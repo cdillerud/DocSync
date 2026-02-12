@@ -398,26 +398,22 @@ async def update_document(doc_id: str, update: DocumentUpdate):
 
 
 @api_router.post("/documents/{doc_id}/resubmit")
-async def resubmit_document(
-    doc_id: str,
-    file: UploadFile = File(...)
-):
-    """Re-submit a failed document: re-upload file and re-run the full workflow."""
+async def resubmit_document(doc_id: str):
+    """Re-submit a failed document: re-run the full workflow using the stored file."""
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    file_content = await file.read()
-    new_hash = hashlib.sha256(file_content).hexdigest()
+    # Read stored file from disk
+    file_path = UPLOAD_DIR / doc_id
+    if not file_path.exists():
+        raise HTTPException(status_code=400, detail="Original file not found on server. Please upload again via the Upload page.")
+    file_content = file_path.read_bytes()
     now = datetime.now(timezone.utc).isoformat()
 
-    # Reset document status and update file info
+    # Reset document status
     await db.hub_documents.update_one({"id": doc_id}, {"$set": {
         "status": "Received",
-        "file_name": file.filename,
-        "sha256_hash": new_hash,
-        "file_size": len(file_content),
-        "content_type": file.content_type,
         "sharepoint_drive_id": None,
         "sharepoint_item_id": None,
         "sharepoint_web_url": None,
@@ -428,7 +424,7 @@ async def resubmit_document(
 
     # Re-run the full workflow with existing metadata
     workflow_id, final_status = await run_upload_and_link_workflow(
-        doc_id, file_content, file.filename,
+        doc_id, file_content, doc["file_name"],
         doc.get("document_type", "Other"),
         doc.get("bc_record_id"),
         doc.get("bc_document_no")

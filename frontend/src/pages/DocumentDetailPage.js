@@ -154,6 +154,11 @@ export default function DocumentDetailPage() {
               </a>
             </Button>
           )}
+          {doc.status === 'Exception' && (
+            <Button size="sm" variant="destructive" onClick={() => { setResubmitFile(null); setResubmitOpen(true); }} data-testid="resubmit-btn">
+              <RotateCcw className="w-3 h-3 mr-1.5" /> Re-submit
+            </Button>
+          )}
           {(doc.status === 'Classified' || doc.status === 'Exception') && doc.bc_document_no && (
             <Button size="sm" onClick={handleLink} disabled={linking} data-testid="link-to-bc-btn">
               {linking ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> : <Link className="w-3 h-3 mr-1.5" />}

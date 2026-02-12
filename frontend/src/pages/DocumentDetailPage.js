@@ -7,13 +7,10 @@ import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
-} from '../components/ui/dialog';
 import { toast } from 'sonner';
 import {
   ArrowLeft, ExternalLink, Link, RefreshCw, FileText,
-  CheckCircle2, AlertCircle, Clock, Loader2, Copy, UploadCloud, RotateCcw
+  CheckCircle2, AlertCircle, Clock, Loader2, Copy, RotateCcw
 } from 'lucide-react';
 
 const STATUS_CLASSES = {

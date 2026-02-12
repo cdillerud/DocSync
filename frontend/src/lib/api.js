@@ -37,7 +37,7 @@ export const listDocuments = (params) => api.get('/documents', { params });
 export const getDocument = (id) => api.get(`/documents/${id}`);
 export const updateDocument = (id, data) => api.put(`/documents/${id}`, data);
 export const linkDocument = (id) => api.post(`/documents/${id}/link`);
-export const resubmitDocument = (id, formData) => api.post(`/documents/${id}/resubmit`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+export const resubmitDocument = (id) => api.post(`/documents/${id}/resubmit`);
 
 // Workflows
 export const listWorkflows = (params) => api.get('/workflows', { params });

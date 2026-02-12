@@ -188,7 +188,7 @@ export default function UploadPage() {
       <Card className="border border-border" data-testid="bc-linking-card">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Business Central Record</CardTitle>
-          <CardDescription>Link this document to a BC Sales Order (optional)</CardDescription>
+          <CardDescription>Search for a BC Sales Order or type the number directly</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex gap-2">

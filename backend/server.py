@@ -589,8 +589,12 @@ async def list_bc_companies():
 
 @api_router.get("/bc/sales-orders")
 async def list_bc_sales_orders(search: str = Query(None)):
-    orders = await get_bc_sales_orders(order_no=search)
-    return {"orders": orders}
+    try:
+        orders = await get_bc_sales_orders(order_no=search)
+        return {"orders": orders}
+    except Exception as e:
+        logger.warning("BC sales orders search failed: %s", str(e))
+        return {"orders": [], "warning": str(e)}
 
 # ==================== SETTINGS ====================
 

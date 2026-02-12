@@ -760,16 +760,23 @@ async def test_connection(service: str = Query(...)):
                     f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies",
                     headers={"Authorization": f"Bearer {token}"})
                 if resp.status_code == 200:
-                    data = resp.json()
+                    try:
+                        data = resp.json()
+                    except Exception:
+                        return {"service": "bc", "status": "error", "detail": f"BC returned non-JSON response (HTTP 200): {resp.text[:200]}"}
                     companies = data.get("value", [])
                     return {"service": "bc", "status": "ok", "detail": f"Connected. Found {len(companies)} companies: {', '.join(c.get('displayName', c.get('name','?')) for c in companies[:3])}"}
+                elif resp.status_code == 404:
+                    if "NoEnvironment" in resp.text:
+                        return {"service": "bc", "status": "error",
+                            "detail": f"Environment '{BC_ENVIRONMENT}' does not exist. Check the exact name in BC admin center (it's case-sensitive)."}
+                    return {"service": "bc", "status": "error", "detail": f"BC API not found (404): {resp.text[:200]}"}
                 elif resp.status_code in (401, 403):
                     return {"service": "bc", "status": "error",
-                        "detail": f"Permission denied (HTTP {resp.status_code}). Ensure the app has D365 Business Central API access and the BC_ENVIRONMENT name ('{BC_ENVIRONMENT}') is correct."}
+                        "detail": f"Permission denied (HTTP {resp.status_code}). Ensure the app is registered in BC under 'Microsoft Entra Applications' with D365 AUTOMATION role, and API.ReadWrite.All permission is granted."}
                 else:
-                    error = resp.json().get("error", {})
                     return {"service": "bc", "status": "error",
-                        "detail": f"HTTP {resp.status_code}: {error.get('message', resp.text[:200])}"}
+                        "detail": f"HTTP {resp.status_code}: {resp.text[:200]}"}
         except Exception as e:
             return {"service": "bc", "status": "error", "detail": str(e)}
     return {"service": service, "status": "unknown", "detail": "Unknown service"}

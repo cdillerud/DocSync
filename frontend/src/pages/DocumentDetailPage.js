@@ -335,6 +335,100 @@ export default function DocumentDetailPage() {
           </Card>
         </div>
       </div>
+
+      {/* Re-submit Dialog */}
+      <Dialog open={resubmitOpen} onOpenChange={setResubmitOpen}>
+        <DialogContent className="max-w-lg" data-testid="resubmit-dialog">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>
+              <RotateCcw className="w-4 h-4 inline mr-2 text-primary" />
+              Re-submit Document
+            </DialogTitle>
+            <DialogDescription>
+              Re-upload the file and re-run the full workflow. Existing metadata (type, BC reference) will be preserved.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* Current doc info */}
+            <div className="bg-muted/50 rounded-lg p-3 text-sm space-y-1">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground text-xs">Original File</span>
+                <span className="font-mono text-xs">{doc.file_name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground text-xs">Document Type</span>
+                <Badge variant="secondary" className="text-xs">{doc.document_type}</Badge>
+              </div>
+              {doc.bc_document_no && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground text-xs">BC Reference</span>
+                  <span className="font-mono text-xs">{doc.bc_document_no}</span>
+                </div>
+              )}
+              {doc.last_error && (
+                <div className="mt-2 pt-2 border-t border-border">
+                  <p className="text-xs text-red-500 font-mono">{doc.last_error}</p>
+                </div>
+              )}
+            </div>
+
+            {/* File picker */}
+            <div className="space-y-2">
+              <Label className="text-sm">Select File</Label>
+              <div
+                className={`dropzone ${resubmitFile ? '' : 'py-6'}`}
+                onClick={() => document.getElementById('resubmit-file-input').click()}
+                data-testid="resubmit-dropzone"
+              >
+                <input
+                  id="resubmit-file-input"
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.png,.jpg,.jpeg,.tiff,.tif"
+                  onChange={(e) => e.target.files?.[0] && setResubmitFile(e.target.files[0])}
+                  data-testid="resubmit-file-input"
+                />
+                {resubmitFile ? (
+                  <div className="flex items-center gap-3 justify-center">
+                    <FileText className="w-5 h-5 text-primary" />
+                    <div className="text-left">
+                      <p className="text-sm font-medium">{resubmitFile.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {resubmitFile.size < 1048576
+                          ? (resubmitFile.size / 1024).toFixed(1) + ' KB'
+                          : (resubmitFile.size / 1048576).toFixed(1) + ' MB'}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <UploadCloud className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                    <p className="text-sm text-muted-foreground">Click to select file</p>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="secondary" onClick={() => setResubmitOpen(false)} data-testid="resubmit-cancel-btn">
+              Cancel
+            </Button>
+            <Button onClick={handleResubmit} disabled={!resubmitFile || resubmitting} data-testid="resubmit-confirm-btn">
+              {resubmitting ? (
+                <span className="flex items-center gap-1.5">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Processing...
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5">
+                  <RotateCcw className="w-3.5 h-3.5" /> Re-submit
+                </span>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

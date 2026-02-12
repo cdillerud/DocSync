@@ -410,6 +410,20 @@ async def update_document(doc_id: str, update: DocumentUpdate):
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     return doc
 
+@api_router.delete("/documents/{doc_id}")
+async def delete_document(doc_id: str):
+    """Delete a document, its workflows, and stored file."""
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    await db.hub_documents.delete_one({"id": doc_id})
+    await db.hub_workflow_runs.delete_many({"document_id": doc_id})
+    file_path = UPLOAD_DIR / doc_id
+    if file_path.exists():
+        file_path.unlink()
+    return {"message": "Document deleted", "id": doc_id}
+
+
 
 @api_router.post("/documents/{doc_id}/resubmit")
 async def resubmit_document(doc_id: str):

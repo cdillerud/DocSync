@@ -66,6 +66,18 @@ export default function QueuePage() {
     fetchDocs();
   };
 
+  const handleDelete = async (e, docId, fileName) => {
+    e.stopPropagation();
+    if (!window.confirm(`Delete "${fileName}"? This will remove the document, its workflows, and stored file.`)) return;
+    try {
+      await deleteDocument(docId);
+      toast.success('Document deleted');
+      fetchDocs();
+    } catch (err) {
+      toast.error('Delete failed: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto" data-testid="queue-page">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">

@@ -707,23 +707,29 @@ async def update_settings_config(update: ConfigUpdate):
 
 @api_router.post("/settings/test-connection")
 async def test_connection(service: str = Query(...)):
-    """Quick connectivity test for a given service with detailed diagnostics."""
+    """Quick connectivity test with detailed permission diagnostics."""
     if service == "graph":
         try:
             token = await get_graph_token()
             if token == "mock-graph-token":
                 return {"service": "graph", "status": "demo", "detail": "Running in demo mode"}
-            # Also try resolving the SharePoint site
+            # Test site resolution
             async with httpx.AsyncClient(timeout=15.0) as c:
                 site_resp = await c.get(
                     f"https://graph.microsoft.com/v1.0/sites/{SHAREPOINT_SITE_HOSTNAME}:{SHAREPOINT_SITE_PATH}",
                     headers={"Authorization": f"Bearer {token}"})
-                site_data = site_resp.json()
-                if "id" in site_data:
-                    return {"service": "graph", "status": "ok", "detail": f"Connected. Site: {site_data.get('displayName', site_data['id'][:12])}"}
+                if site_resp.status_code == 200:
+                    site_data = site_resp.json()
+                    return {"service": "graph", "status": "ok", "detail": f"Connected. Site: {site_data.get('displayName', 'OK')}"}
+                elif site_resp.status_code in (401, 403):
+                    return {"service": "graph", "status": "error",
+                        "detail": f"Permission denied (HTTP {site_resp.status_code}). Your app registration needs 'Sites.ReadWrite.All' (Application permission, NOT Delegated). Go to Azure Portal > App Registrations > API Permissions > Add permission > Microsoft Graph > Application > Sites.ReadWrite.All > then click 'Grant admin consent'."}
+                elif site_resp.status_code == 404:
+                    return {"service": "graph", "status": "error",
+                        "detail": f"Site not found (HTTP 404). Verify hostname='{SHAREPOINT_SITE_HOSTNAME}' and path='{SHAREPOINT_SITE_PATH}'. The path should be like '/sites/YourSiteName' (not a full URL)."}
                 else:
-                    error = site_data.get("error", {})
-                    return {"service": "graph", "status": "partial", "detail": f"Token OK but site error: {error.get('message', 'unknown')}"}
+                    return {"service": "graph", "status": "error",
+                        "detail": f"Unexpected HTTP {site_resp.status_code}: {site_resp.json().get('error', {}).get('message', site_resp.text[:200])}"}
         except Exception as e:
             return {"service": "graph", "status": "error", "detail": str(e)}
     elif service == "bc":
@@ -731,18 +737,21 @@ async def test_connection(service: str = Query(...)):
             token = await get_bc_token()
             if token == "mock-bc-token":
                 return {"service": "bc", "status": "demo", "detail": "Running in demo mode"}
-            # Also try listing companies
             async with httpx.AsyncClient(timeout=15.0) as c:
                 resp = await c.get(
                     f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies",
                     headers={"Authorization": f"Bearer {token}"})
-                data = resp.json()
-                if "value" in data:
-                    companies = data["value"]
-                    return {"service": "bc", "status": "ok", "detail": f"Connected. Found {len(companies)} companies: {', '.join(c.get('displayName', c['name']) for c in companies[:3])}"}
+                if resp.status_code == 200:
+                    data = resp.json()
+                    companies = data.get("value", [])
+                    return {"service": "bc", "status": "ok", "detail": f"Connected. Found {len(companies)} companies: {', '.join(c.get('displayName', c.get('name','?')) for c in companies[:3])}"}
+                elif resp.status_code in (401, 403):
+                    return {"service": "bc", "status": "error",
+                        "detail": f"Permission denied (HTTP {resp.status_code}). Ensure the app has D365 Business Central API access and the BC_ENVIRONMENT name ('{BC_ENVIRONMENT}') is correct."}
                 else:
-                    error = data.get("error", {})
-                    return {"service": "bc", "status": "partial", "detail": f"Token OK but API error: {error.get('message', 'unknown')}"}
+                    error = resp.json().get("error", {})
+                    return {"service": "bc", "status": "error",
+                        "detail": f"HTTP {resp.status_code}: {error.get('message', resp.text[:200])}"}
         except Exception as e:
             return {"service": "bc", "status": "error", "detail": str(e)}
     return {"service": service, "status": "unknown", "detail": "Unknown service"}

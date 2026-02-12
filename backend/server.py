@@ -372,6 +372,47 @@ async def update_document(doc_id: str, update: DocumentUpdate):
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     return doc
 
+
+@api_router.post("/documents/{doc_id}/resubmit")
+async def resubmit_document(
+    doc_id: str,
+    file: UploadFile = File(...)
+):
+    """Re-submit a failed document: re-upload file and re-run the full workflow."""
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    file_content = await file.read()
+    new_hash = hashlib.sha256(file_content).hexdigest()
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Reset document status and update file info
+    await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+        "status": "Received",
+        "file_name": file.filename,
+        "sha256_hash": new_hash,
+        "file_size": len(file_content),
+        "content_type": file.content_type,
+        "sharepoint_drive_id": None,
+        "sharepoint_item_id": None,
+        "sharepoint_web_url": None,
+        "sharepoint_share_link_url": None,
+        "last_error": None,
+        "updated_utc": now,
+    }})
+
+    # Re-run the full workflow with existing metadata
+    workflow_id, final_status = await run_upload_and_link_workflow(
+        doc_id, file_content, file.filename,
+        doc.get("document_type", "Other"),
+        doc.get("bc_record_id"),
+        doc.get("bc_document_no")
+    )
+
+    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    return {"document": updated_doc, "workflow_id": workflow_id}
+
 @api_router.post("/documents/{doc_id}/link")
 async def link_document(doc_id: str):
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})

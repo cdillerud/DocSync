@@ -131,9 +131,21 @@ async def upload_to_sharepoint(file_content: bytes, file_name: str, folder: str)
             f"https://graph.microsoft.com/v1.0/sites/{SHAREPOINT_SITE_HOSTNAME}:{SHAREPOINT_SITE_PATH}",
             headers={"Authorization": f"Bearer {token}"})
         site_data = site_resp.json()
-        if "id" not in site_data:
+        if site_resp.status_code == 401 or site_resp.status_code == 403:
+            raise Exception(
+                f"Graph API permission denied (HTTP {site_resp.status_code}). "
+                f"The app registration needs 'Sites.ReadWrite.All' (Application) permission with admin consent. "
+                f"Go to Azure Portal > App Registrations > {GRAPH_CLIENT_ID} > API Permissions > Add 'Sites.ReadWrite.All' > Grant admin consent."
+            )
+        if site_resp.status_code == 404 or "id" not in site_data:
             error = site_data.get("error", {})
-            raise Exception(f"SharePoint site not found: {error.get('message', error.get('code', site_data))}")
+            raise Exception(
+                f"SharePoint site not found (HTTP {site_resp.status_code}). "
+                f"Check SHAREPOINT_SITE_HOSTNAME='{SHAREPOINT_SITE_HOSTNAME}' and SHAREPOINT_SITE_PATH='{SHAREPOINT_SITE_PATH}'. "
+                f"Detail: {error.get('message', error.get('code', 'unknown'))}"
+            )
+        if "id" not in site_data:
+            raise Exception(f"Unexpected Graph response: {str(site_data)[:200]}")
         site_id = site_data["id"]
 
         # Step 2: Resolve drive
@@ -141,6 +153,8 @@ async def upload_to_sharepoint(file_content: bytes, file_name: str, folder: str)
             f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives",
             headers={"Authorization": f"Bearer {token}"})
         drives_data = drives_resp.json()
+        if drives_resp.status_code in (401, 403):
+            raise Exception(f"Graph permission denied listing drives (HTTP {drives_resp.status_code}). Ensure 'Sites.ReadWrite.All' permission is granted.")
         if "error" in drives_data:
             raise Exception(f"Drive list error: {drives_data['error'].get('message', drives_data['error'])}")
         drives = drives_data.get("value", [])

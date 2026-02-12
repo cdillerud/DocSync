@@ -456,6 +456,14 @@ async def list_bc_sales_orders(search: str = Query(None)):
 
 # ==================== SETTINGS ====================
 
+CONFIG_KEYS = [
+    "TENANT_ID", "BC_ENVIRONMENT", "BC_COMPANY_NAME", "BC_CLIENT_ID",
+    "BC_CLIENT_SECRET", "GRAPH_CLIENT_ID", "GRAPH_CLIENT_SECRET",
+    "SHAREPOINT_SITE_HOSTNAME", "SHAREPOINT_SITE_PATH", "SHAREPOINT_LIBRARY_NAME",
+    "DEMO_MODE"
+]
+SECRET_KEYS = {"BC_CLIENT_SECRET", "GRAPH_CLIENT_SECRET"}
+
 def _mask(val: str) -> str:
     """Mask a secret value showing only first 4 and last 4 chars."""
     if not val or len(val) < 10:
@@ -478,7 +486,37 @@ def _current_config():
         "DEMO_MODE": str(DEMO_MODE).lower(),
     }
 
-SECRET_KEYS = {"BC_CLIENT_SECRET", "GRAPH_CLIENT_SECRET"}
+async def _load_config_from_db():
+    """Load saved config from MongoDB and apply to module globals."""
+    global DEMO_MODE, TENANT_ID, BC_ENVIRONMENT, BC_COMPANY_NAME
+    global BC_CLIENT_ID, BC_CLIENT_SECRET, GRAPH_CLIENT_ID, GRAPH_CLIENT_SECRET
+    global SHAREPOINT_SITE_HOSTNAME, SHAREPOINT_SITE_PATH, SHAREPOINT_LIBRARY_NAME
+
+    saved = await db.hub_config.find_one({"_key": "credentials"}, {"_id": 0, "_key": 0})
+    if not saved:
+        return
+    if saved.get("TENANT_ID"):
+        TENANT_ID = saved["TENANT_ID"]
+    if saved.get("BC_ENVIRONMENT"):
+        BC_ENVIRONMENT = saved["BC_ENVIRONMENT"]
+    if saved.get("BC_COMPANY_NAME"):
+        BC_COMPANY_NAME = saved["BC_COMPANY_NAME"]
+    if saved.get("BC_CLIENT_ID"):
+        BC_CLIENT_ID = saved["BC_CLIENT_ID"]
+    if saved.get("BC_CLIENT_SECRET"):
+        BC_CLIENT_SECRET = saved["BC_CLIENT_SECRET"]
+    if saved.get("GRAPH_CLIENT_ID"):
+        GRAPH_CLIENT_ID = saved["GRAPH_CLIENT_ID"]
+    if saved.get("GRAPH_CLIENT_SECRET"):
+        GRAPH_CLIENT_SECRET = saved["GRAPH_CLIENT_SECRET"]
+    if saved.get("SHAREPOINT_SITE_HOSTNAME"):
+        SHAREPOINT_SITE_HOSTNAME = saved["SHAREPOINT_SITE_HOSTNAME"]
+    if saved.get("SHAREPOINT_SITE_PATH"):
+        SHAREPOINT_SITE_PATH = saved["SHAREPOINT_SITE_PATH"]
+    if saved.get("SHAREPOINT_LIBRARY_NAME"):
+        SHAREPOINT_LIBRARY_NAME = saved["SHAREPOINT_LIBRARY_NAME"]
+    if "DEMO_MODE" in saved:
+        DEMO_MODE = str(saved["DEMO_MODE"]).lower() == "true"
 
 @api_router.get("/settings/status")
 async def get_settings_status():
@@ -529,54 +567,46 @@ class ConfigUpdate(BaseModel):
 
 @api_router.put("/settings/config")
 async def update_settings_config(update: ConfigUpdate):
-    """Update .env file and reload config in-memory."""
+    """Save config to MongoDB and reload in-memory. No .env write = no server restart."""
     global DEMO_MODE, TENANT_ID, BC_ENVIRONMENT, BC_COMPANY_NAME
     global BC_CLIENT_ID, BC_CLIENT_SECRET, GRAPH_CLIENT_ID, GRAPH_CLIENT_SECRET
     global SHAREPOINT_SITE_HOSTNAME, SHAREPOINT_SITE_PATH, SHAREPOINT_LIBRARY_NAME
 
-    env_path = ROOT_DIR / '.env'
+    # Load current saved config from DB
+    saved = await db.hub_config.find_one({"_key": "credentials"}, {"_id": 0}) or {"_key": "credentials"}
 
-    # Read existing .env
-    existing = {}
-    if env_path.exists():
-        for line in env_path.read_text().splitlines():
-            line = line.strip()
-            if line and '=' in line and not line.startswith('#'):
-                key, _, val = line.partition('=')
-                existing[key.strip()] = val.strip().strip('"')
-
-    # Merge updates (skip masked/empty values)
+    # Merge updates — skip masked placeholder values
     update_dict = update.model_dump(exclude_none=True)
     for key, val in update_dict.items():
-        if val is not None and '****' not in val:
-            existing[key] = val
+        if val is not None and "****" not in val:
+            saved[key] = val
 
-    # Write back
-    lines = []
-    for key, val in existing.items():
-        if ' ' in val or '"' in val:
-            lines.append(f'{key}="{val}"')
-        else:
-            lines.append(f'{key}={val}')
-    env_path.write_text('\n'.join(lines) + '\n')
+    # Upsert into MongoDB
+    await db.hub_config.update_one(
+        {"_key": "credentials"},
+        {"$set": saved},
+        upsert=True
+    )
 
-    # Reload in-memory
-    TENANT_ID = existing.get('TENANT_ID', '')
-    BC_ENVIRONMENT = existing.get('BC_ENVIRONMENT', '')
-    BC_COMPANY_NAME = existing.get('BC_COMPANY_NAME', '')
-    BC_CLIENT_ID = existing.get('BC_CLIENT_ID', '')
-    BC_CLIENT_SECRET = existing.get('BC_CLIENT_SECRET', '')
-    GRAPH_CLIENT_ID = existing.get('GRAPH_CLIENT_ID', '')
-    GRAPH_CLIENT_SECRET = existing.get('GRAPH_CLIENT_SECRET', '')
-    SHAREPOINT_SITE_HOSTNAME = existing.get('SHAREPOINT_SITE_HOSTNAME', 'gamerpackaging.sharepoint.com')
-    SHAREPOINT_SITE_PATH = existing.get('SHAREPOINT_SITE_PATH', '/sites/GPI-DocumentHub-Test')
-    SHAREPOINT_LIBRARY_NAME = existing.get('SHAREPOINT_LIBRARY_NAME', 'Documents')
-    DEMO_MODE = existing.get('DEMO_MODE', 'true').lower() == 'true'
+    # Reload in-memory immediately
+    TENANT_ID = saved.get("TENANT_ID", TENANT_ID)
+    BC_ENVIRONMENT = saved.get("BC_ENVIRONMENT", BC_ENVIRONMENT)
+    BC_COMPANY_NAME = saved.get("BC_COMPANY_NAME", BC_COMPANY_NAME)
+    BC_CLIENT_ID = saved.get("BC_CLIENT_ID", BC_CLIENT_ID)
+    BC_CLIENT_SECRET = saved.get("BC_CLIENT_SECRET", BC_CLIENT_SECRET)
+    GRAPH_CLIENT_ID = saved.get("GRAPH_CLIENT_ID", GRAPH_CLIENT_ID)
+    GRAPH_CLIENT_SECRET = saved.get("GRAPH_CLIENT_SECRET", GRAPH_CLIENT_SECRET)
+    SHAREPOINT_SITE_HOSTNAME = saved.get("SHAREPOINT_SITE_HOSTNAME", SHAREPOINT_SITE_HOSTNAME)
+    SHAREPOINT_SITE_PATH = saved.get("SHAREPOINT_SITE_PATH", SHAREPOINT_SITE_PATH)
+    SHAREPOINT_LIBRARY_NAME = saved.get("SHAREPOINT_LIBRARY_NAME", SHAREPOINT_LIBRARY_NAME)
+    DEMO_MODE = str(saved.get("DEMO_MODE", "true")).lower() == "true"
+
+    logger.info("Configuration updated via UI. Demo mode: %s", DEMO_MODE)
 
     # Return fresh masked config
     raw = _current_config()
     masked = {k: (_mask(v) if k in SECRET_KEYS else v) for k, v in raw.items()}
-    return {"message": "Configuration updated successfully", "config": masked, "requires_restart": True}
+    return {"message": "Configuration saved successfully", "config": masked}
 
 @api_router.post("/settings/test-connection")
 async def test_connection(service: str = Query(...)):

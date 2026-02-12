@@ -169,9 +169,11 @@ async def upload_to_sharepoint(file_content: bytes, file_name: str, folder: str)
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/octet-stream"},
             content=file_content)
         item = upload_resp.json()
+        if upload_resp.status_code in (401, 403):
+            raise Exception(f"Upload permission denied (HTTP {upload_resp.status_code}). Ensure app has 'Files.ReadWrite.All' or 'Sites.ReadWrite.All'.")
         if "id" not in item:
             error = item.get("error", {})
-            raise Exception(f"Upload failed: {error.get('message', error.get('code', item))}")
+            raise Exception(f"Upload failed (HTTP {upload_resp.status_code}): {error.get('message', error.get('code', item))}")
         return {"drive_id": drive_id, "item_id": item["id"], "web_url": item.get("webUrl", ""), "name": file_name}
 
 async def create_sharing_link(drive_id: str, item_id: str):

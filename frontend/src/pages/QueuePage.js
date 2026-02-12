@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Badge } from '../components/ui/badge';
 import { toast } from 'sonner';
-import { Search, RefreshCw, FileText, ExternalLink, Filter } from 'lucide-react';
+import { Search, RefreshCw, FileText, ExternalLink, Filter, RotateCcw } from 'lucide-react';
 
 const STATUS_CLASSES = {
   Received: 'status-received',

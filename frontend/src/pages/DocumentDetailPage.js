@@ -92,18 +92,10 @@ export default function DocumentDetailPage() {
   };
 
   const handleResubmit = async () => {
-    if (!resubmitFile) {
-      toast.error('Please select a file');
-      return;
-    }
     setResubmitting(true);
     try {
-      const formData = new FormData();
-      formData.append('file', resubmitFile);
-      const res = await resubmitDocument(id, formData);
+      const res = await resubmitDocument(id);
       toast.success('Document re-submitted successfully');
-      setResubmitOpen(false);
-      setResubmitFile(null);
       setDoc(res.data.document);
       fetchDoc();
     } catch (err) {

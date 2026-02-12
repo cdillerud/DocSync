@@ -650,13 +650,23 @@ async def update_settings_config(update: ConfigUpdate):
 
 @api_router.post("/settings/test-connection")
 async def test_connection(service: str = Query(...)):
-    """Quick connectivity test for a given service."""
+    """Quick connectivity test for a given service with detailed diagnostics."""
     if service == "graph":
         try:
             token = await get_graph_token()
             if token == "mock-graph-token":
                 return {"service": "graph", "status": "demo", "detail": "Running in demo mode"}
-            return {"service": "graph", "status": "ok", "detail": "Token acquired successfully"}
+            # Also try resolving the SharePoint site
+            async with httpx.AsyncClient(timeout=15.0) as c:
+                site_resp = await c.get(
+                    f"https://graph.microsoft.com/v1.0/sites/{SHAREPOINT_SITE_HOSTNAME}:{SHAREPOINT_SITE_PATH}",
+                    headers={"Authorization": f"Bearer {token}"})
+                site_data = site_resp.json()
+                if "id" in site_data:
+                    return {"service": "graph", "status": "ok", "detail": f"Connected. Site: {site_data.get('displayName', site_data['id'][:12])}"}
+                else:
+                    error = site_data.get("error", {})
+                    return {"service": "graph", "status": "partial", "detail": f"Token OK but site error: {error.get('message', 'unknown')}"}
         except Exception as e:
             return {"service": "graph", "status": "error", "detail": str(e)}
     elif service == "bc":
@@ -664,7 +674,18 @@ async def test_connection(service: str = Query(...)):
             token = await get_bc_token()
             if token == "mock-bc-token":
                 return {"service": "bc", "status": "demo", "detail": "Running in demo mode"}
-            return {"service": "bc", "status": "ok", "detail": "Token acquired successfully"}
+            # Also try listing companies
+            async with httpx.AsyncClient(timeout=15.0) as c:
+                resp = await c.get(
+                    f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies",
+                    headers={"Authorization": f"Bearer {token}"})
+                data = resp.json()
+                if "value" in data:
+                    companies = data["value"]
+                    return {"service": "bc", "status": "ok", "detail": f"Connected. Found {len(companies)} companies: {', '.join(c.get('displayName', c['name']) for c in companies[:3])}"}
+                else:
+                    error = data.get("error", {})
+                    return {"service": "bc", "status": "partial", "detail": f"Token OK but API error: {error.get('message', 'unknown')}"}
         except Exception as e:
             return {"service": "bc", "status": "error", "detail": str(e)}
     return {"service": service, "status": "unknown", "detail": "Unknown service"}

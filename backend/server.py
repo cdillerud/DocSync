@@ -321,8 +321,9 @@ async def run_upload_and_link_workflow(doc_id: str, file_content: bytes, file_na
         workflow = {
             "id": workflow_id, "document_id": doc_id, "workflow_name": "upload_and_link",
             "started_utc": started, "ended_utc": datetime.now(timezone.utc).isoformat(),
-            "status": "Completed" if new_status != "Exception" else "CompletedWithWarnings",
-            "steps": steps, "correlation_id": correlation_id, "error": None
+            "status": "Completed" if bc_linked else ("CompletedWithWarnings" if not bc_error else "PartialSuccess"),
+            "steps": steps, "correlation_id": correlation_id, 
+            "error": bc_error
         }
         await db.hub_workflow_runs.insert_one(workflow)
         return workflow_id, new_status

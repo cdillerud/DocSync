@@ -615,6 +615,12 @@ async def link_document(doc_id: str):
     if not bc_record_id and not bc_document_no:
         raise HTTPException(status_code=400, detail="No BC record reference set on this document")
 
+    # Load the stored file for attachment
+    file_path = UPLOAD_DIR / doc_id
+    file_content = None
+    if file_path.exists():
+        file_content = file_path.read_bytes()
+
     workflow_id = str(uuid.uuid4())
     correlation_id = str(uuid.uuid4())
     started = datetime.now(timezone.utc).isoformat()
@@ -627,12 +633,24 @@ async def link_document(doc_id: str):
             steps[-1]["status"] = "completed"
             steps[-1]["ended"] = datetime.now(timezone.utc).isoformat()
             steps.append({"step": "link_to_bc", "status": "running", "started": datetime.now(timezone.utc).isoformat()})
-            link_result = await link_document_to_bc(bc_record_id or orders[0]["id"], doc["sharepoint_share_link_url"], doc["file_name"])
-            steps[-1]["status"] = "completed"
-            steps[-1]["ended"] = datetime.now(timezone.utc).isoformat()
-            steps[-1]["result"] = link_result
-            await db.hub_documents.update_one({"id": doc_id}, {"$set": {"status": "LinkedToBC", "updated_utc": datetime.now(timezone.utc).isoformat(), "last_error": None}})
-            wf_status = "Completed"
+            link_result = await link_document_to_bc(
+                bc_record_id=bc_record_id or orders[0]["id"], 
+                share_link=doc["sharepoint_share_link_url"], 
+                file_name=doc["file_name"],
+                file_content=file_content
+            )
+            if link_result.get("success"):
+                steps[-1]["status"] = "completed"
+                steps[-1]["ended"] = datetime.now(timezone.utc).isoformat()
+                steps[-1]["result"] = link_result
+                await db.hub_documents.update_one({"id": doc_id}, {"$set": {"status": "LinkedToBC", "updated_utc": datetime.now(timezone.utc).isoformat(), "last_error": None}})
+                wf_status = "Completed"
+            else:
+                steps[-1]["status"] = "failed"
+                steps[-1]["ended"] = datetime.now(timezone.utc).isoformat()
+                steps[-1]["error"] = link_result.get("error", "Unknown error")
+                await db.hub_documents.update_one({"id": doc_id}, {"$set": {"status": "Exception", "last_error": link_result.get("error"), "updated_utc": datetime.now(timezone.utc).isoformat()}})
+                wf_status = "Failed"
         else:
             steps[-1]["status"] = "failed"
             steps[-1]["ended"] = datetime.now(timezone.utc).isoformat()
@@ -643,7 +661,7 @@ async def link_document(doc_id: str):
             "id": workflow_id, "document_id": doc_id, "workflow_name": "link_to_bc",
             "started_utc": started, "ended_utc": datetime.now(timezone.utc).isoformat(),
             "status": wf_status, "steps": steps, "correlation_id": correlation_id,
-            "error": None if wf_status == "Completed" else "BC record not found"
+            "error": None if wf_status == "Completed" else steps[-1].get("error", "BC record not found")
         }
         await db.hub_workflow_runs.insert_one(workflow)
     except Exception as e:

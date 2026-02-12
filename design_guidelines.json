@@ -1,0 +1,200 @@
+{
+  "identity": {
+    "name": "GPI Document Hub",
+    "persona": "The Swiss Utility",
+    "tone": "Authoritative, Dense, Functional, Transparent",
+    "keywords": ["Precision", "Audit", "Workflow", "Integration"]
+  },
+  "typography": {
+    "fonts": {
+      "headings": {
+        "family": "Chivo, sans-serif",
+        "weights": ["400", "700", "900"],
+        "url": "https://fonts.googleapis.com/css2?family=Chivo:wght@400;700;900&display=swap",
+        "usage": "Use for all page titles, section headers, and metric values."
+      },
+      "body": {
+        "family": "IBM Plex Sans, sans-serif",
+        "weights": ["400", "500", "600"],
+        "url": "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap",
+        "usage": "Use for all paragraphs, labels, form inputs, and table data."
+      },
+      "mono": {
+        "family": "JetBrains Mono, monospace",
+        "weights": ["400"],
+        "url": "https://fonts.googleapis.com/css2?family=JetBrains+Mono&display=swap",
+        "usage": "Use for Document IDs, JSON blobs, Error codes, and Timestamps."
+      }
+    },
+    "scale": {
+      "h1": "text-4xl font-black tracking-tight leading-none",
+      "h2": "text-2xl font-bold tracking-tight",
+      "h3": "text-lg font-bold tracking-normal uppercase text-muted-foreground",
+      "body": "text-sm leading-relaxed",
+      "caption": "text-xs font-medium text-muted-foreground uppercase tracking-wider"
+    }
+  },
+  "colors": {
+    "light": {
+      "background": "#F8F9FA",
+      "foreground": "#0F172A",
+      "card": "#FFFFFF",
+      "card_foreground": "#0F172A",
+      "primary": "#2563EB",
+      "primary_foreground": "#FFFFFF",
+      "secondary": "#F1F5F9",
+      "secondary_foreground": "#1E293B",
+      "muted": "#F1F5F9",
+      "muted_foreground": "#64748B",
+      "accent": "#F1F5F9",
+      "accent_foreground": "#0F172A",
+      "destructive": "#EF4444",
+      "destructive_foreground": "#FFFFFF",
+      "border": "#E2E8F0",
+      "input": "#E2E8F0",
+      "ring": "#2563EB"
+    },
+    "dark": {
+      "background": "#020617",
+      "foreground": "#F8FAFC",
+      "card": "#0F172A",
+      "card_foreground": "#F8FAFC",
+      "primary": "#3B82F6",
+      "primary_foreground": "#FFFFFF",
+      "secondary": "#1E293B",
+      "secondary_foreground": "#F8FAFC",
+      "muted": "#1E293B",
+      "muted_foreground": "#94A3B8",
+      "accent": "#1E293B",
+      "accent_foreground": "#F8FAFC",
+      "destructive": "#EF4444",
+      "destructive_foreground": "#FFFFFF",
+      "border": "#1E293B",
+      "input": "#1E293B",
+      "ring": "#3B82F6"
+    },
+    "status": {
+      "success": { "bg": "bg-emerald-50 dark:bg-emerald-950", "text": "text-emerald-700 dark:text-emerald-300", "border": "border-emerald-200 dark:border-emerald-800" },
+      "warning": { "bg": "bg-amber-50 dark:bg-amber-950", "text": "text-amber-700 dark:text-amber-300", "border": "border-amber-200 dark:border-amber-800" },
+      "error": { "bg": "bg-red-50 dark:bg-red-950", "text": "text-red-700 dark:text-red-300", "border": "border-red-200 dark:border-red-800" },
+      "info": { "bg": "bg-blue-50 dark:bg-blue-950", "text": "text-blue-700 dark:text-blue-300", "border": "border-blue-200 dark:border-blue-800" }
+    }
+  },
+  "layout_strategies": {
+    "dashboard_grid": {
+      "container": "grid grid-cols-1 md:grid-cols-12 gap-6 p-6 md:p-8 max-w-[1600px] mx-auto",
+      "sidebar_width": "w-64",
+      "modes": {
+        "overview": {
+          "stats_row": "col-span-full grid grid-cols-2 md:grid-cols-4 gap-4",
+          "main_chart": "col-span-full md:col-span-8 row-span-2 min-h-[400px]",
+          "recent_activity": "col-span-full md:col-span-4 row-span-2 min-h-[400px]",
+          "document_queue": "col-span-full min-h-[300px]"
+        },
+        "detail_view": {
+          "container": "flex flex-col md:flex-row h-[calc(100vh-4rem)] overflow-hidden",
+          "left_panel": "w-full md:w-1/3 border-r border-border p-6 overflow-y-auto bg-card",
+          "right_panel": "w-full md:w-2/3 bg-muted/30 p-6 flex flex-col"
+        }
+      }
+    },
+    "spacing": {
+      "page_padding": "p-6 md:p-8",
+      "card_padding": "p-6",
+      "section_gap": "gap-8"
+    }
+  },
+  "visual_enhancers": {
+    "glassmorphism": {
+      "header": "bg-background/80 backdrop-blur-md border-b border-border/50 sticky top-0 z-50",
+      "toast": "bg-background/90 backdrop-blur-xl border border-border shadow-2xl"
+    },
+    "borders": {
+      "card": "border border-border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200",
+      "active_item": "border-l-4 border-primary bg-accent/50"
+    },
+    "shadows": {
+      "soft": "shadow-sm",
+      "floating": "shadow-lg shadow-primary/5"
+    }
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm font-medium rounded-md px-4 py-2 transition-transform active:scale-95",
+      "secondary": "bg-secondary text-secondary-foreground hover:bg-secondary/80 font-medium rounded-md px-4 py-2",
+      "ghost": "hover:bg-accent hover:text-accent-foreground rounded-md px-3 py-2",
+      "destructive": "bg-destructive text-destructive-foreground hover:bg-destructive/90 rounded-md px-4 py-2"
+    },
+    "cards": {
+      "metric": "bg-card text-card-foreground p-6 rounded-lg border border-border shadow-sm flex flex-col justify-between hover:border-primary/50 transition-colors",
+      "data": "bg-card text-card-foreground rounded-lg border border-border shadow-sm overflow-hidden"
+    },
+    "tables": {
+      "header": "bg-muted/50 text-muted-foreground font-medium text-xs uppercase tracking-wider h-10 px-4 text-left align-middle",
+      "row": "border-b border-border hover:bg-muted/30 transition-colors data-[state=selected]:bg-muted",
+      "cell": "p-4 align-middle [&:has([role=checkbox])]:pr-0"
+    },
+    "badges": {
+      "base": "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+      "status_map": {
+        "Received": "bg-blue-100 text-blue-800 border-blue-200",
+        "Classified": "bg-purple-100 text-purple-800 border-purple-200",
+        "LinkedToBC": "bg-green-100 text-green-800 border-green-200",
+        "Exception": "bg-red-100 text-red-800 border-red-200",
+        "Completed": "bg-gray-100 text-gray-800 border-gray-200"
+      }
+    }
+  },
+  "images": {
+    "logo": {
+      "url": "https://images.unsplash.com/photo-1759724369762-376e0a29478b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAxODF8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjBhYnN0cmFjdCUyMGJsdWUlMjBnZW9tZXRyaWMlMjB0ZWNobm9sb2d5JTIwbG9nbyUyMHdoaXRlJTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3NzA5MDc5OTV8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "GPI Document Hub Logo",
+      "desc": "Blue abstract circles representing a document queue"
+    },
+    "user_avatar": {
+      "url": "https://images.unsplash.com/photo-1568585105565-e372998a195d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA2MjJ8MHwxfHNlYXJjaHwyfHxvZmZpY2UlMjB3b3JrZXIlMjBwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc3MDkwNzk5Nnww&ixlib=rb-4.1.0&q=85",
+      "alt": "Admin User",
+      "desc": "Professional headshot for the logged-in user"
+    }
+  },
+  "icons": {
+    "library": "lucide-react",
+    "mapping": {
+      "dashboard": "LayoutDashboard",
+      "upload": "UploadCloud",
+      "queue": "Files",
+      "settings": "Settings",
+      "audit": "History",
+      "success": "CheckCircle2",
+      "error": "AlertCircle",
+      "warning": "AlertTriangle",
+      "search": "Search",
+      "filter": "Filter",
+      "refresh": "RefreshCw",
+      "logout": "LogOut",
+      "moon": "Moon",
+      "sun": "Sun",
+      "link": "Link",
+      "pdf": "FileText"
+    }
+  },
+  "animation": {
+    "transition": "transition-all duration-200 ease-in-out",
+    "hover": "hover:translate-y-[-2px] hover:shadow-md",
+    "enter": "animate-in fade-in slide-in-from-bottom-4 duration-500",
+    "loading": "animate-spin"
+  },
+  "accessibility": {
+    "focus_ring": "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+    "contrast_check": "Ensure text-to-background ratio is at least 4.5:1. Use muted-foreground only on high-contrast backgrounds."
+  },
+  "universal_guidelines": [
+    "Do not use generic 'Inter' font.",
+    "Do not use gradients for text.",
+    "Ensure all interactive elements have data-testid attributes.",
+    "Use 'sonner' for toast notifications.",
+    "Use Shadcn UI components but override default styling to match the 'Swiss Utility' theme.",
+    "Prioritize density and information clarity over whitespace in data tables.",
+    "Always support Dark Mode."
+  ]
+}

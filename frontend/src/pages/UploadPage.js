@@ -58,10 +58,11 @@ export default function UploadPage() {
       const res = await getBcSalesOrders(bcOrderNo);
       setSearchResults(res.data.orders || []);
       if (res.data.orders?.length === 0) {
-        toast.info('No matching sales orders found');
+        toast.info('No matching orders found. You can still type the order number and upload.');
       }
     } catch (err) {
-      toast.error('Failed to search orders');
+      toast.warning('BC search unavailable — you can still type the order number manually and upload.', { duration: 5000 });
+      setSearchResults([]);
     } finally {
       setSearching(false);
     }

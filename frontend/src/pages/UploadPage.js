@@ -87,7 +87,14 @@ export default function UploadPage() {
       formData.append('source', 'manual_upload');
 
       const res = await uploadDocument(formData);
-      toast.success('Document uploaded and workflow completed');
+      const status = res.data.document?.status;
+      if (status === 'LinkedToBC') {
+        toast.success('Document uploaded and linked to BC');
+      } else if (status === 'Classified') {
+        toast.success('Document uploaded to SharePoint. BC linking pending — can be retried later.');
+      } else {
+        toast.success('Document uploaded');
+      }
       navigate(`/documents/${res.data.document.id}`);
     } catch (err) {
       toast.error('Upload failed: ' + (err.response?.data?.detail || err.message));

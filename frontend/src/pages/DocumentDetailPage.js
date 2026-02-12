@@ -96,6 +96,28 @@ export default function DocumentDetailPage() {
     toast.success('Copied to clipboard');
   };
 
+  const handleResubmit = async () => {
+    if (!resubmitFile) {
+      toast.error('Please select a file');
+      return;
+    }
+    setResubmitting(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', resubmitFile);
+      const res = await resubmitDocument(id, formData);
+      toast.success('Document re-submitted successfully');
+      setResubmitOpen(false);
+      setResubmitFile(null);
+      setDoc(res.data.document);
+      fetchDoc();
+    } catch (err) {
+      toast.error('Re-submit failed: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setResubmitting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64" data-testid="doc-detail-loading">

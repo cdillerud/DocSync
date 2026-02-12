@@ -198,7 +198,17 @@ async def get_bc_companies():
         resp = await c.get(
             f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies",
             headers={"Authorization": f"Bearer {token}"})
-        data = resp.json()
+        if resp.status_code == 404:
+            # BC returns XML for missing environments
+            if "NoEnvironment" in resp.text:
+                raise Exception(f"BC environment '{BC_ENVIRONMENT}' does not exist. Check the environment name in Settings.")
+            raise Exception(f"BC API not found (404): {resp.text[:200]}")
+        if resp.status_code in (401, 403):
+            raise Exception(f"BC permission denied (HTTP {resp.status_code}). Ensure the app is registered in BC under 'Microsoft Entra Applications' with D365 AUTOMATION role.")
+        try:
+            data = resp.json()
+        except Exception:
+            raise Exception(f"BC returned non-JSON (HTTP {resp.status_code}): {resp.text[:200]}")
         if "error" in data:
             raise Exception(f"BC companies error: {data['error'].get('message', data['error'])}")
         return data.get("value", [])
@@ -210,7 +220,6 @@ async def get_bc_sales_orders(order_no: str = None):
             orders = [o for o in orders if order_no.lower() in o["number"].lower()]
         return orders
     token = await get_bc_token()
-    # First get companies to find the right one
     companies = await get_bc_companies()
     if not companies:
         raise Exception("No BC companies found")
@@ -220,7 +229,12 @@ async def get_bc_sales_orders(order_no: str = None):
         if order_no:
             url += f"?$filter=contains(number,'{order_no}')"
         resp = await c.get(url, headers={"Authorization": f"Bearer {token}"})
-        data = resp.json()
+        if resp.status_code in (401, 403):
+            raise Exception(f"BC sales orders permission denied (HTTP {resp.status_code}). Ensure the app has D365 AUTOMATION role in BC.")
+        try:
+            data = resp.json()
+        except Exception:
+            raise Exception(f"BC returned non-JSON (HTTP {resp.status_code}): {resp.text[:200]}")
         if "error" in data:
             raise Exception(f"BC sales orders error: {data['error'].get('message', data['error'])}")
         return data.get("value", [])

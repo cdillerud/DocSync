@@ -142,8 +142,9 @@ export default function DocumentDetailPage() {
             </Button>
           )}
           {doc.status === 'Exception' && (
-            <Button size="sm" variant="destructive" onClick={() => { setResubmitFile(null); setResubmitOpen(true); }} data-testid="resubmit-btn">
-              <RotateCcw className="w-3 h-3 mr-1.5" /> Re-submit
+            <Button size="sm" variant="destructive" onClick={handleResubmit} disabled={resubmitting} data-testid="resubmit-btn">
+              {resubmitting ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> : <RotateCcw className="w-3 h-3 mr-1.5" />}
+              {resubmitting ? 'Re-submitting...' : 'Re-submit'}
             </Button>
           )}
           {(doc.status === 'Classified' || doc.status === 'Exception') && doc.bc_document_no && (

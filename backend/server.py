@@ -239,11 +239,132 @@ async def get_bc_sales_orders(order_no: str = None):
             raise Exception(f"BC sales orders error: {data['error'].get('message', data['error'])}")
         return data.get("value", [])
 
-async def link_document_to_bc(bc_record_id: str, share_link: str, file_name: str):
+async def link_document_to_bc(bc_record_id: str, share_link: str, file_name: str, file_content: bytes = None, content_type: str = None):
+    """
+    Attach a document to a BC Sales Order using the documentAttachments API.
+    
+    Args:
+        bc_record_id: The GUID of the Sales Order in BC
+        share_link: SharePoint sharing link (stored in attachment notes if possible)
+        file_name: Name of the file to attach
+        file_content: Binary content of the file to upload
+        content_type: MIME type of the file (e.g., 'application/pdf')
+    
+    Returns:
+        dict with success status and attachment details
+    """
     if DEMO_MODE or not BC_CLIENT_ID:
-        return {"success": True, "method": "mock", "note": "In production: write to BC external doc link field or add as attachment via BC API"}
+        return {"success": True, "method": "mock", "note": "In production: file will be attached to BC Sales Order via documentAttachments API"}
+    
+    if not file_content:
+        return {"success": False, "method": "api", "error": "No file content provided for attachment"}
+    
     token = await get_bc_token()
-    return {"success": True, "method": "api", "note": "Linked via BC API"}
+    companies = await get_bc_companies()
+    if not companies:
+        return {"success": False, "method": "api", "error": "No BC companies found"}
+    
+    company_id = companies[0]["id"]
+    
+    async with httpx.AsyncClient(timeout=60.0) as c:
+        # Step 1: Create the attachment metadata record
+        # Using documentAttachments entity bound to salesOrders
+        attach_url = f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/salesOrders({bc_record_id})/documentAttachments"
+        
+        # Determine content type
+        if not content_type:
+            ext = file_name.lower().split('.')[-1] if '.' in file_name else ''
+            content_type_map = {
+                'pdf': 'application/pdf',
+                'png': 'image/png',
+                'jpg': 'image/jpeg',
+                'jpeg': 'image/jpeg',
+                'gif': 'image/gif',
+                'doc': 'application/msword',
+                'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'xls': 'application/vnd.ms-excel',
+                'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'txt': 'text/plain',
+            }
+            content_type = content_type_map.get(ext, 'application/octet-stream')
+        
+        # Create attachment metadata
+        attachment_payload = {
+            "fileName": file_name
+        }
+        
+        create_resp = await c.post(
+            attach_url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            },
+            json=attachment_payload
+        )
+        
+        if create_resp.status_code == 401 or create_resp.status_code == 403:
+            return {
+                "success": False, 
+                "method": "api", 
+                "error": f"BC permission denied (HTTP {create_resp.status_code}). Ensure the app has D365 BUS FULL ACCESS permission set in BC."
+            }
+        
+        if create_resp.status_code not in (200, 201):
+            try:
+                error_data = create_resp.json()
+                error_msg = error_data.get("error", {}).get("message", str(error_data))
+            except Exception:
+                error_msg = create_resp.text[:500]
+            return {
+                "success": False,
+                "method": "api",
+                "error": f"Failed to create attachment record (HTTP {create_resp.status_code}): {error_msg}"
+            }
+        
+        attachment_data = create_resp.json()
+        attachment_id = attachment_data.get("id")
+        
+        if not attachment_id:
+            return {
+                "success": False,
+                "method": "api",
+                "error": f"No attachment ID returned from BC: {attachment_data}"
+            }
+        
+        # Step 2: Upload the actual file content using PATCH with attachmentContent
+        content_url = f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/salesOrders({bc_record_id})/documentAttachments({attachment_id})/attachmentContent"
+        
+        upload_resp = await c.patch(
+            content_url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": content_type,
+                "If-Match": "*"
+            },
+            content=file_content
+        )
+        
+        if upload_resp.status_code not in (200, 204):
+            try:
+                error_data = upload_resp.json()
+                error_msg = error_data.get("error", {}).get("message", str(error_data))
+            except Exception:
+                error_msg = upload_resp.text[:500]
+            return {
+                "success": False,
+                "method": "api",
+                "error": f"Failed to upload attachment content (HTTP {upload_resp.status_code}): {error_msg}"
+            }
+        
+        logger.info("Successfully attached document '%s' to BC Sales Order %s", file_name, bc_record_id)
+        
+        return {
+            "success": True,
+            "method": "api",
+            "attachment_id": attachment_id,
+            "file_name": file_name,
+            "note": f"Document attached to Sales Order in BC. SharePoint link: {share_link}"
+        }
 
 # ==================== WORKFLOW ENGINE ====================
 

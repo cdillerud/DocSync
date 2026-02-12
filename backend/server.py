@@ -97,7 +97,11 @@ async def get_graph_token():
     async with httpx.AsyncClient() as c:
         resp = await c.post(f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token",
             data={"grant_type": "client_credentials", "client_id": GRAPH_CLIENT_ID, "client_secret": GRAPH_CLIENT_SECRET, "scope": "https://graph.microsoft.com/.default"})
-        return resp.json().get("access_token")
+        data = resp.json()
+        if "access_token" not in data:
+            error_desc = data.get("error_description", data.get("error", "Unknown auth error"))
+            raise Exception(f"Graph token error: {error_desc}")
+        return data["access_token"]
 
 async def get_bc_token():
     if DEMO_MODE or not BC_CLIENT_ID:
@@ -105,7 +109,11 @@ async def get_bc_token():
     async with httpx.AsyncClient() as c:
         resp = await c.post(f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token",
             data={"grant_type": "client_credentials", "client_id": BC_CLIENT_ID, "client_secret": BC_CLIENT_SECRET, "scope": "https://api.businesscentral.dynamics.com/.default"})
-        return resp.json().get("access_token")
+        data = resp.json()
+        if "access_token" not in data:
+            error_desc = data.get("error_description", data.get("error", "Unknown auth error"))
+            raise Exception(f"BC token error: {error_desc}")
+        return data["access_token"]
 
 async def upload_to_sharepoint(file_content: bytes, file_name: str, folder: str):
     if DEMO_MODE or not GRAPH_CLIENT_ID:
@@ -117,42 +125,67 @@ async def upload_to_sharepoint(file_content: bytes, file_name: str, folder: str)
             "name": file_name
         }
     token = await get_graph_token()
-    # Resolve site and drive
-    async with httpx.AsyncClient() as c:
-        site_resp = await c.get(f"https://graph.microsoft.com/v1.0/sites/{SHAREPOINT_SITE_HOSTNAME}:{SHAREPOINT_SITE_PATH}",
+    async with httpx.AsyncClient(timeout=30.0) as c:
+        # Step 1: Resolve site
+        site_resp = await c.get(
+            f"https://graph.microsoft.com/v1.0/sites/{SHAREPOINT_SITE_HOSTNAME}:{SHAREPOINT_SITE_PATH}",
             headers={"Authorization": f"Bearer {token}"})
         site_data = site_resp.json()
+        if "id" not in site_data:
+            error = site_data.get("error", {})
+            raise Exception(f"SharePoint site not found: {error.get('message', error.get('code', site_data))}")
         site_id = site_data["id"]
-        drives_resp = await c.get(f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives",
+
+        # Step 2: Resolve drive
+        drives_resp = await c.get(
+            f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives",
             headers={"Authorization": f"Bearer {token}"})
-        drives = drives_resp.json().get("value", [])
+        drives_data = drives_resp.json()
+        if "error" in drives_data:
+            raise Exception(f"Drive list error: {drives_data['error'].get('message', drives_data['error'])}")
+        drives = drives_data.get("value", [])
         drive = next((d for d in drives if d["name"] == SHAREPOINT_LIBRARY_NAME), drives[0] if drives else None)
+        if not drive:
+            raise Exception(f"Document library '{SHAREPOINT_LIBRARY_NAME}' not found. Available: {[d['name'] for d in drives]}")
         drive_id = drive["id"]
+
+        # Step 3: Upload file
         upload_resp = await c.put(
             f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{folder}/{file_name}:/content",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/octet-stream"},
             content=file_content)
         item = upload_resp.json()
+        if "id" not in item:
+            error = item.get("error", {})
+            raise Exception(f"Upload failed: {error.get('message', error.get('code', item))}")
         return {"drive_id": drive_id, "item_id": item["id"], "web_url": item.get("webUrl", ""), "name": file_name}
 
 async def create_sharing_link(drive_id: str, item_id: str):
     if DEMO_MODE or not GRAPH_CLIENT_ID:
         return f"https://{SHAREPOINT_SITE_HOSTNAME}/:b:/s/GPI-DocumentHub-Test/{item_id[:8]}"
     token = await get_graph_token()
-    async with httpx.AsyncClient() as c:
-        resp = await c.post(f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{item_id}/createLink",
+    async with httpx.AsyncClient(timeout=30.0) as c:
+        resp = await c.post(
+            f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{item_id}/createLink",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             json={"type": "view", "scope": "organization"})
-        return resp.json().get("link", {}).get("webUrl", "")
+        data = resp.json()
+        if "error" in data:
+            raise Exception(f"Sharing link error: {data['error'].get('message', data['error'])}")
+        return data.get("link", {}).get("webUrl", "")
 
 async def get_bc_companies():
     if DEMO_MODE or not BC_CLIENT_ID:
         return MOCK_COMPANIES
     token = await get_bc_token()
-    async with httpx.AsyncClient() as c:
-        resp = await c.get(f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies",
+    async with httpx.AsyncClient(timeout=30.0) as c:
+        resp = await c.get(
+            f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies",
             headers={"Authorization": f"Bearer {token}"})
-        return resp.json().get("value", [])
+        data = resp.json()
+        if "error" in data:
+            raise Exception(f"BC companies error: {data['error'].get('message', data['error'])}")
+        return data.get("value", [])
 
 async def get_bc_sales_orders(order_no: str = None):
     if DEMO_MODE or not BC_CLIENT_ID:
@@ -161,13 +194,20 @@ async def get_bc_sales_orders(order_no: str = None):
             orders = [o for o in orders if order_no.lower() in o["number"].lower()]
         return orders
     token = await get_bc_token()
-    company_id = MOCK_COMPANIES[0]["id"]
-    async with httpx.AsyncClient() as c:
+    # First get companies to find the right one
+    companies = await get_bc_companies()
+    if not companies:
+        raise Exception("No BC companies found")
+    company_id = companies[0]["id"]
+    async with httpx.AsyncClient(timeout=30.0) as c:
         url = f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/salesOrders"
         if order_no:
             url += f"?$filter=contains(number,'{order_no}')"
         resp = await c.get(url, headers={"Authorization": f"Bearer {token}"})
-        return resp.json().get("value", [])
+        data = resp.json()
+        if "error" in data:
+            raise Exception(f"BC sales orders error: {data['error'].get('message', data['error'])}")
+        return data.get("value", [])
 
 async def link_document_to_bc(bc_record_id: str, share_link: str, file_name: str):
     if DEMO_MODE or not BC_CLIENT_ID:

@@ -273,30 +273,38 @@ async def run_upload_and_link_workflow(doc_id: str, file_content: bytes, file_na
 
         # Step 3: Validate and link BC record
         bc_linked = False
+        bc_error = None
         if bc_record_id or bc_document_no:
             step3_start = datetime.now(timezone.utc).isoformat()
             steps.append({"step": "validate_bc_record", "status": "running", "started": step3_start})
-            orders = await get_bc_sales_orders(order_no=bc_document_no)
-            if orders:
-                steps[-1]["status"] = "completed"
-                steps[-1]["ended"] = datetime.now(timezone.utc).isoformat()
-                steps[-1]["result"] = {"found": True, "order_number": orders[0]["number"], "customer": orders[0]["customerName"]}
+            try:
+                orders = await get_bc_sales_orders(order_no=bc_document_no)
+                if orders:
+                    steps[-1]["status"] = "completed"
+                    steps[-1]["ended"] = datetime.now(timezone.utc).isoformat()
+                    steps[-1]["result"] = {"found": True, "order_number": orders[0]["number"], "customer": orders[0]["customerName"]}
 
-                step4_start = datetime.now(timezone.utc).isoformat()
-                steps.append({"step": "link_to_bc", "status": "running", "started": step4_start})
-                link_result = await link_document_to_bc(bc_record_id or orders[0]["id"], share_link, file_name)
-                steps[-1]["status"] = "completed"
+                    step4_start = datetime.now(timezone.utc).isoformat()
+                    steps.append({"step": "link_to_bc", "status": "running", "started": step4_start})
+                    link_result = await link_document_to_bc(bc_record_id or orders[0]["id"], share_link, file_name)
+                    steps[-1]["status"] = "completed"
+                    steps[-1]["ended"] = datetime.now(timezone.utc).isoformat()
+                    steps[-1]["result"] = link_result
+                    bc_linked = True
+                else:
+                    steps[-1]["status"] = "warning"
+                    steps[-1]["ended"] = datetime.now(timezone.utc).isoformat()
+                    steps[-1]["result"] = {"found": False, "note": "BC record not found"}
+                    bc_error = "BC record not found"
+            except Exception as bc_exc:
+                steps[-1]["status"] = "failed"
                 steps[-1]["ended"] = datetime.now(timezone.utc).isoformat()
-                steps[-1]["result"] = link_result
-                bc_linked = True
-            else:
-                steps[-1]["status"] = "warning"
-                steps[-1]["ended"] = datetime.now(timezone.utc).isoformat()
-                steps[-1]["result"] = {"found": False, "note": "BC record not found"}
+                steps[-1]["error"] = str(bc_exc)
+                bc_error = str(bc_exc)
 
-        # Determine final status
+        # Determine final status — SharePoint success is preserved even if BC fails
         if bc_record_id or bc_document_no:
-            new_status = "LinkedToBC" if bc_linked else "Exception"
+            new_status = "LinkedToBC" if bc_linked else "Classified"
         else:
             new_status = "Classified"
 
@@ -307,7 +315,7 @@ async def run_upload_and_link_workflow(doc_id: str, file_content: bytes, file_na
             "sharepoint_share_link_url": share_link,
             "status": new_status,
             "updated_utc": datetime.now(timezone.utc).isoformat(),
-            "last_error": None if new_status != "Exception" else "BC record not found"
+            "last_error": bc_error
         }})
 
         workflow = {

@@ -1,16 +1,19 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getDocument, linkDocument, updateDocument } from '../lib/api';
+import { getDocument, linkDocument, updateDocument, resubmitDocument } from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
+} from '../components/ui/dialog';
 import { toast } from 'sonner';
 import {
   ArrowLeft, ExternalLink, Link, RefreshCw, FileText,
-  CheckCircle2, AlertCircle, Clock, Loader2, Copy
+  CheckCircle2, AlertCircle, Clock, Loader2, Copy, UploadCloud, RotateCcw
 } from 'lucide-react';
 
 const STATUS_CLASSES = {

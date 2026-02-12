@@ -352,6 +352,7 @@ class GPIDocumentHubTester:
         
         self.test_documents_list()
         self.test_settings_status()
+        self.test_settings_config_endpoints()
 
         # Print final results
         print("\n" + "=" * 80)

@@ -44,8 +44,6 @@ export default function DocumentDetailPage() {
   const [linking, setLinking] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState({});
-  const [resubmitOpen, setResubmitOpen] = useState(false);
-  const [resubmitFile, setResubmitFile] = useState(null);
   const [resubmitting, setResubmitting] = useState(false);
 
   const fetchDoc = async () => {

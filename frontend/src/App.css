@@ -1,34 +1,54 @@
-.App-logo {
-    height: 40vmin;
-    pointer-events: none;
+/* GPI Document Hub - Custom Styles */
+
+/* File dropzone */
+.dropzone {
+  border: 2px dashed hsl(var(--border));
+  border-radius: 0.75rem;
+  padding: 2rem;
+  text-align: center;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+.dropzone:hover,
+.dropzone.active {
+  border-color: hsl(var(--primary));
+  background: hsl(var(--primary) / 0.05);
 }
 
-@media (prefers-reduced-motion: no-preference) {
-    .App-logo {
-        animation: App-logo-spin infinite 20s linear;
-    }
+/* Workflow step indicator */
+.workflow-step {
+  position: relative;
+  padding-left: 2rem;
+}
+.workflow-step::before {
+  content: '';
+  position: absolute;
+  left: 0.5rem;
+  top: 1.75rem;
+  bottom: -0.5rem;
+  width: 2px;
+  background: hsl(var(--border));
+}
+.workflow-step:last-child::before {
+  display: none;
+}
+.workflow-step-dot {
+  position: absolute;
+  left: 0;
+  top: 0.25rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.App-header {
-    background-color: #0f0f10;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-size: calc(10px + 2vmin);
-    color: white;
+/* Glassmorphism sidebar */
+.glass-sidebar {
+  background: hsl(var(--card) / 0.95);
+  backdrop-filter: blur(12px);
 }
-
-.App-link {
-    color: #61dafb;
-}
-
-@keyframes App-logo-spin {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
-    }
+.dark .glass-sidebar {
+  background: hsl(var(--card) / 0.8);
 }

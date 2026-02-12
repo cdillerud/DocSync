@@ -16,10 +16,13 @@ export default function LoginPage() {
   const { login, isAuthenticated } = useAuth();
   const navigate = useNavigate();
 
-  if (isAuthenticated) {
-    navigate('/', { replace: true });
-    return null;
-  }
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/', { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
+
+  if (isAuthenticated) return null;
 
   const handleSubmit = async (e) => {
     e.preventDefault();

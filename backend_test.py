@@ -235,6 +235,99 @@ class GPIDocumentHubTester:
             self.log_test("Settings Status", False, f"Error: {str(e)}")
             return None
 
+    def test_settings_config_endpoints(self):
+        """Test new settings configuration endpoints"""
+        print("\n🔧 Testing Settings Configuration...")
+        
+        # Test GET /api/settings/config
+        try:
+            resp = requests.get(f"{self.api}/settings/config", headers=self.headers, timeout=10)
+            
+            if resp.status_code == 200:
+                config_data = resp.json()
+                config = config_data.get('config', {})
+                
+                # Check that config contains expected keys
+                expected_keys = {'TENANT_ID', 'BC_ENVIRONMENT', 'BC_CLIENT_ID', 'GRAPH_CLIENT_ID', 'DEMO_MODE'}
+                found_keys = set(config.keys())
+                has_required_keys = expected_keys.issubset(found_keys)
+                
+                # Check that secrets are masked
+                secrets_masked = True
+                secret_keys = ['BC_CLIENT_SECRET', 'GRAPH_CLIENT_SECRET']
+                for secret_key in secret_keys:
+                    value = config.get(secret_key, '')
+                    if value and '****' not in str(value):
+                        secrets_masked = False
+                
+                self.log_test("GET settings/config", has_required_keys and secrets_masked,
+                            f"Keys found: {len(found_keys)}/{len(expected_keys)}, Secrets masked: {secrets_masked}")
+            else:
+                self.log_test("GET settings/config", False, f"HTTP {resp.status_code}: {resp.text}")
+        except Exception as e:
+            self.log_test("GET settings/config", False, f"Error: {str(e)}")
+
+        # Test PUT /api/settings/config
+        try:
+            test_config = {
+                "TENANT_ID": "test-tenant-123-456",
+                "BC_ENVIRONMENT": "TestEnviroment", 
+                "BC_COMPANY_NAME": "Test Company Limited"
+            }
+            resp = requests.put(f"{self.api}/settings/config",
+                              json=test_config,
+                              headers=self.headers, timeout=10)
+            
+            if resp.status_code == 200:
+                response_data = resp.json()
+                updated_config = response_data.get('config', {})
+                tenant_updated = updated_config.get('TENANT_ID') == 'test-tenant-123-456'
+                env_updated = updated_config.get('BC_ENVIRONMENT') == 'TestEnviroment'
+                has_message = 'message' in response_data
+                
+                self.log_test("PUT settings/config", tenant_updated and env_updated and has_message,
+                            f"TENANT_ID: {tenant_updated}, BC_ENVIRONMENT: {env_updated}, Message: {has_message}")
+            else:
+                self.log_test("PUT settings/config", False, f"HTTP {resp.status_code}: {resp.text}")
+        except Exception as e:
+            self.log_test("PUT settings/config", False, f"Error: {str(e)}")
+
+        # Test POST /api/settings/test-connection?service=graph
+        try:
+            resp = requests.post(f"{self.api}/settings/test-connection?service=graph",
+                               headers=self.headers, timeout=10)
+            
+            if resp.status_code == 200:
+                test_data = resp.json()
+                service_correct = test_data.get('service') == 'graph'
+                has_status = 'status' in test_data
+                has_detail = 'detail' in test_data
+                
+                self.log_test("POST test-connection graph", service_correct and has_status and has_detail,
+                            f"Service: {test_data.get('service')}, Status: {test_data.get('status')}")
+            else:
+                self.log_test("POST test-connection graph", False, f"HTTP {resp.status_code}")
+        except Exception as e:
+            self.log_test("POST test-connection graph", False, f"Error: {str(e)}")
+
+        # Test POST /api/settings/test-connection?service=bc  
+        try:
+            resp = requests.post(f"{self.api}/settings/test-connection?service=bc",
+                               headers=self.headers, timeout=10)
+            
+            if resp.status_code == 200:
+                test_data = resp.json()
+                service_correct = test_data.get('service') == 'bc'
+                has_status = 'status' in test_data
+                has_detail = 'detail' in test_data
+                
+                self.log_test("POST test-connection bc", service_correct and has_status and has_detail,
+                            f"Service: {test_data.get('service')}, Status: {test_data.get('status')}")
+            else:
+                self.log_test("POST test-connection bc", False, f"HTTP {resp.status_code}")
+        except Exception as e:
+            self.log_test("POST test-connection bc", False, f"Error: {str(e)}")
+
     def run_all_tests(self):
         """Run complete test suite"""
         print("=" * 80)

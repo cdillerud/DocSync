@@ -663,6 +663,9 @@ async def startup():
     await db.hub_workflow_runs.create_index("id", unique=True)
     await db.hub_workflow_runs.create_index("document_id")
     await db.hub_workflow_runs.create_index("started_utc")
+    await db.hub_config.create_index("_key", unique=True)
+    # Load saved config from MongoDB (overrides .env defaults)
+    await _load_config_from_db()
     logger.info("GPI Document Hub started. Demo mode: %s", DEMO_MODE)
 
 @app.on_event("shutdown")

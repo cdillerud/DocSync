@@ -690,11 +690,11 @@ async def update_settings_config(update: ConfigUpdate):
     # Load current saved config from DB
     saved = await db.hub_config.find_one({"_key": "credentials"}, {"_id": 0}) or {"_key": "credentials"}
 
-    # Merge updates — skip masked placeholder values
+    # Merge updates — skip masked placeholder values, strip whitespace
     update_dict = update.model_dump(exclude_none=True)
     for key, val in update_dict.items():
         if val is not None and "****" not in val:
-            saved[key] = val
+            saved[key] = val.strip() if isinstance(val, str) else val
 
     # Upsert into MongoDB
     await db.hub_config.update_one(

@@ -161,13 +161,24 @@ export default function QueuePage() {
                       {formatDate(doc.created_utc)}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="ghost" size="sm" className="h-7 text-xs"
-                        onClick={(e) => { e.stopPropagation(); navigate(`/documents/${doc.id}`); }}
-                        data-testid={`view-doc-${doc.id}`}
-                      >
-                        <ExternalLink className="w-3 h-3 mr-1" /> View
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        {doc.status === 'Exception' && (
+                          <Button
+                            variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive"
+                            onClick={(e) => { e.stopPropagation(); navigate(`/documents/${doc.id}`); }}
+                            data-testid={`resubmit-doc-${doc.id}`}
+                          >
+                            <RotateCcw className="w-3 h-3 mr-1" /> Re-submit
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost" size="sm" className="h-7 text-xs"
+                          onClick={(e) => { e.stopPropagation(); navigate(`/documents/${doc.id}`); }}
+                          data-testid={`view-doc-${doc.id}`}
+                        >
+                          <ExternalLink className="w-3 h-3 mr-1" /> View
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

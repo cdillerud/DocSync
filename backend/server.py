@@ -456,6 +456,30 @@ async def list_bc_sales_orders(search: str = Query(None)):
 
 # ==================== SETTINGS ====================
 
+def _mask(val: str) -> str:
+    """Mask a secret value showing only first 4 and last 4 chars."""
+    if not val or len(val) < 10:
+        return "****" if val else ""
+    return val[:4] + "*" * (len(val) - 8) + val[-4:]
+
+def _current_config():
+    """Read live module-level config vars."""
+    return {
+        "TENANT_ID": TENANT_ID,
+        "BC_ENVIRONMENT": BC_ENVIRONMENT,
+        "BC_COMPANY_NAME": BC_COMPANY_NAME,
+        "BC_CLIENT_ID": BC_CLIENT_ID,
+        "BC_CLIENT_SECRET": BC_CLIENT_SECRET,
+        "GRAPH_CLIENT_ID": GRAPH_CLIENT_ID,
+        "GRAPH_CLIENT_SECRET": GRAPH_CLIENT_SECRET,
+        "SHAREPOINT_SITE_HOSTNAME": SHAREPOINT_SITE_HOSTNAME,
+        "SHAREPOINT_SITE_PATH": SHAREPOINT_SITE_PATH,
+        "SHAREPOINT_LIBRARY_NAME": SHAREPOINT_LIBRARY_NAME,
+        "DEMO_MODE": str(DEMO_MODE).lower(),
+    }
+
+SECRET_KEYS = {"BC_CLIENT_SECRET", "GRAPH_CLIENT_SECRET"}
+
 @api_router.get("/settings/status")
 async def get_settings_status():
     return {
@@ -480,6 +504,100 @@ async def get_settings_status():
         },
         "sharepoint_folders": list(set(FOLDER_MAP.values()))
     }
+
+@api_router.get("/settings/config")
+async def get_settings_config():
+    """Return current config with secrets masked."""
+    raw = _current_config()
+    masked = {}
+    for k, v in raw.items():
+        masked[k] = _mask(v) if k in SECRET_KEYS else v
+    return {"config": masked}
+
+class ConfigUpdate(BaseModel):
+    TENANT_ID: Optional[str] = None
+    BC_ENVIRONMENT: Optional[str] = None
+    BC_COMPANY_NAME: Optional[str] = None
+    BC_CLIENT_ID: Optional[str] = None
+    BC_CLIENT_SECRET: Optional[str] = None
+    GRAPH_CLIENT_ID: Optional[str] = None
+    GRAPH_CLIENT_SECRET: Optional[str] = None
+    SHAREPOINT_SITE_HOSTNAME: Optional[str] = None
+    SHAREPOINT_SITE_PATH: Optional[str] = None
+    SHAREPOINT_LIBRARY_NAME: Optional[str] = None
+    DEMO_MODE: Optional[str] = None
+
+@api_router.put("/settings/config")
+async def update_settings_config(update: ConfigUpdate):
+    """Update .env file and reload config in-memory."""
+    global DEMO_MODE, TENANT_ID, BC_ENVIRONMENT, BC_COMPANY_NAME
+    global BC_CLIENT_ID, BC_CLIENT_SECRET, GRAPH_CLIENT_ID, GRAPH_CLIENT_SECRET
+    global SHAREPOINT_SITE_HOSTNAME, SHAREPOINT_SITE_PATH, SHAREPOINT_LIBRARY_NAME
+
+    env_path = ROOT_DIR / '.env'
+
+    # Read existing .env
+    existing = {}
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if line and '=' in line and not line.startswith('#'):
+                key, _, val = line.partition('=')
+                existing[key.strip()] = val.strip().strip('"')
+
+    # Merge updates (skip masked/empty values)
+    update_dict = update.model_dump(exclude_none=True)
+    for key, val in update_dict.items():
+        if val is not None and '****' not in val:
+            existing[key] = val
+
+    # Write back
+    lines = []
+    for key, val in existing.items():
+        if ' ' in val or '"' in val:
+            lines.append(f'{key}="{val}"')
+        else:
+            lines.append(f'{key}={val}')
+    env_path.write_text('\n'.join(lines) + '\n')
+
+    # Reload in-memory
+    TENANT_ID = existing.get('TENANT_ID', '')
+    BC_ENVIRONMENT = existing.get('BC_ENVIRONMENT', '')
+    BC_COMPANY_NAME = existing.get('BC_COMPANY_NAME', '')
+    BC_CLIENT_ID = existing.get('BC_CLIENT_ID', '')
+    BC_CLIENT_SECRET = existing.get('BC_CLIENT_SECRET', '')
+    GRAPH_CLIENT_ID = existing.get('GRAPH_CLIENT_ID', '')
+    GRAPH_CLIENT_SECRET = existing.get('GRAPH_CLIENT_SECRET', '')
+    SHAREPOINT_SITE_HOSTNAME = existing.get('SHAREPOINT_SITE_HOSTNAME', 'gamerpackaging.sharepoint.com')
+    SHAREPOINT_SITE_PATH = existing.get('SHAREPOINT_SITE_PATH', '/sites/GPI-DocumentHub-Test')
+    SHAREPOINT_LIBRARY_NAME = existing.get('SHAREPOINT_LIBRARY_NAME', 'Documents')
+    DEMO_MODE = existing.get('DEMO_MODE', 'true').lower() == 'true'
+
+    # Return fresh masked config
+    raw = _current_config()
+    masked = {k: (_mask(v) if k in SECRET_KEYS else v) for k, v in raw.items()}
+    return {"message": "Configuration updated successfully", "config": masked, "requires_restart": True}
+
+@api_router.post("/settings/test-connection")
+async def test_connection(service: str = Query(...)):
+    """Quick connectivity test for a given service."""
+    if service == "graph":
+        try:
+            token = await get_graph_token()
+            if token == "mock-graph-token":
+                return {"service": "graph", "status": "demo", "detail": "Running in demo mode"}
+            return {"service": "graph", "status": "ok", "detail": "Token acquired successfully"}
+        except Exception as e:
+            return {"service": "graph", "status": "error", "detail": str(e)}
+    elif service == "bc":
+        try:
+            token = await get_bc_token()
+            if token == "mock-bc-token":
+                return {"service": "bc", "status": "demo", "detail": "Running in demo mode"}
+            return {"service": "bc", "status": "ok", "detail": "Token acquired successfully"}
+        except Exception as e:
+            return {"service": "bc", "status": "error", "detail": str(e)}
+    return {"service": service, "status": "unknown", "detail": "Unknown service"}
 
 # ==================== PHASE 2 HOOKS ====================
 

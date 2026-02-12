@@ -49,5 +49,8 @@ export const getBcSalesOrders = (search) => api.get('/bc/sales-orders', { params
 
 // Settings
 export const getSettingsStatus = () => api.get('/settings/status');
+export const getSettingsConfig = () => api.get('/settings/config');
+export const updateSettingsConfig = (data) => api.put('/settings/config', data);
+export const testConnection = (service) => api.post(`/settings/test-connection?service=${service}`);
 
 export default api;

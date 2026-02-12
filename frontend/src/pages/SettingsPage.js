@@ -109,7 +109,8 @@ export default function SettingsPage() {
       const res = await updateSettingsConfig(configForm);
       toast.success(res.data.message || 'Configuration saved');
       setDialogOpen(false);
-      fetchStatus();
+      // Re-fetch config to show updated values + refresh status cards
+      await fetchStatus();
     } catch (err) {
       toast.error('Failed to save: ' + (err.response?.data?.detail || err.message));
     } finally {

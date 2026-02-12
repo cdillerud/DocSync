@@ -407,11 +407,23 @@ async def run_upload_and_link_workflow(doc_id: str, file_content: bytes, file_na
 
                     step4_start = datetime.now(timezone.utc).isoformat()
                     steps.append({"step": "link_to_bc", "status": "running", "started": step4_start})
-                    link_result = await link_document_to_bc(bc_record_id or orders[0]["id"], share_link, file_name)
-                    steps[-1]["status"] = "completed"
-                    steps[-1]["ended"] = datetime.now(timezone.utc).isoformat()
-                    steps[-1]["result"] = link_result
-                    bc_linked = True
+                    link_result = await link_document_to_bc(
+                        bc_record_id=bc_record_id or orders[0]["id"], 
+                        share_link=share_link, 
+                        file_name=file_name,
+                        file_content=file_content
+                    )
+                    # Check if BC attachment succeeded
+                    if link_result.get("success"):
+                        steps[-1]["status"] = "completed"
+                        steps[-1]["ended"] = datetime.now(timezone.utc).isoformat()
+                        steps[-1]["result"] = link_result
+                        bc_linked = True
+                    else:
+                        steps[-1]["status"] = "failed"
+                        steps[-1]["ended"] = datetime.now(timezone.utc).isoformat()
+                        steps[-1]["error"] = link_result.get("error", "Unknown error attaching to BC")
+                        bc_error = link_result.get("error", "Unknown error attaching to BC")
                 else:
                     steps[-1]["status"] = "warning"
                     steps[-1]["ended"] = datetime.now(timezone.utc).isoformat()

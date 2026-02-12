@@ -320,6 +320,10 @@ async def run_upload_and_link_workflow(doc_id: str, file_content: bytes, file_na
 
 # ==================== DOCUMENT ENDPOINTS ====================
 
+# Upload storage path
+UPLOAD_DIR = ROOT_DIR / "uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
+
 @api_router.post("/documents/upload")
 async def upload_document(
     file: UploadFile = File(...),
@@ -333,6 +337,10 @@ async def upload_document(
     sha256_hash = hashlib.sha256(file_content).hexdigest()
     doc_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
+
+    # Persist file to disk for potential resubmit
+    file_path = UPLOAD_DIR / doc_id
+    file_path.write_bytes(file_content)
 
     doc = {
         "id": doc_id, "source": source, "file_name": file.filename,

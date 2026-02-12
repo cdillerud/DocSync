@@ -190,6 +190,13 @@ export default function QueuePage() {
                         >
                           <ExternalLink className="w-3 h-3 mr-1" /> View
                         </Button>
+                        <Button
+                          variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                          onClick={(e) => handleDelete(e, doc.id, doc.file_name)}
+                          data-testid={`delete-doc-${doc.id}`}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>

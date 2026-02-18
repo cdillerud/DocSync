@@ -1608,9 +1608,6 @@ Only include fields that you can actually extract from the document. Leave out f
 
 # ==================== FIELD NORMALIZATION ====================
 
-import re
-from dateutil import parser as date_parser
-
 def normalize_extracted_fields(fields: dict) -> dict:
     """
     Normalize extracted fields before BC validation.

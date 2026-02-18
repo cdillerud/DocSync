@@ -1,0 +1,30 @@
+INVOICE
+
+From: Acme Supplies Inc.
+123 Vendor Street
+Chicago, IL 60601
+
+Bill To:
+Gamer Packaging Ltd
+456 Business Ave
+Detroit, MI 48201
+
+Invoice Number: INV-2024-00789
+Invoice Date: February 15, 2024
+Due Date: March 15, 2024
+PO Number: PO-5566
+
+Description                          Qty    Unit Price    Amount
+-------------------------------------------------------------------
+Packaging Materials - Grade A        100    $15.00       $1,500.00
+Shipping Boxes - Large               50     $8.00        $400.00
+Bubble Wrap Rolls                    25     $12.00       $300.00
+-------------------------------------------------------------------
+                                     Subtotal:           $2,200.00
+                                     Tax (8%):           $176.00
+                                     TOTAL:              $2,376.00
+
+Payment Terms: Net 30
+Please remit payment to: Acme Supplies Inc.
+Bank: First National Bank
+Account: 12345678

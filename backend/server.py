@@ -3380,9 +3380,9 @@ async def poll_mailbox_for_attachments():
                 return stats
             
             messages = messages_resp.json().get("value", [])
-            stats["messages_scanned"] = len(messages)
+            stats["messages_detected"] = len(messages)
             
-            logger.info("[EmailPoll:%s] Found %d messages to process", run_id, len(messages))
+            logger.info("[EmailPoll:%s] Detected %d messages with attachments", run_id, len(messages))
             
             # Process each message
             for msg in messages:

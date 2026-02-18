@@ -3377,9 +3377,10 @@ async def poll_mailbox_for_attachments():
             # First run: look back N minutes
             buffer_time = (datetime.now(timezone.utc) - timedelta(minutes=EMAIL_POLLING_LOOKBACK_MINUTES)).isoformat()
         
-        # Query messages with attachments received after watermark
-        # NO "isRead" filter - we're read-only, idempotency log handles duplicates
-        filter_query = f"hasAttachments eq true and receivedDateTime ge {buffer_time}"
+        # Query messages received after watermark
+        # Note: hasAttachments filter combined with orderby can cause InefficientFilter error
+        # So we filter by date only and check attachments client-side
+        filter_query = f"receivedDateTime ge {buffer_time}"
         
         async with httpx.AsyncClient(timeout=60.0) as client:
             messages_resp = await client.get(
@@ -3387,7 +3388,7 @@ async def poll_mailbox_for_attachments():
                 headers={"Authorization": f"Bearer {token}"},
                 params={
                     "$filter": filter_query,
-                    "$select": "id,subject,from,receivedDateTime,internetMessageId",
+                    "$select": "id,subject,from,receivedDateTime,internetMessageId,hasAttachments",
                     "$top": EMAIL_POLLING_MAX_MESSAGES,
                     "$orderby": "receivedDateTime asc"
                 }

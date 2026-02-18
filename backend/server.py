@@ -4339,59 +4339,94 @@ async def get_shadow_mode_performance_report(days: int = 14):
     automation_metrics = await _get_automation_metrics_internal(days=days)
     
     # Calculate production readiness score (0-100)
+    # LOCKED FORMULA - Phase 7 explicit gates (do not modify without business justification)
+    # Factor weights: High Conf (35) + Alias Exception (20) + Stable Vendors (25) + Data Volume (20) = 100
     readiness_factors = []
     
-    # Factor 1: High confidence percentage (weight: 30)
+    # Factor 1: % docs with match_score >= 0.92 (weight: 35)
+    # Target: 60% of documents should be high-confidence
     high_conf_pct = score_dist["summary"]["high_confidence_pct"]
+    high_conf_score = min(35, (high_conf_pct / 60) * 35) if high_conf_pct < 60 else 35
     readiness_factors.append({
-        "factor": "High Confidence Documents",
+        "factor": "High Confidence Documents (≥0.92)",
         "value": high_conf_pct,
-        "target": 60,
-        "score": min(30, (high_conf_pct / 60) * 30),
-        "max_score": 30
+        "target": "≥60%",
+        "score": round(high_conf_score, 1),
+        "max_score": 35,
+        "gate_passed": high_conf_pct >= 60
     })
     
-    # Factor 2: Alias exception rate (weight: 25)
+    # Factor 2: Alias exception rate < 5% (weight: 20)
+    # Full score if < 5%, proportional reduction otherwise
     alias_exc_rate = alias_metrics["alias_totals"]["alias_exception_rate"]
-    alias_score = max(0, 25 - (alias_exc_rate * 2))  # Penalty for high exception rate
+    if alias_exc_rate < 5:
+        alias_score = 20
+    elif alias_exc_rate < 10:
+        alias_score = 15  # Partial credit
+    elif alias_exc_rate < 20:
+        alias_score = 10  # Minimal credit
+    else:
+        alias_score = 0
     readiness_factors.append({
         "factor": "Alias Exception Rate",
         "value": alias_exc_rate,
-        "target": "<10%",
+        "target": "<5%",
         "score": alias_score,
-        "max_score": 25
+        "max_score": 20,
+        "gate_passed": alias_exc_rate < 5
     })
     
-    # Factor 3: Automation rate (weight: 25)
-    auto_rate = automation_metrics["automation_rate"]
+    # Factor 3: ≥ 3 vendors stable (consistently high match scores) (weight: 25)
+    # A vendor is "stable" if avg_match_score >= 0.94 and min_match_score >= 0.88
+    stable_vendors_count = vendor_stability["categories"]["consistently_high_confidence"]["count"]
+    if stable_vendors_count >= 3:
+        vendor_score = 25
+    elif stable_vendors_count >= 2:
+        vendor_score = 18
+    elif stable_vendors_count >= 1:
+        vendor_score = 10
+    else:
+        vendor_score = 0
     readiness_factors.append({
-        "factor": "Overall Automation Rate",
-        "value": auto_rate,
-        "target": 50,
-        "score": min(25, (auto_rate / 50) * 25),
-        "max_score": 25
+        "factor": "Stable Vendors (≥0.94 avg score)",
+        "value": stable_vendors_count,
+        "target": "≥3",
+        "score": vendor_score,
+        "max_score": 25,
+        "gate_passed": stable_vendors_count >= 3
     })
     
-    # Factor 4: Data volume (weight: 20)
+    # Factor 4: ≥ 100 docs observed (weight: 20)
+    # Need meaningful volume for statistical confidence
     total_docs = automation_metrics["total_documents"]
-    volume_score = min(20, (total_docs / 50) * 20)  # Need 50+ docs for full score
+    if total_docs >= 100:
+        volume_score = 20
+    elif total_docs >= 50:
+        volume_score = round((total_docs / 100) * 20, 1)
+    else:
+        volume_score = round((total_docs / 100) * 10, 1)  # Slower ramp-up below 50
     readiness_factors.append({
-        "factor": "Data Volume",
+        "factor": "Data Volume (Observed Docs)",
         "value": total_docs,
-        "target": 50,
-        "score": volume_score,
-        "max_score": 20
+        "target": "≥100",
+        "score": round(volume_score, 1),
+        "max_score": 20,
+        "gate_passed": total_docs >= 100
     })
     
     total_readiness_score = round(sum(f["score"] for f in readiness_factors), 1)
+    gates_passed = sum(1 for f in readiness_factors if f["gate_passed"])
     
-    # Determine recommendation
-    if total_readiness_score >= 80:
-        recommendation = "READY: System is ready for controlled draft enablement."
-        recommendation_detail = "Consider enabling CREATE_DRAFT_HEADER for a subset of high-confidence vendors."
+    # Determine recommendation (all 4 gates must pass for full readiness)
+    if total_readiness_score >= 80 and gates_passed == 4:
+        recommendation = "READY: All gates passed. System validated for controlled vendor enablement."
+        recommendation_detail = "Enable CREATE_DRAFT_HEADER for 3 stable vendors (exact_no/exact_name/normalized only)."
+    elif total_readiness_score >= 80:
+        recommendation = "NEAR READY: Score high but not all gates passed."
+        recommendation_detail = f"Review failing gates ({4 - gates_passed} of 4 not passed). Address before enablement."
     elif total_readiness_score >= 60:
         recommendation = "APPROACHING: System is close to production readiness."
-        recommendation_detail = "Continue monitoring for 1-2 more weeks. Address any low-scoring factors."
+        recommendation_detail = "Continue monitoring for 1-2 more weeks. Address failing gates."
     elif total_readiness_score >= 40:
         recommendation = "BUILDING: System needs more time and data."
         recommendation_detail = "Focus on improving alias coverage and vendor data hygiene."

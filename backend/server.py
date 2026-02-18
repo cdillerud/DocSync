@@ -2137,6 +2137,8 @@ async def intake_document(
         "normalized_fields": validation_results.get("normalized_fields", {}),
         "validation_results": validation_results,
         "automation_decision": decision,
+        "match_method": validation_results.get("match_method", "none"),  # Track match method
+        "match_score": validation_results.get("match_score", 0.0),
         "vendor_candidates": decision_metadata.get("vendor_candidates", []),
         "customer_candidates": decision_metadata.get("customer_candidates", []),
         "warnings": decision_metadata.get("warnings", []),
@@ -2164,6 +2166,7 @@ async def intake_document(
          "result": sp_result if sp_result else {"error": sp_error}},
         {"step": "bc_validation", "status": "completed", "result": {
             "all_passed": validation_results.get("all_passed"),
+            "match_method": validation_results.get("match_method", "none"),
             "checks_count": len(validation_results.get("checks", [])),
             "vendor_candidates_count": len(validation_results.get("vendor_candidates", [])),
             "warnings_count": len(validation_results.get("warnings", []))

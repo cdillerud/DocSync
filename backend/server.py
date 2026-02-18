@@ -1704,7 +1704,7 @@ async def intake_document(
         "ended_utc": datetime.now(timezone.utc).isoformat(),
         "status": "Completed",
         "steps": [
-            {"step": "receive_document", "status": "completed", "result": {"source": intake.source, "hash": computed_hash}},
+            {"step": "receive_document", "status": "completed", "result": {"source": source, "hash": computed_hash}},
             {"step": "ai_classification", "status": "completed", "result": classification},
             {"step": "bc_validation", "status": "completed", "result": validation_results},
             {"step": "automation_decision", "status": "completed", "result": {"decision": decision, "reasoning": reasoning}}
@@ -1721,7 +1721,7 @@ async def intake_document(
         
         try:
             # Upload to SharePoint
-            sp_result = await upload_to_sharepoint(file_content, intake.attachment_name, folder)
+            sp_result = await upload_to_sharepoint(file_content, final_filename, folder)
             share_link = await create_sharing_link(sp_result["drive_id"], sp_result["item_id"])
             
             # Link to BC if we have a record
@@ -1733,7 +1733,7 @@ async def intake_document(
                 link_result = await link_document_to_bc(
                     bc_record_id=bc_record_id,
                     share_link=share_link,
-                    file_name=intake.attachment_name,
+                    file_name=final_filename,
                     file_content=file_content
                 )
                 bc_linked = link_result.get("success", False)

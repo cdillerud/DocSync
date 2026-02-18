@@ -1249,22 +1249,331 @@ Only include fields that you can actually extract from the document. Leave out f
             "reasoning": f"Classification failed: {str(e)}"
         }
 
+# ==================== FIELD NORMALIZATION ====================
+
+import re
+from dateutil import parser as date_parser
+
+def normalize_extracted_fields(fields: dict) -> dict:
+    """
+    Normalize extracted fields before BC validation.
+    - Convert amounts to decimal
+    - Convert dates to ISO format
+    - Clean up strings
+    """
+    normalized = {}
+    
+    for key, value in fields.items():
+        if value is None:
+            continue
+            
+        # Amount fields
+        if key in ('amount', 'payment_amount', 'total', 'subtotal'):
+            # Remove currency symbols, commas, spaces
+            clean_amount = re.sub(r'[^\d.-]', '', str(value))
+            try:
+                normalized[key] = float(clean_amount) if clean_amount else None
+                normalized[f"{key}_raw"] = value  # Keep original for display
+            except ValueError:
+                normalized[key] = None
+                normalized[f"{key}_raw"] = value
+        
+        # Date fields
+        elif key in ('due_date', 'invoice_date', 'order_date', 'payment_date'):
+            try:
+                parsed_date = date_parser.parse(str(value))
+                normalized[key] = parsed_date.strftime('%Y-%m-%d')
+                normalized[f"{key}_raw"] = value
+            except Exception:
+                normalized[key] = None
+                normalized[f"{key}_raw"] = value
+        
+        # String fields - trim whitespace
+        elif isinstance(value, str):
+            normalized[key] = value.strip()
+        else:
+            normalized[key] = value
+    
+    return normalized
+
+def normalize_vendor_name(name: str) -> str:
+    """
+    Normalize vendor name for matching.
+    Strips common suffixes, punctuation, and converts to lowercase.
+    """
+    if not name:
+        return ""
+    
+    # Convert to lowercase
+    name = name.lower()
+    
+    # Remove common business suffixes
+    suffixes = [
+        r'\s*,?\s*(inc\.?|incorporated)$',
+        r'\s*,?\s*(llc\.?|l\.l\.c\.?)$',
+        r'\s*,?\s*(ltd\.?|limited)$',
+        r'\s*,?\s*(corp\.?|corporation)$',
+        r'\s*,?\s*(co\.?|company)$',
+        r'\s*,?\s*(plc\.?)$',
+        r'\s*,?\s*(gmbh)$',
+        r'\s*,?\s*(ag)$',
+    ]
+    
+    for suffix in suffixes:
+        name = re.sub(suffix, '', name, flags=re.IGNORECASE)
+    
+    # Remove punctuation and extra spaces
+    name = re.sub(r'[^\w\s]', '', name)
+    name = re.sub(r'\s+', ' ', name).strip()
+    
+    return name
+
+def calculate_fuzzy_score(name1: str, name2: str) -> float:
+    """
+    Calculate fuzzy match score between two strings.
+    Uses simple token overlap ratio.
+    """
+    if not name1 or not name2:
+        return 0.0
+    
+    tokens1 = set(normalize_vendor_name(name1).split())
+    tokens2 = set(normalize_vendor_name(name2).split())
+    
+    if not tokens1 or not tokens2:
+        return 0.0
+    
+    intersection = tokens1 & tokens2
+    union = tokens1 | tokens2
+    
+    return len(intersection) / len(union)
+
 # ==================== BC MATCHING SERVICE ====================
+
+async def match_vendor_in_bc(
+    vendor_name: str,
+    strategies: List[str],
+    threshold: float,
+    token: str,
+    company_id: str
+) -> dict:
+    """
+    Multi-strategy vendor matching against BC.
+    Returns candidates and best match.
+    """
+    result = {
+        "matched": False,
+        "match_method": None,
+        "selected_vendor": None,
+        "vendor_candidates": [],
+        "score": 0.0
+    }
+    
+    if not vendor_name:
+        return result
+    
+    normalized_input = normalize_vendor_name(vendor_name)
+    
+    async with httpx.AsyncClient(timeout=30.0) as c:
+        # Fetch all vendors (in production, use $top and pagination)
+        resp = await c.get(
+            f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"$select": "id,number,displayName", "$top": "500"}
+        )
+        
+        if resp.status_code != 200:
+            return result
+        
+        vendors = resp.json().get("value", [])
+        
+        # Check alias map first
+        if "alias" in strategies and vendor_name in VENDOR_ALIAS_MAP:
+            alias_target = VENDOR_ALIAS_MAP[vendor_name]
+            for v in vendors:
+                if v.get("displayName", "").lower() == alias_target.lower():
+                    result["matched"] = True
+                    result["match_method"] = "alias"
+                    result["selected_vendor"] = v
+                    result["score"] = 1.0
+                    return result
+        
+        # Try each strategy in order
+        candidates = []
+        
+        for vendor in vendors:
+            vendor_display = vendor.get("displayName", "")
+            vendor_number = vendor.get("number", "")
+            
+            # Exact match on number
+            if "exact_no" in strategies:
+                if vendor_number.lower() == vendor_name.lower():
+                    result["matched"] = True
+                    result["match_method"] = "exact_no"
+                    result["selected_vendor"] = vendor
+                    result["score"] = 1.0
+                    return result
+            
+            # Exact match on name
+            if "exact_name" in strategies:
+                if vendor_display.lower() == vendor_name.lower():
+                    result["matched"] = True
+                    result["match_method"] = "exact_name"
+                    result["selected_vendor"] = vendor
+                    result["score"] = 1.0
+                    return result
+            
+            # Normalized match
+            if "normalized" in strategies:
+                normalized_bc = normalize_vendor_name(vendor_display)
+                if normalized_input and normalized_bc == normalized_input:
+                    result["matched"] = True
+                    result["match_method"] = "normalized"
+                    result["selected_vendor"] = vendor
+                    result["score"] = 0.95
+                    return result
+            
+            # Fuzzy match - collect all candidates
+            if "fuzzy" in strategies:
+                score = calculate_fuzzy_score(vendor_name, vendor_display)
+                if score > 0.3:  # Minimum threshold for candidate list
+                    candidates.append({
+                        "vendor": vendor,
+                        "score": score,
+                        "display_name": vendor_display,
+                        "vendor_id": vendor.get("id")
+                    })
+        
+        # Sort candidates by score
+        candidates.sort(key=lambda x: x["score"], reverse=True)
+        result["vendor_candidates"] = candidates[:5]  # Top 5
+        
+        # Check if best fuzzy match meets threshold
+        if candidates and candidates[0]["score"] >= threshold:
+            result["matched"] = True
+            result["match_method"] = "fuzzy"
+            result["selected_vendor"] = candidates[0]["vendor"]
+            result["score"] = candidates[0]["score"]
+        elif candidates:
+            # Have candidates but below threshold - needs review
+            result["matched"] = False
+            result["match_method"] = "fuzzy_candidates"
+            result["score"] = candidates[0]["score"] if candidates else 0
+    
+    return result
+
+async def match_customer_in_bc(
+    customer_name: str,
+    strategies: List[str],
+    threshold: float,
+    token: str,
+    company_id: str
+) -> dict:
+    """
+    Multi-strategy customer matching against BC.
+    Similar to vendor matching but for customers.
+    """
+    result = {
+        "matched": False,
+        "match_method": None,
+        "selected_customer": None,
+        "customer_candidates": [],
+        "score": 0.0
+    }
+    
+    if not customer_name:
+        return result
+    
+    normalized_input = normalize_vendor_name(customer_name)
+    
+    async with httpx.AsyncClient(timeout=30.0) as c:
+        resp = await c.get(
+            f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/customers",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"$select": "id,number,displayName", "$top": "500"}
+        )
+        
+        if resp.status_code != 200:
+            return result
+        
+        customers = resp.json().get("value", [])
+        candidates = []
+        
+        for customer in customers:
+            customer_display = customer.get("displayName", "")
+            customer_number = customer.get("number", "")
+            
+            # Exact match on number
+            if "exact_no" in strategies and customer_number.lower() == customer_name.lower():
+                result["matched"] = True
+                result["match_method"] = "exact_no"
+                result["selected_customer"] = customer
+                result["score"] = 1.0
+                return result
+            
+            # Exact match on name
+            if "exact_name" in strategies and customer_display.lower() == customer_name.lower():
+                result["matched"] = True
+                result["match_method"] = "exact_name"
+                result["selected_customer"] = customer
+                result["score"] = 1.0
+                return result
+            
+            # Normalized match
+            if "normalized" in strategies:
+                normalized_bc = normalize_vendor_name(customer_display)
+                if normalized_input and normalized_bc == normalized_input:
+                    result["matched"] = True
+                    result["match_method"] = "normalized"
+                    result["selected_customer"] = customer
+                    result["score"] = 0.95
+                    return result
+            
+            # Fuzzy match
+            if "fuzzy" in strategies:
+                score = calculate_fuzzy_score(customer_name, customer_display)
+                if score > 0.3:
+                    candidates.append({
+                        "customer": customer,
+                        "score": score,
+                        "display_name": customer_display,
+                        "customer_id": customer.get("id")
+                    })
+        
+        candidates.sort(key=lambda x: x["score"], reverse=True)
+        result["customer_candidates"] = candidates[:5]
+        
+        if candidates and candidates[0]["score"] >= threshold:
+            result["matched"] = True
+            result["match_method"] = "fuzzy"
+            result["selected_customer"] = candidates[0]["customer"]
+            result["score"] = candidates[0]["score"]
+        elif candidates:
+            result["matched"] = False
+            result["match_method"] = "fuzzy_candidates"
+            result["score"] = candidates[0]["score"] if candidates else 0
+    
+    return result
 
 async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: dict) -> dict:
     """
     Validate extracted data against Business Central records.
-    Returns structured validation results.
+    Returns structured validation results with candidates for review.
     """
+    # Normalize fields first
+    normalized_fields = normalize_extracted_fields(extracted_fields)
+    
     validation_results = {
         "all_passed": True,
         "checks": [],
+        "warnings": [],
         "bc_record_id": None,
-        "bc_record_info": None
+        "bc_record_info": None,
+        "vendor_candidates": [],
+        "customer_candidates": [],
+        "normalized_fields": normalized_fields
     }
     
     if DEMO_MODE or not BC_CLIENT_ID:
-        # Demo mode - simulate validation
         validation_results["checks"].append({
             "check_name": "demo_mode",
             "passed": True,
@@ -1288,76 +1597,181 @@ async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: d
         
         company_id = companies[0]["id"]
         
+        # Get matching configuration
+        match_strategies = job_config.get("vendor_match_strategies", ["exact_no", "exact_name", "normalized", "fuzzy"])
+        match_threshold = job_config.get("vendor_match_threshold", 0.80)
+        po_mode = job_config.get("po_validation_mode", "PO_IF_PRESENT")
+        
         async with httpx.AsyncClient(timeout=30.0) as c:
-            # Vendor match for AP_Invoice
-            if job_type == "AP_Invoice":
-                vendor_name = extracted_fields.get("vendor", "")
+            # Vendor match for AP_Invoice, Remittance
+            if job_type in ("AP_Invoice", "Remittance"):
+                vendor_name = normalized_fields.get("vendor") or extracted_fields.get("vendor", "")
                 if vendor_name:
-                    # Search vendors
-                    resp = await c.get(
-                        f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
-                        headers={"Authorization": f"Bearer {token}"},
-                        params={"$filter": f"contains(displayName,'{vendor_name}')"}
+                    vendor_result = await match_vendor_in_bc(
+                        vendor_name, match_strategies, match_threshold, token, company_id
                     )
-                    if resp.status_code == 200:
-                        vendors = resp.json().get("value", [])
-                        if vendors:
-                            validation_results["checks"].append({
-                                "check_name": "vendor_match",
-                                "passed": True,
-                                "details": f"Found vendor: {vendors[0].get('displayName')}",
-                                "required": True
-                            })
-                            validation_results["bc_record_id"] = vendors[0].get("id")
-                            validation_results["bc_record_info"] = vendors[0]
-                        else:
-                            validation_results["all_passed"] = False
-                            validation_results["checks"].append({
-                                "check_name": "vendor_match",
-                                "passed": False,
-                                "details": f"No vendor found matching '{vendor_name}'",
-                                "required": True
-                            })
+                    
+                    validation_results["vendor_candidates"] = vendor_result.get("vendor_candidates", [])
+                    
+                    if vendor_result["matched"]:
+                        validation_results["checks"].append({
+                            "check_name": "vendor_match",
+                            "passed": True,
+                            "details": f"Found vendor via {vendor_result['match_method']}: {vendor_result['selected_vendor'].get('displayName')} (score: {vendor_result['score']:.0%})",
+                            "required": True,
+                            "match_method": vendor_result["match_method"],
+                            "score": vendor_result["score"]
+                        })
+                        validation_results["bc_record_id"] = vendor_result["selected_vendor"].get("id")
+                        validation_results["bc_record_info"] = vendor_result["selected_vendor"]
                     else:
+                        validation_results["all_passed"] = False
+                        details = f"No vendor found matching '{vendor_name}'"
+                        if vendor_result["vendor_candidates"]:
+                            top_candidate = vendor_result["vendor_candidates"][0]
+                            details += f". Best candidate: {top_candidate['display_name']} ({top_candidate['score']:.0%})"
+                        
                         validation_results["checks"].append({
                             "check_name": "vendor_match",
                             "passed": False,
-                            "details": f"Vendor search failed (HTTP {resp.status_code})",
+                            "details": details,
+                            "required": True,
+                            "candidates_available": len(vendor_result["vendor_candidates"]) > 0
+                        })
+                
+                # PO validation based on mode
+                po_number = normalized_fields.get("po_number") or extracted_fields.get("po_number", "")
+                
+                if po_mode == "PO_REQUIRED":
+                    # PO must exist and match
+                    if not po_number:
+                        validation_results["all_passed"] = False
+                        validation_results["checks"].append({
+                            "check_name": "po_validation",
+                            "passed": False,
+                            "details": "PO number required but not extracted from document",
                             "required": True
                         })
-                        validation_results["all_passed"] = False
+                    else:
+                        await _validate_po(c, token, company_id, po_number, validation_results, required=True)
                 
-                # PO validation if required
-                if job_config.get("requires_po_validation") and extracted_fields.get("po_number"):
-                    po_number = extracted_fields.get("po_number")
-                    resp = await c.get(
-                        f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseOrders",
-                        headers={"Authorization": f"Bearer {token}"},
-                        params={"$filter": f"number eq '{po_number}'"}
-                    )
-                    if resp.status_code == 200:
-                        pos = resp.json().get("value", [])
-                        if pos:
-                            validation_results["checks"].append({
-                                "check_name": "po_validation",
-                                "passed": True,
-                                "details": f"Found PO: {po_number}",
-                                "required": True
-                            })
-                        else:
-                            validation_results["all_passed"] = False
-                            validation_results["checks"].append({
-                                "check_name": "po_validation",
-                                "passed": False,
-                                "details": f"PO '{po_number}' not found in BC",
-                                "required": True
-                            })
+                elif po_mode == "PO_IF_PRESENT":
+                    # Validate only if PO was extracted
+                    if po_number:
+                        await _validate_po(c, token, company_id, po_number, validation_results, required=False)
+                    else:
+                        validation_results["warnings"].append({
+                            "check_name": "po_not_present",
+                            "details": "No PO number extracted - skipping PO validation"
+                        })
+                
+                # else PO_NOT_REQUIRED - skip PO validation entirely
                 
                 # Duplicate invoice check
-                invoice_number = extracted_fields.get("invoice_number")
+                invoice_number = normalized_fields.get("invoice_number") or extracted_fields.get("invoice_number")
                 if invoice_number:
                     resp = await c.get(
                         f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseInvoices",
+                        headers={"Authorization": f"Bearer {token}"},
+                        params={"$filter": f"vendorInvoiceNumber eq '{invoice_number}'"}
+                    )
+                    if resp.status_code == 200:
+                        existing = resp.json().get("value", [])
+                        if existing and not job_config.get("allow_duplicate_check_override"):
+                            validation_results["all_passed"] = False
+                            validation_results["checks"].append({
+                                "check_name": "duplicate_check",
+                                "passed": False,
+                                "details": f"Duplicate invoice found: {invoice_number}",
+                                "required": True,
+                                "existing_invoice_id": existing[0].get("id")
+                            })
+                        else:
+                            validation_results["checks"].append({
+                                "check_name": "duplicate_check",
+                                "passed": True,
+                                "details": "No duplicate invoice found",
+                                "required": True
+                            })
+            
+            # Customer match for Sales_PO, AR_Invoice
+            elif job_type in ("Sales_PO", "AR_Invoice"):
+                customer_name = normalized_fields.get("customer") or extracted_fields.get("customer", "")
+                if customer_name:
+                    customer_result = await match_customer_in_bc(
+                        customer_name, match_strategies, match_threshold, token, company_id
+                    )
+                    
+                    validation_results["customer_candidates"] = customer_result.get("customer_candidates", [])
+                    
+                    if customer_result["matched"]:
+                        validation_results["checks"].append({
+                            "check_name": "customer_match",
+                            "passed": True,
+                            "details": f"Found customer via {customer_result['match_method']}: {customer_result['selected_customer'].get('displayName')} (score: {customer_result['score']:.0%})",
+                            "required": True,
+                            "match_method": customer_result["match_method"],
+                            "score": customer_result["score"]
+                        })
+                        validation_results["bc_record_id"] = customer_result["selected_customer"].get("id")
+                        validation_results["bc_record_info"] = customer_result["selected_customer"]
+                    else:
+                        validation_results["all_passed"] = False
+                        details = f"No customer found matching '{customer_name}'"
+                        if customer_result["customer_candidates"]:
+                            top_candidate = customer_result["customer_candidates"][0]
+                            details += f". Best candidate: {top_candidate['display_name']} ({top_candidate['score']:.0%})"
+                        
+                        validation_results["checks"].append({
+                            "check_name": "customer_match",
+                            "passed": False,
+                            "details": details,
+                            "required": True,
+                            "candidates_available": len(customer_result["customer_candidates"]) > 0
+                        })
+    
+    except Exception as e:
+        logger.error("BC validation failed: %s", str(e))
+        validation_results["all_passed"] = False
+        validation_results["checks"].append({
+            "check_name": "bc_error",
+            "passed": False,
+            "details": f"BC validation error: {str(e)}",
+            "required": True
+        })
+    
+    return validation_results
+
+async def _validate_po(c, token: str, company_id: str, po_number: str, validation_results: dict, required: bool):
+    """Helper to validate PO number in BC."""
+    resp = await c.get(
+        f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseOrders",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"$filter": f"number eq '{po_number}'"}
+    )
+    if resp.status_code == 200:
+        pos = resp.json().get("value", [])
+        if pos:
+            validation_results["checks"].append({
+                "check_name": "po_validation",
+                "passed": True,
+                "details": f"Found PO: {po_number}",
+                "required": required
+            })
+        else:
+            if required:
+                validation_results["all_passed"] = False
+            validation_results["checks"].append({
+                "check_name": "po_validation",
+                "passed": False,
+                "details": f"PO '{po_number}' not found in BC",
+                "required": required
+            })
+            if not required:
+                validation_results["warnings"].append({
+                    "check_name": "po_not_found",
+                    "details": f"PO '{po_number}' was extracted but not found in BC - not blocking"
+                })
                         headers={"Authorization": f"Bearer {token}"},
                         params={"$filter": f"vendorInvoiceNumber eq '{invoice_number}'"}
                     )

@@ -13,81 +13,98 @@ PRODUCT REQUIREMENTS:
 **User's preferred language**: English
 
 **what currently exists?**
-A mature, full-stack Document Intelligence Platform with a FastAPI backend, React frontend, and MongoDB database. It includes:
-- **Backend:** A monolithic  with advanced features:
-    - AI-powered email ingestion pipeline using Gemini.
-    - A configurable Job Type system for defining automation rules.
-    - A multi-strategy vendor matching engine (exact, alias, fuzzy).
-    - An audit and metrics engine for performance tracking.
-    - A read-only email polling system () using MS Graph API to ingest documents without modifying the source mailbox.
-    - Safety-gated draft creation () for Purchase Invoices in BC, controlled by a feature flag.
-- **Frontend:** A React application featuring:
-    - Document upload, queue management, and settings pages.
-    - A multi-tab Audit Dashboard with an ROI Summary providing executive-level metrics on automation, alias impact, and vendor friction.
-    - A Shadow Mode dashboard to monitor system performance and readiness for production writes.
-- **Deployment:** Dockerfiles for frontend and backend, a  file, and a  script for deployment to a user-provided VM.
+A full-stack Document Intelligence Platform is now successfully deployed and running on the user's VM. The system consists of a FastAPI backend, a React frontend, and a MongoDB database, all running in Docker containers.
+
+The application has been through extensive debugging to connect to the user's real Microsoft Graph (SharePoint, Email) and Business Central APIs. Key features include:
+- An AI-powered email ingestion pipeline that can poll a mailbox () for new emails with attachments.
+- A manual document upload feature.
+- An administrative backfill endpoint () to ingest historical emails from a specified mailbox.
+- AI-driven document classification (e.g., AP_Invoice, Freight_Document) and data extraction (e.g., vendor, invoice number, amount) using Gemini.
+- A Shadow Mode where the system processes documents without writing to production systems, allowing for performance monitoring and data gathering.
+- A UI for viewing queued documents, audit trails, and application settings.
+- A configurable polling interval for the email watcher.
+- A working git-based deployment workflow from the agent's environment to the user's VM.
 
 **Last working item**:
--   **Last item agent was working:** The agent was attempting to deploy the application to the user's VM at . The user provided shell output showing a series of failed deployment attempts. The final error indicated a Node.js version incompatibility in the frontend build process.
--   **Status:** BLOCKED
--   **Agent Testing Done:** N/A (Deployment is the task)
--   **Which testing method agent to use?** Manual testing by executing shell commands on the user's VM.
--   **User Testing Done:** N/A
+-   **Last item agent was working:** Implementing Phase 7 observability improvements based on user guidance. This involved creating an endpoint to measure the quality of AI data extraction () and adding logic to the backend to populate the necessary data. The user has successfully tested this endpoint.
+-   **Status:** IN PROGRESS
+-   **Agent Testing Done:** N
+-   **Which testing method agent to use?** Backend testing agent or manual  to test the new metrics endpoints.
+-   **User Testing Done:** Y
 
 **All Pending/In progress Issue list**:
--   **Issue 1:** (P0) Deployment to user's VM is failing.
+-   **Issue 1:** The user wants to build on the new extraction quality metrics by adding a Missing Fields drill-down endpoint to investigate why some documents fail to have key fields extracted. (P0)
+-   **Issue 2:** The AI classification prompt was updated to better differentiate AP vs AR invoices, but the user is still seeing some misclassifications. This needs to be hardened. (P1)
+-   **Issue 3:** The UI Re-submit button on the document detail page does not trigger re-classification. It calls the  endpoint, but without the  parameter that was recently added. (P2)
+-   **Issue 4:** The user has reported that documents are being ingested but the workflow is not being triggered automatically, requiring a manual reprocess click. This breaks the Shadow Mode observation goal. (P0)
 
 **Issues Detail:**
--   **Issue 1:** Deployment on the user's VM () is failing during the Docker build process for the frontend service.
-    -   **Attempted fixes:**
-        1.  Initial attempt using  with HTTPS failed due to auth issues.
-        2.  Switched to SSH clone, failed due to missing SSH keys on the VM.
-        3.  Switched to  download of a zip, which failed because the repo was private.
-        4.  After the user made the repo public,  download succeeded, but the  script failed because a  file was missing from the repo.
-        5.  The agent provided the  content, but the build failed due to a missing  file.
-        6.  The agent attempted to generate  on the VM, which failed due to  requiring Node.js version  while the environment was using Node 18.
-        7.  The last action was to suggest updating the  to use  and re-running yarn install v1.22.22
-[1/4] Resolving packages...
-[2/4] Fetching packages...
-[3/4] Linking dependencies...
-[4/4] Building fresh packages...
-success Saved lockfile.
-Done in 0.10s..
+-   **Issue 1:** Missing Fields Drilldown
+    -   **Attempted fixes:** None. This is a new request.
     -   **Next debug checklist:**
-        1.  Verify the user has executed the last proposed command: 
-        2.  Verify the user has executed: 
-        3.  Execute  again and check the output for new errors.
-    -   **Why fix this issue and what will be achieved with the fix?** This is a hard blocker. The application cannot be tested or used by the user in their environment until it is successfully deployed.
-    -   **Status:** BLOCKED
+        1.  Create a new endpoint, e.g., .
+        2.  The endpoint should query the  collection for records where the specified field is missing from .
+        3.  Return a list of document IDs and relevant metadata to help the user investigate.
+    -   **Why fix this issue and what will be achieved with the fix?** It will allow the user to deterministically debug and improve the AI extraction performance, which is the primary goal of Phase 7.
+    -   **Status:** NOT STARTED
+    -   **Is recurring issue?** N
+    -   **Should Test frontend/backend/both after fix?** Backend
+    -   **Blocked on other issue:** None.
+-   **Issue 4:** Workflow not triggered on ingestion.
+    -   **Attempted fixes:** The agent created a new  function and modified  to create workflow audit records inline. However, the user is still reporting that workflows are not running automatically.
+    -   **Next debug checklist:**
+        1.  Review the  function in  again.
+        2.  Ensure that after a document is created in the database, a background task is spawned to run the full validation and status update workflow.
+        3.  The workflow logic should be centralized so that manual uploads, email polling, and backfills all trigger the exact same process.
+        4.  Trace the code path from an email attachment being ingested to see where the workflow trigger is missing or failing.
+    -   **Why fix this issue and what will be achieved with the fix?** This is a critical blocker. Until workflows run automatically, none of the Shadow Mode metrics (readiness score, match score, etc.) are meaningful.
+    -   **Status:** IN PROGRESS
     -   **Is recurring issue?** Y
-    -   **Should Test frontend/backend/both after fix?** Both (a successful deployment needs to be verified by accessing the frontend and testing an API endpoint).
+    -   **Should Test frontend/backend/both after fix?** Backend
     -   **Blocked on other issue:** None.
 
 **In progress Task List**:
--   There are no tasks currently in progress. The deployment issue is the sole focus.
+-   **Task 1:** Implement Phase 7 Observability Enhancements (P0)
+    -   **Where to resume:** Start by creating the Missing Fields drilldown endpoint requested by the user.
+    -   **What will be achieved with this?** This will provide the user with the tools needed to analyze the performance of the AI data extraction during the Shadow Mode observation window.
+    -   **Status:** IN PROGRESS
+    -   **Should Test frontend/backend/both after fix?** Backend
+    -   **Blocked on something:** Blocked by **Issue 4**, as the metrics are not fully populated without the workflow running automatically.
 
 **Upcoming and Future Tasks**
 **Upcoming Tasks:**
--   **Task 1 (P0): Phase 7 - Structured Observation Window:** Once deployed, the system needs to run in Shadow Mode for 2-3 weeks to collect real-world data without writing to BC. The goal is to validate the instrumentation, define explicit readiness gates, and produce an ELT Report: Shadow Mode Performance.
--   **Task 2 (P1): Phase 8 - Controlled Vendor Enablement:** After the observation window, enable  for a small, controlled subset of known stable vendors to validate the draft creation process in production.
+-   **Task 1 (P0):** Fully resolve the automatic workflow trigger (Issue 4).
+-   **Task 2 (P1):** Implement the Missing Fields drill-down endpoint.
+-   **Task 3 (P1):** Define Stable Vendor as a metric based on extraction consistency and volume.
+-   **Task 4 (P2):** Phase 8 - Controlled Vendor Enablement: After the observation window, enable  for a small subset of stable vendors.
 
 **Future Tasks:**
--   **Vendor Threshold Override Architecture:** Implement a system to allow setting  thresholds on a per-vendor basis.
--   **Zetadocs Decommissioning:** Plan and execute the phased retirement of the existing Zetadocs system.
--   **Transaction Automation (Level 3):** Automatically create Purchase Invoice *lines* in BC.
--   **Entra ID SSO:** Replace the current mock JWT authentication with single sign-on.
--   **Refactor Backend:** Break down the monolithic  into a structured, service-oriented architecture.
+-   Vendor Threshold Override Architecture: Allow setting  thresholds per-vendor.
+-   Zetadocs Decommissioning: Plan and execute the phased retirement of the legacy system.
+-   Transaction Automation (Level 3): Automatically create Purchase Invoice *lines* in BC.
+-   Entra ID SSO: Replace mock JWT auth with single sign-on.
+-   Refactor Backend: Break down the monolithic .
 
 **Completed work in this session**
-- **Phase 4:  Implementation:** Successfully implemented and tested the logic to create draft purchase invoice headers in BC, guarded by a feature flag and strict safety preconditions.
-- **Phase 5: ELT ROI Dashboard:** Created a new ROI Summary tab in the frontend Audit Dashboard to display executive-level metrics on automation rates, alias impact, vendor friction, and draft creation confidence.
-- **Phase 6: Shadow Mode Instrumentation:** Added backend endpoints and frontend components to monitor system health and readiness for production, including a match score distribution chart and a Shadow Mode Status card.
-- **Phase 7: Observation Mode Activation:** Implemented a data-driven readiness score with explicit, weighted gates and added a command to formally start the shadow mode observation period.
-- **Phase 7 C1 (Revised): Passive Graph Tap:** Implemented a truly read-only email polling system using a watermark strategy () to fetch new emails from an AP inbox without altering their state (e.g., marking as read or moving), ensuring no interference with existing workflows.
-- **Deployment Package Creation:** Created Dockerfiles, , a  script, and supporting documentation to create a deployable release bundle of the application.
+- **Deployment to User VM (Resolved):** Successfully deployed the application to the user's VM, resolving a series of complex issues including Docker build failures (Node.js version, private pip packages), port conflicts, and NGINX proxy misconfigurations.
+- **Credential & Permission Debugging (Resolved):** Identified and corrected numerous issues with Azure AD and SharePoint credentials and permissions, enabling successful connection to MS Graph APIs.
+- **Email Polling & Backfill Implementation:**
+    - Implemented a passive tap email poller that now successfully connects and ingests attachments.
+    - Added support for separate Azure AD App Registrations for SharePoint and Email access.
+    - Created an admin backfill endpoint () to seed the system with historical data from any specified mailbox.
+- **AI Classification & Workflow:**
+    - Enabled AI classification by adding the .
+    - Refined the AI prompt to improve AP vs. AR invoice detection.
+    - Added Freight and Warehouse job types.
+    - Implemented a  option for the reprocess endpoint.
+- **UI & Usability Fixes:**
+    - Made the email polling interval configurable via the UI.
+    - Fixed the Re-submit button on the document detail page to appear for more statuses and call the correct endpoint.
+- **Git Workflow Establishment:** Resolved the user's deployment issues by establishing a proper git-based workflow ( ->  on VM).
+- **Phase 7 Metrics (Initial):** Implemented a new endpoint () to provide initial metrics on data extraction completeness.
 
 **Earlier issues found/mentioned but not fixed**
-- The technical debt of the monolithic  file has been acknowledged but not addressed. This remains a future refactoring task.
+- The technical debt of the monolithic  file remains a future refactoring task.
 
 **Known issue recurrence from previous fork**
 - None.
@@ -101,105 +118,83 @@ Done in 0.10s..
 - **Database:** MongoDB
 - **AI:** Gemini via .
 - **APIs:** Microsoft Graph API, Dynamics 365 Business Central API.
-- **Deployment:** Docker, Docker Compose.
+- **Deployment:** Docker, Docker Compose, Git.
 
 **key DB schema**
--   ****: Stores metadata for each document.
+-   ****: Stores metadata and extracted data for each document.
 -   ****: Stores workflow configurations.
 -   ****: Maps fuzzy vendor names to canonical IDs.
 -   ****: Aggregated daily performance data.
--   ****: Global configuration, including API credentials and feature flags.
--   ****: (New) Idempotency log for the email polling service, tracking processed message IDs and attachment hashes to prevent duplicates.
+-   ****: Global configuration.
+-   ****: Stores configuration settings from the UI (e.g., email watcher settings).
+-   ****: Idempotency log for the email polling service.
+-   ****: (New) Stores statistics for each run of the email polling worker.
 
 **changes in tech stack**
--   **Docker & Docker Compose:** Introduced for containerized deployment.
+- None.
 
 **All files of reference**
--   : The monolithic backend file, modified for all new features (draft creation, metrics, shadow mode, email polling).
--   : The frontend dashboard, updated with ROI, Match Score, and Shadow Mode components.
--   : Defines the services for deployment (frontend, backend, mongo).
--   : Docker build instructions for the FastAPI backend.
--   : Docker build instructions for the React frontend.
--   : The deployment script for the user's VM.
--   : Instructions for the user on how to deploy the application.
--   : Product Requirements Document, updated after each phase.
--   : Memo documenting the start of the observation phase.
+-   : The monolithic backend, heavily modified for deployment fixes, credentials, email polling, backfill, and metrics.
+-   : Modified to fix the Re-submit button's visibility.
+-   : Modified to add the polling interval setting.
+-   : Modified to correct the reprocess endpoint path.
+-   : Updated to use the correct pip index URL for private packages.
+-   : Updated to use  and a more robust yarn install v1.22.22
+[1/4] Resolving packages...
+success Already up-to-date.
+Done in 0.06s. command.
+-   : Port for the frontend was changed from 80 to 8080.
 
 **Areas that need refactoring**:
--   **Monolithic Backend:**  is over 5000 lines and contains all application logic. It is a significant piece of technical debt and needs to be broken down into a service-oriented architecture (routers, services, models).
+-   : This monolithic file is now over 5,500 lines long and urgently needs to be refactored into a proper service-oriented structure (e.g., routers, services, models). The recent debugging has added more complexity, making this a high-priority future task.
 
 **key api endpoints**
--   
--   
--   
--   
--   : (New) Gets status of the draft creation feature.
--   : (New) Toggles the draft creation feature.
--   : (New) Gets histogram data for match scores.
--   : (New) Gets metrics on alias performance.
--   : (New) Gets the full shadow mode readiness report.
--   : (New) Gets the status of the email polling service.
+-   : Modified to accept  query param.
+-   : Modified to accept .
+-   **New:** : Basic health check.
+-   **New:** : Triggers backfill from a specified mailbox.
+-   **New:** : Provides metrics on AI data extraction quality.
 
 **Critical Info for New Agent**
-- The immediate and only priority is to solve the deployment failure on the user's VM. The last attempted fix was to update the frontend Dockerfile to use  to resolve a package version conflict. You must guide the user to apply this fix and retry the deployment.
-- Do not proceed with any new features until the user confirms a successful deployment.
-- The user is technical and provides direct shell output. Pay close attention to these logs for debugging. The user has also shown frustration with repeated failures, so getting the deployment right is critical.
-- The long-term strategy, post-deployment, is to enter a 2-3 week Structured Observation Window (Phase 7) where the system runs in shadow mode to gather real-world data before any automated BC writes are enabled in production.
+- The primary blocker from the last fork (deployment failure) is **resolved**. The application is running on the user's VM. The workflow is now: Agent codes in preview -> Agent uses Push to Github -> User runs  and  on their VM.
+- The application is in Shadow Mode (Phase 7). The immediate goal is **NOT** to enable production features but to improve observability and data quality based on real documents being processed.
+- **The most critical pending issue is that workflows are not being triggered automatically upon ingestion.** This means no metrics are being generated without manual intervention, defeating the purpose of the observation phase. This must be the top priority.
+- The user is technical, provides direct shell output, and is understandably frustrated when features that worked in the mocked preview environment break against real APIs. Be mindful of the distinction between  (preview) and  (user's VM).
 
 **documents and test reports created in this job**
--    (updated)
--   
--   
--   
--   
--   
--   
--   
--   
--   
--   
--   
+-   None. All work was iterative debugging and development.
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **user:**  followed by a successful  start, but it fails with a Docker build error: . (IN PROGRESS)
-2.  **agent:** Suggests generating  on the VM using a  command.
-3.  **user:** Runs the command, but yarn install v1.22.22
-[1/4] Resolving packages...
-success Already up-to-date.
-Done in 0.02s. fails with a Node.js version incompatibility ( needs Node >= 20, but the image is Node 18). (IN PROGRESS)
-4.  **agent:** Suggests the final fix: update  to use  and re-run the yarn install v1.22.22
-[1/4] Resolving packages...
-success Already up-to-date.
-Done in 0.07s. command inside the Node 20 container. (PENDING USER ACTION)
-5.  **user:** (Implicitly provides output showing the yarn install v1.22.22
-[1/4] Resolving packages...
-success Already up-to-date.
-Done in 0.09s. failing again, as the  script immediately retries the build without the lockfile being successfully created).
-6.  **agent:** Re-iterates the fix: Update Dockerfile to Node 20, generate lockfile with Node 20, then run deploy.
-7.  **user:** Provides shell output from a previous failed attempt.
-8.  **agent:** Corrects the command to use  to write the  file due to permissions.
-9.  **user:** Provides shell output of the failed  command.
-10. **agent:** Provides the  command with all the necessary values.
+1.  **user:** can we do another backfill? (COMPLETED - Agent explained how to run it).
+2.  **agent:** Sent the user a prompt for the next steps in observation mode.
+3.  **user:** Shares detailed feedback on what to do next in observation mode: normalize fields, measure vendor stability, and define ReadyForDraftCandidate. (IN PROGRESS)
+4.  **agent:** Acknowledges feedback and starts implementing.
+5.  **agent:** Runs a backfill and shares the extraction-quality metrics with the user.
+6.  **user:** Provides detailed analysis of the metrics and suggests the next steps: a Missing Fields drill-down endpoint, normalizing amounts/dates, and defining a Stable Vendor metric. (IN PROGRESS)
+7.  **agent:** Acknowledges the excellent analysis and agrees to implement the improvements.
+8.  **agent:** Starts implementing Phase 7 improvements.
+9.  **user:** Asks about AI data extraction correctness. (COMPLETED - Agent provided analysis).
+10. **user:** Asks to backfill 13 emails from the  inbox to seed Shadow Mode. (IN PROGRESS - Endpoint was created).
 
 **Project Health Check:**
--   **Broken:** The deployment to the user's target VM is broken.
--   **Mocked:** All external APIs (BC, Graph) are using real credentials but are pointed at sandbox/test environments.  is .
+-   **Broken:** The automatic workflow trigger upon document ingestion is broken. This is a P0 issue preventing the Shadow Mode from functioning as intended.
+-   **Mocked:**  is  on the user's VM. The app is using real credentials against sandbox/test environments for MS Graph and BC.
 
 **3rd Party Integrations**
--   **Microsoft Graph API:** Used for the passive tap email polling () and SharePoint file operations ().
--   **Dynamics 365 Business Central API:** Used for data validation and creating draft purchase invoices.
+-   **Microsoft Graph API:** Used for email polling () and SharePoint file operations (). Using two separate App Registrations for this.
+-   **Dynamics 365 Business Central API:** Used for data validation.
 -   **Gemini 2.5-flash:** Used for document classification/extraction via the Emergent LLM Key.
--   **Docker/Docker Hub:** Used for containerization and pulling base images.
+-   **Docker/Docker Hub:** Used for containerization.
 
 **Testing status**
--   **Testing agent used after significant changes:** YES. The agent ran the testing agent after every major phase, with the last successful run being  for the email polling feature.
--   **Troubleshoot agent used after agent stuck in loop:** NO.
+-   **Testing agent used after significant changes:** NO
+-   **Troubleshoot agent used after agent stuck in loop:** NO
 -   **Test files created:** None.
--   **Known regressions:** None in the application code. The deployment process is failing.
+-   **Known regressions:** The automatic triggering of the processing workflow upon document ingestion seems to have regressed or was never fully implemented for all intake paths.
 
 **Credentials to test flow:**
-The necessary credentials were provided by the user and are intended to be placed in  on the target VM. The agent has a record of these credentials.
+All necessary credentials for MS Graph (SharePoint and Email), Business Central, and the Emergent LLM Key are correctly configured in the  file on the user's VM. They do not need to be requested again.
 
 **What agent forgot to execute**
-- The agent initially missed that the GitHub repository did not contain a  file, which is crucial for reproducible builds. This led to a series of cascading build failures during the user's deployment attempt.
-- The agent also did not initially account for the Node.js version incompatibility between the project's dependencies and the  Docker image.</analysis>
+- The agent has repeatedly applied patches for backend and frontend code instead of relying on the established git workflow, leading to user confusion and code sync issues.
+- The core logic for automatically triggering a full workflow run (including audit trail creation and status updates) after a document is ingested via email polling or backfill was not correctly implemented, leading to the current P0 issue where documents are stuck in the  state.</analysis>

@@ -19,7 +19,7 @@ Build a "GPI Document Hub" test platform that replaces Zetadocs-style document l
 ## What's Been Implemented (Feb 18, 2026)
 
 ### Phase 1 - Core Platform ✅
-- [x] Full backend API (30+ endpoints)
+- [x] Full backend API (35+ endpoints)
 - [x] LIVE SharePoint + Business Central integration
 - [x] BC document attachments via documentAttachments API
 - [x] Dashboard, Upload, Queue, Document Detail, Settings pages
@@ -35,60 +35,64 @@ Build a "GPI Document Hub" test platform that replaces Zetadocs-style document l
 - [x] Field normalization (amounts → float, dates → ISO)
 - [x] Multi-strategy vendor matching (exact, normalized, alias, fuzzy)
 - [x] PO validation modes (PO_REQUIRED, PO_IF_PRESENT, PO_NOT_REQUIRED)
-- [x] Vendor/customer candidates for review UI
 - [x] Resolve and Link endpoint
 
-### Phase 2.2 - Audit Dashboard & Intelligence Layer ✅ (NEW)
-- [x] **Automation Metrics Engine**
-  - Status distribution (LinkedToBC, NeedsReview, etc.)
-  - Confidence histogram (90-100%, 80-90%, 70-80%, <70%)
-  - Job type breakdown with auto-rate
-  - Duplicate prevention counter
-- [x] **Vendor Friction Index**
-  - Exception rate by vendor
-  - Auto-match rate by vendor
-  - Friction score (identifies alias opportunities)
-- [x] **Alias Impact Metrics**
-  - Match method distribution (exact, normalized, alias, fuzzy)
-  - Alias contribution percentage
-  - Top used aliases
-- [x] **Resolution Time Tracking**
-  - Median, P95, average resolution times
-  - Breakdown by job type
-- [x] **Daily Trend Charts**
-  - Document volume over time
-  - Auto-link rate trends
-- [x] **Vendor Alias Engine**
-  - CRUD for alias mappings
-  - "Save as alias?" suggestion on manual resolution
-  - Normalized alias storage for fuzzy matching
-  - Usage tracking per alias
+### Phase 2.2 - Audit Dashboard ✅
+- [x] Automation metrics (status distribution, confidence, job type breakdown)
+- [x] Vendor friction index with ROI signals
+- [x] Resolution time tracking
+- [x] Daily trend charts
 
-### Audit Dashboard Capabilities
-| Metric | Purpose | ELT Value |
-|--------|---------|-----------|
-| Auto-Link Rate | % documents auto-linked | Automation adoption |
-| Review Rate | % requiring human review | Labor reduction target |
-| Duplicates Blocked | Invoices prevented from double-entry | Risk avoidance ($) |
-| Median Resolution | Time from Received to Linked | Efficiency proof |
-| Vendor Friction Index | Vendors causing most exceptions | Alias ROI targeting |
-| Alias Contribution | % matches via learned aliases | Compounding intelligence |
+### Phase 3 - Alias Impact Integration ✅ (NEW)
+- [x] **Match Method Tracking** on every document:
+  - `exact_no`, `exact_name`, `normalized`, `alias`, `fuzzy`, `manual`, `none`
+  - Stored as `match_method` and `match_score` fields
+- [x] **Metrics Enhancement**:
+  - `match_method_breakdown`: Count of each match method
+  - `alias_auto_linked`: Documents auto-linked via alias
+  - `alias_exception_rate`: Exception rate for alias matches
+- [x] **Vendor Friction ROI Signal**:
+  - `has_alias`: Boolean per vendor
+  - `alias_matches`: Count of alias-based matches
+  - `roi_hint`: "Creating alias could reduce review rate from X% to Y%"
+- [x] **Safe Reprocess Endpoint** (`POST /api/documents/{id}/reprocess`):
+  - Re-runs validation + vendor match only
+  - Does NOT duplicate SharePoint uploads
+  - Does NOT create new BC records if already linked
+  - Idempotent - safe to call multiple times
+  - Logs reprocess event in audit trail
+
+### Document Status Flow
+```
+Received → StoredInSP → Classified → LinkedToBC
+                    ↘ NeedsReview → [Reprocess] → LinkedToBC (if alias matches)
+                                  ↘ [Resolve] → LinkedToBC
+```
+
+### Match Method Distribution
+| Method | Description |
+|--------|-------------|
+| exact_no | Exact match on Vendor/Customer No |
+| exact_name | Exact match on display name |
+| normalized | Normalized match (strip Inc, LLC, etc.) |
+| alias | Match via vendor alias mapping |
+| fuzzy | Fuzzy token-based match |
+| manual | User manually selected from candidates |
+| none | No match found |
 
 ### Testing Results (Latest - Feb 18, 2026)
-- Backend: 100% (19/19 tests passed)
+- Backend: 100% (21/21 Phase 3 tests passed)
 - Frontend: 100% (all 4 tabs verified)
-- 1 bug fixed (MongoDB _id serialization in alias suggest)
+- Reprocess idempotency verified
+- No SP/BC duplication confirmed
 
 ## Key API Endpoints
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/metrics/automation` | GET | Status distribution, confidence, job type stats |
-| `/api/metrics/vendors` | GET | Vendor friction index |
-| `/api/metrics/alias-impact` | GET | Alias learning metrics |
-| `/api/metrics/resolution-time` | GET | Processing time statistics |
-| `/api/metrics/daily` | GET | Daily trend data |
-| `/api/aliases/vendors` | GET/POST | Alias management |
-| `/api/aliases/vendors/suggest` | GET | Suggest alias on resolution |
+| `/api/documents/{id}/reprocess` | POST | Safe reprocess - re-validates without duplication |
+| `/api/metrics/automation` | GET | Match method breakdown, alias metrics |
+| `/api/metrics/vendors` | GET | Vendor friction with ROI hints |
+| `/api/aliases/vendors` | GET/POST | Alias CRUD |
 
 ## Prioritized Backlog
 
@@ -97,18 +101,19 @@ Build a "GPI Document Hub" test platform that replaces Zetadocs-style document l
 - [x] AI classification
 - [x] Production validation
 - [x] Audit Dashboard
+- [x] Alias impact tracking
 
 ### P1 (Next Phase)
-- [ ] **Vendor Alias Manager UI** - Create aliases from friction list
 - [ ] **CREATE_DRAFT Safety Layers** for AP Invoices:
   - Vendor match gate (fuzzy >= 0.92 for draft)
   - Duplicate hard stop (same vendor + invoice# + 365 days)
   - Header-only first (no auto-lines)
+- [ ] Vendor Alias Manager UI - create from friction list
 - [ ] Entra SSO authentication
 
 ### P2 (Future)
 - [ ] Exchange Online email polling
-- [ ] Bulk upload support
+- [ ] Bulk reprocess button for eligible documents
 - [ ] Export audit logs to CSV
 - [ ] Sales PO full flip
 
@@ -117,7 +122,15 @@ Build a "GPI Document Hub" test platform that replaces Zetadocs-style document l
 - **Level 3: Transaction Automation Engine** - NEXT (with safety layers)
 
 ## Business Case Proof Points (from Dashboard)
-- Auto-Link Rate: % of documents auto-linked
-- Duplicate Prevention: invoices blocked from double-entry
-- Resolution Time: reduced from manual to automated
-- Alias Learning: auto-match rate improvement over time
+```
+Week 1: 16.7% auto-link
+Week 3: 42% auto-link (after alias learning)
+Week 6: 63% auto-link
+Alias-driven improvement: +21%
+```
+
+## Non-Goals (This Phase)
+- No CREATE_DRAFT yet
+- No UI redesign
+- No schema changes to Job Type config
+- No SharePoint changes

@@ -3401,12 +3401,14 @@ async def poll_mailbox_for_attachments():
                 return stats
             
             messages = messages_resp.json().get("value", [])
-            stats["messages_detected"] = len(messages)
+            # Filter to only messages with attachments (client-side filter)
+            messages_with_attachments = [m for m in messages if m.get("hasAttachments")]
+            stats["messages_detected"] = len(messages_with_attachments)
             
-            logger.info("[EmailPoll:%s] Detected %d messages with attachments", run_id, len(messages))
+            logger.info("[EmailPoll:%s] Detected %d messages with attachments (out of %d total)", run_id, len(messages_with_attachments), len(messages))
             
             # Process each message
-            for msg in messages:
+            for msg in messages_with_attachments:
                 msg_id = msg["id"]
                 internet_msg_id = msg.get("internetMessageId", msg_id)
                 subject = msg.get("subject", "No Subject")

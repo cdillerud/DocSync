@@ -1620,6 +1620,10 @@ async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: d
                     validation_results["vendor_candidates"] = vendor_result.get("vendor_candidates", [])
                     
                     if vendor_result["matched"]:
+                        # Set top-level match method for tracking
+                        validation_results["match_method"] = vendor_result["match_method"]
+                        validation_results["match_score"] = vendor_result["score"]
+                        
                         validation_results["checks"].append({
                             "check_name": "vendor_match",
                             "passed": True,
@@ -1632,6 +1636,7 @@ async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: d
                         validation_results["bc_record_info"] = vendor_result["selected_vendor"]
                     else:
                         validation_results["all_passed"] = False
+                        validation_results["match_method"] = "none"
                         details = f"No vendor found matching '{vendor_name}'"
                         if vendor_result["vendor_candidates"]:
                             top_candidate = vendor_result["vendor_candidates"][0]

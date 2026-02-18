@@ -1578,7 +1578,7 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
             system_message="""You are a document classification and data extraction AI for a business document management system.
             
 Your job is to analyze business documents and:
-1. Classify the document type (AP_Invoice, Sales_PO, AR_Invoice, Remittance, or Unknown)
+1. Classify the document type (AP_Invoice, Sales_PO, AR_Invoice, Remittance, Freight_Document, Warehouse_Document, or Unknown)
 2. Extract key fields based on the document type
 3. Provide a confidence score (0.0 to 1.0) for your classification
 
@@ -1598,9 +1598,17 @@ For Remittance (payment confirmations):
 - Extract: vendor/customer, payment_amount, payment_date, invoice_references
 - Look for "Remittance Advice", "Payment", check numbers
 
+For Freight_Document (shipping/freight documents):
+- Extract: shipper, consignee, tracking_number, carrier, origin, destination, weight, pieces
+- Look for "Bill of Lading", "BOL", "HAWB", "MAWB", "Air Waybill", "Shipping", tracking numbers, freight forwarder names
+
+For Warehouse_Document (warehouse receipts/shipments):
+- Extract: document_number, location, item_numbers, quantities, bin_codes, receipt_date
+- Look for "Warehouse Receipt", "Receiving", "Shipment", "Packing List", location/bin codes
+
 Always respond with valid JSON in this exact format:
 {
-    "document_type": "AP_Invoice|Sales_PO|AR_Invoice|Remittance|Unknown",
+    "document_type": "AP_Invoice|Sales_PO|AR_Invoice|Remittance|Freight_Document|Warehouse_Document|Unknown",
     "confidence": 0.0-1.0,
     "extracted_fields": {
         "vendor": "...",
@@ -1610,7 +1618,15 @@ Always respond with valid JSON in this exact format:
         "amount": "...",
         "due_date": "...",
         "payment_date": "...",
-        "payment_amount": "..."
+        "payment_amount": "...",
+        "shipper": "...",
+        "consignee": "...",
+        "tracking_number": "...",
+        "carrier": "...",
+        "origin": "...",
+        "destination": "...",
+        "document_number": "...",
+        "location": "..."
     },
     "reasoning": "Brief explanation of classification"
 }

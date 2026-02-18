@@ -3590,7 +3590,7 @@ async def poll_mailbox_for_attachments():
         
         async with httpx.AsyncClient(timeout=60.0) as client:
             messages_resp = await client.get(
-                f"https://graph.microsoft.com/v1.0/users/{EMAIL_POLLING_USER}/mailFolders/Inbox/messages",
+                f"https://graph.microsoft.com/v1.0/users/{target_mailbox}/mailFolders/Inbox/messages",
                 headers={"Authorization": f"Bearer {token}"},
                 params={
                     "$filter": filter_query,
@@ -3623,7 +3623,7 @@ async def poll_mailbox_for_attachments():
                 try:
                     # Fetch attachments list (without contentBytes - not allowed in list query)
                     att_resp = await client.get(
-                        f"https://graph.microsoft.com/v1.0/users/{EMAIL_POLLING_USER}/messages/{msg_id}/attachments",
+                        f"https://graph.microsoft.com/v1.0/users/{target_mailbox}/messages/{msg_id}/attachments",
                         headers={"Authorization": f"Bearer {token}"},
                         params={"$select": "id,name,contentType,size"}
                     )
@@ -3658,7 +3658,7 @@ async def poll_mailbox_for_attachments():
                         # Fetch individual attachment content
                         try:
                             att_content_resp = await client.get(
-                                f"https://graph.microsoft.com/v1.0/users/{EMAIL_POLLING_USER}/messages/{msg_id}/attachments/{att_id}",
+                                f"https://graph.microsoft.com/v1.0/users/{target_mailbox}/messages/{msg_id}/attachments/{att_id}",
                                 headers={"Authorization": f"Bearer {token}"}
                             )
                             if att_content_resp.status_code != 200:
@@ -3934,7 +3934,7 @@ async def backfill_ap_mailbox(
         
         async with httpx.AsyncClient(timeout=60.0) as client:
             messages_resp = await client.get(
-                f"https://graph.microsoft.com/v1.0/users/{EMAIL_POLLING_USER}/mailFolders/Inbox/messages",
+                f"https://graph.microsoft.com/v1.0/users/{target_mailbox}/mailFolders/Inbox/messages",
                 headers={"Authorization": f"Bearer {token}"},
                 params={
                     "$filter": filter_query,
@@ -3972,7 +3972,7 @@ async def backfill_ap_mailbox(
                 try:
                     # Fetch attachments list
                     att_resp = await client.get(
-                        f"https://graph.microsoft.com/v1.0/users/{EMAIL_POLLING_USER}/messages/{msg_id}/attachments",
+                        f"https://graph.microsoft.com/v1.0/users/{target_mailbox}/messages/{msg_id}/attachments",
                         headers={"Authorization": f"Bearer {token}"},
                         params={"$select": "id,name,contentType,size,isInline"}
                     )
@@ -4002,7 +4002,7 @@ async def backfill_ap_mailbox(
                         
                         # Fetch attachment content for hash calculation
                         att_content_resp = await client.get(
-                            f"https://graph.microsoft.com/v1.0/users/{EMAIL_POLLING_USER}/messages/{msg_id}/attachments/{att_id}",
+                            f"https://graph.microsoft.com/v1.0/users/{target_mailbox}/messages/{msg_id}/attachments/{att_id}",
                             headers={"Authorization": f"Bearer {token}"}
                         )
                         

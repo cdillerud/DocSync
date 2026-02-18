@@ -3696,15 +3696,26 @@ async def email_polling_worker():
     
     while True:
         try:
-            # Distributed lock to ensure only one instance runs
+            # Get current interval from config (allows runtime adjustment)
+            config = await get_email_watcher_config()
+            interval = config.get("interval_minutes", EMAIL_POLLING_INTERVAL_MINUTES)
+            
+            # Check if polling is enabled
             async with _email_polling_lock:
-                if EMAIL_POLLING_ENABLED:
+                if config.get("enabled", True) and EMAIL_POLLING_ENABLED:
                     await poll_mailbox_for_attachments()
         except Exception as e:
             logger.error("Email polling worker error: %s", str(e))
         
+        # Get interval again in case it changed
+        try:
+            config = await get_email_watcher_config()
+            interval = config.get("interval_minutes", EMAIL_POLLING_INTERVAL_MINUTES)
+        except:
+            interval = EMAIL_POLLING_INTERVAL_MINUTES
+        
         # Wait for next interval
-        await asyncio.sleep(EMAIL_POLLING_INTERVAL_MINUTES * 60)
+        await asyncio.sleep(interval * 60)
 
 
 @api_router.post("/email-polling/trigger")

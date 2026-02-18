@@ -3356,10 +3356,10 @@ async def poll_mailbox_for_attachments():
     }
     
     try:
-        # Get Graph token
-        token = await get_graph_token()
+        # Get Email token (uses EMAIL_CLIENT_ID/SECRET if configured)
+        token = await get_email_token()
         if not token:
-            stats["errors"].append("Failed to get Graph token")
+            stats["errors"].append("Failed to get Email token")
             return stats
         
         # Get watermark from settings (last seen receivedDateTime)

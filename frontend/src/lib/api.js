@@ -55,4 +55,21 @@ export const getSettingsConfig = () => api.get('/settings/config');
 export const updateSettingsConfig = (data) => api.put('/settings/config', data);
 export const testConnection = (service) => api.post(`/settings/test-connection?service=${service}`);
 
+// Job Types (Email Parser Config)
+export const getJobTypes = () => api.get('/settings/job-types');
+export const getJobType = (jobType) => api.get(`/settings/job-types/${jobType}`);
+export const updateJobType = (jobType, data) => api.put(`/settings/job-types/${jobType}`, data);
+
+// Email Watcher Config
+export const getEmailWatcherConfig = () => api.get('/settings/email-watcher');
+export const updateEmailWatcherConfig = (data) => api.put('/settings/email-watcher', data);
+export const subscribeEmailWatcher = (webhookUrl) => api.post(`/settings/email-watcher/subscribe?webhook_url=${encodeURIComponent(webhookUrl)}`);
+
+// Email Stats Dashboard
+export const getEmailStats = () => api.get('/dashboard/email-stats');
+
+// Document Intake & Classification
+export const intakeDocument = (formData) => api.post('/documents/intake', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+export const classifyDocument = (id) => api.post(`/documents/${id}/classify`);
+
 export default api;

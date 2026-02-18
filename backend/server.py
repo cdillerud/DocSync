@@ -3999,7 +3999,7 @@ async def poll_mailbox_for_attachments():
                 try:
                     # Fetch attachments list (without contentBytes - not allowed in list query)
                     att_resp = await client.get(
-                        f"https://graph.microsoft.com/v1.0/users/{target_mailbox}/messages/{msg_id}/attachments",
+                        f"https://graph.microsoft.com/v1.0/users/{EMAIL_POLLING_USER}/messages/{msg_id}/attachments",
                         headers={"Authorization": f"Bearer {token}"},
                         params={"$select": "id,name,contentType,size"}
                     )
@@ -4034,7 +4034,7 @@ async def poll_mailbox_for_attachments():
                         # Fetch individual attachment content
                         try:
                             att_content_resp = await client.get(
-                                f"https://graph.microsoft.com/v1.0/users/{target_mailbox}/messages/{msg_id}/attachments/{att_id}",
+                                f"https://graph.microsoft.com/v1.0/users/{EMAIL_POLLING_USER}/messages/{msg_id}/attachments/{att_id}",
                                 headers={"Authorization": f"Bearer {token}"}
                             )
                             if att_content_resp.status_code != 200:

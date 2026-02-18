@@ -1,162 +1,205 @@
 <analysis>**original_problem_statement:**
-Build a minimal but production-style “GPI Document Hub” test platform to replace Zetadocs-style document linking in Microsoft Dynamics 365 Business Central. The hub will use SharePoint Online as the document repository and a middleware hub to orchestrate ingestion, metadata, approvals, and attachment linking back to BC.
+Build a minimal but production-style “GPI Document Hub” test platform to replace Zetadocs-style document linking in Microsoft Dynamics 365 Business Central (BC). The hub will use SharePoint Online as the document repository and a middleware hub to orchestrate ingestion, metadata, approvals, and attachment linking back to BC.
 
 PRODUCT REQUIREMENTS:
--   **Architecture:** A hub-and-spoke model with a FastAPI backend and a React frontend. The spokes are Business Central (BC) and SharePoint Online.
--   **Authentication:** Use Entra ID (Azure AD) application with client credentials for both BC and Microsoft Graph APIs.
--   **Data Model:**
-    -   : Stores metadata about each document, including file info, SharePoint URLs, BC record details, and status.
-    -   : Logs the execution of each workflow for auditing.
--   **Core Workflows:**
-    1.  **Manual Upload & Link:** A UI to upload a file, associate it with a BC Sales Order, upload it to a specific SharePoint folder, create a sharing link, and attach the document/link back to the BC record.
-    2.  **Document Queue:** A UI to view and manage documents that are not fully processed.
-    3.  **Audit & Monitoring:** A dashboard to display system status, recent runs, and failures.
--   **Success Criteria:** A user can upload a PDF, associate it with a BC Sales Order, find the file in SharePoint, and access the document from within the BC Sales Order record. The system must be stable and provide clear audit logs.
+- **Architecture:** FastAPI backend, React frontend, MongoDB database.
+- **Integrations:** Microsoft Graph API (SharePoint, Outlook), Dynamics 365 Business Central API.
+- **Core Workflows:**
+    1.  **Manual Upload & Link:** A UI to upload a file, associate it with a BC record, and attach it.
+    2.  **Email Ingestion & Automation:** An email-watching agent that ingests attachments, uses AI (Gemini) to classify them and extract data, validates the data against BC, and then either auto-links the document or flags it for human review based on a configurable rules engine.
+    3.  **Audit & Monitoring:** A dashboard to display system automation performance, track exceptions, and provide ROI metrics on the automation.
+    4.  **Intelligence Engine:** A system that learns from manual corrections (e.g., vendor matching) to improve its own automation rate over time (Vendor Alias system).
 
 **User's preferred language**: English
 
 **what currently exists?**
-A full-stack application with a FastAPI backend, MongoDB database, and a React frontend.
--   **Frontend:** Features a login page, a settings page for credentials, a document upload page, a document queue, and a document detail view.
--   **Backend:** Supports user authentication (mock), credential management (stored in DB), document upload, and workflows.
--   **Integrations:**
-    -   **SharePoint:** Successfully uploads files to the correct folders and creates sharing links.
-    -   **Business Central (BC):** After extensive debugging of permissions, the connection is now **working**. The application can successfully query for sales orders from the  environment.
--   **Functionality:** Users can configure credentials, upload documents, and see them processed. Failed documents can be resubmitted or deleted. The system correctly identifies and reports API errors.
+A mature, full-stack Document Intelligence Platform with a FastAPI backend, React frontend, and MongoDB database. It includes:
+- **Backend:** A monolithic  with advanced features:
+    - AI-powered email ingestion pipeline using Gemini.
+    - A configurable Job Type system for defining automation rules.
+    - A multi-strategy vendor matching engine (exact, alias, fuzzy).
+    - An audit and metrics engine for performance tracking.
+    - A read-only email polling system () using MS Graph API to ingest documents without modifying the source mailbox.
+    - Safety-gated draft creation () for Purchase Invoices in BC, controlled by a feature flag.
+- **Frontend:** A React application featuring:
+    - Document upload, queue management, and settings pages.
+    - A multi-tab Audit Dashboard with an ROI Summary providing executive-level metrics on automation, alias impact, and vendor friction.
+    - A Shadow Mode dashboard to monitor system performance and readiness for production writes.
+- **Deployment:** Dockerfiles for frontend and backend, a  file, and a  script for deployment to a user-provided VM.
 
 **Last working item**:
--   **Last item agent was working:** Implementing the final, critical step of the core workflow: attaching the uploaded document file directly to the corresponding Sales Order record within Business Central. The agent successfully proved this was possible using the  API via  and was about to implement this logic into the Python backend service.
--   **Status:** IN PROGRESS
--   **Agent Testing Done:** N (Only manual  testing was performed to validate the API endpoint. The integrated code has not been written or tested.)
--   **Which testing method agent to use?** both
--   **User Testing Done:** N
+-   **Last item agent was working:** The agent was attempting to deploy the application to the user's VM at . The user provided shell output showing a series of failed deployment attempts. The final error indicated a Node.js version incompatibility in the frontend build process.
+-   **Status:** BLOCKED
+-   **Agent Testing Done:** N/A (Deployment is the task)
+-   **Which testing method agent to use?** Manual testing by executing shell commands on the user's VM.
+-   **User Testing Done:** N/A
 
 **All Pending/In progress Issue list**:
-There are no outstanding issues. The last working item is a task in progress.
+-   **Issue 1:** (P0) Deployment to user's VM is failing.
+
+**Issues Detail:**
+-   **Issue 1:** Deployment on the user's VM () is failing during the Docker build process for the frontend service.
+    -   **Attempted fixes:**
+        1.  Initial attempt using  with HTTPS failed due to auth issues.
+        2.  Switched to SSH clone, failed due to missing SSH keys on the VM.
+        3.  Switched to  download of a zip, which failed because the repo was private.
+        4.  After the user made the repo public,  download succeeded, but the  script failed because a  file was missing from the repo.
+        5.  The agent provided the  content, but the build failed due to a missing  file.
+        6.  The agent attempted to generate  on the VM, which failed due to  requiring Node.js version  while the environment was using Node 18.
+        7.  The last action was to suggest updating the  to use  and re-running yarn install v1.22.22
+[1/4] Resolving packages...
+[2/4] Fetching packages...
+[3/4] Linking dependencies...
+[4/4] Building fresh packages...
+success Saved lockfile.
+Done in 0.10s..
+    -   **Next debug checklist:**
+        1.  Verify the user has executed the last proposed command: 
+        2.  Verify the user has executed: 
+        3.  Execute  again and check the output for new errors.
+    -   **Why fix this issue and what will be achieved with the fix?** This is a hard blocker. The application cannot be tested or used by the user in their environment until it is successfully deployed.
+    -   **Status:** BLOCKED
+    -   **Is recurring issue?** Y
+    -   **Should Test frontend/backend/both after fix?** Both (a successful deployment needs to be verified by accessing the frontend and testing an API endpoint).
+    -   **Blocked on other issue:** None.
 
 **In progress Task List**:
--   **Task 1:** Complete the implementation of attaching documents to Business Central Sales Orders. (P0)
-    -   **Where to resume:** Modify the  function in . The function should be updated to read the locally stored file (from the  directory) and POST its content to the BC  API endpoint for the specified sales order. The successful  commands from message #418 serve as a direct template for this implementation.
-    -   **What will be achieved with this?** This will complete the primary success criteria of the project, allowing a user in Business Central to see and open the document directly from the Sales Order record.
-    -   **Status:** IN PROGRESS
-    -   **Should Test frontend/backend/both after fix?** both
-    -   **Blocked on something:** No.
+-   There are no tasks currently in progress. The deployment issue is the sole focus.
 
 **Upcoming and Future Tasks**
 **Upcoming Tasks:**
--   **Task 1 (P1):** Implement writing the SharePoint URL back to the BC record as a note/comment, in addition to the file attachment. This provides a secondary access method.
--   **Task 2 (P1):** Fully implement the Document Queue UI functionality (Workflow 2), allowing users to edit metadata (, , etc.) and trigger the linking process for queued documents.
--   **Task 3 (P2):** Build the Audit and Monitoring dashboard UI (Workflow 3) to show statistics, recent workflow runs, and filterable error logs.
+-   **Task 1 (P0): Phase 7 - Structured Observation Window:** Once deployed, the system needs to run in Shadow Mode for 2-3 weeks to collect real-world data without writing to BC. The goal is to validate the instrumentation, define explicit readiness gates, and produce an ELT Report: Shadow Mode Performance.
+-   **Task 2 (P1): Phase 8 - Controlled Vendor Enablement:** After the observation window, enable  for a small, controlled subset of known stable vendors to validate the draft creation process in production.
 
-**Future Tasks (Phase 2):**
--   Implement Exchange Online email ingestion.
--   Add a placeholder for an AI document classification step.
--   Add a mapping layer for document sets concept.
--   Integrate Entra ID SSO for UI authentication.
+**Future Tasks:**
+-   **Vendor Threshold Override Architecture:** Implement a system to allow setting  thresholds on a per-vendor basis.
+-   **Zetadocs Decommissioning:** Plan and execute the phased retirement of the existing Zetadocs system.
+-   **Transaction Automation (Level 3):** Automatically create Purchase Invoice *lines* in BC.
+-   **Entra ID SSO:** Replace the current mock JWT authentication with single sign-on.
+-   **Refactor Backend:** Break down the monolithic  into a structured, service-oriented architecture.
 
 **Completed work in this session**
--   **Full-stack Application Scaffold:** Created a FastAPI backend and React frontend with a complete project structure.
--   **Database & Models:** Implemented MongoDB for data persistence with  and  models.
--   **UI Development:**
-    -   Created pages for Login, Dashboard, Upload, Document Queue, Document Detail, and Settings.
-    -   Implemented a Configure Credentials dialog on the Settings page to manage API keys, which are stored securely in the database.
--   **Core Workflow Implementation:**
-    -   Implemented document upload, which saves the file locally to .
-    -   Integrated with SharePoint to upload the file and create a sharing link.
--   **Critical Integration Debugging:**
-    -   Resolved numerous complex authentication and permission issues with both Microsoft Graph and Business Central APIs.
-    -   **Key BC Fix:** Identified that the tenant has a default  entitlement block. Discovered that adding the **** permission set alongside **** in the BC Entra Application setup successfully overrides this block.
-    -   Switched to and configured the  BC environment, which is now working.
--   **Feature Enhancements:**
-    -   Added a Re-submit button for failed workflows (single click, no re-upload required).
-    -   Added a Delete button to remove documents from the queue.
-    -   Made the BC sales order search non-blocking, allowing manual entry if the API search fails, improving user experience.
+- **Phase 4:  Implementation:** Successfully implemented and tested the logic to create draft purchase invoice headers in BC, guarded by a feature flag and strict safety preconditions.
+- **Phase 5: ELT ROI Dashboard:** Created a new ROI Summary tab in the frontend Audit Dashboard to display executive-level metrics on automation rates, alias impact, vendor friction, and draft creation confidence.
+- **Phase 6: Shadow Mode Instrumentation:** Added backend endpoints and frontend components to monitor system health and readiness for production, including a match score distribution chart and a Shadow Mode Status card.
+- **Phase 7: Observation Mode Activation:** Implemented a data-driven readiness score with explicit, weighted gates and added a command to formally start the shadow mode observation period.
+- **Phase 7 C1 (Revised): Passive Graph Tap:** Implemented a truly read-only email polling system using a watermark strategy () to fetch new emails from an AP inbox without altering their state (e.g., marking as read or moving), ensuring no interference with existing workflows.
+- **Deployment Package Creation:** Created Dockerfiles, , a  script, and supporting documentation to create a deployable release bundle of the application.
 
 **Earlier issues found/mentioned but not fixed**
-- None. All major issues, especially the critical BC permission blockers, were resolved during the session.
+- The technical debt of the monolithic  file has been acknowledged but not addressed. This remains a future refactoring task.
 
 **Known issue recurrence from previous fork**
--   None.
+- None.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
--   **Backend:** FastAPI, Pydantic
--   **Frontend:** React, Tailwind CSS, Shadcn/UI
--   **Database:** MongoDB
--   **Authentication:** JWT for local UI auth, Client Credentials Flow for service-to-service API calls to Microsoft.
--   **APIs:** Microsoft Graph API (for SharePoint), Dynamics 365 Business Central v2.0 API.
+- **Backend:** FastAPI, Pydantic
+- **Frontend:** React, Tailwind CSS, Shadcn/UI, Recharts
+- **Database:** MongoDB
+- **AI:** Gemini via .
+- **APIs:** Microsoft Graph API, Dynamics 365 Business Central API.
+- **Deployment:** Docker, Docker Compose.
 
 **key DB schema**
--   ** (collection):** 
--   ** (collection):** 
--   ** (collection):** A single document storing all configuration from the UI, e.g., .
+-   ****: Stores metadata for each document.
+-   ****: Stores workflow configurations.
+-   ****: Maps fuzzy vendor names to canonical IDs.
+-   ****: Aggregated daily performance data.
+-   ****: Global configuration, including API credentials and feature flags.
+-   ****: (New) Idempotency log for the email polling service, tracking processed message IDs and attachment hashes to prevent duplicates.
 
 **changes in tech stack**
--   The application uses MongoDB, which was one of the suggested options.
--   Configuration management was moved from  files to a dedicated MongoDB collection to prevent server restarts upon saving settings from the UI.
+-   **Docker & Docker Compose:** Introduced for containerized deployment.
 
 **All files of reference**
--   : Contains all logic for interacting with the Business Central API. **This is the next file to be modified.**
--   : Contains all logic for interacting with the Microsoft Graph API for SharePoint.
--   : Defines the API endpoints for document upload, resubmission, and deletion.
--   : Handles loading configuration from both  and the MongoDB database.
--   : The UI for configuring credentials.
--   : The UI for uploading new documents.
--   : Shows details for a single document, including the re-submit button.
+-   : The monolithic backend file, modified for all new features (draft creation, metrics, shadow mode, email polling).
+-   : The frontend dashboard, updated with ROI, Match Score, and Shadow Mode components.
+-   : Defines the services for deployment (frontend, backend, mongo).
+-   : Docker build instructions for the FastAPI backend.
+-   : Docker build instructions for the React frontend.
+-   : The deployment script for the user's VM.
+-   : Instructions for the user on how to deploy the application.
+-   : Product Requirements Document, updated after each phase.
+-   : Memo documenting the start of the observation phase.
 
 **Areas that need refactoring**:
--   The  service file contains commented-out code and debugging logic from the extensive permission troubleshooting. Now that a stable solution is found, this file could be cleaned up to only contain the working API call logic.
+-   **Monolithic Backend:**  is over 5000 lines and contains all application logic. It is a significant piece of technical debt and needs to be broken down into a service-oriented architecture (routers, services, models).
 
 **key api endpoints**
--   : Uploads a new document.
--   : Re-runs the linking workflow for a failed document.
--   : Deletes a document and its stored file.
--   : Searches for sales orders in Business Central.
--   : Retrieves the current configuration from the database.
--   : Saves new configuration to the database.
--   : Tests the credentials for BC and SharePoint.
+-   
+-   
+-   
+-   
+-   : (New) Gets status of the draft creation feature.
+-   : (New) Toggles the draft creation feature.
+-   : (New) Gets histogram data for match scores.
+-   : (New) Gets metrics on alias performance.
+-   : (New) Gets the full shadow mode readiness report.
+-   : (New) Gets the status of the email polling service.
 
 **Critical Info for New Agent**
--   **BC Permissions are Solved:** The Business Central API is now accessible. The required setup in the BC Microsoft Entra Applications page is to assign both **** and **** permission sets. This overrides a tenant-level exclusion policy ().
--   **Active BC Environment:** The application is configured to use the **** environment. Do not use the other sandboxes as they are poisoned by a cached permission exclusion.
--   **Config is in MongoDB:** All credentials and settings entered via the UI are stored in a  collection in MongoDB, not in the  file. The  file is only used for initial bootstrap.
--   **Local File Storage:** Uploaded files are temporarily stored in the  directory before being sent to SharePoint and attached to BC. This is used for the re-submit functionality.
+- The immediate and only priority is to solve the deployment failure on the user's VM. The last attempted fix was to update the frontend Dockerfile to use  to resolve a package version conflict. You must guide the user to apply this fix and retry the deployment.
+- Do not proceed with any new features until the user confirms a successful deployment.
+- The user is technical and provides direct shell output. Pay close attention to these logs for debugging. The user has also shown frustration with repeated failures, so getting the deployment right is critical.
+- The long-term strategy, post-deployment, is to enter a 2-3 week Structured Observation Window (Phase 7) where the system runs in shadow mode to gather real-world data before any automated BC writes are enabled in production.
 
 **documents and test reports created in this job**
+-    (updated)
 -   
--   Test reports from previous iterations exist in .
+-   
+-   
+-   
+-   
+-   
+-   
+-   
+-   
+-   
+-   
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **user:** Asks how a user in BC can access the linked document. (PENDING full implementation)
-2.  **agent:** Confirms that the BC API supports attachments and that this will be the implementation method.
-3.  **user:** Notes a Zetadocs (old system) error in the BC UI.
-4.  **agent:** Clarifies that the Zetadocs error is separate and won't affect the hub's API-based approach.
-5.  **user:** Confirms setup is done for the new sandbox.
-6.  **agent:** **Confirms the BC connection is finally working** and can query real sales order data.
-7.  **agent:** Suggests adding the  permission set in BC to solve the final blocker.
-8.  **user:**  (referring to setting up the new sandbox ).
-9.  **agent:** Asks user to set up the new sandbox () with  permissions only to get a clean slate.
-10. **user:** Expresses frustration that BC is the most important part and must work.
+1.  **user:**  followed by a successful  start, but it fails with a Docker build error: . (IN PROGRESS)
+2.  **agent:** Suggests generating  on the VM using a  command.
+3.  **user:** Runs the command, but yarn install v1.22.22
+[1/4] Resolving packages...
+success Already up-to-date.
+Done in 0.02s. fails with a Node.js version incompatibility ( needs Node >= 20, but the image is Node 18). (IN PROGRESS)
+4.  **agent:** Suggests the final fix: update  to use  and re-run the yarn install v1.22.22
+[1/4] Resolving packages...
+success Already up-to-date.
+Done in 0.07s. command inside the Node 20 container. (PENDING USER ACTION)
+5.  **user:** (Implicitly provides output showing the yarn install v1.22.22
+[1/4] Resolving packages...
+success Already up-to-date.
+Done in 0.09s. failing again, as the  script immediately retries the build without the lockfile being successfully created).
+6.  **agent:** Re-iterates the fix: Update Dockerfile to Node 20, generate lockfile with Node 20, then run deploy.
+7.  **user:** Provides shell output from a previous failed attempt.
+8.  **agent:** Corrects the command to use  to write the  file due to permissions.
+9.  **user:** Provides shell output of the failed  command.
+10. **agent:** Provides the  command with all the necessary values.
 
 **Project Health Check:**
--   **Working:** Frontend UI, SharePoint Integration, Settings Management, Document Upload/Queue, Resubmit/Delete, Audit Logging.
--   **In Progress:** The final step of the Business Central integration (attaching the file) is being implemented.
--   **Broken:** Nothing is currently broken. The main blocker (BC permissions) has been resolved.
+-   **Broken:** The deployment to the user's target VM is broken.
+-   **Mocked:** All external APIs (BC, Graph) are using real credentials but are pointed at sandbox/test environments.  is .
 
 **3rd Party Integrations**
--   **Microsoft Graph API:** Used for SharePoint file operations.
--   **Dynamics 365 Business Central API:** Used for validating and attaching documents to Sales Orders.
+-   **Microsoft Graph API:** Used for the passive tap email polling () and SharePoint file operations ().
+-   **Dynamics 365 Business Central API:** Used for data validation and creating draft purchase invoices.
+-   **Gemini 2.5-flash:** Used for document classification/extraction via the Emergent LLM Key.
+-   **Docker/Docker Hub:** Used for containerization and pulling base images.
 
 **Testing status**
--   **Testing agent used after significant changes:** YES (but not for the most recent changes).
--   **Troubleshoot agent used after agent stuck in loop:** NO
+-   **Testing agent used after significant changes:** YES. The agent ran the testing agent after every major phase, with the last successful run being  for the email polling feature.
+-   **Troubleshoot agent used after agent stuck in loop:** NO.
 -   **Test files created:** None.
--   **Known regressions:** None.
+-   **Known regressions:** None in the application code. The deployment process is failing.
 
 **Credentials to test flow:**
-All necessary credentials for SharePoint and Business Central have been successfully entered by the user and are stored in the application's database. The agent does not need to ask for them again.
+The necessary credentials were provided by the user and are intended to be placed in  on the target VM. The agent has a record of these credentials.
 
 **What agent forgot to execute**
-- The agent has not yet implemented the user's request to also write the SharePoint link as a **note/comment** back to the BC Sales Order, in addition to attaching the file. This should be added to the upcoming task list.</analysis>
+- The agent initially missed that the GitHub repository did not contain a  file, which is crucial for reproducible builds. This led to a series of cascading build failures during the user's deployment attempt.
+- The agent also did not initially account for the Node.js version incompatibility between the project's dependencies and the  Docker image.</analysis>

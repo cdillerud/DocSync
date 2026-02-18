@@ -141,10 +141,11 @@ export default function DocumentDetailPage() {
               </a>
             </Button>
           )}
-          {doc.status === 'Exception' && (
-            <Button size="sm" variant="destructive" onClick={handleResubmit} disabled={resubmitting} data-testid="resubmit-btn">
+          {/* Re-submit button - show for Exception, StoredInSP, Classified, Unknown status */}
+          {['Exception', 'StoredInSP', 'Classified', 'Received'].includes(doc.status) && (
+            <Button size="sm" variant="outline" onClick={handleResubmit} disabled={resubmitting} data-testid="resubmit-btn">
               {resubmitting ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> : <RotateCcw className="w-3 h-3 mr-1.5" />}
-              {resubmitting ? 'Re-submitting...' : 'Re-submit'}
+              {resubmitting ? 'Re-processing...' : 'Re-process'}
             </Button>
           )}
           {(doc.status === 'Classified' || doc.status === 'Exception') && doc.bc_document_no && (

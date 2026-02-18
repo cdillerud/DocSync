@@ -3289,23 +3289,28 @@ def should_skip_attachment(filename: str, content_type: str, size_bytes: int) ->
 
 async def poll_mailbox_for_attachments():
     """
-    Phase C1: Poll mailbox for unread messages with attachments.
+    Phase C1 (Revised): Passive Graph "Tap" - READ-ONLY.
+    
+    This is a shadow listener that does NOT modify the mailbox in any way.
+    Zetadocs/Square9 continues to own the inbox state.
     
     Process flow:
-    1. Query unread messages with attachments
-    2. For each message:
-       - Fetch attachments
-       - Check idempotency (skip duplicates)
+    1. Get watermark (last seen receivedDateTime)
+    2. Query messages received after watermark (with overlap buffer)
+    3. For each message with attachments:
+       - Check idempotency log (skip duplicates)
        - Store in SharePoint first (durability)
        - Process through intake pipeline
-       - Mark message with category "HubShadowProcessed"
        - Log result
+    4. Update watermark
     
-    Safety:
-    - Max messages per run (default 25)
-    - Skip inline images and signatures
-    - No folder moves (Phase C1)
-    - No deletes ever
+    Permissions: Mail.Read only (application permission)
+    
+    What this does NOT do:
+    - Mark messages as read
+    - Add categories
+    - Move messages
+    - Delete anything
     """
     if not EMAIL_POLLING_ENABLED:
         return {"skipped": True, "reason": "EMAIL_POLLING_ENABLED is false"}
@@ -3317,13 +3322,13 @@ async def poll_mailbox_for_attachments():
         return {"skipped": True, "reason": "Demo mode - no real polling"}
     
     run_id = str(uuid.uuid4())[:8]
-    logger.info("[EmailPoll:%s] Starting poll run for %s", run_id, EMAIL_POLLING_USER)
+    logger.info("[EmailPoll:%s] Starting passive tap for %s", run_id, EMAIL_POLLING_USER)
     
     stats = {
         "run_id": run_id,
         "started_at": datetime.now(timezone.utc).isoformat(),
-        "messages_scanned": 0,
-        "attachments_processed": 0,
+        "messages_detected": 0,
+        "attachments_ingested": 0,
         "attachments_skipped_duplicate": 0,
         "attachments_skipped_inline": 0,
         "attachments_failed": 0,
@@ -3337,11 +3342,24 @@ async def poll_mailbox_for_attachments():
             stats["errors"].append("Failed to get Graph token")
             return stats
         
-        # Calculate lookback time
-        lookback_time = (datetime.now(timezone.utc) - timedelta(minutes=EMAIL_POLLING_LOOKBACK_MINUTES)).isoformat()
+        # Get watermark from settings (last seen receivedDateTime)
+        watermark_doc = await db.hub_settings.find_one({"type": "email_poll_watermark"}, {"_id": 0})
         
-        # Query unread messages with attachments
-        filter_query = f"hasAttachments eq true and isRead eq false and receivedDateTime ge {lookback_time}"
+        if watermark_doc and watermark_doc.get("last_received_datetime"):
+            # Use watermark with 5-minute overlap buffer for safety
+            watermark_time = watermark_doc["last_received_datetime"]
+            try:
+                watermark_dt = datetime.fromisoformat(watermark_time.replace('Z', '+00:00'))
+                buffer_time = (watermark_dt - timedelta(minutes=5)).isoformat()
+            except Exception:
+                buffer_time = watermark_time
+        else:
+            # First run: look back N minutes
+            buffer_time = (datetime.now(timezone.utc) - timedelta(minutes=EMAIL_POLLING_LOOKBACK_MINUTES)).isoformat()
+        
+        # Query messages with attachments received after watermark
+        # NO "isRead" filter - we're read-only, idempotency log handles duplicates
+        filter_query = f"hasAttachments eq true and receivedDateTime ge {buffer_time}"
         
         async with httpx.AsyncClient(timeout=60.0) as client:
             messages_resp = await client.get(

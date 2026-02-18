@@ -3394,13 +3394,10 @@ async def record_alias_usage(alias_string: str):
 
 # ==================== AUTOMATION METRICS ENGINE ====================
 
-@api_router.get("/metrics/automation")
-async def get_automation_metrics(
-    days: int = Query(30, description="Number of days to include"),
-    job_type: Optional[str] = Query(None, description="Filter by job type")
-):
+async def _get_automation_metrics_internal(days: int = 30, job_type: str = None):
     """
-    Get comprehensive automation metrics for the audit dashboard.
+    Internal helper function to get automation metrics without FastAPI Query parameters.
+    Used by other endpoints to aggregate metrics.
     """
     cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     
@@ -3417,6 +3414,127 @@ async def get_automation_metrics(
     for status in ["Received", "StoredInSP", "Classified", "NeedsReview", "LinkedToBC", "Exception"]:
         status_query = {**query, "status": status}
         status_counts[status] = await db.hub_documents.count_documents(status_query)
+    
+    # Percentages
+    status_percentages = {
+        status: round((count / total * 100) if total > 0 else 0, 1)
+        for status, count in status_counts.items()
+    }
+    
+    # Job type breakdown
+    job_type_breakdown = {}
+    for jt in DEFAULT_JOB_TYPES.keys():
+        count = await db.hub_documents.count_documents({**query, "suggested_job_type": jt})
+        if count > 0:
+            job_type_breakdown[jt] = count
+    
+    # Confidence distribution
+    confidence_ranges = {
+        "high_0.9_1.0": 0,
+        "medium_0.7_0.9": 0,
+        "low_0_0.7": 0
+    }
+    
+    docs_with_confidence = await db.hub_documents.find(
+        {**query, "ai_confidence": {"$exists": True}},
+        {"ai_confidence": 1, "_id": 0}
+    ).to_list(10000)
+    
+    for doc in docs_with_confidence:
+        conf = doc.get("ai_confidence", 0)
+        if conf >= 0.9:
+            confidence_ranges["high_0.9_1.0"] += 1
+        elif conf >= 0.7:
+            confidence_ranges["medium_0.7_0.9"] += 1
+        else:
+            confidence_ranges["low_0_0.7"] += 1
+    
+    # Average confidence
+    total_confidence = sum(doc.get("ai_confidence", 0) for doc in docs_with_confidence)
+    avg_confidence = round(total_confidence / len(docs_with_confidence), 3) if docs_with_confidence else 0
+    
+    # Duplicate prevention count
+    duplicate_prevented = await db.hub_documents.count_documents({
+        **query,
+        "validation_results.checks": {
+            "$elemMatch": {"check_name": "duplicate_check", "passed": False}
+        }
+    })
+    
+    # Match method breakdown
+    match_method_breakdown = {
+        "exact_no": 0, "exact_name": 0, "normalized": 0,
+        "alias": 0, "fuzzy": 0, "manual": 0, "none": 0
+    }
+    
+    docs_with_match = await db.hub_documents.find(
+        query, {"match_method": 1, "status": 1, "_id": 0}
+    ).to_list(10000)
+    
+    alias_auto_linked = 0
+    alias_needs_review = 0
+    
+    for doc in docs_with_match:
+        method = doc.get("match_method", "none")
+        if method in match_method_breakdown:
+            match_method_breakdown[method] += 1
+        else:
+            match_method_breakdown["none"] += 1
+        
+        if method == "alias":
+            if doc.get("status") == "LinkedToBC":
+                alias_auto_linked += 1
+            elif doc.get("status") == "NeedsReview":
+                alias_needs_review += 1
+    
+    total_alias = alias_auto_linked + alias_needs_review
+    alias_exception_rate = round((alias_needs_review / total_alias * 100) if total_alias > 0 else 0, 1)
+    
+    # Draft creation metrics
+    draft_created_count = await db.hub_documents.count_documents({
+        **query, "transaction_action": TransactionAction.DRAFT_CREATED
+    })
+    
+    linked_only_count = await db.hub_documents.count_documents({
+        **query, "transaction_action": TransactionAction.LINKED_ONLY
+    })
+    
+    linked_total = status_counts.get("LinkedToBC", 0)
+    draft_creation_rate = round((draft_created_count / linked_total * 100) if linked_total > 0 else 0, 1)
+    
+    return {
+        "period_days": days,
+        "total_documents": total,
+        "status_distribution": {
+            "counts": status_counts,
+            "percentages": status_percentages
+        },
+        "job_type_breakdown": job_type_breakdown,
+        "confidence_distribution": confidence_ranges,
+        "average_confidence": avg_confidence,
+        "duplicate_prevented": duplicate_prevented,
+        "automation_rate": status_percentages.get("LinkedToBC", 0),
+        "review_rate": status_percentages.get("NeedsReview", 0),
+        "match_method_breakdown": match_method_breakdown,
+        "alias_auto_linked": alias_auto_linked,
+        "alias_exception_rate": alias_exception_rate,
+        "draft_created_count": draft_created_count,
+        "linked_only_count": linked_only_count,
+        "draft_creation_rate": draft_creation_rate,
+        "draft_feature_enabled": ENABLE_CREATE_DRAFT_HEADER,
+        "header_only_flag": True
+    }
+
+
+@api_router.get("/metrics/automation")
+async def get_automation_metrics(
+    days: int = Query(30, description="Number of days to include"),
+    job_type: Optional[str] = Query(None, description="Filter by job type")
+):
+    """
+    Get comprehensive automation metrics for the audit dashboard.
+    """
+    return await _get_automation_metrics_internal(days=days, job_type=job_type)
     
     # Calculate percentages
     status_percentages = {}

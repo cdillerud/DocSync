@@ -1716,6 +1716,10 @@ async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: d
                     validation_results["customer_candidates"] = customer_result.get("customer_candidates", [])
                     
                     if customer_result["matched"]:
+                        # Set top-level match method for tracking
+                        validation_results["match_method"] = customer_result["match_method"]
+                        validation_results["match_score"] = customer_result["score"]
+                        
                         validation_results["checks"].append({
                             "check_name": "customer_match",
                             "passed": True,
@@ -1728,6 +1732,7 @@ async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: d
                         validation_results["bc_record_info"] = customer_result["selected_customer"]
                     else:
                         validation_results["all_passed"] = False
+                        validation_results["match_method"] = "none"
                         details = f"No customer found matching '{customer_name}'"
                         if customer_result["customer_candidates"]:
                             top_candidate = customer_result["customer_candidates"][0]

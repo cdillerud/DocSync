@@ -4930,4 +4930,12 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
+    global _email_polling_task
+    # Cancel email polling worker if running
+    if _email_polling_task and not _email_polling_task.done():
+        _email_polling_task.cancel()
+        try:
+            await _email_polling_task
+        except asyncio.CancelledError:
+            logger.info("Email polling worker stopped")
     client.close()

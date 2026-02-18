@@ -5899,11 +5899,22 @@ async def get_extraction_quality_metrics(days: int = 7):
 
 @api_router.get("/metrics/extraction-misses")
 async def get_extraction_misses(
-    field: str = Query("vendor", description="Field to check: vendor, invoice_number, amount"),
-    days: int = Query(7)
+    field: str = Query("vendor", description="Field to check: vendor, invoice_number, amount, po_number, due_date"),
+    days: int = Query(7),
+    limit: int = Query(100)
 ):
     """
-    Drilldown endpoint for documents missing specific fields.
+    Phase 7 Week 1: Enhanced Missing Fields Drilldown endpoint.
+    
+    Returns documents missing specific required fields, with:
+    - document_id
+    - file_name
+    - vendor_extracted
+    - invoice_number_extracted
+    - amount_extracted
+    - which_required_fields_missing
+    - ai_confidence
+    - first_500_chars (optional, from email subject)
     
     Use this to understand WHY fields are missing and fix extraction deterministically.
     """
@@ -5929,36 +5940,365 @@ async def get_extraction_misses(
             "document_type": 1,
             "ai_confidence": 1,
             "extracted_fields": 1,
+            "canonical_fields": 1,
             "email_sender": 1,
             "email_subject": 1,
             "created_utc": 1,
             "_id": 0
         }
-    ).sort("created_utc", -1).to_list(100)
+    ).sort("created_utc", -1).to_list(limit)
+    
+    # Build enhanced response per spec
+    required_fields = ["vendor", "invoice_number", "amount"]
+    results = []
+    
+    for d in docs:
+        extracted = d.get("extracted_fields", {}) or {}
+        canonical = d.get("canonical_fields", {}) or {}
+        
+        # Determine which required fields are missing
+        missing_fields = []
+        for rf in required_fields:
+            val = extracted.get(rf) or canonical.get(f"{rf}_normalized") or canonical.get(f"{rf}_clean")
+            if not val:
+                missing_fields.append(rf)
+        
+        # Build first 500 chars from email subject or file name
+        first_500 = ""
+        if d.get("email_subject"):
+            first_500 = d["email_subject"][:500]
+        elif d.get("email_sender"):
+            first_500 = f"From: {d['email_sender']}"
+        
+        results.append({
+            "document_id": d.get("id"),
+            "file_name": d.get("file_name"),
+            "source": d.get("source"),
+            "document_type": d.get("document_type"),
+            "vendor_extracted": extracted.get("vendor"),
+            "invoice_number_extracted": extracted.get("invoice_number"),
+            "amount_extracted": extracted.get("amount"),
+            "which_required_fields_missing": missing_fields,
+            "ai_confidence": d.get("ai_confidence"),
+            "email_sender": d.get("email_sender"),
+            "first_500_chars_text": first_500,
+            "created_utc": d.get("created_utc")
+        })
     
     return {
         "field": field,
         "period_days": days,
-        "missing_count": len(docs),
-        "documents": [
-            {
-                "id": d.get("id"),
-                "file_name": d.get("file_name"),
-                "source": d.get("source"),
-                "document_type": d.get("document_type"),
-                "ai_confidence": d.get("ai_confidence"),
-                "email_sender": d.get("email_sender"),
-                "email_subject": d.get("email_subject", "")[:50],
-                "extracted_fields": d.get("extracted_fields", {}),
-                "created_utc": d.get("created_utc")
-            }
-            for d in docs
-        ],
-        "next_steps": [
-            f"Review these {len(docs)} documents to understand why '{field}' wasn't extracted",
+        "missing_count": len(results),
+        "documents": results,
+        "analysis_hints": [
+            f"Review these {len(results)} documents to understand why '{field}' wasn't extracted",
             "Common causes: unusual document format, scanned PDFs, non-standard layouts",
+            "Check ai_confidence - low confidence may indicate OCR quality issues",
             "Consider adjusting AI prompt or adding document-specific extraction rules"
         ]
+    }
+
+
+@api_router.get("/metrics/stable-vendors")
+async def get_stable_vendors(
+    min_count: int = Query(5, description="Minimum document count to be stable"),
+    min_completeness: float = Query(0.85, description="Minimum field completeness rate (0-1)"),
+    max_variants: int = Query(3, description="Maximum allowed name variations"),
+    days: int = Query(30)
+):
+    """
+    Phase 7 Week 1: Stable Vendor metric endpoint.
+    
+    Stable Vendor Criteria (Phase 7 metric only):
+    - count >= min_count (default 5)
+    - required field completeness >= min_completeness (default 85%)
+    - alias variance <= max_variants (default 3 variants)
+    - no conflicting invoice numbers
+    
+    This does NOT enable anything - it only reports candidates for Phase 8.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    query = {"created_utc": {"$gte": cutoff}}
+    
+    docs = await db.hub_documents.find(
+        query,
+        {
+            "id": 1,
+            "extracted_fields": 1,
+            "canonical_fields": 1,
+            "ai_confidence": 1,
+            "document_type": 1,
+            "draft_candidate": 1,
+            "_id": 0
+        }
+    ).to_list(10000)
+    
+    # Group by normalized vendor
+    vendor_data = {}
+    
+    for doc in docs:
+        extracted = doc.get("extracted_fields", {}) or {}
+        canonical = doc.get("canonical_fields", {}) or {}
+        
+        # Get vendor - prefer canonical normalized
+        vendor_normalized = canonical.get("vendor_normalized") or ""
+        if not vendor_normalized and extracted.get("vendor"):
+            vendor_normalized = normalize_vendor_name(extracted.get("vendor", ""))
+        
+        if not vendor_normalized:
+            continue
+        
+        if vendor_normalized not in vendor_data:
+            vendor_data[vendor_normalized] = {
+                "variations": set(),
+                "count": 0,
+                "has_vendor": 0,
+                "has_invoice_number": 0,
+                "has_amount": 0,
+                "invoice_numbers": set(),
+                "draft_candidates": 0,
+                "high_confidence_count": 0  # ai_confidence >= 0.92
+            }
+        
+        vd = vendor_data[vendor_normalized]
+        vd["count"] += 1
+        
+        # Track variations
+        raw_vendor = extracted.get("vendor", "")
+        if raw_vendor:
+            vd["variations"].add(raw_vendor)
+        
+        # Field completeness
+        if extracted.get("vendor") or canonical.get("vendor_normalized"):
+            vd["has_vendor"] += 1
+        if extracted.get("invoice_number") or canonical.get("invoice_number_clean"):
+            vd["has_invoice_number"] += 1
+            inv_num = canonical.get("invoice_number_clean") or extracted.get("invoice_number", "")
+            if inv_num:
+                vd["invoice_numbers"].add(str(inv_num))
+        if extracted.get("amount") is not None or canonical.get("amount_float") is not None:
+            vd["has_amount"] += 1
+        
+        # Draft candidate tracking
+        if doc.get("draft_candidate"):
+            vd["draft_candidates"] += 1
+        
+        # High confidence tracking
+        confidence = doc.get("ai_confidence", 0)
+        if confidence and confidence >= 0.92:
+            vd["high_confidence_count"] += 1
+    
+    # Evaluate stability
+    stable_vendors = []
+    unstable_vendors = []
+    
+    for vendor_name, data in vendor_data.items():
+        count = data["count"]
+        
+        # Calculate completeness
+        completeness_rate = 0.0
+        if count > 0:
+            completeness_rate = (
+                (data["has_vendor"] + data["has_invoice_number"] + data["has_amount"]) / 
+                (count * 3)
+            )
+        
+        # Check for duplicate/conflicting invoice numbers
+        has_conflicts = len(data["invoice_numbers"]) < count * 0.5 if count > 2 else False
+        
+        vendor_record = {
+            "vendor_normalized": vendor_name,
+            "count": count,
+            "variations": list(data["variations"]),
+            "variation_count": len(data["variations"]),
+            "completeness_rate": round(completeness_rate, 3),
+            "field_breakdown": {
+                "vendor": data["has_vendor"],
+                "invoice_number": data["has_invoice_number"],
+                "amount": data["has_amount"]
+            },
+            "draft_candidates": data["draft_candidates"],
+            "draft_candidate_rate": round(data["draft_candidates"] / count, 3) if count > 0 else 0,
+            "high_confidence_count": data["high_confidence_count"],
+            "high_confidence_rate": round(data["high_confidence_count"] / count, 3) if count > 0 else 0,
+            "unique_invoices": len(data["invoice_numbers"]),
+            "potential_conflicts": has_conflicts
+        }
+        
+        # Check stability criteria
+        is_stable = (
+            count >= min_count and
+            completeness_rate >= min_completeness and
+            len(data["variations"]) <= max_variants and
+            not has_conflicts
+        )
+        
+        vendor_record["is_stable"] = is_stable
+        
+        if is_stable:
+            vendor_record["stability_reasons"] = ["Meets all criteria"]
+            stable_vendors.append(vendor_record)
+        else:
+            reasons = []
+            if count < min_count:
+                reasons.append(f"count {count} < {min_count}")
+            if completeness_rate < min_completeness:
+                reasons.append(f"completeness {completeness_rate:.1%} < {min_completeness:.0%}")
+            if len(data["variations"]) > max_variants:
+                reasons.append(f"variations {len(data['variations'])} > {max_variants}")
+            if has_conflicts:
+                reasons.append("potential invoice conflicts")
+            vendor_record["stability_reasons"] = reasons
+            unstable_vendors.append(vendor_record)
+    
+    # Sort by count descending
+    stable_vendors.sort(key=lambda x: x["count"], reverse=True)
+    unstable_vendors.sort(key=lambda x: x["count"], reverse=True)
+    
+    return {
+        "period_days": days,
+        "criteria": {
+            "min_count": min_count,
+            "min_completeness": min_completeness,
+            "max_variants": max_variants
+        },
+        "summary": {
+            "total_vendors": len(vendor_data),
+            "stable_vendors": len(stable_vendors),
+            "unstable_vendors": len(unstable_vendors),
+            "stable_rate": round(len(stable_vendors) / len(vendor_data), 3) if vendor_data else 0
+        },
+        "stable_vendors": stable_vendors[:20],
+        "near_stable_vendors": [
+            v for v in unstable_vendors 
+            if v["count"] >= min_count - 2 and v["completeness_rate"] >= min_completeness - 0.1
+        ][:10],
+        "phase_8_note": "Stable vendors are candidates for controlled draft enablement in Phase 8. This endpoint is metric-only and does not enable any automation."
+    }
+
+
+@api_router.get("/metrics/draft-candidates")
+async def get_draft_candidate_metrics(days: int = Query(7)):
+    """
+    Phase 7 Week 1: Draft Candidate metrics endpoint.
+    
+    Shows distribution of draft candidate flags computed at ingestion.
+    This is NON-OPERATIONAL - it only reports what WOULD be ready for draft creation.
+    
+    Dashboard can show:
+    - ReadyForDraftCandidate: X%
+    - ReadyToLink: Y%  
+    - NeedsHumanReview: Z%
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    query = {"created_utc": {"$gte": cutoff}}
+    
+    docs = await db.hub_documents.find(
+        query,
+        {
+            "id": 1,
+            "document_type": 1,
+            "draft_candidate": 1,
+            "draft_candidate_score": 1,
+            "draft_candidate_reason": 1,
+            "ai_confidence": 1,
+            "status": 1,
+            "match_method": 1,
+            "match_score": 1,
+            "_id": 0
+        }
+    ).to_list(10000)
+    
+    total = len(docs)
+    if total == 0:
+        return {
+            "period_days": days,
+            "total_documents": 0,
+            "draft_candidate_rate": 0,
+            "readiness_breakdown": {}
+        }
+    
+    # Count draft candidates
+    draft_candidates = sum(1 for d in docs if d.get("draft_candidate"))
+    
+    # Count by score bucket
+    score_buckets = {
+        "100_ready": 0,      # Perfect score, draft ready
+        "75_needs_confidence": 0,   # Missing confidence only
+        "50_needs_fields": 0,       # Missing 1-2 fields
+        "25_not_ap": 0,             # Not AP_Invoice
+        "0_missing_all": 0          # Multiple issues
+    }
+    
+    # Count by missing reason
+    missing_reasons = {
+        "missing vendor": 0,
+        "missing invoice_number": 0,
+        "missing amount": 0,
+        "low_confidence": 0,
+        "wrong_doc_type": 0
+    }
+    
+    # Count ready to link
+    ready_to_link = 0
+    needs_review = 0
+    
+    for doc in docs:
+        score = doc.get("draft_candidate_score", 0)
+        reasons = doc.get("draft_candidate_reason", [])
+        status = doc.get("status", "")
+        
+        # Bucket by score
+        if score == 100:
+            score_buckets["100_ready"] += 1
+        elif score >= 75:
+            score_buckets["75_needs_confidence"] += 1
+        elif score >= 50:
+            score_buckets["50_needs_fields"] += 1
+        elif score >= 25:
+            score_buckets["25_not_ap"] += 1
+        else:
+            score_buckets["0_missing_all"] += 1
+        
+        # Track missing reasons
+        for reason in reasons:
+            if "vendor" in reason.lower():
+                missing_reasons["missing vendor"] += 1
+            if "invoice_number" in reason.lower():
+                missing_reasons["missing invoice_number"] += 1
+            if "amount" in reason.lower():
+                missing_reasons["missing amount"] += 1
+            if "confidence" in reason.lower():
+                missing_reasons["low_confidence"] += 1
+            if "document_type" in reason.lower() or "not AP" in reason:
+                missing_reasons["wrong_doc_type"] += 1
+        
+        # Track status
+        if status in ("ReadyToLink", "LinkedToBC"):
+            ready_to_link += 1
+        elif status == "NeedsReview":
+            needs_review += 1
+    
+    return {
+        "period_days": days,
+        "total_documents": total,
+        "draft_candidate_summary": {
+            "draft_candidates": draft_candidates,
+            "draft_candidate_rate": round(draft_candidates / total * 100, 1),
+            "description": "Documents that WOULD be ready for draft creation if Phase 8 was enabled"
+        },
+        "readiness_breakdown": {
+            "ReadyForDraftCandidate": round(draft_candidates / total * 100, 1),
+            "ReadyToLink": round(ready_to_link / total * 100, 1),
+            "NeedsHumanReview": round(needs_review / total * 100, 1),
+            "Other": round((total - draft_candidates - ready_to_link - needs_review) / total * 100, 1)
+        },
+        "score_distribution": {
+            k: {"count": v, "rate": round(v / total * 100, 1)} 
+            for k, v in score_buckets.items()
+        },
+        "missing_field_analysis": missing_reasons,
+        "phase_7_note": "This is observation-only. Draft creation is NOT enabled. Use this data to improve extraction quality."
     }
 
 

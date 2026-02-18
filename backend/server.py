@@ -1560,6 +1560,8 @@ async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: d
     """
     Validate extracted data against Business Central records.
     Returns structured validation results with candidates for review.
+    
+    match_method values: exact_no, exact_name, normalized, alias, fuzzy, manual, none
     """
     # Normalize fields first
     normalized_fields = normalize_extracted_fields(extracted_fields)
@@ -1572,7 +1574,9 @@ async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: d
         "bc_record_info": None,
         "vendor_candidates": [],
         "customer_candidates": [],
-        "normalized_fields": normalized_fields
+        "normalized_fields": normalized_fields,
+        "match_method": "none",  # Top-level match method for tracking
+        "match_score": 0.0
     }
     
     if DEMO_MODE or not BC_CLIENT_ID:

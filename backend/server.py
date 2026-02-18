@@ -1458,6 +1458,7 @@ class EmailWatchConfig(BaseModel):
     needs_review_folder: str = "Needs Review"
     processed_folder: str = "Processed"
     enabled: bool = True
+    interval_minutes: int = 5  # Polling interval in minutes
 
 class JobTypeConfig(BaseModel):
     job_type: str

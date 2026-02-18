@@ -51,82 +51,88 @@ Build a "GPI Document Hub" test platform that replaces Zetadocs-style document l
 
 ### Phase 4 - CREATE_DRAFT_HEADER (Sandbox) ✅
 - [x] **Feature Flag**: `ENABLE_CREATE_DRAFT_HEADER` (default: false)
-- [x] **Purchase Invoice Draft Creation** for AP_Invoice only:
-  - Creates HEADER ONLY (no lines, no posting)
-  - Header fields: Vendor No, External Doc No, Document Date, Due Date, Posting Date
-  - Adds comment: "Created by GPI Hub Automation"
-- [x] **Safety Preconditions** (ALL must be true):
-  - Feature flag enabled
-  - Job type = AP_Invoice
-  - match_method ∈ {exact_no, exact_name, normalized, alias} (NO fuzzy)
-  - match_score ≥ 0.92
-  - AI confidence ≥ 0.92
-  - duplicate_check passed
-  - vendor_match passed
-  - PO validation passed (if required)
-  - Document status ≠ LinkedToBC
-  - bc_record_id not already set
+- [x] **Purchase Invoice Draft Creation** for AP_Invoice only
+- [x] **Safety Preconditions** enforced (match_score ≥0.92, confidence ≥0.92)
 - [x] **Duplicate Check**: Vendor + External Doc No before creation
-- [x] **Idempotency**: 
-  - Reprocess NEVER creates drafts (only links)
-  - bc_record_id guard prevents duplicate drafts
-- [x] **Transaction Tracking**: `transaction_action` field tracks NONE/LINKED_ONLY/DRAFT_CREATED
-- [x] **Metrics Integration**: draft_created_count, draft_creation_rate, draft_feature_enabled
+- [x] **Idempotency**: Reprocess NEVER creates drafts, bc_record_id guard
+- [x] **Transaction Tracking**: NONE/LINKED_ONLY/DRAFT_CREATED
 
-### Phase 5 - ELT ROI Dashboard ✅ NEW
-- [x] **New "ROI Summary" Tab** - Default tab in Audit Dashboard
-- [x] **Section 1: Automation Overview**
-  - Total Documents, Fully Automated %, Needs Review %, Manual Resolved, Duplicates Blocked
-  - Trend chart (AreaChart) showing auto-linked vs needs review over time
-  - Visual indicators (arrows, warning icons) for quick status assessment
-- [x] **Section 2: Alias Impact — Data Hygiene ROI**
-  - Docs Via Alias, Automation From Alias %, Vendors w/ Alias, Alias Exception Rate
-  - "Data Hygiene Improvement" explanation box showing ROI story
-  - Proof that learned aliases compound automation over time
-- [x] **Section 3: Vendor Friction Matrix**
-  - Sortable table: Vendor | Docs | Automation % | Exception % | Avg Score | Alias Usage
-  - Visual progress bars for automation rate
-  - Badges for vendors with aliases
-  - ROI conversation starter: "Here's where process breakdowns are happening"
-- [x] **Section 4: Draft Creation Confidence** (Conditional)
-  - Shows when `draft_feature_enabled` is defined
-  - Disabled state: Shows safety requirements (match score ≥ 92%, confidence ≥ 92%, etc.)
-  - Enabled state: Eligible docs, Drafts created, Draft creation rate, Draft mode
-- [x] **Executive Summary Box**
-  - Automation Rate with exact %
-  - Data Hygiene ROI (alias count and contribution)
-  - Risk Mitigation (duplicates blocked)
-  - Processing Time (median resolution)
+### Phase 5 - ELT ROI Dashboard ✅
+- [x] **ROI Summary Tab** (default tab) with 4 sections
+- [x] Automation Overview with trend chart
+- [x] Alias Impact — Data Hygiene ROI
+- [x] Vendor Friction Matrix (sortable)
+- [x] Draft Creation Confidence (conditional)
+- [x] Executive Summary box
 
-### Document Status Flow
-```
-Received → StoredInSP → Classified → LinkedToBC (LINKED_ONLY or DRAFT_CREATED)
-                    ↘ NeedsReview → [Reprocess] → LinkedToBC (LINKED_ONLY only)
-                                  ↘ [Resolve] → LinkedToBC
-```
-
-### Transaction Actions
-| Action | Description |
-|--------|-------------|
-| NONE | No BC action taken |
-| LINKED_ONLY | Document attached to existing BC record |
-| DRAFT_CREATED | Purchase Invoice draft header created in BC |
+### Phase 6 - Shadow Mode Instrumentation ✅ NEW
+- [x] **Match Score Distribution Endpoint**
+  - `GET /api/metrics/match-score-distribution?from=&to=`
+  - Histogram buckets: 0.95-1.00, 0.92-0.95, 0.88-0.92, <0.88
+  - Summary with high_confidence_pct and interpretation
+  - Method breakdown per bucket
+- [x] **Enhanced Alias Exception Tracking**
+  - `GET /api/metrics/alias-exceptions?days=14`
+  - alias_totals (total, success, needs_review, exception_rate)
+  - Daily trend (7 days)
+  - Top 10 vendors by alias exceptions
+  - Top 10 vendors by alias contribution (60%+)
+- [x] **Vendor Stability Analysis**
+  - `GET /api/metrics/vendor-stability?days=14`
+  - Categories: low_automation, high_score_high_exception, consistently_high_confidence
+  - Threshold override candidates for future vendor-specific thresholds
+- [x] **Shadow Mode Status**
+  - `GET /api/settings/shadow-mode`
+  - Feature flag status (CREATE_DRAFT_HEADER, DEMO_MODE)
+  - Shadow mode start date and days running
+  - Health indicators (7-day rolling): high_confidence_pct, alias_exception_rate, top_friction_vendor
+  - Readiness assessment with pass/fail criteria
+  - `POST /api/settings/shadow-mode` to set start date and notes
+- [x] **Shadow Mode Performance Report (ELT)**
+  - `GET /api/reports/shadow-mode-performance?days=14`
+  - Readiness score (0-100) based on 4 factors:
+    - High Confidence Documents (30 pts)
+    - Alias Exception Rate (25 pts)
+    - Overall Automation Rate (25 pts)
+    - Data Volume (20 pts)
+  - Match score analysis with buckets and interpretation
+  - Alias engine performance with daily trend
+  - Vendor friction analysis
+  - Next steps recommendations
+- [x] **Frontend Updates**
+  - Match Score Distribution chart with 4 colored buckets + bar chart
+  - Shadow Mode Status card with feature flags, readiness, health indicators
 
 ### Testing Results (Latest - Feb 18, 2026)
-- Phase 4: 47/47 tests passed (26 Phase 4 + 21 Phase 3)
-- Phase 5: 14/14 backend + 100% frontend UI verification
-- All safety gates verified
-- All ROI dashboard sections functional
+- Phase 6: 40/40 backend tests passed, 100% frontend verified
+- All previous phases: Fully tested and working
 
 ## Key API Endpoints
+
+### Core Operations
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/documents/{id}/reprocess` | POST | Safe reprocess - re-validates, links only (no drafts) |
-| `/api/metrics/automation` | GET | Match methods, alias metrics, draft metrics |
+| `/api/documents/intake` | POST | Main document intake (email parser) |
+| `/api/documents/{id}/resolve` | POST | Manual link for NeedsReview docs |
+| `/api/documents/{id}/reprocess` | POST | Safe reprocess (no drafts) |
+
+### Phase 6: Shadow Mode Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/metrics/match-score-distribution` | GET | Histogram buckets for threshold analysis |
+| `/api/metrics/alias-exceptions` | GET | Alias exception tracking + daily trend |
+| `/api/metrics/vendor-stability` | GET | Vendor categorization for threshold overrides |
+| `/api/settings/shadow-mode` | GET | Feature flags + readiness assessment |
+| `/api/settings/shadow-mode` | POST | Set start date and notes |
+| `/api/reports/shadow-mode-performance` | GET | Comprehensive ELT report |
+
+### Other Metrics
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/metrics/automation` | GET | Overall automation metrics |
 | `/api/metrics/vendors` | GET | Vendor friction with ROI hints |
-| `/api/aliases/vendors` | GET/POST | Alias CRUD |
-| `/api/settings/features/create-draft-header` | GET/POST | Draft creation feature toggle |
-| `/api/settings/status` | GET | Now includes `features` section |
+| `/api/metrics/alias-impact` | GET | Alias contribution metrics |
+| `/api/settings/features/create-draft-header` | GET/POST | Draft creation toggle |
 
 ## Prioritized Backlog
 
@@ -136,49 +142,48 @@ Received → StoredInSP → Classified → LinkedToBC (LINKED_ONLY or DRAFT_CREA
 - [x] Production validation
 - [x] Audit Dashboard
 - [x] Alias impact tracking
-- [x] CREATE_DRAFT_HEADER backend (Phase 4)
-- [x] ELT ROI Dashboard (Phase 5)
+- [x] CREATE_DRAFT_HEADER backend
+- [x] ELT ROI Dashboard
+- [x] Shadow Mode Instrumentation
 
-### P1 (Next Phase) - Production Cutover
-- [ ] **Deploy to Production (Shadow Mode)** - Feature flags OFF, metrics running
-- [ ] **Monitor 2-3 weeks**: match_score distribution, alias exception rate, vendor patterns
-- [ ] **Vendor Threshold Override Architecture** - Per-vendor match score thresholds
+### P1 (Next Phase) - Production Deployment
+- [ ] **Set shadow_mode_started_at** via POST /api/settings/shadow-mode
+- [ ] **Monitor 2-3 weeks** watching:
+  - Match score distribution (want 80%+ above 0.92)
+  - Alias exception rate (want <10%)
+  - Vendor friction patterns
+- [ ] **Vendor Threshold Override Architecture** (when data supports it)
 - [ ] **Enable CREATE_DRAFT_HEADER** for controlled vendor subset
 
 ### P2 (Future)
-- [ ] **Vendor Alias Manager UI** - create/edit/delete aliases from friction list
-- [ ] **"Resolve and Link" UI Actions** - select vendor from candidates
+- [ ] Vendor Alias Manager UI
+- [ ] "Resolve and Link" UI Actions
 - [ ] Transaction Level 3 (auto-create invoice lines)
 - [ ] Real-time Email Watcher (Graph webhooks)
 - [ ] Entra ID SSO
 
 ### P3 (Strategic)
-- [ ] **Zetadocs Decommission Plan**
-  - Phase A: Parallel run
-  - Phase B: AP Invoices redirected to Hub
-  - Phase C: Full intake cutover
-  - Phase D: License removal
+- [ ] Zetadocs Decommission Plan
 
 ## Production Cutover Strategy
 ```
-Step 1: Deploy with feature flags OFF
-        ├── Draft creation disabled
-        ├── Full metrics running
-        ├── Matching + scoring active
-        ├── Alias engine active
-        └── Dashboard collecting real-world stats
+Step 1: Deploy with feature flags OFF ← READY
+        ├── CREATE_DRAFT_HEADER: OFF
+        ├── All metrics running
+        ├── Shadow mode instrumentation active
+        └── Set shadow_mode_started_at
 
-Step 2: Analyze 2-3 weeks of metrics
-        ├── % match_score >= 0.92 (should be high and stable)
-        ├── Alias exception rate (should be low)
-        ├── Fuzzy matches near threshold (should be small cluster)
-        ├── NeedsReview volume (should be declining)
-        └── Vendor-level automation rate (should be predictable)
+Step 2: Observe 2-3 weeks
+        ├── Match score distribution
+        ├── Alias exception rate trend
+        ├── Vendor friction stability
+        └── Monitor readiness_score in reports
 
-Step 3: Enable Draft Creation for
-        ├── AP_Invoice only
-        ├── Limited vendor subset
-        └── PO_REQUIRED documents first
+Step 3: Enable draft creation when
+        ├── readiness_score >= 80
+        ├── high_confidence_pct >= 60%
+        ├── alias_exception_rate < 10%
+        └── sufficient_data (50+ docs)
 ```
 
 ## Safety Configuration
@@ -191,15 +196,17 @@ DRAFT_CREATION_CONFIG = {
 }
 ```
 
-## Strategic Positioning for ELT
-This is not just document management. This is:
-- **Middleware Governance** - Controlled document flow with audit trails
-- **Measurable Automation** - ROI proof with exact metrics
-- **Vendor Data Hygiene** - Alias learning improves over time
-- **BC-Safe Draft Staging** - No auto-posting, header-only, reversible
-- **AI-Ready Ingestion** - Classification layer for future enhancements
+## Shadow Mode Notes Storage
+Use POST /api/settings/shadow-mode to record:
+- Production deploy date
+- Vendor onboarding changes
+- Alias import events
+- Any known data changes
 
-## Non-Goals (Current Phase)
-- No line creation (header only)
-- No production enablement yet (shadow mode first)
-- No Zetadocs retirement (parallel run first)
+Example:
+```json
+{
+  "shadow_mode_started_at": "2026-02-18T10:00:00Z",
+  "shadow_mode_notes": "Production deploy. 3 vendor aliases pre-loaded."
+}
+```

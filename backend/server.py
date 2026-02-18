@@ -3489,23 +3489,24 @@ async def poll_mailbox_for_attachments():
                             stats["attachments_failed"] += 1
                             stats["errors"].append(f"Intake failed for {filename}: {str(e)}")
                     
-                    # Mark message with category (Phase C1: no folder moves)
-                    # Only mark if at least one attachment was processed
-                    if stats["attachments_processed"] > 0:
-                        try:
-                            await client.patch(
-                                f"https://graph.microsoft.com/v1.0/users/{EMAIL_POLLING_USER}/messages/{msg_id}",
-                                headers={
-                                    "Authorization": f"Bearer {token}",
-                                    "Content-Type": "application/json"
-                                },
-                                json={"categories": ["HubShadowProcessed"]}
-                            )
-                        except Exception as e:
-                            logger.warning("[EmailPoll:%s] Failed to add category to %s: %s", run_id, msg_id, str(e))
+                    # NO mailbox mutations - we are read-only
+                    # Idempotency log is the source of truth, not mailbox state
                 
                 except Exception as e:
                     stats["errors"].append(f"Failed processing message {msg_id}: {str(e)}")
+            
+            # Update watermark to newest receivedDateTime seen
+            if messages:
+                newest_received = max(msg.get("receivedDateTime", "") for msg in messages)
+                if newest_received:
+                    await db.hub_settings.update_one(
+                        {"type": "email_poll_watermark"},
+                        {"$set": {
+                            "last_received_datetime": newest_received,
+                            "updated_utc": datetime.now(timezone.utc).isoformat()
+                        }},
+                        upsert=True
+                    )
         
     except Exception as e:
         stats["errors"].append(f"Poll run failed: {str(e)}")

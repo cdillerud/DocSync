@@ -3449,6 +3449,22 @@ async def poll_mailbox_for_attachments():
                             stats["attachments_skipped_inline"] += 1
                             continue
                         
+                        # Fetch individual attachment content
+                        try:
+                            att_content_resp = await client.get(
+                                f"https://graph.microsoft.com/v1.0/users/{EMAIL_POLLING_USER}/messages/{msg_id}/attachments/{att_id}",
+                                headers={"Authorization": f"Bearer {token}"}
+                            )
+                            if att_content_resp.status_code != 200:
+                                stats["attachments_failed"] += 1
+                                stats["errors"].append(f"Failed to fetch content for {filename}")
+                                continue
+                            content_b64 = att_content_resp.json().get("contentBytes", "")
+                        except Exception as e:
+                            stats["attachments_failed"] += 1
+                            stats["errors"].append(f"Error fetching {filename}: {str(e)}")
+                            continue
+                        
                         # Decode content and hash
                         try:
                             content_bytes = base64.b64decode(content_b64)

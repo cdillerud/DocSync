@@ -2487,13 +2487,129 @@ async def intake_document(
     }
     await db.hub_workflow_runs.insert_one(workflow)
     
-    # Execute BC linking based on decision (only if SharePoint upload succeeded)
+    # Execute BC action based on decision (only if SharePoint upload succeeded)
     final_status = update_data["status"]
+    transaction_action = TransactionAction.NONE
+    draft_result = None
     
     if sp_result and (decision == "auto_link" or decision == "auto_create"):
         bc_record_id = validation_results.get("bc_record_id")
+        match_method = validation_results.get("match_method", "none")
+        match_score = validation_results.get("match_score", 0.0)
         
-        if bc_record_id:
+        # Check if eligible for draft creation (Phase 4)
+        # Fetch current doc state for eligibility check
+        current_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+        is_draft_eligible, draft_reason = is_eligible_for_draft_creation(
+            job_type=suggested_type,
+            match_method=match_method,
+            match_score=match_score,
+            ai_confidence=confidence,
+            validation_results=validation_results,
+            doc=current_doc
+        )
+        
+        if is_draft_eligible and suggested_type == "AP_Invoice":
+            # CREATE DRAFT HEADER - Phase 4
+            logger.info("Document %s eligible for draft creation: %s", doc_id, draft_reason)
+            
+            # Get vendor info for draft
+            vendor_info = validation_results.get("bc_record_info", {})
+            vendor_no = vendor_info.get("number", "")
+            external_doc_no = normalized_fields.get("invoice_number") or extracted_fields.get("invoice_number", "")
+            
+            if vendor_no and external_doc_no:
+                # Run duplicate check one more time (defense in depth)
+                token = await get_bc_token()
+                companies = await get_bc_companies()
+                company_id = companies[0]["id"] if companies else None
+                
+                dup_check = await check_duplicate_purchase_invoice(
+                    vendor_no=vendor_no,
+                    external_doc_no=external_doc_no,
+                    company_id=company_id,
+                    token=token
+                )
+                
+                if dup_check.get("found"):
+                    # Duplicate found - hard stop
+                    logger.warning(
+                        "Duplicate invoice found during draft creation for doc %s: %s",
+                        doc_id, dup_check.get("existing_invoice_no")
+                    )
+                    final_status = "NeedsReview"
+                    await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+                        "status": "NeedsReview",
+                        "transaction_action": TransactionAction.NONE,
+                        "last_error": f"Duplicate invoice exists: {dup_check.get('existing_invoice_no')}",
+                        "updated_utc": datetime.now(timezone.utc).isoformat()
+                    }})
+                else:
+                    # Create the draft
+                    draft_result = await create_purchase_invoice_header(
+                        vendor_no=vendor_no,
+                        external_doc_no=external_doc_no,
+                        document_date=normalized_fields.get("invoice_date") or normalized_fields.get("due_date_raw"),
+                        due_date=normalized_fields.get("due_date"),
+                        posting_date=None,  # Let BC use today
+                        company_id=company_id,
+                        token=token
+                    )
+                    
+                    if draft_result.get("success"):
+                        final_status = "LinkedToBC"
+                        transaction_action = TransactionAction.DRAFT_CREATED
+                        await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+                            "bc_record_id": draft_result.get("invoice_id"),
+                            "bc_document_no": draft_result.get("invoice_no"),
+                            "bc_record_type": "PurchaseInvoice",
+                            "transaction_action": TransactionAction.DRAFT_CREATED,
+                            "draft_creation_result": draft_result,
+                            "status": "LinkedToBC",
+                            "updated_utc": datetime.now(timezone.utc).isoformat()
+                        }})
+                        logger.info(
+                            "Draft Purchase Invoice created for doc %s: %s",
+                            doc_id, draft_result.get("invoice_no")
+                        )
+                    else:
+                        # Draft creation failed - fallback to needs review
+                        logger.error(
+                            "Draft creation failed for doc %s: %s",
+                            doc_id, draft_result.get("error")
+                        )
+                        final_status = "NeedsReview"
+                        await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+                            "status": "NeedsReview",
+                            "transaction_action": TransactionAction.NONE,
+                            "last_error": f"Draft creation failed: {draft_result.get('error')}",
+                            "updated_utc": datetime.now(timezone.utc).isoformat()
+                        }})
+            else:
+                # Missing required fields for draft - fallback to link only
+                logger.warning("Missing vendor_no or external_doc_no for draft creation, falling back to link")
+                if bc_record_id:
+                    try:
+                        link_result = await link_document_to_bc(
+                            bc_record_id=bc_record_id,
+                            share_link=share_link,
+                            file_name=final_filename,
+                            file_content=file_content
+                        )
+                        if link_result.get("success"):
+                            final_status = "LinkedToBC"
+                            transaction_action = TransactionAction.LINKED_ONLY
+                            await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+                                "bc_record_id": bc_record_id,
+                                "transaction_action": TransactionAction.LINKED_ONLY,
+                                "status": "LinkedToBC",
+                                "updated_utc": datetime.now(timezone.utc).isoformat()
+                            }})
+                    except Exception as e:
+                        logger.error("BC linking failed for document %s: %s", doc_id, str(e))
+        
+        elif bc_record_id:
+            # Standard auto-link flow (Level 1 or not eligible for draft)
             try:
                 link_result = await link_document_to_bc(
                     bc_record_id=bc_record_id,
@@ -2503,8 +2619,10 @@ async def intake_document(
                 )
                 if link_result.get("success"):
                     final_status = "LinkedToBC"
+                    transaction_action = TransactionAction.LINKED_ONLY
                     await db.hub_documents.update_one({"id": doc_id}, {"$set": {
                         "bc_record_id": bc_record_id,
+                        "transaction_action": TransactionAction.LINKED_ONLY,
                         "status": "LinkedToBC",
                         "updated_utc": datetime.now(timezone.utc).isoformat()
                     }})
@@ -2515,6 +2633,7 @@ async def intake_document(
         final_status = "NeedsReview"
         await db.hub_documents.update_one({"id": doc_id}, {"$set": {
             "status": "NeedsReview",
+            "transaction_action": TransactionAction.NONE,
             "updated_utc": datetime.now(timezone.utc).isoformat()
         }})
     
@@ -2525,7 +2644,9 @@ async def intake_document(
         "classification": classification,
         "validation": validation_results,
         "decision": decision,
-        "reasoning": reasoning
+        "reasoning": reasoning,
+        "draft_result": draft_result,
+        "transaction_action": transaction_action
     }
 
 @api_router.post("/documents/{doc_id}/classify")

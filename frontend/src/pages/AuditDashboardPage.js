@@ -32,22 +32,25 @@ export default function AuditDashboardPage() {
   const [aliasImpact, setAliasImpact] = useState(null);
   const [resolutionTime, setResolutionTime] = useState(null);
   const [dailyMetrics, setDailyMetrics] = useState(null);
+  const [settingsStatus, setSettingsStatus] = useState(null);
 
   const fetchAllMetrics = async () => {
     setLoading(true);
     try {
-      const [metricsRes, vendorRes, aliasRes, timeRes, dailyRes] = await Promise.all([
+      const [metricsRes, vendorRes, aliasRes, timeRes, dailyRes, settingsRes] = await Promise.all([
         fetch(`${API}/api/metrics/automation?days=${days}`).then(r => r.json()),
         fetch(`${API}/api/metrics/vendors?days=${days}`).then(r => r.json()),
         fetch(`${API}/api/metrics/alias-impact`).then(r => r.json()),
         fetch(`${API}/api/metrics/resolution-time?days=${days}`).then(r => r.json()),
-        fetch(`${API}/api/metrics/daily?days=14`).then(r => r.json())
+        fetch(`${API}/api/metrics/daily?days=14`).then(r => r.json()),
+        fetch(`${API}/api/settings/status`).then(r => r.json())
       ]);
       setMetrics(metricsRes);
       setVendorFriction(vendorRes);
       setAliasImpact(aliasRes);
       setResolutionTime(timeRes);
       setDailyMetrics(dailyRes);
+      setSettingsStatus(settingsRes);
     } catch (err) {
       toast.error('Failed to load metrics');
     } finally {

@@ -5591,6 +5591,112 @@ async def get_shadow_mode_performance_report(days: int = 14):
     }
 
 
+@api_router.get("/metrics/extraction-quality")
+async def get_extraction_quality_metrics(days: int = 7):
+    """
+    Phase 7 extraction quality metrics.
+    
+    Measures:
+    - Field extraction completeness rates
+    - Ready for draft candidate rate
+    - Vendor name variation tracking
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    query = {"created_utc": {"$gte": cutoff}}
+    
+    docs = await db.hub_documents.find(
+        query,
+        {
+            "extracted_fields": 1, 
+            "validation_results.extraction_quality": 1,
+            "validation_results.normalized_fields": 1,
+            "ai_confidence": 1,
+            "document_type": 1,
+            "_id": 0
+        }
+    ).to_list(10000)
+    
+    total = len(docs)
+    if total == 0:
+        return {
+            "period_days": days,
+            "total_documents": 0,
+            "extraction_rates": {},
+            "ready_for_draft_rate": 0,
+            "vendor_variations": []
+        }
+    
+    # Track field extraction rates
+    field_counts = {
+        "vendor": 0,
+        "invoice_number": 0,
+        "amount": 0,
+        "po_number": 0,
+        "due_date": 0
+    }
+    
+    ready_for_draft = 0
+    vendor_names = {}  # Track variations
+    
+    for doc in docs:
+        fields = doc.get("extracted_fields", {})
+        norm_fields = doc.get("validation_results", {}).get("normalized_fields", {})
+        
+        # Use normalized fields if available, otherwise raw
+        check_fields = norm_fields if norm_fields else fields
+        
+        for field in field_counts.keys():
+            if check_fields.get(field):
+                field_counts[field] += 1
+        
+        # Check ready for draft
+        has_vendor = bool(check_fields.get("vendor"))
+        has_invoice = bool(check_fields.get("invoice_number"))
+        has_amount = check_fields.get("amount") is not None
+        
+        if has_vendor and has_invoice and has_amount:
+            ready_for_draft += 1
+        
+        # Track vendor name variations
+        vendor = check_fields.get("vendor", "").strip()
+        if vendor:
+            normalized = normalize_vendor_name(vendor)
+            if normalized not in vendor_names:
+                vendor_names[normalized] = {"variations": set(), "count": 0}
+            vendor_names[normalized]["variations"].add(vendor)
+            vendor_names[normalized]["count"] += 1
+    
+    # Calculate rates
+    extraction_rates = {k: round(v / total * 100, 1) for k, v in field_counts.items()}
+    
+    # Find vendors with multiple name variations
+    vendor_variations = [
+        {
+            "normalized": norm,
+            "variations": list(data["variations"]),
+            "count": data["count"]
+        }
+        for norm, data in vendor_names.items()
+        if len(data["variations"]) > 1
+    ]
+    vendor_variations.sort(key=lambda x: x["count"], reverse=True)
+    
+    return {
+        "period_days": days,
+        "total_documents": total,
+        "extraction_rates": extraction_rates,
+        "ready_for_draft_rate": round(ready_for_draft / total * 100, 1),
+        "ready_for_draft_count": ready_for_draft,
+        "vendor_variations": vendor_variations[:20],  # Top 20
+        "completeness_summary": {
+            "all_required_fields": ready_for_draft,
+            "missing_vendor": total - field_counts["vendor"],
+            "missing_invoice_number": total - field_counts["invoice_number"],
+            "missing_amount": total - field_counts["amount"]
+        }
+    }
+
+
 # ==================== APP SETUP ====================
 
 app.include_router(api_router)

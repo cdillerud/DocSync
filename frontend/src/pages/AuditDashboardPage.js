@@ -309,31 +309,50 @@ export default function AuditDashboardPage() {
               {vendorFriction?.vendors && vendorFriction.vendors.length > 0 ? (
                 <div className="space-y-3">
                   {vendorFriction.vendors.map((vendor, idx) => (
-                    <div key={idx} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
-                          vendor.friction_index >= 80 ? 'bg-red-100 text-red-700' :
-                          vendor.friction_index >= 50 ? 'bg-amber-100 text-amber-700' :
-                          'bg-emerald-100 text-emerald-700'
+                    <div key={idx} className="p-4 bg-muted/30 rounded-lg space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+                            vendor.friction_index >= 80 ? 'bg-red-100 text-red-700' :
+                            vendor.friction_index >= 50 ? 'bg-amber-100 text-amber-700' :
+                            'bg-emerald-100 text-emerald-700'
+                          }`}>
+                            {idx + 1}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="font-medium">{vendor.vendor}</p>
+                              {vendor.has_alias && (
+                                <Badge variant="secondary" className="text-xs">Has Alias</Badge>
+                              )}
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              {vendor.total_documents} docs • {vendor.auto_rate}% auto-linked • {vendor.alias_matches || 0} alias matches
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="text-right">
+                            <p className="text-sm font-mono">{vendor.friction_index}%</p>
+                            <p className="text-xs text-muted-foreground">friction</p>
+                          </div>
+                          {!vendor.has_alias && (
+                            <Button size="sm" variant="outline" data-testid={`add-alias-${idx}`}>
+                              Add Alias
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                      {/* ROI Hint */}
+                      {vendor.roi_hint && (
+                        <div className={`text-xs p-2 rounded ${
+                          vendor.has_alias 
+                            ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300' 
+                            : 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300'
                         }`}>
-                          {idx + 1}
+                          💡 {vendor.roi_hint}
                         </div>
-                        <div>
-                          <p className="font-medium">{vendor.vendor}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {vendor.total_documents} docs • {vendor.auto_rate}% auto-linked
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="text-right">
-                          <p className="text-sm font-mono">{vendor.friction_index}%</p>
-                          <p className="text-xs text-muted-foreground">friction</p>
-                        </div>
-                        <Button size="sm" variant="outline" data-testid={`add-alias-${idx}`}>
-                          Add Alias
-                        </Button>
-                      </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -348,6 +367,18 @@ export default function AuditDashboardPage() {
 
         {/* ==================== INTELLIGENCE TAB ==================== */}
         <TabsContent value="intelligence" className="space-y-4">
+          {/* Match Method Summary Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+            {metrics?.match_method_breakdown && Object.entries(metrics.match_method_breakdown).map(([method, count]) => (
+              <Card key={method} className="border border-border">
+                <CardContent className="p-3 text-center">
+                  <p className="text-2xl font-bold">{count}</p>
+                  <p className="text-xs text-muted-foreground capitalize">{method.replace('_', ' ')}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Match Method Distribution */}
             <Card className="border border-border" data-testid="match-method-card">

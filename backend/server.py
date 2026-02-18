@@ -2708,7 +2708,7 @@ async def suggest_alias_creation(vendor_name: str, resolved_vendor_no: str, reso
             {"alias_string": vendor_name},
             {"normalized_alias": normalized}
         ]
-    })
+    }, {"_id": 0})
     
     if existing:
         return {

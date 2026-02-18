@@ -339,6 +339,203 @@ export default function AuditDashboardPage() {
             </CardContent>
           </Card>
 
+          {/* Phase 6: Match Score Distribution Chart */}
+          <Card className="border border-border" data-testid="roi-match-score-distribution">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg font-bold flex items-center gap-2" style={{ fontFamily: 'Chivo, sans-serif' }}>
+                <BarChart3 className="w-5 h-5 text-indigo-600" />
+                Match Score Distribution
+              </CardTitle>
+              <CardDescription>
+                Score threshold analysis — determines if 0.92 threshold is conservative
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {matchScoreDistribution ? (
+                <>
+                  <div className="grid grid-cols-4 gap-2 mb-4">
+                    {[
+                      { key: '0.95_1.00', label: '0.95-1.00', color: 'bg-emerald-500', desc: 'Very High' },
+                      { key: '0.92_0.95', label: '0.92-0.95', color: 'bg-blue-500', desc: 'High' },
+                      { key: '0.88_0.92', label: '0.88-0.92', color: 'bg-amber-500', desc: 'Near' },
+                      { key: 'lt_0.88', label: '<0.88', color: 'bg-red-500', desc: 'Below' }
+                    ].map(bucket => (
+                      <div key={bucket.key} className="text-center p-3 bg-muted/30 rounded-lg">
+                        <div className={`w-3 h-3 ${bucket.color} rounded-full mx-auto mb-2`}></div>
+                        <p className="text-2xl font-bold">
+                          {matchScoreDistribution.buckets?.[bucket.key]?.count || 0}
+                        </p>
+                        <p className="text-xs text-muted-foreground">{bucket.label}</p>
+                        <p className="text-xs text-muted-foreground/60">{bucket.desc}</p>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {/* Bar chart */}
+                  <div className="h-40 mb-4">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={[
+                        { bucket: '0.95-1.00', count: matchScoreDistribution.buckets?.['0.95_1.00']?.count || 0, fill: '#10b981' },
+                        { bucket: '0.92-0.95', count: matchScoreDistribution.buckets?.['0.92_0.95']?.count || 0, fill: '#3b82f6' },
+                        { bucket: '0.88-0.92', count: matchScoreDistribution.buckets?.['0.88_0.92']?.count || 0, fill: '#f59e0b' },
+                        { bucket: '<0.88', count: matchScoreDistribution.buckets?.['lt_0.88']?.count || 0, fill: '#ef4444' }
+                      ]}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="bucket" fontSize={11} />
+                        <YAxis fontSize={11} />
+                        <Tooltip />
+                        <Bar dataKey="count" name="Documents">
+                          {[
+                            { bucket: '0.95-1.00', fill: '#10b981' },
+                            { bucket: '0.92-0.95', fill: '#3b82f6' },
+                            { bucket: '0.88-0.92', fill: '#f59e0b' },
+                            { bucket: '<0.88', fill: '#ef4444' }
+                          ].map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.fill} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  
+                  {/* Interpretation */}
+                  <div className={`p-4 rounded-lg border ${
+                    matchScoreDistribution.summary?.high_confidence_pct >= 60 
+                      ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800'
+                      : matchScoreDistribution.summary?.high_confidence_pct >= 40
+                      ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800'
+                      : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+                  }`}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="font-medium">High-confidence eligible (≥0.92):</span>
+                      <span className="font-bold text-lg">{matchScoreDistribution.summary?.high_confidence_eligible || 0}</span>
+                      <span className="text-muted-foreground">
+                        ({matchScoreDistribution.summary?.high_confidence_pct || 0}%)
+                      </span>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {matchScoreDistribution.summary?.interpretation}
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  Loading match score data...
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Phase 6: Shadow Mode Status Card */}
+          {shadowModeStatus && (
+            <Card className={`border-2 ${
+              shadowModeStatus.shadow_mode?.is_active 
+                ? 'border-indigo-500/50 bg-indigo-50/30 dark:bg-indigo-900/10' 
+                : 'border-border'
+            }`} data-testid="roi-shadow-mode">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg font-bold flex items-center gap-2" style={{ fontFamily: 'Chivo, sans-serif' }}>
+                    <Clock className="w-5 h-5 text-indigo-600" />
+                    Shadow Mode Status
+                  </CardTitle>
+                  {shadowModeStatus.shadow_mode?.is_active && (
+                    <Badge className="bg-indigo-100 text-indigo-800 border border-indigo-200">
+                      Active
+                    </Badge>
+                  )}
+                </div>
+                <CardDescription>
+                  Production instrumentation without BC writes — collect real metrics safely
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                  <div className="p-4 bg-muted/30 rounded-lg text-center">
+                    <p className="text-3xl font-bold text-indigo-600">
+                      {shadowModeStatus.shadow_mode?.days_running || 0}
+                    </p>
+                    <p className="text-sm text-muted-foreground">Days in Shadow</p>
+                  </div>
+                  <div className="p-4 bg-muted/30 rounded-lg text-center">
+                    <p className="text-3xl font-bold">
+                      {shadowModeStatus.health_indicators_7d?.high_confidence_docs_pct || 0}%
+                    </p>
+                    <p className="text-sm text-muted-foreground">High Conf. (7d)</p>
+                  </div>
+                  <div className="p-4 bg-muted/30 rounded-lg text-center">
+                    <p className="text-3xl font-bold">
+                      {shadowModeStatus.health_indicators_7d?.alias_exception_rate || 0}%
+                    </p>
+                    <p className="text-sm text-muted-foreground">Alias Exc. (7d)</p>
+                  </div>
+                  <div className="p-4 bg-muted/30 rounded-lg text-center">
+                    <p className="text-3xl font-bold">
+                      {shadowModeStatus.health_indicators_7d?.total_docs_processed || 0}
+                    </p>
+                    <p className="text-sm text-muted-foreground">Docs (7d)</p>
+                  </div>
+                </div>
+                
+                {/* Feature Flags */}
+                <div className="flex flex-wrap gap-2 mb-4">
+                  <Badge variant={shadowModeStatus.feature_flags?.CREATE_DRAFT_HEADER ? 'default' : 'secondary'}>
+                    CREATE_DRAFT_HEADER: {shadowModeStatus.feature_flags?.CREATE_DRAFT_HEADER ? 'ON' : 'OFF'}
+                  </Badge>
+                  <Badge variant="outline">
+                    DEMO_MODE: {shadowModeStatus.feature_flags?.DEMO_MODE ? 'ON' : 'OFF'}
+                  </Badge>
+                </div>
+                
+                {/* Readiness Assessment */}
+                <div className={`p-4 rounded-lg ${
+                  shadowModeStatus.readiness_assessment?.recommended_action?.includes('Ready')
+                    ? 'bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800'
+                    : 'bg-muted/50 border border-border'
+                }`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    {shadowModeStatus.readiness_assessment?.recommended_action?.includes('Ready') ? (
+                      <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                    ) : (
+                      <Clock className="w-5 h-5 text-muted-foreground" />
+                    )}
+                    <span className="font-medium">Readiness Assessment</span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {shadowModeStatus.readiness_assessment?.recommended_action}
+                  </p>
+                  <div className="flex flex-wrap gap-4 mt-3 text-xs">
+                    <span className={shadowModeStatus.readiness_assessment?.high_confidence_ok ? 'text-emerald-600' : 'text-muted-foreground'}>
+                      High Conf: {shadowModeStatus.readiness_assessment?.high_confidence_ok ? '✓' : '✗'}
+                    </span>
+                    <span className={shadowModeStatus.readiness_assessment?.alias_exception_ok ? 'text-emerald-600' : 'text-muted-foreground'}>
+                      Alias Exc: {shadowModeStatus.readiness_assessment?.alias_exception_ok ? '✓' : '✗'}
+                    </span>
+                    <span className={shadowModeStatus.readiness_assessment?.sufficient_data ? 'text-emerald-600' : 'text-muted-foreground'}>
+                      Data Vol: {shadowModeStatus.readiness_assessment?.sufficient_data ? '✓' : '✗'}
+                    </span>
+                  </div>
+                </div>
+                
+                {/* Top Friction Vendor */}
+                {shadowModeStatus.health_indicators_7d?.top_friction_vendor && (
+                  <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-600" />
+                      <span className="text-sm font-medium">Top Friction Vendor (7d):</span>
+                      <span className="text-sm">
+                        {shadowModeStatus.health_indicators_7d.top_friction_vendor.vendor}
+                      </span>
+                      <Badge variant="destructive" className="text-xs">
+                        {shadowModeStatus.health_indicators_7d.top_friction_vendor.exception_count} exceptions
+                      </Badge>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {/* Section 3: Vendor Friction Matrix */}
           <Card className="border border-border" data-testid="roi-vendor-matrix">
             <CardHeader className="pb-2">

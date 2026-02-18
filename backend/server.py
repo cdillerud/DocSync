@@ -1736,6 +1736,155 @@ def normalize_extracted_fields(fields: dict) -> dict:
     
     return normalized
 
+
+def compute_canonical_fields(extracted_fields: dict) -> dict:
+    """
+    Phase 7 Week 1: Compute canonical normalized fields at ingestion time.
+    
+    For AP_Invoice:
+    - vendor_normalized: lowercase, trimmed
+    - invoice_number_clean: strip spaces, consistent casing
+    - amount_float: parsed float
+    - due_date_iso: ISO date format
+    
+    Stored alongside raw fields for consistency and stability.
+    """
+    canonical = {}
+    
+    if not extracted_fields:
+        return canonical
+    
+    # Vendor normalization
+    vendor = extracted_fields.get("vendor", "")
+    if vendor:
+        vendor_str = str(vendor).strip()
+        canonical["vendor_normalized"] = vendor_str.lower().strip()
+        canonical["vendor_trimmed"] = vendor_str  # Original case but trimmed
+    
+    # Invoice number normalization
+    invoice_num = extracted_fields.get("invoice_number", "")
+    if invoice_num:
+        inv_str = str(invoice_num).strip()
+        # Remove extra spaces, normalize to uppercase for consistency
+        canonical["invoice_number_clean"] = re.sub(r'\s+', '', inv_str).upper()
+        canonical["invoice_number_trimmed"] = inv_str
+    
+    # Amount parsing to float
+    amount = extracted_fields.get("amount")
+    if amount is not None:
+        try:
+            # Remove currency symbols, commas, spaces
+            clean_amount = re.sub(r'[^\d.-]', '', str(amount))
+            canonical["amount_float"] = float(clean_amount) if clean_amount else None
+            canonical["amount_raw"] = str(amount)
+        except (ValueError, TypeError):
+            canonical["amount_float"] = None
+            canonical["amount_raw"] = str(amount)
+    
+    # Due date to ISO
+    due_date = extracted_fields.get("due_date")
+    if due_date:
+        try:
+            parsed_date = date_parser.parse(str(due_date))
+            canonical["due_date_iso"] = parsed_date.strftime('%Y-%m-%d')
+            canonical["due_date_raw"] = str(due_date)
+        except Exception:
+            canonical["due_date_iso"] = None
+            canonical["due_date_raw"] = str(due_date)
+    
+    # Invoice date to ISO
+    invoice_date = extracted_fields.get("invoice_date")
+    if invoice_date:
+        try:
+            parsed_date = date_parser.parse(str(invoice_date))
+            canonical["invoice_date_iso"] = parsed_date.strftime('%Y-%m-%d')
+            canonical["invoice_date_raw"] = str(invoice_date)
+        except Exception:
+            canonical["invoice_date_iso"] = None
+            canonical["invoice_date_raw"] = str(invoice_date)
+    
+    # PO number normalization
+    po_number = extracted_fields.get("po_number")
+    if po_number:
+        po_str = str(po_number).strip()
+        canonical["po_number_clean"] = re.sub(r'\s+', '', po_str).upper()
+        canonical["po_number_raw"] = po_str
+    
+    return canonical
+
+
+def compute_draft_candidate_flag(
+    document_type: str,
+    extracted_fields: dict,
+    canonical_fields: dict,
+    ai_confidence: float
+) -> dict:
+    """
+    Phase 7 Week 1: Compute draft_candidate flag (non-operational).
+    
+    draft_candidate = True if:
+    - document_type == AP_Invoice
+    - vendor present
+    - invoice_number present  
+    - amount present
+    - ai_confidence >= 0.92
+    
+    This does NOT create drafts or change status.
+    It only computes and exposes the flag for observation.
+    """
+    result = {
+        "draft_candidate": False,
+        "draft_candidate_reason": [],
+        "draft_candidate_score": 0.0
+    }
+    
+    # Check document type
+    if document_type not in ("AP_Invoice", "AP Invoice"):
+        result["draft_candidate_reason"].append("document_type is not AP_Invoice")
+        return result
+    
+    score = 0.0
+    reasons = []
+    
+    # Check vendor (25 points)
+    has_vendor = bool(canonical_fields.get("vendor_normalized") or 
+                      (extracted_fields and extracted_fields.get("vendor")))
+    if has_vendor:
+        score += 25
+    else:
+        reasons.append("missing vendor")
+    
+    # Check invoice_number (25 points)
+    has_invoice = bool(canonical_fields.get("invoice_number_clean") or 
+                       (extracted_fields and extracted_fields.get("invoice_number")))
+    if has_invoice:
+        score += 25
+    else:
+        reasons.append("missing invoice_number")
+    
+    # Check amount (25 points)
+    has_amount = canonical_fields.get("amount_float") is not None
+    if not has_amount and extracted_fields:
+        # Fallback to raw
+        has_amount = extracted_fields.get("amount") is not None
+    if has_amount:
+        score += 25
+    else:
+        reasons.append("missing amount")
+    
+    # Check AI confidence (25 points)
+    confidence_threshold = 0.92
+    if ai_confidence and ai_confidence >= confidence_threshold:
+        score += 25
+    else:
+        reasons.append(f"ai_confidence {ai_confidence or 0:.2f} < {confidence_threshold}")
+    
+    result["draft_candidate_score"] = score
+    result["draft_candidate_reason"] = reasons
+    result["draft_candidate"] = score == 100  # All criteria met
+    
+    return result
+
 def normalize_vendor_name(name: str) -> str:
     """
     Normalize vendor name for matching.

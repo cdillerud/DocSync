@@ -33,6 +33,8 @@ const JOB_TYPE_ICONS = {
   Sales_PO: '📦',
   AR_Invoice: '📤',
   Remittance: '💳',
+  Freight_Document: '🚚',
+  Warehouse_Document: '🏭',
 };
 
 export default function EmailParserPage() {

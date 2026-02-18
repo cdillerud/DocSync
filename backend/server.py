@@ -4885,6 +4885,7 @@ logger = logging.getLogger(__name__)
 
 @app.on_event("startup")
 async def startup():
+    global _email_polling_task
     await db.hub_documents.create_index("id", unique=True)
     await db.hub_documents.create_index("status")
     await db.hub_documents.create_index("document_type")
@@ -4902,6 +4903,12 @@ async def startup():
     await db.vendor_aliases.create_index("alias_string", unique=True)
     await db.vendor_aliases.create_index("normalized_alias")
     await db.vendor_aliases.create_index("vendor_no")
+    # Phase C1: Mail intake log indexes
+    await db.mail_intake_log.create_index("internet_message_id")
+    await db.mail_intake_log.create_index("attachment_hash")
+    await db.mail_intake_log.create_index([("internet_message_id", 1), ("attachment_hash", 1)])
+    await db.mail_intake_log.create_index("processed_at")
+    await db.mail_poll_runs.create_index("started_at")
     # Load saved config from MongoDB (overrides .env defaults)
     await _load_config_from_db()
     # Initialize default job types if not present
@@ -4914,6 +4921,11 @@ async def startup():
     for alias in aliases:
         VENDOR_ALIAS_MAP[alias["alias_string"]] = alias.get("vendor_name") or alias.get("vendor_no")
         VENDOR_ALIAS_MAP[alias["normalized_alias"]] = alias.get("vendor_name") or alias.get("vendor_no")
+    # Start email polling worker if enabled
+    if EMAIL_POLLING_ENABLED:
+        _email_polling_task = asyncio.create_task(email_polling_worker())
+        logger.info("Email polling worker started (interval: %d min, user: %s)", 
+                   EMAIL_POLLING_INTERVAL_MINUTES, EMAIL_POLLING_USER)
     logger.info("GPI Document Hub started. Demo mode: %s, Loaded %d vendor aliases", DEMO_MODE, len(aliases))
 
 @app.on_event("shutdown")

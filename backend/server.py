@@ -2989,6 +2989,42 @@ async def get_automation_metrics(
         }
     })
     
+    # Match method breakdown (new for Phase 3)
+    match_method_breakdown = {
+        "exact_no": 0,
+        "exact_name": 0,
+        "normalized": 0,
+        "alias": 0,
+        "fuzzy": 0,
+        "manual": 0,
+        "none": 0
+    }
+    
+    docs_with_match = await db.hub_documents.find(
+        query,
+        {"match_method": 1, "status": 1}
+    ).to_list(10000)
+    
+    alias_auto_linked = 0
+    alias_needs_review = 0
+    
+    for doc in docs_with_match:
+        method = doc.get("match_method", "none")
+        if method in match_method_breakdown:
+            match_method_breakdown[method] += 1
+        else:
+            match_method_breakdown["none"] += 1
+        
+        # Track alias-specific metrics
+        if method == "alias":
+            if doc.get("status") == "LinkedToBC":
+                alias_auto_linked += 1
+            elif doc.get("status") == "NeedsReview":
+                alias_needs_review += 1
+    
+    total_alias = alias_auto_linked + alias_needs_review
+    alias_exception_rate = round((alias_needs_review / total_alias * 100) if total_alias > 0 else 0, 1)
+    
     return {
         "period_days": days,
         "total_documents": total,

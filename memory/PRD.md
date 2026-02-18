@@ -43,56 +43,77 @@ Build a "GPI Document Hub" test platform that replaces Zetadocs-style document l
 - [x] Resolution time tracking
 - [x] Daily trend charts
 
-### Phase 3 - Alias Impact Integration ✅ (NEW)
-- [x] **Match Method Tracking** on every document:
-  - `exact_no`, `exact_name`, `normalized`, `alias`, `fuzzy`, `manual`, `none`
-  - Stored as `match_method` and `match_score` fields
-- [x] **Metrics Enhancement**:
-  - `match_method_breakdown`: Count of each match method
-  - `alias_auto_linked`: Documents auto-linked via alias
-  - `alias_exception_rate`: Exception rate for alias matches
-- [x] **Vendor Friction ROI Signal**:
-  - `has_alias`: Boolean per vendor
-  - `alias_matches`: Count of alias-based matches
-  - `roi_hint`: "Creating alias could reduce review rate from X% to Y%"
-- [x] **Safe Reprocess Endpoint** (`POST /api/documents/{id}/reprocess`):
-  - Re-runs validation + vendor match only
-  - Does NOT duplicate SharePoint uploads
-  - Does NOT create new BC records if already linked
-  - Idempotent - safe to call multiple times
-  - Logs reprocess event in audit trail
+### Phase 3 - Alias Impact Integration ✅
+- [x] **Match Method Tracking** on every document
+- [x] **Metrics Enhancement** with match_method_breakdown, alias_auto_linked
+- [x] **Vendor Friction ROI Signal** with roi_hint
+- [x] **Safe Reprocess Endpoint** with idempotency guards
 
-### Document Status Flow
+### Phase 4 - CREATE_DRAFT_HEADER (Sandbox) ✅ NEW
+- [x] **Feature Flag**: `ENABLE_CREATE_DRAFT_HEADER` (default: false)
+- [x] **Purchase Invoice Draft Creation** for AP_Invoice only:
+  - Creates HEADER ONLY (no lines, no posting)
+  - Header fields: Vendor No, External Doc No, Document Date, Due Date, Posting Date
+  - Adds comment: "Created by GPI Hub Automation"
+- [x] **Safety Preconditions** (ALL must be true):
+  - Feature flag enabled
+  - Job type = AP_Invoice
+  - match_method ∈ {exact_no, exact_name, normalized, alias} (NO fuzzy)
+  - match_score ≥ 0.92
+  - AI confidence ≥ 0.92
+  - duplicate_check passed
+  - vendor_match passed
+  - PO validation passed (if required)
+  - Document status ≠ LinkedToBC
+  - bc_record_id not already set
+- [x] **Duplicate Check**: Vendor + External Doc No before creation
+- [x] **Idempotency**: 
+  - Reprocess NEVER creates drafts (only links)
+  - bc_record_id guard prevents duplicate drafts
+- [x] **Transaction Tracking**: `transaction_action` field tracks NONE/LINKED_ONLY/DRAFT_CREATED
+- [x] **Metrics Integration**:
+  - `draft_created_count`: Number of drafts created
+  - `draft_creation_rate`: % of LinkedToBC that are drafts
+  - `draft_feature_enabled`: Current flag state
+  - `header_only_flag`: Always true (no lines yet)
+
+### Document Status Flow (Updated)
 ```
-Received → StoredInSP → Classified → LinkedToBC
-                    ↘ NeedsReview → [Reprocess] → LinkedToBC (if alias matches)
+Received → StoredInSP → Classified → LinkedToBC (LINKED_ONLY or DRAFT_CREATED)
+                    ↘ NeedsReview → [Reprocess] → LinkedToBC (LINKED_ONLY only)
                                   ↘ [Resolve] → LinkedToBC
 ```
 
-### Match Method Distribution
-| Method | Description |
+### Transaction Actions
+| Action | Description |
 |--------|-------------|
-| exact_no | Exact match on Vendor/Customer No |
-| exact_name | Exact match on display name |
-| normalized | Normalized match (strip Inc, LLC, etc.) |
-| alias | Match via vendor alias mapping |
-| fuzzy | Fuzzy token-based match |
-| manual | User manually selected from candidates |
-| none | No match found |
+| NONE | No BC action taken |
+| LINKED_ONLY | Document attached to existing BC record |
+| DRAFT_CREATED | Purchase Invoice draft header created in BC |
+
+### Phase 4 API Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/settings/features/create-draft-header` | GET | Get draft creation feature status |
+| `/api/settings/features/create-draft-header` | POST | Toggle draft creation feature |
+| `/api/settings/status` | GET | Now includes `features` section |
+| `/api/metrics/automation` | GET | Now includes draft metrics |
 
 ### Testing Results (Latest - Feb 18, 2026)
-- Backend: 100% (21/21 Phase 3 tests passed)
-- Frontend: 100% (all 4 tabs verified)
-- Reprocess idempotency verified
-- No SP/BC duplication confirmed
+- Backend: 100% (47/47 tests - 26 Phase 4 + 21 Phase 3)
+- All safety gates verified
+- Idempotency guards tested
+- No duplicate draft creation
+- Reprocess never creates drafts
 
 ## Key API Endpoints
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/documents/{id}/reprocess` | POST | Safe reprocess - re-validates without duplication |
-| `/api/metrics/automation` | GET | Match method breakdown, alias metrics |
+| `/api/documents/{id}/reprocess` | POST | Safe reprocess - re-validates, links only (no drafts) |
+| `/api/metrics/automation` | GET | Match methods, alias metrics, draft metrics |
 | `/api/metrics/vendors` | GET | Vendor friction with ROI hints |
 | `/api/aliases/vendors` | GET/POST | Alias CRUD |
+| `/api/settings/features/create-draft-header` | GET/POST | Draft creation feature toggle |
 
 ## Prioritized Backlog
 
@@ -102,35 +123,39 @@ Received → StoredInSP → Classified → LinkedToBC
 - [x] Production validation
 - [x] Audit Dashboard
 - [x] Alias impact tracking
+- [x] CREATE_DRAFT_HEADER backend (Phase 4)
 
 ### P1 (Next Phase)
-- [ ] **CREATE_DRAFT Safety Layers** for AP Invoices:
-  - Vendor match gate (fuzzy >= 0.92 for draft)
-  - Duplicate hard stop (same vendor + invoice# + 365 days)
-  - Header-only first (no auto-lines)
-- [ ] Vendor Alias Manager UI - create from friction list
+- [ ] **Enable CREATE_DRAFT_HEADER in Production** (after 7-day sandbox monitoring)
+- [ ] **Vendor Alias Manager UI** - create/edit/delete aliases from friction list
+- [ ] **"Resolve and Link" UI Actions** - select vendor from candidates
 - [ ] Entra SSO authentication
 
 ### P2 (Future)
-- [ ] Exchange Online email polling
+- [ ] Transaction Automation Level 3 (auto-create invoice lines)
+- [ ] Real-time Email Watcher (Graph webhooks)
 - [ ] Bulk reprocess button for eligible documents
 - [ ] Export audit logs to CSV
 - [ ] Sales PO full flip
 
 ## Strategic Status
 - **Level 2: Intelligent Link Engine** ✅ COMPLETE
-- **Level 3: Transaction Automation Engine** - NEXT (with safety layers)
+- **Level 3: Transaction Automation Engine** ✅ BACKEND COMPLETE (Sandbox)
+- **Next**: Enable in production after monitoring
 
-## Business Case Proof Points (from Dashboard)
-```
-Week 1: 16.7% auto-link
-Week 3: 42% auto-link (after alias learning)
-Week 6: 63% auto-link
-Alias-driven improvement: +21%
+## Safety Configuration
+```python
+DRAFT_CREATION_CONFIG = {
+    "eligible_match_methods": ["exact_no", "exact_name", "normalized", "alias"],
+    "min_match_score_for_draft": 0.92,
+    "min_confidence_for_draft": 0.92,
+    "duplicate_lookback_days": 365,
+}
 ```
 
 ## Non-Goals (This Phase)
-- No CREATE_DRAFT yet
+- No line creation (header only)
 - No UI redesign
-- No schema changes to Job Type config
-- No SharePoint changes
+- No production enablement (sandbox only)
+- No job type schema changes
+- No SharePoint logic changes

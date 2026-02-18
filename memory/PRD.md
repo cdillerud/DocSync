@@ -49,7 +49,7 @@ Build a "GPI Document Hub" test platform that replaces Zetadocs-style document l
 - [x] **Vendor Friction ROI Signal** with roi_hint
 - [x] **Safe Reprocess Endpoint** with idempotency guards
 
-### Phase 4 - CREATE_DRAFT_HEADER (Sandbox) ✅ NEW
+### Phase 4 - CREATE_DRAFT_HEADER (Sandbox) ✅
 - [x] **Feature Flag**: `ENABLE_CREATE_DRAFT_HEADER` (default: false)
 - [x] **Purchase Invoice Draft Creation** for AP_Invoice only:
   - Creates HEADER ONLY (no lines, no posting)
@@ -71,13 +71,34 @@ Build a "GPI Document Hub" test platform that replaces Zetadocs-style document l
   - Reprocess NEVER creates drafts (only links)
   - bc_record_id guard prevents duplicate drafts
 - [x] **Transaction Tracking**: `transaction_action` field tracks NONE/LINKED_ONLY/DRAFT_CREATED
-- [x] **Metrics Integration**:
-  - `draft_created_count`: Number of drafts created
-  - `draft_creation_rate`: % of LinkedToBC that are drafts
-  - `draft_feature_enabled`: Current flag state
-  - `header_only_flag`: Always true (no lines yet)
+- [x] **Metrics Integration**: draft_created_count, draft_creation_rate, draft_feature_enabled
 
-### Document Status Flow (Updated)
+### Phase 5 - ELT ROI Dashboard ✅ NEW
+- [x] **New "ROI Summary" Tab** - Default tab in Audit Dashboard
+- [x] **Section 1: Automation Overview**
+  - Total Documents, Fully Automated %, Needs Review %, Manual Resolved, Duplicates Blocked
+  - Trend chart (AreaChart) showing auto-linked vs needs review over time
+  - Visual indicators (arrows, warning icons) for quick status assessment
+- [x] **Section 2: Alias Impact — Data Hygiene ROI**
+  - Docs Via Alias, Automation From Alias %, Vendors w/ Alias, Alias Exception Rate
+  - "Data Hygiene Improvement" explanation box showing ROI story
+  - Proof that learned aliases compound automation over time
+- [x] **Section 3: Vendor Friction Matrix**
+  - Sortable table: Vendor | Docs | Automation % | Exception % | Avg Score | Alias Usage
+  - Visual progress bars for automation rate
+  - Badges for vendors with aliases
+  - ROI conversation starter: "Here's where process breakdowns are happening"
+- [x] **Section 4: Draft Creation Confidence** (Conditional)
+  - Shows when `draft_feature_enabled` is defined
+  - Disabled state: Shows safety requirements (match score ≥ 92%, confidence ≥ 92%, etc.)
+  - Enabled state: Eligible docs, Drafts created, Draft creation rate, Draft mode
+- [x] **Executive Summary Box**
+  - Automation Rate with exact %
+  - Data Hygiene ROI (alias count and contribution)
+  - Risk Mitigation (duplicates blocked)
+  - Processing Time (median resolution)
+
+### Document Status Flow
 ```
 Received → StoredInSP → Classified → LinkedToBC (LINKED_ONLY or DRAFT_CREATED)
                     ↘ NeedsReview → [Reprocess] → LinkedToBC (LINKED_ONLY only)
@@ -91,20 +112,11 @@ Received → StoredInSP → Classified → LinkedToBC (LINKED_ONLY or DRAFT_CREA
 | LINKED_ONLY | Document attached to existing BC record |
 | DRAFT_CREATED | Purchase Invoice draft header created in BC |
 
-### Phase 4 API Endpoints
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/settings/features/create-draft-header` | GET | Get draft creation feature status |
-| `/api/settings/features/create-draft-header` | POST | Toggle draft creation feature |
-| `/api/settings/status` | GET | Now includes `features` section |
-| `/api/metrics/automation` | GET | Now includes draft metrics |
-
 ### Testing Results (Latest - Feb 18, 2026)
-- Backend: 100% (47/47 tests - 26 Phase 4 + 21 Phase 3)
+- Phase 4: 47/47 tests passed (26 Phase 4 + 21 Phase 3)
+- Phase 5: 14/14 backend + 100% frontend UI verification
 - All safety gates verified
-- Idempotency guards tested
-- No duplicate draft creation
-- Reprocess never creates drafts
+- All ROI dashboard sections functional
 
 ## Key API Endpoints
 | Endpoint | Method | Description |
@@ -114,6 +126,7 @@ Received → StoredInSP → Classified → LinkedToBC (LINKED_ONLY or DRAFT_CREA
 | `/api/metrics/vendors` | GET | Vendor friction with ROI hints |
 | `/api/aliases/vendors` | GET/POST | Alias CRUD |
 | `/api/settings/features/create-draft-header` | GET/POST | Draft creation feature toggle |
+| `/api/settings/status` | GET | Now includes `features` section |
 
 ## Prioritized Backlog
 
@@ -124,24 +137,49 @@ Received → StoredInSP → Classified → LinkedToBC (LINKED_ONLY or DRAFT_CREA
 - [x] Audit Dashboard
 - [x] Alias impact tracking
 - [x] CREATE_DRAFT_HEADER backend (Phase 4)
+- [x] ELT ROI Dashboard (Phase 5)
 
-### P1 (Next Phase)
-- [ ] **Enable CREATE_DRAFT_HEADER in Production** (after 7-day sandbox monitoring)
-- [ ] **Vendor Alias Manager UI** - create/edit/delete aliases from friction list
-- [ ] **"Resolve and Link" UI Actions** - select vendor from candidates
-- [ ] Entra SSO authentication
+### P1 (Next Phase) - Production Cutover
+- [ ] **Deploy to Production (Shadow Mode)** - Feature flags OFF, metrics running
+- [ ] **Monitor 2-3 weeks**: match_score distribution, alias exception rate, vendor patterns
+- [ ] **Vendor Threshold Override Architecture** - Per-vendor match score thresholds
+- [ ] **Enable CREATE_DRAFT_HEADER** for controlled vendor subset
 
 ### P2 (Future)
-- [ ] Transaction Automation Level 3 (auto-create invoice lines)
+- [ ] **Vendor Alias Manager UI** - create/edit/delete aliases from friction list
+- [ ] **"Resolve and Link" UI Actions** - select vendor from candidates
+- [ ] Transaction Level 3 (auto-create invoice lines)
 - [ ] Real-time Email Watcher (Graph webhooks)
-- [ ] Bulk reprocess button for eligible documents
-- [ ] Export audit logs to CSV
-- [ ] Sales PO full flip
+- [ ] Entra ID SSO
 
-## Strategic Status
-- **Level 2: Intelligent Link Engine** ✅ COMPLETE
-- **Level 3: Transaction Automation Engine** ✅ BACKEND COMPLETE (Sandbox)
-- **Next**: Enable in production after monitoring
+### P3 (Strategic)
+- [ ] **Zetadocs Decommission Plan**
+  - Phase A: Parallel run
+  - Phase B: AP Invoices redirected to Hub
+  - Phase C: Full intake cutover
+  - Phase D: License removal
+
+## Production Cutover Strategy
+```
+Step 1: Deploy with feature flags OFF
+        ├── Draft creation disabled
+        ├── Full metrics running
+        ├── Matching + scoring active
+        ├── Alias engine active
+        └── Dashboard collecting real-world stats
+
+Step 2: Analyze 2-3 weeks of metrics
+        ├── % match_score >= 0.92 (should be high and stable)
+        ├── Alias exception rate (should be low)
+        ├── Fuzzy matches near threshold (should be small cluster)
+        ├── NeedsReview volume (should be declining)
+        └── Vendor-level automation rate (should be predictable)
+
+Step 3: Enable Draft Creation for
+        ├── AP_Invoice only
+        ├── Limited vendor subset
+        └── PO_REQUIRED documents first
+```
 
 ## Safety Configuration
 ```python
@@ -153,9 +191,15 @@ DRAFT_CREATION_CONFIG = {
 }
 ```
 
-## Non-Goals (This Phase)
+## Strategic Positioning for ELT
+This is not just document management. This is:
+- **Middleware Governance** - Controlled document flow with audit trails
+- **Measurable Automation** - ROI proof with exact metrics
+- **Vendor Data Hygiene** - Alias learning improves over time
+- **BC-Safe Draft Staging** - No auto-posting, header-only, reversible
+- **AI-Ready Ingestion** - Classification layer for future enhancements
+
+## Non-Goals (Current Phase)
 - No line creation (header only)
-- No UI redesign
-- No production enablement (sandbox only)
-- No job type schema changes
-- No SharePoint logic changes
+- No production enablement yet (shadow mode first)
+- No Zetadocs retirement (parallel run first)

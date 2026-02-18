@@ -5773,8 +5773,9 @@ async def get_extraction_quality_metrics(days: int = 7):
     
     Measures:
     - Field extraction completeness rates
-    - Ready for draft candidate rate
+    - Ready for draft candidate rate (Phase 7 Week 1)
     - Vendor name variation tracking
+    - Canonical fields completeness
     """
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     query = {"created_utc": {"$gte": cutoff}}
@@ -5783,10 +5784,13 @@ async def get_extraction_quality_metrics(days: int = 7):
         query,
         {
             "extracted_fields": 1, 
+            "canonical_fields": 1,
             "validation_results.extraction_quality": 1,
             "validation_results.normalized_fields": 1,
             "ai_confidence": 1,
             "document_type": 1,
+            "draft_candidate": 1,
+            "draft_candidate_score": 1,
             "_id": 0
         }
     ).to_list(10000)
@@ -5812,29 +5816,42 @@ async def get_extraction_quality_metrics(days: int = 7):
     
     ready_for_draft = 0
     ready_to_link = 0
+    draft_candidates_count = 0  # Phase 7 Week 1: computed flag
     vendor_names = {}  # Track variations
     
     for doc in docs:
-        fields = doc.get("extracted_fields", {})
-        norm_fields = doc.get("validation_results", {}).get("normalized_fields", {})
+        fields = doc.get("extracted_fields", {}) or {}
+        norm_fields = doc.get("validation_results", {}).get("normalized_fields", {}) or {}
+        canonical = doc.get("canonical_fields", {}) or {}
         
-        # Use normalized fields if available, otherwise raw
-        check_fields = norm_fields if norm_fields else fields
+        # Use canonical fields first, then normalized, then raw
+        check_fields = canonical if canonical else (norm_fields if norm_fields else fields)
         
         for field in field_counts.keys():
-            if check_fields.get(field):
+            # Check multiple possible field names
+            val = (check_fields.get(field) or 
+                   check_fields.get(f"{field}_normalized") or
+                   check_fields.get(f"{field}_clean") or
+                   fields.get(field))
+            if val:
                 field_counts[field] += 1
         
-        # Check ready for draft (extraction completeness)
-        has_vendor = bool(check_fields.get("vendor"))
-        has_invoice = bool(check_fields.get("invoice_number"))
-        has_amount = check_fields.get("amount") is not None
+        # Check ready for draft (extraction completeness - legacy calc)
+        has_vendor = bool(check_fields.get("vendor") or check_fields.get("vendor_normalized") or fields.get("vendor"))
+        has_invoice = bool(check_fields.get("invoice_number") or check_fields.get("invoice_number_clean") or fields.get("invoice_number"))
+        has_amount = (check_fields.get("amount") is not None or 
+                     check_fields.get("amount_float") is not None or
+                     fields.get("amount") is not None)
         
         if has_vendor and has_invoice and has_amount:
             ready_for_draft += 1
         
+        # Phase 7 Week 1: Count computed draft candidates
+        if doc.get("draft_candidate"):
+            draft_candidates_count += 1
+        
         # Track vendor name variations
-        vendor = check_fields.get("vendor", "").strip()
+        vendor = fields.get("vendor", "").strip() if fields.get("vendor") else ""
         if vendor:
             normalized = normalize_vendor_name(vendor)
             if normalized not in vendor_names:
@@ -5879,6 +5896,11 @@ async def get_extraction_quality_metrics(days: int = 7):
                 "rate": round(ready_for_draft / total * 100, 1),
                 "description": "Docs with vendor + invoice_number + amount extracted"
             },
+            "draft_candidates": {
+                "count": draft_candidates_count,
+                "rate": round(draft_candidates_count / total * 100, 1),
+                "description": "Phase 7: Computed draft_candidate flag (AP + all fields + confidence >= 0.92)"
+            },
             "ready_to_link": {
                 "count": ready_to_link,
                 "rate": round(ready_to_link / total * 100, 1) if total > 0 else 0,
@@ -5893,7 +5915,7 @@ async def get_extraction_quality_metrics(days: int = 7):
         },
         "vendor_variations": vendor_variations[:20],
         "stable_vendors": stable_vendors[:10],
-        "phase_7_recommendation": "Ready for Draft is the leading indicator for AP. Lead with extraction completeness."
+        "phase_7_recommendation": "Draft Candidates is the primary indicator for Phase 8 readiness. Lead with extraction completeness + confidence."
     }
 
 

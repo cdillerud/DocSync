@@ -30,6 +30,7 @@ export default function Layout() {
     if (path === '/upload') return 'Upload Document';
     if (path === '/queue') return 'Document Queue';
     if (path.startsWith('/documents/')) return 'Document Detail';
+    if (path === '/email-parser') return 'Email Parser';
     if (path === '/settings') return 'Settings';
     return 'GPI Document Hub';
   };

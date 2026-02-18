@@ -12,11 +12,12 @@ import {
 import { toast } from 'sonner';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, LineChart, Line, Legend
+  PieChart, Pie, Cell, LineChart, Line, Legend, AreaChart, Area
 } from 'recharts';
 import {
   TrendingUp, TrendingDown, AlertTriangle, CheckCircle2, Clock, 
-  RefreshCw, Users, FileText, Zap, Shield, BarChart3
+  RefreshCw, Users, FileText, Zap, Shield, BarChart3, DollarSign,
+  Target, Award, ArrowUpRight, ArrowDownRight, Building2
 } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL;

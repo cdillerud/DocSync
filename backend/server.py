@@ -3037,7 +3037,11 @@ async def get_automation_metrics(
         "average_confidence": avg_confidence,
         "duplicate_prevented": duplicate_prevented,
         "automation_rate": status_percentages.get("LinkedToBC", 0),
-        "review_rate": status_percentages.get("NeedsReview", 0)
+        "review_rate": status_percentages.get("NeedsReview", 0),
+        # Phase 3: Match method breakdown
+        "match_method_breakdown": match_method_breakdown,
+        "alias_auto_linked": alias_auto_linked,
+        "alias_exception_rate": alias_exception_rate
     }
 
 @api_router.get("/metrics/vendors")

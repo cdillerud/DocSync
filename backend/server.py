@@ -4691,11 +4691,13 @@ async def get_shadow_mode_status():
             "top_friction_vendor": top_friction_vendor,
             "total_docs_processed": len(docs_with_score)
         },
-        # Phase C1: Email polling health
+        # Phase C1: Email polling health (passive tap - read-only)
         "email_polling": {
             "enabled": EMAIL_POLLING_ENABLED,
+            "mode": "passive_tap",
             "user": EMAIL_POLLING_USER or "(not configured)",
-            "interval_minutes": EMAIL_POLLING_INTERVAL_MINUTES
+            "interval_minutes": EMAIL_POLLING_INTERVAL_MINUTES,
+            "permissions": "Mail.Read (read-only)"
         },
         "readiness_assessment": {
             "high_confidence_ok": high_conf_pct >= 60,

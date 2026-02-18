@@ -3566,16 +3566,21 @@ async def get_email_polling_status():
         {"_id": 0}
     ).sort("started_at", -1).limit(10).to_list(10)
     
-    # Aggregate stats for last 24h
-    total_scanned = sum(r.get("messages_scanned", 0) for r in recent_runs)
-    total_processed = sum(r.get("attachments_processed", 0) for r in recent_runs)
+    # Aggregate stats for last 24h (use new field names, fallback to old for compatibility)
+    total_detected = sum(r.get("messages_detected", r.get("messages_scanned", 0)) for r in recent_runs)
+    total_ingested = sum(r.get("attachments_ingested", r.get("attachments_processed", 0)) for r in recent_runs)
     total_skipped_dup = sum(r.get("attachments_skipped_duplicate", 0) for r in recent_runs)
     total_skipped_inline = sum(r.get("attachments_skipped_inline", 0) for r in recent_runs)
     total_failed = sum(r.get("attachments_failed", 0) for r in recent_runs)
     
+    # Get watermark
+    watermark_doc = await db.hub_settings.find_one({"type": "email_poll_watermark"}, {"_id": 0})
+    watermark = watermark_doc.get("last_received_datetime") if watermark_doc else None
+    
     return {
         "config": {
             "enabled": EMAIL_POLLING_ENABLED,
+            "mode": "passive_tap",  # Read-only, no mailbox mutations
             "interval_minutes": EMAIL_POLLING_INTERVAL_MINUTES,
             "user": EMAIL_POLLING_USER or "(not configured)",
             "lookback_minutes": EMAIL_POLLING_LOOKBACK_MINUTES,

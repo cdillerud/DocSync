@@ -1117,7 +1117,15 @@ async def get_settings_status():
                 "tenant_id": (TENANT_ID[:8] + "...") if TENANT_ID else "Not set"
             }
         },
-        "sharepoint_folders": list(set(FOLDER_MAP.values()))
+        "sharepoint_folders": list(set(FOLDER_MAP.values())),
+        # Phase 4: Draft creation feature flag
+        "features": {
+            "create_draft_header": {
+                "enabled": ENABLE_CREATE_DRAFT_HEADER,
+                "description": "Phase 4: Create Purchase Invoice draft headers for high-confidence AP Invoice matches",
+                "safety_thresholds": DRAFT_CREATION_CONFIG
+            }
+        }
     }
 
 @api_router.get("/settings/config")

@@ -5636,6 +5636,7 @@ async def get_extraction_quality_metrics(days: int = 7):
     }
     
     ready_for_draft = 0
+    ready_to_link = 0
     vendor_names = {}  # Track variations
     
     for doc in docs:
@@ -5649,7 +5650,7 @@ async def get_extraction_quality_metrics(days: int = 7):
             if check_fields.get(field):
                 field_counts[field] += 1
         
-        # Check ready for draft
+        # Check ready for draft (extraction completeness)
         has_vendor = bool(check_fields.get("vendor"))
         has_invoice = bool(check_fields.get("invoice_number"))
         has_amount = check_fields.get("amount") is not None
@@ -5681,19 +5682,108 @@ async def get_extraction_quality_metrics(days: int = 7):
     ]
     vendor_variations.sort(key=lambda x: x["count"], reverse=True)
     
+    # Identify stable vendors (candidates for Phase 8)
+    stable_vendors = [
+        {
+            "normalized": norm,
+            "count": data["count"],
+            "variations": list(data["variations"])
+        }
+        for norm, data in vendor_names.items()
+        if data["count"] >= 5  # At least 5 docs
+    ]
+    stable_vendors.sort(key=lambda x: x["count"], reverse=True)
+    
     return {
         "period_days": days,
         "total_documents": total,
         "extraction_rates": extraction_rates,
-        "ready_for_draft_rate": round(ready_for_draft / total * 100, 1),
-        "ready_for_draft_count": ready_for_draft,
-        "vendor_variations": vendor_variations[:20],  # Top 20
+        "readiness_metrics": {
+            "ready_for_draft": {
+                "count": ready_for_draft,
+                "rate": round(ready_for_draft / total * 100, 1),
+                "description": "Docs with vendor + invoice_number + amount extracted"
+            },
+            "ready_to_link": {
+                "count": ready_to_link,
+                "rate": round(ready_to_link / total * 100, 1) if total > 0 else 0,
+                "description": "Docs matched to existing BC record (match_score >= 0.80)"
+            }
+        },
         "completeness_summary": {
             "all_required_fields": ready_for_draft,
             "missing_vendor": total - field_counts["vendor"],
             "missing_invoice_number": total - field_counts["invoice_number"],
             "missing_amount": total - field_counts["amount"]
+        },
+        "vendor_variations": vendor_variations[:20],
+        "stable_vendors": stable_vendors[:10],
+        "phase_7_recommendation": "Ready for Draft is the leading indicator for AP. Lead with extraction completeness."
+    }
+
+
+@api_router.get("/metrics/extraction-misses")
+async def get_extraction_misses(
+    field: str = Query("vendor", description="Field to check: vendor, invoice_number, amount"),
+    days: int = Query(7)
+):
+    """
+    Drilldown endpoint for documents missing specific fields.
+    
+    Use this to understand WHY fields are missing and fix extraction deterministically.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    
+    # Build query for missing field
+    field_path = f"extracted_fields.{field}"
+    query = {
+        "created_utc": {"$gte": cutoff},
+        "$or": [
+            {field_path: {"$exists": False}},
+            {field_path: None},
+            {field_path: ""}
+        ]
+    }
+    
+    docs = await db.hub_documents.find(
+        query,
+        {
+            "id": 1,
+            "file_name": 1,
+            "source": 1,
+            "document_type": 1,
+            "ai_confidence": 1,
+            "extracted_fields": 1,
+            "email_sender": 1,
+            "email_subject": 1,
+            "created_utc": 1,
+            "_id": 0
         }
+    ).sort("created_utc", -1).to_list(100)
+    
+    return {
+        "field": field,
+        "period_days": days,
+        "missing_count": len(docs),
+        "documents": [
+            {
+                "id": d.get("id"),
+                "file_name": d.get("file_name"),
+                "source": d.get("source"),
+                "document_type": d.get("document_type"),
+                "ai_confidence": d.get("ai_confidence"),
+                "email_sender": d.get("email_sender"),
+                "email_subject": d.get("email_subject", "")[:50],
+                "extracted_fields": d.get("extracted_fields", {}),
+                "created_utc": d.get("created_utc")
+            }
+            for d in docs
+        ],
+        "next_steps": [
+            f"Review these {len(docs)} documents to understand why '{field}' wasn't extracted",
+            "Common causes: unusual document format, scanned PDFs, non-standard layouts",
+            "Consider adjusting AI prompt or adding document-specific extraction rules"
+        ]
     }
 
 

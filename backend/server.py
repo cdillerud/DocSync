@@ -2410,6 +2410,157 @@ async def resolve_and_link_document(doc_id: str, resolve: ResolveRequest):
         "message": "Document linked to BC" if link_success else f"Document stored in SharePoint. BC linking failed: {link_error}"
     }
 
+# ==================== SAFE REPROCESS ENDPOINT ====================
+
+@api_router.post("/documents/{doc_id}/reprocess")
+async def reprocess_document(doc_id: str):
+    """
+    Safe reprocess endpoint - re-runs validation + vendor match only.
+    
+    Rules:
+    - Do NOT duplicate SharePoint uploads
+    - Do NOT create new BC records if already linked
+    - If alias now matches → transition from NeedsReview → LinkedToBC
+    - Must be idempotent
+    """
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Cannot reprocess already-linked documents
+    if doc.get("status") == "LinkedToBC":
+        return {
+            "reprocessed": False,
+            "reason": "Document already linked to BC - no reprocessing needed",
+            "document": doc
+        }
+    
+    # Get the file content for BC linking (if needed)
+    file_path = UPLOAD_DIR / doc_id
+    file_content = None
+    if file_path.exists():
+        file_content = file_path.read_bytes()
+    
+    # Get job config
+    job_type = doc.get("suggested_job_type", "AP_Invoice")
+    job_configs = await db.hub_job_types.find_one({"job_type": job_type}, {"_id": 0})
+    if not job_configs:
+        job_configs = DEFAULT_JOB_TYPES.get(job_type, DEFAULT_JOB_TYPES["AP_Invoice"])
+    
+    # Get extracted fields
+    extracted_fields = doc.get("extracted_fields", {})
+    
+    # Re-run BC validation (this will use any new aliases)
+    old_match_method = doc.get("match_method", "none")
+    validation_results = await validate_bc_match(job_type, extracted_fields, job_configs)
+    new_match_method = validation_results.get("match_method", "none")
+    
+    # Make new automation decision
+    confidence = doc.get("ai_confidence", 0.0)
+    decision, reasoning, decision_metadata = make_automation_decision(job_configs, confidence, validation_results)
+    
+    # Determine if status should change
+    old_status = doc.get("status")
+    new_status = old_status
+    bc_linked = False
+    link_error = None
+    
+    # If validation now passes and we have SharePoint info, try to link to BC
+    share_link = doc.get("sharepoint_share_link_url")
+    bc_record_id = validation_results.get("bc_record_id")
+    
+    if validation_results.get("all_passed") and decision in ("auto_link", "auto_create"):
+        if share_link and bc_record_id and file_content:
+            try:
+                link_result = await link_document_to_bc(
+                    bc_record_id=bc_record_id,
+                    share_link=share_link,
+                    file_name=doc["file_name"],
+                    file_content=file_content
+                )
+                if link_result.get("success"):
+                    bc_linked = True
+                    new_status = "LinkedToBC"
+                else:
+                    link_error = link_result.get("error")
+            except Exception as e:
+                link_error = str(e)
+        elif share_link and bc_record_id and not file_content:
+            # File not available but SharePoint link exists - partial success
+            new_status = "StoredInSP"
+    elif decision == "needs_review":
+        new_status = "NeedsReview"
+    
+    # Update document
+    update_data = {
+        "validation_results": validation_results,
+        "automation_decision": decision,
+        "match_method": new_match_method,
+        "match_score": validation_results.get("match_score", 0.0),
+        "vendor_candidates": decision_metadata.get("vendor_candidates", []),
+        "customer_candidates": decision_metadata.get("customer_candidates", []),
+        "status": new_status,
+        "reprocessed_utc": datetime.now(timezone.utc).isoformat(),
+        "updated_utc": datetime.now(timezone.utc).isoformat()
+    }
+    
+    if bc_linked:
+        update_data["bc_record_id"] = bc_record_id
+        update_data["last_error"] = None
+    elif link_error:
+        update_data["last_error"] = link_error
+    
+    await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
+    
+    # Log reprocess workflow
+    workflow = {
+        "id": str(uuid.uuid4()),
+        "document_id": doc_id,
+        "workflow_name": "reprocess",
+        "started_utc": datetime.now(timezone.utc).isoformat(),
+        "ended_utc": datetime.now(timezone.utc).isoformat(),
+        "status": "Completed",
+        "steps": [
+            {
+                "step": "revalidation",
+                "status": "completed",
+                "result": {
+                    "old_match_method": old_match_method,
+                    "new_match_method": new_match_method,
+                    "validation_passed": validation_results.get("all_passed"),
+                    "decision": decision
+                }
+            },
+            {
+                "step": "status_transition",
+                "status": "completed" if bc_linked or new_status != old_status else "no_change",
+                "result": {
+                    "old_status": old_status,
+                    "new_status": new_status,
+                    "bc_linked": bc_linked
+                }
+            }
+        ],
+        "correlation_id": str(uuid.uuid4()),
+        "error": link_error
+    }
+    await db.hub_workflow_runs.insert_one(workflow)
+    
+    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    
+    return {
+        "reprocessed": True,
+        "status_changed": old_status != new_status,
+        "old_status": old_status,
+        "new_status": new_status,
+        "match_method_changed": old_match_method != new_match_method,
+        "old_match_method": old_match_method,
+        "new_match_method": new_match_method,
+        "bc_linked": bc_linked,
+        "document": updated_doc,
+        "reasoning": reasoning
+    }
+
 from datetime import timedelta
 
 @api_router.post("/graph/webhook")

@@ -1080,9 +1080,13 @@ class JobTypeConfig(BaseModel):
     automation_level: int = 1
     min_confidence_to_auto_link: float = 0.85
     min_confidence_to_auto_create_draft: float = 0.95
-    requires_po_validation: bool = False
+    # PO Validation: PO_REQUIRED, PO_IF_PRESENT, PO_NOT_REQUIRED
+    po_validation_mode: str = "PO_IF_PRESENT"
     allow_duplicate_check_override: bool = False
     requires_human_review_if_exception: bool = True
+    # Vendor matching
+    vendor_match_threshold: float = 0.80
+    vendor_match_strategies: List[str] = ["exact_no", "exact_name", "normalized", "fuzzy"]
     sharepoint_folder: str
     bc_entity: str
     required_extractions: List[str]

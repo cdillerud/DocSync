@@ -3114,11 +3114,17 @@ async def startup():
     await db.hub_documents.create_index("created_utc")
     await db.hub_documents.create_index("source")
     await db.hub_documents.create_index("suggested_job_type")
+    await db.hub_documents.create_index([("extracted_fields.vendor", 1)])
     await db.hub_workflow_runs.create_index("id", unique=True)
     await db.hub_workflow_runs.create_index("document_id")
     await db.hub_workflow_runs.create_index("started_utc")
     await db.hub_config.create_index("_key", unique=True)
     await db.hub_job_types.create_index("job_type", unique=True)
+    # Vendor aliases indexes
+    await db.vendor_aliases.create_index("alias_id", unique=True)
+    await db.vendor_aliases.create_index("alias_string", unique=True)
+    await db.vendor_aliases.create_index("normalized_alias")
+    await db.vendor_aliases.create_index("vendor_no")
     # Load saved config from MongoDB (overrides .env defaults)
     await _load_config_from_db()
     # Initialize default job types if not present
@@ -3126,7 +3132,12 @@ async def startup():
         existing = await db.hub_job_types.find_one({"job_type": jt_key})
         if not existing:
             await db.hub_job_types.insert_one(jt_config)
-    logger.info("GPI Document Hub started. Demo mode: %s", DEMO_MODE)
+    # Load vendor aliases into memory
+    aliases = await db.vendor_aliases.find({}, {"_id": 0}).to_list(500)
+    for alias in aliases:
+        VENDOR_ALIAS_MAP[alias["alias_string"]] = alias.get("vendor_name") or alias.get("vendor_no")
+        VENDOR_ALIAS_MAP[alias["normalized_alias"]] = alias.get("vendor_name") or alias.get("vendor_no")
+    logger.info("GPI Document Hub started. Demo mode: %s, Loaded %d vendor aliases", DEMO_MODE, len(aliases))
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

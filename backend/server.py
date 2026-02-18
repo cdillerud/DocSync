@@ -3878,7 +3878,8 @@ async def get_mail_intake_logs(days: int = Query(1), status: str = Query(None), 
 async def backfill_ap_mailbox(
     days_back: int = Query(7, description="How many days back to search"),
     max_messages: int = Query(25, description="Maximum messages to process"),
-    dry_run: bool = Query(False, description="If true, only report what would be processed")
+    dry_run: bool = Query(False, description="If true, only report what would be processed"),
+    mailbox: str = Query(None, description="Mailbox to poll (defaults to EMAIL_POLLING_USER)")
 ):
     """
     One-time backfill of existing AP mailbox emails into the Document Hub.

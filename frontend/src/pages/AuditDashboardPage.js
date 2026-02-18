@@ -194,13 +194,324 @@ export default function AuditDashboardPage() {
         </Card>
       </div>
 
-      <Tabs defaultValue="overview" className="space-y-4">
+      <Tabs defaultValue="roi" className="space-y-4">
         <TabsList data-testid="audit-tabs">
+          <TabsTrigger value="roi" data-testid="tab-roi">
+            <DollarSign className="w-4 h-4 mr-1" />
+            ROI Summary
+          </TabsTrigger>
           <TabsTrigger value="overview" data-testid="tab-overview">Overview</TabsTrigger>
           <TabsTrigger value="vendors" data-testid="tab-vendors">Vendor Friction</TabsTrigger>
           <TabsTrigger value="intelligence" data-testid="tab-intelligence">Intelligence</TabsTrigger>
           <TabsTrigger value="trends" data-testid="tab-trends">Trends</TabsTrigger>
         </TabsList>
+
+        {/* ==================== ROI SUMMARY TAB (NEW) ==================== */}
+        <TabsContent value="roi" className="space-y-6" data-testid="roi-tab-content">
+          {/* Section 1: Automation Overview */}
+          <Card className="border border-border" data-testid="roi-automation-overview">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg font-bold flex items-center gap-2" style={{ fontFamily: 'Chivo, sans-serif' }}>
+                <Target className="w-5 h-5 text-primary" />
+                Automation Overview
+              </CardTitle>
+              <CardDescription>Document processing efficiency at a glance</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+                <div className="p-4 bg-gradient-to-br from-primary/10 to-primary/5 rounded-lg border border-primary/20 text-center">
+                  <p className="text-3xl font-bold text-primary">{metrics?.total_documents || 0}</p>
+                  <p className="text-sm text-muted-foreground">Total Documents</p>
+                </div>
+                <div className="p-4 bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 rounded-lg border border-emerald-500/20 text-center">
+                  <div className="flex items-center justify-center gap-1">
+                    <p className="text-3xl font-bold text-emerald-600">{metrics?.automation_rate || 0}%</p>
+                    {metrics?.automation_rate >= 50 && <ArrowUpRight className="w-5 h-5 text-emerald-600" />}
+                  </div>
+                  <p className="text-sm text-muted-foreground">Fully Automated</p>
+                </div>
+                <div className="p-4 bg-gradient-to-br from-amber-500/10 to-amber-500/5 rounded-lg border border-amber-500/20 text-center">
+                  <div className="flex items-center justify-center gap-1">
+                    <p className="text-3xl font-bold text-amber-600">{metrics?.review_rate || 0}%</p>
+                    {metrics?.review_rate > 30 && <AlertTriangle className="w-4 h-4 text-amber-600" />}
+                  </div>
+                  <p className="text-sm text-muted-foreground">Needs Review</p>
+                </div>
+                <div className="p-4 bg-gradient-to-br from-blue-500/10 to-blue-500/5 rounded-lg border border-blue-500/20 text-center">
+                  <p className="text-3xl font-bold text-blue-600">
+                    {metrics?.status_distribution?.counts?.Classified || 0}
+                  </p>
+                  <p className="text-sm text-muted-foreground">Manual Resolved</p>
+                </div>
+                <div className="p-4 bg-gradient-to-br from-purple-500/10 to-purple-500/5 rounded-lg border border-purple-500/20 text-center">
+                  <p className="text-3xl font-bold text-purple-600">{metrics?.duplicate_prevented || 0}</p>
+                  <p className="text-sm text-muted-foreground">Duplicates Blocked</p>
+                </div>
+              </div>
+              
+              {/* Trend chart */}
+              <div className="h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={dailyMetrics?.daily_metrics || []}>
+                    <defs>
+                      <linearGradient id="autoGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="date" tickFormatter={(d) => d.slice(5)} fontSize={12} />
+                    <YAxis fontSize={12} />
+                    <Tooltip />
+                    <Area type="monotone" dataKey="auto_linked" stroke="#10b981" fill="url(#autoGradient)" name="Auto-Linked" />
+                    <Area type="monotone" dataKey="needs_review" stroke="#f59e0b" fill="#f59e0b20" name="Needs Review" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Section 2: Alias Impact - Data Hygiene ROI */}
+          <Card className="border border-border" data-testid="roi-alias-impact">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg font-bold flex items-center gap-2" style={{ fontFamily: 'Chivo, sans-serif' }}>
+                <Award className="w-5 h-5 text-purple-600" />
+                Alias Impact — Data Hygiene ROI
+              </CardTitle>
+              <CardDescription>How learned aliases are improving automation rates</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg text-center border border-purple-200 dark:border-purple-800">
+                  <p className="text-3xl font-bold text-purple-600">{metrics?.alias_auto_linked || 0}</p>
+                  <p className="text-sm text-muted-foreground">Docs Via Alias</p>
+                </div>
+                <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg text-center border border-emerald-200 dark:border-emerald-800">
+                  <p className="text-3xl font-bold text-emerald-600">{aliasImpact?.alias_contribution || 0}%</p>
+                  <p className="text-sm text-muted-foreground">Automation From Alias</p>
+                </div>
+                <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-center border border-blue-200 dark:border-blue-800">
+                  <p className="text-3xl font-bold text-blue-600">{aliasImpact?.total_aliases || 0}</p>
+                  <p className="text-sm text-muted-foreground">Vendors w/ Alias</p>
+                </div>
+                <div className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-lg text-center border border-amber-200 dark:border-amber-800">
+                  <p className="text-3xl font-bold text-amber-600">{metrics?.alias_exception_rate || 0}%</p>
+                  <p className="text-sm text-muted-foreground">Alias Exception Rate</p>
+                </div>
+              </div>
+              
+              {/* ROI Story */}
+              <div className="p-4 bg-gradient-to-r from-purple-50 to-emerald-50 dark:from-purple-900/10 dark:to-emerald-900/10 rounded-lg border border-purple-200 dark:border-purple-800">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-full bg-purple-100 dark:bg-purple-800 flex items-center justify-center flex-shrink-0">
+                    <TrendingUp className="w-5 h-5 text-purple-600" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-sm">Data Hygiene Improvement</p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {aliasImpact?.total_aliases > 0 ? (
+                        <>
+                          Your {aliasImpact?.total_aliases} vendor aliases have reduced manual touches by{' '}
+                          <span className="font-bold text-emerald-600">{aliasImpact?.alias_contribution || 0}%</span>.{' '}
+                          Each alias learned from manual corrections compounds future automation.
+                        </>
+                      ) : (
+                        <>
+                          No aliases configured yet. As you resolve documents manually, aliases are created
+                          that will automate future matches for the same vendors.
+                        </>
+                      )}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Section 3: Vendor Friction Matrix */}
+          <Card className="border border-border" data-testid="roi-vendor-matrix">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg font-bold flex items-center gap-2" style={{ fontFamily: 'Chivo, sans-serif' }}>
+                <Building2 className="w-5 h-5 text-blue-600" />
+                Vendor Friction Matrix
+              </CardTitle>
+              <CardDescription>Where process breakdowns are happening — sortable by automation rate</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {vendorFriction?.vendors && vendorFriction.vendors.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm" data-testid="vendor-friction-table">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left py-3 px-2 font-medium">Vendor</th>
+                        <th className="text-center py-3 px-2 font-medium">Docs</th>
+                        <th className="text-center py-3 px-2 font-medium">Automation %</th>
+                        <th className="text-center py-3 px-2 font-medium">Exception %</th>
+                        <th className="text-center py-3 px-2 font-medium">Avg Score</th>
+                        <th className="text-center py-3 px-2 font-medium">Alias Usage</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {vendorFriction.vendors.slice(0, 10).map((vendor, idx) => (
+                        <tr key={idx} className="border-b hover:bg-muted/30 transition-colors">
+                          <td className="py-3 px-2">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium truncate max-w-[200px]">{vendor.vendor}</span>
+                              {vendor.has_alias && (
+                                <Badge variant="secondary" className="text-xs">Alias</Badge>
+                              )}
+                            </div>
+                          </td>
+                          <td className="text-center py-3 px-2 font-mono">{vendor.total_documents}</td>
+                          <td className="text-center py-3 px-2">
+                            <div className="flex items-center justify-center gap-2">
+                              <Progress 
+                                value={vendor.auto_rate} 
+                                className="w-16 h-2" 
+                              />
+                              <span className={`font-mono ${
+                                vendor.auto_rate >= 70 ? 'text-emerald-600' :
+                                vendor.auto_rate >= 40 ? 'text-amber-600' : 'text-red-600'
+                              }`}>{vendor.auto_rate}%</span>
+                            </div>
+                          </td>
+                          <td className="text-center py-3 px-2">
+                            <Badge variant={vendor.friction_index >= 50 ? 'destructive' : 'secondary'}>
+                              {vendor.friction_index}%
+                            </Badge>
+                          </td>
+                          <td className="text-center py-3 px-2 font-mono">
+                            {vendor.avg_confidence ? (vendor.avg_confidence * 100).toFixed(0) + '%' : '-'}
+                          </td>
+                          <td className="text-center py-3 px-2">
+                            {vendor.alias_matches > 0 ? (
+                              <Badge variant="outline" className="text-purple-600">
+                                {vendor.alias_matches} uses
+                              </Badge>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  No vendor data available yet
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Section 4: Draft Creation Confidence (Shown when feature exists) */}
+          {(metrics?.draft_feature_enabled !== undefined) && (
+            <Card className={`border ${metrics?.draft_feature_enabled ? 'border-emerald-500/50' : 'border-border opacity-60'}`} data-testid="roi-draft-confidence">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg font-bold flex items-center gap-2" style={{ fontFamily: 'Chivo, sans-serif' }}>
+                    <Shield className="w-5 h-5 text-emerald-600" />
+                    Draft Creation Confidence
+                    {!metrics?.draft_feature_enabled && (
+                      <Badge variant="outline" className="ml-2 text-muted-foreground">Feature Disabled</Badge>
+                    )}
+                  </CardTitle>
+                  {metrics?.draft_feature_enabled && (
+                    <Badge className="bg-emerald-100 text-emerald-800 border border-emerald-200">
+                      <CheckCircle2 className="w-3 h-3 mr-1" />
+                      Active
+                    </Badge>
+                  )}
+                </div>
+                <CardDescription>
+                  {metrics?.draft_feature_enabled 
+                    ? 'Purchase Invoice draft creation metrics — risk calibration indicator'
+                    : 'Enable CREATE_DRAFT_HEADER feature flag to see draft creation metrics'
+                  }
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {metrics?.draft_feature_enabled ? (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="p-4 bg-muted/30 rounded-lg text-center">
+                      <p className="text-3xl font-bold">
+                        {(metrics?.status_distribution?.counts?.LinkedToBC || 0) - (metrics?.draft_created_count || 0)}
+                      </p>
+                      <p className="text-sm text-muted-foreground">Eligible for Draft</p>
+                    </div>
+                    <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg text-center border border-emerald-200 dark:border-emerald-800">
+                      <p className="text-3xl font-bold text-emerald-600">{metrics?.draft_created_count || 0}</p>
+                      <p className="text-sm text-muted-foreground">Drafts Created</p>
+                    </div>
+                    <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-center border border-blue-200 dark:border-blue-800">
+                      <p className="text-3xl font-bold text-blue-600">{metrics?.draft_creation_rate || 0}%</p>
+                      <p className="text-sm text-muted-foreground">Draft Creation Rate</p>
+                    </div>
+                    <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg text-center border border-purple-200 dark:border-purple-800">
+                      <p className="text-3xl font-bold text-purple-600">
+                        {metrics?.header_only_flag ? 'Header' : 'Full'}
+                      </p>
+                      <p className="text-sm text-muted-foreground">Draft Mode</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-6 space-y-3">
+                    <div className="w-16 h-16 mx-auto rounded-full bg-muted flex items-center justify-center">
+                      <Shield className="w-8 h-8 text-muted-foreground" />
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Draft creation is disabled. Enable in Settings → Features to begin creating Purchase Invoice drafts automatically.
+                    </p>
+                    <div className="text-xs text-muted-foreground bg-muted/50 p-3 rounded-lg max-w-md mx-auto">
+                      <p className="font-medium mb-1">Safety Requirements:</p>
+                      <ul className="list-disc list-inside text-left">
+                        <li>Match score ≥ 92%</li>
+                        <li>AI confidence ≥ 92%</li>
+                        <li>Match method: exact, normalized, or alias</li>
+                        <li>No duplicate invoices</li>
+                      </ul>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ELT Summary Box */}
+          <Card className="border-2 border-primary/30 bg-primary/5" data-testid="roi-elt-summary">
+            <CardContent className="p-6">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                  <DollarSign className="w-6 h-6 text-primary" />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="font-bold text-lg" style={{ fontFamily: 'Chivo, sans-serif' }}>
+                    Executive Summary
+                  </h3>
+                  <div className="text-sm text-muted-foreground space-y-1">
+                    <p>
+                      <span className="font-medium text-foreground">Automation Rate:</span>{' '}
+                      {metrics?.automation_rate || 0}% of documents processed without human intervention
+                    </p>
+                    <p>
+                      <span className="font-medium text-foreground">Data Hygiene ROI:</span>{' '}
+                      {aliasImpact?.total_aliases || 0} vendor aliases contributing {aliasImpact?.alias_contribution || 0}% of automation
+                    </p>
+                    <p>
+                      <span className="font-medium text-foreground">Risk Mitigation:</span>{' '}
+                      {metrics?.duplicate_prevented || 0} duplicate invoices blocked
+                    </p>
+                    <p>
+                      <span className="font-medium text-foreground">Processing Time:</span>{' '}
+                      Median resolution in {resolutionTime?.median_minutes || 0} minutes
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* ==================== OVERVIEW TAB ==================== */}
         <TabsContent value="overview" className="space-y-4">

@@ -3966,7 +3966,7 @@ async def poll_mailbox_for_attachments():
         
         async with httpx.AsyncClient(timeout=60.0) as client:
             messages_resp = await client.get(
-                f"https://graph.microsoft.com/v1.0/users/{target_mailbox}/mailFolders/Inbox/messages",
+                f"https://graph.microsoft.com/v1.0/users/{EMAIL_POLLING_USER}/mailFolders/Inbox/messages",
                 headers={"Authorization": f"Bearer {token}"},
                 params={
                     "$filter": filter_query,

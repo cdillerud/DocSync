@@ -3832,6 +3832,632 @@ async def get_email_stats():
         "recent": recent
     }
 
+# ==================== PHASE 6: SHADOW MODE INSTRUMENTATION ====================
+
+@api_router.get("/metrics/match-score-distribution")
+async def get_match_score_distribution(
+    from_date: str = None,
+    to_date: str = None
+):
+    """
+    Get match score distribution histogram for Phase 6 Shadow Mode analysis.
+    
+    This is the cornerstone metric that tells you whether 0.92 threshold is conservative or tight.
+    
+    Buckets:
+    - 0.95-1.00: Very high confidence (ideal candidates for draft creation)
+    - 0.92-0.95: High confidence (meets draft threshold)
+    - 0.88-0.92: Near threshold (watch zone)
+    - <0.88: Low confidence (not eligible)
+    
+    Args:
+        from_date: Start date (YYYY-MM-DD), defaults to 14 days ago
+        to_date: End date (YYYY-MM-DD), defaults to today
+    """
+    # Default to last 14 days
+    if not to_date:
+        to_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    if not from_date:
+        from_date = (datetime.now(timezone.utc) - timedelta(days=14)).strftime('%Y-%m-%d')
+    
+    query = {
+        "created_utc": {
+            "$gte": from_date,
+            "$lte": to_date + "T23:59:59"
+        },
+        "match_score": {"$exists": True, "$ne": None}
+    }
+    
+    # Get all documents with match scores in range
+    docs = await db.hub_documents.find(
+        query,
+        {"match_score": 1, "match_method": 1, "status": 1, "_id": 0}
+    ).to_list(10000)
+    
+    # Initialize buckets
+    buckets = {
+        "0.95_1.00": {"count": 0, "by_method": {}, "linked": 0, "needs_review": 0},
+        "0.92_0.95": {"count": 0, "by_method": {}, "linked": 0, "needs_review": 0},
+        "0.88_0.92": {"count": 0, "by_method": {}, "linked": 0, "needs_review": 0},
+        "lt_0.88": {"count": 0, "by_method": {}, "linked": 0, "needs_review": 0}
+    }
+    
+    total_docs = len(docs)
+    
+    for doc in docs:
+        score = doc.get("match_score", 0) or 0
+        method = doc.get("match_method", "none")
+        status = doc.get("status", "Unknown")
+        
+        # Determine bucket
+        if score >= 0.95:
+            bucket_key = "0.95_1.00"
+        elif score >= 0.92:
+            bucket_key = "0.92_0.95"
+        elif score >= 0.88:
+            bucket_key = "0.88_0.92"
+        else:
+            bucket_key = "lt_0.88"
+        
+        buckets[bucket_key]["count"] += 1
+        
+        # Track method breakdown within bucket
+        if method not in buckets[bucket_key]["by_method"]:
+            buckets[bucket_key]["by_method"][method] = 0
+        buckets[bucket_key]["by_method"][method] += 1
+        
+        # Track outcome within bucket
+        if status == "LinkedToBC":
+            buckets[bucket_key]["linked"] += 1
+        elif status == "NeedsReview":
+            buckets[bucket_key]["needs_review"] += 1
+    
+    # Calculate high-confidence eligible (>= 0.92)
+    high_confidence_count = buckets["0.95_1.00"]["count"] + buckets["0.92_0.95"]["count"]
+    high_confidence_pct = round((high_confidence_count / total_docs * 100) if total_docs > 0 else 0, 1)
+    
+    # Calculate threshold eligibility
+    threshold_eligible = high_confidence_count
+    near_threshold = buckets["0.88_0.92"]["count"]
+    below_threshold = buckets["lt_0.88"]["count"]
+    
+    # Generate interpretation
+    if high_confidence_pct >= 80:
+        interpretation = f"Excellent: {high_confidence_pct}% of documents are above 0.92 threshold. Your threshold is conservative and safe for production."
+    elif high_confidence_pct >= 60:
+        interpretation = f"Good: {high_confidence_pct}% of documents are above 0.92 threshold. Consider monitoring the {near_threshold} documents in the 0.88-0.92 watch zone."
+    elif high_confidence_pct >= 40:
+        interpretation = f"Moderate: {high_confidence_pct}% of documents are above 0.92 threshold. Investigate the {below_threshold + near_threshold} documents below threshold before enabling draft creation."
+    else:
+        interpretation = f"Caution: Only {high_confidence_pct}% of documents are above 0.92 threshold. Review vendor data hygiene and alias coverage before enabling draft creation."
+    
+    return {
+        "period": {
+            "from_date": from_date,
+            "to_date": to_date
+        },
+        "total_documents": total_docs,
+        "buckets": buckets,
+        "summary": {
+            "high_confidence_eligible": high_confidence_count,
+            "high_confidence_pct": high_confidence_pct,
+            "near_threshold": near_threshold,
+            "below_threshold": below_threshold,
+            "interpretation": interpretation
+        },
+        "threshold_analysis": {
+            "current_threshold": 0.92,
+            "above_threshold_count": threshold_eligible,
+            "above_threshold_pct": high_confidence_pct,
+            "near_threshold_count": near_threshold,
+            "near_threshold_pct": round((near_threshold / total_docs * 100) if total_docs > 0 else 0, 1)
+        }
+    }
+
+
+@api_router.get("/metrics/alias-exceptions")
+async def get_alias_exception_metrics(days: int = 14):
+    """
+    Enhanced alias exception tracking for Phase 6.
+    
+    This is the second key signal that tells you:
+    - Data hygiene ROI is real
+    - Alias engine is compounding over time
+    
+    Returns:
+    - Total alias matches vs exceptions
+    - Alias exception rate trend
+    - Top 10 vendors by alias exceptions
+    - Top 10 vendors by alias contribution
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    query = {"created_utc": {"$gte": cutoff}}
+    
+    # Get all documents with match data
+    docs = await db.hub_documents.find(
+        query,
+        {"match_method": 1, "status": 1, "extracted_fields.vendor": 1, "_id": 0}
+    ).to_list(10000)
+    
+    # Calculate overall alias metrics
+    alias_matches_total = 0
+    alias_matches_success = 0  # LinkedToBC
+    alias_matches_needs_review = 0  # NeedsReview (exceptions)
+    
+    # Vendor-level tracking
+    vendor_alias_stats = {}
+    
+    for doc in docs:
+        method = doc.get("match_method", "none")
+        status = doc.get("status", "Unknown")
+        vendor = doc.get("extracted_fields", {}).get("vendor", "Unknown")
+        
+        # Initialize vendor if not seen
+        if vendor not in vendor_alias_stats:
+            vendor_alias_stats[vendor] = {
+                "total_docs": 0,
+                "alias_matches": 0,
+                "alias_success": 0,
+                "alias_exceptions": 0,
+                "non_alias_linked": 0
+            }
+        
+        vendor_alias_stats[vendor]["total_docs"] += 1
+        
+        if method == "alias":
+            alias_matches_total += 1
+            vendor_alias_stats[vendor]["alias_matches"] += 1
+            
+            if status == "LinkedToBC":
+                alias_matches_success += 1
+                vendor_alias_stats[vendor]["alias_success"] += 1
+            elif status == "NeedsReview":
+                alias_matches_needs_review += 1
+                vendor_alias_stats[vendor]["alias_exceptions"] += 1
+        elif status == "LinkedToBC":
+            vendor_alias_stats[vendor]["non_alias_linked"] += 1
+    
+    # Calculate alias exception rate
+    alias_exception_rate = round(
+        (alias_matches_needs_review / alias_matches_total * 100) if alias_matches_total > 0 else 0, 1
+    )
+    
+    # Top 10 vendors by alias exceptions
+    top_exception_vendors = sorted(
+        [{"vendor": v, **stats} for v, stats in vendor_alias_stats.items() if stats["alias_exceptions"] > 0],
+        key=lambda x: x["alias_exceptions"],
+        reverse=True
+    )[:10]
+    
+    # Top 10 vendors by alias contribution (alias drives 60%+ of their automation)
+    # Calculate alias contribution % per vendor
+    for vendor, stats in vendor_alias_stats.items():
+        total_linked = stats["alias_success"] + stats["non_alias_linked"]
+        stats["alias_contribution_pct"] = round(
+            (stats["alias_success"] / total_linked * 100) if total_linked > 0 else 0, 1
+        )
+    
+    high_alias_contribution_vendors = sorted(
+        [{"vendor": v, **stats} for v, stats in vendor_alias_stats.items() 
+         if stats["alias_contribution_pct"] >= 60 and stats["alias_matches"] >= 2],
+        key=lambda x: x["alias_contribution_pct"],
+        reverse=True
+    )[:10]
+    
+    # Daily trend (last 7 days)
+    daily_alias_trend = []
+    for i in range(7):
+        day = (datetime.now(timezone.utc) - timedelta(days=i)).strftime('%Y-%m-%d')
+        day_query = {
+            "created_utc": {"$gte": day, "$lt": day + "T23:59:59"},
+            "match_method": "alias"
+        }
+        day_total = await db.hub_documents.count_documents(day_query)
+        day_success = await db.hub_documents.count_documents({**day_query, "status": "LinkedToBC"})
+        day_exception = await db.hub_documents.count_documents({**day_query, "status": "NeedsReview"})
+        
+        daily_alias_trend.append({
+            "date": day,
+            "total": day_total,
+            "success": day_success,
+            "exceptions": day_exception,
+            "exception_rate": round((day_exception / day_total * 100) if day_total > 0 else 0, 1)
+        })
+    
+    # Reverse to show oldest first
+    daily_alias_trend.reverse()
+    
+    return {
+        "period_days": days,
+        "alias_totals": {
+            "alias_matches_total": alias_matches_total,
+            "alias_matches_success": alias_matches_success,
+            "alias_matches_needs_review": alias_matches_needs_review,
+            "alias_exception_rate": alias_exception_rate
+        },
+        "interpretation": {
+            "status": "healthy" if alias_exception_rate < 10 else ("watch" if alias_exception_rate < 25 else "attention"),
+            "message": f"Alias exception rate is {alias_exception_rate}%. " + (
+                "Alias engine is performing well." if alias_exception_rate < 10 else
+                "Monitor vendor data for inconsistencies." if alias_exception_rate < 25 else
+                "High alias exceptions suggest alias data hygiene issues."
+            )
+        },
+        "top_exception_vendors": top_exception_vendors,
+        "high_alias_contribution_vendors": high_alias_contribution_vendors,
+        "daily_trend": daily_alias_trend
+    }
+
+
+@api_router.get("/metrics/vendor-stability")
+async def get_vendor_stability_analysis(days: int = 14):
+    """
+    Vendor friction stability analysis for Phase 6.
+    
+    This informs Vendor Threshold Overrides (future architecture).
+    
+    Identifies:
+    - Vendors consistently under 50% automation
+    - Vendors with high match scores but high exception rates (process issue)
+    - Vendors with consistently high confidence (candidates for lower thresholds)
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    query = {"created_utc": {"$gte": cutoff}}
+    
+    # Get all documents
+    docs = await db.hub_documents.find(
+        query,
+        {"extracted_fields.vendor": 1, "match_score": 1, "status": 1, "ai_confidence": 1, "_id": 0}
+    ).to_list(10000)
+    
+    # Vendor-level analysis
+    vendor_stats = {}
+    
+    for doc in docs:
+        vendor = doc.get("extracted_fields", {}).get("vendor", "Unknown")
+        if vendor == "Unknown":
+            continue
+            
+        if vendor not in vendor_stats:
+            vendor_stats[vendor] = {
+                "total_docs": 0,
+                "linked": 0,
+                "needs_review": 0,
+                "match_scores": [],
+                "confidence_scores": []
+            }
+        
+        vendor_stats[vendor]["total_docs"] += 1
+        
+        if doc.get("status") == "LinkedToBC":
+            vendor_stats[vendor]["linked"] += 1
+        elif doc.get("status") == "NeedsReview":
+            vendor_stats[vendor]["needs_review"] += 1
+        
+        if doc.get("match_score"):
+            vendor_stats[vendor]["match_scores"].append(doc["match_score"])
+        if doc.get("ai_confidence"):
+            vendor_stats[vendor]["confidence_scores"].append(doc["ai_confidence"])
+    
+    # Calculate aggregates per vendor
+    analyzed_vendors = []
+    
+    for vendor, stats in vendor_stats.items():
+        if stats["total_docs"] < 2:  # Need at least 2 docs for meaningful analysis
+            continue
+        
+        automation_rate = round((stats["linked"] / stats["total_docs"] * 100), 1)
+        exception_rate = round((stats["needs_review"] / stats["total_docs"] * 100), 1)
+        avg_match_score = round(sum(stats["match_scores"]) / len(stats["match_scores"]), 3) if stats["match_scores"] else 0
+        avg_confidence = round(sum(stats["confidence_scores"]) / len(stats["confidence_scores"]), 3) if stats["confidence_scores"] else 0
+        
+        analyzed_vendors.append({
+            "vendor": vendor,
+            "total_docs": stats["total_docs"],
+            "automation_rate": automation_rate,
+            "exception_rate": exception_rate,
+            "avg_match_score": avg_match_score,
+            "avg_confidence": avg_confidence,
+            "min_match_score": min(stats["match_scores"]) if stats["match_scores"] else 0,
+            "max_match_score": max(stats["match_scores"]) if stats["match_scores"] else 0,
+        })
+    
+    # Categorize vendors
+    low_automation_vendors = [v for v in analyzed_vendors if v["automation_rate"] < 50]
+    high_score_high_exception = [v for v in analyzed_vendors 
+                                  if v["avg_match_score"] >= 0.85 and v["exception_rate"] >= 40]
+    consistently_high_confidence = [v for v in analyzed_vendors 
+                                     if v["avg_match_score"] >= 0.92 and v["min_match_score"] >= 0.88 
+                                     and v["automation_rate"] >= 80]
+    
+    # Sort by impact
+    low_automation_vendors.sort(key=lambda x: x["total_docs"], reverse=True)
+    high_score_high_exception.sort(key=lambda x: x["exception_rate"], reverse=True)
+    consistently_high_confidence.sort(key=lambda x: x["avg_match_score"], reverse=True)
+    
+    return {
+        "period_days": days,
+        "total_vendors_analyzed": len(analyzed_vendors),
+        "categories": {
+            "low_automation": {
+                "description": "Vendors consistently under 50% automation - need attention",
+                "count": len(low_automation_vendors),
+                "vendors": low_automation_vendors[:10]
+            },
+            "high_score_high_exception": {
+                "description": "High match scores but high exceptions - likely process or data issue",
+                "count": len(high_score_high_exception),
+                "vendors": high_score_high_exception[:10]
+            },
+            "consistently_high_confidence": {
+                "description": "Candidates for threshold override (consistent high scores)",
+                "count": len(consistently_high_confidence),
+                "vendors": consistently_high_confidence[:10]
+            }
+        },
+        "threshold_override_candidates": [
+            {
+                "vendor": v["vendor"],
+                "recommended_threshold": max(0.88, v["min_match_score"] - 0.02),
+                "avg_match_score": v["avg_match_score"],
+                "min_match_score": v["min_match_score"],
+                "automation_rate": v["automation_rate"]
+            }
+            for v in consistently_high_confidence[:5]
+        ]
+    }
+
+
+class ShadowModeConfig(BaseModel):
+    """Configuration for shadow mode tracking."""
+    shadow_mode_started_at: Optional[str] = None
+    shadow_mode_notes: Optional[str] = None
+
+
+@api_router.get("/settings/shadow-mode")
+async def get_shadow_mode_status():
+    """
+    Get shadow mode status for Phase 6 monitoring.
+    
+    Returns feature flag status, shadow mode duration, and quick health indicators.
+    """
+    # Get shadow mode config from settings
+    settings = await db.hub_settings.find_one({"type": "shadow_mode"}, {"_id": 0})
+    
+    if not settings:
+        # Initialize shadow mode settings if not exists
+        settings = {
+            "type": "shadow_mode",
+            "shadow_mode_started_at": None,
+            "shadow_mode_notes": "",
+            "created_utc": datetime.now(timezone.utc).isoformat()
+        }
+    
+    # Calculate days in shadow mode
+    days_in_shadow_mode = 0
+    if settings.get("shadow_mode_started_at"):
+        start_date = datetime.fromisoformat(settings["shadow_mode_started_at"].replace('Z', '+00:00'))
+        days_in_shadow_mode = (datetime.now(timezone.utc) - start_date).days
+    
+    # Get quick health indicators (last 7 days)
+    cutoff_7d = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    query_7d = {"created_utc": {"$gte": cutoff_7d}}
+    
+    # High confidence docs percentage
+    docs_with_score = await db.hub_documents.find(
+        {**query_7d, "match_score": {"$exists": True, "$ne": None}},
+        {"match_score": 1, "_id": 0}
+    ).to_list(10000)
+    
+    high_conf_count = sum(1 for d in docs_with_score if (d.get("match_score") or 0) >= 0.92)
+    high_conf_pct = round((high_conf_count / len(docs_with_score) * 100) if docs_with_score else 0, 1)
+    
+    # Alias exception rate (last 7 days)
+    alias_total_7d = await db.hub_documents.count_documents({**query_7d, "match_method": "alias"})
+    alias_exceptions_7d = await db.hub_documents.count_documents({
+        **query_7d, "match_method": "alias", "status": "NeedsReview"
+    })
+    alias_exception_rate_7d = round((alias_exceptions_7d / alias_total_7d * 100) if alias_total_7d > 0 else 0, 1)
+    
+    # Top friction vendor this week
+    top_friction_vendor = None
+    vendor_friction = await db.hub_documents.aggregate([
+        {"$match": {**query_7d, "status": "NeedsReview"}},
+        {"$group": {"_id": "$extracted_fields.vendor", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 1}
+    ]).to_list(1)
+    
+    if vendor_friction:
+        top_friction_vendor = {
+            "vendor": vendor_friction[0]["_id"],
+            "exception_count": vendor_friction[0]["count"]
+        }
+    
+    return {
+        "feature_flags": {
+            "CREATE_DRAFT_HEADER": ENABLE_CREATE_DRAFT_HEADER,
+            "DEMO_MODE": DEMO_MODE
+        },
+        "shadow_mode": {
+            "started_at": settings.get("shadow_mode_started_at"),
+            "days_running": days_in_shadow_mode,
+            "notes": settings.get("shadow_mode_notes", ""),
+            "is_active": settings.get("shadow_mode_started_at") is not None and not ENABLE_CREATE_DRAFT_HEADER
+        },
+        "health_indicators_7d": {
+            "high_confidence_docs_pct": high_conf_pct,
+            "alias_exception_rate": alias_exception_rate_7d,
+            "top_friction_vendor": top_friction_vendor,
+            "total_docs_processed": len(docs_with_score)
+        },
+        "readiness_assessment": {
+            "high_confidence_ok": high_conf_pct >= 60,
+            "alias_exception_ok": alias_exception_rate_7d < 15,
+            "sufficient_data": len(docs_with_score) >= 20,
+            "recommended_action": (
+                "Ready for controlled draft enablement" 
+                if high_conf_pct >= 60 and alias_exception_rate_7d < 15 and len(docs_with_score) >= 20
+                else "Continue monitoring - need more data or better metrics"
+            )
+        },
+        "draft_creation_thresholds": DRAFT_CREATION_CONFIG
+    }
+
+
+@api_router.post("/settings/shadow-mode")
+async def update_shadow_mode_settings(config: ShadowModeConfig):
+    """
+    Update shadow mode configuration.
+    
+    Use this to:
+    - Set shadow_mode_started_at when deploying to production
+    - Add notes about deployments, vendor changes, alias imports
+    """
+    update_data = {}
+    
+    if config.shadow_mode_started_at is not None:
+        update_data["shadow_mode_started_at"] = config.shadow_mode_started_at
+    
+    if config.shadow_mode_notes is not None:
+        update_data["shadow_mode_notes"] = config.shadow_mode_notes
+    
+    if update_data:
+        update_data["updated_utc"] = datetime.now(timezone.utc).isoformat()
+        
+        await db.hub_settings.update_one(
+            {"type": "shadow_mode"},
+            {"$set": update_data},
+            upsert=True
+        )
+    
+    return await get_shadow_mode_status()
+
+
+@api_router.get("/reports/shadow-mode-performance")
+async def get_shadow_mode_performance_report(days: int = 14):
+    """
+    Generate comprehensive Shadow Mode Performance report for ELT.
+    
+    This endpoint produces the complete analysis needed to decide
+    whether to enable draft creation.
+    
+    Returns exportable JSON structure for executive presentation.
+    """
+    # Gather all metrics
+    score_dist = await get_match_score_distribution()
+    alias_metrics = await get_alias_exception_metrics(days=days)
+    vendor_stability = await get_vendor_stability_analysis(days=days)
+    shadow_status = await get_shadow_mode_status()
+    automation_metrics = await get_automation_metrics(days=days)
+    
+    # Calculate production readiness score (0-100)
+    readiness_factors = []
+    
+    # Factor 1: High confidence percentage (weight: 30)
+    high_conf_pct = score_dist["summary"]["high_confidence_pct"]
+    readiness_factors.append({
+        "factor": "High Confidence Documents",
+        "value": high_conf_pct,
+        "target": 60,
+        "score": min(30, (high_conf_pct / 60) * 30),
+        "max_score": 30
+    })
+    
+    # Factor 2: Alias exception rate (weight: 25)
+    alias_exc_rate = alias_metrics["alias_totals"]["alias_exception_rate"]
+    alias_score = max(0, 25 - (alias_exc_rate * 2))  # Penalty for high exception rate
+    readiness_factors.append({
+        "factor": "Alias Exception Rate",
+        "value": alias_exc_rate,
+        "target": "<10%",
+        "score": alias_score,
+        "max_score": 25
+    })
+    
+    # Factor 3: Automation rate (weight: 25)
+    auto_rate = automation_metrics["automation_rate"]
+    readiness_factors.append({
+        "factor": "Overall Automation Rate",
+        "value": auto_rate,
+        "target": 50,
+        "score": min(25, (auto_rate / 50) * 25),
+        "max_score": 25
+    })
+    
+    # Factor 4: Data volume (weight: 20)
+    total_docs = automation_metrics["total_documents"]
+    volume_score = min(20, (total_docs / 50) * 20)  # Need 50+ docs for full score
+    readiness_factors.append({
+        "factor": "Data Volume",
+        "value": total_docs,
+        "target": 50,
+        "score": volume_score,
+        "max_score": 20
+    })
+    
+    total_readiness_score = round(sum(f["score"] for f in readiness_factors), 1)
+    
+    # Determine recommendation
+    if total_readiness_score >= 80:
+        recommendation = "READY: System is ready for controlled draft enablement."
+        recommendation_detail = "Consider enabling CREATE_DRAFT_HEADER for a subset of high-confidence vendors."
+    elif total_readiness_score >= 60:
+        recommendation = "APPROACHING: System is close to production readiness."
+        recommendation_detail = "Continue monitoring for 1-2 more weeks. Address any low-scoring factors."
+    elif total_readiness_score >= 40:
+        recommendation = "BUILDING: System needs more time and data."
+        recommendation_detail = "Focus on improving alias coverage and vendor data hygiene."
+    else:
+        recommendation = "EARLY: System is in early shadow mode."
+        recommendation_detail = "Continue collecting data. Review vendor friction and alias exceptions."
+    
+    return {
+        "report_title": "Shadow Mode Performance Analysis",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "report_period_days": days,
+        "executive_summary": {
+            "readiness_score": total_readiness_score,
+            "readiness_max": 100,
+            "recommendation": recommendation,
+            "recommendation_detail": recommendation_detail,
+            "shadow_mode_days": shadow_status["shadow_mode"]["days_running"],
+            "total_documents_processed": total_docs,
+            "automation_rate": auto_rate,
+            "high_confidence_pct": high_conf_pct
+        },
+        "readiness_factors": readiness_factors,
+        "match_score_analysis": {
+            "buckets": score_dist["buckets"],
+            "summary": score_dist["summary"],
+            "threshold_analysis": score_dist["threshold_analysis"]
+        },
+        "alias_engine_performance": {
+            "totals": alias_metrics["alias_totals"],
+            "interpretation": alias_metrics["interpretation"],
+            "daily_trend": alias_metrics["daily_trend"],
+            "top_exception_vendors": alias_metrics["top_exception_vendors"][:5],
+            "high_contribution_vendors": alias_metrics["high_alias_contribution_vendors"][:5]
+        },
+        "vendor_friction_analysis": {
+            "total_vendors": vendor_stability["total_vendors_analyzed"],
+            "low_automation_count": vendor_stability["categories"]["low_automation"]["count"],
+            "process_issue_count": vendor_stability["categories"]["high_score_high_exception"]["count"],
+            "threshold_override_candidates": vendor_stability["threshold_override_candidates"]
+        },
+        "shadow_mode_status": shadow_status["shadow_mode"],
+        "feature_flags": shadow_status["feature_flags"],
+        "health_indicators": shadow_status["health_indicators_7d"],
+        "next_steps": [
+            "Review match score distribution for threshold confidence",
+            "Address top friction vendors",
+            "Consider creating aliases for high-exception vendors",
+            "Monitor alias exception rate trend",
+            "When readiness score >= 80, prepare for controlled enablement"
+        ]
+    }
+
+
 # ==================== APP SETUP ====================
 
 app.include_router(api_router)

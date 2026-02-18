@@ -1782,43 +1782,67 @@ def make_automation_decision(
 ) -> tuple:
     """
     Decision matrix for automation level.
-    Returns (decision, reasoning)
+    Returns (decision, reasoning, metadata)
+    
+    Metadata includes candidates if available for quick resolution.
     """
     automation_level = job_config.get("automation_level", 0)
     link_threshold = job_config.get("min_confidence_to_auto_link", 0.85)
     create_threshold = job_config.get("min_confidence_to_auto_create_draft", 0.95)
     requires_review = job_config.get("requires_human_review_if_exception", True)
     
+    metadata = {
+        "vendor_candidates": validation_results.get("vendor_candidates", []),
+        "customer_candidates": validation_results.get("customer_candidates", []),
+        "warnings": validation_results.get("warnings", [])
+    }
+    
     # Level 0: Manual only
     if automation_level == 0:
-        return "manual", "Job type configured for manual processing only"
+        return "manual", "Job type configured for manual processing only", metadata
     
     # Check validation results
     if not validation_results.get("all_passed", False):
         failed_checks = [c["check_name"] for c in validation_results.get("checks", []) if not c["passed"] and c.get("required", True)]
+        
+        # Check if we have candidates for failed checks (can be resolved with one click)
+        has_candidates = (
+            len(validation_results.get("vendor_candidates", [])) > 0 or
+            len(validation_results.get("customer_candidates", [])) > 0
+        )
+        
+        reason_suffix = ""
+        if has_candidates:
+            reason_suffix = " (candidates available for quick resolution)"
+        
         if requires_review:
-            return "needs_review", f"Validation failed: {', '.join(failed_checks)}"
-        return "manual", f"Validation failed but review not required: {', '.join(failed_checks)}"
+            return "needs_review", f"Validation failed: {', '.join(failed_checks)}{reason_suffix}", metadata
+        return "manual", f"Validation failed but review not required: {', '.join(failed_checks)}", metadata
+    
+    # Check warnings (non-blocking issues)
+    warning_notes = ""
+    if validation_results.get("warnings"):
+        warning_notes = f" (with {len(validation_results['warnings'])} warning(s))"
     
     # Check confidence thresholds
     if ai_confidence < link_threshold:
-        return "needs_review", f"Confidence {ai_confidence:.2%} below link threshold {link_threshold:.2%}"
+        return "needs_review", f"Confidence {ai_confidence:.2%} below link threshold {link_threshold:.2%}", metadata
     
     # Level 1: Auto-link only
     if automation_level == 1:
         if ai_confidence >= link_threshold:
-            return "auto_link", f"Confidence {ai_confidence:.2%} meets link threshold, auto-linking to existing BC record"
-        return "needs_review", f"Confidence {ai_confidence:.2%} below threshold"
+            return "auto_link", f"Confidence {ai_confidence:.2%} meets link threshold, auto-linking to existing BC record{warning_notes}", metadata
+        return "needs_review", f"Confidence {ai_confidence:.2%} below threshold", metadata
     
     # Level 2: Auto-create draft
     if automation_level >= 2:
         if ai_confidence >= create_threshold:
-            return "auto_create", f"Confidence {ai_confidence:.2%} meets create threshold, creating draft BC document"
+            return "auto_create", f"Confidence {ai_confidence:.2%} meets create threshold, creating draft BC document{warning_notes}", metadata
         elif ai_confidence >= link_threshold:
-            return "auto_link", f"Confidence {ai_confidence:.2%} meets link threshold only, auto-linking"
-        return "needs_review", f"Confidence {ai_confidence:.2%} below thresholds"
+            return "auto_link", f"Confidence {ai_confidence:.2%} meets link threshold only, auto-linking{warning_notes}", metadata
+        return "needs_review", f"Confidence {ai_confidence:.2%} below thresholds", metadata
     
-    return "needs_review", "Default fallback to review"
+    return "needs_review", "Default fallback to review", metadata
 
 # ==================== EMAIL WATCHER SERVICE ====================
 

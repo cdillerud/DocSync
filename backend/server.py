@@ -990,6 +990,26 @@ class VendorMatchMethod:
     ALIAS = "alias"                 # Alias lookup table
     FUZZY = "fuzzy"                 # Fuzzy match with score
 
+class TransactionAction:
+    """Track what action was taken on the BC side"""
+    NONE = "NONE"                       # No BC action taken
+    LINKED_ONLY = "LINKED_ONLY"         # Document attached to existing record
+    DRAFT_CREATED = "DRAFT_CREATED"     # Draft invoice header created
+    DRAFT_WITH_LINES = "DRAFT_WITH_LINES"  # Future: draft with lines
+
+# Phase 4: CREATE_DRAFT_HEADER configuration
+# These are safety thresholds that must be met before creating a draft
+DRAFT_CREATION_CONFIG = {
+    # Match methods eligible for draft creation (high confidence methods only)
+    "eligible_match_methods": ["exact_no", "exact_name", "normalized", "alias"],
+    # Minimum match score for draft creation (stricter than auto-link)
+    "min_match_score_for_draft": 0.92,
+    # Minimum AI confidence for draft creation
+    "min_confidence_for_draft": 0.92,
+    # Number of days to look back for duplicate check
+    "duplicate_lookback_days": 365,
+}
+
 # Default Job Type configurations - Production Grade
 DEFAULT_JOB_TYPES = {
     "AP_Invoice": {

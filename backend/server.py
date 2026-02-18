@@ -974,7 +974,19 @@ class AutomationLevel:
     AUTO_CREATE_DRAFT = 2 # Create draft BC documents
     ADVANCED = 3          # Future: auto-populate lines, etc.
 
-# Default Job Type configurations
+class POValidationMode:
+    PO_REQUIRED = "PO_REQUIRED"           # PO must exist and match in BC
+    PO_IF_PRESENT = "PO_IF_PRESENT"       # Validate PO if extracted, but don't fail if missing
+    PO_NOT_REQUIRED = "PO_NOT_REQUIRED"   # Skip PO validation entirely
+
+class VendorMatchMethod:
+    EXACT_NO = "exact_no"           # Exact match on Vendor No
+    EXACT_NAME = "exact_name"       # Exact match on Vendor Name
+    NORMALIZED = "normalized"       # Normalized match (strip Inc, LLC, punctuation)
+    ALIAS = "alias"                 # Alias lookup table
+    FUZZY = "fuzzy"                 # Fuzzy match with score
+
+# Default Job Type configurations - Production Grade
 DEFAULT_JOB_TYPES = {
     "AP_Invoice": {
         "job_type": "AP_Invoice",
@@ -982,9 +994,13 @@ DEFAULT_JOB_TYPES = {
         "automation_level": 1,
         "min_confidence_to_auto_link": 0.85,
         "min_confidence_to_auto_create_draft": 0.95,
-        "requires_po_validation": True,
+        # PO Validation - use PO_IF_PRESENT for real-world flexibility
+        "po_validation_mode": "PO_IF_PRESENT",
         "allow_duplicate_check_override": False,
         "requires_human_review_if_exception": True,
+        # Vendor matching configuration
+        "vendor_match_threshold": 0.80,  # Minimum score for auto-accept
+        "vendor_match_strategies": ["exact_no", "exact_name", "normalized", "fuzzy"],
         "sharepoint_folder": "AP_Invoices",
         "bc_entity": "purchaseInvoices",
         "required_extractions": ["vendor", "invoice_number", "amount"],
@@ -997,9 +1013,11 @@ DEFAULT_JOB_TYPES = {
         "automation_level": 1,
         "min_confidence_to_auto_link": 0.80,
         "min_confidence_to_auto_create_draft": 0.92,
-        "requires_po_validation": False,
+        "po_validation_mode": "PO_NOT_REQUIRED",
         "allow_duplicate_check_override": False,
         "requires_human_review_if_exception": True,
+        "vendor_match_threshold": 0.80,
+        "vendor_match_strategies": ["exact_no", "exact_name", "normalized", "fuzzy"],
         "sharepoint_folder": "Sales_POs",
         "bc_entity": "salesOrders",
         "required_extractions": ["customer", "po_number", "order_date"],
@@ -1012,9 +1030,11 @@ DEFAULT_JOB_TYPES = {
         "automation_level": 0,  # Manual only - these are our invoices
         "min_confidence_to_auto_link": 0.90,
         "min_confidence_to_auto_create_draft": 0.98,
-        "requires_po_validation": False,
+        "po_validation_mode": "PO_NOT_REQUIRED",
         "allow_duplicate_check_override": False,
         "requires_human_review_if_exception": True,
+        "vendor_match_threshold": 0.80,
+        "vendor_match_strategies": ["exact_no", "exact_name", "normalized", "fuzzy"],
         "sharepoint_folder": "AR_Invoices",
         "bc_entity": "salesInvoices",
         "required_extractions": ["customer", "invoice_number", "amount"],
@@ -1027,15 +1047,23 @@ DEFAULT_JOB_TYPES = {
         "automation_level": 1,
         "min_confidence_to_auto_link": 0.75,
         "min_confidence_to_auto_create_draft": 0.95,
-        "requires_po_validation": False,
+        "po_validation_mode": "PO_NOT_REQUIRED",
         "allow_duplicate_check_override": True,
         "requires_human_review_if_exception": True,
+        "vendor_match_threshold": 0.75,
+        "vendor_match_strategies": ["exact_no", "exact_name", "normalized", "fuzzy"],
         "sharepoint_folder": "Remittances",
         "bc_entity": "vendorPayments",
         "required_extractions": ["vendor", "payment_amount", "payment_date"],
         "optional_extractions": ["invoice_references", "check_number"],
         "enabled": True
     }
+}
+
+# Vendor Alias Map (company-specific)
+VENDOR_ALIAS_MAP = {
+    # "Alias on Invoice": "Vendor Name in BC"
+    # Add company-specific aliases here
 }
 
 # Email config schema

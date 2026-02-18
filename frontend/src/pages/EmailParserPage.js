@@ -116,6 +116,7 @@ export default function EmailParserPage() {
         needs_review_folder: emailConfig.needs_review_folder || 'Needs Review',
         processed_folder: emailConfig.processed_folder || 'Processed',
         enabled: emailConfig.enabled || false,
+        interval_minutes: emailConfig.interval_minutes || 5,
       });
     }
   }, [emailConfig]);

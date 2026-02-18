@@ -120,6 +120,23 @@ async def get_graph_token():
             raise Exception(f"Graph token error: {error_desc}")
         return data["access_token"]
 
+async def get_email_token():
+    """Get Graph token specifically for email access (Mail.Read)"""
+    # Use EMAIL_CLIENT_ID/SECRET if configured, otherwise fall back to GRAPH credentials
+    client_id = EMAIL_CLIENT_ID or GRAPH_CLIENT_ID
+    client_secret = EMAIL_CLIENT_SECRET or GRAPH_CLIENT_SECRET
+    
+    if DEMO_MODE or not client_id:
+        return "mock-email-token"
+    async with httpx.AsyncClient() as c:
+        resp = await c.post(f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token",
+            data={"grant_type": "client_credentials", "client_id": client_id, "client_secret": client_secret, "scope": "https://graph.microsoft.com/.default"})
+        data = resp.json()
+        if "access_token" not in data:
+            error_desc = data.get("error_description", data.get("error", "Unknown auth error"))
+            raise Exception(f"Email token error: {error_desc}")
+        return data["access_token"]
+
 async def get_bc_token():
     if DEMO_MODE or not BC_CLIENT_ID:
         return "mock-bc-token"

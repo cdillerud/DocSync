@@ -3589,14 +3589,16 @@ async def get_email_polling_status():
         },
         "last_24h": {
             "runs_count": len(recent_runs),
-            "messages_scanned": total_scanned,
-            "attachments_processed": total_processed,
+            "messages_detected": total_detected,
+            "attachments_ingested": total_ingested,
             "attachments_skipped_duplicate": total_skipped_dup,
             "attachments_skipped_inline": total_skipped_inline,
             "attachments_failed": total_failed
         },
+        "watermark": watermark,
         "recent_runs": recent_runs[:5],
-        "health": "healthy" if total_failed == 0 else ("degraded" if total_failed < total_processed else "unhealthy")
+        "health": "healthy" if total_failed == 0 else ("degraded" if total_failed < total_ingested else "unhealthy"),
+        "permissions_required": "Mail.Read (application, read-only)"
     }
 
 

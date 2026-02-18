@@ -3923,11 +3923,15 @@ async def update_email_watcher_settings(config: EmailWatchConfig):
     update_data = config.model_dump()
     update_data["_key"] = "email_watcher"
     
-    await db.hub_config.update_one(
+    logger.info("Saving email watcher config: %s", update_data)
+    
+    result = await db.hub_config.update_one(
         {"_key": "email_watcher"},
         {"$set": update_data},
         upsert=True
     )
+    
+    logger.info("MongoDB update result: matched=%s, modified=%s", result.matched_count, result.modified_count)
     
     return await get_email_watcher_config()
 

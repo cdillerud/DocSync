@@ -3119,8 +3119,6 @@ async def process_incoming_email(email_id: str, mailbox_address: str):
     
     # Process each attachment
     for attachment in attachments:
-        import base64
-        
         try:
             # Decode attachment content
             content_bytes = base64.b64decode(attachment.get("content_bytes", ""))

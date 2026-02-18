@@ -2014,8 +2014,32 @@ async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: d
         "customer_candidates": [],
         "normalized_fields": normalized_fields,
         "match_method": "none",  # Top-level match method for tracking
-        "match_score": 0.0
+        "match_score": 0.0,
+        # Phase 7 extraction quality metrics
+        "extraction_quality": {
+            "vendor_extracted": bool(normalized_fields.get("vendor")),
+            "invoice_number_extracted": bool(normalized_fields.get("invoice_number")),
+            "amount_extracted": normalized_fields.get("amount") is not None,
+            "po_detected": bool(normalized_fields.get("po_number")),
+            "due_date_extracted": bool(normalized_fields.get("due_date")),
+            "completeness_score": 0.0,  # Will be calculated
+            "ready_for_draft_candidate": False
+        }
     }
+    
+    # Calculate extraction completeness score
+    required_fields = ["vendor", "invoice_number", "amount"]
+    optional_fields = ["po_number", "due_date"]
+    
+    required_count = sum(1 for f in required_fields if normalized_fields.get(f))
+    optional_count = sum(1 for f in optional_fields if normalized_fields.get(f))
+    
+    # Completeness: required fields worth 80%, optional worth 20%
+    completeness = (required_count / len(required_fields)) * 0.8 + (optional_count / len(optional_fields)) * 0.2
+    validation_results["extraction_quality"]["completeness_score"] = round(completeness, 2)
+    
+    # Ready for draft candidate if all required fields extracted
+    validation_results["extraction_quality"]["ready_for_draft_candidate"] = required_count == len(required_fields)
     
     if DEMO_MODE or not BC_CLIENT_ID:
         validation_results["checks"].append({

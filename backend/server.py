@@ -3057,8 +3057,12 @@ async def get_vendor_friction_metrics(days: int = Query(30)):
             "created_utc": {"$gte": cutoff_date},
             "extracted_fields.vendor": {"$exists": True}
         },
-        {"extracted_fields.vendor": 1, "status": 1, "ai_confidence": 1, "validation_results": 1, "_id": 0}
+        {"extracted_fields.vendor": 1, "status": 1, "ai_confidence": 1, "match_method": 1, "_id": 0}
     ).to_list(5000)
+    
+    # Get existing aliases
+    aliases = await db.vendor_aliases.find({}, {"alias_string": 1, "vendor_name": 1}).to_list(500)
+    alias_strings = set(a.get("alias_string", "").lower() for a in aliases)
     
     # Aggregate by vendor
     vendor_stats = {}
@@ -3070,11 +3074,17 @@ async def get_vendor_friction_metrics(days: int = Query(30)):
                 "linked": 0,
                 "needs_review": 0,
                 "exception": 0,
-                "total_confidence": 0
+                "total_confidence": 0,
+                "alias_matches": 0,
+                "has_alias": vendor.lower() in alias_strings
             }
         
         vendor_stats[vendor]["total"] += 1
         vendor_stats[vendor]["total_confidence"] += doc.get("ai_confidence", 0)
+        
+        # Track alias-based matches
+        if doc.get("match_method") == "alias":
+            vendor_stats[vendor]["alias_matches"] += 1
         
         status = doc.get("status", "")
         if status == "LinkedToBC":
@@ -3084,7 +3094,7 @@ async def get_vendor_friction_metrics(days: int = Query(30)):
         elif status == "Exception":
             vendor_stats[vendor]["exception"] += 1
     
-    # Calculate friction index and sort
+    # Calculate friction index and ROI hints
     vendor_friction = []
     for vendor, stats in vendor_stats.items():
         total = stats["total"]
@@ -3096,14 +3106,32 @@ async def get_vendor_friction_metrics(days: int = Query(30)):
             # Friction index: higher = more manual intervention needed
             friction_index = round(exception_rate * 100, 1)
             
+            # ROI hint: estimate potential improvement if alias is created
+            # If no alias exists and high friction, alias could help
+            potential_auto_rate = None
+            roi_hint = None
+            
+            if not stats["has_alias"] and friction_index > 50 and avg_confidence >= 0.85:
+                # Documents with high confidence but failing vendor match
+                # Would likely auto-link if alias existed
+                potential_docs = stats["needs_review"]
+                potential_auto_rate = round((stats["linked"] + potential_docs) / total * 100, 1)
+                roi_hint = f"Creating alias could reduce review rate from {friction_index}% to ~{100 - potential_auto_rate}%"
+            elif stats["has_alias"]:
+                roi_hint = "Alias exists - monitoring impact"
+            
             vendor_friction.append({
                 "vendor": vendor,
                 "total_documents": total,
                 "auto_linked": stats["linked"],
                 "needs_review": stats["needs_review"],
+                "alias_matches": stats["alias_matches"],
                 "auto_rate": round(auto_rate * 100, 1),
                 "avg_confidence": round(avg_confidence, 3),
-                "friction_index": friction_index
+                "friction_index": friction_index,
+                "has_alias": stats["has_alias"],
+                "potential_auto_rate": potential_auto_rate,
+                "roi_hint": roi_hint
             })
     
     # Sort by friction index (highest first = most opportunity)

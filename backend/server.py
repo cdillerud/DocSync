@@ -29,6 +29,13 @@ DEMO_MODE = os.environ.get('DEMO_MODE', 'true').lower() == 'true'
 JWT_SECRET = os.environ.get('JWT_SECRET', 'gpi-hub-secret-key')
 # Feature flag for Phase 4: CREATE_DRAFT_HEADER (Sandbox only)
 ENABLE_CREATE_DRAFT_HEADER = os.environ.get('ENABLE_CREATE_DRAFT_HEADER', 'false').lower() == 'true'
+# Phase 7 C1: Email Polling Config (Observation Infrastructure)
+EMAIL_POLLING_ENABLED = os.environ.get('EMAIL_POLLING_ENABLED', 'false').lower() == 'true'
+EMAIL_POLLING_INTERVAL_MINUTES = int(os.environ.get('EMAIL_POLLING_INTERVAL_MINUTES', '5'))
+EMAIL_POLLING_USER = os.environ.get('EMAIL_POLLING_USER', '')  # ap@gamerpackaging.com
+EMAIL_POLLING_LOOKBACK_MINUTES = int(os.environ.get('EMAIL_POLLING_LOOKBACK_MINUTES', '60'))
+EMAIL_POLLING_MAX_MESSAGES = int(os.environ.get('EMAIL_POLLING_MAX_MESSAGES', '25'))
+EMAIL_POLLING_MAX_ATTACHMENT_MB = int(os.environ.get('EMAIL_POLLING_MAX_ATTACHMENT_MB', '25'))
 TENANT_ID = os.environ.get('TENANT_ID', '')
 BC_ENVIRONMENT = os.environ.get('BC_ENVIRONMENT', '')
 BC_COMPANY_NAME = os.environ.get('BC_COMPANY_NAME', '')

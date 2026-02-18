@@ -3415,11 +3415,11 @@ async def poll_mailbox_for_attachments():
                 sender = msg.get("from", {}).get("emailAddress", {}).get("address", "unknown")
                 
                 try:
-                    # Fetch attachments
+                    # Fetch attachments list (without contentBytes - not allowed in list query)
                     att_resp = await client.get(
                         f"https://graph.microsoft.com/v1.0/users/{EMAIL_POLLING_USER}/messages/{msg_id}/attachments",
                         headers={"Authorization": f"Bearer {token}"},
-                        params={"$select": "id,name,contentType,size,contentBytes"}
+                        params={"$select": "id,name,contentType,size"}
                     )
                     
                     if att_resp.status_code != 200:
@@ -3433,7 +3433,6 @@ async def poll_mailbox_for_attachments():
                         filename = att.get("name", "unknown")
                         content_type = att.get("contentType", "")
                         size_bytes = att.get("size", 0)
-                        content_b64 = att.get("contentBytes", "")
                         
                         # Skip check
                         should_skip, skip_reason = should_skip_attachment(filename, content_type, size_bytes)

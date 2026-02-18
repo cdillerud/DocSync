@@ -1772,67 +1772,6 @@ async def _validate_po(c, token: str, company_id: str, po_number: str, validatio
                     "check_name": "po_not_found",
                     "details": f"PO '{po_number}' was extracted but not found in BC - not blocking"
                 })
-                        headers={"Authorization": f"Bearer {token}"},
-                        params={"$filter": f"vendorInvoiceNumber eq '{invoice_number}'"}
-                    )
-                    if resp.status_code == 200:
-                        existing = resp.json().get("value", [])
-                        if existing and not job_config.get("allow_duplicate_check_override"):
-                            validation_results["all_passed"] = False
-                            validation_results["checks"].append({
-                                "check_name": "duplicate_check",
-                                "passed": False,
-                                "details": f"Duplicate invoice found: {invoice_number}",
-                                "required": True
-                            })
-                        else:
-                            validation_results["checks"].append({
-                                "check_name": "duplicate_check",
-                                "passed": True,
-                                "details": "No duplicate invoice found",
-                                "required": True
-                            })
-            
-            # Customer match for Sales_PO
-            elif job_type == "Sales_PO":
-                customer_name = extracted_fields.get("customer", "")
-                if customer_name:
-                    resp = await c.get(
-                        f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/customers",
-                        headers={"Authorization": f"Bearer {token}"},
-                        params={"$filter": f"contains(displayName,'{customer_name}')"}
-                    )
-                    if resp.status_code == 200:
-                        customers = resp.json().get("value", [])
-                        if customers:
-                            validation_results["checks"].append({
-                                "check_name": "customer_match",
-                                "passed": True,
-                                "details": f"Found customer: {customers[0].get('displayName')}",
-                                "required": True
-                            })
-                            validation_results["bc_record_id"] = customers[0].get("id")
-                            validation_results["bc_record_info"] = customers[0]
-                        else:
-                            validation_results["all_passed"] = False
-                            validation_results["checks"].append({
-                                "check_name": "customer_match",
-                                "passed": False,
-                                "details": f"No customer found matching '{customer_name}'",
-                                "required": True
-                            })
-    
-    except Exception as e:
-        logger.error("BC validation failed: %s", str(e))
-        validation_results["all_passed"] = False
-        validation_results["checks"].append({
-            "check_name": "bc_error",
-            "passed": False,
-            "details": f"BC validation error: {str(e)}",
-            "required": True
-        })
-    
-    return validation_results
 
 # ==================== AUTOMATION DECISION ENGINE ====================
 

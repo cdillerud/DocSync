@@ -2474,6 +2474,131 @@ async def move_email_to_folder(email_id: str, mailbox_address: str, folder_name:
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+# ==================== AUTOMATIC WORKFLOW TRIGGER ====================
+
+async def on_document_ingested(doc_id: str, source: str = "unknown"):
+    """
+    Triggered automatically after every successful document ingestion.
+    Runs validation workflow and creates audit trail.
+    
+    Called by all ingestion paths:
+    - Manual upload
+    - Email polling  
+    - Backfill
+    - API upload
+    
+    Safety: Does NOT create BC drafts in Phase 7 (controlled by ENABLE_CREATE_DRAFT_HEADER flag)
+    """
+    run_id = uuid.uuid4().hex[:8]
+    correlation_id = uuid.uuid4().hex[:8]
+    started_at = datetime.now(timezone.utc)
+    
+    logger.info("[Workflow:%s] Auto-triggered for doc %s (source: %s)", run_id, doc_id, source)
+    
+    try:
+        # Get document
+        doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+        if not doc:
+            logger.error("[Workflow:%s] Document not found: %s", run_id, doc_id)
+            return
+        
+        old_status = doc.get("status", "Unknown")
+        job_type = doc.get("suggested_job_type", "AP_Invoice")
+        extracted_fields = doc.get("extracted_fields", {})
+        
+        # Get job config
+        job_configs = await db.hub_job_types.find_one({"job_type": job_type}, {"_id": 0})
+        if not job_configs:
+            job_configs = DEFAULT_JOB_TYPES.get(job_type, DEFAULT_JOB_TYPES["AP_Invoice"])
+        
+        # Run BC validation
+        validation_results = await validate_bc_match(job_type, extracted_fields, job_configs)
+        
+        # Make automation decision
+        confidence = doc.get("ai_confidence", 0.0)
+        decision, reasoning, decision_metadata = make_automation_decision(job_configs, confidence, validation_results)
+        
+        # Determine new status based on decision
+        new_status = old_status
+        if decision == "auto_link" and validation_results.get("all_passed"):
+            new_status = "ReadyToLink"
+        elif decision == "needs_review":
+            new_status = "NeedsReview"
+        elif decision == "manual":
+            new_status = "NeedsReview"
+        elif decision == "exception":
+            new_status = "Exception"
+        
+        # Update document
+        update_data = {
+            "validation_results": validation_results,
+            "automation_decision": decision,
+            "match_method": validation_results.get("match_method", "none"),
+            "match_score": validation_results.get("match_score", 0.0),
+            "vendor_candidates": decision_metadata.get("vendor_candidates", []),
+            "customer_candidates": decision_metadata.get("customer_candidates", []),
+            "warnings": decision_metadata.get("warnings", []),
+            "status": new_status,
+            "workflow_state": "Validated",
+            "updated_utc": datetime.now(timezone.utc).isoformat()
+        }
+        
+        await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
+        
+        # Create workflow audit trail entry
+        duration = (datetime.now(timezone.utc) - started_at).total_seconds()
+        
+        await db.hub_workflow_runs.insert_one({
+            "run_id": run_id,
+            "correlation_id": correlation_id,
+            "document_id": doc_id,
+            "workflow_type": "auto_validation",
+            "source": source,
+            "status": "Completed",
+            "started_at": started_at.isoformat(),
+            "ended_at": datetime.now(timezone.utc).isoformat(),
+            "duration_seconds": round(duration, 2),
+            "steps": [
+                {
+                    "step": "Validation",
+                    "status": "Completed",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "details": {
+                        "old_status": old_status,
+                        "new_status": new_status,
+                        "match_method": validation_results.get("match_method", "none"),
+                        "match_score": validation_results.get("match_score", 0.0),
+                        "automation_decision": decision,
+                        "reasoning": reasoning
+                    }
+                }
+            ]
+        })
+        
+        logger.info("[Workflow:%s] Complete: %s → %s (decision: %s, score: %.2f)", 
+                    run_id, old_status, new_status, decision, validation_results.get("match_score", 0.0))
+        
+    except Exception as e:
+        # Log error but don't fail silently - create an error audit entry
+        logger.error("[Workflow:%s] Error processing doc %s: %s", run_id, doc_id, str(e))
+        
+        try:
+            await db.hub_workflow_runs.insert_one({
+                "run_id": run_id,
+                "correlation_id": correlation_id,
+                "document_id": doc_id,
+                "workflow_type": "auto_validation",
+                "source": source,
+                "status": "Failed",
+                "started_at": started_at.isoformat(),
+                "ended_at": datetime.now(timezone.utc).isoformat(),
+                "error": str(e),
+                "steps": []
+            })
+        except:
+            pass  # Don't let audit logging failure mask the original error
+
+
 # ==================== EMAIL INTAKE ENDPOINTS ====================
 
 async def _internal_intake_document(

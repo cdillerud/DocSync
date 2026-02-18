@@ -3605,7 +3605,8 @@ async def get_email_polling_status():
             "user": EMAIL_POLLING_USER or "(not configured)",
             "lookback_minutes": EMAIL_POLLING_LOOKBACK_MINUTES,
             "max_messages_per_run": EMAIL_POLLING_MAX_MESSAGES,
-            "max_attachment_mb": EMAIL_POLLING_MAX_ATTACHMENT_MB
+            "max_attachment_mb": EMAIL_POLLING_MAX_ATTACHMENT_MB,
+            "email_app_configured": bool(EMAIL_CLIENT_ID)
         },
         "last_24h": {
             "runs_count": len(recent_runs),

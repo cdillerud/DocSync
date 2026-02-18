@@ -4665,6 +4665,12 @@ async def get_shadow_mode_status():
             "top_friction_vendor": top_friction_vendor,
             "total_docs_processed": len(docs_with_score)
         },
+        # Phase C1: Email polling health
+        "email_polling": {
+            "enabled": EMAIL_POLLING_ENABLED,
+            "user": EMAIL_POLLING_USER or "(not configured)",
+            "interval_minutes": EMAIL_POLLING_INTERVAL_MINUTES
+        },
         "readiness_assessment": {
             "high_confidence_ok": high_conf_pct >= 60,
             "alias_exception_ok": alias_exception_rate_7d < 15,

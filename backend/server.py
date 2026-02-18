@@ -1605,7 +1605,16 @@ async def move_email_to_folder(email_id: str, mailbox_address: str, folder_name:
 # ==================== EMAIL INTAKE ENDPOINTS ====================
 
 @api_router.post("/documents/intake")
-async def intake_document(intake: DocumentIntake, file: UploadFile = File(...)):
+async def intake_document(
+    file: UploadFile = File(...),
+    source: str = Form("email"),
+    sender: Optional[str] = Form(None),
+    subject: Optional[str] = Form(None),
+    attachment_name: Optional[str] = Form(None),
+    content_hash: Optional[str] = Form(None),
+    email_id: Optional[str] = Form(None),
+    email_received_utc: Optional[str] = Form(None)
+):
     """
     Receive a document from email or other source.
     Runs AI classification and automation decision matrix.
@@ -1615,6 +1624,9 @@ async def intake_document(intake: DocumentIntake, file: UploadFile = File(...)):
     doc_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     
+    # Use provided attachment name or fall back to filename
+    final_filename = attachment_name or file.filename
+    
     # Store file locally
     file_path = UPLOAD_DIR / doc_id
     file_path.write_bytes(file_content)
@@ -1622,15 +1634,15 @@ async def intake_document(intake: DocumentIntake, file: UploadFile = File(...)):
     # Create document record
     doc = {
         "id": doc_id,
-        "source": intake.source,
-        "file_name": intake.attachment_name,
+        "source": source,
+        "file_name": final_filename,
         "sha256_hash": computed_hash,
         "file_size": len(file_content),
         "content_type": file.content_type,
-        "email_sender": intake.sender,
-        "email_subject": intake.subject,
-        "email_id": intake.email_id,
-        "email_received_utc": intake.email_received_utc,
+        "email_sender": sender,
+        "email_subject": subject,
+        "email_id": email_id,
+        "email_received_utc": email_received_utc,
         "sharepoint_drive_id": None,
         "sharepoint_item_id": None,
         "sharepoint_web_url": None,
@@ -1654,7 +1666,7 @@ async def intake_document(intake: DocumentIntake, file: UploadFile = File(...)):
     
     # Run AI classification
     logger.info("Running AI classification for document %s", doc_id)
-    classification = await classify_document_with_ai(str(file_path), intake.attachment_name)
+    classification = await classify_document_with_ai(str(file_path), final_filename)
     
     suggested_type = classification.get("suggested_job_type", "Unknown")
     confidence = classification.get("confidence", 0.0)

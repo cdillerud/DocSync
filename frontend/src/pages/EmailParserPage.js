@@ -397,6 +397,29 @@ export default function EmailParserPage() {
 
               <Separator />
 
+              {/* Polling Interval */}
+              <div className="space-y-2">
+                <Label htmlFor="interval_minutes">Polling Interval (minutes)</Label>
+                <div className="flex items-center gap-3">
+                  <Input
+                    id="interval_minutes"
+                    type="number"
+                    min="1"
+                    max="60"
+                    value={emailConfigForm.interval_minutes}
+                    onChange={(e) => setEmailConfigForm(prev => ({ ...prev, interval_minutes: parseInt(e.target.value) || 5 }))}
+                    className="w-24 font-mono"
+                    data-testid="polling-interval-input"
+                  />
+                  <span className="text-sm text-muted-foreground">minutes between polls</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  How often the system checks for new emails (1-60 minutes). Lower values = faster detection but more API calls.
+                </p>
+              </div>
+
+              <Separator />
+
               {/* Mailbox Address */}
               <div className="space-y-2">
                 <Label htmlFor="mailbox_address">Mailbox Address</Label>

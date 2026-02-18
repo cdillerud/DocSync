@@ -3483,13 +3483,19 @@ async def record_mail_intake_log(
     return log_entry
 
 
-async def check_duplicate_mail_intake(internet_message_id: str, attachment_hash: str) -> bool:
-    """Check if this attachment was already processed (idempotency)."""
-    existing = await db.mail_intake_log.find_one({
-        "internet_message_id": internet_message_id,
-        "attachment_hash": attachment_hash,
-        "status": "Processed"
-    })
+async def check_duplicate_mail_intake(internet_message_id: str, attachment_hash: str, message_id: str = None, attachment_id: str = None) -> bool:
+    """Check if this attachment was already processed (idempotency).
+    
+    Primary key: internetMessageId + attachment_hash
+    Fallback: message_id + attachment_id (Graph-specific IDs)
+    """
+    query = {"$or": [
+        {"internet_message_id": internet_message_id, "attachment_hash": attachment_hash}
+    ]}
+    if message_id and attachment_id:
+        query["$or"].append({"message_id": message_id, "attachment_id": attachment_id})
+    
+    existing = await db.mail_intake_log.find_one(query)
     return existing is not None
 
 

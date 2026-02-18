@@ -1,0 +1,82 @@
+{
+  "summary": "Phase 3: Alias Impact Integration - All 21 backend tests passed. Frontend UI verified with all 4 tabs working correctly. Reprocess endpoint is idempotent and doesn't duplicate SP/BC records.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Audit Dashboard - Charts",
+        "issues": ["Console warnings about chart width/height being -1 - charts render but show warnings. Non-blocking."]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase3_alias_impact.py",
+    "/app/test_reports/pytest/phase3_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Reprocess endpoint correctly prevents duplication - SharePoint IDs unchanged after reprocess",
+    "LinkedToBC documents correctly blocked from reprocessing",
+    "match_method_breakdown includes all 7 methods: exact_no, exact_name, normalized, alias, fuzzy, manual, none",
+    "Vendor friction metrics include has_alias, alias_matches, and roi_hint fields",
+    "ROI hints correctly show potential improvement when alias doesn't exist"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_phase3_alias_impact.py (new test file)"
+  ],
+  "success_rate": {
+    "backend": "100% (21/21 tests passed)",
+    "frontend": "100% (all tabs and features working)"
+  },
+  "seed_data_creation": "Test aliases with TEST_ prefix were created and cleaned up during testing",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Phase 3 Alias Impact Integration fully functional. Key endpoints tested: POST /api/documents/{id}/reprocess (idempotent, no SP/BC duplication), GET /api/metrics/automation (includes match_method_breakdown, alias_auto_linked, alias_exception_rate), GET /api/metrics/vendors (includes has_alias, roi_hint, alias_matches). Frontend Audit Dashboard shows all metrics correctly in Intelligence and Vendor Friction tabs.",
+  "tested_endpoints": {
+    "POST /api/documents/{id}/reprocess": {
+      "status": "PASS",
+      "notes": "Safe reprocess - idempotent, no SP/BC duplication, updates match_method if alias matches, blocks LinkedToBC documents"
+    },
+    "GET /api/metrics/automation": {
+      "status": "PASS",
+      "notes": "Returns match_method_breakdown (7 methods), alias_auto_linked count, alias_exception_rate percentage"
+    },
+    "GET /api/metrics/vendors": {
+      "status": "PASS",
+      "notes": "Returns has_alias (boolean), roi_hint (string or null), alias_matches (count) per vendor"
+    },
+    "GET /api/metrics/alias-impact": {
+      "status": "PASS",
+      "notes": "Returns total_aliases, match_method_distribution, alias_contribution percentage"
+    }
+  },
+  "frontend_ui_verified": {
+    "Audit Dashboard - Overview Tab": "PASS - Status Distribution pie chart, Confidence Distribution bar chart, Job Type Performance",
+    "Audit Dashboard - Vendor Friction Tab": "PASS - Shows vendors with friction index, has_alias indicator, ROI hints, Add Alias button",
+    "Audit Dashboard - Intelligence Tab": "PASS - Match Method Breakdown cards (7 methods), Match Method Distribution chart, Alias Intelligence stats",
+    "Audit Dashboard - Trends Tab": "PASS - Daily Processing Trends, Resolution Time charts"
+  },
+  "phase3_features_verified": {
+    "Document match_method field": "PASS - Documents store match_method (exact_no, exact_name, normalized, alias, fuzzy, manual, none)",
+    "Document match_score field": "PASS - Documents store match_score (0.0 to 1.0)",
+    "Reprocess idempotency": "PASS - SharePoint IDs unchanged after reprocess",
+    "Reprocess no BC duplication": "PASS - LinkedToBC documents blocked from reprocessing",
+    "Reprocess updates match_method": "PASS - match_method updated if alias now matches",
+    "Metrics match_method_breakdown": "PASS - All 7 match methods tracked",
+    "Metrics alias_auto_linked": "PASS - Count of alias-matched LinkedToBC documents",
+    "Metrics alias_exception_rate": "PASS - Percentage of alias matches that went to NeedsReview",
+    "Vendor has_alias": "PASS - Boolean indicating if vendor has alias mapping",
+    "Vendor roi_hint": "PASS - String explaining potential improvement from alias creation",
+    "Vendor alias_matches": "PASS - Count of documents matched via alias for each vendor"
+  },
+  "mocked_services": {
+    "SharePoint": "LIVE - Real SharePoint integration (gamerpackaging1.sharepoint.com)",
+    "Business Central": "LIVE - Real BC integration",
+    "AI Classification": "LIVE - Uses real Gemini via EMERGENT_LLM_KEY"
+  }
+}

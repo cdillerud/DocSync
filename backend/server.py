@@ -959,15 +959,1117 @@ async def test_connection(service: str = Query(...)):
             return {"service": "bc", "status": "error", "detail": str(e)}
     return {"service": service, "status": "unknown", "detail": "Unknown service"}
 
-# ==================== PHASE 2 HOOKS ====================
+# ==================== PHASE 2: EMAIL PARSER AGENT ====================
 
-@api_router.post("/incoming/email")
-async def incoming_email_webhook():
-    return {"message": "Phase 2: Email ingestion not yet implemented", "status": "placeholder"}
+# Emergent LLM Key for AI Classification
+EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+
+# ==================== JOB TYPE MODELS ====================
+
+class AutomationLevel:
+    MANUAL_ONLY = 0       # Store + classify only, no auto-linking
+    AUTO_LINK = 1         # Auto-link to existing BC records
+    AUTO_CREATE_DRAFT = 2 # Create draft BC documents
+    ADVANCED = 3          # Future: auto-populate lines, etc.
+
+# Default Job Type configurations
+DEFAULT_JOB_TYPES = {
+    "AP_Invoice": {
+        "job_type": "AP_Invoice",
+        "display_name": "AP Invoice (Vendor Invoice)",
+        "automation_level": 1,
+        "min_confidence_to_auto_link": 0.85,
+        "min_confidence_to_auto_create_draft": 0.95,
+        "requires_po_validation": True,
+        "allow_duplicate_check_override": False,
+        "requires_human_review_if_exception": True,
+        "sharepoint_folder": "AP_Invoices",
+        "bc_entity": "purchaseInvoices",
+        "required_extractions": ["vendor", "invoice_number", "amount"],
+        "optional_extractions": ["po_number", "due_date", "line_items"],
+        "enabled": True
+    },
+    "Sales_PO": {
+        "job_type": "Sales_PO",
+        "display_name": "Sales PO (Customer Purchase Order)",
+        "automation_level": 1,
+        "min_confidence_to_auto_link": 0.80,
+        "min_confidence_to_auto_create_draft": 0.92,
+        "requires_po_validation": False,
+        "allow_duplicate_check_override": False,
+        "requires_human_review_if_exception": True,
+        "sharepoint_folder": "Sales_POs",
+        "bc_entity": "salesOrders",
+        "required_extractions": ["customer", "po_number", "order_date"],
+        "optional_extractions": ["amount", "ship_to", "line_items"],
+        "enabled": True
+    },
+    "AR_Invoice": {
+        "job_type": "AR_Invoice",
+        "display_name": "AR Invoice (Outgoing Invoice)",
+        "automation_level": 0,  # Manual only - these are our invoices
+        "min_confidence_to_auto_link": 0.90,
+        "min_confidence_to_auto_create_draft": 0.98,
+        "requires_po_validation": False,
+        "allow_duplicate_check_override": False,
+        "requires_human_review_if_exception": True,
+        "sharepoint_folder": "AR_Invoices",
+        "bc_entity": "salesInvoices",
+        "required_extractions": ["customer", "invoice_number", "amount"],
+        "optional_extractions": ["due_date", "line_items"],
+        "enabled": True
+    },
+    "Remittance": {
+        "job_type": "Remittance",
+        "display_name": "Remittance Advice (Payment Confirmation)",
+        "automation_level": 1,
+        "min_confidence_to_auto_link": 0.75,
+        "min_confidence_to_auto_create_draft": 0.95,
+        "requires_po_validation": False,
+        "allow_duplicate_check_override": True,
+        "requires_human_review_if_exception": True,
+        "sharepoint_folder": "Remittances",
+        "bc_entity": "vendorPayments",
+        "required_extractions": ["vendor", "payment_amount", "payment_date"],
+        "optional_extractions": ["invoice_references", "check_number"],
+        "enabled": True
+    }
+}
+
+# Email config schema
+class EmailWatchConfig(BaseModel):
+    mailbox_address: str
+    watch_folder: str = "Inbox"
+    needs_review_folder: str = "Needs Review"
+    processed_folder: str = "Processed"
+    enabled: bool = True
+
+class JobTypeConfig(BaseModel):
+    job_type: str
+    display_name: str
+    automation_level: int = 1
+    min_confidence_to_auto_link: float = 0.85
+    min_confidence_to_auto_create_draft: float = 0.95
+    requires_po_validation: bool = False
+    allow_duplicate_check_override: bool = False
+    requires_human_review_if_exception: bool = True
+    sharepoint_folder: str
+    bc_entity: str
+    required_extractions: List[str]
+    optional_extractions: List[str] = []
+    enabled: bool = True
+
+class DocumentIntake(BaseModel):
+    source: str = "email"
+    sender: Optional[str] = None
+    subject: Optional[str] = None
+    attachment_name: str
+    content_hash: str
+    email_id: Optional[str] = None
+    email_received_utc: Optional[str] = None
+
+class AIClassificationResult(BaseModel):
+    suggested_job_type: str
+    confidence: float
+    extracted_fields: dict
+    validation_results: dict
+    automation_decision: str  # "auto_link", "auto_create", "needs_review", "manual"
+    reasoning: str
+
+class ValidationCheck(BaseModel):
+    check_name: str
+    passed: bool
+    details: str
+    required: bool = True
+
+# ==================== AI CLASSIFICATION SERVICE ====================
+
+async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
+    """
+    Use Gemini to analyze a document and extract structured data.
+    Returns classification and extracted fields.
+    """
+    if not EMERGENT_LLM_KEY:
+        return {
+            "error": "EMERGENT_LLM_KEY not configured",
+            "suggested_job_type": "Unknown",
+            "confidence": 0.0,
+            "extracted_fields": {}
+        }
+    
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
+        
+        # Determine MIME type
+        ext = file_name.lower().split('.')[-1] if '.' in file_name else ''
+        mime_map = {
+            'pdf': 'application/pdf',
+            'png': 'image/png',
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg',
+            'tiff': 'image/tiff',
+            'gif': 'image/gif'
+        }
+        mime_type = mime_map.get(ext, 'application/octet-stream')
+        
+        # Initialize chat with Gemini (required for file attachments)
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"classify-{uuid.uuid4()}",
+            system_message="""You are a document classification and data extraction AI for a business document management system.
+            
+Your job is to analyze business documents and:
+1. Classify the document type (AP_Invoice, Sales_PO, AR_Invoice, Remittance, or Unknown)
+2. Extract key fields based on the document type
+3. Provide a confidence score (0.0 to 1.0) for your classification
+
+For AP_Invoice (vendor invoices we receive):
+- Extract: vendor name, invoice_number, amount, po_number (if present), due_date
+- Look for "Invoice", "Bill To" addressing our company
+
+For Sales_PO (purchase orders from our customers):
+- Extract: customer name, po_number, order_date, amount, ship_to address
+- Look for customer company names, "Purchase Order" header
+
+For AR_Invoice (invoices we send to customers):
+- Extract: customer name, invoice_number, amount, due_date
+- Look for our company name as the sender/from
+
+For Remittance (payment confirmations):
+- Extract: vendor/customer, payment_amount, payment_date, invoice_references
+- Look for "Remittance Advice", "Payment", check numbers
+
+Always respond with valid JSON in this exact format:
+{
+    "document_type": "AP_Invoice|Sales_PO|AR_Invoice|Remittance|Unknown",
+    "confidence": 0.0-1.0,
+    "extracted_fields": {
+        "vendor": "...",
+        "customer": "...",
+        "invoice_number": "...",
+        "po_number": "...",
+        "amount": "...",
+        "due_date": "...",
+        "payment_date": "...",
+        "payment_amount": "..."
+    },
+    "reasoning": "Brief explanation of classification"
+}
+
+Only include fields that you can actually extract from the document. Leave out fields that are not present."""
+        ).with_model("gemini", "gemini-2.5-flash")
+        
+        # Create file attachment
+        file_content = FileContentWithMimeType(
+            file_path=file_path,
+            mime_type=mime_type
+        )
+        
+        # Send for classification
+        user_message = UserMessage(
+            text="Please analyze this business document. Classify it and extract all relevant fields. Respond with JSON only.",
+            file_contents=[file_content]
+        )
+        
+        response = await chat.send_message(user_message)
+        
+        # Parse JSON response
+        import json
+        # Clean response - extract JSON from possible markdown code blocks
+        response_text = response.strip()
+        if response_text.startswith("```"):
+            lines = response_text.split("\n")
+            json_lines = []
+            in_json = False
+            for line in lines:
+                if line.startswith("```json"):
+                    in_json = True
+                    continue
+                if line.startswith("```") and in_json:
+                    break
+                if in_json:
+                    json_lines.append(line)
+            response_text = "\n".join(json_lines)
+        
+        result = json.loads(response_text)
+        
+        return {
+            "suggested_job_type": result.get("document_type", "Unknown"),
+            "confidence": float(result.get("confidence", 0.0)),
+            "extracted_fields": result.get("extracted_fields", {}),
+            "reasoning": result.get("reasoning", "")
+        }
+        
+    except Exception as e:
+        logger.error("AI classification failed: %s", str(e))
+        return {
+            "error": str(e),
+            "suggested_job_type": "Unknown",
+            "confidence": 0.0,
+            "extracted_fields": {},
+            "reasoning": f"Classification failed: {str(e)}"
+        }
+
+# ==================== BC MATCHING SERVICE ====================
+
+async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: dict) -> dict:
+    """
+    Validate extracted data against Business Central records.
+    Returns structured validation results.
+    """
+    validation_results = {
+        "all_passed": True,
+        "checks": [],
+        "bc_record_id": None,
+        "bc_record_info": None
+    }
+    
+    if DEMO_MODE or not BC_CLIENT_ID:
+        # Demo mode - simulate validation
+        validation_results["checks"].append({
+            "check_name": "demo_mode",
+            "passed": True,
+            "details": "Running in demo mode - validation simulated",
+            "required": False
+        })
+        return validation_results
+    
+    try:
+        token = await get_bc_token()
+        companies = await get_bc_companies()
+        if not companies:
+            validation_results["all_passed"] = False
+            validation_results["checks"].append({
+                "check_name": "bc_connection",
+                "passed": False,
+                "details": "No BC companies found",
+                "required": True
+            })
+            return validation_results
+        
+        company_id = companies[0]["id"]
+        
+        async with httpx.AsyncClient(timeout=30.0) as c:
+            # Vendor match for AP_Invoice
+            if job_type == "AP_Invoice":
+                vendor_name = extracted_fields.get("vendor", "")
+                if vendor_name:
+                    # Search vendors
+                    resp = await c.get(
+                        f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
+                        headers={"Authorization": f"Bearer {token}"},
+                        params={"$filter": f"contains(displayName,'{vendor_name}')"}
+                    )
+                    if resp.status_code == 200:
+                        vendors = resp.json().get("value", [])
+                        if vendors:
+                            validation_results["checks"].append({
+                                "check_name": "vendor_match",
+                                "passed": True,
+                                "details": f"Found vendor: {vendors[0].get('displayName')}",
+                                "required": True
+                            })
+                            validation_results["bc_record_id"] = vendors[0].get("id")
+                            validation_results["bc_record_info"] = vendors[0]
+                        else:
+                            validation_results["all_passed"] = False
+                            validation_results["checks"].append({
+                                "check_name": "vendor_match",
+                                "passed": False,
+                                "details": f"No vendor found matching '{vendor_name}'",
+                                "required": True
+                            })
+                    else:
+                        validation_results["checks"].append({
+                            "check_name": "vendor_match",
+                            "passed": False,
+                            "details": f"Vendor search failed (HTTP {resp.status_code})",
+                            "required": True
+                        })
+                        validation_results["all_passed"] = False
+                
+                # PO validation if required
+                if job_config.get("requires_po_validation") and extracted_fields.get("po_number"):
+                    po_number = extracted_fields.get("po_number")
+                    resp = await c.get(
+                        f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseOrders",
+                        headers={"Authorization": f"Bearer {token}"},
+                        params={"$filter": f"number eq '{po_number}'"}
+                    )
+                    if resp.status_code == 200:
+                        pos = resp.json().get("value", [])
+                        if pos:
+                            validation_results["checks"].append({
+                                "check_name": "po_validation",
+                                "passed": True,
+                                "details": f"Found PO: {po_number}",
+                                "required": True
+                            })
+                        else:
+                            validation_results["all_passed"] = False
+                            validation_results["checks"].append({
+                                "check_name": "po_validation",
+                                "passed": False,
+                                "details": f"PO '{po_number}' not found in BC",
+                                "required": True
+                            })
+                
+                # Duplicate invoice check
+                invoice_number = extracted_fields.get("invoice_number")
+                if invoice_number:
+                    resp = await c.get(
+                        f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseInvoices",
+                        headers={"Authorization": f"Bearer {token}"},
+                        params={"$filter": f"vendorInvoiceNumber eq '{invoice_number}'"}
+                    )
+                    if resp.status_code == 200:
+                        existing = resp.json().get("value", [])
+                        if existing and not job_config.get("allow_duplicate_check_override"):
+                            validation_results["all_passed"] = False
+                            validation_results["checks"].append({
+                                "check_name": "duplicate_check",
+                                "passed": False,
+                                "details": f"Duplicate invoice found: {invoice_number}",
+                                "required": True
+                            })
+                        else:
+                            validation_results["checks"].append({
+                                "check_name": "duplicate_check",
+                                "passed": True,
+                                "details": "No duplicate invoice found",
+                                "required": True
+                            })
+            
+            # Customer match for Sales_PO
+            elif job_type == "Sales_PO":
+                customer_name = extracted_fields.get("customer", "")
+                if customer_name:
+                    resp = await c.get(
+                        f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/customers",
+                        headers={"Authorization": f"Bearer {token}"},
+                        params={"$filter": f"contains(displayName,'{customer_name}')"}
+                    )
+                    if resp.status_code == 200:
+                        customers = resp.json().get("value", [])
+                        if customers:
+                            validation_results["checks"].append({
+                                "check_name": "customer_match",
+                                "passed": True,
+                                "details": f"Found customer: {customers[0].get('displayName')}",
+                                "required": True
+                            })
+                            validation_results["bc_record_id"] = customers[0].get("id")
+                            validation_results["bc_record_info"] = customers[0]
+                        else:
+                            validation_results["all_passed"] = False
+                            validation_results["checks"].append({
+                                "check_name": "customer_match",
+                                "passed": False,
+                                "details": f"No customer found matching '{customer_name}'",
+                                "required": True
+                            })
+    
+    except Exception as e:
+        logger.error("BC validation failed: %s", str(e))
+        validation_results["all_passed"] = False
+        validation_results["checks"].append({
+            "check_name": "bc_error",
+            "passed": False,
+            "details": f"BC validation error: {str(e)}",
+            "required": True
+        })
+    
+    return validation_results
+
+# ==================== AUTOMATION DECISION ENGINE ====================
+
+def make_automation_decision(
+    job_config: dict,
+    ai_confidence: float,
+    validation_results: dict
+) -> tuple:
+    """
+    Decision matrix for automation level.
+    Returns (decision, reasoning)
+    """
+    automation_level = job_config.get("automation_level", 0)
+    link_threshold = job_config.get("min_confidence_to_auto_link", 0.85)
+    create_threshold = job_config.get("min_confidence_to_auto_create_draft", 0.95)
+    requires_review = job_config.get("requires_human_review_if_exception", True)
+    
+    # Level 0: Manual only
+    if automation_level == 0:
+        return "manual", "Job type configured for manual processing only"
+    
+    # Check validation results
+    if not validation_results.get("all_passed", False):
+        failed_checks = [c["check_name"] for c in validation_results.get("checks", []) if not c["passed"] and c.get("required", True)]
+        if requires_review:
+            return "needs_review", f"Validation failed: {', '.join(failed_checks)}"
+        return "manual", f"Validation failed but review not required: {', '.join(failed_checks)}"
+    
+    # Check confidence thresholds
+    if ai_confidence < link_threshold:
+        return "needs_review", f"Confidence {ai_confidence:.2%} below link threshold {link_threshold:.2%}"
+    
+    # Level 1: Auto-link only
+    if automation_level == 1:
+        if ai_confidence >= link_threshold:
+            return "auto_link", f"Confidence {ai_confidence:.2%} meets link threshold, auto-linking to existing BC record"
+        return "needs_review", f"Confidence {ai_confidence:.2%} below threshold"
+    
+    # Level 2: Auto-create draft
+    if automation_level >= 2:
+        if ai_confidence >= create_threshold:
+            return "auto_create", f"Confidence {ai_confidence:.2%} meets create threshold, creating draft BC document"
+        elif ai_confidence >= link_threshold:
+            return "auto_link", f"Confidence {ai_confidence:.2%} meets link threshold only, auto-linking"
+        return "needs_review", f"Confidence {ai_confidence:.2%} below thresholds"
+    
+    return "needs_review", "Default fallback to review"
+
+# ==================== EMAIL WATCHER SERVICE ====================
+
+async def get_email_watcher_config() -> dict:
+    """Load email watcher configuration from database."""
+    config = await db.hub_config.find_one({"_key": "email_watcher"}, {"_id": 0})
+    if not config:
+        return {
+            "mailbox_address": "",
+            "watch_folder": "Inbox",
+            "needs_review_folder": "Needs Review",
+            "processed_folder": "Processed",
+            "enabled": False,
+            "webhook_subscription_id": None,
+            "last_poll_utc": None
+        }
+    return config
+
+async def subscribe_to_mailbox_notifications(mailbox_address: str, webhook_url: str) -> dict:
+    """
+    Create a Microsoft Graph subscription for email notifications.
+    """
+    if DEMO_MODE or not GRAPH_CLIENT_ID:
+        return {"status": "demo", "message": "Running in demo mode"}
+    
+    try:
+        token = await get_graph_token()
+        
+        # Create subscription for new messages
+        subscription_payload = {
+            "changeType": "created",
+            "notificationUrl": webhook_url,
+            "resource": f"users/{mailbox_address}/mailFolders/Inbox/messages",
+            "expirationDateTime": (datetime.now(timezone.utc).replace(hour=23, minute=59) + timedelta(days=2)).isoformat() + "Z",
+            "clientState": "gpi-document-hub-secret"
+        }
+        
+        async with httpx.AsyncClient(timeout=30.0) as c:
+            resp = await c.post(
+                "https://graph.microsoft.com/v1.0/subscriptions",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json"
+                },
+                json=subscription_payload
+            )
+            
+            if resp.status_code in (200, 201):
+                data = resp.json()
+                return {
+                    "status": "ok",
+                    "subscription_id": data.get("id"),
+                    "expiration": data.get("expirationDateTime")
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": f"Failed to create subscription (HTTP {resp.status_code}): {resp.text[:500]}"
+                }
+    
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+async def fetch_email_with_attachments(email_id: str, mailbox_address: str) -> dict:
+    """Fetch a specific email and its attachments from Graph API."""
+    if DEMO_MODE or not GRAPH_CLIENT_ID:
+        return {"status": "demo", "email": None, "attachments": []}
+    
+    try:
+        token = await get_graph_token()
+        
+        async with httpx.AsyncClient(timeout=60.0) as c:
+            # Get email details
+            email_resp = await c.get(
+                f"https://graph.microsoft.com/v1.0/users/{mailbox_address}/messages/{email_id}",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+            
+            if email_resp.status_code != 200:
+                return {"status": "error", "message": f"Failed to fetch email: {email_resp.status_code}"}
+            
+            email_data = email_resp.json()
+            
+            # Get attachments
+            attachments_resp = await c.get(
+                f"https://graph.microsoft.com/v1.0/users/{mailbox_address}/messages/{email_id}/attachments",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+            
+            attachments = []
+            if attachments_resp.status_code == 200:
+                for att in attachments_resp.json().get("value", []):
+                    if att.get("@odata.type") == "#microsoft.graph.fileAttachment":
+                        attachments.append({
+                            "id": att.get("id"),
+                            "name": att.get("name"),
+                            "content_type": att.get("contentType"),
+                            "size": att.get("size"),
+                            "content_bytes": att.get("contentBytes")  # Base64 encoded
+                        })
+            
+            return {
+                "status": "ok",
+                "email": {
+                    "id": email_data.get("id"),
+                    "subject": email_data.get("subject"),
+                    "sender": email_data.get("from", {}).get("emailAddress", {}).get("address"),
+                    "received_utc": email_data.get("receivedDateTime"),
+                    "has_attachments": email_data.get("hasAttachments", False)
+                },
+                "attachments": attachments
+            }
+    
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+async def move_email_to_folder(email_id: str, mailbox_address: str, folder_name: str) -> dict:
+    """Move an email to a specific folder."""
+    if DEMO_MODE or not GRAPH_CLIENT_ID:
+        return {"status": "demo"}
+    
+    try:
+        token = await get_graph_token()
+        
+        async with httpx.AsyncClient(timeout=30.0) as c:
+            # First, find the folder ID
+            folders_resp = await c.get(
+                f"https://graph.microsoft.com/v1.0/users/{mailbox_address}/mailFolders",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+            
+            if folders_resp.status_code != 200:
+                return {"status": "error", "message": f"Failed to list folders: {folders_resp.status_code}"}
+            
+            folder_id = None
+            for folder in folders_resp.json().get("value", []):
+                if folder.get("displayName") == folder_name:
+                    folder_id = folder.get("id")
+                    break
+            
+            if not folder_id:
+                # Create the folder if it doesn't exist
+                create_resp = await c.post(
+                    f"https://graph.microsoft.com/v1.0/users/{mailbox_address}/mailFolders",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json"
+                    },
+                    json={"displayName": folder_name}
+                )
+                if create_resp.status_code in (200, 201):
+                    folder_id = create_resp.json().get("id")
+                else:
+                    return {"status": "error", "message": f"Failed to create folder: {create_resp.status_code}"}
+            
+            # Move the email
+            move_resp = await c.post(
+                f"https://graph.microsoft.com/v1.0/users/{mailbox_address}/messages/{email_id}/move",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json"
+                },
+                json={"destinationId": folder_id}
+            )
+            
+            if move_resp.status_code in (200, 201):
+                return {"status": "ok", "folder": folder_name}
+            else:
+                return {"status": "error", "message": f"Failed to move email: {move_resp.status_code}"}
+    
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# ==================== EMAIL INTAKE ENDPOINTS ====================
+
+@api_router.post("/documents/intake")
+async def intake_document(intake: DocumentIntake, file: UploadFile = File(...)):
+    """
+    Receive a document from email or other source.
+    Runs AI classification and automation decision matrix.
+    """
+    file_content = await file.read()
+    computed_hash = hashlib.sha256(file_content).hexdigest()
+    doc_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Store file locally
+    file_path = UPLOAD_DIR / doc_id
+    file_path.write_bytes(file_content)
+    
+    # Create document record
+    doc = {
+        "id": doc_id,
+        "source": intake.source,
+        "file_name": intake.attachment_name,
+        "sha256_hash": computed_hash,
+        "file_size": len(file_content),
+        "content_type": file.content_type,
+        "email_sender": intake.sender,
+        "email_subject": intake.subject,
+        "email_id": intake.email_id,
+        "email_received_utc": intake.email_received_utc,
+        "sharepoint_drive_id": None,
+        "sharepoint_item_id": None,
+        "sharepoint_web_url": None,
+        "sharepoint_share_link_url": None,
+        "document_type": None,
+        "suggested_job_type": None,
+        "ai_confidence": None,
+        "extracted_fields": None,
+        "validation_results": None,
+        "automation_decision": None,
+        "bc_record_type": None,
+        "bc_company_id": None,
+        "bc_record_id": None,
+        "bc_document_no": None,
+        "status": "Received",
+        "created_utc": now,
+        "updated_utc": now,
+        "last_error": None
+    }
+    await db.hub_documents.insert_one(doc)
+    
+    # Run AI classification
+    logger.info("Running AI classification for document %s", doc_id)
+    classification = await classify_document_with_ai(str(file_path), intake.attachment_name)
+    
+    suggested_type = classification.get("suggested_job_type", "Unknown")
+    confidence = classification.get("confidence", 0.0)
+    extracted_fields = classification.get("extracted_fields", {})
+    
+    # Get job type config
+    job_configs = await db.hub_job_types.find_one({"job_type": suggested_type}, {"_id": 0})
+    if not job_configs:
+        job_configs = DEFAULT_JOB_TYPES.get(suggested_type, DEFAULT_JOB_TYPES["AP_Invoice"])
+    
+    # Run BC validation
+    validation_results = await validate_bc_match(suggested_type, extracted_fields, job_configs)
+    
+    # Make automation decision
+    decision, reasoning = make_automation_decision(job_configs, confidence, validation_results)
+    
+    # Update document with classification results
+    await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+        "suggested_job_type": suggested_type,
+        "document_type": suggested_type,
+        "ai_confidence": confidence,
+        "extracted_fields": extracted_fields,
+        "validation_results": validation_results,
+        "automation_decision": decision,
+        "status": "Classified",
+        "updated_utc": datetime.now(timezone.utc).isoformat()
+    }})
+    
+    # Create workflow run for intake
+    workflow = {
+        "id": str(uuid.uuid4()),
+        "document_id": doc_id,
+        "workflow_name": "email_intake",
+        "started_utc": now,
+        "ended_utc": datetime.now(timezone.utc).isoformat(),
+        "status": "Completed",
+        "steps": [
+            {"step": "receive_document", "status": "completed", "result": {"source": intake.source, "hash": computed_hash}},
+            {"step": "ai_classification", "status": "completed", "result": classification},
+            {"step": "bc_validation", "status": "completed", "result": validation_results},
+            {"step": "automation_decision", "status": "completed", "result": {"decision": decision, "reasoning": reasoning}}
+        ],
+        "correlation_id": str(uuid.uuid4()),
+        "error": None
+    }
+    await db.hub_workflow_runs.insert_one(workflow)
+    
+    # Execute automation based on decision
+    if decision == "auto_link" or decision == "auto_create":
+        # Run the full upload and link workflow
+        folder = job_configs.get("sharepoint_folder", "Incoming")
+        
+        try:
+            # Upload to SharePoint
+            sp_result = await upload_to_sharepoint(file_content, intake.attachment_name, folder)
+            share_link = await create_sharing_link(sp_result["drive_id"], sp_result["item_id"])
+            
+            # Link to BC if we have a record
+            bc_linked = False
+            bc_record_id = validation_results.get("bc_record_id")
+            
+            if decision == "auto_link" and bc_record_id:
+                # Find related sales order or create appropriate link
+                link_result = await link_document_to_bc(
+                    bc_record_id=bc_record_id,
+                    share_link=share_link,
+                    file_name=intake.attachment_name,
+                    file_content=file_content
+                )
+                bc_linked = link_result.get("success", False)
+            
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+                "sharepoint_drive_id": sp_result["drive_id"],
+                "sharepoint_item_id": sp_result["item_id"],
+                "sharepoint_web_url": sp_result["web_url"],
+                "sharepoint_share_link_url": share_link,
+                "bc_record_id": bc_record_id,
+                "status": "LinkedToBC" if bc_linked else "Classified",
+                "updated_utc": datetime.now(timezone.utc).isoformat()
+            }})
+        except Exception as e:
+            logger.error("Auto-link failed for document %s: %s", doc_id, str(e))
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+                "status": "Exception",
+                "last_error": str(e),
+                "updated_utc": datetime.now(timezone.utc).isoformat()
+            }})
+    elif decision == "needs_review":
+        await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+            "status": "NeedsReview",
+            "updated_utc": datetime.now(timezone.utc).isoformat()
+        }})
+    
+    # Return result
+    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    return {
+        "document": updated_doc,
+        "classification": classification,
+        "validation": validation_results,
+        "decision": decision,
+        "reasoning": reasoning
+    }
 
 @api_router.post("/documents/{doc_id}/classify")
 async def classify_document(doc_id: str):
-    return {"message": "Phase 2: AI classification not yet implemented", "status": "placeholder"}
+    """Re-run AI classification on an existing document."""
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    file_path = UPLOAD_DIR / doc_id
+    if not file_path.exists():
+        raise HTTPException(status_code=400, detail="Original file not found")
+    
+    classification = await classify_document_with_ai(str(file_path), doc["file_name"])
+    
+    suggested_type = classification.get("suggested_job_type", "Unknown")
+    confidence = classification.get("confidence", 0.0)
+    extracted_fields = classification.get("extracted_fields", {})
+    
+    # Get job type config
+    job_configs = await db.hub_job_types.find_one({"job_type": suggested_type}, {"_id": 0})
+    if not job_configs:
+        job_configs = DEFAULT_JOB_TYPES.get(suggested_type, DEFAULT_JOB_TYPES["AP_Invoice"])
+    
+    # Run BC validation
+    validation_results = await validate_bc_match(suggested_type, extracted_fields, job_configs)
+    
+    # Make automation decision
+    decision, reasoning = make_automation_decision(job_configs, confidence, validation_results)
+    
+    await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+        "suggested_job_type": suggested_type,
+        "document_type": suggested_type,
+        "ai_confidence": confidence,
+        "extracted_fields": extracted_fields,
+        "validation_results": validation_results,
+        "automation_decision": decision,
+        "updated_utc": datetime.now(timezone.utc).isoformat()
+    }})
+    
+    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    return {
+        "document": updated_doc,
+        "classification": classification,
+        "validation": validation_results,
+        "decision": decision,
+        "reasoning": reasoning
+    }
+
+# ==================== GRAPH WEBHOOK ENDPOINT ====================
+
+from datetime import timedelta
+
+@api_router.post("/graph/webhook")
+async def graph_webhook(request_data: dict = None):
+    """
+    Microsoft Graph webhook endpoint for email notifications.
+    Handles both validation and notification requests.
+    """
+    # Handle validation request (Graph sends this when creating subscription)
+    if request_data and "validationToken" in request_data:
+        return request_data["validationToken"]
+    
+    # Handle notification
+    if request_data and "value" in request_data:
+        for notification in request_data.get("value", []):
+            # Verify client state
+            if notification.get("clientState") != "gpi-document-hub-secret":
+                logger.warning("Invalid client state in webhook notification")
+                continue
+            
+            resource = notification.get("resource", "")
+            change_type = notification.get("changeType", "")
+            
+            if change_type == "created" and "/messages/" in resource:
+                # Extract email ID and mailbox from resource
+                # Resource format: users/{mailbox}/mailFolders/Inbox/messages/{emailId}
+                parts = resource.split("/")
+                if len(parts) >= 6:
+                    mailbox = parts[1]
+                    email_id = parts[-1]
+                    
+                    # Queue for processing (in production, use a proper queue)
+                    logger.info("New email notification: mailbox=%s, email_id=%s", mailbox, email_id)
+                    
+                    # Process the email
+                    await process_incoming_email(email_id, mailbox)
+    
+    return {"status": "ok"}
+
+@api_router.get("/graph/webhook")
+async def graph_webhook_validation(validationToken: str = Query(None)):
+    """Handle Graph subscription validation (GET request)."""
+    if validationToken:
+        from starlette.responses import PlainTextResponse
+        return PlainTextResponse(content=validationToken)
+    return {"status": "ready"}
+
+async def process_incoming_email(email_id: str, mailbox_address: str):
+    """Process a new incoming email with attachments."""
+    config = await get_email_watcher_config()
+    
+    if not config.get("enabled"):
+        logger.info("Email watcher disabled, skipping email %s", email_id)
+        return
+    
+    # Fetch email and attachments
+    email_data = await fetch_email_with_attachments(email_id, mailbox_address)
+    
+    if email_data.get("status") != "ok":
+        logger.error("Failed to fetch email %s: %s", email_id, email_data.get("message"))
+        return
+    
+    email = email_data.get("email", {})
+    attachments = email_data.get("attachments", [])
+    
+    if not attachments:
+        logger.info("Email %s has no attachments, skipping", email_id)
+        return
+    
+    # Process each attachment
+    for attachment in attachments:
+        import base64
+        
+        try:
+            # Decode attachment content
+            content_bytes = base64.b64decode(attachment.get("content_bytes", ""))
+            
+            # Create intake request
+            intake = DocumentIntake(
+                source="email",
+                sender=email.get("sender"),
+                subject=email.get("subject"),
+                attachment_name=attachment.get("name"),
+                content_hash=hashlib.sha256(content_bytes).hexdigest(),
+                email_id=email_id,
+                email_received_utc=email.get("received_utc")
+            )
+            
+            # Save attachment temporarily
+            temp_id = str(uuid.uuid4())
+            temp_path = UPLOAD_DIR / temp_id
+            temp_path.write_bytes(content_bytes)
+            
+            # Process through intake workflow
+            doc_id = str(uuid.uuid4())
+            now = datetime.now(timezone.utc).isoformat()
+            
+            # Create document record
+            doc = {
+                "id": doc_id,
+                "source": "email",
+                "file_name": attachment.get("name"),
+                "sha256_hash": intake.content_hash,
+                "file_size": len(content_bytes),
+                "content_type": attachment.get("content_type"),
+                "email_sender": intake.sender,
+                "email_subject": intake.subject,
+                "email_id": email_id,
+                "email_received_utc": intake.email_received_utc,
+                "status": "Received",
+                "created_utc": now,
+                "updated_utc": now
+            }
+            await db.hub_documents.insert_one(doc)
+            
+            # Move temp file to permanent location
+            perm_path = UPLOAD_DIR / doc_id
+            temp_path.rename(perm_path)
+            
+            # Run classification
+            classification = await classify_document_with_ai(str(perm_path), attachment.get("name"))
+            
+            suggested_type = classification.get("suggested_job_type", "Unknown")
+            confidence = classification.get("confidence", 0.0)
+            extracted_fields = classification.get("extracted_fields", {})
+            
+            # Get job config and validate
+            job_configs = await db.hub_job_types.find_one({"job_type": suggested_type}, {"_id": 0})
+            if not job_configs:
+                job_configs = DEFAULT_JOB_TYPES.get(suggested_type, DEFAULT_JOB_TYPES["AP_Invoice"])
+            
+            validation_results = await validate_bc_match(suggested_type, extracted_fields, job_configs)
+            decision, reasoning = make_automation_decision(job_configs, confidence, validation_results)
+            
+            # Update document
+            new_status = "NeedsReview" if decision == "needs_review" else "Classified"
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+                "suggested_job_type": suggested_type,
+                "document_type": suggested_type,
+                "ai_confidence": confidence,
+                "extracted_fields": extracted_fields,
+                "validation_results": validation_results,
+                "automation_decision": decision,
+                "status": new_status,
+                "updated_utc": datetime.now(timezone.utc).isoformat()
+            }})
+            
+            # Move email to appropriate folder
+            if decision == "needs_review":
+                await move_email_to_folder(email_id, mailbox_address, config.get("needs_review_folder", "Needs Review"))
+            else:
+                await move_email_to_folder(email_id, mailbox_address, config.get("processed_folder", "Processed"))
+            
+            logger.info("Processed email attachment: doc_id=%s, type=%s, decision=%s", doc_id, suggested_type, decision)
+            
+        except Exception as e:
+            logger.error("Failed to process attachment from email %s: %s", email_id, str(e))
+
+# ==================== JOB TYPE CONFIGURATION ENDPOINTS ====================
+
+@api_router.get("/settings/job-types")
+async def get_job_types():
+    """Get all job type configurations."""
+    job_types = await db.hub_job_types.find({}, {"_id": 0}).to_list(100)
+    
+    # Merge with defaults for any missing types
+    result = dict(DEFAULT_JOB_TYPES)
+    for jt in job_types:
+        result[jt["job_type"]] = jt
+    
+    return {"job_types": list(result.values())}
+
+@api_router.get("/settings/job-types/{job_type}")
+async def get_job_type(job_type: str):
+    """Get a specific job type configuration."""
+    jt = await db.hub_job_types.find_one({"job_type": job_type}, {"_id": 0})
+    if not jt:
+        jt = DEFAULT_JOB_TYPES.get(job_type)
+        if not jt:
+            raise HTTPException(status_code=404, detail="Job type not found")
+    return jt
+
+@api_router.put("/settings/job-types/{job_type}")
+async def update_job_type(job_type: str, config: JobTypeConfig):
+    """Update a job type configuration."""
+    update_data = config.model_dump()
+    update_data["job_type"] = job_type
+    
+    await db.hub_job_types.update_one(
+        {"job_type": job_type},
+        {"$set": update_data},
+        upsert=True
+    )
+    
+    return await get_job_type(job_type)
+
+@api_router.get("/settings/email-watcher")
+async def get_email_watcher_settings():
+    """Get email watcher configuration."""
+    return await get_email_watcher_config()
+
+@api_router.put("/settings/email-watcher")
+async def update_email_watcher_settings(config: EmailWatchConfig):
+    """Update email watcher configuration."""
+    update_data = config.model_dump()
+    update_data["_key"] = "email_watcher"
+    
+    await db.hub_config.update_one(
+        {"_key": "email_watcher"},
+        {"$set": update_data},
+        upsert=True
+    )
+    
+    return await get_email_watcher_config()
+
+@api_router.post("/settings/email-watcher/subscribe")
+async def subscribe_email_watcher(webhook_url: str = Query(...)):
+    """Create Graph subscription for email notifications."""
+    config = await get_email_watcher_config()
+    
+    if not config.get("mailbox_address"):
+        raise HTTPException(status_code=400, detail="Mailbox address not configured")
+    
+    result = await subscribe_to_mailbox_notifications(config["mailbox_address"], webhook_url)
+    
+    if result.get("status") == "ok":
+        await db.hub_config.update_one(
+            {"_key": "email_watcher"},
+            {"$set": {
+                "webhook_subscription_id": result.get("subscription_id"),
+                "webhook_expiration": result.get("expiration")
+            }}
+        )
+    
+    return result
+
+# ==================== ENHANCED DASHBOARD ====================
+
+@api_router.get("/dashboard/email-stats")
+async def get_email_stats():
+    """Get email processing statistics."""
+    total_email = await db.hub_documents.count_documents({"source": "email"})
+    needs_review = await db.hub_documents.count_documents({"source": "email", "status": "NeedsReview"})
+    auto_linked = await db.hub_documents.count_documents({"source": "email", "status": "LinkedToBC"})
+    
+    # Get by job type
+    by_job_type = {}
+    for jt in DEFAULT_JOB_TYPES.keys():
+        count = await db.hub_documents.count_documents({"source": "email", "suggested_job_type": jt})
+        if count > 0:
+            by_job_type[jt] = count
+    
+    # Recent email documents
+    recent = await db.hub_documents.find(
+        {"source": "email"},
+        {"_id": 0}
+    ).sort("created_utc", -1).limit(10).to_list(10)
+    
+    return {
+        "total_email_documents": total_email,
+        "needs_review": needs_review,
+        "auto_linked": auto_linked,
+        "by_job_type": by_job_type,
+        "recent": recent
+    }
 
 # ==================== APP SETUP ====================
 

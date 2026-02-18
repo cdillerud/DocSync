@@ -2414,6 +2414,130 @@ async def move_email_to_folder(email_id: str, mailbox_address: str, folder_name:
 
 # ==================== EMAIL INTAKE ENDPOINTS ====================
 
+async def _internal_intake_document(
+    file_content: bytes,
+    filename: str,
+    content_type: str,
+    source: str = "email_poll",
+    sender: Optional[str] = None,
+    subject: Optional[str] = None,
+    email_id: Optional[str] = None
+) -> dict:
+    """
+    Internal function to process document intake from email polling.
+    Similar to intake_document but accepts raw bytes instead of UploadFile.
+    """
+    computed_hash = hashlib.sha256(file_content).hexdigest()
+    doc_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Store file locally
+    file_path = UPLOAD_DIR / doc_id
+    file_path.write_bytes(file_content)
+    
+    # Create document record
+    doc = {
+        "id": doc_id,
+        "source": source,
+        "file_name": filename,
+        "sha256_hash": computed_hash,
+        "file_size": len(file_content),
+        "content_type": content_type,
+        "email_sender": sender,
+        "email_subject": subject,
+        "email_id": email_id,
+        "email_received_utc": now,
+        "sharepoint_drive_id": None,
+        "sharepoint_item_id": None,
+        "sharepoint_web_url": None,
+        "sharepoint_share_link_url": None,
+        "document_type": None,
+        "suggested_job_type": None,
+        "ai_confidence": None,
+        "extracted_fields": None,
+        "validation_results": None,
+        "automation_decision": None,
+        "bc_record_type": None,
+        "bc_company_id": None,
+        "bc_record_id": None,
+        "bc_document_no": None,
+        "status": "Received",
+        "created_utc": now,
+        "updated_utc": now,
+        "last_error": None
+    }
+    await db.hub_documents.insert_one(doc)
+    
+    # Run AI classification
+    logger.info("Running AI classification for document %s", doc_id)
+    classification = await classify_document_with_ai(str(file_path), filename)
+    
+    suggested_type = classification.get("suggested_job_type", "Unknown")
+    confidence = classification.get("confidence", 0.0)
+    extracted_fields = classification.get("extracted_fields", {})
+    
+    # Get job type config
+    job_configs = await db.hub_job_types.find_one({"job_type": suggested_type}, {"_id": 0})
+    if not job_configs:
+        job_configs = DEFAULT_JOB_TYPES.get(suggested_type, DEFAULT_JOB_TYPES["AP_Invoice"])
+    
+    # Run BC validation
+    validation_results = await validate_bc_match(suggested_type, extracted_fields, job_configs)
+    
+    # Make automation decision
+    decision, reasoning, decision_metadata = make_automation_decision(job_configs, confidence, validation_results)
+    
+    # Upload to SharePoint
+    folder = job_configs.get("sharepoint_folder", "Incoming")
+    sp_result = None
+    share_link = None
+    sp_error = None
+    
+    try:
+        sp_result = await upload_to_sharepoint(file_content, filename, folder)
+        share_link = await create_sharing_link(sp_result["drive_id"], sp_result["item_id"])
+        logger.info("Document %s stored in SharePoint: %s", doc_id, sp_result.get("web_url"))
+    except Exception as e:
+        sp_error = str(e)
+        logger.error("SharePoint upload failed for document %s: %s", doc_id, sp_error)
+    
+    # Update document with classification + SharePoint results
+    update_data = {
+        "suggested_job_type": suggested_type,
+        "document_type": suggested_type,
+        "ai_confidence": confidence,
+        "extracted_fields": extracted_fields,
+        "normalized_fields": validation_results.get("normalized_fields", {}),
+        "validation_results": validation_results,
+        "automation_decision": decision,
+        "match_method": validation_results.get("match_method", "none"),
+        "match_score": validation_results.get("match_score", 0.0),
+        "vendor_candidates": decision_metadata.get("vendor_candidates", []),
+        "customer_candidates": decision_metadata.get("customer_candidates", []),
+        "warnings": decision_metadata.get("warnings", []),
+        "updated_utc": datetime.now(timezone.utc).isoformat()
+    }
+    
+    if sp_result:
+        update_data["sharepoint_drive_id"] = sp_result["drive_id"]
+        update_data["sharepoint_item_id"] = sp_result["item_id"]
+        update_data["sharepoint_web_url"] = sp_result["web_url"]
+        update_data["sharepoint_share_link_url"] = share_link
+        update_data["status"] = "StoredInSP"
+    else:
+        update_data["status"] = "Classified"
+        update_data["last_error"] = f"SharePoint upload failed: {sp_error}"
+    
+    await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
+    
+    return {
+        "document": {"id": doc_id, "status": update_data["status"]},
+        "classification": classification,
+        "automation_decision": decision,
+        "sharepoint": sp_result
+    }
+
+
 @api_router.post("/documents/intake")
 async def intake_document(
     file: UploadFile = File(...),

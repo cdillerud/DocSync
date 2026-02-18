@@ -3472,9 +3472,9 @@ async def poll_mailbox_for_attachments():
                                 status="Processed",
                                 sharepoint_doc_id=doc_id
                             )
-                            stats["attachments_processed"] += 1
+                            stats["attachments_ingested"] += 1
                             
-                            logger.info("[EmailPoll:%s] Processed %s → doc %s", run_id, filename, doc_id)
+                            logger.info("[EmailPoll:%s] Ingested %s → doc %s", run_id, filename, doc_id)
                             
                         except Exception as e:
                             await record_mail_intake_log(

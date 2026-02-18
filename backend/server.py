@@ -3461,6 +3461,20 @@ async def get_automation_metrics(
     total_alias = alias_auto_linked + alias_needs_review
     alias_exception_rate = round((alias_needs_review / total_alias * 100) if total_alias > 0 else 0, 1)
     
+    # Phase 4: Draft creation metrics
+    draft_created_count = await db.hub_documents.count_documents({
+        **query,
+        "transaction_action": TransactionAction.DRAFT_CREATED
+    })
+    
+    linked_only_count = await db.hub_documents.count_documents({
+        **query,
+        "transaction_action": TransactionAction.LINKED_ONLY
+    })
+    
+    linked_total = status_counts.get("LinkedToBC", 0)
+    draft_creation_rate = round((draft_created_count / linked_total * 100) if linked_total > 0 else 0, 1)
+    
     return {
         "period_days": days,
         "total_documents": total,
@@ -3477,7 +3491,13 @@ async def get_automation_metrics(
         # Phase 3: Match method breakdown
         "match_method_breakdown": match_method_breakdown,
         "alias_auto_linked": alias_auto_linked,
-        "alias_exception_rate": alias_exception_rate
+        "alias_exception_rate": alias_exception_rate,
+        # Phase 4: Draft creation metrics
+        "draft_created_count": draft_created_count,
+        "linked_only_count": linked_only_count,
+        "draft_creation_rate": draft_creation_rate,
+        "draft_feature_enabled": ENABLE_CREATE_DRAFT_HEADER,
+        "header_only_flag": True  # All drafts are header-only for now
     }
 
 @api_router.get("/metrics/vendors")

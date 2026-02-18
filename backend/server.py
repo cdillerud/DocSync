@@ -3139,6 +3139,25 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
     if file_path.exists():
         file_content = file_path.read_bytes()
     
+    # Re-run AI classification if requested
+    if reclassify and file_path.exists():
+        logger.info("Re-running AI classification for document %s", doc_id)
+        classification = await classify_document_with_ai(str(file_path), doc["file_name"])
+        
+        # Update document with new classification
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {
+                "document_type": classification.get("suggested_job_type", "Unknown"),
+                "suggested_job_type": classification.get("suggested_job_type", "Unknown"),
+                "ai_confidence": classification.get("confidence", 0.0),
+                "extracted_fields": classification.get("extracted_fields", {}),
+                "updated_utc": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+        # Reload the document
+        doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    
     # Get job config
     job_type = doc.get("suggested_job_type", "AP_Invoice")
     job_configs = await db.hub_job_types.find_one({"job_type": job_type}, {"_id": 0})

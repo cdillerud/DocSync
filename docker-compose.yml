@@ -1,49 +1,67 @@
 version: '3.8'
 
 services:
+  # MongoDB Database
   mongodb:
-    image: mongo:7
-    container_name: gpi-hub-mongo
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo_data:/data/db
+    image: mongo:6.0
+    container_name: gpi-mongodb
     restart: unless-stopped
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - gpi-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
+  # Backend API (FastAPI)
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: gpi-hub-backend
-    ports:
-      - "8001:8001"
+    container_name: gpi-backend
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
     env_file:
       - ./backend/.env
     environment:
       - MONGO_URL=mongodb://mongodb:27017
       - DB_NAME=gpi_document_hub
-    depends_on:
-      - mongodb
     volumes:
-      - ./backend:/app
-    restart: unless-stopped
-    command: uvicorn server:app --host 0.0.0.0 --port 8001 --reload
+      - uploads_data:/app/uploads
+    networks:
+      - gpi-network
+    # Bind to localhost only for security (nginx handles external)
+    expose:
+      - "8001"
 
+  # Frontend (React + Nginx)
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: gpi-hub-frontend
-    ports:
-      - "3000:3000"
-    environment:
-      - REACT_APP_BACKEND_URL=http://localhost:8001
+      args:
+        - REACT_APP_BACKEND_URL=http://4.204.41.190
+    container_name: gpi-frontend
+    restart: unless-stopped
     depends_on:
       - backend
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    restart: unless-stopped
+    ports:
+      # Bind to all interfaces for external access
+      - "80:3000"
+    networks:
+      - gpi-network
 
 volumes:
-  mongo_data:
+  mongodb_data:
+    driver: local
+  uploads_data:
+    driver: local
+
+networks:
+  gpi-network:
+    driver: bridge

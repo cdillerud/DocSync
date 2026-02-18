@@ -11,141 +11,100 @@ Build a "GPI Document Hub" test platform that replaces Zetadocs-style document l
 - **Microsoft APIs**: LIVE integration with Graph API (SharePoint, Email) and Business Central API
 - **AI Classification**: Gemini 2.5-flash via Emergent LLM Key
 
-## User Personas
-- Enterprise IT Administrators managing BC-SharePoint document flows
-- AP/AR Clerks processing invoices and purchase orders
-- ERP Consultants testing POC for document management
-- Document Management Professionals evaluating replacement for Zetadocs
-
 ## Core Requirements
 - Upload documents (PDF/images) and link to BC Sales Orders
 - Store files in SharePoint folders organized by document type
 - Create sharing links for one-click document access
 - **Attach files directly to BC Sales Orders via documentAttachments API**
 - **AI-powered email parsing with document classification**
-- **Configurable automation levels per job type**
+- **Production-grade validation with configurable automation**
 - Full audit trail of workflow runs with step-by-step detail
-- Dashboard with real-time stats and monitoring
-- Document queue with status filtering and management
 
 ## What's Been Implemented (Feb 18, 2026)
 
 ### Phase 1 - Complete ✅
 - [x] Full backend API (FastAPI) with 25+ endpoints
 - [x] MongoDB persistence for HubDocument, HubWorkflowRun, HubJobTypes
-- [x] Workflow engine: upload_and_link, link_to_bc, email_intake workflows
-- [x] **LIVE SharePoint integration** - file upload + sharing links
-- [x] **LIVE Business Central integration** - sales order queries + document attachments
-- [x] BC document attachment via documentAttachments API (POST metadata + PATCH content)
-- [x] JWT authentication (admin/admin)
-- [x] Login page with SSO-ready structure
-- [x] Dashboard with stats cards, bar chart, recent/failed workflows
-- [x] Upload page with file dropzone, doc type selection, BC order search
-- [x] Document Queue with status tabs, search, pagination
-- [x] Document Detail with full metadata, SharePoint links, audit trail
-- [x] Settings page with credential management + connection testing
-- [x] Dark/Light theme toggle (Swiss Utility design)
-- [x] Re-submit failed workflows with one click
-- [x] Delete documents from queue
+- [x] LIVE SharePoint integration - file upload + sharing links
+- [x] LIVE Business Central integration - document attachments
+- [x] Dashboard, Upload, Queue, Document Detail, Settings pages
+- [x] Dark/Light theme, Re-submit/Delete functionality
 
-### Phase 2 - Email Parser Agent ✅ (NEW)
-- [x] **AI Document Classification** using Gemini 2.5-flash
-- [x] **Configurable Job Types** with automation levels:
-  - Level 0: Manual Only (store + classify)
-  - Level 1: Auto Link (link to existing BC records)
-  - Level 2: Auto Create Draft (create draft BC documents)
-  - Level 3: Advanced (future: auto-populate lines)
-- [x] **Confidence Thresholds** per job type (auto-link, auto-create)
-- [x] **BC Validation Engine**:
-  - Vendor matching
-  - Customer matching
-  - PO validation
-  - Duplicate invoice checking
-- [x] **Decision Matrix** for automation:
-  - All validations pass + confidence >= threshold → auto action
-  - Validation fails → needs review
-  - Confidence too low → needs review
-- [x] **Graph Webhook Support** for real-time email notifications
-- [x] **Email Watcher Configuration** (mailbox, folders)
-- [x] **Email Parser UI** with:
-  - Overview tab (stats, recent documents)
-  - Job Types tab (configure automation)
-  - Email Watcher tab (configure mailbox)
+### Phase 2 - Email Parser Agent ✅
+- [x] AI Document Classification using Gemini 2.5-flash
+- [x] Configurable Job Types with automation levels
+- [x] Graph Webhook support for real-time email monitoring
+- [x] Email Parser UI with Overview, Job Types, Email Watcher tabs
 
-### Job Type Configurations
-| Job Type | Automation Level | Auto-Link Threshold | Auto-Create Threshold | PO Validation |
-|----------|-----------------|--------------------|-----------------------|---------------|
-| AP_Invoice | Auto Link | 85% | 95% | Required |
-| Sales_PO | Auto Link | 80% | 92% | No |
-| AR_Invoice | Manual Only | 90% | 98% | No |
-| Remittance | Auto Link | 75% | 95% | No |
+### Phase 2.1 - Production Hardening ✅ (NEW)
+- [x] **Always upload to SharePoint first** - documents preserved even if BC fails
+- [x] **Field Normalization** - amounts to float, dates to ISO format
+- [x] **Multi-strategy Vendor Matching**:
+  - Exact match on Vendor No
+  - Exact match on Vendor Name
+  - Normalized match (strip Inc, LLC, punctuation)
+  - Alias map lookup
+  - Fuzzy match with candidates
+- [x] **PO Validation Modes**:
+  - `PO_REQUIRED` - PO must exist and match
+  - `PO_IF_PRESENT` - Validate if extracted (default for AP_Invoice)
+  - `PO_NOT_REQUIRED` - Skip PO validation
+- [x] **Vendor/Customer Candidates** - top 5 matches with scores for review UI
+- [x] **Resolve and Link Endpoint** - one-click resolution from review queue
+- [x] **New Document Statuses**:
+  - `StoredInSP` - Document in SharePoint, pending BC link
 
-### AI Classification Capabilities
-- **Document Types**: AP Invoice, Sales PO, AR Invoice, Remittance
-- **Extracted Fields**:
-  - AP Invoice: vendor, invoice_number, amount, po_number, due_date
-  - Sales PO: customer, po_number, order_date, amount, ship_to
-  - AR Invoice: customer, invoice_number, amount, due_date
-  - Remittance: vendor, payment_amount, payment_date, invoice_references
-- **Model**: Gemini 2.5-flash via Emergent LLM Key
+### Job Type Configuration (Production)
+| Job Type | Automation | Link Threshold | Create Threshold | PO Mode | Vendor Threshold |
+|----------|------------|---------------|-----------------|---------|-----------------|
+| AP_Invoice | Auto Link | 85% | 95% | PO_IF_PRESENT | 80% |
+| Sales_PO | Auto Link | 80% | 92% | PO_NOT_REQUIRED | 80% |
+| AR_Invoice | Manual Only | 90% | 98% | PO_NOT_REQUIRED | 80% |
+| Remittance | Auto Link | 75% | 95% | PO_NOT_REQUIRED | 75% |
+
+### Document Status Flow
+```
+Received → StoredInSP → Classified → LinkedToBC
+                    ↘ NeedsReview → [Resolve] → LinkedToBC
+```
 
 ### Testing Results (Latest - Feb 18, 2026)
-- Backend: 100% (47/47 tests passed)
-- All API endpoints verified working in LIVE mode
-- AI classification verified with real Gemini API
-
-## Prioritized Backlog
-
-### P0 (Blocking for Production) - COMPLETED ✅
-- [x] Configure real Entra ID credentials
-- [x] Test live BC and SharePoint APIs
-- [x] Implement BC document attachment via documentAttachments API
-- [x] Implement AI-powered email classification
-
-### P1 (Important - Upcoming)
-- [ ] Write SharePoint URL as a note/comment to BC Sales Order
-- [ ] Complete Document Queue UI - edit metadata and trigger linking
-- [ ] Build Audit & Monitoring dashboard with stats and error logs
-- [ ] Entra SSO for UI authentication
-- [ ] BC draft purchase invoice creation (automation level 2)
-
-### P2 (Nice to Have - Future)
-- [ ] Exchange Online email polling (alternative to webhook)
-- [ ] File size validation and virus scanning
-- [ ] Spiro CRM integration
-- [ ] Document sets mapping layer
-- [ ] Bulk upload support
-- [ ] Export audit logs to CSV
-- [ ] WebSocket real-time workflow status updates
+- Backend: 100% (32/32 tests passed)
+- All API endpoints verified working
+- SharePoint-first upload verified
+- Field normalization verified
+- Vendor candidate matching verified
 
 ## Key API Endpoints
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/documents/upload` | POST | Upload document, store in SharePoint, attach to BC |
-| `/api/documents/intake` | POST | Email intake with AI classification |
+| `/api/documents/intake` | POST | Email intake with AI classification + SharePoint upload |
+| `/api/documents/{id}/resolve` | POST | Resolve NeedsReview with vendor/customer selection |
 | `/api/documents/{id}/classify` | POST | Re-run AI classification |
-| `/api/documents/{id}/resubmit` | POST | Re-run workflow for failed document |
-| `/api/bc/sales-orders` | GET | Query BC sales orders |
 | `/api/settings/job-types` | GET/PUT | Job type automation configuration |
 | `/api/settings/email-watcher` | GET/PUT | Email watcher configuration |
-| `/api/graph/webhook` | POST | Graph notification endpoint |
-| `/api/dashboard/email-stats` | GET | Email processing statistics |
 
-## Database Schema (MongoDB)
-- **hub_documents**: Document metadata, SharePoint IDs, BC references, AI classification, status
-- **hub_workflow_runs**: Workflow execution logs with step-by-step audit trail
-- **hub_config**: Saved credentials (masked secrets, loaded on startup)
-- **hub_job_types**: Job type automation configurations
+## Prioritized Backlog
+
+### P0 (Blocking for Production) - COMPLETED ✅
+- [x] BC document attachment via API
+- [x] AI-powered email classification
+- [x] Production-grade validation with candidates
+
+### P1 (Important - Upcoming)
+- [ ] Review UI improvements - vendor pick list from candidates
+- [ ] Audit & Monitoring dashboard with error filtering
+- [ ] BC draft purchase invoice creation (automation level 2)
+- [ ] Entra SSO for UI authentication
+
+### P2 (Future)
+- [ ] Exchange Online email polling (backup to webhooks)
+- [ ] Vendor alias configuration UI
+- [ ] Bulk upload support
+- [ ] Export audit logs to CSV
 
 ## Technical Stack
-- **Backend**: FastAPI, Pydantic, Motor (async MongoDB), httpx
-- **Frontend**: React 18, Tailwind CSS, Shadcn/UI, Recharts
+- **Backend**: FastAPI, Pydantic, Motor, httpx, python-dateutil
+- **Frontend**: React 18, Tailwind CSS, Shadcn/UI
 - **AI**: Gemini 2.5-flash via emergentintegrations library
 - **Database**: MongoDB
-- **APIs**: Microsoft Graph API, Dynamics 365 BC API v2.0
-
-## Next Tasks
-1. Implement SharePoint link as BC note/comment
-2. BC draft purchase invoice creation for high-confidence AP Invoices
-3. Entra SSO for production authentication
-4. Exchange Online email polling as backup to webhooks

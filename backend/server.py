@@ -3613,14 +3613,14 @@ async def poll_mailbox_for_attachments():
                         
                         # Process through intake pipeline
                         try:
-                            intake_result = await intake_document(
+                            intake_result = await _internal_intake_document(
                                 file_content=content_bytes,
                                 filename=filename,
                                 content_type=content_type,
                                 source="email_poll",
                                 email_id=msg_id,
-                                email_subject=subject,
-                                email_sender=sender
+                                subject=subject,
+                                sender=sender
                             )
                             
                             doc_id = intake_result.get("document", {}).get("id")

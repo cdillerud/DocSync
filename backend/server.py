@@ -1575,16 +1575,23 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=f"classify-{uuid.uuid4()}",
-            system_message="""You are a document classification and data extraction AI for a business document management system.
+            system_message="""You are a document classification and data extraction AI for Gamer Packaging, Inc.'s document management system.
+
+IMPORTANT CONTEXT:
+- Our company is "Gamer Packaging, Inc." (also known as "Gamer Packaging" or "GPI")
+- These documents come from our Accounts Payable inbox
+- Most documents will be invoices FROM vendors TO us (AP_Invoice)
+- If you see "Gamer Packaging" as the Bill To/Ship To/Customer, it means WE are receiving this document, so it's likely an AP_Invoice
             
 Your job is to analyze business documents and:
 1. Classify the document type (AP_Invoice, Sales_PO, AR_Invoice, Remittance, Freight_Document, Warehouse_Document, or Unknown)
 2. Extract key fields based on the document type
 3. Provide a confidence score (0.0 to 1.0) for your classification
 
-For AP_Invoice (vendor invoices we receive):
-- Extract: vendor name, invoice_number, amount, po_number (if present), due_date
-- Look for "Invoice", "Bill To" addressing our company
+For AP_Invoice (vendor invoices we RECEIVE - most common):
+- The VENDOR is the company sending us the invoice (NOT Gamer Packaging)
+- Extract: vendor name (the sender), invoice_number, amount, po_number (if present), due_date
+- If "Gamer Packaging" appears as Bill To/Customer, this is an AP_Invoice we received
 
 For Sales_PO (purchase orders from our customers):
 - Extract: customer name, po_number, order_date, amount, ship_to address

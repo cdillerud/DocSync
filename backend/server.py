@@ -2094,22 +2094,67 @@ async def intake_document(
     # Run BC validation
     validation_results = await validate_bc_match(suggested_type, extracted_fields, job_configs)
     
-    # Make automation decision
-    decision, reasoning = make_automation_decision(job_configs, confidence, validation_results)
+    # Make automation decision (returns 3-tuple with metadata)
+    decision, reasoning, decision_metadata = make_automation_decision(job_configs, confidence, validation_results)
     
-    # Update document with classification results
-    await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+    # ALWAYS upload to SharePoint first - regardless of validation status
+    # This ensures document is preserved even if BC linking fails
+    folder = job_configs.get("sharepoint_folder", "Incoming")
+    sp_result = None
+    share_link = None
+    sp_error = None
+    
+    try:
+        sp_result = await upload_to_sharepoint(file_content, final_filename, folder)
+        share_link = await create_sharing_link(sp_result["drive_id"], sp_result["item_id"])
+        logger.info("Document %s stored in SharePoint: %s", doc_id, sp_result.get("web_url"))
+    except Exception as e:
+        sp_error = str(e)
+        logger.error("SharePoint upload failed for document %s: %s", doc_id, sp_error)
+    
+    # Update document with classification + SharePoint results
+    update_data = {
         "suggested_job_type": suggested_type,
         "document_type": suggested_type,
         "ai_confidence": confidence,
         "extracted_fields": extracted_fields,
+        "normalized_fields": validation_results.get("normalized_fields", {}),
         "validation_results": validation_results,
         "automation_decision": decision,
-        "status": "Classified",
+        "vendor_candidates": decision_metadata.get("vendor_candidates", []),
+        "customer_candidates": decision_metadata.get("customer_candidates", []),
+        "warnings": decision_metadata.get("warnings", []),
         "updated_utc": datetime.now(timezone.utc).isoformat()
-    }})
+    }
+    
+    # Add SharePoint info if successful
+    if sp_result:
+        update_data["sharepoint_drive_id"] = sp_result["drive_id"]
+        update_data["sharepoint_item_id"] = sp_result["item_id"]
+        update_data["sharepoint_web_url"] = sp_result["web_url"]
+        update_data["sharepoint_share_link_url"] = share_link
+        update_data["status"] = "StoredInSP"  # New intermediate state
+    else:
+        update_data["status"] = "Classified"
+        update_data["last_error"] = f"SharePoint upload failed: {sp_error}"
+    
+    await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
     
     # Create workflow run for intake
+    workflow_steps = [
+        {"step": "receive_document", "status": "completed", "result": {"source": source, "hash": computed_hash}},
+        {"step": "ai_classification", "status": "completed", "result": classification},
+        {"step": "sharepoint_upload", "status": "completed" if sp_result else "failed", 
+         "result": sp_result if sp_result else {"error": sp_error}},
+        {"step": "bc_validation", "status": "completed", "result": {
+            "all_passed": validation_results.get("all_passed"),
+            "checks_count": len(validation_results.get("checks", [])),
+            "vendor_candidates_count": len(validation_results.get("vendor_candidates", [])),
+            "warnings_count": len(validation_results.get("warnings", []))
+        }},
+        {"step": "automation_decision", "status": "completed", "result": {"decision": decision, "reasoning": reasoning}}
+    ]
+    
     workflow = {
         "id": str(uuid.uuid4()),
         "document_id": doc_id,
@@ -2117,58 +2162,38 @@ async def intake_document(
         "started_utc": now,
         "ended_utc": datetime.now(timezone.utc).isoformat(),
         "status": "Completed",
-        "steps": [
-            {"step": "receive_document", "status": "completed", "result": {"source": source, "hash": computed_hash}},
-            {"step": "ai_classification", "status": "completed", "result": classification},
-            {"step": "bc_validation", "status": "completed", "result": validation_results},
-            {"step": "automation_decision", "status": "completed", "result": {"decision": decision, "reasoning": reasoning}}
-        ],
+        "steps": workflow_steps,
         "correlation_id": str(uuid.uuid4()),
         "error": None
     }
     await db.hub_workflow_runs.insert_one(workflow)
     
-    # Execute automation based on decision
-    if decision == "auto_link" or decision == "auto_create":
-        # Run the full upload and link workflow
-        folder = job_configs.get("sharepoint_folder", "Incoming")
+    # Execute BC linking based on decision (only if SharePoint upload succeeded)
+    final_status = update_data["status"]
+    
+    if sp_result and (decision == "auto_link" or decision == "auto_create"):
+        bc_record_id = validation_results.get("bc_record_id")
         
-        try:
-            # Upload to SharePoint
-            sp_result = await upload_to_sharepoint(file_content, final_filename, folder)
-            share_link = await create_sharing_link(sp_result["drive_id"], sp_result["item_id"])
-            
-            # Link to BC if we have a record
-            bc_linked = False
-            bc_record_id = validation_results.get("bc_record_id")
-            
-            if decision == "auto_link" and bc_record_id:
-                # Find related sales order or create appropriate link
+        if bc_record_id:
+            try:
                 link_result = await link_document_to_bc(
                     bc_record_id=bc_record_id,
                     share_link=share_link,
                     file_name=final_filename,
                     file_content=file_content
                 )
-                bc_linked = link_result.get("success", False)
-            
-            await db.hub_documents.update_one({"id": doc_id}, {"$set": {
-                "sharepoint_drive_id": sp_result["drive_id"],
-                "sharepoint_item_id": sp_result["item_id"],
-                "sharepoint_web_url": sp_result["web_url"],
-                "sharepoint_share_link_url": share_link,
-                "bc_record_id": bc_record_id,
-                "status": "LinkedToBC" if bc_linked else "Classified",
-                "updated_utc": datetime.now(timezone.utc).isoformat()
-            }})
-        except Exception as e:
-            logger.error("Auto-link failed for document %s: %s", doc_id, str(e))
-            await db.hub_documents.update_one({"id": doc_id}, {"$set": {
-                "status": "Exception",
-                "last_error": str(e),
-                "updated_utc": datetime.now(timezone.utc).isoformat()
-            }})
+                if link_result.get("success"):
+                    final_status = "LinkedToBC"
+                    await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+                        "bc_record_id": bc_record_id,
+                        "status": "LinkedToBC",
+                        "updated_utc": datetime.now(timezone.utc).isoformat()
+                    }})
+            except Exception as e:
+                logger.error("BC linking failed for document %s: %s", doc_id, str(e))
+    
     elif decision == "needs_review":
+        final_status = "NeedsReview"
         await db.hub_documents.update_one({"id": doc_id}, {"$set": {
             "status": "NeedsReview",
             "updated_utc": datetime.now(timezone.utc).isoformat()

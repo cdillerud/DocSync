@@ -2592,6 +2592,9 @@ async def _internal_intake_document(
     
     await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
     
+    # Trigger workflow validation asynchronously
+    asyncio.create_task(on_document_ingested(doc_id, source))
+    
     return {
         "document": {"id": doc_id, "status": update_data["status"]},
         "classification": classification,

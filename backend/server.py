@@ -1251,6 +1251,53 @@ async def test_connection(service: str = Query(...)):
             return {"service": "bc", "status": "error", "detail": str(e)}
     return {"service": service, "status": "unknown", "detail": "Unknown service"}
 
+# ==================== PHASE 4: DRAFT CREATION FEATURE TOGGLE ====================
+
+class DraftFeatureToggle(BaseModel):
+    enabled: bool
+
+@api_router.post("/settings/features/create-draft-header")
+async def toggle_draft_creation_feature(toggle: DraftFeatureToggle):
+    """
+    Toggle the CREATE_DRAFT_HEADER feature flag.
+    This is for SANDBOX testing only - production should use environment variables.
+    
+    IMPORTANT: This is a safety-critical feature. Only enable in sandbox environment.
+    """
+    global ENABLE_CREATE_DRAFT_HEADER
+    
+    old_value = ENABLE_CREATE_DRAFT_HEADER
+    ENABLE_CREATE_DRAFT_HEADER = toggle.enabled
+    
+    # Log the change
+    logger.info(
+        "CREATE_DRAFT_HEADER feature toggled: %s -> %s (by UI toggle)",
+        old_value, ENABLE_CREATE_DRAFT_HEADER
+    )
+    
+    return {
+        "feature": "create_draft_header",
+        "previous_value": old_value,
+        "current_value": ENABLE_CREATE_DRAFT_HEADER,
+        "message": f"Draft creation feature {'enabled' if ENABLE_CREATE_DRAFT_HEADER else 'disabled'}",
+        "safety_thresholds": DRAFT_CREATION_CONFIG if ENABLE_CREATE_DRAFT_HEADER else None
+    }
+
+@api_router.get("/settings/features/create-draft-header")
+async def get_draft_creation_feature_status():
+    """
+    Get the current status of the CREATE_DRAFT_HEADER feature.
+    """
+    return {
+        "feature": "create_draft_header",
+        "enabled": ENABLE_CREATE_DRAFT_HEADER,
+        "safety_thresholds": DRAFT_CREATION_CONFIG,
+        "eligible_match_methods": DRAFT_CREATION_CONFIG["eligible_match_methods"],
+        "min_match_score": DRAFT_CREATION_CONFIG["min_match_score_for_draft"],
+        "min_confidence": DRAFT_CREATION_CONFIG["min_confidence_for_draft"],
+        "supported_job_types": ["AP_Invoice"]
+    }
+
 # ==================== PHASE 2: EMAIL PARSER AGENT ====================
 
 # Emergent LLM Key for AI Classification

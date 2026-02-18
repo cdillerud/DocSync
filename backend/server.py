@@ -4336,7 +4336,7 @@ async def get_shadow_mode_performance_report(days: int = 14):
     alias_metrics = await get_alias_exception_metrics(days=days)
     vendor_stability = await get_vendor_stability_analysis(days=days)
     shadow_status = await get_shadow_mode_status()
-    automation_metrics = await get_automation_metrics(days=days)
+    automation_metrics = await _get_automation_metrics_internal(days=days)
     
     # Calculate production readiness score (0-100)
     readiness_factors = []

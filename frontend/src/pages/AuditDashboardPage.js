@@ -486,7 +486,9 @@ export default function AuditDashboardPage() {
                     DEMO_MODE: {shadowModeStatus.feature_flags?.DEMO_MODE ? 'ON' : 'OFF'}
                   </Badge>
                   <Badge variant={shadowModeStatus.email_polling?.enabled ? 'default' : 'outline'} className={shadowModeStatus.email_polling?.enabled ? 'bg-blue-100 text-blue-800' : ''}>
-                    EMAIL_POLLING: {shadowModeStatus.email_polling?.enabled ? `ON (${shadowModeStatus.email_polling?.interval_minutes}m)` : 'OFF'}
+                    {shadowModeStatus.email_polling?.enabled 
+                      ? `PASSIVE TAP: ON (${shadowModeStatus.email_polling?.interval_minutes}m)` 
+                      : 'EMAIL TAP: OFF'}
                   </Badge>
                 </div>
                 

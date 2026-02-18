@@ -12,6 +12,7 @@ import QueuePage from "@/pages/QueuePage";
 import DocumentDetailPage from "@/pages/DocumentDetailPage";
 import SettingsPage from "@/pages/SettingsPage";
 import EmailParserPage from "@/pages/EmailParserPage";
+import AuditDashboardPage from "@/pages/AuditDashboardPage";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -29,6 +30,7 @@ function AppRoutes() {
         <Route path="queue" element={<QueuePage />} />
         <Route path="documents/:id" element={<DocumentDetailPage />} />
         <Route path="email-parser" element={<EmailParserPage />} />
+        <Route path="audit" element={<AuditDashboardPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

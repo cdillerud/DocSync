@@ -4718,7 +4718,7 @@ async def _get_automation_metrics_internal(days: int = 30, job_type: str = None)
     ).to_list(10000)
     
     for doc in docs_with_confidence:
-        conf = doc.get("ai_confidence", 0)
+        conf = doc.get("ai_confidence") or 0
         if conf >= 0.9:
             confidence_ranges["high_0.9_1.0"] += 1
         elif conf >= 0.7:
@@ -4727,7 +4727,7 @@ async def _get_automation_metrics_internal(days: int = 30, job_type: str = None)
             confidence_ranges["low_0_0.7"] += 1
     
     # Average confidence
-    total_confidence = sum(doc.get("ai_confidence", 0) for doc in docs_with_confidence)
+    total_confidence = sum((doc.get("ai_confidence") or 0) for doc in docs_with_confidence)
     avg_confidence = round(total_confidence / len(docs_with_confidence), 3) if docs_with_confidence else 0
     
     # Duplicate prevention count

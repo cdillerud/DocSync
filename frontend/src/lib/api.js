@@ -38,7 +38,7 @@ export const getDocument = (id) => api.get(`/documents/${id}`);
 export const updateDocument = (id, data) => api.put(`/documents/${id}`, data);
 export const linkDocument = (id) => api.post(`/documents/${id}/link`);
 export const deleteDocument = (id) => api.delete(`/documents/${id}`);
-export const resubmitDocument = (id) => api.post(`/documents/${id}/resubmit`);
+export const resubmitDocument = (id) => api.post(`/documents/${id}/reprocess`);
 
 // Workflows
 export const listWorkflows = (params) => api.get('/workflows', { params });

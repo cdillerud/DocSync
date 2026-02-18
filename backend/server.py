@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, UploadFile, File, Form, HTTPException, Query, Request
+from fastapi import FastAPI, APIRouter, UploadFile, File, Form, HTTPException, Query, Request, BackgroundTasks
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import PlainTextResponse
@@ -8,6 +8,7 @@ import logging
 import hashlib
 import base64
 import re
+import asyncio
 from pathlib import Path
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any

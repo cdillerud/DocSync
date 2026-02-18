@@ -3915,6 +3915,10 @@ async def backfill_ap_mailbox(
     logger.info("[Backfill:%s] Starting AP mailbox backfill (days=%d, max=%d, dry_run=%s)", 
                 run_id, days_back, max_messages, dry_run)
     
+    # Use specified mailbox or default to EMAIL_POLLING_USER
+    target_mailbox = mailbox or EMAIL_POLLING_USER
+    stats["mailbox"] = target_mailbox
+    
     try:
         # Get email token (uses EMAIL_CLIENT_ID/SECRET)
         token = await get_email_token()

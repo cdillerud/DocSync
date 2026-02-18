@@ -3,39 +3,69 @@
 ## Original Problem Statement
 Build a "GPI Document Hub" test platform that replaces Zetadocs-style document linking in Microsoft Dynamics 365 Business Central by using SharePoint Online as the document repository and a middleware hub to orchestrate ingestion, metadata, approvals, and attachment linking back to BC.
 
-## Architecture
-- **Hub & Spoke**: Hub (FastAPI orchestrator) → Spokes (BC Sandbox, SharePoint Online, Exchange Online)
-- **Backend**: FastAPI + MongoDB (Motor async driver)
-- **Frontend**: React + Tailwind CSS + Shadcn/UI + Recharts
-- **Auth**: JWT with hardcoded test user (SSO-ready structure)
-- **Microsoft APIs**: LIVE integration with Graph API and Business Central API
-- **AI Classification**: Gemini 2.5-flash via Emergent LLM Key
-
-## Current Status: PHASE 7 - OBSERVATION MODE
+## Current Status: PHASE 7 - OBSERVATION MODE + C1
 
 **Shadow Mode Started:** February 18, 2026  
-**Feature Freeze:** 14 days (until ~Mar 4, 2026)  
-**No new features until observation window completes.**
+**Email Polling:** Implemented (disabled by default)  
+**Feature Freeze:** 14 days (until ~Mar 4, 2026)
 
 ---
 
 ## What's Been Implemented
 
-### Phase 1 - Core Platform ✅
-### Phase 2 - Email Parser Agent ✅
-### Phase 2.1 - Production Hardening ✅
-### Phase 2.2 - Audit Dashboard ✅
-### Phase 3 - Alias Impact Integration ✅
-### Phase 4 - CREATE_DRAFT_HEADER (Sandbox) ✅
-### Phase 5 - ELT ROI Dashboard ✅
-### Phase 6 - Shadow Mode Instrumentation ✅
+### Phase 1-6 ✅ Complete
+
 ### Phase 7 - Observation Mode 🔄 ACTIVE
+
+#### Phase 7 C1: Email Polling (Observation Infrastructure) ✅
+Minimal, reversible, shadow-only email polling for data collection.
+
+**NOT a product feature** — this is observation instrumentation plumbing.
+
+**Implementation:**
+- Feature flag: `EMAIL_POLLING_ENABLED` (default: OFF)
+- Poll interval: `EMAIL_POLLING_INTERVAL_MINUTES` (default: 5)
+- Target mailbox: `EMAIL_POLLING_USER` (e.g., ap@gamerpackaging.com)
+- Lookback window: `EMAIL_POLLING_LOOKBACK_MINUTES` (default: 60)
+- Safety limits: 25 messages/run, 25MB max attachment
+
+**Process Flow:**
+```
+Poll → Fetch Attachments → Check Idempotency → Save to SharePoint → 
+Process via Intake → Mark Message (Category) → Log Result
+```
+
+**Collections Added:**
+- `mail_intake_log` - Per-attachment idempotency tracking
+- `mail_poll_runs` - Per-run statistics
+
+**What Phase C1 Does:**
+- ✅ Polls for unread messages with attachments
+- ✅ Skips inline images and signatures
+- ✅ Checks for duplicate processing (idempotency)
+- ✅ Stores in SharePoint first (durability)
+- ✅ Processes through existing intake pipeline
+- ✅ Marks messages with category "HubShadowProcessed"
+- ✅ Logs all results for observability
+
+**What Phase C1 Does NOT Do:**
+- ❌ Move messages between folders
+- ❌ Delete messages
+- ❌ Create BC drafts (controlled by separate flag)
+- ❌ Any BC writes
+
+**New Endpoints:**
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/email-polling/status` | GET | Config + last 24h stats |
+| `/api/email-polling/trigger` | POST | Manual poll run (testing) |
+| `/api/email-polling/logs` | GET | Mail intake logs |
+
+**Rollback:** Set `EMAIL_POLLING_ENABLED=false`. No data loss, no operational impact.
 
 ---
 
 ## Locked Readiness Formula (Phase 7)
-
-**DO NOT MODIFY** without business justification.
 
 | Factor | Weight | Target | Gate Criteria |
 |--------|--------|--------|---------------|
@@ -44,31 +74,7 @@ Build a "GPI Document Hub" test platform that replaces Zetadocs-style document l
 | Stable Vendors | 25 pts | ≥3 | `stable_vendors >= 3` |
 | Data Volume | 20 pts | ≥100 | `total_docs >= 100` |
 
-**Total:** 100 pts  
 **Enablement Threshold:** ≥80 pts AND all 4 gates passed
-
-### Scoring Rules
-- High Confidence: `min(35, (pct / 60) * 35)`
-- Alias Exception: Full 20 if <5%, 15 if <10%, 10 if <20%, 0 otherwise
-- Stable Vendors: Full 25 if ≥3, 18 if ≥2, 10 if ≥1, 0 otherwise
-- Data Volume: Full 20 if ≥100, proportional if ≥50, slower ramp if <50
-
----
-
-## Observation Checkpoints
-
-- [ ] **Week 1:** Feb 25, 2026 - Check histogram stability
-- [ ] **Week 2:** Mar 4, 2026 - Evaluate gates, decide Phase 8
-- [ ] **Week 3:** Mar 11, 2026 (if needed)
-
----
-
-## Phase 8 Trigger (When All Gates Pass)
-
-1. Enable `CREATE_DRAFT_HEADER`
-2. Restrict to **3 known stable vendors only**
-3. Match methods: `exact_no`, `exact_name`, `normalized` (exclude alias initially)
-4. Monitor draft modification rate (target: <10%)
 
 ---
 
@@ -80,27 +86,33 @@ Build a "GPI Document Hub" test platform that replaces Zetadocs-style document l
 | 4 | ✅ | Safe draft gating |
 | 5 | ✅ | Executive ROI visibility |
 | 6 | ✅ | Production instrumentation |
-| 7 | 🔄 | **Observed stability** (CURRENT) |
+| 7 | 🔄 | **Observed stability + C1 Email Polling** (CURRENT) |
 | 8 | ⏳ | Controlled automation |
 | 9 | ⏳ | Vendor-level tuning |
 | 10 | ⏳ | Zetadocs retirement |
 
 ---
 
-## Key Endpoints (Reference)
+## Phase C Rollout Plan
 
-| Endpoint | Purpose |
-|----------|---------|
-| `GET /api/reports/shadow-mode-performance` | Full readiness report |
-| `GET /api/settings/shadow-mode` | Current shadow mode status |
-| `GET /api/metrics/match-score-distribution` | Histogram analysis |
-| `GET /api/metrics/alias-exceptions` | Alias health |
-| `GET /api/metrics/vendor-stability` | Vendor categorization |
+| Phase | Status | Description |
+|-------|--------|-------------|
+| C1 | ✅ | Poll + ingest + log + metrics (category tagging only) |
+| C2 | ⏳ | Add folder move after success (HubShadow folder) |
+| C3 | ⏳ | Production mode (HubProcessed folder, draft enablement) |
 
 ---
 
-## Documents
+## Next Steps
 
-- `/app/memory/PRD.md` - This file
-- `/app/memory/SHADOW_MODE_MEMO.md` - Internal memo
-- `/app/test_reports/iteration_10.json` - Latest test results
+1. **Configure EMAIL_POLLING_USER** in .env
+2. **Set EMAIL_POLLING_ENABLED=true** when ready to start data collection
+3. **Monitor /api/email-polling/status** for intake health
+4. **Continue Phase 7 observation** (14 days)
+5. **When readiness_score ≥ 80** → Phase 8: Controlled Vendor Enablement
+
+---
+
+## Testing Results (Latest)
+- Phase C1: 42/42 tests passed
+- All previous phases: Fully functional

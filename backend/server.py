@@ -3101,9 +3101,10 @@ async def resolve_and_link_document(doc_id: str, resolve: ResolveRequest):
 # ==================== SAFE REPROCESS ENDPOINT ====================
 
 @api_router.post("/documents/{doc_id}/reprocess")
-async def reprocess_document(doc_id: str):
+async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
     """
     Safe reprocess endpoint - re-runs validation + vendor match only.
+    Set reclassify=true to also re-run AI classification.
     
     Rules:
     - Do NOT duplicate SharePoint uploads

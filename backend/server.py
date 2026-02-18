@@ -1442,6 +1442,40 @@ DEFAULT_JOB_TYPES = {
         "required_extractions": ["vendor", "payment_amount", "payment_date"],
         "optional_extractions": ["invoice_references", "check_number"],
         "enabled": True
+    },
+    "Freight_Document": {
+        "job_type": "Freight_Document",
+        "display_name": "Freight Document (BOL/HAWB/Shipping)",
+        "automation_level": 1,
+        "min_confidence_to_auto_link": 0.80,
+        "min_confidence_to_auto_create_draft": 0.92,
+        "po_validation_mode": "PO_IF_PRESENT",
+        "allow_duplicate_check_override": False,
+        "requires_human_review_if_exception": True,
+        "vendor_match_threshold": 0.75,
+        "vendor_match_strategies": ["exact_no", "exact_name", "normalized", "fuzzy"],
+        "sharepoint_folder": "Freight",
+        "bc_entity": "purchaseReceipts",
+        "required_extractions": ["shipper", "tracking_number"],
+        "optional_extractions": ["consignee", "ship_date", "weight", "pieces", "origin", "destination", "carrier"],
+        "enabled": True
+    },
+    "Warehouse_Document": {
+        "job_type": "Warehouse_Document",
+        "display_name": "Warehouse Document (Receipt/Shipment)",
+        "automation_level": 1,
+        "min_confidence_to_auto_link": 0.80,
+        "min_confidence_to_auto_create_draft": 0.92,
+        "po_validation_mode": "PO_IF_PRESENT",
+        "allow_duplicate_check_override": False,
+        "requires_human_review_if_exception": True,
+        "vendor_match_threshold": 0.75,
+        "vendor_match_strategies": ["exact_no", "exact_name", "normalized", "fuzzy"],
+        "sharepoint_folder": "Warehouse",
+        "bc_entity": "warehouseReceipts",
+        "required_extractions": ["document_number", "location"],
+        "optional_extractions": ["item_numbers", "quantities", "bin_codes", "receipt_date"],
+        "enabled": True
     }
 }
 

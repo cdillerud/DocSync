@@ -6332,6 +6332,10 @@ async def startup():
     await db.hub_documents.create_index("source")
     await db.hub_documents.create_index("suggested_job_type")
     await db.hub_documents.create_index([("extracted_fields.vendor", 1)])
+    # Phase 7 Week 1: Indexes for canonical fields and draft candidate
+    await db.hub_documents.create_index([("canonical_fields.vendor_normalized", 1)])
+    await db.hub_documents.create_index("draft_candidate")
+    await db.hub_documents.create_index("draft_candidate_score")
     await db.hub_workflow_runs.create_index("id", unique=True)
     await db.hub_workflow_runs.create_index("document_id")
     await db.hub_workflow_runs.create_index("started_utc")

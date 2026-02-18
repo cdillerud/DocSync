@@ -77,7 +77,7 @@ export default function AuditDashboardPage() {
     { range: '90-100%', count: metrics.confidence_distribution['0.90-1.00'] },
     { range: '80-90%', count: metrics.confidence_distribution['0.80-0.90'] },
     { range: '70-80%', count: metrics.confidence_distribution['0.70-0.80'] },
-    { range: '<70%', count: metrics.confidence_distribution.below_0.70 },
+    { range: '<70%', count: metrics.confidence_distribution['below_0.70'] },
   ] : [];
 
   const matchMethodData = aliasImpact ? Object.entries(aliasImpact.match_method_distribution).map(([method, count]) => ({

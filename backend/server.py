@@ -2841,7 +2841,8 @@ async def reprocess_document(doc_id: str):
     Rules:
     - Do NOT duplicate SharePoint uploads
     - Do NOT create new BC records if already linked
-    - If alias now matches → transition from NeedsReview → LinkedToBC
+    - Do NOT create draft invoices (drafts only during initial intake)
+    - If alias now matches → transition from NeedsReview → LinkedToBC (via linking, not draft)
     - Must be idempotent
     """
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
@@ -2853,6 +2854,14 @@ async def reprocess_document(doc_id: str):
         return {
             "reprocessed": False,
             "reason": "Document already linked to BC - no reprocessing needed",
+            "document": doc
+        }
+    
+    # Idempotency check: If bc_record_id exists, document was already processed
+    if doc.get("bc_record_id"):
+        return {
+            "reprocessed": False,
+            "reason": f"BC record already exists ({doc.get('bc_record_id')}) - idempotency guard",
             "document": doc
         }
     
@@ -2885,8 +2894,10 @@ async def reprocess_document(doc_id: str):
     new_status = old_status
     bc_linked = False
     link_error = None
+    transaction_action = doc.get("transaction_action", TransactionAction.NONE)
     
     # If validation now passes and we have SharePoint info, try to link to BC
+    # NOTE: Reprocess does NOT create drafts - only links to existing records
     share_link = doc.get("sharepoint_share_link_url")
     bc_record_id = validation_results.get("bc_record_id")
     
@@ -2902,6 +2913,7 @@ async def reprocess_document(doc_id: str):
                 if link_result.get("success"):
                     bc_linked = True
                     new_status = "LinkedToBC"
+                    transaction_action = TransactionAction.LINKED_ONLY
                 else:
                     link_error = link_result.get("error")
             except Exception as e:
@@ -2921,6 +2933,7 @@ async def reprocess_document(doc_id: str):
         "vendor_candidates": decision_metadata.get("vendor_candidates", []),
         "customer_candidates": decision_metadata.get("customer_candidates", []),
         "status": new_status,
+        "transaction_action": transaction_action,
         "reprocessed_utc": datetime.now(timezone.utc).isoformat(),
         "updated_utc": datetime.now(timezone.utc).isoformat()
     }
@@ -2949,7 +2962,9 @@ async def reprocess_document(doc_id: str):
                     "old_match_method": old_match_method,
                     "new_match_method": new_match_method,
                     "validation_passed": validation_results.get("all_passed"),
-                    "decision": decision
+                    "decision": decision,
+                    "draft_creation_skipped": True,  # Reprocess never creates drafts
+                    "reason": "Reprocess only links to existing BC records, no draft creation"
                 }
             },
             {

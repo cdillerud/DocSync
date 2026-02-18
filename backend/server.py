@@ -2836,6 +2836,9 @@ async def _internal_intake_document(
     confidence = classification.get("confidence", 0.0)
     extracted_fields = classification.get("extracted_fields", {})
     
+    # Phase 7 Week 1: Compute canonical fields at ingestion time
+    canonical_fields = compute_canonical_fields(extracted_fields)
+    
     # Get job type config
     job_configs = await db.hub_job_types.find_one({"job_type": suggested_type}, {"_id": 0})
     if not job_configs:
@@ -2843,6 +2846,11 @@ async def _internal_intake_document(
     
     # Run BC validation
     validation_results = await validate_bc_match(suggested_type, extracted_fields, job_configs)
+    
+    # Phase 7 Week 1: Compute draft candidate flag (non-operational)
+    draft_candidate_result = compute_draft_candidate_flag(
+        suggested_type, extracted_fields, canonical_fields, confidence
+    )
     
     # Make automation decision
     decision, reasoning, decision_metadata = make_automation_decision(job_configs, confidence, validation_results)
@@ -2879,6 +2887,7 @@ async def _internal_intake_document(
         "document_type": suggested_type,
         "ai_confidence": confidence,
         "extracted_fields": extracted_fields,
+        "canonical_fields": canonical_fields,  # Phase 7: Store canonical fields
         "normalized_fields": validation_results.get("normalized_fields", {}),
         "validation_results": validation_results,
         "automation_decision": decision,
@@ -2887,6 +2896,10 @@ async def _internal_intake_document(
         "vendor_candidates": decision_metadata.get("vendor_candidates", []),
         "customer_candidates": decision_metadata.get("customer_candidates", []),
         "warnings": decision_metadata.get("warnings", []),
+        # Phase 7 Week 1: Draft candidate computed flag (non-operational)
+        "draft_candidate": draft_candidate_result["draft_candidate"],
+        "draft_candidate_score": draft_candidate_result["draft_candidate_score"],
+        "draft_candidate_reason": draft_candidate_result["draft_candidate_reason"],
         "status": final_status,
         "workflow_state": "Validated",
         "updated_utc": datetime.now(timezone.utc).isoformat()

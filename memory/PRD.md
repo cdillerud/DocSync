@@ -3,7 +3,7 @@
 ## Original Problem Statement
 Build a "GPI Document Hub" test platform that replaces Zetadocs-style document linking in Microsoft Dynamics 365 Business Central by using SharePoint Online as the document repository and a middleware hub to orchestrate ingestion, metadata, approvals, and attachment linking back to BC.
 
-## Current Status: PHASE 7 - OBSERVATION MODE + C1
+## Current Status: PHASE 7 - OBSERVATION MODE + Week 1 Hardening
 
 **Shadow Mode Started:** February 18, 2026  
 **Email Polling:** Implemented (disabled by default)  
@@ -65,6 +65,65 @@ Process via Intake → Mark Message (Category) → Log Result
 
 ---
 
+#### Phase 7 Week 1: Hardening (Observability) ✅ IMPLEMENTED 2026-02-18
+
+**Purpose:** Tighten signal quality and observability before Phase 8 enablement.
+
+**1️⃣ Missing Fields Drilldown Endpoint**
+- Endpoint: `GET /api/metrics/extraction-misses`
+- Parameters: `field` (vendor/invoice_number/amount), `days`, `limit`
+- Returns: document_id, file_name, vendor_extracted, invoice_number_extracted, amount_extracted, which_required_fields_missing, ai_confidence, first_500_chars_text
+- Purpose: Identify WHY extraction is failing for specific documents
+
+**2️⃣ Canonical Normalization at Ingestion**
+- New `canonical_fields` object stored on every document at ingestion time
+- Fields stored:
+  - `vendor_normalized` (lowercase, trimmed)
+  - `invoice_number_clean` (whitespace stripped, uppercase)
+  - `amount_float` (parsed to float)
+  - `due_date_iso` (ISO 8601 format)
+  - `invoice_date_iso` (ISO 8601 format)
+  - `po_number_clean` (whitespace stripped, uppercase)
+- Raw values preserved alongside normalized for audit trail
+- Applied to both `intake_document` and `_internal_intake_document` paths
+
+**3️⃣ Stable Vendor Metric**
+- Endpoint: `GET /api/metrics/stable-vendors`
+- Parameters: `min_count` (default 5), `min_completeness` (0.85), `max_variants` (3), `days`
+- Criteria:
+  - count >= min_count
+  - required field completeness >= min_completeness (85%)
+  - alias variance <= max_variants
+  - no conflicting invoice numbers
+- Purpose: Identify candidates for Phase 8 controlled enablement
+- **Does NOT enable anything** - metric only
+
+**4️⃣ Draft Candidate Flag (Non-Operational)**
+- Computed at ingestion time for every document
+- Stored fields: `draft_candidate` (bool), `draft_candidate_score` (0-100), `draft_candidate_reason` (array)
+- Criteria for `draft_candidate = True`:
+  - document_type == AP_Invoice
+  - vendor present
+  - invoice_number present
+  - amount present
+  - ai_confidence >= 0.92
+- **Does NOT create drafts or change status**
+- Endpoint: `GET /api/metrics/draft-candidates`
+- Dashboard can now show:
+  - ReadyForDraftCandidate: X%
+  - ReadyToLink: Y%
+  - NeedsHumanReview: Z%
+
+**What Phase 7 Week 1 Does NOT Touch:**
+- ❌ Match score thresholds
+- ❌ CREATE_DRAFT_HEADER enablement
+- ❌ Vendor overrides
+- ❌ Readiness weights
+- ❌ AI prompts
+- ❌ Document types
+
+---
+
 ## Locked Readiness Formula (Phase 7)
 
 | Factor | Weight | Target | Gate Criteria |
@@ -86,7 +145,7 @@ Process via Intake → Mark Message (Category) → Log Result
 | 4 | ✅ | Safe draft gating |
 | 5 | ✅ | Executive ROI visibility |
 | 6 | ✅ | Production instrumentation |
-| 7 | 🔄 | **Observed stability + C1 Email Polling** (CURRENT) |
+| 7 | 🔄 | **Observed stability + C1 Email Polling + Week 1 Hardening** (CURRENT) |
 | 8 | ⏳ | Controlled automation |
 | 9 | ⏳ | Vendor-level tuning |
 | 10 | ⏳ | Zetadocs retirement |
@@ -105,14 +164,26 @@ Process via Intake → Mark Message (Category) → Log Result
 
 ## Next Steps
 
-1. **Configure EMAIL_POLLING_USER** in .env
-2. **Set EMAIL_POLLING_ENABLED=true** when ready to start data collection
-3. **Monitor /api/email-polling/status** for intake health
-4. **Continue Phase 7 observation** (14 days)
+1. **Deploy Phase 7 Week 1 changes to VM** via git pull + deploy.sh
+2. **Run backfill** to test canonical normalization with real data
+3. **Monitor `/api/metrics/stable-vendors`** for Phase 8 candidates
+4. **Review `/api/metrics/draft-candidates`** for readiness rates
 5. **When readiness_score ≥ 80** → Phase 8: Controlled Vendor Enablement
+
+---
+
+## API Endpoints Summary (Phase 7 Week 1)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/metrics/extraction-quality` | GET | Overall extraction quality + draft candidate rate |
+| `/api/metrics/extraction-misses` | GET | Missing field drilldown |
+| `/api/metrics/stable-vendors` | GET | Stable vendor candidates for Phase 8 |
+| `/api/metrics/draft-candidates` | GET | Draft candidate distribution |
 
 ---
 
 ## Testing Results (Latest)
 - Phase C1: 42/42 tests passed
+- Phase 7 Week 1: All 4 endpoints functional
 - All previous phases: Fully functional

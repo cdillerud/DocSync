@@ -4906,6 +4906,11 @@ async def get_shadow_mode_performance_report(days: int = 14):
 
 app.include_router(api_router)
 
+@app.get("/api/health")
+async def health_check():
+    """Health check endpoint for Docker/Kubernetes probes."""
+    return {"status": "healthy", "service": "gpi-document-hub"}
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

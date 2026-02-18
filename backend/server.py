@@ -2689,6 +2689,18 @@ async def _internal_intake_document(
         logger.error("SharePoint upload failed for document %s: %s", doc_id, sp_error)
     
     # Update document with classification + SharePoint results
+    # Set status based on automation decision (not just StoredInSP)
+    if decision == "auto_link" and validation_results.get("all_passed"):
+        final_status = "ReadyToLink"
+    elif decision in ("needs_review", "manual"):
+        final_status = "NeedsReview"
+    elif decision == "exception":
+        final_status = "Exception"
+    elif sp_result:
+        final_status = "StoredInSP"
+    else:
+        final_status = "Classified"
+    
     update_data = {
         "suggested_job_type": suggested_type,
         "document_type": suggested_type,
@@ -2702,6 +2714,8 @@ async def _internal_intake_document(
         "vendor_candidates": decision_metadata.get("vendor_candidates", []),
         "customer_candidates": decision_metadata.get("customer_candidates", []),
         "warnings": decision_metadata.get("warnings", []),
+        "status": final_status,
+        "workflow_state": "Validated",
         "updated_utc": datetime.now(timezone.utc).isoformat()
     }
     
@@ -2710,18 +2724,47 @@ async def _internal_intake_document(
         update_data["sharepoint_item_id"] = sp_result["item_id"]
         update_data["sharepoint_web_url"] = sp_result["web_url"]
         update_data["sharepoint_share_link_url"] = share_link
-        update_data["status"] = "StoredInSP"
     else:
-        update_data["status"] = "Classified"
         update_data["last_error"] = f"SharePoint upload failed: {sp_error}"
     
     await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
     
-    # Trigger workflow validation asynchronously
-    asyncio.create_task(on_document_ingested(doc_id, source))
+    # Create workflow audit trail entry
+    workflow_run_id = uuid.uuid4().hex[:8]
+    workflow = {
+        "id": str(uuid.uuid4()),
+        "run_id": workflow_run_id,
+        "document_id": doc_id,
+        "workflow_name": source,
+        "workflow_type": "intake_validation",
+        "started_utc": now,
+        "ended_utc": datetime.now(timezone.utc).isoformat(),
+        "status": "Completed",
+        "correlation_id": uuid.uuid4().hex[:8],
+        "steps": [
+            {"step": "AI Classification", "status": "Completed", "timestamp": now, 
+             "details": {"document_type": suggested_type, "confidence": confidence}},
+            {"step": "SharePoint Upload", "status": "Completed" if sp_result else "Failed", 
+             "timestamp": datetime.now(timezone.utc).isoformat(),
+             "details": sp_result if sp_result else {"error": sp_error}},
+            {"step": "BC Validation", "status": "Completed", "timestamp": datetime.now(timezone.utc).isoformat(),
+             "details": {
+                 "match_method": validation_results.get("match_method", "none"),
+                 "match_score": validation_results.get("match_score", 0.0),
+                 "all_passed": validation_results.get("all_passed", False)
+             }},
+            {"step": "Automation Decision", "status": "Completed", "timestamp": datetime.now(timezone.utc).isoformat(),
+             "details": {"decision": decision, "reasoning": reasoning, "final_status": final_status}}
+        ],
+        "error": None
+    }
+    await db.hub_workflow_runs.insert_one(workflow)
+    
+    logger.info("[Workflow:%s] Intake complete: %s → status=%s, decision=%s, score=%.2f", 
+                workflow_run_id, filename, final_status, decision, validation_results.get("match_score", 0.0))
     
     return {
-        "document": {"id": doc_id, "status": update_data["status"]},
+        "document": {"id": doc_id, "status": final_status},
         "classification": classification,
         "automation_decision": decision,
         "sharepoint": sp_result

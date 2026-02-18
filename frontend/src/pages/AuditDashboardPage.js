@@ -33,17 +33,25 @@ export default function AuditDashboardPage() {
   const [resolutionTime, setResolutionTime] = useState(null);
   const [dailyMetrics, setDailyMetrics] = useState(null);
   const [settingsStatus, setSettingsStatus] = useState(null);
+  // Phase 6: Shadow Mode metrics
+  const [matchScoreDistribution, setMatchScoreDistribution] = useState(null);
+  const [aliasExceptions, setAliasExceptions] = useState(null);
+  const [shadowModeStatus, setShadowModeStatus] = useState(null);
 
   const fetchAllMetrics = async () => {
     setLoading(true);
     try {
-      const [metricsRes, vendorRes, aliasRes, timeRes, dailyRes, settingsRes] = await Promise.all([
+      const [metricsRes, vendorRes, aliasRes, timeRes, dailyRes, settingsRes, scoreDistRes, aliasExcRes, shadowRes] = await Promise.all([
         fetch(`${API}/api/metrics/automation?days=${days}`).then(r => r.json()),
         fetch(`${API}/api/metrics/vendors?days=${days}`).then(r => r.json()),
         fetch(`${API}/api/metrics/alias-impact`).then(r => r.json()),
         fetch(`${API}/api/metrics/resolution-time?days=${days}`).then(r => r.json()),
         fetch(`${API}/api/metrics/daily?days=14`).then(r => r.json()),
-        fetch(`${API}/api/settings/status`).then(r => r.json())
+        fetch(`${API}/api/settings/status`).then(r => r.json()),
+        // Phase 6 endpoints
+        fetch(`${API}/api/metrics/match-score-distribution`).then(r => r.json()),
+        fetch(`${API}/api/metrics/alias-exceptions?days=${days}`).then(r => r.json()),
+        fetch(`${API}/api/settings/shadow-mode`).then(r => r.json())
       ]);
       setMetrics(metricsRes);
       setVendorFriction(vendorRes);
@@ -51,6 +59,9 @@ export default function AuditDashboardPage() {
       setResolutionTime(timeRes);
       setDailyMetrics(dailyRes);
       setSettingsStatus(settingsRes);
+      setMatchScoreDistribution(scoreDistRes);
+      setAliasExceptions(aliasExcRes);
+      setShadowModeStatus(shadowRes);
     } catch (err) {
       toast.error('Failed to load metrics');
     } finally {

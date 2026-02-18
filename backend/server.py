@@ -1110,9 +1110,14 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
             'jpg': 'image/jpeg',
             'jpeg': 'image/jpeg',
             'tiff': 'image/tiff',
-            'gif': 'image/gif'
+            'gif': 'image/gif',
+            'txt': 'text/plain',
+            'csv': 'text/csv',
+            'html': 'text/html',
+            'json': 'application/json',
+            'xml': 'application/xml'
         }
-        mime_type = mime_map.get(ext, 'application/octet-stream')
+        mime_type = mime_map.get(ext, 'text/plain')  # Default to text/plain for better compatibility
         
         # Initialize chat with Gemini (required for file attachments)
         chat = LlmChat(

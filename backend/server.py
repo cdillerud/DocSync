@@ -3541,8 +3541,8 @@ async def poll_mailbox_for_attachments():
     await db.mail_poll_runs.insert_one(stats)
     
     logger.info(
-        "[EmailPoll:%s] Complete: scanned=%d, processed=%d, skipped_dup=%d, skipped_inline=%d, failed=%d",
-        run_id, stats["messages_scanned"], stats["attachments_processed"],
+        "[EmailPoll:%s] Complete: detected=%d, ingested=%d, skipped_dup=%d, skipped_inline=%d, failed=%d",
+        run_id, stats["messages_detected"], stats["attachments_ingested"],
         stats["attachments_skipped_duplicate"], stats["attachments_skipped_inline"], stats["attachments_failed"]
     )
     

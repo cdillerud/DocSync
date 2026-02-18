@@ -2629,6 +2629,436 @@ async def subscribe_email_watcher(webhook_url: str = Query(...)):
     
     return result
 
+# ==================== VENDOR ALIAS ENGINE ====================
+
+class VendorAlias(BaseModel):
+    alias_string: str
+    vendor_no: str
+    vendor_name: Optional[str] = None
+    confidence_override: Optional[float] = None  # If set, use this instead of calculated
+    notes: Optional[str] = None
+
+@api_router.get("/aliases/vendors")
+async def get_vendor_aliases():
+    """Get all vendor aliases."""
+    aliases = await db.vendor_aliases.find({}, {"_id": 0}).to_list(500)
+    return {"aliases": aliases, "count": len(aliases)}
+
+@api_router.post("/aliases/vendors")
+async def create_vendor_alias(alias: VendorAlias):
+    """Create a new vendor alias mapping."""
+    alias_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Normalize the alias string for matching
+    normalized = normalize_vendor_name(alias.alias_string)
+    
+    # Check for existing alias
+    existing = await db.vendor_aliases.find_one({
+        "$or": [
+            {"alias_string": alias.alias_string},
+            {"normalized_alias": normalized}
+        ]
+    })
+    
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Alias already exists for '{alias.alias_string}'")
+    
+    alias_doc = {
+        "alias_id": alias_id,
+        "alias_string": alias.alias_string,
+        "normalized_alias": normalized,
+        "vendor_no": alias.vendor_no,
+        "vendor_name": alias.vendor_name,
+        "confidence_override": alias.confidence_override,
+        "notes": alias.notes,
+        "created_by": "system",  # Could be user ID in future
+        "created_at": now,
+        "usage_count": 0,
+        "last_used_at": None
+    }
+    
+    await db.vendor_aliases.insert_one(alias_doc)
+    
+    # Update global alias map
+    VENDOR_ALIAS_MAP[alias.alias_string] = alias.vendor_name or alias.vendor_no
+    VENDOR_ALIAS_MAP[normalized] = alias.vendor_name or alias.vendor_no
+    
+    return {"alias_id": alias_id, "message": "Alias created successfully"}
+
+@api_router.delete("/aliases/vendors/{alias_id}")
+async def delete_vendor_alias(alias_id: str):
+    """Delete a vendor alias."""
+    result = await db.vendor_aliases.delete_one({"alias_id": alias_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Alias not found")
+    return {"message": "Alias deleted"}
+
+@api_router.get("/aliases/vendors/suggest")
+async def suggest_alias_creation(vendor_name: str, resolved_vendor_no: str, resolved_vendor_name: str):
+    """
+    Called when user manually resolves a vendor match.
+    Returns suggestion to save as alias.
+    """
+    normalized = normalize_vendor_name(vendor_name)
+    
+    # Check if alias already exists
+    existing = await db.vendor_aliases.find_one({
+        "$or": [
+            {"alias_string": vendor_name},
+            {"normalized_alias": normalized}
+        ]
+    })
+    
+    if existing:
+        return {
+            "suggest_alias": False,
+            "reason": "Alias already exists",
+            "existing_alias": existing
+        }
+    
+    return {
+        "suggest_alias": True,
+        "suggested_alias": {
+            "alias_string": vendor_name,
+            "normalized_alias": normalized,
+            "vendor_no": resolved_vendor_no,
+            "vendor_name": resolved_vendor_name
+        },
+        "message": f"Would you like to save '{vendor_name}' as an alias for '{resolved_vendor_name}'?"
+    }
+
+# Update resolve endpoint to increment alias usage
+async def record_alias_usage(alias_string: str):
+    """Record when an alias is used for matching."""
+    await db.vendor_aliases.update_one(
+        {"alias_string": alias_string},
+        {
+            "$inc": {"usage_count": 1},
+            "$set": {"last_used_at": datetime.now(timezone.utc).isoformat()}
+        }
+    )
+
+# ==================== AUTOMATION METRICS ENGINE ====================
+
+@api_router.get("/metrics/automation")
+async def get_automation_metrics(
+    days: int = Query(30, description="Number of days to include"),
+    job_type: Optional[str] = Query(None, description="Filter by job type")
+):
+    """
+    Get comprehensive automation metrics for the audit dashboard.
+    """
+    cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    
+    # Build query filter
+    query = {"created_utc": {"$gte": cutoff_date}}
+    if job_type:
+        query["suggested_job_type"] = job_type
+    
+    # Total documents
+    total = await db.hub_documents.count_documents(query)
+    
+    # Status distribution
+    status_counts = {}
+    for status in ["Received", "StoredInSP", "Classified", "NeedsReview", "LinkedToBC", "Exception"]:
+        status_query = {**query, "status": status}
+        status_counts[status] = await db.hub_documents.count_documents(status_query)
+    
+    # Calculate percentages
+    status_percentages = {}
+    for status, count in status_counts.items():
+        status_percentages[status] = round((count / total * 100) if total > 0 else 0, 1)
+    
+    # By job type breakdown
+    job_type_breakdown = {}
+    for jt in DEFAULT_JOB_TYPES.keys():
+        jt_query = {**query, "suggested_job_type": jt}
+        jt_total = await db.hub_documents.count_documents(jt_query)
+        if jt_total > 0:
+            jt_linked = await db.hub_documents.count_documents({**jt_query, "status": "LinkedToBC"})
+            jt_review = await db.hub_documents.count_documents({**jt_query, "status": "NeedsReview"})
+            job_type_breakdown[jt] = {
+                "total": jt_total,
+                "linked": jt_linked,
+                "needs_review": jt_review,
+                "auto_rate": round((jt_linked / jt_total * 100) if jt_total > 0 else 0, 1)
+            }
+    
+    # Confidence distribution
+    confidence_ranges = {
+        "0.70-0.80": 0,
+        "0.80-0.90": 0,
+        "0.90-1.00": 0,
+        "below_0.70": 0
+    }
+    
+    docs_with_confidence = await db.hub_documents.find(
+        {**query, "ai_confidence": {"$exists": True, "$ne": None}},
+        {"ai_confidence": 1}
+    ).to_list(10000)
+    
+    for doc in docs_with_confidence:
+        conf = doc.get("ai_confidence", 0)
+        if conf >= 0.90:
+            confidence_ranges["0.90-1.00"] += 1
+        elif conf >= 0.80:
+            confidence_ranges["0.80-0.90"] += 1
+        elif conf >= 0.70:
+            confidence_ranges["0.70-0.80"] += 1
+        else:
+            confidence_ranges["below_0.70"] += 1
+    
+    # Average confidence
+    total_confidence = sum(doc.get("ai_confidence", 0) for doc in docs_with_confidence)
+    avg_confidence = round(total_confidence / len(docs_with_confidence), 3) if docs_with_confidence else 0
+    
+    # Duplicate prevention count (documents with duplicate_check failed)
+    duplicate_prevented = await db.hub_documents.count_documents({
+        **query,
+        "validation_results.checks": {
+            "$elemMatch": {"check_name": "duplicate_check", "passed": False}
+        }
+    })
+    
+    return {
+        "period_days": days,
+        "total_documents": total,
+        "status_distribution": {
+            "counts": status_counts,
+            "percentages": status_percentages
+        },
+        "job_type_breakdown": job_type_breakdown,
+        "confidence_distribution": confidence_ranges,
+        "average_confidence": avg_confidence,
+        "duplicate_prevented": duplicate_prevented,
+        "automation_rate": status_percentages.get("LinkedToBC", 0),
+        "review_rate": status_percentages.get("NeedsReview", 0)
+    }
+
+@api_router.get("/metrics/vendors")
+async def get_vendor_friction_metrics(days: int = Query(30)):
+    """
+    Get vendor friction index - shows where alias mapping will have biggest ROI.
+    """
+    cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    
+    # Get all documents with vendor info
+    docs = await db.hub_documents.find(
+        {
+            "created_utc": {"$gte": cutoff_date},
+            "extracted_fields.vendor": {"$exists": True}
+        },
+        {"extracted_fields.vendor": 1, "status": 1, "ai_confidence": 1, "validation_results": 1, "_id": 0}
+    ).to_list(5000)
+    
+    # Aggregate by vendor
+    vendor_stats = {}
+    for doc in docs:
+        vendor = doc.get("extracted_fields", {}).get("vendor", "Unknown")
+        if vendor not in vendor_stats:
+            vendor_stats[vendor] = {
+                "total": 0,
+                "linked": 0,
+                "needs_review": 0,
+                "exception": 0,
+                "total_confidence": 0
+            }
+        
+        vendor_stats[vendor]["total"] += 1
+        vendor_stats[vendor]["total_confidence"] += doc.get("ai_confidence", 0)
+        
+        status = doc.get("status", "")
+        if status == "LinkedToBC":
+            vendor_stats[vendor]["linked"] += 1
+        elif status == "NeedsReview":
+            vendor_stats[vendor]["needs_review"] += 1
+        elif status == "Exception":
+            vendor_stats[vendor]["exception"] += 1
+    
+    # Calculate friction index and sort
+    vendor_friction = []
+    for vendor, stats in vendor_stats.items():
+        total = stats["total"]
+        if total > 0:
+            exception_rate = stats["needs_review"] / total
+            avg_confidence = stats["total_confidence"] / total
+            auto_rate = stats["linked"] / total
+            
+            # Friction index: higher = more manual intervention needed
+            friction_index = round(exception_rate * 100, 1)
+            
+            vendor_friction.append({
+                "vendor": vendor,
+                "total_documents": total,
+                "auto_linked": stats["linked"],
+                "needs_review": stats["needs_review"],
+                "auto_rate": round(auto_rate * 100, 1),
+                "avg_confidence": round(avg_confidence, 3),
+                "friction_index": friction_index
+            })
+    
+    # Sort by friction index (highest first = most opportunity)
+    vendor_friction.sort(key=lambda x: x["friction_index"], reverse=True)
+    
+    return {
+        "period_days": days,
+        "vendor_count": len(vendor_friction),
+        "vendors": vendor_friction[:20],  # Top 20 friction vendors
+        "total_analyzed": len(docs)
+    }
+
+@api_router.get("/metrics/alias-impact")
+async def get_alias_impact_metrics():
+    """
+    Track alias learning impact over time.
+    Shows compounding intelligence.
+    """
+    # Get all aliases with usage stats
+    aliases = await db.vendor_aliases.find({}, {"_id": 0}).to_list(500)
+    
+    total_aliases = len(aliases)
+    total_usage = sum(a.get("usage_count", 0) for a in aliases)
+    
+    # Get match method distribution from recent documents
+    docs = await db.hub_documents.find(
+        {"validation_results.checks": {"$exists": True}},
+        {"validation_results.checks": 1, "_id": 0}
+    ).sort("created_utc", -1).limit(1000).to_list(1000)
+    
+    match_methods = {
+        "exact_no": 0,
+        "exact_name": 0,
+        "normalized": 0,
+        "alias": 0,
+        "fuzzy": 0,
+        "no_match": 0
+    }
+    
+    for doc in docs:
+        checks = doc.get("validation_results", {}).get("checks", [])
+        for check in checks:
+            if check.get("check_name") in ("vendor_match", "customer_match"):
+                method = check.get("match_method", "no_match")
+                if method in match_methods:
+                    match_methods[method] += 1
+                elif not check.get("passed"):
+                    match_methods["no_match"] += 1
+    
+    total_matches = sum(match_methods.values())
+    
+    return {
+        "total_aliases": total_aliases,
+        "total_alias_usage": total_usage,
+        "top_aliases": sorted(aliases, key=lambda x: x.get("usage_count", 0), reverse=True)[:10],
+        "match_method_distribution": match_methods,
+        "match_method_percentages": {
+            k: round(v / total_matches * 100, 1) if total_matches > 0 else 0
+            for k, v in match_methods.items()
+        },
+        "alias_contribution": round(match_methods.get("alias", 0) / total_matches * 100, 1) if total_matches > 0 else 0
+    }
+
+@api_router.get("/metrics/resolution-time")
+async def get_resolution_time_metrics(days: int = Query(30)):
+    """
+    Track time from Received to LinkedToBC.
+    Shows efficiency improvements.
+    """
+    cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    
+    # Get documents that reached LinkedToBC status
+    linked_docs = await db.hub_documents.find(
+        {
+            "created_utc": {"$gte": cutoff_date},
+            "status": "LinkedToBC"
+        },
+        {"created_utc": 1, "updated_utc": 1, "resolved_utc": 1, "suggested_job_type": 1, "_id": 0}
+    ).to_list(5000)
+    
+    resolution_times = []
+    by_job_type = {}
+    
+    for doc in linked_docs:
+        try:
+            created = datetime.fromisoformat(doc["created_utc"].replace("Z", "+00:00"))
+            # Use resolved_utc if available, otherwise updated_utc
+            resolved = doc.get("resolved_utc") or doc.get("updated_utc")
+            if resolved:
+                resolved = datetime.fromisoformat(resolved.replace("Z", "+00:00"))
+                minutes = (resolved - created).total_seconds() / 60
+                resolution_times.append(minutes)
+                
+                jt = doc.get("suggested_job_type", "Unknown")
+                if jt not in by_job_type:
+                    by_job_type[jt] = []
+                by_job_type[jt].append(minutes)
+        except Exception:
+            continue
+    
+    # Calculate statistics
+    if resolution_times:
+        resolution_times.sort()
+        median_time = resolution_times[len(resolution_times) // 2]
+        p95_time = resolution_times[int(len(resolution_times) * 0.95)] if len(resolution_times) > 20 else max(resolution_times)
+        avg_time = sum(resolution_times) / len(resolution_times)
+    else:
+        median_time = 0
+        p95_time = 0
+        avg_time = 0
+    
+    # Per job type stats
+    job_type_stats = {}
+    for jt, times in by_job_type.items():
+        if times:
+            times.sort()
+            job_type_stats[jt] = {
+                "count": len(times),
+                "median_minutes": round(times[len(times) // 2], 2),
+                "avg_minutes": round(sum(times) / len(times), 2)
+            }
+    
+    return {
+        "period_days": days,
+        "total_resolved": len(resolution_times),
+        "median_minutes": round(median_time, 2),
+        "p95_minutes": round(p95_time, 2),
+        "avg_minutes": round(avg_time, 2),
+        "by_job_type": job_type_stats
+    }
+
+@api_router.get("/metrics/daily")
+async def get_daily_metrics(days: int = Query(14)):
+    """
+    Get daily aggregated metrics for trend charts.
+    """
+    daily_metrics = []
+    
+    for i in range(days):
+        date = datetime.now(timezone.utc) - timedelta(days=i)
+        date_str = date.strftime("%Y-%m-%d")
+        start = date.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        end = date.replace(hour=23, minute=59, second=59, microsecond=999999).isoformat()
+        
+        query = {"created_utc": {"$gte": start, "$lte": end}}
+        
+        total = await db.hub_documents.count_documents(query)
+        linked = await db.hub_documents.count_documents({**query, "status": "LinkedToBC"})
+        review = await db.hub_documents.count_documents({**query, "status": "NeedsReview"})
+        
+        daily_metrics.append({
+            "date": date_str,
+            "total": total,
+            "auto_linked": linked,
+            "needs_review": review,
+            "auto_rate": round(linked / total * 100, 1) if total > 0 else 0
+        })
+    
+    # Reverse to chronological order
+    daily_metrics.reverse()
+    
+    return {"daily_metrics": daily_metrics}
+
 # ==================== ENHANCED DASHBOARD ====================
 
 @api_router.get("/dashboard/email-stats")
@@ -2637,6 +3067,7 @@ async def get_email_stats():
     total_email = await db.hub_documents.count_documents({"source": "email"})
     needs_review = await db.hub_documents.count_documents({"source": "email", "status": "NeedsReview"})
     auto_linked = await db.hub_documents.count_documents({"source": "email", "status": "LinkedToBC"})
+    stored_sp = await db.hub_documents.count_documents({"source": "email", "status": "StoredInSP"})
     
     # Get by job type
     by_job_type = {}
@@ -2655,6 +3086,7 @@ async def get_email_stats():
         "total_email_documents": total_email,
         "needs_review": needs_review,
         "auto_linked": auto_linked,
+        "stored_sp": stored_sp,
         "by_job_type": by_job_type,
         "recent": recent
     }

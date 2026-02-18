@@ -4441,11 +4441,12 @@ async def get_shadow_mode_performance_report(days: int = 14):
         "executive_summary": {
             "readiness_score": total_readiness_score,
             "readiness_max": 100,
+            "gates_passed": gates_passed,
+            "gates_total": 4,
             "recommendation": recommendation,
             "recommendation_detail": recommendation_detail,
             "shadow_mode_days": shadow_status["shadow_mode"]["days_running"],
             "total_documents_processed": total_docs,
-            "automation_rate": auto_rate,
             "high_confidence_pct": high_conf_pct
         },
         "readiness_factors": readiness_factors,

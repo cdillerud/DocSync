@@ -27,6 +27,8 @@ db = client[os.environ['DB_NAME']]
 # Config
 DEMO_MODE = os.environ.get('DEMO_MODE', 'true').lower() == 'true'
 JWT_SECRET = os.environ.get('JWT_SECRET', 'gpi-hub-secret-key')
+# Feature flag for Phase 4: CREATE_DRAFT_HEADER (Sandbox only)
+ENABLE_CREATE_DRAFT_HEADER = os.environ.get('ENABLE_CREATE_DRAFT_HEADER', 'false').lower() == 'true'
 TENANT_ID = os.environ.get('TENANT_ID', '')
 BC_ENVIRONMENT = os.environ.get('BC_ENVIRONMENT', '')
 BC_COMPANY_NAME = os.environ.get('BC_COMPANY_NAME', '')

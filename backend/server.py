@@ -2303,9 +2303,13 @@ async def get_email_watcher_config() -> dict:
             "needs_review_folder": "Needs Review",
             "processed_folder": "Processed",
             "enabled": False,
+            "interval_minutes": 5,
             "webhook_subscription_id": None,
             "last_poll_utc": None
         }
+    # Ensure interval_minutes has a default
+    if "interval_minutes" not in config:
+        config["interval_minutes"] = 5
     return config
 
 async def subscribe_to_mailbox_notifications(mailbox_address: str, webhook_url: str) -> dict:

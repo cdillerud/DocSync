@@ -4015,10 +4015,12 @@ async def backfill_ap_mailbox(
                         content_hash = hashlib.sha256(content_bytes).hexdigest()
                         
                         # Check idempotency - have we already processed this attachment?
+                        # Primary key: internetMessageId + attachment_hash (handles forwarded copies correctly)
+                        # Fallback: message_id + attachment_id (Graph-specific IDs)
                         existing = await db.mail_intake_log.find_one({
                             "$or": [
-                                {"attachment_hash": content_hash},
-                                {"internet_message_id": internet_msg_id, "filename": filename}
+                                {"internet_message_id": internet_msg_id, "attachment_hash": content_hash},
+                                {"message_id": msg_id, "attachment_id": att_id}
                             ]
                         })
                         

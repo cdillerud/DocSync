@@ -3537,8 +3537,9 @@ async def poll_mailbox_for_attachments():
     
     stats["ended_at"] = datetime.now(timezone.utc).isoformat()
     
-    # Store run stats
-    await db.mail_poll_runs.insert_one(stats)
+    # Store run stats (make a copy since insert_one adds _id)
+    stats_to_store = stats.copy()
+    await db.mail_poll_runs.insert_one(stats_to_store)
     
     logger.info(
         "[EmailPoll:%s] Complete: detected=%d, ingested=%d, skipped_dup=%d, skipped_inline=%d, failed=%d",

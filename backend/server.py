@@ -3212,6 +3212,385 @@ async def process_incoming_email(email_id: str, mailbox_address: str):
         except Exception as e:
             logger.error("Failed to process attachment from email %s: %s", email_id, str(e))
 
+# ==================== PHASE 7 C1: EMAIL POLLING (OBSERVATION INFRASTRUCTURE) ====================
+# This is NOT a product feature - it is data collection plumbing for shadow mode.
+# Scope: Poll → Ingest → Log → Metrics. No BC writes, no folder moves.
+
+# Global state for polling worker
+_email_polling_task = None
+_email_polling_lock = asyncio.Lock()
+
+# Skip patterns for attachments (inline images, signatures)
+SKIP_CONTENT_TYPES = {'image/gif', 'image/x-icon', 'image/bmp'}
+SKIP_FILENAME_PATTERNS = [
+    r'^image\d+\.(png|jpg|gif)$',  # Inline images
+    r'^signature',  # Email signatures
+    r'^logo',  # Company logos
+    r'\.vcf$',  # Contact cards
+]
+
+
+async def record_mail_intake_log(
+    message_id: str,
+    internet_message_id: str,
+    attachment_id: str,
+    attachment_hash: str,
+    filename: str,
+    status: str,
+    sharepoint_doc_id: str = None,
+    error: str = None
+):
+    """Record mail intake for idempotency and observability."""
+    log_entry = {
+        "id": str(uuid.uuid4()),
+        "message_id": message_id,
+        "internet_message_id": internet_message_id,
+        "attachment_id": attachment_id,
+        "attachment_hash": attachment_hash,
+        "filename": filename,
+        "status": status,  # Processed, SkippedDuplicate, SkippedInline, Error
+        "sharepoint_doc_id": sharepoint_doc_id,
+        "error": error,
+        "processed_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.mail_intake_log.insert_one(log_entry)
+    return log_entry
+
+
+async def check_duplicate_mail_intake(internet_message_id: str, attachment_hash: str) -> bool:
+    """Check if this attachment was already processed (idempotency)."""
+    existing = await db.mail_intake_log.find_one({
+        "internet_message_id": internet_message_id,
+        "attachment_hash": attachment_hash,
+        "status": "Processed"
+    })
+    return existing is not None
+
+
+def should_skip_attachment(filename: str, content_type: str, size_bytes: int) -> tuple:
+    """Determine if attachment should be skipped (inline images, signatures, too large)."""
+    # Check content type
+    if content_type and content_type.lower() in SKIP_CONTENT_TYPES:
+        return (True, f"Skipped content type: {content_type}")
+    
+    # Check filename patterns
+    if filename:
+        for pattern in SKIP_FILENAME_PATTERNS:
+            if re.match(pattern, filename.lower()):
+                return (True, f"Skipped filename pattern: {filename}")
+    
+    # Check size limit
+    max_size = EMAIL_POLLING_MAX_ATTACHMENT_MB * 1024 * 1024
+    if size_bytes > max_size:
+        return (True, f"Skipped size: {size_bytes / 1024 / 1024:.1f}MB > {EMAIL_POLLING_MAX_ATTACHMENT_MB}MB limit")
+    
+    return (False, None)
+
+
+async def poll_mailbox_for_attachments():
+    """
+    Phase C1: Poll mailbox for unread messages with attachments.
+    
+    Process flow:
+    1. Query unread messages with attachments
+    2. For each message:
+       - Fetch attachments
+       - Check idempotency (skip duplicates)
+       - Store in SharePoint first (durability)
+       - Process through intake pipeline
+       - Mark message with category "HubShadowProcessed"
+       - Log result
+    
+    Safety:
+    - Max messages per run (default 25)
+    - Skip inline images and signatures
+    - No folder moves (Phase C1)
+    - No deletes ever
+    """
+    if not EMAIL_POLLING_ENABLED:
+        return {"skipped": True, "reason": "EMAIL_POLLING_ENABLED is false"}
+    
+    if not EMAIL_POLLING_USER:
+        return {"skipped": True, "reason": "EMAIL_POLLING_USER not configured"}
+    
+    if DEMO_MODE:
+        return {"skipped": True, "reason": "Demo mode - no real polling"}
+    
+    run_id = str(uuid.uuid4())[:8]
+    logger.info("[EmailPoll:%s] Starting poll run for %s", run_id, EMAIL_POLLING_USER)
+    
+    stats = {
+        "run_id": run_id,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "messages_scanned": 0,
+        "attachments_processed": 0,
+        "attachments_skipped_duplicate": 0,
+        "attachments_skipped_inline": 0,
+        "attachments_failed": 0,
+        "errors": []
+    }
+    
+    try:
+        # Get Graph token
+        token = await get_graph_token()
+        if not token:
+            stats["errors"].append("Failed to get Graph token")
+            return stats
+        
+        # Calculate lookback time
+        lookback_time = (datetime.now(timezone.utc) - timedelta(minutes=EMAIL_POLLING_LOOKBACK_MINUTES)).isoformat()
+        
+        # Query unread messages with attachments
+        filter_query = f"hasAttachments eq true and isRead eq false and receivedDateTime ge {lookback_time}"
+        
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            messages_resp = await client.get(
+                f"https://graph.microsoft.com/v1.0/users/{EMAIL_POLLING_USER}/mailFolders/Inbox/messages",
+                headers={"Authorization": f"Bearer {token}"},
+                params={
+                    "$filter": filter_query,
+                    "$select": "id,subject,from,receivedDateTime,internetMessageId",
+                    "$top": EMAIL_POLLING_MAX_MESSAGES,
+                    "$orderby": "receivedDateTime asc"
+                }
+            )
+            
+            if messages_resp.status_code != 200:
+                error_msg = f"Graph API error {messages_resp.status_code}: {messages_resp.text[:200]}"
+                logger.error("[EmailPoll:%s] %s", run_id, error_msg)
+                stats["errors"].append(error_msg)
+                return stats
+            
+            messages = messages_resp.json().get("value", [])
+            stats["messages_scanned"] = len(messages)
+            
+            logger.info("[EmailPoll:%s] Found %d messages to process", run_id, len(messages))
+            
+            # Process each message
+            for msg in messages:
+                msg_id = msg["id"]
+                internet_msg_id = msg.get("internetMessageId", msg_id)
+                subject = msg.get("subject", "No Subject")
+                sender = msg.get("from", {}).get("emailAddress", {}).get("address", "unknown")
+                
+                try:
+                    # Fetch attachments
+                    att_resp = await client.get(
+                        f"https://graph.microsoft.com/v1.0/users/{EMAIL_POLLING_USER}/messages/{msg_id}/attachments",
+                        headers={"Authorization": f"Bearer {token}"},
+                        params={"$select": "id,name,contentType,size,contentBytes"}
+                    )
+                    
+                    if att_resp.status_code != 200:
+                        stats["errors"].append(f"Failed to fetch attachments for {msg_id}")
+                        continue
+                    
+                    attachments = att_resp.json().get("value", [])
+                    
+                    for att in attachments:
+                        att_id = att.get("id")
+                        filename = att.get("name", "unknown")
+                        content_type = att.get("contentType", "")
+                        size_bytes = att.get("size", 0)
+                        content_b64 = att.get("contentBytes", "")
+                        
+                        # Skip check
+                        should_skip, skip_reason = should_skip_attachment(filename, content_type, size_bytes)
+                        if should_skip:
+                            await record_mail_intake_log(
+                                message_id=msg_id,
+                                internet_message_id=internet_msg_id,
+                                attachment_id=att_id,
+                                attachment_hash="",
+                                filename=filename,
+                                status="SkippedInline",
+                                error=skip_reason
+                            )
+                            stats["attachments_skipped_inline"] += 1
+                            continue
+                        
+                        # Decode content and hash
+                        try:
+                            content_bytes = base64.b64decode(content_b64)
+                            att_hash = hashlib.sha256(content_bytes).hexdigest()
+                        except Exception as e:
+                            stats["attachments_failed"] += 1
+                            stats["errors"].append(f"Failed to decode {filename}: {str(e)}")
+                            continue
+                        
+                        # Idempotency check
+                        if await check_duplicate_mail_intake(internet_msg_id, att_hash):
+                            await record_mail_intake_log(
+                                message_id=msg_id,
+                                internet_message_id=internet_msg_id,
+                                attachment_id=att_id,
+                                attachment_hash=att_hash,
+                                filename=filename,
+                                status="SkippedDuplicate"
+                            )
+                            stats["attachments_skipped_duplicate"] += 1
+                            continue
+                        
+                        # Process through intake pipeline
+                        try:
+                            intake_result = await intake_document(
+                                file_content=content_bytes,
+                                filename=filename,
+                                content_type=content_type,
+                                source="email_poll",
+                                email_id=msg_id,
+                                email_subject=subject,
+                                email_sender=sender
+                            )
+                            
+                            doc_id = intake_result.get("document", {}).get("id")
+                            
+                            await record_mail_intake_log(
+                                message_id=msg_id,
+                                internet_message_id=internet_msg_id,
+                                attachment_id=att_id,
+                                attachment_hash=att_hash,
+                                filename=filename,
+                                status="Processed",
+                                sharepoint_doc_id=doc_id
+                            )
+                            stats["attachments_processed"] += 1
+                            
+                            logger.info("[EmailPoll:%s] Processed %s → doc %s", run_id, filename, doc_id)
+                            
+                        except Exception as e:
+                            await record_mail_intake_log(
+                                message_id=msg_id,
+                                internet_message_id=internet_msg_id,
+                                attachment_id=att_id,
+                                attachment_hash=att_hash,
+                                filename=filename,
+                                status="Error",
+                                error=str(e)
+                            )
+                            stats["attachments_failed"] += 1
+                            stats["errors"].append(f"Intake failed for {filename}: {str(e)}")
+                    
+                    # Mark message with category (Phase C1: no folder moves)
+                    # Only mark if at least one attachment was processed
+                    if stats["attachments_processed"] > 0:
+                        try:
+                            await client.patch(
+                                f"https://graph.microsoft.com/v1.0/users/{EMAIL_POLLING_USER}/messages/{msg_id}",
+                                headers={
+                                    "Authorization": f"Bearer {token}",
+                                    "Content-Type": "application/json"
+                                },
+                                json={"categories": ["HubShadowProcessed"]}
+                            )
+                        except Exception as e:
+                            logger.warning("[EmailPoll:%s] Failed to add category to %s: %s", run_id, msg_id, str(e))
+                
+                except Exception as e:
+                    stats["errors"].append(f"Failed processing message {msg_id}: {str(e)}")
+        
+    except Exception as e:
+        stats["errors"].append(f"Poll run failed: {str(e)}")
+        logger.error("[EmailPoll:%s] Run failed: %s", run_id, str(e))
+    
+    stats["ended_at"] = datetime.now(timezone.utc).isoformat()
+    
+    # Store run stats
+    await db.mail_poll_runs.insert_one(stats)
+    
+    logger.info(
+        "[EmailPoll:%s] Complete: scanned=%d, processed=%d, skipped_dup=%d, skipped_inline=%d, failed=%d",
+        run_id, stats["messages_scanned"], stats["attachments_processed"],
+        stats["attachments_skipped_duplicate"], stats["attachments_skipped_inline"], stats["attachments_failed"]
+    )
+    
+    return stats
+
+
+async def email_polling_worker():
+    """Background worker that polls mailbox at configured interval."""
+    logger.info("Email polling worker started (interval: %d minutes)", EMAIL_POLLING_INTERVAL_MINUTES)
+    
+    while True:
+        try:
+            # Distributed lock to ensure only one instance runs
+            async with _email_polling_lock:
+                if EMAIL_POLLING_ENABLED:
+                    await poll_mailbox_for_attachments()
+        except Exception as e:
+            logger.error("Email polling worker error: %s", str(e))
+        
+        # Wait for next interval
+        await asyncio.sleep(EMAIL_POLLING_INTERVAL_MINUTES * 60)
+
+
+@api_router.post("/email-polling/trigger")
+async def trigger_email_poll():
+    """
+    Manually trigger an email poll run (for testing).
+    Returns the poll run statistics.
+    """
+    if not EMAIL_POLLING_ENABLED:
+        return {"error": "EMAIL_POLLING_ENABLED is false. Set to true to enable polling."}
+    
+    stats = await poll_mailbox_for_attachments()
+    return stats
+
+
+@api_router.get("/email-polling/status")
+async def get_email_polling_status():
+    """Get current email polling configuration and recent run stats."""
+    # Get last 24 hours of runs
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    recent_runs = await db.mail_poll_runs.find(
+        {"started_at": {"$gte": cutoff}},
+        {"_id": 0}
+    ).sort("started_at", -1).limit(10).to_list(10)
+    
+    # Aggregate stats for last 24h
+    total_scanned = sum(r.get("messages_scanned", 0) for r in recent_runs)
+    total_processed = sum(r.get("attachments_processed", 0) for r in recent_runs)
+    total_skipped_dup = sum(r.get("attachments_skipped_duplicate", 0) for r in recent_runs)
+    total_skipped_inline = sum(r.get("attachments_skipped_inline", 0) for r in recent_runs)
+    total_failed = sum(r.get("attachments_failed", 0) for r in recent_runs)
+    
+    return {
+        "config": {
+            "enabled": EMAIL_POLLING_ENABLED,
+            "interval_minutes": EMAIL_POLLING_INTERVAL_MINUTES,
+            "user": EMAIL_POLLING_USER or "(not configured)",
+            "lookback_minutes": EMAIL_POLLING_LOOKBACK_MINUTES,
+            "max_messages_per_run": EMAIL_POLLING_MAX_MESSAGES,
+            "max_attachment_mb": EMAIL_POLLING_MAX_ATTACHMENT_MB
+        },
+        "last_24h": {
+            "runs_count": len(recent_runs),
+            "messages_scanned": total_scanned,
+            "attachments_processed": total_processed,
+            "attachments_skipped_duplicate": total_skipped_dup,
+            "attachments_skipped_inline": total_skipped_inline,
+            "attachments_failed": total_failed
+        },
+        "recent_runs": recent_runs[:5],
+        "health": "healthy" if total_failed == 0 else ("degraded" if total_failed < total_processed else "unhealthy")
+    }
+
+
+@api_router.get("/email-polling/logs")
+async def get_mail_intake_logs(days: int = Query(1), status: str = Query(None), limit: int = Query(100)):
+    """Get mail intake logs for debugging."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    query = {"processed_at": {"$gte": cutoff}}
+    if status:
+        query["status"] = status
+    
+    logs = await db.mail_intake_log.find(
+        query, {"_id": 0}
+    ).sort("processed_at", -1).limit(limit).to_list(limit)
+    
+    return {"logs": logs, "count": len(logs)}
+
+
 # ==================== JOB TYPE CONFIGURATION ENDPOINTS ====================
 
 @api_router.get("/settings/job-types")

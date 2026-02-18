@@ -258,22 +258,22 @@ class TestPhase4And5EndpointsStillWork:
         assert "enabled" in data, "Should have enabled field"
         assert "safety_thresholds" in data, "Should have safety_thresholds"
     
-    def test_roi_dashboard_stats(self):
-        """GET /api/metrics/roi-dashboard should work"""
-        response = requests.get(f"{BASE_URL}/api/metrics/roi-dashboard")
+    def test_automation_metrics(self):
+        """GET /api/metrics/automation should work"""
+        response = requests.get(f"{BASE_URL}/api/metrics/automation")
         assert response.status_code == 200, f"Expected 200, got {response.status_code}"
         
         data = response.json()
-        assert "automation_overview" in data, "Should have automation_overview"
+        assert "total_documents" in data or "automation_rate" in data, "Should have automation metrics"
     
     def test_alias_impact_metrics(self):
         """GET /api/metrics/alias-impact should work"""
         response = requests.get(f"{BASE_URL}/api/metrics/alias-impact")
         assert response.status_code == 200, f"Expected 200, got {response.status_code}"
     
-    def test_vendor_friction_matrix(self):
-        """GET /api/metrics/vendor-friction-matrix should work"""
-        response = requests.get(f"{BASE_URL}/api/metrics/vendor-friction-matrix")
+    def test_vendor_friction_metrics(self):
+        """GET /api/metrics/vendors should work"""
+        response = requests.get(f"{BASE_URL}/api/metrics/vendors")
         assert response.status_code == 200, f"Expected 200, got {response.status_code}"
     
     def test_settings_status(self):

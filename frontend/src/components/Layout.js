@@ -6,7 +6,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator
 } from '../components/ui/dropdown-menu';
 import {
-  LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, Brain, BarChart3
+  LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, Brain, BarChart3, ShoppingCart
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -16,6 +16,7 @@ const navItems = [
   { to: '/queue', icon: Files, label: 'Document Queue' },
   { to: '/email-parser', icon: Brain, label: 'Email Parser' },
   { to: '/audit', icon: BarChart3, label: 'Audit Dashboard' },
+  { to: '/sales', icon: ShoppingCart, label: 'Sales' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 
@@ -33,6 +34,7 @@ export default function Layout() {
     if (path.startsWith('/documents/')) return 'Document Detail';
     if (path === '/email-parser') return 'Email Parser';
     if (path === '/audit') return 'Audit Dashboard';
+    if (path === '/sales') return 'Sales';
     if (path === '/settings') return 'Settings';
     return 'GPI Document Hub';
   };

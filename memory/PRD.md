@@ -216,3 +216,53 @@ Shows distribution of `draft_candidate` flags without enabling drafts.
 - Backend: Running with new validation logic
 - Dashboard: Updated with AP Invoice Extraction Quality section
 - BC writes: Confirmed DISABLED
+- **Sales Module Phase 0**: All endpoints functional, seed data populated
+
+---
+
+## Sales Inventory & Orders Module (Phase 0)
+
+**Status:** Implemented, BC Disconnected
+
+### Data Collections (10 new)
+- `sales_customers` - Customer master data
+- `sales_items` - Item/SKU master
+- `sales_customer_items` - Customer-specific SKU mappings
+- `sales_warehouses` - Warehouse locations
+- `sales_inventory_positions` - Inventory snapshots
+- `sales_open_order_headers` - Open order headers
+- `sales_open_order_lines` - Open order line items
+- `sales_lost_business` - Lost business tracking
+- `sales_pricing_tiers` - Customer item pricing
+- `sales_order_draft_candidates` - Draft candidate pattern
+
+### API Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/sales/customers` | GET | Customer list |
+| `/api/sales/customers/{id}/dashboard` | GET | Dashboard data with summary, inventory, orders, alerts |
+| `/api/sales/customers/{id}/open-orders` | GET | Open orders with line detail |
+| `/api/sales/order-drafts` | GET | Draft candidates list |
+| `/api/sales/order-drafts/{id}` | GET | Draft candidate detail |
+| `/api/sales/warehouses` | GET | Warehouse list |
+| `/api/sales/items` | GET | Item list |
+| `/api/sales/seed-data` | POST | Initialize test data |
+
+### UI: Sales Dashboard
+- Customer selector dropdown
+- Summary cards: On Hand, Available, Open Orders, On Water, On Order
+- Inventory grid by item/warehouse with search
+- Open orders grid with status badges
+- Alerts panel: low stock, at-risk orders, lost business
+
+### Seed Data Customers
+- ET Browne
+- HOW (House of Wines)
+- Karlin
+- Wing Nien
+
+### Phase 0 Limitations
+- ❌ No BC API calls
+- ❌ bc_customer_no, bc_sales_order_no are null placeholders
+- ❌ No Excel ingestion (manual seed data only)
+- ❌ No draft creation to BC

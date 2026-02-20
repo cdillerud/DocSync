@@ -6594,10 +6594,14 @@ async def startup():
     await db.hub_documents.create_index("source")
     await db.hub_documents.create_index("suggested_job_type")
     await db.hub_documents.create_index([("extracted_fields.vendor", 1)])
-    # Phase 7 Week 1: Indexes for canonical fields and draft candidate
-    await db.hub_documents.create_index([("canonical_fields.vendor_normalized", 1)])
+    # Phase 7: Indexes for new flat normalized fields
+    await db.hub_documents.create_index("vendor_normalized")
+    await db.hub_documents.create_index("invoice_number_clean")
+    await db.hub_documents.create_index("vendor_canonical")
     await db.hub_documents.create_index("draft_candidate")
-    await db.hub_documents.create_index("draft_candidate_score")
+    await db.hub_documents.create_index("possible_duplicate")
+    # Legacy indexes (keep for backward compat)
+    await db.hub_documents.create_index([("canonical_fields.vendor_normalized", 1)])
     await db.hub_workflow_runs.create_index("id", unique=True)
     await db.hub_workflow_runs.create_index("document_id")
     await db.hub_workflow_runs.create_index("started_utc")
@@ -6608,6 +6612,7 @@ async def startup():
     await db.vendor_aliases.create_index("alias_string", unique=True)
     await db.vendor_aliases.create_index("normalized_alias")
     await db.vendor_aliases.create_index("vendor_no")
+    await db.vendor_aliases.create_index("canonical_vendor_id")
     # Phase C1: Mail intake log indexes
     await db.mail_intake_log.create_index("internet_message_id")
     await db.mail_intake_log.create_index("attachment_hash")

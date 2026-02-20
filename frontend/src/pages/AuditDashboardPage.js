@@ -546,6 +546,124 @@ export default function AuditDashboardPage() {
             </Card>
           )}
 
+          {/* Phase 7: AP Invoice Extraction Quality */}
+          {extractionQuality && (
+            <Card className="border-2 border-cyan-500/50 bg-cyan-50/30 dark:bg-cyan-900/10" data-testid="roi-extraction-quality">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg font-bold flex items-center gap-2" style={{ fontFamily: 'Chivo, sans-serif' }}>
+                    <FileText className="w-5 h-5 text-cyan-600" />
+                    AP Invoice Extraction Quality
+                  </CardTitle>
+                  <Badge className="bg-cyan-100 text-cyan-800 border border-cyan-200">
+                    Phase 7
+                  </Badge>
+                </div>
+                <CardDescription>
+                  Field extraction completeness and draft readiness metrics
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {/* Readiness Metrics */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                  <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg text-center border border-emerald-200">
+                    <p className="text-3xl font-bold text-emerald-600">
+                      {extractionQuality.readiness_metrics?.ready_for_draft?.rate || 0}%
+                    </p>
+                    <p className="text-sm text-muted-foreground">Ready for Draft</p>
+                    <p className="text-xs text-emerald-600">
+                      {extractionQuality.readiness_metrics?.ready_for_draft?.count || 0} docs
+                    </p>
+                  </div>
+                  <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg text-center border border-purple-200">
+                    <p className="text-3xl font-bold text-purple-600">
+                      {extractionQuality.readiness_metrics?.draft_candidates?.rate || 0}%
+                    </p>
+                    <p className="text-sm text-muted-foreground">Draft Candidates</p>
+                    <p className="text-xs text-purple-600">
+                      {extractionQuality.readiness_metrics?.draft_candidates?.count || 0} docs
+                    </p>
+                  </div>
+                  <div className="p-4 bg-muted/30 rounded-lg text-center">
+                    <p className="text-3xl font-bold">
+                      {extractionQuality.total_documents || 0}
+                    </p>
+                    <p className="text-sm text-muted-foreground">Total Documents</p>
+                  </div>
+                  <div className="p-4 bg-muted/30 rounded-lg text-center">
+                    <p className="text-3xl font-bold">
+                      {extractionQuality.period_days || 0}
+                    </p>
+                    <p className="text-sm text-muted-foreground">Days</p>
+                  </div>
+                </div>
+
+                {/* Extraction Rates */}
+                <div className="mb-4">
+                  <h4 className="text-sm font-medium mb-2">Field Extraction Rates</h4>
+                  <div className="grid grid-cols-5 gap-2">
+                    {Object.entries(extractionQuality.extraction_rates || {}).map(([field, rate]) => (
+                      <div key={field} className="text-center p-2 bg-muted/20 rounded">
+                        <p className={`text-lg font-bold ${rate >= 85 ? 'text-emerald-600' : rate >= 70 ? 'text-amber-600' : 'text-red-600'}`}>
+                          {rate}%
+                        </p>
+                        <p className="text-xs text-muted-foreground capitalize">{field.replace('_', ' ')}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Completeness Summary */}
+                {extractionQuality.completeness_summary && (
+                  <div className="p-3 bg-muted/30 rounded-lg">
+                    <h4 className="text-sm font-medium mb-2">Missing Field Analysis</h4>
+                    <div className="flex flex-wrap gap-4 text-sm">
+                      <span className={extractionQuality.completeness_summary.missing_vendor > 0 ? 'text-amber-600' : 'text-emerald-600'}>
+                        Missing Vendor: {extractionQuality.completeness_summary.missing_vendor || 0}
+                      </span>
+                      <span className={extractionQuality.completeness_summary.missing_invoice_number > 0 ? 'text-amber-600' : 'text-emerald-600'}>
+                        Missing Invoice#: {extractionQuality.completeness_summary.missing_invoice_number || 0}
+                      </span>
+                      <span className={extractionQuality.completeness_summary.missing_amount > 0 ? 'text-amber-600' : 'text-emerald-600'}>
+                        Missing Amount: {extractionQuality.completeness_summary.missing_amount || 0}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Vendor Variations */}
+                {extractionQuality.vendor_variations && extractionQuality.vendor_variations.length > 0 && (
+                  <div className="mt-4">
+                    <h4 className="text-sm font-medium mb-2">Vendor Name Variations (Alias Candidates)</h4>
+                    <div className="max-h-40 overflow-y-auto">
+                      <table className="w-full text-sm">
+                        <thead className="sticky top-0 bg-background">
+                          <tr className="text-left text-muted-foreground">
+                            <th className="pb-2">Normalized</th>
+                            <th className="pb-2">Variations</th>
+                            <th className="pb-2 text-right">Count</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {extractionQuality.vendor_variations.slice(0, 10).map((v, i) => (
+                            <tr key={i} className="border-t border-border/50">
+                              <td className="py-2 font-mono text-xs">{v.normalized}</td>
+                              <td className="py-2 text-xs text-muted-foreground">
+                                {v.variations.slice(0, 3).join(', ')}
+                                {v.variations.length > 3 && ` +${v.variations.length - 3} more`}
+                              </td>
+                              <td className="py-2 text-right">{v.count}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {/* Section 3: Vendor Friction Matrix */}
           <Card className="border border-border" data-testid="roi-vendor-matrix">
             <CardHeader className="pb-2">

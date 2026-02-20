@@ -17,6 +17,9 @@ from datetime import datetime, timezone, timedelta
 import httpx
 from dateutil import parser as date_parser
 
+# Sales Module (Phase 0)
+from sales_module import sales_router, set_db as set_sales_db, initialize_sales_indexes
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 

@@ -3,187 +3,215 @@
 ## Original Problem Statement
 Build a "GPI Document Hub" test platform that replaces Zetadocs-style document linking in Microsoft Dynamics 365 Business Central by using SharePoint Online as the document repository and a middleware hub to orchestrate ingestion, metadata, approvals, and attachment linking back to BC.
 
-## Current Status: PHASE 7 - OBSERVATION MODE + Week 1 Hardening
+## Current Status: PHASE 7 - OBSERVATION MODE (Read-Only BC)
 
 **Shadow Mode Started:** February 18, 2026  
-**Email Polling:** Implemented (disabled by default)  
-**Feature Freeze:** 14 days (until ~Mar 4, 2026)
+**Observation Window:** 14 days  
+**BC Write Operations:** DISABLED (all integrations read-only)
 
 ---
 
-## What's Been Implemented
+## Phase 7 Implementation Summary
 
-### Phase 1-6 ✅ Complete
+### 1. Normalized Fields on Document Model ✅
 
-### Phase 7 - Observation Mode 🔄 ACTIVE
+For `document_type = "AP_Invoice"`, the following fields are computed at ingestion and stored flat on the document:
 
-#### Phase 7 C1: Email Polling (Observation Infrastructure) ✅
-Minimal, reversible, shadow-only email polling for data collection.
+| Field | Description |
+|-------|-------------|
+| `vendor_raw` | Original extracted vendor string |
+| `vendor_normalized` | Lowercased, trimmed, multiple spaces collapsed |
+| `invoice_number_raw` | Original invoice number |
+| `invoice_number_clean` | Stripped of spaces/commas, uppercase |
+| `amount_raw` | Original amount string |
+| `amount_float` | Parsed numeric value as float |
+| `due_date_raw` | Original date string |
+| `due_date_iso` | Parsed ISO format (YYYY-MM-DD) |
+| `po_number_raw` | Original PO string (if any) |
+| `po_number_clean` | Normalized PO number for matching |
 
-**NOT a product feature** — this is observation instrumentation plumbing.
+### 2. Required Field Completeness Check ✅
 
-**Implementation:**
-- Feature flag: `EMAIL_POLLING_ENABLED` (default: OFF)
-- Poll interval: `EMAIL_POLLING_INTERVAL_MINUTES` (default: 5)
-- Target mailbox: `EMAIL_POLLING_USER` (e.g., ap@gamerpackaging.com)
-- Lookback window: `EMAIL_POLLING_LOOKBACK_MINUTES` (default: 60)
-- Safety limits: 25 messages/run, 25MB max attachment
+**Required Fields for AP Invoice Header Readiness:**
+- `vendor_normalized`
+- `invoice_number_clean`
+- `amount_float`
 
-**Process Flow:**
+**Computed Fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `draft_candidate` | boolean | True when all 3 required fields present and valid |
+| `validation_errors` | array | String codes: `missing_vendor`, `missing_invoice_number`, `missing_amount`, `low_classification_confidence`, `potential_duplicate_invoice` |
+| `validation_warnings` | array | Non-blocking: `missing_po_number` |
+
+### 3. Vendor Alias Support (Read-Only) ✅
+
+**Collection:** `vendor_aliases`
+```json
+{
+  "normalized": "tumalo creek transportation",
+  "canonical_vendor_id": "TUMALO CREEK",
+  "aliases": ["TUMALO CREEK Transportation", ...]
+}
 ```
-Poll → Fetch Attachments → Check Idempotency → Save to SharePoint → 
-Process via Intake → Mark Message (Category) → Log Result
+
+**Computed Fields on Document:**
+| Field | Description |
+|-------|-------------|
+| `vendor_canonical` | Canonical vendor ID when found, else null |
+| `vendor_match_method` | `"alias"`, `"exact_name"`, or `"none"` |
+
+### 4. Duplicate Safety Check ✅
+
+**Logic:** A document is a possible duplicate if another non-deleted doc exists with:
+- Same `vendor_canonical` (if set) OR same `vendor_normalized`
+- Same `invoice_number_clean`
+
+**Computed Fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `possible_duplicate` | boolean | True if duplicate detected |
+| `duplicate_of_document_id` | string | ID of existing doc, or null |
+
+### 5. Status Logic for AP Invoices (Phase 7) ✅
+
+**Conservative Observation Mode:**
+- All AP_Invoice documents → `status = "NeedsReview"`
+- `draft_candidate` flag visible in API/UI for observation
+- NO auto-advancement to BC-writing statuses
+- NO draft creation regardless of readiness
+
+### 6. Metrics Endpoint - Extraction Quality ✅
+
+**Endpoint:** `GET /api/metrics/extraction-quality?days=N`
+
+Returns:
+```json
+{
+  "period_days": 7,
+  "total_documents": 100,
+  "extraction_rates": {
+    "vendor": 87.0,
+    "invoice_number": 83.0,
+    "amount": 91.0,
+    "po_number": 65.0,
+    "due_date": 72.0
+  },
+  "readiness_metrics": {
+    "ready_for_draft": {"count": 82, "rate": 82.0},
+    "draft_candidates": {"count": 78, "rate": 78.0}
+  },
+  "completeness_summary": {
+    "all_required_fields": 82,
+    "missing_vendor": 13,
+    "missing_invoice_number": 17,
+    "missing_amount": 9
+  },
+  "vendor_variations": [...],
+  "stable_vendors": [...]
+}
 ```
 
-**Collections Added:**
-- `mail_intake_log` - Per-attachment idempotency tracking
-- `mail_poll_runs` - Per-run statistics
+### 7. Extraction Misses Drilldown ✅
 
-**What Phase C1 Does:**
-- ✅ Polls for unread messages with attachments
-- ✅ Skips inline images and signatures
-- ✅ Checks for duplicate processing (idempotency)
-- ✅ Stores in SharePoint first (durability)
-- ✅ Processes through existing intake pipeline
-- ✅ Marks messages with category "HubShadowProcessed"
-- ✅ Logs all results for observability
+**Endpoint:** `GET /api/metrics/extraction-misses?field=vendor|invoice_number|amount`
 
-**What Phase C1 Does NOT Do:**
-- ❌ Move messages between folders
-- ❌ Delete messages
-- ❌ Create BC drafts (controlled by separate flag)
-- ❌ Any BC writes
+Returns array with:
+- `document_id`
+- `file_name`
+- `document_type`
+- `status`
+- `vendor_raw`, `invoice_number_raw`, `amount_raw`, `due_date_raw`, `po_number_raw`
+- `ai_confidence`
+- `first_500_chars_text`
 
-**New Endpoints:**
+### 8. Stable Vendors Endpoint ✅
+
+**Endpoint:** `GET /api/metrics/stable-vendors`
+
+Criteria:
+- `count >= 5`
+- `completeness >= 85%`
+- `alias variance <= 3`
+
+### 9. Draft Candidates Endpoint ✅
+
+**Endpoint:** `GET /api/metrics/draft-candidates`
+
+Shows distribution of `draft_candidate` flags without enabling drafts.
+
+---
+
+## Non-Goals for Phase 7 (Explicitly Disabled)
+
+- ❌ `CREATE_DRAFT_HEADER` - Disabled
+- ❌ Auto-posting or draft creation in BC
+- ❌ Automatic document deletion
+- ❌ Freight workflow modifications
+- ❌ Email polling behavior changes
+- ❌ Match score threshold changes
+- ❌ Vendor overrides
+- ❌ AI prompt tuning
+
+---
+
+## API Endpoints Summary
+
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/email-polling/status` | GET | Config + last 24h stats |
-| `/api/email-polling/trigger` | POST | Manual poll run (testing) |
-| `/api/email-polling/logs` | GET | Mail intake logs |
-
-**Rollback:** Set `EMAIL_POLLING_ENABLED=false`. No data loss, no operational impact.
-
----
-
-#### Phase 7 Week 1: Hardening (Observability) ✅ IMPLEMENTED 2026-02-18
-
-**Purpose:** Tighten signal quality and observability before Phase 8 enablement.
-
-**1️⃣ Missing Fields Drilldown Endpoint**
-- Endpoint: `GET /api/metrics/extraction-misses`
-- Parameters: `field` (vendor/invoice_number/amount), `days`, `limit`
-- Returns: document_id, file_name, vendor_extracted, invoice_number_extracted, amount_extracted, which_required_fields_missing, ai_confidence, first_500_chars_text
-- Purpose: Identify WHY extraction is failing for specific documents
-
-**2️⃣ Canonical Normalization at Ingestion**
-- New `canonical_fields` object stored on every document at ingestion time
-- Fields stored:
-  - `vendor_normalized` (lowercase, trimmed)
-  - `invoice_number_clean` (whitespace stripped, uppercase)
-  - `amount_float` (parsed to float)
-  - `due_date_iso` (ISO 8601 format)
-  - `invoice_date_iso` (ISO 8601 format)
-  - `po_number_clean` (whitespace stripped, uppercase)
-- Raw values preserved alongside normalized for audit trail
-- Applied to both `intake_document` and `_internal_intake_document` paths
-
-**3️⃣ Stable Vendor Metric**
-- Endpoint: `GET /api/metrics/stable-vendors`
-- Parameters: `min_count` (default 5), `min_completeness` (0.85), `max_variants` (3), `days`
-- Criteria:
-  - count >= min_count
-  - required field completeness >= min_completeness (85%)
-  - alias variance <= max_variants
-  - no conflicting invoice numbers
-- Purpose: Identify candidates for Phase 8 controlled enablement
-- **Does NOT enable anything** - metric only
-
-**4️⃣ Draft Candidate Flag (Non-Operational)**
-- Computed at ingestion time for every document
-- Stored fields: `draft_candidate` (bool), `draft_candidate_score` (0-100), `draft_candidate_reason` (array)
-- Criteria for `draft_candidate = True`:
-  - document_type == AP_Invoice
-  - vendor present
-  - invoice_number present
-  - amount present
-  - ai_confidence >= 0.92
-- **Does NOT create drafts or change status**
-- Endpoint: `GET /api/metrics/draft-candidates`
-- Dashboard can now show:
-  - ReadyForDraftCandidate: X%
-  - ReadyToLink: Y%
-  - NeedsHumanReview: Z%
-
-**What Phase 7 Week 1 Does NOT Touch:**
-- ❌ Match score thresholds
-- ❌ CREATE_DRAFT_HEADER enablement
-- ❌ Vendor overrides
-- ❌ Readiness weights
-- ❌ AI prompts
-- ❌ Document types
+| `/api/metrics/extraction-quality` | GET | Extraction rates + draft readiness |
+| `/api/metrics/extraction-misses` | GET | Drilldown on missing fields |
+| `/api/metrics/stable-vendors` | GET | Vendors meeting stability criteria |
+| `/api/metrics/draft-candidates` | GET | Draft candidate distribution |
+| `/api/documents` | GET | Document list with new fields |
 
 ---
 
-## Locked Readiness Formula (Phase 7)
+## Document Model (Phase 7 Fields)
 
-| Factor | Weight | Target | Gate Criteria |
-|--------|--------|--------|---------------|
-| High Confidence Docs (≥0.92) | 35 pts | ≥60% | `high_confidence_pct >= 60` |
-| Alias Exception Rate | 20 pts | <5% | `alias_exception_rate < 5` |
-| Stable Vendors | 25 pts | ≥3 | `stable_vendors >= 3` |
-| Data Volume | 20 pts | ≥100 | `total_docs >= 100` |
-
-**Enablement Threshold:** ≥80 pts AND all 4 gates passed
-
----
-
-## Enterprise Maturity Ladder
-
-| Phase | Status | Description |
-|-------|--------|-------------|
-| 3 | ✅ | Deterministic matching |
-| 4 | ✅ | Safe draft gating |
-| 5 | ✅ | Executive ROI visibility |
-| 6 | ✅ | Production instrumentation |
-| 7 | 🔄 | **Observed stability + C1 Email Polling + Week 1 Hardening** (CURRENT) |
-| 8 | ⏳ | Controlled automation |
-| 9 | ⏳ | Vendor-level tuning |
-| 10 | ⏳ | Zetadocs retirement |
-
----
-
-## Phase C Rollout Plan
-
-| Phase | Status | Description |
-|-------|--------|-------------|
-| C1 | ✅ | Poll + ingest + log + metrics (category tagging only) |
-| C2 | ⏳ | Add folder move after success (HubShadow folder) |
-| C3 | ⏳ | Production mode (HubProcessed folder, draft enablement) |
+```javascript
+{
+  // ... existing fields ...
+  
+  // Phase 7: Normalized fields (flat)
+  "vendor_raw": "Tumalo Creek Transportation",
+  "vendor_normalized": "tumalo creek transportation",
+  "invoice_number_raw": "INV-2024-001",
+  "invoice_number_clean": "INV2024001",
+  "amount_raw": "$1,234.56",
+  "amount_float": 1234.56,
+  "due_date_raw": "March 15, 2024",
+  "due_date_iso": "2024-03-15",
+  "po_number_raw": "PO-123",
+  "po_number_clean": "PO123",
+  
+  // Phase 7: Vendor alias results
+  "vendor_canonical": "TUMALO CREEK",
+  "vendor_match_method": "alias",
+  
+  // Phase 7: Duplicate detection
+  "possible_duplicate": false,
+  "duplicate_of_document_id": null,
+  
+  // Phase 7: Validation
+  "validation_errors": [],
+  "validation_warnings": ["missing_po_number"],
+  "draft_candidate": true
+}
+```
 
 ---
 
 ## Next Steps
 
-1. **Deploy Phase 7 Week 1 changes to VM** via git pull + deploy.sh
-2. **Run backfill** to test canonical normalization with real data
-3. **Monitor `/api/metrics/stable-vendors`** for Phase 8 candidates
-4. **Review `/api/metrics/draft-candidates`** for readiness rates
-5. **When readiness_score ≥ 80** → Phase 8: Controlled Vendor Enablement
+1. **Deploy to VM:** `git pull origin main && sudo docker compose build backend && sudo docker compose up -d`
+2. **Re-process existing documents** to populate new fields (optional backfill)
+3. **Monitor metrics** during 14-day observation window
+4. **Phase 8 Planning:** When `draft_candidate` rate stabilizes ≥80%, plan controlled vendor enablement
 
 ---
 
-## API Endpoints Summary (Phase 7 Week 1)
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/metrics/extraction-quality` | GET | Overall extraction quality + draft candidate rate |
-| `/api/metrics/extraction-misses` | GET | Missing field drilldown |
-| `/api/metrics/stable-vendors` | GET | Stable vendor candidates for Phase 8 |
-| `/api/metrics/draft-candidates` | GET | Draft candidate distribution |
-
----
-
-## Testing Results (Latest)
-- Phase C1: 42/42 tests passed
-- Phase 7 Week 1: All 4 endpoints functional
-- All previous phases: Fully functional
+## Testing Results
+- Phase 7 endpoints: All functional
+- Backend: Running with new validation logic
+- BC writes: Confirmed DISABLED

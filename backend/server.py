@@ -6570,6 +6570,8 @@ async def get_draft_candidate_metrics(days: int = Query(7)):
 # ==================== APP SETUP ====================
 
 app.include_router(api_router)
+# Sales Module (Phase 0 - BC disconnected)
+app.include_router(sales_router)
 
 @app.get("/api/health")
 async def health_check():

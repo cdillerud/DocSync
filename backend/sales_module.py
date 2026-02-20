@@ -557,7 +557,7 @@ async def get_customer_open_orders(
         order_with_lines = {
             **order,
             "lines": lines_by_order.get(order["order_id"], []),
-            "total_qty": sum(l.get("ordered_qty", 0) for l in lines_by_order.get(order["order_id"], [])),
+            "total_qty": sum(ol.get("ordered_qty", 0) for ol in lines_by_order.get(order["order_id"], [])),
             "line_count": len(lines_by_order.get(order["order_id"], []))
         }
         result.append(order_with_lines)

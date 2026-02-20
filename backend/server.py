@@ -6624,6 +6624,9 @@ async def startup():
     await db.mail_intake_log.create_index([("internet_message_id", 1), ("attachment_hash", 1)])
     await db.mail_intake_log.create_index("processed_at")
     await db.mail_poll_runs.create_index("started_at")
+    # Sales Module (Phase 0): Initialize database and indexes
+    set_sales_db(db)
+    await initialize_sales_indexes(db)
     # Load saved config from MongoDB (overrides .env defaults)
     await _load_config_from_db()
     # Initialize default job types if not present

@@ -2994,21 +2994,38 @@ async def _internal_intake_document(
     confidence = classification.get("confidence", 0.0)
     extracted_fields = classification.get("extracted_fields", {})
     
-    # Phase 7 Week 1: Compute canonical fields at ingestion time
-    canonical_fields = compute_canonical_fields(extracted_fields)
+    # Phase 7: Compute normalized fields (flat, stored on document)
+    normalized_fields = compute_ap_normalized_fields(extracted_fields)
+    
+    # Phase 7: Vendor alias lookup
+    vendor_alias_result = await lookup_vendor_alias(normalized_fields.get("vendor_normalized"))
+    
+    # Phase 7: Duplicate check
+    duplicate_result = await check_duplicate_document(
+        vendor_normalized=normalized_fields.get("vendor_normalized"),
+        vendor_canonical=vendor_alias_result.get("vendor_canonical"),
+        invoice_number_clean=normalized_fields.get("invoice_number_clean"),
+        current_doc_id=doc_id
+    )
+    
+    # Phase 7: Compute validation errors/warnings and draft_candidate
+    ap_validation = compute_ap_validation(
+        document_type=suggested_type,
+        vendor_normalized=normalized_fields.get("vendor_normalized"),
+        invoice_number_clean=normalized_fields.get("invoice_number_clean"),
+        amount_float=normalized_fields.get("amount_float"),
+        po_number_clean=normalized_fields.get("po_number_clean"),
+        ai_confidence=confidence,
+        possible_duplicate=duplicate_result.get("possible_duplicate", False)
+    )
     
     # Get job type config
     job_configs = await db.hub_job_types.find_one({"job_type": suggested_type}, {"_id": 0})
     if not job_configs:
         job_configs = DEFAULT_JOB_TYPES.get(suggested_type, DEFAULT_JOB_TYPES["AP_Invoice"])
     
-    # Run BC validation
+    # Run BC validation (existing logic)
     validation_results = await validate_bc_match(suggested_type, extracted_fields, job_configs)
-    
-    # Phase 7 Week 1: Compute draft candidate flag (non-operational)
-    draft_candidate_result = compute_draft_candidate_flag(
-        suggested_type, extracted_fields, canonical_fields, confidence
-    )
     
     # Make automation decision
     decision, reasoning, decision_metadata = make_automation_decision(job_configs, confidence, validation_results)
@@ -3027,25 +3044,52 @@ async def _internal_intake_document(
         sp_error = str(e)
         logger.error("SharePoint upload failed for document %s: %s", doc_id, sp_error)
     
-    # Update document with classification + SharePoint results
-    # Set status based on automation decision (not just StoredInSP)
-    if decision == "auto_link" and validation_results.get("all_passed"):
-        final_status = "ReadyToLink"
-    elif decision in ("needs_review", "manual"):
+    # Phase 7: Determine status for AP_Invoice using new logic
+    if suggested_type in ("AP_Invoice", "AP Invoice"):
+        # All AP_Invoice documents stay in NeedsReview during Phase 7
+        # The draft_candidate flag indicates readiness
         final_status = "NeedsReview"
-    elif decision == "exception":
-        final_status = "Exception"
-    elif sp_result:
-        final_status = "StoredInSP"
     else:
-        final_status = "Classified"
+        # Non-AP documents use existing logic
+        if decision == "auto_link" and validation_results.get("all_passed"):
+            final_status = "ReadyToLink"
+        elif decision in ("needs_review", "manual"):
+            final_status = "NeedsReview"
+        elif decision == "exception":
+            final_status = "Exception"
+        elif sp_result:
+            final_status = "StoredInSP"
+        else:
+            final_status = "Classified"
     
     update_data = {
         "suggested_job_type": suggested_type,
         "document_type": suggested_type,
         "ai_confidence": confidence,
         "extracted_fields": extracted_fields,
-        "canonical_fields": canonical_fields,  # Phase 7: Store canonical fields
+        # Phase 7: Flat normalized fields on document
+        "vendor_raw": normalized_fields.get("vendor_raw"),
+        "vendor_normalized": normalized_fields.get("vendor_normalized"),
+        "invoice_number_raw": normalized_fields.get("invoice_number_raw"),
+        "invoice_number_clean": normalized_fields.get("invoice_number_clean"),
+        "amount_raw": normalized_fields.get("amount_raw"),
+        "amount_float": normalized_fields.get("amount_float"),
+        "due_date_raw": normalized_fields.get("due_date_raw"),
+        "due_date_iso": normalized_fields.get("due_date_iso"),
+        "po_number_raw": normalized_fields.get("po_number_raw"),
+        "po_number_clean": normalized_fields.get("po_number_clean"),
+        # Phase 7: Vendor alias results
+        "vendor_canonical": vendor_alias_result.get("vendor_canonical"),
+        "vendor_match_method": vendor_alias_result.get("vendor_match_method"),
+        # Phase 7: Duplicate detection
+        "possible_duplicate": duplicate_result.get("possible_duplicate", False),
+        "duplicate_of_document_id": duplicate_result.get("duplicate_of_document_id"),
+        # Phase 7: Validation errors/warnings and draft_candidate
+        "validation_errors": ap_validation.get("validation_errors", []),
+        "validation_warnings": ap_validation.get("validation_warnings", []),
+        "draft_candidate": ap_validation.get("draft_candidate", False),
+        # Legacy fields (keep for backward compat)
+        "canonical_fields": normalized_fields,
         "normalized_fields": validation_results.get("normalized_fields", {}),
         "validation_results": validation_results,
         "automation_decision": decision,
@@ -3054,10 +3098,6 @@ async def _internal_intake_document(
         "vendor_candidates": decision_metadata.get("vendor_candidates", []),
         "customer_candidates": decision_metadata.get("customer_candidates", []),
         "warnings": decision_metadata.get("warnings", []),
-        # Phase 7 Week 1: Draft candidate computed flag (non-operational)
-        "draft_candidate": draft_candidate_result["draft_candidate"],
-        "draft_candidate_score": draft_candidate_result["draft_candidate_score"],
-        "draft_candidate_reason": draft_candidate_result["draft_candidate_reason"],
         "status": final_status,
         "workflow_state": "Validated",
         "updated_utc": datetime.now(timezone.utc).isoformat()

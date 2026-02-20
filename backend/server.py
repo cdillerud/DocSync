@@ -1737,80 +1737,276 @@ def normalize_extracted_fields(fields: dict) -> dict:
     return normalized
 
 
-def compute_canonical_fields(extracted_fields: dict) -> dict:
+def compute_ap_normalized_fields(extracted_fields: dict) -> dict:
     """
-    Phase 7 Week 1: Compute canonical normalized fields at ingestion time.
+    Phase 7: Compute normalized fields for AP_Invoice documents.
     
-    For AP_Invoice:
-    - vendor_normalized: lowercase, trimmed
-    - invoice_number_clean: strip spaces, consistent casing
-    - amount_float: parsed float
-    - due_date_iso: ISO date format
+    Returns flat fields to be stored directly on the document:
+    - vendor_raw, vendor_normalized
+    - invoice_number_raw, invoice_number_clean
+    - amount_raw, amount_float
+    - due_date_raw, due_date_iso
+    - po_number_raw, po_number_clean
     
-    Stored alongside raw fields for consistency and stability.
+    These are stored alongside extracted_fields, not nested.
     """
-    canonical = {}
+    result = {}
     
     if not extracted_fields:
-        return canonical
+        return result
     
     # Vendor normalization
-    vendor = extracted_fields.get("vendor", "")
+    vendor = extracted_fields.get("vendor")
     if vendor:
         vendor_str = str(vendor).strip()
-        canonical["vendor_normalized"] = vendor_str.lower().strip()
-        canonical["vendor_trimmed"] = vendor_str  # Original case but trimmed
+        result["vendor_raw"] = vendor_str
+        # Lowercase, trimmed, collapse multiple internal spaces
+        normalized = re.sub(r'\s+', ' ', vendor_str.lower().strip())
+        result["vendor_normalized"] = normalized
+    else:
+        result["vendor_raw"] = None
+        result["vendor_normalized"] = None
     
     # Invoice number normalization
-    invoice_num = extracted_fields.get("invoice_number", "")
+    invoice_num = extracted_fields.get("invoice_number")
     if invoice_num:
         inv_str = str(invoice_num).strip()
-        # Remove extra spaces, normalize to uppercase for consistency
-        canonical["invoice_number_clean"] = re.sub(r'\s+', '', inv_str).upper()
-        canonical["invoice_number_trimmed"] = inv_str
+        result["invoice_number_raw"] = inv_str
+        # Strip spaces and commas, normalize casing for comparison
+        clean = re.sub(r'[\s,]+', '', inv_str).upper()
+        result["invoice_number_clean"] = clean
+    else:
+        result["invoice_number_raw"] = None
+        result["invoice_number_clean"] = None
     
     # Amount parsing to float
     amount = extracted_fields.get("amount")
     if amount is not None:
+        result["amount_raw"] = str(amount)
         try:
             # Remove currency symbols, commas, spaces
             clean_amount = re.sub(r'[^\d.-]', '', str(amount))
-            canonical["amount_float"] = float(clean_amount) if clean_amount else None
-            canonical["amount_raw"] = str(amount)
+            result["amount_float"] = float(clean_amount) if clean_amount else None
         except (ValueError, TypeError):
-            canonical["amount_float"] = None
-            canonical["amount_raw"] = str(amount)
+            result["amount_float"] = None
+    else:
+        result["amount_raw"] = None
+        result["amount_float"] = None
     
     # Due date to ISO
     due_date = extracted_fields.get("due_date")
     if due_date:
+        result["due_date_raw"] = str(due_date)
         try:
             parsed_date = date_parser.parse(str(due_date))
-            canonical["due_date_iso"] = parsed_date.strftime('%Y-%m-%d')
-            canonical["due_date_raw"] = str(due_date)
+            result["due_date_iso"] = parsed_date.strftime('%Y-%m-%d')
         except Exception:
-            canonical["due_date_iso"] = None
-            canonical["due_date_raw"] = str(due_date)
-    
-    # Invoice date to ISO
-    invoice_date = extracted_fields.get("invoice_date")
-    if invoice_date:
-        try:
-            parsed_date = date_parser.parse(str(invoice_date))
-            canonical["invoice_date_iso"] = parsed_date.strftime('%Y-%m-%d')
-            canonical["invoice_date_raw"] = str(invoice_date)
-        except Exception:
-            canonical["invoice_date_iso"] = None
-            canonical["invoice_date_raw"] = str(invoice_date)
+            result["due_date_iso"] = None
+    else:
+        result["due_date_raw"] = None
+        result["due_date_iso"] = None
     
     # PO number normalization
     po_number = extracted_fields.get("po_number")
     if po_number:
         po_str = str(po_number).strip()
-        canonical["po_number_clean"] = re.sub(r'\s+', '', po_str).upper()
-        canonical["po_number_raw"] = po_str
+        result["po_number_raw"] = po_str
+        result["po_number_clean"] = re.sub(r'[\s,]+', '', po_str).upper()
+    else:
+        result["po_number_raw"] = None
+        result["po_number_clean"] = None
     
-    return canonical
+    return result
+
+
+async def lookup_vendor_alias(vendor_normalized: str) -> dict:
+    """
+    Phase 7: Look up vendor in alias collection.
+    
+    Returns:
+    - vendor_canonical: the canonical_vendor_id if found, else None
+    - vendor_match_method: "alias", "exact_name", or "none"
+    """
+    if not vendor_normalized:
+        return {"vendor_canonical": None, "vendor_match_method": "none"}
+    
+    # Check vendor_aliases collection
+    alias_doc = await db.vendor_aliases.find_one({
+        "$or": [
+            {"normalized": vendor_normalized},
+            {"normalized_alias": vendor_normalized},
+            {"alias_string": {"$regex": f"^{re.escape(vendor_normalized)}$", "$options": "i"}}
+        ]
+    }, {"_id": 0})
+    
+    if alias_doc:
+        canonical_id = alias_doc.get("canonical_vendor_id") or alias_doc.get("vendor_no") or alias_doc.get("vendor_name")
+        return {
+            "vendor_canonical": canonical_id,
+            "vendor_match_method": "alias"
+        }
+    
+    # Check if exact match in cached BC vendors (if available)
+    bc_vendor = await db.hub_bc_vendors.find_one({
+        "$or": [
+            {"name_normalized": vendor_normalized},
+            {"displayName": {"$regex": f"^{re.escape(vendor_normalized)}$", "$options": "i"}}
+        ]
+    }, {"_id": 0})
+    
+    if bc_vendor:
+        return {
+            "vendor_canonical": bc_vendor.get("number") or bc_vendor.get("id"),
+            "vendor_match_method": "exact_name"
+        }
+    
+    return {"vendor_canonical": None, "vendor_match_method": "none"}
+
+
+async def check_duplicate_document(vendor_normalized: str, vendor_canonical: str, invoice_number_clean: str, current_doc_id: str) -> dict:
+    """
+    Phase 7: Check for potential duplicate AP invoice in the Hub.
+    
+    A document is a possible duplicate if another non-deleted doc exists with:
+    - same vendor_canonical (if set) OR same vendor_normalized
+    - same invoice_number_clean
+    
+    Returns:
+    - possible_duplicate: boolean
+    - duplicate_of_document_id: id of existing doc or None
+    """
+    if not invoice_number_clean:
+        return {"possible_duplicate": False, "duplicate_of_document_id": None}
+    
+    # Build query
+    vendor_match = {}
+    if vendor_canonical:
+        vendor_match = {"$or": [
+            {"vendor_canonical": vendor_canonical},
+            {"vendor_normalized": vendor_normalized}
+        ]}
+    elif vendor_normalized:
+        vendor_match = {"vendor_normalized": vendor_normalized}
+    else:
+        return {"possible_duplicate": False, "duplicate_of_document_id": None}
+    
+    query = {
+        **vendor_match,
+        "invoice_number_clean": invoice_number_clean,
+        "id": {"$ne": current_doc_id},  # Exclude current document
+        "status": {"$nin": ["Deleted", "Rejected"]}  # Exclude deleted
+    }
+    
+    existing = await db.hub_documents.find_one(query, {"id": 1, "_id": 0})
+    
+    if existing:
+        return {
+            "possible_duplicate": True,
+            "duplicate_of_document_id": existing.get("id")
+        }
+    
+    return {"possible_duplicate": False, "duplicate_of_document_id": None}
+
+
+def compute_ap_validation(
+    document_type: str,
+    vendor_normalized: str,
+    invoice_number_clean: str,
+    amount_float: float,
+    po_number_clean: str,
+    ai_confidence: float,
+    possible_duplicate: bool
+) -> dict:
+    """
+    Phase 7: Compute validation_errors, validation_warnings, and draft_candidate for AP invoices.
+    
+    Required fields for AP invoice header readiness:
+    - vendor_normalized
+    - invoice_number_clean
+    - amount_float
+    
+    draft_candidate = True when all three required fields are present and valid
+    
+    This does NOT create drafts or change status logic (handled separately).
+    """
+    validation_errors = []
+    validation_warnings = []
+    
+    # Only process AP_Invoice documents
+    if document_type not in ("AP_Invoice", "AP Invoice"):
+        return {
+            "draft_candidate": False,
+            "validation_errors": [],
+            "validation_warnings": []
+        }
+    
+    # Check required fields
+    if not vendor_normalized:
+        validation_errors.append("missing_vendor")
+    
+    if not invoice_number_clean:
+        validation_errors.append("missing_invoice_number")
+    
+    if amount_float is None:
+        validation_errors.append("missing_amount")
+    
+    # Check confidence
+    if ai_confidence is not None and ai_confidence < 0.90:
+        validation_errors.append("low_classification_confidence")
+    
+    # Check duplicate
+    if possible_duplicate:
+        validation_errors.append("potential_duplicate_invoice")
+    
+    # Warnings (non-blocking)
+    if not po_number_clean:
+        validation_warnings.append("missing_po_number")
+    
+    # draft_candidate is True only when all required fields present and no errors
+    draft_candidate = (
+        len(validation_errors) == 0 and
+        vendor_normalized is not None and
+        invoice_number_clean is not None and
+        amount_float is not None
+    )
+    
+    return {
+        "draft_candidate": draft_candidate,
+        "validation_errors": validation_errors,
+        "validation_warnings": validation_warnings
+    }
+
+
+def compute_ap_status(
+    document_type: str,
+    ai_confidence: float,
+    validation_errors: list,
+    draft_candidate: bool,
+    current_status: str
+) -> str:
+    """
+    Phase 7: Determine status for AP_Invoice documents.
+    
+    Status logic (observation mode - conservative):
+    - If not AP_Invoice: unchanged (let other workflows handle)
+    - If ai_confidence < 0.90: NeedsReview
+    - If any validation_errors: NeedsReview
+    - Else (no errors, draft_candidate=True): NeedsReview (but draft_candidate flag visible)
+    
+    In Phase 7, we do NOT auto-advance to any status that triggers BC writes.
+    """
+    if document_type not in ("AP_Invoice", "AP Invoice"):
+        return current_status  # Unchanged for non-AP
+    
+    # All AP_Invoice documents stay in NeedsReview during Phase 7
+    # The draft_candidate flag indicates readiness without changing status
+    return "NeedsReview"
+
+
+# Legacy wrapper for backward compatibility
+def compute_canonical_fields(extracted_fields: dict) -> dict:
+    """Legacy wrapper - calls compute_ap_normalized_fields"""
+    return compute_ap_normalized_fields(extracted_fields)
 
 
 def compute_draft_candidate_flag(
@@ -1820,35 +2016,35 @@ def compute_draft_candidate_flag(
     ai_confidence: float
 ) -> dict:
     """
-    Phase 7 Week 1: Compute draft_candidate flag (non-operational).
-    
-    draft_candidate = True if:
-    - document_type == AP_Invoice
-    - vendor present
-    - invoice_number present  
-    - amount present
-    - ai_confidence >= 0.92
-    
-    This does NOT create drafts or change status.
-    It only computes and exposes the flag for observation.
+    Legacy wrapper for backward compatibility.
+    Now delegates to compute_ap_validation.
     """
-    result = {
-        "draft_candidate": False,
-        "draft_candidate_reason": [],
-        "draft_candidate_score": 0.0
+    # Extract normalized values
+    vendor_normalized = canonical_fields.get("vendor_normalized")
+    invoice_number_clean = canonical_fields.get("invoice_number_clean")
+    amount_float = canonical_fields.get("amount_float")
+    po_number_clean = canonical_fields.get("po_number_clean")
+    
+    result = compute_ap_validation(
+        document_type=document_type,
+        vendor_normalized=vendor_normalized,
+        invoice_number_clean=invoice_number_clean,
+        amount_float=amount_float,
+        po_number_clean=po_number_clean,
+        ai_confidence=ai_confidence,
+        possible_duplicate=False  # Legacy doesn't have this
+    )
+    
+    # Map to legacy format
+    return {
+        "draft_candidate": result["draft_candidate"],
+        "draft_candidate_reason": result["validation_errors"] + result["validation_warnings"],
+        "draft_candidate_score": 100.0 if result["draft_candidate"] else 0.0
     }
-    
-    # Check document type
-    if document_type not in ("AP_Invoice", "AP Invoice"):
-        result["draft_candidate_reason"].append("document_type is not AP_Invoice")
-        return result
-    
-    score = 0.0
-    reasons = []
-    
-    # Check vendor (25 points)
-    has_vendor = bool(canonical_fields.get("vendor_normalized") or 
-                      (extracted_fields and extracted_fields.get("vendor")))
+
+
+# Keep for backward compatibility
+has_vendor = True  # Placeholder to not break following code
     if has_vendor:
         score += 25
     else:

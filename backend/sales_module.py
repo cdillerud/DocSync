@@ -468,7 +468,7 @@ async def get_customer_dashboard(
             })
     
     # Alert: At-risk orders (backordered lines)
-    backordered_lines = [l for l in order_lines if l.get("line_status") == "backordered"]
+    backordered_lines = [ol for ol in order_lines if ol.get("line_status") == "backordered"]
     for line in backordered_lines:
         item = items.get(line["item_id"], {})
         alerts.append({

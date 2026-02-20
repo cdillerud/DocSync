@@ -13,6 +13,7 @@ import DocumentDetailPage from "@/pages/DocumentDetailPage";
 import SettingsPage from "@/pages/SettingsPage";
 import EmailParserPage from "@/pages/EmailParserPage";
 import AuditDashboardPage from "@/pages/AuditDashboardPage";
+import SalesDashboardPage from "@/pages/SalesDashboardPage";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -31,6 +32,7 @@ function AppRoutes() {
         <Route path="documents/:id" element={<DocumentDetailPage />} />
         <Route path="email-parser" element={<EmailParserPage />} />
         <Route path="audit" element={<AuditDashboardPage />} />
+        <Route path="sales" element={<SalesDashboardPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

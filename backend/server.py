@@ -2043,44 +2043,6 @@ def compute_draft_candidate_flag(
     }
 
 
-# Keep for backward compatibility
-has_vendor = True  # Placeholder to not break following code
-    if has_vendor:
-        score += 25
-    else:
-        reasons.append("missing vendor")
-    
-    # Check invoice_number (25 points)
-    has_invoice = bool(canonical_fields.get("invoice_number_clean") or 
-                       (extracted_fields and extracted_fields.get("invoice_number")))
-    if has_invoice:
-        score += 25
-    else:
-        reasons.append("missing invoice_number")
-    
-    # Check amount (25 points)
-    has_amount = canonical_fields.get("amount_float") is not None
-    if not has_amount and extracted_fields:
-        # Fallback to raw
-        has_amount = extracted_fields.get("amount") is not None
-    if has_amount:
-        score += 25
-    else:
-        reasons.append("missing amount")
-    
-    # Check AI confidence (25 points)
-    confidence_threshold = 0.92
-    if ai_confidence and ai_confidence >= confidence_threshold:
-        score += 25
-    else:
-        reasons.append(f"ai_confidence {ai_confidence or 0:.2f} < {confidence_threshold}")
-    
-    result["draft_candidate_score"] = score
-    result["draft_candidate_reason"] = reasons
-    result["draft_candidate"] = score == 100  # All criteria met
-    
-    return result
-
 def normalize_vendor_name(name: str) -> str:
     """
     Normalize vendor name for matching.

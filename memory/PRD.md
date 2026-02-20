@@ -214,4 +214,5 @@ Shows distribution of `draft_candidate` flags without enabling drafts.
 ## Testing Results
 - Phase 7 endpoints: All functional
 - Backend: Running with new validation logic
+- Dashboard: Updated with AP Invoice Extraction Quality section
 - BC writes: Confirmed DISABLED

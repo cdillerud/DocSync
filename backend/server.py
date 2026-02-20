@@ -6164,35 +6164,39 @@ async def get_extraction_quality_metrics(days: int = 7):
 
 @api_router.get("/metrics/extraction-misses")
 async def get_extraction_misses(
-    field: str = Query("vendor", description="Field to check: vendor, invoice_number, amount, po_number, due_date"),
+    field: str = Query("vendor", description="Field to check: vendor, invoice_number, amount"),
     days: int = Query(7),
     limit: int = Query(100)
 ):
     """
-    Phase 7 Week 1: Enhanced Missing Fields Drilldown endpoint.
+    Phase 7: Diagnostic endpoint for documents missing specific fields.
     
-    Returns documents missing specific required fields, with:
-    - document_id
-    - file_name
-    - vendor_extracted
-    - invoice_number_extracted
-    - amount_extracted
-    - which_required_fields_missing
-    - ai_confidence
-    - first_500_chars (optional, from email subject)
+    Filter AP_Invoice documents from the last N days by the given missing field:
+    - field=vendor → vendor_normalized missing
+    - field=invoice_number → invoice_number_clean missing
+    - field=amount → amount_float missing
     
-    Use this to understand WHY fields are missing and fix extraction deterministically.
+    Returns data needed for debugging extraction during observation mode.
     """
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     
-    # Build query for missing field
-    field_path = f"extracted_fields.{field}"
+    # Map field parameter to actual document field
+    field_map = {
+        "vendor": "vendor_normalized",
+        "invoice_number": "invoice_number_clean",
+        "amount": "amount_float"
+    }
+    
+    actual_field = field_map.get(field, f"extracted_fields.{field}")
+    
+    # Build query for AP_Invoice documents missing the specified field
     query = {
         "created_utc": {"$gte": cutoff},
+        "document_type": {"$in": ["AP_Invoice", "AP Invoice"]},
         "$or": [
-            {field_path: {"$exists": False}},
-            {field_path: None},
-            {field_path: ""}
+            {actual_field: {"$exists": False}},
+            {actual_field: None},
+            {actual_field: ""}
         ]
     }
     
@@ -6203,9 +6207,16 @@ async def get_extraction_misses(
             "file_name": 1,
             "source": 1,
             "document_type": 1,
+            "status": 1,
             "ai_confidence": 1,
-            "extracted_fields": 1,
-            "canonical_fields": 1,
+            "vendor_raw": 1,
+            "vendor_normalized": 1,
+            "invoice_number_raw": 1,
+            "invoice_number_clean": 1,
+            "amount_raw": 1,
+            "amount_float": 1,
+            "due_date_raw": 1,
+            "po_number_raw": 1,
             "email_sender": 1,
             "email_subject": 1,
             "created_utc": 1,
@@ -6213,40 +6224,27 @@ async def get_extraction_misses(
         }
     ).sort("created_utc", -1).to_list(limit)
     
-    # Build enhanced response per spec
-    required_fields = ["vendor", "invoice_number", "amount"]
     results = []
-    
     for d in docs:
-        extracted = d.get("extracted_fields", {}) or {}
-        canonical = d.get("canonical_fields", {}) or {}
-        
-        # Determine which required fields are missing
-        missing_fields = []
-        for rf in required_fields:
-            val = extracted.get(rf) or canonical.get(f"{rf}_normalized") or canonical.get(f"{rf}_clean")
-            if not val:
-                missing_fields.append(rf)
-        
-        # Build first 500 chars from email subject or file name
-        first_500 = ""
+        # Build text snippet from email subject
+        text_snippet = ""
         if d.get("email_subject"):
-            first_500 = d["email_subject"][:500]
+            text_snippet = d["email_subject"][:500]
         elif d.get("email_sender"):
-            first_500 = f"From: {d['email_sender']}"
+            text_snippet = f"From: {d['email_sender']}"
         
         results.append({
             "document_id": d.get("id"),
             "file_name": d.get("file_name"),
-            "source": d.get("source"),
             "document_type": d.get("document_type"),
-            "vendor_extracted": extracted.get("vendor"),
-            "invoice_number_extracted": extracted.get("invoice_number"),
-            "amount_extracted": extracted.get("amount"),
-            "which_required_fields_missing": missing_fields,
+            "status": d.get("status"),
+            "vendor_raw": d.get("vendor_raw"),
+            "invoice_number_raw": d.get("invoice_number_raw"),
+            "amount_raw": d.get("amount_raw"),
+            "due_date_raw": d.get("due_date_raw"),
+            "po_number_raw": d.get("po_number_raw"),
             "ai_confidence": d.get("ai_confidence"),
-            "email_sender": d.get("email_sender"),
-            "first_500_chars_text": first_500,
+            "first_500_chars_text": text_snippet,
             "created_utc": d.get("created_utc")
         })
     
@@ -6256,10 +6254,9 @@ async def get_extraction_misses(
         "missing_count": len(results),
         "documents": results,
         "analysis_hints": [
-            f"Review these {len(results)} documents to understand why '{field}' wasn't extracted",
+            f"Review these {len(results)} AP_Invoice documents to understand why '{field}' wasn't extracted",
             "Common causes: unusual document format, scanned PDFs, non-standard layouts",
-            "Check ai_confidence - low confidence may indicate OCR quality issues",
-            "Consider adjusting AI prompt or adding document-specific extraction rules"
+            "Check ai_confidence - low confidence may indicate OCR quality issues"
         ]
     }
 

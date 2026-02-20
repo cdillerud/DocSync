@@ -37,11 +37,13 @@ export default function AuditDashboardPage() {
   const [matchScoreDistribution, setMatchScoreDistribution] = useState(null);
   const [aliasExceptions, setAliasExceptions] = useState(null);
   const [shadowModeStatus, setShadowModeStatus] = useState(null);
+  // Phase 7: Extraction Quality metrics
+  const [extractionQuality, setExtractionQuality] = useState(null);
 
   const fetchAllMetrics = async () => {
     setLoading(true);
     try {
-      const [metricsRes, vendorRes, aliasRes, timeRes, dailyRes, settingsRes, scoreDistRes, aliasExcRes, shadowRes] = await Promise.all([
+      const [metricsRes, vendorRes, aliasRes, timeRes, dailyRes, settingsRes, scoreDistRes, aliasExcRes, shadowRes, extractionRes] = await Promise.all([
         fetch(`${API}/api/metrics/automation?days=${days}`).then(r => r.json()),
         fetch(`${API}/api/metrics/vendors?days=${days}`).then(r => r.json()),
         fetch(`${API}/api/metrics/alias-impact`).then(r => r.json()),
@@ -51,7 +53,9 @@ export default function AuditDashboardPage() {
         // Phase 6 endpoints
         fetch(`${API}/api/metrics/match-score-distribution`).then(r => r.json()),
         fetch(`${API}/api/metrics/alias-exceptions?days=${days}`).then(r => r.json()),
-        fetch(`${API}/api/settings/shadow-mode`).then(r => r.json())
+        fetch(`${API}/api/settings/shadow-mode`).then(r => r.json()),
+        // Phase 7 endpoints
+        fetch(`${API}/api/metrics/extraction-quality?days=${days}`).then(r => r.json()).catch(() => null)
       ]);
       setMetrics(metricsRes);
       setVendorFriction(vendorRes);
@@ -62,6 +66,7 @@ export default function AuditDashboardPage() {
       setMatchScoreDistribution(scoreDistRes);
       setAliasExceptions(aliasExcRes);
       setShadowModeStatus(shadowRes);
+      setExtractionQuality(extractionRes);
     } catch (err) {
       toast.error('Failed to load metrics');
     } finally {

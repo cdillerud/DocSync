@@ -7,8 +7,9 @@ import { Input } from '../components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Badge } from '../components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { toast } from 'sonner';
-import { Search, RefreshCw, FileText, ExternalLink, Filter, RotateCcw, Trash2 } from 'lucide-react';
+import { Search, RefreshCw, FileText, ExternalLink, Filter, RotateCcw, Trash2, FolderOpen } from 'lucide-react';
 
 const STATUS_CLASSES = {
   Received: 'status-received',
@@ -16,9 +17,19 @@ const STATUS_CLASSES = {
   LinkedToBC: 'status-linked',
   Exception: 'status-exception',
   Completed: 'status-completed',
+  NeedsReview: 'status-classified',
+  StoredInSP: 'status-classified',
+  ReadyToLink: 'status-linked',
 };
 
-const ALL_STATUSES = ['All', 'Received', 'Classified', 'LinkedToBC', 'Exception', 'Completed'];
+const CATEGORY_COLORS = {
+  AP: 'bg-blue-100 text-blue-800 border-blue-200',
+  Sales: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  Unknown: 'bg-gray-100 text-gray-600 border-gray-200',
+};
+
+const ALL_STATUSES = ['All', 'Received', 'Classified', 'NeedsReview', 'StoredInSP', 'LinkedToBC', 'Exception', 'Completed'];
+const ALL_CATEGORIES = ['All', 'AP', 'Sales'];
 
 function formatDate(iso) {
   if (!iso) return '-';

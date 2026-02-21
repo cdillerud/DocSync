@@ -1667,7 +1667,24 @@ VENDOR_ALIAS_MAP = {
     # Add company-specific aliases here
 }
 
-# Email config schema
+# ==================== MAILBOX SOURCE CONFIGURATION ====================
+
+class MailboxSource(BaseModel):
+    """Configuration for a document intake mailbox source."""
+    mailbox_id: Optional[str] = None  # Auto-generated if not provided
+    name: str  # Display name (e.g., "AP Invoices", "Sales Orders")
+    email_address: str  # The mailbox to monitor
+    category: str = "AP"  # Default category for documents from this mailbox (AP, Sales, etc.)
+    enabled: bool = True
+    polling_interval_minutes: int = 5
+    watch_folder: str = "Inbox"
+    needs_review_folder: str = "Needs Review"
+    processed_folder: str = "Processed"
+    description: Optional[str] = None
+    created_utc: Optional[str] = None
+    updated_utc: Optional[str] = None
+
+# Email config schema (legacy - kept for backward compatibility)
 class EmailWatchConfig(BaseModel):
     mailbox_address: str
     watch_folder: str = "Inbox"

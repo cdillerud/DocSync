@@ -60,10 +60,19 @@ export const getJobTypes = () => api.get('/settings/job-types');
 export const getJobType = (jobType) => api.get(`/settings/job-types/${jobType}`);
 export const updateJobType = (jobType, data) => api.put(`/settings/job-types/${jobType}`, data);
 
-// Email Watcher Config
+// Email Watcher Config (Legacy)
 export const getEmailWatcherConfig = () => api.get('/settings/email-watcher');
 export const updateEmailWatcherConfig = (data) => api.put('/settings/email-watcher', data);
 export const subscribeEmailWatcher = (webhookUrl) => api.post(`/settings/email-watcher/subscribe?webhook_url=${encodeURIComponent(webhookUrl)}`);
+
+// Mailbox Sources CRUD
+export const listMailboxSources = () => api.get('/settings/mailbox-sources');
+export const getMailboxSource = (id) => api.get(`/settings/mailbox-sources/${id}`);
+export const createMailboxSource = (data) => api.post('/settings/mailbox-sources', data);
+export const updateMailboxSource = (id, data) => api.put(`/settings/mailbox-sources/${id}`, data);
+export const deleteMailboxSource = (id) => api.delete(`/settings/mailbox-sources/${id}`);
+export const testMailboxConnection = (id) => api.post(`/settings/mailbox-sources/${id}/test-connection`);
+export const pollMailboxNow = (id) => api.post(`/settings/mailbox-sources/${id}/poll-now`);
 
 // Email Stats Dashboard
 export const getEmailStats = () => api.get('/dashboard/email-stats');

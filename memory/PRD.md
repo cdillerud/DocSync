@@ -266,3 +266,68 @@ Shows distribution of `draft_candidate` flags without enabling drafts.
 - ❌ bc_customer_no, bc_sales_order_no are null placeholders
 - ❌ No Excel ingestion (manual seed data only)
 - ❌ No draft creation to BC
+
+---
+
+## Sales Email Polling (Shadow Mode)
+
+**Status:** Implemented, Ready to Enable
+
+### Configuration (.env)
+```bash
+SALES_EMAIL_POLLING_ENABLED=true
+SALES_EMAIL_POLLING_USER=hub-sales-intake@gamerpackaging.com
+SALES_EMAIL_POLLING_INTERVAL_MINUTES=5
+```
+
+### Document Types (18 categories)
+| Type | Priority | Action | Description |
+|------|----------|--------|-------------|
+| Sales_Order | high | create_order_candidate | Customer PO |
+| Order_Change | high | flag_for_review | Order modification |
+| Shipping_Request | high | flag_for_review | Ship request |
+| Quality_Issue | high | flag_for_review | Quality complaint |
+| Return_Request | high | flag_for_review | RMA request |
+| Sales_Quote | medium | log_only | Price quote |
+| Order_Confirmation | medium | link_to_order | Confirmation |
+| Shipping_Schedule | medium | log_only | ETA/tracking |
+| Price_Inquiry | medium | log_only | Price question |
+| Inventory_Report | medium | log_only | Stock report |
+| Forecast | medium | log_only | Demand forecast |
+| Contract | medium | log_only | Agreement |
+| Bill_of_Lading | medium | log_only | BOL |
+| Packing_List | low | log_only | Pack list |
+| Price_List | low | log_only | Catalog |
+| Customer_Inquiry | low | log_only | General question |
+| Meeting_Notes | low | log_only | Call notes |
+| Unknown_Sales | low | log_only | Unclassified |
+
+### API Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/sales/email-polling/status` | GET | Polling config + stats |
+| `/api/sales/email-polling/trigger` | POST | Manual poll run |
+| `/api/sales/email-polling/logs` | GET | Intake logs |
+| `/api/sales/documents` | GET | Ingested documents |
+| `/api/sales/documents/{id}` | GET | Document detail |
+| `/api/sales/documents/stats/by-type` | GET | Stats by doc type |
+| `/api/sales/documents/stats/by-customer` | GET | Stats by customer |
+
+### Transport Rule Setup (Exchange Admin)
+1. Create shared mailbox: `hub-sales-intake@gamerpackaging.com`
+2. Transport rule: Copy emails with attachments FROM inside sales team TO shared mailbox
+3. Set `SALES_EMAIL_POLLING_USER` and `SALES_EMAIL_POLLING_ENABLED=true`
+
+### What Sales Shadow Mode Does
+- ✅ Polls mailbox for emails with attachments
+- ✅ AI classifies into 18 document types
+- ✅ Extracts customer name, PO#, dates, items
+- ✅ Attempts customer matching
+- ✅ All documents land in `NeedsReview`
+- ✅ Logs all intake for metrics
+
+### What Sales Shadow Mode Does NOT Do
+- ❌ Create BC sales orders
+- ❌ Write to BC
+- ❌ Auto-process anything
+- ❌ Delete or move emails

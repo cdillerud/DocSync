@@ -7,11 +7,12 @@ import { Button } from '../components/ui/button';
 import { 
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue 
 } from '../components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
 import {
   Package, Truck, AlertTriangle, ShoppingCart, Anchor,
   RefreshCw, Users, Building2, ClipboardList, TrendingDown,
-  ChevronRight, Search, Filter
+  ChevronRight, Search, Filter, Mail, FileText, Eye
 } from 'lucide-react';
 import { Input } from '../components/ui/input';
 
@@ -26,6 +27,13 @@ export default function SalesDashboardPage() {
   const [dashboardData, setDashboardData] = useState(null);
   const [inventorySearch, setInventorySearch] = useState('');
   const [orderSearch, setOrderSearch] = useState('');
+  const [activeTab, setActiveTab] = useState('inventory');
+  
+  // Email Documents state
+  const [emailDocs, setEmailDocs] = useState({ total: 0, documents: [] });
+  const [emailDocsLoading, setEmailDocsLoading] = useState(false);
+  const [docTypeStats, setDocTypeStats] = useState([]);
+  const [docTypeFilter, setDocTypeFilter] = useState('all');
 
   // Load customers and warehouses on mount
   useEffect(() => {

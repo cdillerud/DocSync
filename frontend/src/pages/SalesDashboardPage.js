@@ -207,6 +207,25 @@ export default function SalesDashboardPage() {
         </Card>
       )}
 
+      {/* Tabs for different views */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid w-full grid-cols-2 lg:w-96">
+          <TabsTrigger value="inventory" className="flex items-center gap-2">
+            <Package className="w-4 h-4" />
+            Inventory & Orders
+          </TabsTrigger>
+          <TabsTrigger value="documents" className="flex items-center gap-2">
+            <Mail className="w-4 h-4" />
+            Email Documents
+            {emailDocs.total > 0 && (
+              <Badge variant="secondary" className="ml-1 text-xs">{emailDocs.total}</Badge>
+            )}
+          </TabsTrigger>
+        </TabsList>
+
+        {/* Inventory & Orders Tab */}
+        <TabsContent value="inventory" className="space-y-6 mt-6">
+
       {/* Summary Cards */}
       {dashboardData && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4" data-testid="summary-cards">

@@ -503,189 +503,295 @@ export default function EmailParserPage() {
 
         {/* ==================== EMAIL CONFIG TAB ==================== */}
         <TabsContent value="email-config" className="space-y-4">
-          {/* AP Mailbox Configuration */}
-          <Card className="border border-border" data-testid="email-watcher-config-card">
-            <CardHeader>
-              <CardTitle className="text-base font-bold flex items-center gap-2" style={{ fontFamily: 'Chivo, sans-serif' }}>
-                <Mail className="w-5 h-5 text-blue-500" />
-                AP Mailbox (Accounts Payable)
-                <Badge variant="outline" className="ml-2 bg-blue-100 text-blue-800 border-blue-200">Primary</Badge>
-              </CardTitle>
-              <CardDescription>
-                Monitor vendor invoices, remittances, and AP-related documents
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Enabled Toggle */}
-              <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                <div>
-                  <Label className="text-sm font-medium">AP Email Watcher Enabled</Label>
-                  <p className="text-xs text-muted-foreground">
-                    When enabled, the system will monitor this mailbox for AP documents
-                  </p>
-                </div>
-                <Switch
-                  checked={emailConfigForm.enabled}
-                  onCheckedChange={(checked) => setEmailConfigForm(prev => ({ ...prev, enabled: checked }))}
-                  data-testid="email-enabled-switch"
-                />
-              </div>
+          {/* Header with Add Button */}
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-semibold">Mailbox Sources</h3>
+              <p className="text-sm text-muted-foreground">
+                Configure email mailboxes to monitor for incoming documents
+              </p>
+            </div>
+            <Button onClick={handleAddMailbox} data-testid="add-mailbox-btn">
+              <Plus className="w-4 h-4 mr-2" />
+              Add Mailbox
+            </Button>
+          </div>
 
-              <Separator />
-
-              {/* Polling Interval */}
-              <div className="space-y-2">
-                <Label htmlFor="interval_minutes">Polling Interval (minutes)</Label>
-                <div className="flex items-center gap-3">
-                  <Input
-                    id="interval_minutes"
-                    type="number"
-                    min="1"
-                    max="60"
-                    value={emailConfigForm.interval_minutes}
-                    onChange={(e) => setEmailConfigForm(prev => ({ ...prev, interval_minutes: parseInt(e.target.value) || 5 }))}
-                    className="w-24 font-mono"
-                    data-testid="polling-interval-input"
-                  />
-                  <span className="text-sm text-muted-foreground">minutes between polls</span>
-                </div>
-              </div>
-
-              <Separator />
-
-              {/* Mailbox Address */}
-              <div className="space-y-2">
-                <Label htmlFor="mailbox_address">AP Mailbox Address</Label>
-                <Input
-                  id="mailbox_address"
-                  placeholder="e.g. hub-ap-intake@yourcompany.com"
-                  value={emailConfigForm.mailbox_address}
-                  onChange={(e) => setEmailConfigForm(prev => ({ ...prev, mailbox_address: e.target.value }))}
-                  className="font-mono"
-                  data-testid="mailbox-address-input"
-                />
-              </div>
-
-              {/* Folder Configuration */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="watch_folder">Watch Folder</Label>
-                  <Input
-                    id="watch_folder"
-                    placeholder="Inbox"
-                    value={emailConfigForm.watch_folder}
-                    onChange={(e) => setEmailConfigForm(prev => ({ ...prev, watch_folder: e.target.value }))}
-                    data-testid="watch-folder-input"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="needs_review_folder">Needs Review Folder</Label>
-                  <Input
-                    id="needs_review_folder"
-                    placeholder="Needs Review"
-                    value={emailConfigForm.needs_review_folder}
-                    onChange={(e) => setEmailConfigForm(prev => ({ ...prev, needs_review_folder: e.target.value }))}
-                    data-testid="needs-review-folder-input"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="processed_folder">Processed Folder</Label>
-                  <Input
-                    id="processed_folder"
-                    placeholder="Processed"
-                    value={emailConfigForm.processed_folder}
-                    onChange={(e) => setEmailConfigForm(prev => ({ ...prev, processed_folder: e.target.value }))}
-                    data-testid="processed-folder-input"
-                  />
-                </div>
-              </div>
-
-              {/* Save Button */}
-              <div className="flex justify-end pt-2">
-                <Button onClick={handleSaveEmailConfig} disabled={savingEmail} data-testid="save-email-config-btn">
-                  {savingEmail ? (
-                    <span className="flex items-center gap-1.5">
-                      <Loader2 className="w-4 h-4 animate-spin" /> Saving...
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-1.5">
-                      <Save className="w-4 h-4" /> Save AP Configuration
-                    </span>
-                  )}
+          {/* Mailbox Sources List */}
+          {mailboxSources.length === 0 ? (
+            <Card className="border border-dashed">
+              <CardContent className="p-8 text-center">
+                <MailPlus className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+                <h4 className="font-medium mb-2">No mailboxes configured</h4>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Add your first mailbox source to start ingesting documents automatically
+                </p>
+                <Button onClick={handleAddMailbox} variant="outline">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Your First Mailbox
                 </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Sales Mailbox Configuration */}
-          <Card className="border border-border" data-testid="sales-email-config-card">
-            <CardHeader>
-              <CardTitle className="text-base font-bold flex items-center gap-2" style={{ fontFamily: 'Chivo, sans-serif' }}>
-                <Mail className="w-5 h-5 text-emerald-500" />
-                Sales Mailbox
-                <Badge variant="outline" className="ml-2 bg-emerald-100 text-emerald-800 border-emerald-200">Sales</Badge>
-              </CardTitle>
-              <CardDescription>
-                Monitor customer POs, quotes, shipping requests, and sales-related documents
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="p-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="w-5 h-5 text-amber-500 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-                      Environment Configuration Required
-                    </p>
-                    <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
-                      Sales mailbox is configured via environment variables on your server:
-                    </p>
-                    <code className="block text-xs mt-2 p-2 bg-amber-100 dark:bg-amber-900 rounded font-mono">
-                      SALES_EMAIL_POLLING_ENABLED=true<br/>
-                      SALES_EMAIL_POLLING_USER=hub-sales-intake@yourcompany.com
-                    </code>
-                    <p className="text-xs text-amber-700 dark:text-amber-300 mt-2">
-                      Documents from both mailboxes will appear in the unified Document Queue with appropriate category tags.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Sales Email Status Info */}
-              <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                <div>
-                  <Label className="text-sm font-medium">Sales Email Status</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Check your server's .env file for current configuration
-                  </p>
-                </div>
-                <Badge variant="outline" className="text-xs">
-                  Configured via .env
-                </Badge>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Current Status */}
-          {emailConfig?.webhook_subscription_id && (
-            <Card className="border border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/30">
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                  <div>
-                    <p className="text-sm font-medium text-emerald-800 dark:text-emerald-200">
-                      AP Webhook Active
-                    </p>
-                    <p className="text-xs text-emerald-700 dark:text-emerald-300">
-                      Subscription ID: {emailConfig.webhook_subscription_id}
-                    </p>
-                  </div>
-                </div>
               </CardContent>
             </Card>
+          ) : (
+            <div className="space-y-3">
+              {mailboxSources.map((mailbox) => {
+                const categoryConfig = CATEGORY_OPTIONS.find(c => c.value === mailbox.category) || CATEGORY_OPTIONS[4];
+                return (
+                  <Card key={mailbox.mailbox_id} className="border">
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-start gap-3 min-w-0 flex-1">
+                          <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${mailbox.enabled ? 'bg-primary/10' : 'bg-muted'}`}>
+                            <Mail className={`w-5 h-5 ${mailbox.enabled ? 'text-primary' : 'text-muted-foreground'}`} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="font-medium">{mailbox.name}</h4>
+                              <Badge variant="outline" className={`text-xs ${categoryConfig.color}`}>
+                                {categoryConfig.label}
+                              </Badge>
+                              {!mailbox.enabled && (
+                                <Badge variant="secondary" className="text-xs">Disabled</Badge>
+                              )}
+                            </div>
+                            <p className="text-sm text-muted-foreground font-mono truncate">
+                              {mailbox.email_address}
+                            </p>
+                            {mailbox.description && (
+                              <p className="text-xs text-muted-foreground mt-1">{mailbox.description}</p>
+                            )}
+                            <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                              <span className="flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                Every {mailbox.polling_interval_minutes} min
+                              </span>
+                              <span>Watch: {mailbox.watch_folder}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleTestMailbox(mailbox.mailbox_id)}
+                            disabled={testingMailbox === mailbox.mailbox_id}
+                            title="Test Connection"
+                          >
+                            {testingMailbox === mailbox.mailbox_id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Plug className="w-4 h-4" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handlePollMailbox(mailbox.mailbox_id)}
+                            disabled={pollingMailbox === mailbox.mailbox_id}
+                            title="Poll Now"
+                          >
+                            {pollingMailbox === mailbox.mailbox_id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Play className="w-4 h-4" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleEditMailbox(mailbox)}
+                            title="Edit"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleDeleteMailbox(mailbox.mailbox_id)}
+                            className="text-destructive hover:text-destructive"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
           )}
+
+          {/* Info Card */}
+          <Card className="border border-dashed border-muted-foreground/30 bg-muted/20">
+            <CardContent className="p-4">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                  <Brain className="w-4 h-4 text-primary" />
+                </div>
+                <div>
+                  <p className="font-medium text-sm">Unified Document Pipeline</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Documents from all mailboxes are ingested into a single queue. The AI classifier automatically 
+                    determines the document type and category. Use the Document Queue to view and manage all documents.
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
+
+      {/* ==================== ADD/EDIT MAILBOX DIALOG ==================== */}
+      <Dialog open={showAddMailbox} onOpenChange={setShowAddMailbox}>
+        <DialogContent className="max-w-lg" data-testid="mailbox-dialog">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold flex items-center gap-2">
+              <Mail className="w-5 h-5" />
+              {editingMailbox ? 'Edit Mailbox Source' : 'Add Mailbox Source'}
+            </DialogTitle>
+            <DialogDescription>
+              Configure a mailbox to monitor for incoming documents
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* Name */}
+            <div className="space-y-2">
+              <Label htmlFor="mailbox-name">Display Name *</Label>
+              <Input
+                id="mailbox-name"
+                placeholder="e.g. AP Invoices, Sales Orders"
+                value={mailboxForm.name}
+                onChange={(e) => setMailboxForm(prev => ({ ...prev, name: e.target.value }))}
+                data-testid="mailbox-name-input"
+              />
+            </div>
+
+            {/* Email Address */}
+            <div className="space-y-2">
+              <Label htmlFor="mailbox-email">Email Address *</Label>
+              <Input
+                id="mailbox-email"
+                placeholder="e.g. hub-ap-intake@yourcompany.com"
+                value={mailboxForm.email_address}
+                onChange={(e) => setMailboxForm(prev => ({ ...prev, email_address: e.target.value }))}
+                className="font-mono"
+                data-testid="mailbox-email-input"
+              />
+            </div>
+
+            {/* Category */}
+            <div className="space-y-2">
+              <Label>Default Category</Label>
+              <Select
+                value={mailboxForm.category}
+                onValueChange={(val) => setMailboxForm(prev => ({ ...prev, category: val }))}
+              >
+                <SelectTrigger data-testid="mailbox-category-select">
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  {CATEGORY_OPTIONS.map((cat) => (
+                    <SelectItem key={cat.value} value={cat.value}>
+                      <span className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full ${cat.color.split(' ')[0]}`} />
+                        {cat.label}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                AI will override this based on document content
+              </p>
+            </div>
+
+            {/* Enabled + Interval Row */}
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={mailboxForm.enabled}
+                  onCheckedChange={(checked) => setMailboxForm(prev => ({ ...prev, enabled: checked }))}
+                  data-testid="mailbox-enabled-switch"
+                />
+                <Label>Enabled</Label>
+              </div>
+              <div className="flex items-center gap-2 flex-1">
+                <Label className="whitespace-nowrap">Poll every</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  max="60"
+                  value={mailboxForm.polling_interval_minutes}
+                  onChange={(e) => setMailboxForm(prev => ({ ...prev, polling_interval_minutes: parseInt(e.target.value) || 5 }))}
+                  className="w-20 font-mono"
+                />
+                <span className="text-sm text-muted-foreground">min</span>
+              </div>
+            </div>
+
+            {/* Folders */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Watch Folder</Label>
+                <Input
+                  placeholder="Inbox"
+                  value={mailboxForm.watch_folder}
+                  onChange={(e) => setMailboxForm(prev => ({ ...prev, watch_folder: e.target.value }))}
+                  className="text-sm"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Review Folder</Label>
+                <Input
+                  placeholder="Needs Review"
+                  value={mailboxForm.needs_review_folder}
+                  onChange={(e) => setMailboxForm(prev => ({ ...prev, needs_review_folder: e.target.value }))}
+                  className="text-sm"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Processed Folder</Label>
+                <Input
+                  placeholder="Processed"
+                  value={mailboxForm.processed_folder}
+                  onChange={(e) => setMailboxForm(prev => ({ ...prev, processed_folder: e.target.value }))}
+                  className="text-sm"
+                />
+              </div>
+            </div>
+
+            {/* Description */}
+            <div className="space-y-2">
+              <Label htmlFor="mailbox-desc">Description (optional)</Label>
+              <Input
+                id="mailbox-desc"
+                placeholder="e.g. Main AP inbox for vendor invoices"
+                value={mailboxForm.description}
+                onChange={(e) => setMailboxForm(prev => ({ ...prev, description: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddMailbox(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveMailbox} disabled={savingMailbox} data-testid="save-mailbox-btn">
+              {savingMailbox ? (
+                <span className="flex items-center gap-1.5">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Saving...
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5">
+                  <Save className="w-4 h-4" /> {editingMailbox ? 'Update' : 'Add'} Mailbox
+                </span>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ==================== EDIT JOB TYPE DIALOG ==================== */}
       <Dialog open={!!editingJob} onOpenChange={() => setEditingJob(null)}>

@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { 
   getJobTypes, updateJobType, getEmailWatcherConfig, updateEmailWatcherConfig,
-  getEmailStats, classifyDocument 
+  getEmailStats, classifyDocument,
+  listMailboxSources, createMailboxSource, updateMailboxSource, deleteMailboxSource,
+  testMailboxConnection, pollMailboxNow
 } from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -12,13 +14,15 @@ import { Switch } from '../components/ui/switch';
 import { Slider } from '../components/ui/slider';
 import { Separator } from '../components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
 } from '../components/ui/dialog';
 import { toast } from 'sonner';
 import {
   Mail, FileText, Brain, Settings, RefreshCw, CheckCircle2, AlertCircle,
-  Loader2, Save, Edit, Eye, Clock, TrendingUp, AlertTriangle, Zap
+  Loader2, Save, Edit, Eye, Clock, TrendingUp, AlertTriangle, Zap,
+  Plus, Trash2, Play, Plug, MailPlus
 } from 'lucide-react';
 
 const AUTOMATION_LEVELS = {
@@ -35,7 +39,17 @@ const JOB_TYPE_ICONS = {
   Remittance: '💳',
   Freight_Document: '🚚',
   Warehouse_Document: '🏭',
+  Sales_Order: '📋',
+  Inventory_Report: '📊',
 };
+
+const CATEGORY_OPTIONS = [
+  { value: 'AP', label: 'Accounts Payable', color: 'bg-blue-100 text-blue-800' },
+  { value: 'Sales', label: 'Sales', color: 'bg-emerald-100 text-emerald-800' },
+  { value: 'Operations', label: 'Operations', color: 'bg-purple-100 text-purple-800' },
+  { value: 'HR', label: 'Human Resources', color: 'bg-amber-100 text-amber-800' },
+  { value: 'Other', label: 'Other', color: 'bg-gray-100 text-gray-800' },
+];
 
 export default function EmailParserPage() {
   const [jobTypes, setJobTypes] = useState([]);
@@ -47,6 +61,25 @@ export default function EmailParserPage() {
   const [saving, setSaving] = useState(false);
   const [emailConfigForm, setEmailConfigForm] = useState({});
   const [savingEmail, setSavingEmail] = useState(false);
+  
+  // Mailbox sources state
+  const [mailboxSources, setMailboxSources] = useState([]);
+  const [showAddMailbox, setShowAddMailbox] = useState(false);
+  const [editingMailbox, setEditingMailbox] = useState(null);
+  const [mailboxForm, setMailboxForm] = useState({
+    name: '',
+    email_address: '',
+    category: 'AP',
+    enabled: true,
+    polling_interval_minutes: 5,
+    watch_folder: 'Inbox',
+    needs_review_folder: 'Needs Review',
+    processed_folder: 'Processed',
+    description: ''
+  });
+  const [savingMailbox, setSavingMailbox] = useState(false);
+  const [testingMailbox, setTestingMailbox] = useState(null);
+  const [pollingMailbox, setPollingMailbox] = useState(null);
 
   const fetchData = async () => {
     setLoading(true);

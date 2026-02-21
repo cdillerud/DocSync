@@ -78,9 +78,38 @@ export default function SalesDashboardPage() {
     loadDashboard();
   }, [selectedCustomer, selectedWarehouse]);
 
+  // Load email documents when tab changes to 'documents'
+  useEffect(() => {
+    if (activeTab !== 'documents') return;
+    loadEmailDocuments();
+  }, [activeTab, docTypeFilter]);
+
+  const loadEmailDocuments = async () => {
+    setEmailDocsLoading(true);
+    try {
+      const typeParam = docTypeFilter !== 'all' ? `&document_type=${docTypeFilter}` : '';
+      const [docsRes, statsRes] = await Promise.all([
+        fetch(`${API}/api/sales/documents?limit=50${typeParam}`).then(r => r.json()),
+        fetch(`${API}/api/sales/documents/stats/by-type?days=30`).then(r => r.json())
+      ]);
+      setEmailDocs(docsRes);
+      setDocTypeStats(statsRes.by_type || []);
+    } catch (err) {
+      toast.error('Failed to load email documents');
+    } finally {
+      setEmailDocsLoading(false);
+    }
+  };
+
   const formatNumber = (num) => {
     if (num === null || num === undefined) return '0';
     return num.toLocaleString();
+  };
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return '-';
+    const d = new Date(dateStr);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
   // Filter inventory by search

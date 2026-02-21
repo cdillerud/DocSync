@@ -853,6 +853,7 @@ async def upload_document(
 @api_router.get("/documents")
 async def list_documents(
     status: str = Query(None), document_type: str = Query(None),
+    category: str = Query(None),
     search: str = Query(None), skip: int = Query(0), limit: int = Query(50)
 ):
     fq = {}
@@ -860,6 +861,8 @@ async def list_documents(
         fq["status"] = status
     if document_type:
         fq["document_type"] = document_type
+    if category:
+        fq["category"] = category
     if search:
         fq["file_name"] = {"$regex": search, "$options": "i"}
     total = await db.hub_documents.count_documents(fq)

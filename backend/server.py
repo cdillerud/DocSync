@@ -18,7 +18,16 @@ import httpx
 from dateutil import parser as date_parser
 
 # Sales Module (Phase 0)
-from sales_module import sales_router, set_db as set_sales_db, initialize_sales_indexes
+from sales_module import (
+    sales_router, 
+    set_db as set_sales_db, 
+    initialize_sales_indexes,
+    configure_sales_email_polling,
+    ingest_sales_document,
+    check_sales_duplicate,
+    record_sales_mail_log,
+    _sales_email_config
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')

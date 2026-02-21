@@ -70,6 +70,10 @@ SHAREPOINT_LIBRARY_NAME = os.environ.get('SHAREPOINT_LIBRARY_NAME', 'Documents')
 app = FastAPI(title="GPI Document Hub API")
 api_router = APIRouter(prefix="/api")
 
+# Global polling task references
+_email_polling_task = None
+_sales_polling_task = None
+
 # ==================== AUTH ====================
 import jwt as pyjwt
 

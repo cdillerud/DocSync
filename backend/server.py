@@ -1758,61 +1758,80 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
 
 IMPORTANT CONTEXT:
 - Our company is "Gamer Packaging, Inc." (also known as "Gamer Packaging" or "GPI")
-- These documents come from our Accounts Payable inbox
-- Most documents will be invoices FROM vendors TO us (AP_Invoice)
-- If you see "Gamer Packaging" as the Bill To/Ship To/Customer, it means WE are receiving this document, so it's likely an AP_Invoice
-            
-Your job is to analyze business documents and:
-1. Classify the document type (AP_Invoice, Sales_PO, AR_Invoice, Remittance, Freight_Document, Warehouse_Document, or Unknown)
-2. Extract key fields based on the document type
-3. Provide a confidence score (0.0 to 1.0) for your classification
+- Documents come from BOTH our Accounts Payable inbox AND Sales mailboxes
+- You must classify documents into the correct category: AP (accounts payable) or Sales
 
-For AP_Invoice (vendor invoices we RECEIVE - most common):
+DOCUMENT CATEGORIES AND TYPES:
+
+== AP (Accounts Payable) Category ==
+AP_Invoice: Vendor invoices we RECEIVE
 - The VENDOR is the company sending us the invoice (NOT Gamer Packaging)
-- Extract: vendor name (the sender), invoice_number, amount, po_number (if present), due_date
 - If "Gamer Packaging" appears as Bill To/Customer, this is an AP_Invoice we received
+- Extract: vendor name (the sender), invoice_number, amount, po_number (if present), due_date
 
-For Sales_PO (purchase orders from our customers):
-- Extract: customer name, po_number, order_date, amount, ship_to address
-- Look for customer company names, "Purchase Order" header
-
-For AR_Invoice (invoices we send to customers):
+AR_Invoice: Invoices we send to customers (outgoing)
+- Our company name appears as the sender
 - Extract: customer name, invoice_number, amount, due_date
-- Look for our company name as the sender/from
 
-For Remittance (payment confirmations):
+Remittance: Payment confirmations
 - Extract: vendor/customer, payment_amount, payment_date, invoice_references
 - Look for "Remittance Advice", "Payment", check numbers
 
-For Freight_Document (shipping/freight documents):
-- Extract: shipper, consignee, tracking_number, carrier, origin, destination, weight, pieces
-- Look for "Bill of Lading", "BOL", "HAWB", "MAWB", "Air Waybill", "Shipping", tracking numbers, freight forwarder names
+Freight_Document: Shipping/freight documents  
+- Extract: shipper, consignee, tracking_number, carrier, origin, destination
+- Look for "Bill of Lading", "BOL", "HAWB", tracking numbers
 
-For Warehouse_Document (warehouse receipts/shipments):
-- Extract: document_number, location, item_numbers, quantities, bin_codes, receipt_date
-- Look for "Warehouse Receipt", "Receiving", "Shipment", "Packing List", location/bin codes
+== Sales Category ==
+Sales_Order: Customer purchase orders to us
+- Extract: customer name, po_number, order_date, amount, ship_to address
+- Look for "Purchase Order", "PO#", "Order", quantity, ship to
+
+Sales_Quote: Price quotes or proposals to customers
+- Extract: customer, amount, valid_until
+- Look for "Quote", "Quotation", "Proposal", "Estimate"
+
+Order_Confirmation: Order acknowledgments
+- Extract: order_number, customer, amount
+- Look for "Confirmation", "Acknowledged", "Order Acknowledgment"
+
+Inventory_Report: Stock/inventory status reports
+- Extract: warehouse, items, quantities
+- Look for "Inventory", "Stock", "On Hand", "Available"
+
+Shipping_Document: Shipping requests, BOLs, tracking
+- Extract: tracking_number, ship_date, customer
+- Look for "Ship", "Delivery", "Dispatch", "Bill of Lading", "BOL"
+
+Quality_Issue: Quality complaints or issues
+- Extract: customer, item, description
+- Look for "Quality", "Defect", "Complaint", "NCR", "Claim"
+
+Return_Request: Return requests / RMAs
+- Extract: customer, amount, reason  
+- Look for "Return", "RMA", "Credit", "Refund"
+
+Unknown_Document: Cannot determine type confidently
 
 Always respond with valid JSON in this exact format:
 {
-    "document_type": "AP_Invoice|Sales_PO|AR_Invoice|Remittance|Freight_Document|Warehouse_Document|Unknown",
+    "document_type": "AP_Invoice|AR_Invoice|Remittance|Freight_Document|Sales_Order|Sales_Quote|Order_Confirmation|Inventory_Report|Shipping_Document|Quality_Issue|Return_Request|Unknown_Document",
     "confidence": 0.0-1.0,
     "extracted_fields": {
         "vendor": "...",
         "customer": "...",
         "invoice_number": "...",
         "po_number": "...",
+        "order_number": "...",
         "amount": "...",
         "due_date": "...",
+        "order_date": "...",
+        "ship_date": "...",
         "payment_date": "...",
         "payment_amount": "...",
-        "shipper": "...",
-        "consignee": "...",
         "tracking_number": "...",
-        "carrier": "...",
-        "origin": "...",
-        "destination": "...",
-        "document_number": "...",
-        "location": "..."
+        "warehouse": "...",
+        "items": "...",
+        "ship_to": "..."
     },
     "reasoning": "Brief explanation of classification"
 }

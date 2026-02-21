@@ -4918,8 +4918,9 @@ async def run_sales_email_poll():
     
     stats["completed_at"] = datetime.now(timezone.utc).isoformat()
     
-    # Record poll run
-    await db.sales_mail_poll_runs.insert_one(stats)
+    # Record poll run - make a copy to avoid _id mutation affecting response
+    stats_to_store = {**stats}
+    await db.sales_mail_poll_runs.insert_one(stats_to_store)
     
     logger.info("[SalesPoll:%s] Complete: detected=%d, ingested=%d, skipped_dup=%d, skipped_inline=%d, failed=%d",
                 run_id, stats["messages_detected"], stats["attachments_ingested"],

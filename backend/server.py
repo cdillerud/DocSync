@@ -40,6 +40,10 @@ EMAIL_POLLING_USER = os.environ.get('EMAIL_POLLING_USER', '')  # ap@gamerpackagi
 EMAIL_POLLING_LOOKBACK_MINUTES = int(os.environ.get('EMAIL_POLLING_LOOKBACK_MINUTES', '60'))
 EMAIL_POLLING_MAX_MESSAGES = int(os.environ.get('EMAIL_POLLING_MAX_MESSAGES', '25'))
 EMAIL_POLLING_MAX_ATTACHMENT_MB = int(os.environ.get('EMAIL_POLLING_MAX_ATTACHMENT_MB', '25'))
+# Sales Email Polling Config (Shadow Mode)
+SALES_EMAIL_POLLING_ENABLED = os.environ.get('SALES_EMAIL_POLLING_ENABLED', 'false').lower() == 'true'
+SALES_EMAIL_POLLING_USER = os.environ.get('SALES_EMAIL_POLLING_USER', '')  # hub-sales-intake@gamerpackaging.com
+SALES_EMAIL_POLLING_INTERVAL_MINUTES = int(os.environ.get('SALES_EMAIL_POLLING_INTERVAL_MINUTES', '5'))
 # Separate email app credentials (for Mail.Read access)
 EMAIL_CLIENT_ID = os.environ.get('EMAIL_CLIENT_ID', '')
 EMAIL_CLIENT_SECRET = os.environ.get('EMAIL_CLIENT_SECRET', '')

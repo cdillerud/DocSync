@@ -500,6 +500,171 @@ export default function SalesDashboardPage() {
           </div>
         </CardContent>
       </Card>
+        </TabsContent>
+
+        {/* Email Documents Tab */}
+        <TabsContent value="documents" className="space-y-6 mt-6">
+          {/* Document Type Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            <Card 
+              className={`cursor-pointer transition-all ${docTypeFilter === 'all' ? 'ring-2 ring-primary' : 'hover:bg-muted/50'}`}
+              onClick={() => setDocTypeFilter('all')}
+            >
+              <CardContent className="p-3 text-center">
+                <p className="text-2xl font-bold">{emailDocs.total}</p>
+                <p className="text-xs text-muted-foreground">All Documents</p>
+              </CardContent>
+            </Card>
+            {docTypeStats.map(stat => (
+              <Card 
+                key={stat.document_type}
+                className={`cursor-pointer transition-all ${docTypeFilter === stat.document_type ? 'ring-2 ring-primary' : 'hover:bg-muted/50'}`}
+                onClick={() => setDocTypeFilter(stat.document_type)}
+              >
+                <CardContent className="p-3 text-center">
+                  <p className="text-2xl font-bold">{stat.count}</p>
+                  <p className="text-xs text-muted-foreground truncate" title={stat.document_type}>
+                    {stat.document_type?.replace(/_/g, ' ')}
+                  </p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* Documents Table */}
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <FileText className="w-5 h-5" />
+                    Ingested Sales Documents
+                  </CardTitle>
+                  <CardDescription>
+                    Documents from email inbox (Shadow Mode - Observation Only)
+                  </CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={loadEmailDocuments} disabled={emailDocsLoading}>
+                  <RefreshCw className={`w-4 h-4 mr-2 ${emailDocsLoading ? 'animate-spin' : ''}`} />
+                  Refresh
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {emailDocsLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <RefreshCw className="w-6 h-6 animate-spin text-primary" />
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="py-3 text-left font-medium">File Name</th>
+                        <th className="py-3 text-left font-medium">Type</th>
+                        <th className="py-3 text-left font-medium">Confidence</th>
+                        <th className="py-3 text-left font-medium">Source</th>
+                        <th className="py-3 text-left font-medium">Email Subject</th>
+                        <th className="py-3 text-left font-medium">Date</th>
+                        <th className="py-3 text-left font-medium">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {emailDocs.documents?.map(doc => (
+                        <tr key={doc.document_id} className="hover:bg-muted/30">
+                          <td className="py-3">
+                            <div className="flex items-center gap-2">
+                              <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                              <span className="truncate max-w-48" title={doc.file_name}>
+                                {doc.file_name}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-3">
+                            <Badge 
+                              variant="outline" 
+                              className={
+                                doc.document_type === 'Sales_Order' ? 'bg-emerald-100 text-emerald-800 border-emerald-200' :
+                                doc.document_type === 'Inventory_Report' ? 'bg-blue-100 text-blue-800 border-blue-200' :
+                                doc.document_type === 'Purchase_Order' ? 'bg-purple-100 text-purple-800 border-purple-200' :
+                                doc.document_type === 'Unknown_Sales' ? 'bg-gray-100 text-gray-600 border-gray-200' :
+                                ''
+                              }
+                            >
+                              {doc.document_type?.replace(/_/g, ' ')}
+                            </Badge>
+                          </td>
+                          <td className="py-3">
+                            <div className="flex items-center gap-2">
+                              <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
+                                <div 
+                                  className={`h-full ${doc.ai_confidence >= 0.7 ? 'bg-emerald-500' : doc.ai_confidence >= 0.5 ? 'bg-amber-500' : 'bg-red-500'}`}
+                                  style={{ width: `${(doc.ai_confidence || 0) * 100}%` }}
+                                />
+                              </div>
+                              <span className="text-xs text-muted-foreground">{Math.round((doc.ai_confidence || 0) * 100)}%</span>
+                            </div>
+                          </td>
+                          <td className="py-3">
+                            <Badge variant="secondary" className="text-xs">{doc.source}</Badge>
+                          </td>
+                          <td className="py-3">
+                            <span className="truncate max-w-64 block text-muted-foreground" title={doc.email_subject}>
+                              {doc.email_subject?.substring(0, 50)}{doc.email_subject?.length > 50 ? '...' : ''}
+                            </span>
+                          </td>
+                          <td className="py-3 text-muted-foreground text-xs">
+                            {formatDate(doc.created_utc)}
+                          </td>
+                          <td className="py-3">
+                            <Badge 
+                              variant="outline"
+                              className={
+                                doc.status === 'NeedsReview' ? 'bg-amber-100 text-amber-800 border-amber-200' :
+                                doc.status === 'Approved' ? 'bg-emerald-100 text-emerald-800 border-emerald-200' :
+                                ''
+                              }
+                            >
+                              {doc.status}
+                            </Badge>
+                          </td>
+                        </tr>
+                      ))}
+                      {emailDocs.documents?.length === 0 && (
+                        <tr>
+                          <td colSpan={7} className="py-12 text-center text-muted-foreground">
+                            <Mail className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                            <p>No email documents found</p>
+                            <p className="text-xs mt-1">Run the backfill to ingest emails from the Sales mailbox</p>
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Shadow Mode Notice */}
+          <Card className="border border-dashed border-amber-500/30 bg-amber-50/10">
+            <CardContent className="p-4">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                  <Eye className="w-4 h-4 text-amber-600" />
+                </div>
+                <div>
+                  <p className="font-medium text-sm">Shadow Mode - Observation Phase</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Documents are being ingested and classified for observation only. No automated actions are taken.
+                    Use this data to validate AI classification accuracy before enabling automation.
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

@@ -3242,9 +3242,13 @@ async def _internal_intake_document(
         else:
             final_status = "Classified"
     
+    # Get the category from job type config
+    doc_category = job_configs.get("category", "Unknown")
+    
     update_data = {
         "suggested_job_type": suggested_type,
         "document_type": suggested_type,
+        "category": doc_category,
         "ai_confidence": confidence,
         "extracted_fields": extracted_fields,
         # Phase 7: Flat normalized fields on document

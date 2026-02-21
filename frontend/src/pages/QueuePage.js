@@ -158,6 +158,7 @@ export default function QueuePage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="text-xs uppercase tracking-wider">File</TableHead>
+                  <TableHead className="text-xs uppercase tracking-wider">Category</TableHead>
                   <TableHead className="text-xs uppercase tracking-wider">Type</TableHead>
                   <TableHead className="text-xs uppercase tracking-wider">Status</TableHead>
                   <TableHead className="text-xs uppercase tracking-wider hidden md:table-cell">BC Ref</TableHead>
@@ -182,6 +183,11 @@ export default function QueuePage() {
                           <p className="text-xs text-muted-foreground font-mono">{doc.id.slice(0, 8)}...</p>
                         </div>
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={`text-xs ${CATEGORY_COLORS[doc.category] || CATEGORY_COLORS.Unknown}`}>
+                        {doc.category || 'AP'}
+                      </Badge>
                     </TableCell>
                     <TableCell>
                       <Badge variant="secondary" className="text-xs">{doc.document_type}</Badge>

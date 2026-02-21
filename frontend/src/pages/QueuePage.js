@@ -120,16 +120,31 @@ export default function QueuePage() {
         </div>
       </div>
 
-      {/* Status Tabs */}
-      <Tabs value={statusFilter} onValueChange={(val) => { setStatusFilter(val); setPage(0); }}>
-        <TabsList data-testid="queue-status-tabs">
-          {ALL_STATUSES.map((s) => (
-            <TabsTrigger key={s} value={s} data-testid={`queue-tab-${s.toLowerCase()}`} className="text-xs">
-              {s === 'LinkedToBC' ? 'Linked' : s}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+      {/* Category Filter + Status Tabs */}
+      <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex items-center gap-2">
+          <FolderOpen className="w-4 h-4 text-muted-foreground" />
+          <Select value={categoryFilter} onValueChange={(val) => { setCategoryFilter(val); setPage(0); }}>
+            <SelectTrigger className="w-32" data-testid="category-filter">
+              <SelectValue placeholder="Category" />
+            </SelectTrigger>
+            <SelectContent>
+              {ALL_CATEGORIES.map((c) => (
+                <SelectItem key={c} value={c}>{c === 'All' ? 'All Categories' : c}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <Tabs value={statusFilter} onValueChange={(val) => { setStatusFilter(val); setPage(0); }}>
+          <TabsList data-testid="queue-status-tabs">
+            {ALL_STATUSES.map((s) => (
+              <TabsTrigger key={s} value={s} data-testid={`queue-tab-${s.toLowerCase()}`} className="text-xs">
+                {s === 'LinkedToBC' ? 'Linked' : s === 'NeedsReview' ? 'Review' : s === 'StoredInSP' ? 'Stored' : s}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      </div>
 
       {/* Documents Table */}
       <Card className="border border-border" data-testid="queue-table-card">

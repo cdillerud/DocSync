@@ -84,14 +84,16 @@ export default function EmailParserPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [jobRes, emailRes, statsRes] = await Promise.all([
+      const [jobRes, emailRes, statsRes, mailboxRes] = await Promise.all([
         getJobTypes(),
         getEmailWatcherConfig(),
-        getEmailStats()
+        getEmailStats(),
+        listMailboxSources()
       ]);
       setJobTypes(jobRes.data.job_types || []);
       setEmailConfig(emailRes.data);
       setEmailStats(statsRes.data);
+      setMailboxSources(mailboxRes.data.mailbox_sources || []);
     } catch (err) {
       toast.error('Failed to load email parser settings');
     } finally {
@@ -100,6 +102,103 @@ export default function EmailParserPage() {
   };
 
   useEffect(() => { fetchData(); }, []);
+
+  // Mailbox source handlers
+  const handleAddMailbox = () => {
+    setEditingMailbox(null);
+    setMailboxForm({
+      name: '',
+      email_address: '',
+      category: 'AP',
+      enabled: true,
+      polling_interval_minutes: 5,
+      watch_folder: 'Inbox',
+      needs_review_folder: 'Needs Review',
+      processed_folder: 'Processed',
+      description: ''
+    });
+    setShowAddMailbox(true);
+  };
+
+  const handleEditMailbox = (mailbox) => {
+    setEditingMailbox(mailbox);
+    setMailboxForm({
+      name: mailbox.name || '',
+      email_address: mailbox.email_address || '',
+      category: mailbox.category || 'AP',
+      enabled: mailbox.enabled !== false,
+      polling_interval_minutes: mailbox.polling_interval_minutes || 5,
+      watch_folder: mailbox.watch_folder || 'Inbox',
+      needs_review_folder: mailbox.needs_review_folder || 'Needs Review',
+      processed_folder: mailbox.processed_folder || 'Processed',
+      description: mailbox.description || ''
+    });
+    setShowAddMailbox(true);
+  };
+
+  const handleSaveMailbox = async () => {
+    if (!mailboxForm.name || !mailboxForm.email_address) {
+      toast.error('Name and email address are required');
+      return;
+    }
+    
+    setSavingMailbox(true);
+    try {
+      if (editingMailbox) {
+        await updateMailboxSource(editingMailbox.mailbox_id, mailboxForm);
+        toast.success('Mailbox updated');
+      } else {
+        await createMailboxSource(mailboxForm);
+        toast.success('Mailbox added');
+      }
+      setShowAddMailbox(false);
+      fetchData();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to save mailbox');
+    } finally {
+      setSavingMailbox(false);
+    }
+  };
+
+  const handleDeleteMailbox = async (mailboxId) => {
+    if (!window.confirm('Are you sure you want to delete this mailbox source?')) return;
+    
+    try {
+      await deleteMailboxSource(mailboxId);
+      toast.success('Mailbox deleted');
+      fetchData();
+    } catch (err) {
+      toast.error('Failed to delete mailbox');
+    }
+  };
+
+  const handleTestMailbox = async (mailboxId) => {
+    setTestingMailbox(mailboxId);
+    try {
+      const res = await testMailboxConnection(mailboxId);
+      if (res.data.status === 'success') {
+        toast.success(`Connected! ${res.data.total_count} emails in inbox`);
+      } else {
+        toast.error(res.data.message || 'Connection failed');
+      }
+    } catch (err) {
+      toast.error('Connection test failed');
+    } finally {
+      setTestingMailbox(null);
+    }
+  };
+
+  const handlePollMailbox = async (mailboxId) => {
+    setPollingMailbox(mailboxId);
+    try {
+      const res = await pollMailboxNow(mailboxId);
+      toast.success(`Poll complete: ${res.data.attachments_ingested} documents ingested`);
+    } catch (err) {
+      toast.error('Poll failed');
+    } finally {
+      setPollingMailbox(null);
+    }
+  };
 
   const openEditDialog = (job) => {
     setEditingJob(job);

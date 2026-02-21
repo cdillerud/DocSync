@@ -4772,7 +4772,7 @@ async def run_sales_email_poll():
         logger.info("[SalesPoll:%s] Starting poll for %s", run_id, SALES_EMAIL_POLLING_USER)
         
         # Get email access token
-        token = await get_email_access_token()
+        token = await get_email_token()
         if not token:
             stats["errors"].append("Failed to get email access token")
             return stats

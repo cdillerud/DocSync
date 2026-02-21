@@ -48,6 +48,7 @@ export default function QueuePage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('All');
+  const [categoryFilter, setCategoryFilter] = useState('All');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
   const navigate = useNavigate();
@@ -58,6 +59,7 @@ export default function QueuePage() {
     try {
       const params = { skip: page * limit, limit };
       if (statusFilter !== 'All') params.status = statusFilter;
+      if (categoryFilter !== 'All') params.category = categoryFilter;
       if (search) params.search = search;
       const res = await listDocuments(params);
       setDocs(res.data.documents || []);
@@ -69,7 +71,7 @@ export default function QueuePage() {
     }
   };
 
-  useEffect(() => { fetchDocs(); }, [statusFilter, page]);
+  useEffect(() => { fetchDocs(); }, [statusFilter, categoryFilter, page]);
 
   const handleSearch = (e) => {
     e.preventDefault();

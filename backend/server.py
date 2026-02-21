@@ -6838,6 +6838,12 @@ async def startup():
     # Sales Module (Phase 0): Initialize database and indexes
     set_sales_db(db)
     await initialize_sales_indexes(db)
+    # Configure Sales email polling
+    configure_sales_email_polling(
+        enabled=SALES_EMAIL_POLLING_ENABLED,
+        mailbox=SALES_EMAIL_POLLING_USER,
+        interval_minutes=SALES_EMAIL_POLLING_INTERVAL_MINUTES
+    )
     # Load saved config from MongoDB (overrides .env defaults)
     await _load_config_from_db()
     # Initialize default job types if not present
@@ -6850,11 +6856,17 @@ async def startup():
     for alias in aliases:
         VENDOR_ALIAS_MAP[alias["alias_string"]] = alias.get("vendor_name") or alias.get("vendor_no")
         VENDOR_ALIAS_MAP[alias["normalized_alias"]] = alias.get("vendor_name") or alias.get("vendor_no")
-    # Start email polling worker if enabled
+    # Start AP email polling worker if enabled
     if EMAIL_POLLING_ENABLED:
         _email_polling_task = asyncio.create_task(email_polling_worker())
-        logger.info("Email polling worker started (interval: %d min, user: %s)", 
+        logger.info("AP email polling worker started (interval: %d min, user: %s)", 
                    EMAIL_POLLING_INTERVAL_MINUTES, EMAIL_POLLING_USER)
+    # Start Sales email polling worker if enabled
+    global _sales_polling_task
+    if SALES_EMAIL_POLLING_ENABLED and SALES_EMAIL_POLLING_USER:
+        _sales_polling_task = asyncio.create_task(_sales_email_polling_worker())
+        logger.info("Sales email polling worker started (interval: %d min, user: %s)", 
+                   SALES_EMAIL_POLLING_INTERVAL_MINUTES, SALES_EMAIL_POLLING_USER)
     logger.info("GPI Document Hub started. Demo mode: %s, Loaded %d vendor aliases", DEMO_MODE, len(aliases))
 
 @app.on_event("shutdown")

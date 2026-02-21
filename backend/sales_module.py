@@ -741,3 +741,634 @@ async def initialize_sales_indexes(database):
     await db.sales_order_draft_candidates.create_index("candidate_id", unique=True)
     await db.sales_order_draft_candidates.create_index("customer_id")
     await db.sales_order_draft_candidates.create_index("ready_for_bc_draft")
+    
+    # Sales Documents (ingested from email)
+    await db.sales_documents.create_index("document_id", unique=True)
+    await db.sales_documents.create_index("document_type")
+    await db.sales_documents.create_index("status")
+    await db.sales_documents.create_index("created_utc")
+    await db.sales_documents.create_index("customer_id")
+    await db.sales_documents.create_index("email_sender")
+    
+    # Sales Mail Intake Log (idempotency)
+    await db.sales_mail_intake_log.create_index("internet_message_id")
+    await db.sales_mail_intake_log.create_index("attachment_hash")
+    await db.sales_mail_intake_log.create_index([("internet_message_id", 1), ("attachment_hash", 1)])
+    
+    # Sales Mail Poll Runs
+    await db.sales_mail_poll_runs.create_index("started_at")
+
+
+# ==================== SALES DOCUMENT TYPES ====================
+
+SALES_DOCUMENT_TYPES = {
+    # Core order documents
+    "Sales_Order": {
+        "description": "Customer purchase order or sales order",
+        "keywords": ["purchase order", "po", "order", "buy", "quantity", "ship to", "bill to"],
+        "priority": "high",
+        "action": "create_order_candidate"
+    },
+    "Sales_Quote": {
+        "description": "Price quote or proposal to customer",
+        "keywords": ["quote", "quotation", "proposal", "estimate", "pricing", "valid until"],
+        "priority": "medium",
+        "action": "log_only"
+    },
+    "Order_Confirmation": {
+        "description": "Confirmation of order received/accepted",
+        "keywords": ["confirmation", "confirmed", "order acknowledgment", "acknowledge"],
+        "priority": "medium",
+        "action": "link_to_order"
+    },
+    "Order_Change": {
+        "description": "Request to modify existing order",
+        "keywords": ["change order", "revision", "amendment", "modify", "cancel line", "add line"],
+        "priority": "high",
+        "action": "flag_for_review"
+    },
+    
+    # Shipping & logistics
+    "Shipping_Request": {
+        "description": "Request for shipment or delivery",
+        "keywords": ["ship", "shipping", "delivery", "dispatch", "release", "pick up"],
+        "priority": "high",
+        "action": "flag_for_review"
+    },
+    "Shipping_Schedule": {
+        "description": "Scheduled shipment or delivery date",
+        "keywords": ["schedule", "eta", "arrival", "vessel", "container", "tracking"],
+        "priority": "medium",
+        "action": "log_only"
+    },
+    "Bill_of_Lading": {
+        "description": "Bill of lading or shipping document",
+        "keywords": ["bill of lading", "bol", "b/l", "consignment", "freight"],
+        "priority": "medium",
+        "action": "log_only"
+    },
+    "Packing_List": {
+        "description": "Packing list or shipment contents",
+        "keywords": ["packing list", "pack list", "contents", "cartons", "pallets"],
+        "priority": "low",
+        "action": "log_only"
+    },
+    
+    # Commercial documents
+    "Price_Inquiry": {
+        "description": "Customer asking about pricing",
+        "keywords": ["price", "pricing", "cost", "rate", "discount", "how much"],
+        "priority": "medium",
+        "action": "log_only"
+    },
+    "Price_List": {
+        "description": "Price list or catalog",
+        "keywords": ["price list", "catalog", "catalogue", "pricing sheet"],
+        "priority": "low",
+        "action": "log_only"
+    },
+    
+    # Inventory related
+    "Inventory_Report": {
+        "description": "Inventory status or report",
+        "keywords": ["inventory", "stock", "on hand", "available", "warehouse"],
+        "priority": "medium",
+        "action": "log_only"
+    },
+    "Forecast": {
+        "description": "Sales or demand forecast",
+        "keywords": ["forecast", "projection", "demand", "planning", "outlook"],
+        "priority": "medium",
+        "action": "log_only"
+    },
+    
+    # Quality & returns
+    "Quality_Issue": {
+        "description": "Quality complaint or issue report",
+        "keywords": ["quality", "defect", "damage", "complaint", "issue", "problem"],
+        "priority": "high",
+        "action": "flag_for_review"
+    },
+    "Return_Request": {
+        "description": "Request to return goods",
+        "keywords": ["return", "rma", "credit", "refund", "send back"],
+        "priority": "high",
+        "action": "flag_for_review"
+    },
+    
+    # General
+    "Customer_Inquiry": {
+        "description": "General customer question or inquiry",
+        "keywords": ["question", "inquiry", "asking", "wondering", "information"],
+        "priority": "low",
+        "action": "log_only"
+    },
+    "Meeting_Notes": {
+        "description": "Notes from customer meeting or call",
+        "keywords": ["meeting", "call", "discussion", "notes", "recap"],
+        "priority": "low",
+        "action": "log_only"
+    },
+    "Contract": {
+        "description": "Contract or agreement document",
+        "keywords": ["contract", "agreement", "terms", "conditions", "signed"],
+        "priority": "medium",
+        "action": "log_only"
+    },
+    "Unknown_Sales": {
+        "description": "Unclassified sales-related document",
+        "keywords": [],
+        "priority": "low",
+        "action": "log_only"
+    }
+}
+
+
+# ==================== SALES EMAIL POLLING ====================
+
+# Configuration (will be set from environment)
+_sales_email_config = {
+    "enabled": False,
+    "mailbox": "",
+    "interval_minutes": 5,
+    "lookback_minutes": 60,
+    "max_messages": 25,
+    "max_attachment_size_mb": 25
+}
+
+_sales_polling_task = None
+
+
+def configure_sales_email_polling(
+    enabled: bool,
+    mailbox: str,
+    interval_minutes: int = 5,
+    lookback_minutes: int = 60
+):
+    """Configure sales email polling settings."""
+    global _sales_email_config
+    _sales_email_config["enabled"] = enabled
+    _sales_email_config["mailbox"] = mailbox
+    _sales_email_config["interval_minutes"] = interval_minutes
+    _sales_email_config["lookback_minutes"] = lookback_minutes
+
+
+async def classify_sales_document_with_ai(file_path: str, filename: str, email_subject: str = "", email_body: str = "") -> Dict[str, Any]:
+    """
+    Classify a sales document using AI.
+    
+    Returns:
+    - document_type: One of SALES_DOCUMENT_TYPES keys
+    - confidence: 0.0 to 1.0
+    - extracted_fields: Dict of extracted data
+    - reasoning: Why this classification was chosen
+    """
+    import os
+    import base64
+    
+    # Check for Emergent LLM key
+    llm_key = os.environ.get("EMERGENT_LLM_KEY")
+    if not llm_key:
+        # Fallback to keyword-based classification
+        return _keyword_classify_sales_document(filename, email_subject, email_body)
+    
+    try:
+        from emergentintegrations.llm.gemini import GeminiChat
+        
+        # Read file content for context
+        file_context = ""
+        if file_path and os.path.exists(file_path):
+            try:
+                # For PDFs, we'd need OCR - for now just use filename + email context
+                with open(file_path, 'rb') as f:
+                    content = f.read()
+                    if len(content) < 1000:  # Small text file
+                        try:
+                            file_context = content.decode('utf-8')[:2000]
+                        except:
+                            pass
+            except:
+                pass
+        
+        # Build classification prompt
+        doc_types_list = "\n".join([
+            f"- {dtype}: {info['description']}"
+            for dtype, info in SALES_DOCUMENT_TYPES.items()
+        ])
+        
+        prompt = f"""You are a document classifier for a packaging company's Sales department.
+
+Classify this document into ONE of the following types:
+
+{doc_types_list}
+
+Document Information:
+- Filename: {filename}
+- Email Subject: {email_subject}
+- Email Preview: {email_body[:500] if email_body else 'N/A'}
+
+Additionally, extract any relevant fields you can identify:
+- customer_name: The customer or company name
+- customer_po_no: Customer's PO number if present
+- order_date: Date of order/request
+- requested_ship_date: When they want it shipped
+- items: List of items/SKUs mentioned (if any)
+- quantities: Quantities mentioned (if any)
+- ship_to_address: Shipping destination
+- contact_person: Contact name
+- contact_email: Contact email
+- urgency: urgent, normal, or low
+
+Respond in this exact JSON format:
+{{
+    "document_type": "TYPE_FROM_LIST",
+    "confidence": 0.85,
+    "reasoning": "Brief explanation of why this classification",
+    "extracted_fields": {{
+        "customer_name": "...",
+        "customer_po_no": "...",
+        ...
+    }}
+}}
+"""
+        
+        chat = GeminiChat(emergent_api_key=llm_key)
+        response = await chat.send_message_async(prompt=prompt, model="gemini-2.5-flash")
+        
+        # Parse response
+        import json
+        import re
+        
+        # Extract JSON from response
+        json_match = re.search(r'\{[\s\S]*\}', response)
+        if json_match:
+            result = json.loads(json_match.group())
+            # Validate document type
+            if result.get("document_type") not in SALES_DOCUMENT_TYPES:
+                result["document_type"] = "Unknown_Sales"
+            return result
+        else:
+            return _keyword_classify_sales_document(filename, email_subject, email_body)
+            
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"AI classification failed: {e}")
+        return _keyword_classify_sales_document(filename, email_subject, email_body)
+
+
+def _keyword_classify_sales_document(filename: str, email_subject: str = "", email_body: str = "") -> Dict[str, Any]:
+    """Fallback keyword-based classification for sales documents."""
+    combined_text = f"{filename} {email_subject} {email_body}".lower()
+    
+    best_match = "Unknown_Sales"
+    best_score = 0
+    
+    for doc_type, info in SALES_DOCUMENT_TYPES.items():
+        if doc_type == "Unknown_Sales":
+            continue
+        score = sum(1 for kw in info["keywords"] if kw.lower() in combined_text)
+        if score > best_score:
+            best_score = score
+            best_match = doc_type
+    
+    confidence = min(0.5 + (best_score * 0.1), 0.85) if best_score > 0 else 0.3
+    
+    return {
+        "document_type": best_match,
+        "confidence": confidence,
+        "reasoning": f"Keyword match (score: {best_score})",
+        "extracted_fields": {}
+    }
+
+
+async def ingest_sales_document(
+    file_content: bytes,
+    filename: str,
+    source: str = "email",
+    email_sender: str = None,
+    email_subject: str = None,
+    email_body: str = None,
+    email_message_id: str = None,
+    correlation_id: str = None
+) -> Dict[str, Any]:
+    """
+    Ingest a sales document into the Hub.
+    
+    This is the main entry point for sales document ingestion.
+    All documents land in NeedsReview status (shadow mode).
+    """
+    import hashlib
+    import os
+    from pathlib import Path
+    
+    doc_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Save file temporarily for classification
+    upload_dir = Path("/app/uploads/sales")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    file_path = upload_dir / doc_id
+    
+    with open(file_path, 'wb') as f:
+        f.write(file_content)
+    
+    # Classify document with AI
+    classification = await classify_sales_document_with_ai(
+        str(file_path), 
+        filename, 
+        email_subject or "", 
+        email_body or ""
+    )
+    
+    doc_type = classification.get("document_type", "Unknown_Sales")
+    confidence = classification.get("confidence", 0.0)
+    extracted_fields = classification.get("extracted_fields", {})
+    reasoning = classification.get("reasoning", "")
+    
+    # Get document type config
+    type_config = SALES_DOCUMENT_TYPES.get(doc_type, SALES_DOCUMENT_TYPES["Unknown_Sales"])
+    
+    # Try to match to a customer
+    customer_id = None
+    customer_name = extracted_fields.get("customer_name")
+    if customer_name:
+        # Try to find matching customer
+        customer = await _db.sales_customers.find_one(
+            {"name": {"$regex": customer_name, "$options": "i"}},
+            {"customer_id": 1, "_id": 0}
+        )
+        if customer:
+            customer_id = customer["customer_id"]
+    
+    # Determine action based on document type
+    action = type_config.get("action", "log_only")
+    priority = type_config.get("priority", "low")
+    
+    # All documents start as NeedsReview in shadow mode
+    status = "NeedsReview"
+    
+    # Build document record
+    document = {
+        "document_id": doc_id,
+        "file_name": filename,
+        "file_size": len(file_content),
+        "file_hash": hashlib.sha256(file_content).hexdigest(),
+        "source": source,
+        "document_type": doc_type,
+        "ai_confidence": confidence,
+        "classification_reasoning": reasoning,
+        "extracted_fields": extracted_fields,
+        "type_config": {
+            "priority": priority,
+            "action": action,
+            "description": type_config.get("description", "")
+        },
+        "customer_id": customer_id,
+        "customer_name_extracted": customer_name,
+        "email_sender": email_sender,
+        "email_subject": email_subject,
+        "email_message_id": email_message_id,
+        "status": status,
+        "workflow_state": "Classified",
+        "validation_errors": [],
+        "validation_warnings": [],
+        "created_utc": now,
+        "updated_utc": now,
+        "correlation_id": correlation_id or str(uuid.uuid4())
+    }
+    
+    # Insert into database
+    await _db.sales_documents.insert_one(document)
+    
+    # Clean up temp file
+    try:
+        os.remove(file_path)
+    except:
+        pass
+    
+    return {
+        "document_id": doc_id,
+        "document_type": doc_type,
+        "confidence": confidence,
+        "status": status,
+        "customer_id": customer_id,
+        "priority": priority,
+        "action": action
+    }
+
+
+async def check_sales_duplicate(internet_message_id: str, attachment_hash: str) -> bool:
+    """Check if this attachment was already processed."""
+    existing = await _db.sales_mail_intake_log.find_one({
+        "internet_message_id": internet_message_id,
+        "attachment_hash": attachment_hash,
+        "status": {"$in": ["Ingested", "SkippedInline"]}
+    })
+    return existing is not None
+
+
+async def record_sales_mail_log(
+    message_id: str,
+    internet_message_id: str,
+    attachment_id: str,
+    attachment_hash: str,
+    filename: str,
+    status: str,
+    document_id: str = None,
+    error: str = None
+):
+    """Record mail intake processing result."""
+    await _db.sales_mail_intake_log.insert_one({
+        "log_id": str(uuid.uuid4()),
+        "message_id": message_id,
+        "internet_message_id": internet_message_id,
+        "attachment_id": attachment_id,
+        "attachment_hash": attachment_hash,
+        "filename": filename,
+        "status": status,
+        "document_id": document_id,
+        "error": error,
+        "processed_at": datetime.now(timezone.utc).isoformat()
+    })
+
+
+# ==================== SALES EMAIL POLLING ENDPOINTS ====================
+
+@sales_router.get("/email-polling/status")
+async def get_sales_email_polling_status():
+    """Get current sales email polling configuration and stats."""
+    # Get last 24h stats
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    
+    runs = await _db.sales_mail_poll_runs.find(
+        {"started_at": {"$gte": cutoff}},
+        {"_id": 0}
+    ).sort("started_at", -1).to_list(100)
+    
+    total_detected = sum(r.get("messages_detected", 0) for r in runs)
+    total_ingested = sum(r.get("attachments_ingested", 0) for r in runs)
+    total_skipped = sum(r.get("attachments_skipped_dup", 0) + r.get("attachments_skipped_inline", 0) for r in runs)
+    
+    return {
+        "config": {
+            "enabled": _sales_email_config["enabled"],
+            "mailbox": _sales_email_config["mailbox"],
+            "interval_minutes": _sales_email_config["interval_minutes"],
+            "lookback_minutes": _sales_email_config["lookback_minutes"]
+        },
+        "stats_24h": {
+            "poll_runs": len(runs),
+            "messages_detected": total_detected,
+            "attachments_ingested": total_ingested,
+            "attachments_skipped": total_skipped
+        },
+        "recent_runs": runs[:10],
+        "document_types": list(SALES_DOCUMENT_TYPES.keys())
+    }
+
+
+@sales_router.post("/email-polling/trigger")
+async def trigger_sales_email_poll():
+    """Manually trigger a sales email poll run (for testing)."""
+    if not _sales_email_config["mailbox"]:
+        raise HTTPException(status_code=400, detail="Sales email polling not configured. Set SALES_EMAIL_POLLING_USER in .env")
+    
+    # Import the polling function from main server
+    try:
+        from server import run_sales_email_poll
+        result = await run_sales_email_poll()
+        return result
+    except ImportError:
+        raise HTTPException(status_code=500, detail="Sales email polling not initialized")
+
+
+@sales_router.get("/documents")
+async def get_sales_documents(
+    skip: int = Query(0),
+    limit: int = Query(20),
+    document_type: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    customer_id: Optional[str] = Query(None),
+    days: int = Query(30)
+):
+    """Get list of ingested sales documents."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    
+    query = {"created_utc": {"$gte": cutoff}}
+    if document_type:
+        query["document_type"] = document_type
+    if status:
+        query["status"] = status
+    if customer_id:
+        query["customer_id"] = customer_id
+    
+    total = await _db.sales_documents.count_documents(query)
+    docs = await _db.sales_documents.find(
+        query,
+        {"_id": 0}
+    ).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
+    
+    return {
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+        "documents": docs
+    }
+
+
+@sales_router.get("/documents/{document_id}")
+async def get_sales_document(document_id: str):
+    """Get details of a single sales document."""
+    doc = await _db.sales_documents.find_one({"document_id": document_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return doc
+
+
+@sales_router.get("/documents/stats/by-type")
+async def get_sales_document_stats_by_type(days: int = Query(30)):
+    """Get document counts grouped by type."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    
+    pipeline = [
+        {"$match": {"created_utc": {"$gte": cutoff}}},
+        {"$group": {
+            "_id": "$document_type",
+            "count": {"$sum": 1},
+            "avg_confidence": {"$avg": "$ai_confidence"}
+        }},
+        {"$sort": {"count": -1}}
+    ]
+    
+    results = await _db.sales_documents.aggregate(pipeline).to_list(100)
+    
+    # Add metadata from type config
+    stats = []
+    for r in results:
+        doc_type = r["_id"]
+        type_config = SALES_DOCUMENT_TYPES.get(doc_type, {})
+        stats.append({
+            "document_type": doc_type,
+            "count": r["count"],
+            "avg_confidence": round(r.get("avg_confidence", 0), 2),
+            "priority": type_config.get("priority", "unknown"),
+            "action": type_config.get("action", "unknown"),
+            "description": type_config.get("description", "")
+        })
+    
+    return {
+        "period_days": days,
+        "total_documents": sum(s["count"] for s in stats),
+        "by_type": stats
+    }
+
+
+@sales_router.get("/documents/stats/by-customer")
+async def get_sales_document_stats_by_customer(days: int = Query(30)):
+    """Get document counts grouped by customer."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    
+    pipeline = [
+        {"$match": {"created_utc": {"$gte": cutoff}}},
+        {"$group": {
+            "_id": "$customer_id",
+            "customer_name": {"$first": "$customer_name_extracted"},
+            "count": {"$sum": 1},
+            "types": {"$addToSet": "$document_type"}
+        }},
+        {"$sort": {"count": -1}}
+    ]
+    
+    results = await _db.sales_documents.aggregate(pipeline).to_list(100)
+    
+    return {
+        "period_days": days,
+        "by_customer": [
+            {
+                "customer_id": r["_id"],
+                "customer_name": r.get("customer_name") or "Unknown",
+                "document_count": r["count"],
+                "document_types": r["types"]
+            }
+            for r in results
+        ]
+    }
+
+
+@sales_router.get("/email-polling/logs")
+async def get_sales_email_logs(
+    skip: int = Query(0),
+    limit: int = Query(50),
+    status: Optional[str] = Query(None)
+):
+    """Get sales mail intake logs."""
+    query = {}
+    if status:
+        query["status"] = status
+    
+    logs = await _db.sales_mail_intake_log.find(
+        query,
+        {"_id": 0}
+    ).sort("processed_at", -1).skip(skip).limit(limit).to_list(limit)
+    
+    return logs

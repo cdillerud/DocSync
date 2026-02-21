@@ -1393,18 +1393,18 @@ DRAFT_CREATION_CONFIG = {
 
 # Default Job Type configurations - Production Grade
 DEFAULT_JOB_TYPES = {
+    # ==================== AP DOCUMENTS (Category: AP) ====================
     "AP_Invoice": {
         "job_type": "AP_Invoice",
         "display_name": "AP Invoice (Vendor Invoice)",
+        "category": "AP",
         "automation_level": 1,
         "min_confidence_to_auto_link": 0.85,
         "min_confidence_to_auto_create_draft": 0.95,
-        # PO Validation - use PO_IF_PRESENT for real-world flexibility
         "po_validation_mode": "PO_IF_PRESENT",
         "allow_duplicate_check_override": False,
         "requires_human_review_if_exception": True,
-        # Vendor matching configuration
-        "vendor_match_threshold": 0.80,  # Minimum score for auto-accept
+        "vendor_match_threshold": 0.80,
         "vendor_match_strategies": ["exact_no", "exact_name", "normalized", "fuzzy"],
         "sharepoint_folder": "AP_Invoices",
         "bc_entity": "purchaseInvoices",
@@ -1415,6 +1415,7 @@ DEFAULT_JOB_TYPES = {
     "Sales_PO": {
         "job_type": "Sales_PO",
         "display_name": "Sales PO (Customer Purchase Order)",
+        "category": "AP",
         "automation_level": 1,
         "min_confidence_to_auto_link": 0.80,
         "min_confidence_to_auto_create_draft": 0.92,

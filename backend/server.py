@@ -3149,6 +3149,7 @@ async def _internal_intake_document(
         "sharepoint_web_url": None,
         "sharepoint_share_link_url": None,
         "document_type": None,
+        "category": None,
         "suggested_job_type": None,
         "ai_confidence": None,
         "extracted_fields": None,

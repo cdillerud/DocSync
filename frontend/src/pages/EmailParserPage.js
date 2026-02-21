@@ -371,23 +371,25 @@ export default function EmailParserPage() {
 
         {/* ==================== EMAIL CONFIG TAB ==================== */}
         <TabsContent value="email-config" className="space-y-4">
+          {/* AP Mailbox Configuration */}
           <Card className="border border-border" data-testid="email-watcher-config-card">
             <CardHeader>
               <CardTitle className="text-base font-bold flex items-center gap-2" style={{ fontFamily: 'Chivo, sans-serif' }}>
-                <Mail className="w-5 h-5 text-primary" />
-                Email Watcher Configuration
+                <Mail className="w-5 h-5 text-blue-500" />
+                AP Mailbox (Accounts Payable)
+                <Badge variant="outline" className="ml-2 bg-blue-100 text-blue-800 border-blue-200">Primary</Badge>
               </CardTitle>
               <CardDescription>
-                Configure the mailbox to watch for incoming documents
+                Monitor vendor invoices, remittances, and AP-related documents
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {/* Enabled Toggle */}
               <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
                 <div>
-                  <Label className="text-sm font-medium">Email Watcher Enabled</Label>
+                  <Label className="text-sm font-medium">AP Email Watcher Enabled</Label>
                   <p className="text-xs text-muted-foreground">
-                    When enabled, the system will monitor the mailbox for new emails
+                    When enabled, the system will monitor this mailbox for AP documents
                   </p>
                 </div>
                 <Switch
@@ -415,27 +417,21 @@ export default function EmailParserPage() {
                   />
                   <span className="text-sm text-muted-foreground">minutes between polls</span>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  How often the system checks for new emails (1-60 minutes). Lower values = faster detection but more API calls.
-                </p>
               </div>
 
               <Separator />
 
               {/* Mailbox Address */}
               <div className="space-y-2">
-                <Label htmlFor="mailbox_address">Mailbox Address</Label>
+                <Label htmlFor="mailbox_address">AP Mailbox Address</Label>
                 <Input
                   id="mailbox_address"
-                  placeholder="e.g. invoices@yourcompany.com"
+                  placeholder="e.g. hub-ap-intake@yourcompany.com"
                   value={emailConfigForm.mailbox_address}
                   onChange={(e) => setEmailConfigForm(prev => ({ ...prev, mailbox_address: e.target.value }))}
                   className="font-mono"
                   data-testid="mailbox-address-input"
                 />
-                <p className="text-xs text-muted-foreground">
-                  The shared mailbox to monitor for incoming documents
-                </p>
               </div>
 
               {/* Folder Configuration */}
@@ -481,10 +477,59 @@ export default function EmailParserPage() {
                     </span>
                   ) : (
                     <span className="flex items-center gap-1.5">
-                      <Save className="w-4 h-4" /> Save Configuration
+                      <Save className="w-4 h-4" /> Save AP Configuration
                     </span>
                   )}
                 </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Sales Mailbox Configuration */}
+          <Card className="border border-border" data-testid="sales-email-config-card">
+            <CardHeader>
+              <CardTitle className="text-base font-bold flex items-center gap-2" style={{ fontFamily: 'Chivo, sans-serif' }}>
+                <Mail className="w-5 h-5 text-emerald-500" />
+                Sales Mailbox
+                <Badge variant="outline" className="ml-2 bg-emerald-100 text-emerald-800 border-emerald-200">Sales</Badge>
+              </CardTitle>
+              <CardDescription>
+                Monitor customer POs, quotes, shipping requests, and sales-related documents
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="p-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-amber-500 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                      Environment Configuration Required
+                    </p>
+                    <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                      Sales mailbox is configured via environment variables on your server:
+                    </p>
+                    <code className="block text-xs mt-2 p-2 bg-amber-100 dark:bg-amber-900 rounded font-mono">
+                      SALES_EMAIL_POLLING_ENABLED=true<br/>
+                      SALES_EMAIL_POLLING_USER=hub-sales-intake@yourcompany.com
+                    </code>
+                    <p className="text-xs text-amber-700 dark:text-amber-300 mt-2">
+                      Documents from both mailboxes will appear in the unified Document Queue with appropriate category tags.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Sales Email Status Info */}
+              <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+                <div>
+                  <Label className="text-sm font-medium">Sales Email Status</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Check your server's .env file for current configuration
+                  </p>
+                </div>
+                <Badge variant="outline" className="text-xs">
+                  Configured via .env
+                </Badge>
               </div>
             </CardContent>
           </Card>
@@ -497,7 +542,7 @@ export default function EmailParserPage() {
                   <CheckCircle2 className="w-5 h-5 text-emerald-500" />
                   <div>
                     <p className="text-sm font-medium text-emerald-800 dark:text-emerald-200">
-                      Webhook Active
+                      AP Webhook Active
                     </p>
                     <p className="text-xs text-emerald-700 dark:text-emerald-300">
                       Subscription ID: {emailConfig.webhook_subscription_id}

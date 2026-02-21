@@ -5135,6 +5135,115 @@ async def backfill_sales_mailbox(
     return stats
 
 
+# ==================== MIGRATE SALES DOCUMENTS TO UNIFIED COLLECTION ====================
+
+@api_router.post("/admin/migrate-sales-to-unified")
+async def migrate_sales_documents_to_unified():
+    """
+    One-time migration to move sales_documents into the main hub_documents collection.
+    This unifies all documents into a single pipeline with category-based routing.
+    
+    Documents from sales_documents will be:
+    - Copied to hub_documents with category="Sales"
+    - Original sales_documents collection will NOT be deleted (kept for reference)
+    - Duplicates (by document_id) will be skipped
+    """
+    run_id = uuid.uuid4().hex[:8]
+    
+    stats = {
+        "run_id": run_id,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "sales_documents_found": 0,
+        "migrated": 0,
+        "skipped_duplicate": 0,
+        "errors": [],
+        "migrated_documents": []
+    }
+    
+    try:
+        # Get all sales documents
+        sales_docs = await db.sales_documents.find({}, {"_id": 0}).to_list(1000)
+        stats["sales_documents_found"] = len(sales_docs)
+        
+        logger.info("[Migration:%s] Found %d sales documents to migrate", run_id, len(sales_docs))
+        
+        for sdoc in sales_docs:
+            doc_id = sdoc.get("document_id")
+            
+            # Check if already exists in hub_documents
+            existing = await db.hub_documents.find_one({"id": doc_id})
+            if existing:
+                stats["skipped_duplicate"] += 1
+                continue
+            
+            # Map sales document to hub_documents schema
+            now = datetime.now(timezone.utc).isoformat()
+            
+            hub_doc = {
+                "id": doc_id,
+                "source": sdoc.get("source", "email"),
+                "file_name": sdoc.get("file_name"),
+                "sha256_hash": sdoc.get("file_hash"),
+                "file_size": sdoc.get("file_size"),
+                "content_type": "application/octet-stream",
+                "email_sender": sdoc.get("email_sender"),
+                "email_subject": sdoc.get("email_subject"),
+                "email_id": sdoc.get("email_message_id"),
+                "email_received_utc": sdoc.get("created_utc"),
+                "sharepoint_drive_id": None,
+                "sharepoint_item_id": None,
+                "sharepoint_web_url": None,
+                "sharepoint_share_link_url": None,
+                "document_type": sdoc.get("document_type"),
+                "category": "Sales",
+                "suggested_job_type": sdoc.get("document_type"),
+                "ai_confidence": sdoc.get("ai_confidence"),
+                "extracted_fields": sdoc.get("extracted_fields", {}),
+                "validation_results": None,
+                "automation_decision": "manual",
+                "bc_record_type": None,
+                "bc_company_id": None,
+                "bc_record_id": None,
+                "bc_document_no": None,
+                "status": sdoc.get("status", "NeedsReview"),
+                "workflow_state": sdoc.get("workflow_state", "Classified"),
+                "validation_errors": sdoc.get("validation_errors", []),
+                "validation_warnings": sdoc.get("validation_warnings", []),
+                "created_utc": sdoc.get("created_utc", now),
+                "updated_utc": now,
+                "last_error": None,
+                "classification_reasoning": sdoc.get("classification_reasoning"),
+                "customer_id_sales": sdoc.get("customer_id"),
+                "customer_name_extracted": sdoc.get("customer_name_extracted"),
+                "correlation_id": sdoc.get("correlation_id"),
+                "migrated_from": "sales_documents",
+                "migrated_at": now
+            }
+            
+            try:
+                await db.hub_documents.insert_one(hub_doc)
+                stats["migrated"] += 1
+                stats["migrated_documents"].append({
+                    "document_id": doc_id,
+                    "document_type": sdoc.get("document_type"),
+                    "file_name": sdoc.get("file_name")
+                })
+            except Exception as e:
+                stats["errors"].append(f"Failed to migrate {doc_id}: {str(e)}")
+        
+        stats["ended_at"] = datetime.now(timezone.utc).isoformat()
+        
+        logger.info("[Migration:%s] Complete: found=%d, migrated=%d, skipped=%d, errors=%d",
+                   run_id, stats["sales_documents_found"], stats["migrated"],
+                   stats["skipped_duplicate"], len(stats["errors"]))
+        
+    except Exception as e:
+        stats["errors"].append(f"Migration error: {str(e)}")
+        logger.error("[Migration:%s] Error: %s", run_id, str(e))
+    
+    return stats
+
+
 # ==================== JOB TYPE CONFIGURATION ENDPOINTS ====================
 
 # ==================== SALES EMAIL POLLING ====================

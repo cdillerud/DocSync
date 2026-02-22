@@ -82,4 +82,21 @@ export const getEmailStats = () => api.get('/dashboard/email-stats');
 export const intakeDocument = (formData) => api.post('/documents/intake', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
 export const classifyDocument = (id) => api.post(`/documents/${id}/classify`);
 
+// AP Invoice Workflow Queues
+export const getWorkflowStatusCounts = () => api.get('/workflows/ap_invoice/status-counts');
+export const getVendorPendingQueue = (params) => api.get('/workflows/ap_invoice/vendor-pending', { params });
+export const getBcValidationPendingQueue = (params) => api.get('/workflows/ap_invoice/bc-validation-pending', { params });
+export const getBcValidationFailedQueue = (params) => api.get('/workflows/ap_invoice/bc-validation-failed', { params });
+export const getDataCorrectionPendingQueue = (params) => api.get('/workflows/ap_invoice/data-correction-pending', { params });
+export const getReadyForApprovalQueue = (params) => api.get('/workflows/ap_invoice/ready-for-approval', { params });
+export const getWorkflowMetrics = (days) => api.get('/workflows/ap_invoice/metrics', { params: { days } });
+
+// AP Invoice Workflow Actions
+export const setVendor = (docId, vendorNo, vendorName, actor) => api.post(`/workflows/ap_invoice/${docId}/set-vendor`, { vendor_no: vendorNo, vendor_name: vendorName, actor });
+export const updateFields = (docId, fields, actor) => api.post(`/workflows/ap_invoice/${docId}/update-fields`, { ...fields, actor });
+export const overrideBcValidation = (docId, reason, actor) => api.post(`/workflows/ap_invoice/${docId}/override-bc-validation`, { reason, actor });
+export const startApproval = (docId, actor) => api.post(`/workflows/ap_invoice/${docId}/start-approval`, { actor });
+export const approveDocument = (docId, comment, actor) => api.post(`/workflows/ap_invoice/${docId}/approve`, { comment, actor });
+export const rejectDocument = (docId, reason, actor) => api.post(`/workflows/ap_invoice/${docId}/reject`, { reason, actor });
+
 export default api;

@@ -4078,6 +4078,10 @@ async def _internal_intake_document(
     else:
         update_data["last_error"] = f"SharePoint upload failed: {sp_error}"
     
+    # Add AI classification audit trail if AI was invoked
+    if ai_classification_audit:
+        update_data["ai_classification"] = ai_classification_audit
+    
     await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
     
     # Update workflow status based on processing results and doc_type

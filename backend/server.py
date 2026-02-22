@@ -114,6 +114,7 @@ api_router = APIRouter(prefix="/api")
 # Global polling task references
 _email_polling_task = None
 _sales_polling_task = None
+_pilot_summary_task = None
 
 # ==================== AUTH ====================
 import jwt as pyjwt

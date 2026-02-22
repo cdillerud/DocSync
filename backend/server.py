@@ -5196,7 +5196,9 @@ async def process_incoming_email(email_id: str, mailbox_address: str):
                 "email_received_utc": intake.email_received_utc,
                 "status": "Received",
                 "created_utc": now,
-                "updated_utc": now
+                "updated_utc": now,
+                # Pilot metadata (added if pilot mode enabled)
+                **get_pilot_metadata()
             }
             await db.hub_documents.insert_one(doc)
             

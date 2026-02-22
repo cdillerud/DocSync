@@ -91,6 +91,11 @@ export const getDataCorrectionPendingQueue = (params) => api.get('/workflows/ap_
 export const getReadyForApprovalQueue = (params) => api.get('/workflows/ap_invoice/ready-for-approval', { params });
 export const getWorkflowMetrics = (days) => api.get('/workflows/ap_invoice/metrics', { params: { days } });
 
+// Generic Workflow APIs (multi-document type support)
+export const getGenericQueue = (docType, params) => api.get('/workflows/generic/queue', { params: { doc_type: docType, ...params } });
+export const getStatusCountsByType = () => api.get('/workflows/generic/status-counts-by-type');
+export const getMetricsByType = (days, docType) => api.get('/workflows/generic/metrics-by-type', { params: { days, doc_type: docType } });
+
 // AP Invoice Workflow Actions
 export const setVendor = (docId, vendorNo, vendorName, actor) => api.post(`/workflows/ap_invoice/${docId}/set-vendor`, { vendor_no: vendorNo, vendor_name: vendorName, actor });
 export const updateFields = (docId, fields, actor) => api.post(`/workflows/ap_invoice/${docId}/update-fields`, { ...fields, actor });

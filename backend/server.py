@@ -11034,28 +11034,31 @@ async def run_simulation_for_document(doc_id: str):
     doc_for_sim = {**doc, "document_id": doc_id}
     simulation_results = run_full_export_simulation(doc_for_sim)
     
-    # Convert results to dicts - use JSON round-trip to ensure clean serializable dicts
-    import json
+    # Convert SimulationResult objects to clean dicts
+    # Use JSON round-trip to ensure 100% serializable output
+    import json as json_lib
     results_dict = {}
-    for k, v in simulation_results.items():
-        result_json = json.dumps(v.to_dict())
-        results_dict[k] = json.loads(result_json)
+    for sim_key, sim_result in simulation_results.items():
+        result_dict = sim_result.to_dict()
+        # JSON round-trip to ensure clean dict
+        clean_result = json_lib.loads(json_lib.dumps(result_dict))
+        results_dict[sim_key] = clean_result
     
     # Create workflow history entry (also JSON-clean)
     history_entry_raw = SimulationHistoryEntry.create_batch_simulation_entry(
         document_id=doc_id,
         simulation_results=results_dict
     )
-    history_entry = json.loads(json.dumps(history_entry_raw))
+    history_entry = json_lib.loads(json_lib.dumps(history_entry_raw))
     
     # Store simulation results in dedicated collection
     for sim_type, result in results_dict.items():
-        result_copy = json.loads(json.dumps(result))
-        result_copy["_collection_timestamp"] = datetime.now(timezone.utc).isoformat()
-        await db.pilot_simulation_results.insert_one(result_copy)
+        db_copy = json_lib.loads(json_lib.dumps(result))
+        db_copy["_collection_timestamp"] = datetime.now(timezone.utc).isoformat()
+        await db.pilot_simulation_results.insert_one(db_copy)
     
     # Update document with simulation results and history
-    results_for_db = json.loads(json.dumps(results_dict))
+    results_for_db = json_lib.loads(json_lib.dumps(results_dict))
     await db.hub_documents.update_one(
         {"id": doc_id},
         {
@@ -11070,12 +11073,15 @@ async def run_simulation_for_document(doc_id: str):
     # Calculate summary
     would_succeed = all(r.get("would_succeed_in_production") for r in results_dict.values())
     
+    # Return clean dict (another JSON round-trip for safety)
+    response_results = json_lib.loads(json_lib.dumps(results_dict))
+    
     return {
         "document_id": doc_id,
         "doc_type": doc.get("doc_type"),
-        "simulations_run": len(results_dict),
+        "simulations_run": len(response_results),
         "all_would_succeed": would_succeed,
-        "results": results_dict,
+        "results": response_results,
         "history_entry_added": True
     }
 

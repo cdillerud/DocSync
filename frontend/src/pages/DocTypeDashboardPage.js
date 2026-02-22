@@ -268,6 +268,9 @@ export default function DocTypeDashboardPage() {
   const grandTotal = data?.grand_total || 0;
   const docTypeCount = Object.keys(data?.by_type || {}).length;
   
+  // Classification totals
+  const classificationTotals = data?.classification_totals || { deterministic: 0, ai: 0, other: 0 };
+  
   // Calculate overall extraction rates
   let totalDocs = 0;
   let totalWithVendor = 0;
@@ -289,6 +292,7 @@ export default function DocTypeDashboardPage() {
     const params = {};
     if (sourceSystemFilter !== 'all') params.source_system = sourceSystemFilter;
     if (docTypeFilter !== 'all') params.doc_type = docTypeFilter;
+    if (classificationFilter !== 'all') params.classification = classificationFilter;
     
     toast.success('Starting CSV export...');
     exportDocumentTypesDashboard(params);

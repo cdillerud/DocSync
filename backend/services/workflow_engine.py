@@ -180,6 +180,15 @@ class WorkflowEvent(str, Enum):
     ON_BC_INVALID = "on_bc_invalid"
     ON_BC_VALIDATION_OVERRIDE = "on_bc_validation_override"
     
+    # BC Sandbox lookup events (observation mode)
+    ON_BC_LOOKUP_SUCCESS = "on_bc_lookup_success"
+    ON_BC_LOOKUP_FAILED = "on_bc_lookup_failed"
+    ON_BC_LOOKUP_NOT_FOUND = "on_bc_lookup_not_found"
+    ON_BC_VENDOR_VALIDATED = "on_bc_vendor_validated"
+    ON_BC_CUSTOMER_VALIDATED = "on_bc_customer_validated"
+    ON_BC_PO_VALIDATED = "on_bc_po_validated"
+    ON_BC_INVOICE_VALIDATED = "on_bc_invoice_validated"
+    
     # PO validation events (PURCHASE_ORDER)
     ON_PO_VALIDATION_STARTED = "on_po_validation_started"
     ON_PO_VALID = "on_po_valid"

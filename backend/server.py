@@ -11049,7 +11049,7 @@ async def run_simulation_for_document(doc_id: str):
     
     # Update document with simulation results and history
     await db.hub_documents.update_one(
-        {"document_id": doc_id},
+        {"id": doc_id},
         {
             "$push": {"workflow_history": history_entry},
             "$set": {

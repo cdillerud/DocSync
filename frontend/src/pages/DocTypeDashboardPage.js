@@ -444,12 +444,12 @@ export default function DocTypeDashboardPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-[200px]">Document Type</TableHead>
-                  <TableHead className="text-center w-[100px]">Total</TableHead>
-                  <TableHead className="text-center w-[120px]">Progress</TableHead>
-                  <TableHead className="w-[180px]">Status Distribution</TableHead>
-                  <TableHead className="w-[150px]">Extraction (Core)</TableHead>
-                  <TableHead className="w-[150px]">Extraction (Extended)</TableHead>
-                  <TableHead className="w-[200px]">Match Methods</TableHead>
+                  <TableHead className="text-center w-[80px]">Total</TableHead>
+                  <TableHead className="w-[140px]">Classification</TableHead>
+                  <TableHead className="text-center w-[100px]">Progress</TableHead>
+                  <TableHead className="w-[160px]">Status Counts</TableHead>
+                  <TableHead className="w-[130px]">Extraction</TableHead>
+                  <TableHead className="w-[180px]">Match Methods</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

@@ -4327,6 +4327,7 @@ async def intake_document(
         # Document classification fields
         "doc_type": doc_type_value,
         "category": category,
+        "classification_method": classification_method,
         # Phase 7: Flat normalized fields on document
         "vendor_raw": normalized_fields.get("vendor_raw"),
         "vendor_normalized": normalized_fields.get("vendor_normalized"),
@@ -4370,6 +4371,10 @@ async def intake_document(
         update_data["sharepoint_share_link_url"] = share_link
     else:
         update_data["last_error"] = f"SharePoint upload failed: {sp_error}"
+    
+    # Add AI classification audit trail if AI was invoked
+    if ai_classification_audit:
+        update_data["ai_classification"] = ai_classification_audit
     
     await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
     

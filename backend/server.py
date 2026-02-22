@@ -4179,7 +4179,7 @@ async def _internal_intake_document(
         # Document classification fields
         "doc_type": doc_type_value,
         "source_system": SourceSystem.GPI_HUB_NATIVE.value,
-        "capture_channel": CaptureChannel.EMAIL.value if "email" in source.lower() else CaptureChannel.UPLOAD.value,
+        "capture_channel": capture_channel,  # Use pilot-aware channel
         "classification_method": classification_method,
         "ai_confidence": confidence,
         "extracted_fields": extracted_fields,

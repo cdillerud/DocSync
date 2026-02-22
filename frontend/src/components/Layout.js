@@ -6,7 +6,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator
 } from '../components/ui/dropdown-menu';
 import {
-  LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, Brain, BarChart3, ShoppingCart, GitBranch, PieChart, Receipt, Package, Eye
+  LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, Brain, BarChart3, ShoppingCart, GitBranch, PieChart, Receipt, Package, Eye, FlaskConical
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -18,6 +18,7 @@ const navItems = [
   { to: '/sales-workflows', icon: ShoppingCart, label: 'Sales Workflows' },
   { to: '/operations-workflows', icon: Package, label: 'Operations' },
   { to: '/pilot-dashboard', icon: Eye, label: 'Pilot Dashboard' },
+  { to: '/simulation-dashboard', icon: FlaskConical, label: 'Simulation' },
   { to: '/doc-types', icon: PieChart, label: 'Doc Types' },
   { to: '/email-parser', icon: Brain, label: 'Email Parser' },
   { to: '/audit', icon: BarChart3, label: 'Audit Dashboard' },
@@ -39,6 +40,7 @@ export default function Layout() {
     if (path === '/sales-workflows') return 'Sales Workflows';
     if (path === '/operations-workflows') return 'Operations';
     if (path === '/pilot-dashboard') return 'Pilot Dashboard';
+    if (path === '/simulation-dashboard') return 'Simulation Dashboard';
     if (path === '/workflow') return 'Legacy Workflow';
     if (path === '/doc-types') return 'Document Types';
     if (path.startsWith('/documents/')) return 'Document Detail';

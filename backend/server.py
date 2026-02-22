@@ -3177,6 +3177,103 @@ async def on_document_ingested(doc_id: str, source: str = "unknown"):
 
 # ==================== EMAIL INTAKE ENDPOINTS ====================
 
+async def _update_standard_workflow_status(
+    doc_id: str,
+    doc_type: str,
+    confidence: float,
+    normalized_fields: Dict
+):
+    """
+    Update workflow status for non-AP document types.
+    Uses simplified workflow: captured -> classified -> extracted -> ready_for_approval
+    """
+    doc = await db.hub_documents.find_one({"id": doc_id})
+    if not doc:
+        return
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Step 1: Classification done - move from captured to classified
+    if confidence > 0:
+        WorkflowEngine.advance_workflow(
+            doc,
+            WorkflowEvent.ON_CLASSIFICATION_SUCCESS.value,
+            context={"reason": f"AI classification completed with confidence {confidence:.2f}"}
+        )
+    else:
+        WorkflowEngine.advance_workflow(
+            doc,
+            WorkflowEvent.ON_CLASSIFICATION_FAILED.value,
+            context={"reason": "Classification failed or returned Unknown"}
+        )
+        # Save and return early for failed classification
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {
+                "workflow_status": doc.get("workflow_status"),
+                "workflow_history": doc.get("workflow_history", []),
+                "workflow_status_updated_utc": now
+            }}
+        )
+        return
+    
+    # Step 2: Check extraction quality
+    vendor = normalized_fields.get("vendor_normalized") or normalized_fields.get("vendor_raw")
+    invoice_number = normalized_fields.get("invoice_number_clean")
+    amount = normalized_fields.get("amount_float")
+    
+    # For non-AP types, we're more lenient on required fields
+    has_basic_data = any([vendor, invoice_number, amount is not None])
+    
+    if not has_basic_data or confidence < 0.3:
+        # Low confidence or no data - needs review
+        WorkflowEngine.advance_workflow(
+            doc,
+            WorkflowEvent.ON_EXTRACTION_FAILED.value,
+            context={
+                "reason": "Extraction incomplete or very low confidence",
+                "metadata": {
+                    "has_vendor": bool(vendor),
+                    "has_invoice_number": bool(invoice_number),
+                    "has_amount": amount is not None,
+                    "confidence": confidence
+                }
+            }
+        )
+    else:
+        # Extraction succeeded
+        WorkflowEngine.advance_workflow(
+            doc,
+            WorkflowEvent.ON_EXTRACTION_SUCCESS.value,
+            context={"reason": "Extraction completed successfully"}
+        )
+        
+        # For standard workflow types (not AP), skip vendor/BC validation
+        # Move directly to ready_for_approval or auto-approve based on doc_type
+        if doc_type in [DocType.STATEMENT.value, DocType.REMINDER.value, 
+                        DocType.FINANCE_CHARGE_MEMO.value, DocType.QUALITY_DOC.value,
+                        DocType.OTHER.value]:
+            # Simplified types can go directly to extracted -> exportable
+            pass  # Stay at extracted, can be approved/exported manually
+        else:
+            # Standard business docs (Sales, PO, Credit Memo) advance to ready_for_approval
+            WorkflowEngine.advance_workflow(
+                doc,
+                WorkflowEvent.ON_REVIEW_COMPLETE.value,
+                context={"reason": f"Automatic review complete for {doc_type}"}
+            )
+    
+    # Save workflow updates
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "workflow_status": doc.get("workflow_status"),
+            "workflow_history": doc.get("workflow_history", []),
+            "workflow_status_updated_utc": now
+        }}
+    )
+
+
 async def _update_ap_workflow_status(
     doc_id: str,
     confidence: float,

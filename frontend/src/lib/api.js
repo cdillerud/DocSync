@@ -118,4 +118,27 @@ export const exportDocument = (docId, destination, user) => api.post(`/workflows
 // Get AP Dashboard metrics (from doc-types dashboard filtered to AP)
 export const getAPDashboardMetrics = () => api.get('/dashboard/document-types', { params: { doc_type: 'AP_INVOICE' } });
 
+// =============================================================================
+// PILOT APIs
+// =============================================================================
+
+// Get pilot status and configuration
+export const getPilotStatus = () => api.get('/pilot/status');
+
+// Get pilot daily metrics
+export const getPilotDailyMetrics = (phase = 'shadow_pilot_v1', date = null) => 
+  api.get('/pilot/daily-metrics', { params: { phase, date } });
+
+// Get pilot logs
+export const getPilotLogs = (params = {}) => 
+  api.get('/pilot/logs', { params: { phase: 'shadow_pilot_v1', ...params } });
+
+// Get pilot accuracy report
+export const getPilotAccuracy = (phase = 'shadow_pilot_v1') => 
+  api.get('/pilot/accuracy', { params: { phase } });
+
+// Get pilot trend data
+export const getPilotTrend = (phase = 'shadow_pilot_v1', days = 14) => 
+  api.get('/pilot/trend', { params: { phase, days } });
+
 export default api;

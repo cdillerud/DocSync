@@ -1507,8 +1507,6 @@ async def export_document_types_dashboard(
             # Write one row per status
             for status, count in sorted(status_counts.items()):
                 writer.writerow({**common_fields, 'status': status, 'status_count': count})
-                    'match_none': match_methods.get("none", 0)
-                })
     
     csv_content = output.getvalue()
     output.close()

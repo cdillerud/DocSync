@@ -143,7 +143,7 @@ class BCLookupResult:
     
     @property
     def is_found(self) -> bool:
-        return self.status == BCLookupStatus.SUCCESS and bool(self.data)
+        return self.status in [BCLookupStatus.SUCCESS, BCLookupStatus.DEMO_MODE] and bool(self.data)
 
 
 # =============================================================================

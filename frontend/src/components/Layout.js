@@ -6,7 +6,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator
 } from '../components/ui/dropdown-menu';
 import {
-  LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, Brain, BarChart3, ShoppingCart, GitBranch, PieChart, Receipt
+  LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, Brain, BarChart3, ShoppingCart, GitBranch, PieChart, Receipt, Package, Eye
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -15,11 +15,12 @@ const navItems = [
   { to: '/upload', icon: UploadCloud, label: 'Upload' },
   { to: '/queue', icon: Files, label: 'Document Queue' },
   { to: '/ap-workflows', icon: Receipt, label: 'AP Workflows' },
-  { to: '/workflow', icon: GitBranch, label: 'Legacy Workflow' },
+  { to: '/sales-workflows', icon: ShoppingCart, label: 'Sales Workflows' },
+  { to: '/operations-workflows', icon: Package, label: 'Operations' },
+  { to: '/pilot-dashboard', icon: Eye, label: 'Pilot Dashboard' },
   { to: '/doc-types', icon: PieChart, label: 'Doc Types' },
   { to: '/email-parser', icon: Brain, label: 'Email Parser' },
   { to: '/audit', icon: BarChart3, label: 'Audit Dashboard' },
-  { to: '/sales', icon: ShoppingCart, label: 'Sales' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 

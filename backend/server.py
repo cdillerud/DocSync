@@ -11044,7 +11044,6 @@ async def run_simulation_for_document(doc_id: str):
     )
     
     # Store simulation results in dedicated collection (deep copy to avoid _id mutation)
-    import copy
     for sim_type, result in results_dict.items():
         result_copy = copy.deepcopy(result)
         result_copy["_collection_timestamp"] = datetime.now(timezone.utc).isoformat()

@@ -11349,6 +11349,118 @@ async def run_batch_simulation(
     }
 
 
+# ==================== SIMULATION METRICS API ====================
+
+from services.simulation_metrics_service import (
+    SimulationMetricsService, 
+    normalize_failure_reason,
+    FailureReasonCode
+)
+
+# Create singleton metrics service
+_simulation_metrics_service = None
+
+def get_simulation_metrics_service():
+    global _simulation_metrics_service
+    if _simulation_metrics_service is None:
+        _simulation_metrics_service = SimulationMetricsService(db)
+    return _simulation_metrics_service
+
+
+@api_router.get("/pilot/simulation/metrics")
+async def get_simulation_metrics(
+    days: int = Query(14, ge=1, le=90),
+    doc_type: str = Query(None),
+    source_system: str = Query(None)
+):
+    """
+    Get global simulation metrics summary.
+    
+    Returns success/failure counts grouped by doc_type, failure_reason,
+    source_system, and workflow_status.
+    """
+    service = get_simulation_metrics_service()
+    metrics = await service.get_global_metrics(
+        days=days,
+        doc_type_filter=doc_type,
+        source_system_filter=source_system
+    )
+    return metrics
+
+
+@api_router.get("/pilot/simulation/metrics/failures")
+async def get_simulation_failure_details(
+    failure_reason: str = Query(None, description="Normalized failure reason code"),
+    doc_type: str = Query(None),
+    limit: int = Query(50, le=200)
+):
+    """
+    Get detailed list of failed simulations.
+    
+    Filter by failure_reason code (e.g., VENDOR_NOT_FOUND, MISSING_REQUIRED_FIELDS).
+    """
+    service = get_simulation_metrics_service()
+    return await service.get_failure_details(
+        failure_reason=failure_reason,
+        doc_type=doc_type,
+        limit=limit
+    )
+
+
+@api_router.get("/pilot/simulation/metrics/successes")
+async def get_simulation_success_details(
+    doc_type: str = Query(None),
+    limit: int = Query(50, le=200)
+):
+    """
+    Get detailed list of successful simulations.
+    """
+    service = get_simulation_metrics_service()
+    return await service.get_success_details(doc_type=doc_type, limit=limit)
+
+
+@api_router.get("/pilot/simulation/metrics/trend")
+async def get_simulation_trend(
+    days: int = Query(14, ge=1, le=90),
+    granularity: str = Query("day", regex="^(day|hour)$")
+):
+    """
+    Get simulation trend data over time for charting.
+    """
+    service = get_simulation_metrics_service()
+    return await service.get_trend_data(days=days, granularity=granularity)
+
+
+@api_router.get("/pilot/simulation/metrics/pending")
+async def get_documents_pending_simulation(
+    doc_type: str = Query(None),
+    workflow_status: str = Query(None),
+    limit: int = Query(100, le=500)
+):
+    """
+    Get documents that haven't been simulated yet.
+    """
+    service = get_simulation_metrics_service()
+    return await service.get_documents_needing_simulation(
+        doc_type=doc_type,
+        workflow_status=workflow_status,
+        limit=limit
+    )
+
+
+@api_router.get("/pilot/simulation/failure-reasons")
+async def get_failure_reason_codes():
+    """
+    Get list of all normalized failure reason codes.
+    """
+    return {
+        "failure_reason_codes": [
+            {"code": e.value, "description": e.value.replace("_", " ").title()}
+            for e in FailureReasonCode
+        ]
+    }
+
+
 # ==================== APP SETUP ====================
 
 app.include_router(api_router)

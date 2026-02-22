@@ -127,6 +127,62 @@ export default function SimulationDashboardPage() {
     }
   };
 
+  // Drill-down functions
+  const openDrillDown = async (type, filter, title) => {
+    setDrillDownType(type);
+    setDrillDownFilter(filter);
+    setDrillDownTitle(title);
+    setDrillDownOpen(true);
+    setDrillDownLoading(true);
+    
+    try {
+      let response;
+      const params = new URLSearchParams({ limit: '100' });
+      
+      if (type === 'failures') {
+        if (filter.failure_reason) params.append('failure_reason', filter.failure_reason);
+        if (filter.doc_type) params.append('doc_type', filter.doc_type);
+        response = await api.get(`/pilot/simulation/metrics/failures?${params}`);
+        setDrillDownData(response.data.failures || []);
+      } else if (type === 'successes') {
+        if (filter.doc_type) params.append('doc_type', filter.doc_type);
+        response = await api.get(`/pilot/simulation/metrics/successes?${params}`);
+        setDrillDownData(response.data.successes || []);
+      } else if (type === 'doc_type_failures') {
+        params.append('doc_type', filter.doc_type);
+        response = await api.get(`/pilot/simulation/metrics/failures?${params}`);
+        setDrillDownData(response.data.failures || []);
+      } else if (type === 'doc_type_successes') {
+        params.append('doc_type', filter.doc_type);
+        response = await api.get(`/pilot/simulation/metrics/successes?${params}`);
+        setDrillDownData(response.data.successes || []);
+      }
+    } catch (error) {
+      console.error('Failed to fetch drill-down data:', error);
+      toast.error('Failed to load details');
+    } finally {
+      setDrillDownLoading(false);
+    }
+  };
+
+  const openDocumentDetail = async (docId) => {
+    try {
+      const response = await api.get(`/documents/${docId}`);
+      setSelectedDocument(response.data);
+      setDetailPanelOpen(true);
+    } catch (error) {
+      console.error('Failed to fetch document:', error);
+      toast.error('Failed to load document details');
+    }
+  };
+
+  const closeDrillDown = () => {
+    setDrillDownOpen(false);
+    setDrillDownData([]);
+    setDrillDownType('');
+    setDrillDownFilter({});
+  };
+
   const successRate = metrics?.success_rate || 0;
   const successColor = successRate >= 80 ? 'text-green-500' : successRate >= 50 ? 'text-yellow-500' : 'text-red-500';
 

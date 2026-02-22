@@ -680,4 +680,77 @@ An automated daily email notification system that sends pilot summary reports to
 
 ---
 
+## BC Sandbox Service Integration (Completed - February 22, 2026)
+
+### Overview
+Read-only Business Central sandbox API integration for vendor, customer, PO, and invoice lookups with pilot-safe guards. All write operations are blocked.
+
+### New Service Module
+- **File:** `/app/backend/services/bc_sandbox_service.py`
+- **Purpose:** Safe, read-only BC sandbox API access during pilot observation mode
+
+### Configuration
+| Variable | Value | Description |
+|----------|-------|-------------|
+| BC_SANDBOX_CLIENT_ID | 22c4e601-51e8-4305-bd63-d4aa7d19defd | App registration client ID |
+| BC_SANDBOX_TENANT_ID | c7b2de14-71d9-4c49-a0b9-2bec103a6fdc | Azure AD tenant ID |
+| BC_SANDBOX_ENVIRONMENT | Sandbox | BC environment name |
+| DEMO_MODE | true | Using mock data (no BC secret configured) |
+
+### Read-Only Functions
+| Function | Description |
+|----------|-------------|
+| `get_vendor(vendor_number)` | Get vendor by number |
+| `search_vendors_by_name(name_fragment)` | Search vendors by name |
+| `validate_vendor_exists(vendor_number)` | Check if vendor exists |
+| `get_customer(customer_number)` | Get customer by number |
+| `get_purchase_order(po_number)` | Get PO by number |
+| `get_purchase_invoice(invoice_number)` | Get purchase invoice |
+| `get_sales_invoice(invoice_number)` | Get sales invoice |
+| `validate_invoice_exists(invoice_number, type)` | Check if invoice exists |
+
+### Validation Functions (Observation Mode)
+| Function | Description |
+|----------|-------------|
+| `validate_ap_invoice_in_bc()` | Full AP invoice validation |
+| `validate_sales_invoice_in_bc()` | Sales invoice validation |
+| `validate_purchase_order_in_bc()` | PO validation |
+
+### API Endpoints
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/bc-sandbox/status | Service status and config |
+| GET | /api/bc-sandbox/vendors/{number} | Get vendor |
+| GET | /api/bc-sandbox/vendors/search/{fragment} | Search vendors |
+| GET | /api/bc-sandbox/customers/{number} | Get customer |
+| GET | /api/bc-sandbox/purchase-orders/{number} | Get PO |
+| GET | /api/bc-sandbox/purchase-invoices/{number} | Get purchase invoice |
+| GET | /api/bc-sandbox/sales-invoices/{number} | Get sales invoice |
+| POST | /api/bc-sandbox/validate/vendor | Validate vendor exists |
+| POST | /api/bc-sandbox/validate/invoice | Validate invoice exists |
+| POST | /api/bc-sandbox/validate/ap-invoice | Full AP validation |
+| POST | /api/bc-sandbox/validate/sales-invoice | Sales validation |
+| POST | /api/bc-sandbox/validate/purchase-order | PO validation |
+| POST | /api/bc-sandbox/document/{id}/validate | Validate document against BC |
+
+### Blocked Operations (PilotModeWriteBlockedError)
+- `create_vendor`, `update_vendor`, `delete_vendor`
+- `create_purchase_invoice`, `post_purchase_invoice`, `update_purchase_invoice`
+- `create_sales_invoice`, `post_sales_invoice`
+
+### Workflow Integration
+- New workflow events: `ON_BC_LOOKUP_SUCCESS`, `ON_BC_LOOKUP_FAILED`, `ON_BC_LOOKUP_NOT_FOUND`
+- New workflow events: `ON_BC_VENDOR_VALIDATED`, `ON_BC_CUSTOMER_VALIDATED`, `ON_BC_PO_VALIDATED`, `ON_BC_INVOICE_VALIDATED`
+- `BCValidationHistoryEntry` class for creating workflow history entries
+
+### Test Coverage
+- **36 tests** in `/app/backend/tests/test_bc_sandbox_service.py`
+- Coverage: All 8 lookup functions, 5 pilot guards, 5 validation functions, workflow integration
+
+### Notes
+- Currently using **MOCK DATA** (DEMO_MODE=true, no BC_CLIENT_SECRET)
+- To enable real BC API calls: Set `BC_SANDBOX_CLIENT_SECRET` in environment
+
+---
+
 *Last Updated: February 22, 2026*

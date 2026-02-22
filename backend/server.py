@@ -6334,19 +6334,22 @@ async def update_document_fields(doc_id: str, request: UpdateFieldsRequest):
     """
     Manually update/correct fields on a document.
     Re-runs validation and advances workflow based on new data.
+    Works for any document type, but AP-specific validation only runs for AP_INVOICE.
     """
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
     
-    if doc.get("document_type") != "AP_Invoice":
-        raise HTTPException(status_code=400, detail="This endpoint only supports AP_Invoice documents")
+    # Get doc_type with backward compatibility
+    doc_type = doc.get("doc_type") or (DocType.AP_INVOICE.value if doc.get("document_type") == "AP_Invoice" else DocType.OTHER.value)
     
     current_status = doc.get("workflow_status")
     valid_statuses = [
         WorkflowStatus.DATA_CORRECTION_PENDING.value,
         WorkflowStatus.BC_VALIDATION_FAILED.value,
-        WorkflowStatus.VENDOR_PENDING.value
+        WorkflowStatus.VENDOR_PENDING.value,
+        WorkflowStatus.REVIEW_PENDING.value,
+        WorkflowStatus.EXTRACTED.value
     ]
     
     if current_status not in valid_statuses:

@@ -1104,10 +1104,19 @@ async def get_dashboard_stats():
     }
 
 
-async def _aggregate_document_types_data(source_system: Optional[str] = None, doc_type: Optional[str] = None) -> Dict:
+async def _aggregate_document_types_data(
+    source_system: Optional[str] = None, 
+    doc_type: Optional[str] = None,
+    classification: Optional[str] = None
+) -> Dict:
     """
     Shared aggregation logic for document types dashboard.
     Reused by both the JSON endpoint and CSV export endpoint.
+    
+    Args:
+        source_system: Filter by source system (SQUARE9, ZETADOCS, GPI_HUB_NATIVE)
+        doc_type: Filter by specific document type
+        classification: Filter by classification method: "deterministic", "ai", "all"
     """
     # Build base match filter
     base_match = {}
@@ -1115,6 +1124,17 @@ async def _aggregate_document_types_data(source_system: Optional[str] = None, do
         base_match["source_system"] = source_system
     if doc_type:
         base_match["doc_type"] = doc_type
+    
+    # Add classification filter
+    if classification == "deterministic":
+        # Deterministic: legacy_ai, zetadocs, square9, mailbox (NOT ai:*)
+        base_match["$and"] = [
+            {"classification_method": {"$exists": True}},
+            {"classification_method": {"$not": {"$regex": "^ai:"}}}
+        ]
+    elif classification == "ai":
+        # AI-assisted: classification_method starts with "ai:"
+        base_match["classification_method"] = {"$regex": "^ai:"}
     
     # Aggregate status counts by doc_type
     status_pipeline = [

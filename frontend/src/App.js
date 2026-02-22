@@ -20,6 +20,7 @@ import APWorkflowsPage from "@/pages/APWorkflowsPage";
 import SalesWorkflowsPage from "@/pages/SalesWorkflowsPage";
 import OperationsWorkflowsPage from "@/pages/OperationsWorkflowsPage";
 import PilotDashboardPage from "@/pages/PilotDashboardPage";
+import SimulationDashboardPage from "@/pages/SimulationDashboardPage";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -40,6 +41,7 @@ function AppRoutes() {
         <Route path="sales-workflows" element={<SalesWorkflowsPage />} />
         <Route path="operations-workflows" element={<OperationsWorkflowsPage />} />
         <Route path="pilot-dashboard" element={<PilotDashboardPage />} />
+        <Route path="simulation-dashboard" element={<SimulationDashboardPage />} />
         <Route path="doc-types" element={<DocTypeDashboardPage />} />
         <Route path="documents/:id" element={<DocumentDetailPage />} />
         <Route path="email-parser" element={<EmailParserPage />} />

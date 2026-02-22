@@ -28,6 +28,18 @@ export default function SimulationDashboardPage() {
   const [selectedFailureReason, setSelectedFailureReason] = useState('all');
   const [days, setDays] = useState(14);
 
+  // Drill-down state
+  const [drillDownOpen, setDrillDownOpen] = useState(false);
+  const [drillDownTitle, setDrillDownTitle] = useState('');
+  const [drillDownType, setDrillDownType] = useState(''); // 'failures', 'successes', 'doc_type', 'source_system'
+  const [drillDownFilter, setDrillDownFilter] = useState({});
+  const [drillDownData, setDrillDownData] = useState([]);
+  const [drillDownLoading, setDrillDownLoading] = useState(false);
+  
+  // Document detail panel state
+  const [selectedDocument, setSelectedDocument] = useState(null);
+  const [detailPanelOpen, setDetailPanelOpen] = useState(false);
+
   const fetchMetrics = useCallback(async () => {
     try {
       const params = new URLSearchParams({ days: days.toString() });

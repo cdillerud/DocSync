@@ -33,8 +33,7 @@ class TestSalesInvoiceWorkflowFull:
         }
         
         # Initialize
-        doc, _, success = WorkflowEngine.initialize_workflow(doc)
-        assert success
+        doc = WorkflowEngine.initialize_workflow(doc)
         assert doc["workflow_status"] == WorkflowStatus.CAPTURED.value
         
         # Classification
@@ -106,8 +105,7 @@ class TestPurchaseOrderWorkflowFull:
         }
         
         # Initialize
-        doc, _, success = WorkflowEngine.initialize_workflow(doc)
-        assert success
+        doc = WorkflowEngine.initialize_workflow(doc)
         
         # Classification
         doc, _, success = WorkflowEngine.advance_workflow(
@@ -177,8 +175,7 @@ class TestSalesCreditMemoWorkflowFull:
         }
         
         # Initialize
-        doc, _, success = WorkflowEngine.initialize_workflow(doc)
-        assert success
+        doc = WorkflowEngine.initialize_workflow(doc)
         
         # Classification
         doc, _, success = WorkflowEngine.advance_workflow(
@@ -225,8 +222,7 @@ class TestPurchaseCreditMemoWorkflowFull:
             "doc_type": DocType.PURCHASE_CREDIT_MEMO.value
         }
         
-        doc, _, success = WorkflowEngine.initialize_workflow(doc)
-        assert success
+        doc = WorkflowEngine.initialize_workflow(doc)
         
         # Classification -> Extraction
         doc, _, _ = WorkflowEngine.advance_workflow(
@@ -255,8 +251,7 @@ class TestStatementWorkflowFull:
             "doc_type": DocType.STATEMENT.value
         }
         
-        doc, _, success = WorkflowEngine.initialize_workflow(doc)
-        assert success
+        doc = WorkflowEngine.initialize_workflow(doc)
         
         # Classification
         doc, _, _ = WorkflowEngine.advance_workflow(
@@ -316,7 +311,7 @@ class TestReminderWorkflowFull:
             "doc_type": DocType.REMINDER.value
         }
         
-        doc, _, _ = WorkflowEngine.initialize_workflow(doc)
+        doc = WorkflowEngine.initialize_workflow(doc)
         doc, _, _ = WorkflowEngine.advance_workflow(
             doc, WorkflowEvent.ON_CLASSIFICATION_SUCCESS.value
         )
@@ -349,7 +344,7 @@ class TestFinanceChargeMemoWorkflowFull:
             "doc_type": DocType.FINANCE_CHARGE_MEMO.value
         }
         
-        doc, _, _ = WorkflowEngine.initialize_workflow(doc)
+        doc = WorkflowEngine.initialize_workflow(doc)
         doc, _, _ = WorkflowEngine.advance_workflow(
             doc, WorkflowEvent.ON_CLASSIFICATION_SUCCESS.value
         )
@@ -375,7 +370,7 @@ class TestQualityDocWorkflowFull:
             "doc_type": DocType.QUALITY_DOC.value
         }
         
-        doc, _, _ = WorkflowEngine.initialize_workflow(doc)
+        doc = WorkflowEngine.initialize_workflow(doc)
         doc, _, _ = WorkflowEngine.advance_workflow(
             doc, WorkflowEvent.ON_CLASSIFICATION_SUCCESS.value
         )
@@ -436,7 +431,7 @@ class TestOtherWorkflowFull:
             "doc_type": DocType.OTHER.value
         }
         
-        doc, _, _ = WorkflowEngine.initialize_workflow(doc)
+        doc = WorkflowEngine.initialize_workflow(doc)
         doc, _, _ = WorkflowEngine.advance_workflow(
             doc, WorkflowEvent.ON_CLASSIFICATION_SUCCESS.value
         )

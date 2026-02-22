@@ -75,6 +75,45 @@ function MatchMethodBadge({ method, count }) {
   );
 }
 
+function ClassificationBadge({ type, count }) {
+  const config = {
+    deterministic: { 
+      icon: Cpu, 
+      color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+      label: 'Det'
+    },
+    ai: { 
+      icon: Brain, 
+      color: 'bg-violet-500/20 text-violet-400 border-violet-500/30',
+      label: 'AI'
+    },
+    other: { 
+      icon: HelpCircle, 
+      color: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
+      label: 'Oth'
+    }
+  };
+  
+  const cfg = config[type] || config.other;
+  const Icon = cfg.icon;
+  
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Badge variant="outline" className={`text-xs ${cfg.color} flex items-center gap-1`}>
+            <Icon className="h-3 w-3" />
+            {count}
+          </Badge>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>{type === 'deterministic' ? 'Deterministic' : type === 'ai' ? 'AI-assisted' : 'Other/Unknown'}: {count} documents</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 function DocTypeRow({ docType, data }) {
   const config = DOC_TYPE_CONFIG[docType] || DOC_TYPE_CONFIG.OTHER;
   const Icon = config.icon;

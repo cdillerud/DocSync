@@ -241,6 +241,7 @@ export default function DocTypeDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [sourceSystemFilter, setSourceSystemFilter] = useState('all');
   const [docTypeFilter, setDocTypeFilter] = useState('all');
+  const [classificationFilter, setClassificationFilter] = useState('all');
 
   const fetchData = async () => {
     setLoading(true);
@@ -248,6 +249,7 @@ export default function DocTypeDashboardPage() {
       const params = {};
       if (sourceSystemFilter !== 'all') params.source_system = sourceSystemFilter;
       if (docTypeFilter !== 'all') params.doc_type = docTypeFilter;
+      if (classificationFilter !== 'all') params.classification = classificationFilter;
       
       const res = await getDocumentTypesDashboard(params);
       setData(res.data);
@@ -260,7 +262,7 @@ export default function DocTypeDashboardPage() {
 
   useEffect(() => {
     fetchData();
-  }, [sourceSystemFilter, docTypeFilter]);
+  }, [sourceSystemFilter, docTypeFilter, classificationFilter]);
 
   // Calculate summary stats
   const grandTotal = data?.grand_total || 0;

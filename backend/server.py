@@ -7774,6 +7774,9 @@ async def export_document(
     Applicable to all document types.
     
     Triggers: on_exported event
+    
+    Note: During pilot mode, actual exports are blocked but status transitions
+    are recorded for observation.
     """
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
@@ -7782,14 +7785,19 @@ async def export_document(
     doc_type = doc.get("doc_type", DocType.OTHER.value)
     actor = user or "system"
     
+    # Pilot mode guard: Block actual export but allow workflow transition
+    pilot_blocked = is_export_blocked(doc)
+    
     updated_doc, history_entry, success = WorkflowEngine.advance_workflow(
         doc,
         WorkflowEvent.ON_EXPORTED.value,
         context={
-            "reason": f"Exported to: {export_destination or 'default'}",
+            "reason": f"Exported to: {export_destination or 'default'}" + (" [PILOT: actual export blocked]" if pilot_blocked else ""),
             "metadata": {
                 "triggered_by": actor,
-                "export_destination": export_destination
+                "export_destination": export_destination,
+                "pilot_mode": pilot_blocked,
+                "pilot_blocked_action": "external_export" if pilot_blocked else None
             }
         },
         actor=actor

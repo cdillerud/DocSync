@@ -840,9 +840,22 @@ async def upload_document(
         "sharepoint_drive_id": None, "sharepoint_item_id": None,
         "sharepoint_web_url": None, "sharepoint_share_link_url": None,
         "document_type": document_type,
+        "category": None,
         "bc_record_type": "SalesOrder" if document_type == "SalesOrder" else None,
         "bc_company_id": bc_company_id, "bc_record_id": bc_record_id,
         "bc_document_no": bc_document_no,
+        # Workflow tracking fields
+        "workflow_status": WorkflowStatus.CAPTURED.value,
+        "workflow_history": [{
+            "timestamp": now,
+            "from_status": None,
+            "to_status": WorkflowStatus.CAPTURED.value,
+            "event": WorkflowEvent.ON_CAPTURE.value,
+            "actor": "system",
+            "reason": f"Document captured from {source}",
+            "metadata": {"source": source}
+        }],
+        "workflow_status_updated_utc": now,
         "status": "Received", "created_utc": now, "updated_utc": now, "last_error": None
     }
     await db.hub_documents.insert_one(doc)

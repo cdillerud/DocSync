@@ -3506,8 +3506,8 @@ async def _internal_intake_document(
     
     await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
     
-    # Update workflow status based on processing results
-    if suggested_type == "AP_Invoice":
+    # Update workflow status based on processing results and doc_type
+    if doc_type_value == DocType.AP_INVOICE.value:
         # Full AP workflow with vendor matching, BC validation, etc.
         await _update_ap_workflow_status(
             doc_id, 
@@ -3518,29 +3518,13 @@ async def _internal_intake_document(
             ap_validation
         )
     else:
-        # For non-AP documents, at least advance from captured to classified
-        doc = await db.hub_documents.find_one({"id": doc_id})
-        if doc and doc.get("workflow_status") == WorkflowStatus.CAPTURED.value:
-            if confidence > 0:
-                WorkflowEngine.advance_workflow(
-                    doc,
-                    WorkflowEvent.ON_CLASSIFICATION_SUCCESS.value,
-                    context={"reason": f"Classified as {suggested_type} with confidence {confidence:.2f}"}
-                )
-            else:
-                WorkflowEngine.advance_workflow(
-                    doc,
-                    WorkflowEvent.ON_CLASSIFICATION_FAILED.value,
-                    context={"reason": "Classification failed or returned Unknown"}
-                )
-            await db.hub_documents.update_one(
-                {"id": doc_id},
-                {"$set": {
-                    "workflow_status": doc.get("workflow_status"),
-                    "workflow_history": doc.get("workflow_history", []),
-                    "workflow_status_updated_utc": datetime.now(timezone.utc).isoformat()
-                }}
-            )
+        # For non-AP documents, use simplified workflow
+        await _update_standard_workflow_status(
+            doc_id, 
+            doc_type_value,
+            confidence, 
+            normalized_fields
+        )
     
     # Create workflow audit trail entry
     workflow_run_id = uuid.uuid4().hex[:8]

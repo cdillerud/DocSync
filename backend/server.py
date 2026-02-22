@@ -7742,12 +7742,18 @@ async def startup():
     for alias in aliases:
         VENDOR_ALIAS_MAP[alias["alias_string"]] = alias.get("vendor_name") or alias.get("vendor_no")
         VENDOR_ALIAS_MAP[alias["normalized_alias"]] = alias.get("vendor_name") or alias.get("vendor_no")
-    # Start AP email polling worker if enabled
+    
+    # Start dynamic mailbox polling worker (polls mailboxes configured via UI)
+    global _dynamic_mailbox_polling_task
+    _dynamic_mailbox_polling_task = asyncio.create_task(dynamic_mailbox_polling_worker())
+    logger.info("Dynamic mailbox polling worker started")
+    
+    # Start AP email polling worker if enabled (legacy env var method)
     if EMAIL_POLLING_ENABLED:
         _email_polling_task = asyncio.create_task(email_polling_worker())
         logger.info("AP email polling worker started (interval: %d min, user: %s)", 
                    EMAIL_POLLING_INTERVAL_MINUTES, EMAIL_POLLING_USER)
-    # Start Sales email polling worker if enabled
+    # Start Sales email polling worker if enabled (legacy env var method)
     global _sales_polling_task
     if SALES_EMAIL_POLLING_ENABLED and SALES_EMAIL_POLLING_USER:
         _sales_polling_task = asyncio.create_task(_sales_email_polling_worker())

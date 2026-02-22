@@ -11000,6 +11000,330 @@ async def bc_sandbox_validate_document(doc_id: str, background_tasks: Background
     }
 
 
+# ==================== BC SIMULATION API (Phase 2 Shadow Pilot) ====================
+
+from services.bc_simulation_service import (
+    simulate_export_ap_invoice, simulate_create_purchase_invoice,
+    simulate_attach_pdf, simulate_sales_invoice_export, simulate_po_linkage,
+    run_full_export_simulation, calculate_simulation_summary,
+    get_simulation_service_status, SimulationResult, SimulationType, SimulationStatus
+)
+from services.workflow_engine import SimulationHistoryEntry
+
+
+@api_router.get("/pilot/simulation/status")
+async def get_pilot_simulation_status():
+    """Get BC simulation service status."""
+    return get_simulation_service_status()
+
+
+@api_router.post("/pilot/simulation/document/{doc_id}/run")
+async def run_simulation_for_document(doc_id: str):
+    """
+    Run full BC export simulation for a document.
+    
+    This simulates all applicable BC operations based on doc_type
+    and stores results in workflow history and simulation_results collection.
+    """
+    doc = await db.hub_documents.find_one({"document_id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Run full simulation
+    simulation_results = run_full_export_simulation(doc)
+    
+    # Convert results to dicts
+    results_dict = {k: v.to_dict() for k, v in simulation_results.items()}
+    
+    # Create workflow history entry
+    history_entry = SimulationHistoryEntry.create_batch_simulation_entry(
+        document_id=doc_id,
+        simulation_results=results_dict
+    )
+    
+    # Store simulation results in dedicated collection
+    for sim_type, result in results_dict.items():
+        result["_collection_timestamp"] = datetime.now(timezone.utc).isoformat()
+        await db.pilot_simulation_results.insert_one(result)
+    
+    # Update document with simulation results and history
+    await db.hub_documents.update_one(
+        {"document_id": doc_id},
+        {
+            "$push": {"workflow_history": history_entry},
+            "$set": {
+                "last_simulation_results": results_dict,
+                "last_simulation_timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        }
+    )
+    
+    # Calculate summary
+    would_succeed = all(r.get("would_succeed_in_production") for r in results_dict.values())
+    
+    return {
+        "document_id": doc_id,
+        "doc_type": doc.get("doc_type"),
+        "simulations_run": len(results_dict),
+        "all_would_succeed": would_succeed,
+        "results": results_dict,
+        "history_entry_added": True
+    }
+
+
+@api_router.post("/pilot/simulation/ap-invoice/{doc_id}")
+async def simulate_ap_invoice_export(doc_id: str):
+    """Simulate AP invoice export to BC."""
+    doc = await db.hub_documents.find_one({"document_id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    if doc.get("doc_type") != "AP_INVOICE":
+        raise HTTPException(status_code=400, detail=f"Document is {doc.get('doc_type')}, not AP_INVOICE")
+    
+    result = simulate_export_ap_invoice(doc)
+    result_dict = result.to_dict()
+    
+    # Store result
+    result_dict["_collection_timestamp"] = datetime.now(timezone.utc).isoformat()
+    await db.pilot_simulation_results.insert_one(result_dict)
+    
+    # Add to workflow history
+    history_entry = SimulationHistoryEntry.create_simulation_entry(result_dict)
+    await db.hub_documents.update_one(
+        {"document_id": doc_id},
+        {"$push": {"workflow_history": history_entry}}
+    )
+    
+    return result_dict
+
+
+@api_router.post("/pilot/simulation/sales-invoice/{doc_id}")
+async def simulate_sales_invoice_export_endpoint(doc_id: str):
+    """Simulate sales invoice export to BC."""
+    doc = await db.hub_documents.find_one({"document_id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    if doc.get("doc_type") != "SALES_INVOICE":
+        raise HTTPException(status_code=400, detail=f"Document is {doc.get('doc_type')}, not SALES_INVOICE")
+    
+    result = simulate_sales_invoice_export(doc)
+    result_dict = result.to_dict()
+    
+    # Store result
+    result_dict["_collection_timestamp"] = datetime.now(timezone.utc).isoformat()
+    await db.pilot_simulation_results.insert_one(result_dict)
+    
+    # Add to workflow history
+    history_entry = SimulationHistoryEntry.create_simulation_entry(result_dict)
+    await db.hub_documents.update_one(
+        {"document_id": doc_id},
+        {"$push": {"workflow_history": history_entry}}
+    )
+    
+    return result_dict
+
+
+@api_router.post("/pilot/simulation/po-linkage/{doc_id}")
+async def simulate_po_linkage_endpoint(doc_id: str):
+    """Simulate PO linkage in BC."""
+    doc = await db.hub_documents.find_one({"document_id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    result = simulate_po_linkage(doc)
+    result_dict = result.to_dict()
+    
+    # Store result
+    result_dict["_collection_timestamp"] = datetime.now(timezone.utc).isoformat()
+    await db.pilot_simulation_results.insert_one(result_dict)
+    
+    # Add to workflow history
+    history_entry = SimulationHistoryEntry.create_simulation_entry(result_dict)
+    await db.hub_documents.update_one(
+        {"document_id": doc_id},
+        {"$push": {"workflow_history": history_entry}}
+    )
+    
+    return result_dict
+
+
+@api_router.post("/pilot/simulation/attachment/{doc_id}")
+async def simulate_attachment_endpoint(doc_id: str):
+    """Simulate PDF attachment to BC record."""
+    doc = await db.hub_documents.find_one({"document_id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    result = simulate_attach_pdf(doc)
+    result_dict = result.to_dict()
+    
+    # Store result
+    result_dict["_collection_timestamp"] = datetime.now(timezone.utc).isoformat()
+    await db.pilot_simulation_results.insert_one(result_dict)
+    
+    # Add to workflow history
+    history_entry = SimulationHistoryEntry.create_simulation_entry(result_dict)
+    await db.hub_documents.update_one(
+        {"document_id": doc_id},
+        {"$push": {"workflow_history": history_entry}}
+    )
+    
+    return result_dict
+
+
+@api_router.get("/pilot/simulation-results")
+async def get_simulation_results(
+    doc_type: str = Query(None),
+    simulation_type: str = Query(None),
+    would_succeed: bool = Query(None),
+    limit: int = Query(100, le=500),
+    skip: int = Query(0)
+):
+    """
+    Get simulation results from the pilot.
+    
+    Filter by doc_type, simulation_type, or success status.
+    """
+    query = {}
+    
+    if doc_type:
+        # Get document IDs for this doc_type
+        doc_ids = await db.hub_documents.distinct("document_id", {"doc_type": doc_type})
+        query["document_id"] = {"$in": doc_ids}
+    
+    if simulation_type:
+        query["simulation_type"] = simulation_type
+    
+    if would_succeed is not None:
+        query["would_succeed_in_production"] = would_succeed
+    
+    cursor = db.pilot_simulation_results.find(query, {"_id": 0}).sort("timestamp", -1).skip(skip).limit(limit)
+    results = await cursor.to_list(limit)
+    
+    total = await db.pilot_simulation_results.count_documents(query)
+    
+    return {
+        "results": results,
+        "total": total,
+        "limit": limit,
+        "skip": skip,
+        "filters": {
+            "doc_type": doc_type,
+            "simulation_type": simulation_type,
+            "would_succeed": would_succeed
+        }
+    }
+
+
+@api_router.get("/pilot/simulation-summary")
+async def get_simulation_summary(
+    doc_type: str = Query(None),
+    days: int = Query(14, ge=1, le=90)
+):
+    """
+    Get summary statistics for simulation results.
+    
+    Shows success rates, failure reasons, and breakdown by type.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    
+    query = {"timestamp": {"$gte": cutoff.isoformat()}}
+    
+    if doc_type:
+        doc_ids = await db.hub_documents.distinct("document_id", {"doc_type": doc_type})
+        query["document_id"] = {"$in": doc_ids}
+    
+    # Get all results for the period
+    cursor = db.pilot_simulation_results.find(query, {"_id": 0})
+    results = await cursor.to_list(10000)
+    
+    # Calculate summary
+    summary = calculate_simulation_summary(results)
+    
+    # Add time range info
+    summary["period_days"] = days
+    summary["cutoff_date"] = cutoff.isoformat()
+    summary["doc_type_filter"] = doc_type
+    
+    # Get unique documents simulated
+    unique_docs = set(r.get("document_id") for r in results)
+    summary["unique_documents_simulated"] = len(unique_docs)
+    
+    return summary
+
+
+@api_router.post("/pilot/simulation/batch")
+async def run_batch_simulation(
+    doc_type: str = Query(...),
+    status: str = Query(None),
+    limit: int = Query(50, le=200)
+):
+    """
+    Run simulation for a batch of documents.
+    
+    Useful for running simulations on all documents of a type.
+    """
+    query = {"doc_type": doc_type}
+    if status:
+        query["workflow_status"] = status
+    
+    # Get documents
+    cursor = db.hub_documents.find(query, {"_id": 0}).limit(limit)
+    docs = await cursor.to_list(limit)
+    
+    results = []
+    for doc in docs:
+        doc_id = doc.get("document_id")
+        try:
+            simulation_results = run_full_export_simulation(doc)
+            results_dict = {k: v.to_dict() for k, v in simulation_results.items()}
+            
+            # Store results
+            for sim_type, result in results_dict.items():
+                result["_collection_timestamp"] = datetime.now(timezone.utc).isoformat()
+                await db.pilot_simulation_results.insert_one(result)
+            
+            # Update document
+            history_entry = SimulationHistoryEntry.create_batch_simulation_entry(
+                document_id=doc_id,
+                simulation_results=results_dict
+            )
+            await db.hub_documents.update_one(
+                {"document_id": doc_id},
+                {
+                    "$push": {"workflow_history": history_entry},
+                    "$set": {
+                        "last_simulation_results": results_dict,
+                        "last_simulation_timestamp": datetime.now(timezone.utc).isoformat()
+                    }
+                }
+            )
+            
+            would_succeed = all(r.get("would_succeed_in_production") for r in results_dict.values())
+            results.append({
+                "document_id": doc_id,
+                "simulations_run": len(results_dict),
+                "all_would_succeed": would_succeed
+            })
+        except Exception as e:
+            results.append({
+                "document_id": doc_id,
+                "error": str(e)
+            })
+    
+    succeeded = sum(1 for r in results if r.get("all_would_succeed"))
+    
+    return {
+        "doc_type": doc_type,
+        "documents_processed": len(results),
+        "all_would_succeed": succeeded,
+        "would_have_failures": len(results) - succeeded,
+        "results": results
+    }
+
+
 # ==================== APP SETUP ====================
 
 app.include_router(api_router)

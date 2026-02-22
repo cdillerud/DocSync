@@ -865,7 +865,10 @@ async def upload_document(
 
     # Determine doc_type from document_type parameter
     doc_type_value = DocumentClassifier.classify_from_ai_result(document_type or "").value if document_type else DocType.OTHER.value
-    capture_channel = CaptureChannel.UPLOAD.value
+    
+    # Apply pilot capture channel if pilot mode is enabled
+    base_capture_channel = CaptureChannel.UPLOAD.value
+    capture_channel = get_pilot_capture_channel(base_capture_channel) if PILOT_MODE_ENABLED else base_capture_channel
 
     doc = {
         "id": doc_id, "source": source, "file_name": file.filename,
@@ -894,7 +897,9 @@ async def upload_document(
             "metadata": {"source": source, "doc_type": doc_type_value}
         }],
         "workflow_status_updated_utc": now,
-        "status": "Received", "created_utc": now, "updated_utc": now, "last_error": None
+        "status": "Received", "created_utc": now, "updated_utc": now, "last_error": None,
+        # Pilot metadata (added if pilot mode enabled)
+        **get_pilot_metadata()
     }
     await db.hub_documents.insert_one(doc)
 

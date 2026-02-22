@@ -1,0 +1,203 @@
+<analysis>**original_problem_statement:**
+The user wants to build a GPI Document Hub to replace their existing Square9 workflows for AP invoices. The core of the current request is to implement a comprehensive workflow engine within the existing GPI Hub application.
+
+**PRODUCT REQUIREMENTS (from user spec):**
+- **Goal:** Replicate and improve the existing Square9 workflows for AP Invoice documents.
+- **Architecture:** Add a workflow engine to the existing FastAPI backend. All existing tests and metrics must remain intact.
+- **Workflow Model:**
+    - Add  (enum) and  (array of changes) fields to the main document model.
+    - Statuses include: , , , , , , , , , , .
+- **Workflow Engine Service:**
+    - Create a pure, testable service module () with a state machine function .
+- **API Endpoints:**
+    - Create new API endpoints to serve as work queues, filtering documents by  (e.g., ).
+    - Create mutation endpoints for manual corrections (e.g., , , ).
+    - Create skeleton endpoints for a basic approval process (, ).
+- **Integration:**
+    - The new workflow logic must integrate with existing draft creation and metrics without breaking them.
+    - Add new metrics for workflow status counts and time-in-status.
+
+**User's preferred language**: English
+
+**what currently exists?**
+A full-stack application with a FastAPI backend, React frontend, and MongoDB database. The platform features:
+- A **unified document ingestion pipeline** that processes emails from multiple, dynamically configurable mailboxes.
+- A **dynamic multi-mailbox management UI** where users can add, edit, delete, and monitor email sources without editing environment files.
+- **Automatic background polling** for all UI-configured mailboxes.
+- AI-driven document classification (AP vs. Sales) using Gemini.
+- A **unified document queue** in the UI with filtering by document category (AP, Sales).
+- The initial scaffolding for the new **AP Invoice Workflow Engine**, including the  service file, new API routes, and  fields in the database model.
+
+**Last working item**:
+- **Last item agent was working:** The agent began implementing the complex AP Invoice Workflow Engine based on a detailed specification provided by the user. The initial files and database model changes were made, and placeholder API endpoints for the new workflow queues were created.
+- **Status:** IN PROGRESS
+- **Agent Testing Done:** N
+- **Which testing method agent to use?** backend testing agent. This is a large, critical backend feature. The agent should first create unit tests for the pure logic in . After implementation, the testing agent should be used to write integration tests for all the new workflow API endpoints to ensure they function correctly and don't cause regressions.
+- **User Testing Done:** N
+
+**All Pending/In progress Issue list**:
+- **Issue 1:** Complete the implementation of the AP Invoice Workflow Engine. (P0)
+- **Issue 2:** The automatic workflow for AP documents is not being triggered upon ingestion. (P0, Recurring)
+- **Issue 3:** The AI classification prompt for AP vs AR invoices needs hardening. (P1)
+- **Issue 4:** The Re-submit button on the document detail UI does not trigger re-classification. (P2)
+
+**Issues Detail:**
+- **Issue 1:** Complete the implementation of the AP Invoice Workflow Engine.
+    - **Attempted fixes:** The agent created the initial structure:
+        - New directory: 
+        - New file:  (with placeholder content).
+        - Modified  to add  and  fields to new documents and created stubs for the new API endpoints under .
+    - **Next debug checklist:** Follow the user's detailed specification (from chat history) to build out the feature:
+        1.  Implement the state machine logic in  for all specified statuses and transitions.
+        2.  Integrate calls to the  function at all key stages of document processing within  (e.g., after extraction, on vendor match/miss, on BC validation success/fail).
+        3.  Fully implement the logic for the workflow queue APIs (e.g., ) to filter the  collection by the  field.
+        4.  Implement the mutation APIs for manual user actions (, , etc.), ensuring they call the workflow engine to transition the document status correctly.
+        5.  Implement the basic approval/rejection endpoints (, ).
+        6.  Add unit tests for .
+    - **Why fix this issue and what will be achieved with the fix?** This is the user's primary requirement and will provide the core functionality for managing document exceptions and approvals, replacing their legacy Square9 system.
+    - **Status:** IN PROGRESS
+    - **Is recurring issue?** N
+    - **Should Test frontend/backend/both after fix?** Backend. This will be followed by a frontend task to build the UI for these new queues.
+    - **Blocked on other issue:** None.
+
+- **Issue 2:** The automatic workflow for AP documents is not being triggered upon ingestion.
+    - **Attempted fixes:** This recurring issue has been partially addressed by previous refactors. The full solution is to implement the new workflow engine correctly.
+    - **Next debug checklist:** The implementation of the workflow engine (Issue 1) should explicitly solve this by creating a deterministic state machine. Once the engine is built, ingest a new AP document and verify its  transitions from  to , , etc.
+    - **Why fix this issue and what will be achieved with the fix?** This is a critical blocker. Without it, documents are ingested but never processed, defeating the purpose of the automation.
+    - **Status:** IN PROGRESS (as part of Issue 1)
+    - **Is recurring issue?** Y
+    - **Should Test frontend/backend/both after fix?** Backend
+    - **Blocked on other issue:** Issue 1
+
+**In progress Task List**:
+- **Task 1:** Implement AP Invoice Workflow Engine (P0)
+    - **Where to resume:** . The agent needs to write the core state machine logic. Then, integrate it into .
+    - **What will be achieved with this?** A fully functional backend workflow system for AP invoices as specified by the user.
+    - **Status:** IN PROGRESS
+    - **Should Test frontend/backend/both after fix?** Backend
+    - **Blocked on something:** None.
+
+**Upcoming and Future Tasks**
+**Upcoming Tasks:**
+- **Task 1 (P0):** Build Frontend UI for AP Workflow Queues. This will involve creating new pages/components to display documents from the new workflow APIs and allow users to perform manual correction actions.
+- **Task 2 (P1):** Implement ingestion from Excel/CSV files for the Sales module.
+- **Task 3 (P1):** Define Stable Vendor as a metric based on extraction consistency and volume.
+- **Task 4 (P2):** Phase 8 - Controlled Vendor Enablement: Enable automated draft creation in BC for a small subset of stable AP vendors.
+
+**Future Tasks:**
+- Flesh out the approval routing logic with multi-step approvals.
+- Refactor the monolithic  into a more service-oriented structure.
+- Implement a Vendor Threshold Override architecture.
+- Plan and execute the full decommissioning of the legacy Zetadocs system.
+- Implement automated creation of Purchase Invoice *lines* in BC (Transaction Automation Level 3).
+- Replace mock JWT auth with Entra ID SSO.
+
+**Completed work in this session**
+- **Unified Document Architecture:**
+    - Merged AP and Sales ingestion into a single pipeline feeding one  collection.
+    - Added a  field to all documents for easy filtering.
+    - Created a migration endpoint () to merge legacy data.
+- **Dynamic Multi-Mailbox System:**
+    - Replaced hardcoded  settings with a dynamic, UI-driven system for managing email sources.
+    - Created a new  model and full CRUD APIs.
+    - Completely redesigned the Email Watcher UI to list, add, edit, and test mailboxes.
+- **Automatic Polling for Dynamic Mailboxes:**
+    - Implemented a background worker () to automatically poll all enabled mailboxes configured in the UI.
+    - Added a status indicator to the UI to show when polling is active.
+- **Begun Workflow Engine Implementation:**
+    - Created the initial file structure () and API stubs for the new AP workflow engine.
+
+**Earlier issues found/mentioned but not fixed**
+- The technical debt of the monolithic  file remains a future refactoring task.
+
+**Known issue recurrence from previous fork**
+- **Issue recurrence in previous fork:** Automatic workflow for AP documents not being triggered.
+- **Recurrence count:** 2
+- **Status:** IN PROGRESS (The new workflow engine is the definitive fix for this).
+
+**Code Architecture**
+
+
+**Key Technical Concepts**
+- **Backend:** FastAPI, Pydantic, Background Tasks ()
+- **Frontend:** React, Tailwind CSS, Shadcn/UI
+- **Database:** MongoDB
+- **Workflow Engine:** A new state machine pattern being implemented in .
+- **Deployment:** Docker, Docker Compose, Git.
+
+**key DB schema**
+- ****: , ,  (NEW),  (NEW),  (NEW), , . This is the single source of truth for all documents.
+- **** (NEW): , , , , .
+
+**changes in tech stack**
+- None.
+
+**All files of reference**
+- : Heavily modified to add dynamic polling, workflow integration, and new APIs.
+- : New file, the starting point for the current main task.
+- : Updated to be the unified document queue.
+- : Updated with the dynamic mailbox configuration UI.
+- : Updated with new API client functions.
+
+**Areas that need refactoring**:
+-  is a large monolith. The creation of  is a good pattern to follow. The dynamic polling logic should also be extracted into its own service module to clean up .
+
+**key api endpoints**
+- **Mailbox Management (NEW):**
+    - 
+    - 
+    - 
+    - 
+- **Admin/Migration (NEW):**
+    - 
+- **Workflow Queues (NEW & IN PROGRESS):**
+    - 
+    - 
+    - 
+- **Workflow Mutations (NEW & IN PROGRESS):**
+    - 
+    - 
+    - 
+
+**Critical Info for New Agent**
+- **Follow the User's Spec:** The user has provided a very detailed, prescriptive specification for the workflow engine (from chat history). You MUST follow this spec closely. It is the source of truth for the current task.
+- **Resume Implementation:** Your primary task is to continue the implementation of the workflow engine, which has only just been started. The core logic in  needs to be built.
+- **No Regressions:** The user has been very clear that all new logic must integrate with the existing system without breaking existing metrics or draft creation features.
+
+**documents and test reports created in this job**
+- : Updated with a high-level summary of the project architecture and status.
+
+**Last 10 User Messages and any pending HUMAN messages**
+1. user: asks if they need to add the sales mailbox to the UI.
+2. agent: Confirms and explains the new unified architecture.
+3. user: requests the ability to add more mailboxes dynamically.
+4. agent: Implements the full dynamic multi-mailbox system.
+5. user: Asks for a summary of the project status.
+6. agent: Provides a detailed summary.
+7. user: Asks to update the PRD with the summary.
+8. agent: Updates PRD.md.
+9. user: Asks if polling is automatic.
+10. agent: Realizes the dynamic mailboxes aren't auto-polled and implements the feature.
+11. user: Provides a very long, detailed specification for a new workflow engine to replicate their Square9 system.
+12. agent: Acknowledges the spec and begins implementation. (This is the current task).
+
+**Project Health Check:**
+- **Broken:** The AP Invoice Workflow Engine is incomplete.
+- **Mocked:** Business Central integration remains in Shadow Mode (observation only). The new approval workflow will initially be stubs.
+
+**3rd Party Integrations**
+- **Microsoft Graph API:** For reading emails and attachments.
+- **Dynamics 365 Business Central API:** For data validation.
+- **Gemini (via Emergent LLM Key):** For document classification.
+
+**Testing status**
+- **Testing agent used after significant changes:** NO
+- **Troubleshoot agent used after agent stuck in loop:** NO
+- **Test files created:** None, but the creation of  implies unit tests should be added in a corresponding  directory.
+- **Known regressions:** None from this session, but the recurring AP workflow not triggering issue is the top priority to fix with the new engine.
+
+**Credentials to test flow:**
+Not required. All necessary credentials for the user's environment are stored on their VM. Local development does not require live credentials.
+
+**What agent forgot to execute**
+- The agent correctly started the large task of implementing the workflow engine as requested by the user. The task is in its very early stages and has not been completed.</analysis>

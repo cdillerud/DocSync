@@ -1199,6 +1199,54 @@ async def _aggregate_document_types_data(
     ]
     source_system_results = await db.hub_documents.aggregate(source_system_pipeline).to_list(20)
     
+    # Aggregate classification method counts by doc_type
+    classification_pipeline = [
+        {"$match": base_match} if base_match else {"$match": {}},
+        {"$group": {
+            "_id": {"$ifNull": ["$doc_type", "OTHER"]},
+            "total": {"$sum": 1},
+            # Count deterministic classifications (legacy_ai, zetadocs, square9, mailbox, default - NOT ai:*)
+            "deterministic_count": {"$sum": {"$cond": [
+                {"$and": [
+                    {"$ne": [{"$ifNull": ["$classification_method", ""]}, ""]},
+                    {"$not": [{"$regexMatch": {"input": {"$ifNull": ["$classification_method", ""]}, "regex": "^ai:"}}]}
+                ]},
+                1, 0
+            ]}},
+            # Count AI-assisted classifications (classification_method starts with "ai:")
+            "ai_count": {"$sum": {"$cond": [
+                {"$regexMatch": {"input": {"$ifNull": ["$classification_method", ""]}, "regex": "^ai:"}},
+                1, 0
+            ]}},
+            # Count other/missing (classification_method is null or empty)
+            "other_count": {"$sum": {"$cond": [
+                {"$or": [
+                    {"$eq": [{"$ifNull": ["$classification_method", ""]}, ""]},
+                    {"$eq": ["$classification_method", None]}
+                ]},
+                1, 0
+            ]}},
+            # AI assisted: ai_classification exists AND doc_type != OTHER AND classification_method starts with "ai:"
+            "ai_assisted_count": {"$sum": {"$cond": [
+                {"$and": [
+                    {"$ne": ["$ai_classification", None]},
+                    {"$ne": [{"$ifNull": ["$doc_type", "OTHER"]}, "OTHER"]},
+                    {"$regexMatch": {"input": {"$ifNull": ["$classification_method", ""]}, "regex": "^ai:"}}
+                ]},
+                1, 0
+            ]}},
+            # AI suggested but rejected: ai_classification exists AND doc_type == OTHER
+            "ai_suggested_but_rejected_count": {"$sum": {"$cond": [
+                {"$and": [
+                    {"$ne": ["$ai_classification", None]},
+                    {"$eq": [{"$ifNull": ["$doc_type", "OTHER"]}, "OTHER"]}
+                ]},
+                1, 0
+            ]}}
+        }}
+    ]
+    classification_results = await db.hub_documents.aggregate(classification_pipeline).to_list(50)
+    
     # Build the response structure
     by_type = {}
     
@@ -1215,7 +1263,15 @@ async def _aggregate_document_types_data(
                 "due_date": {"rate": 0.0, "count": 0}
             },
             "match_methods": {},
-            "avg_confidence": 0.0
+            "avg_confidence": 0.0,
+            # NEW: Classification method breakdown
+            "classification_counts": {
+                "deterministic": 0,
+                "ai": 0,
+                "other": 0
+            },
+            "ai_assisted_count": 0,
+            "ai_suggested_but_rejected_count": 0
         }
     
     # Populate status counts

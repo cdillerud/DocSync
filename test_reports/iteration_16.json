@@ -1,0 +1,93 @@
+{
+  "summary": "Classification Dashboard Extension - All features verified. Backend: 22/22 tests passed for new classification_counts, ai_assisted_count, ai_suggested_but_rejected_count fields and classification filter. Frontend: Classification column with badges (Det/AI/Other), Classification filter dropdown all working correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_classification_dashboard.py",
+    "/app/backend/tests/test_document_types_dashboard.py",
+    "/app/test_reports/pytest/classification_dashboard_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Classification aggregation correctly implemented in _aggregate_document_types_data() - deterministic matches classification_method NOT starting with 'ai:', AI matches 'ai:*' pattern",
+    "CSV export includes all new classification columns: classification_deterministic, classification_ai, classification_other, ai_assisted_count, ai_suggested_but_rejected_count",
+    "Frontend ClassificationBadge component correctly displays counts with appropriate icons (Cpu for Det, Brain for AI, HelpCircle for Other)",
+    "Classification filter dropdown properly filters API with classification parameter and updates UI accordingly"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_classification_dashboard.py"
+  ],
+  "success_rate": {
+    "backend": "100% (34/34 tests - 12 existing + 22 new classification tests)",
+    "frontend": "100% (All UI elements verified via Playwright)"
+  },
+  "seed_data_creation": "Test documents with classification_method='legacy_ai:AP_Invoice' (deterministic) and null/empty (other) already exist in database",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Classification dashboard extension fully tested. Key behaviors verified: 1) classification_counts field with deterministic/ai/other breakdown per doc_type, 2) ai_assisted_count and ai_suggested_but_rejected_count fields present, 3) classification filter works (deterministic/ai/all), 4) CSV export includes all classification columns, 5) Frontend shows Classification column with badges and filter dropdown",
+  "verified_features": {
+    "backend_api": {
+      "classification_counts_per_doc_type": {
+        "status": "VERIFIED",
+        "evidence": "AP_INVOICE has classification_counts.deterministic=1, OTHER has classification_counts.other=3"
+      },
+      "ai_assisted_count_field": {
+        "status": "VERIFIED",
+        "evidence": "Field present in each doc_type response, correctly counts docs with ai_classification AND doc_type != OTHER"
+      },
+      "ai_suggested_but_rejected_count_field": {
+        "status": "VERIFIED", 
+        "evidence": "OTHER doc_type shows ai_suggested_but_rejected_count=3 (docs with ai_classification but remained OTHER)"
+      },
+      "classification_filter_deterministic": {
+        "status": "VERIFIED",
+        "evidence": "?classification=deterministic returns only 1 doc (AP_INVOICE with legacy_ai method)"
+      },
+      "classification_filter_ai": {
+        "status": "VERIFIED",
+        "evidence": "?classification=ai returns 0 docs (no AI-classified docs in test data)"
+      },
+      "csv_export_classification_columns": {
+        "status": "VERIFIED",
+        "evidence": "CSV includes classification_deterministic, classification_ai, classification_other, ai_assisted_count, ai_suggested_but_rejected_count columns"
+      },
+      "classification_totals": {
+        "status": "VERIFIED",
+        "evidence": "Response includes classification_totals with deterministic/ai/other sums across all doc_types"
+      }
+    },
+    "frontend_ui": {
+      "classification_column": {
+        "status": "VERIFIED",
+        "evidence": "Table shows Classification column header and ClassificationBadge components for each row"
+      },
+      "classification_badges": {
+        "status": "VERIFIED",
+        "evidence": "Badges show Det/AI/Other counts with appropriate icons (Cpu=Det, Brain=AI, HelpCircle=Other)"
+      },
+      "classification_filter_dropdown": {
+        "status": "VERIFIED",
+        "evidence": "Dropdown shows All Methods, Deterministic, AI Assisted options with counts"
+      },
+      "filter_updates_data": {
+        "status": "VERIFIED",
+        "evidence": "Selecting Deterministic filter reduces Total Documents from 4 to 1, hides OTHER row"
+      },
+      "empty_state_on_filter": {
+        "status": "VERIFIED",
+        "evidence": "AI Assisted filter shows 'No documents found' when 0 AI-classified docs exist"
+      },
+      "export_csv_with_filter": {
+        "status": "VERIFIED",
+        "evidence": "Export CSV button respects classification filter, disabled when no data"
+      }
+    }
+  }
+}

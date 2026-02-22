@@ -8510,6 +8510,118 @@ async def get_pilot_trend_data(
     }
 
 
+@api_router.post("/pilot/send-daily-summary")
+async def trigger_daily_pilot_summary():
+    """
+    Manually trigger the daily pilot summary email.
+    
+    Only allowed when pilot mode is enabled.
+    
+    Returns:
+        Summary data and email send result
+    """
+    if not PILOT_MODE_ENABLED:
+        raise HTTPException(
+            status_code=400,
+            detail="Pilot mode is disabled. Cannot send daily summary."
+        )
+    
+    from services.email_service import get_email_service
+    
+    email_service = get_email_service()
+    result = await send_daily_pilot_summary(db, email_service)
+    
+    return result
+
+
+@api_router.get("/pilot/email-logs")
+async def get_pilot_email_logs(
+    limit: int = Query(default=20, ge=1, le=100),
+    skip: int = Query(default=0, ge=0)
+):
+    """
+    Get logs of sent pilot summary emails.
+    
+    Useful for verifying email content during the shadow pilot.
+    """
+    cursor = db.email_logs.find(
+        {"subject": {"$regex": "Pilot Summary", "$options": "i"}},
+        {"_id": 0}
+    ).sort("sent_at", -1).skip(skip).limit(limit)
+    
+    logs = await cursor.to_list(limit)
+    total = await db.email_logs.count_documents(
+        {"subject": {"$regex": "Pilot Summary", "$options": "i"}}
+    )
+    
+    return {
+        "total": total,
+        "logs": logs
+    }
+
+
+@api_router.get("/pilot/email-config")
+async def get_pilot_email_config():
+    """
+    Get current pilot email configuration.
+    """
+    return {
+        "daily_email_enabled": DAILY_PILOT_EMAIL_ENABLED,
+        "recipients": PILOT_SUMMARY_RECIPIENTS,
+        "cron_hour_utc": PILOT_SUMMARY_CRON_HOUR_UTC,
+        "pilot_mode_enabled": PILOT_MODE_ENABLED,
+        "current_phase": CURRENT_PILOT_PHASE
+    }
+
+
+# Daily pilot summary scheduler
+async def _daily_pilot_summary_scheduler():
+    """
+    Background task that sends daily pilot summary emails.
+    
+    Runs continuously, checking every minute if it's time to send.
+    Sends at PILOT_SUMMARY_CRON_HOUR_UTC (default: 13:00 UTC = 7 AM CST).
+    """
+    from services.email_service import get_email_service
+    
+    last_sent_date = None
+    
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            current_date = now.strftime("%Y-%m-%d")
+            current_hour = now.hour
+            
+            # Check if it's time to send and we haven't sent today
+            should_send = (
+                PILOT_MODE_ENABLED and
+                DAILY_PILOT_EMAIL_ENABLED and
+                current_hour == PILOT_SUMMARY_CRON_HOUR_UTC and
+                last_sent_date != current_date
+            )
+            
+            if should_send:
+                logger.info("Daily pilot summary cron triggered")
+                email_service = get_email_service()
+                result = await send_daily_pilot_summary(db, email_service)
+                
+                if result.get("sent"):
+                    last_sent_date = current_date
+                    logger.info(f"Daily pilot summary sent successfully: {result.get('message_id')}")
+                else:
+                    logger.warning(f"Daily pilot summary not sent: {result.get('reason')}")
+            
+            # Sleep for 60 seconds before checking again
+            await asyncio.sleep(60)
+            
+        except asyncio.CancelledError:
+            logger.info("Daily pilot summary scheduler cancelled")
+            break
+        except Exception as e:
+            logger.error(f"Error in daily pilot summary scheduler: {e}")
+            await asyncio.sleep(60)  # Wait before retrying
+
+
 # ==================== WORKFLOW METRICS ====================
 
 @api_router.get("/workflows/ap_invoice/metrics")

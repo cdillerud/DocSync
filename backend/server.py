@@ -11042,10 +11042,10 @@ async def run_simulation_for_document(doc_id: str):
         simulation_results=results_dict
     )
     
-    # Store simulation results in dedicated collection
+    # Store simulation results in dedicated collection (copy to avoid _id mutation)
     for sim_type, result in results_dict.items():
-        result["_collection_timestamp"] = datetime.now(timezone.utc).isoformat()
-        await db.pilot_simulation_results.insert_one(result)
+        result_copy = {**result, "_collection_timestamp": datetime.now(timezone.utc).isoformat()}
+        await db.pilot_simulation_results.insert_one(result_copy)
     
     # Update document with simulation results and history
     await db.hub_documents.update_one(

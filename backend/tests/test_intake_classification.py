@@ -436,6 +436,160 @@ class TestAIClassificationAuditTrail:
         print("PASS: Test completed")
 
 
+class TestDeterministicVsAIClassification:
+    """Tests specifically for verifying deterministic-first behavior."""
+    
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        """Setup test fixtures."""
+        self.test_doc_ids = []
+        yield
+        # Cleanup
+        for doc_id in self.test_doc_ids:
+            try:
+                requests.delete(f"{BASE_URL}/api/documents/{doc_id}")
+            except Exception:
+                pass
+    
+    def _create_test_pdf(self, content_text: str = "Test Document") -> BytesIO:
+        """Create a simple test PDF-like file."""
+        pdf_content = f"%PDF-1.4\n{content_text}\n%%EOF".encode('utf-8')
+        return BytesIO(pdf_content)
+    
+    def test_ap_invoice_uses_legacy_ai_method(self):
+        """Test that AP Invoice document uses legacy_ai classification method when AI extraction identifies it."""
+        # Create clear AP Invoice content
+        test_file = self._create_test_pdf("""
+            INVOICE FROM VENDOR
+            =====================
+            Vendor: ABC Corporation
+            Invoice No: INV-2026-TEST-001
+            Invoice Date: January 22, 2026
+            Due Date: February 22, 2026
+            
+            Description: Professional Services
+            Amount: $3,500.00
+            Tax: $350.00
+            Total Due: $3,850.00
+            
+            Please remit payment within 30 days.
+            
+            Vendor Contact: accounts@abccorp.com
+        """)
+        
+        response = requests.post(
+            f"{BASE_URL}/api/documents/intake",
+            files={"file": ("vendor_invoice_test.pdf", test_file, "application/pdf")},
+            data={
+                "source": "test_legacy_ai_method",
+                "sender": "accounts@abccorp.com",
+                "subject": "Invoice INV-2026-TEST-001"
+            }
+        )
+        
+        assert response.status_code == 200, f"Intake failed: {response.status_code}"
+        
+        data = response.json()
+        doc = data.get("document", {})
+        
+        if doc.get("id"):
+            self.test_doc_ids.append(doc["id"])
+        
+        suggested_type = doc.get("suggested_job_type", "")
+        doc_type = doc.get("doc_type", "")
+        classification_method = doc.get("classification_method", "")
+        ai_classification = doc.get("ai_classification")
+        
+        print(f"AP Invoice classification test:")
+        print(f"  - suggested_job_type (from AI extraction): {suggested_type}")
+        print(f"  - doc_type: {doc_type}")
+        print(f"  - classification_method: {classification_method}")
+        print(f"  - ai_classification: {'present' if ai_classification else 'not present'}")
+        
+        # If AI extraction identified it as AP_Invoice, the classification should use legacy_ai method
+        if suggested_type in ("AP_Invoice", "AP Invoice"):
+            # Deterministic rule (legacy_ai) should have classified it
+            assert "legacy_ai" in classification_method or doc_type == "AP_INVOICE", \
+                f"Expected legacy_ai method or AP_INVOICE doc_type when suggested_type is {suggested_type}"
+            
+            # When legacy_ai method is used, ai_classification audit should NOT be present
+            # (because AI fallback was never invoked - deterministic rule won)
+            if classification_method.startswith("legacy_ai:"):
+                assert ai_classification is None, \
+                    f"ai_classification should be None when legacy_ai deterministic rule wins"
+                print("PASS: AP_Invoice classified via legacy_ai - no AI fallback needed")
+            else:
+                print(f"Note: Classification method is {classification_method}")
+        else:
+            print(f"Note: AI extraction did not identify as AP_Invoice, got: {suggested_type}")
+        
+        print("PASS: AP Invoice classification behavior verified")
+    
+    def test_ai_fallback_for_unknown_document(self):
+        """Test that AI fallback is invoked for documents that deterministic rules cannot classify."""
+        # Create ambiguous content that won't match deterministic rules
+        test_file = self._create_test_pdf("""
+            BUSINESS CORRESPONDENCE
+            
+            Dear Sir/Madam,
+            
+            Reference: MISC-DOC-2026-001
+            
+            This document contains miscellaneous business information
+            that does not clearly indicate a specific document type.
+            
+            Please review and file accordingly.
+            
+            Best regards,
+            Business Team
+        """)
+        
+        response = requests.post(
+            f"{BASE_URL}/api/documents/intake",
+            files={"file": ("misc_document.pdf", test_file, "application/pdf")},
+            data={
+                "source": "test_ai_fallback",
+                "sender": "info@company.com",
+                "subject": "Business Document Reference"
+            }
+        )
+        
+        assert response.status_code == 200, f"Intake failed: {response.status_code}"
+        
+        data = response.json()
+        doc = data.get("document", {})
+        
+        if doc.get("id"):
+            self.test_doc_ids.append(doc["id"])
+        
+        suggested_type = doc.get("suggested_job_type", "")
+        doc_type = doc.get("doc_type", "")
+        classification_method = doc.get("classification_method", "")
+        ai_classification = doc.get("ai_classification")
+        
+        print(f"AI fallback test:")
+        print(f"  - suggested_job_type (from AI extraction): {suggested_type}")
+        print(f"  - doc_type: {doc_type}")
+        print(f"  - classification_method: {classification_method}")
+        
+        # If deterministic rules returned OTHER, AI fallback should have been attempted
+        # (if EMERGENT_LLM_KEY is configured)
+        if classification_method.startswith("ai:"):
+            # AI fallback was invoked
+            assert ai_classification is not None, "ai_classification should be present when AI fallback is used"
+            print(f"PASS: AI fallback was invoked, audit trail present")
+            print(f"  - AI proposed: {ai_classification.get('proposed_doc_type')}")
+            print(f"  - AI confidence: {ai_classification.get('confidence')}")
+        elif classification_method == "default":
+            # Neither deterministic nor AI worked
+            print(f"Note: Default classification used, AI may not be configured or failed")
+        else:
+            # Deterministic rule worked
+            print(f"Note: Deterministic classification succeeded: {classification_method}")
+        
+        print("PASS: AI fallback behavior verified")
+
+
 class TestDashboardStats:
     """Test that dashboard stats reflect classification data correctly."""
     

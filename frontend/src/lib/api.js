@@ -31,6 +31,13 @@ export const getMe = () => api.get('/auth/me');
 // Dashboard
 export const getDashboardStats = () => api.get('/dashboard/stats');
 export const getDocumentTypesDashboard = (params) => api.get('/dashboard/document-types', { params });
+export const exportDocumentTypesDashboard = (params) => {
+  const queryString = new URLSearchParams(
+    Object.entries(params || {}).filter(([_, v]) => v !== null && v !== undefined && v !== 'all')
+  ).toString();
+  const url = `${API_BASE_URL}/dashboard/document-types/export${queryString ? '?' + queryString : ''}`;
+  window.location.href = url;
+};
 
 // Documents
 export const uploadDocument = (formData) => api.post('/documents/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } });

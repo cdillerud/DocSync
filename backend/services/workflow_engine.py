@@ -1319,6 +1319,112 @@ def _summarize_bc_data(data: Dict, lookup_type: str) -> Dict:
 
 
 # =============================================================================
+# BC SIMULATION WORKFLOW HELPERS
+# =============================================================================
+
+class SimulationHistoryEntry:
+    """
+    Creates workflow history entries for BC simulation events.
+    Used during Phase 2 of shadow pilot to track simulated operations.
+    """
+    
+    @staticmethod
+    def create_simulation_entry(
+        simulation_result: Dict,
+        actor: str = "bc_simulation_service"
+    ) -> Dict:
+        """
+        Create a workflow history entry for a BC simulation.
+        
+        Args:
+            simulation_result: The SimulationResult.to_dict() data
+            actor: Who/what performed the simulation
+            
+        Returns:
+            Workflow history entry dict
+        """
+        sim_type = simulation_result.get("simulation_type", "unknown")
+        status = simulation_result.get("status", "unknown")
+        would_succeed = simulation_result.get("would_succeed_in_production", False)
+        
+        # Determine the workflow event based on simulation type
+        event_map = {
+            "export_ap_invoice": WorkflowEvent.ON_EXPORT_SIMULATED.value,
+            "create_purchase_invoice": WorkflowEvent.ON_BC_CREATE_INVOICE_SIMULATED.value,
+            "attach_pdf": WorkflowEvent.ON_BC_ATTACHMENT_SIMULATED.value,
+            "export_sales_invoice": WorkflowEvent.ON_EXPORT_SIMULATED.value,
+            "po_linkage": WorkflowEvent.ON_BC_LINKAGE_SIMULATED.value,
+        }
+        event = event_map.get(sim_type, f"on_{sim_type}_simulated")
+        
+        return {
+            "timestamp": simulation_result.get("timestamp", datetime.now(timezone.utc).isoformat()),
+            "event": event,
+            "actor": actor,
+            "simulation": {
+                "simulation_id": simulation_result.get("simulation_id"),
+                "simulation_type": sim_type,
+                "status": status,
+                "would_succeed_in_production": would_succeed,
+                "failure_reason": simulation_result.get("failure_reason"),
+                "timing_ms": simulation_result.get("timing_ms"),
+                "simulated_bc_number": simulation_result.get("simulated_bc_response", {}).get("number"),
+                "simulated_bc_id": simulation_result.get("simulated_bc_response", {}).get("id"),
+            },
+            "validation_checks": [
+                {"check": c.get("check"), "passed": c.get("passed")}
+                for c in simulation_result.get("validation_checks", [])
+            ],
+            "observation_only": True,
+            "pilot_mode": True,
+            "pilot_phase": simulation_result.get("pilot_phase")
+        }
+    
+    @staticmethod
+    def create_batch_simulation_entry(
+        document_id: str,
+        simulation_results: Dict[str, Dict],
+        actor: str = "bc_simulation_service"
+    ) -> Dict:
+        """
+        Create a workflow history entry for a batch of simulations.
+        
+        Args:
+            document_id: The document ID
+            simulation_results: Dict mapping simulation type to result dict
+            actor: Who/what performed the simulations
+            
+        Returns:
+            Workflow history entry dict
+        """
+        total = len(simulation_results)
+        succeeded = sum(1 for r in simulation_results.values() if r.get("would_succeed_in_production"))
+        
+        return {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": WorkflowEvent.ON_SIMULATION_SUCCESS.value if succeeded == total else WorkflowEvent.ON_SIMULATION_WOULD_FAIL.value,
+            "actor": actor,
+            "batch_simulation": {
+                "document_id": document_id,
+                "total_simulations": total,
+                "would_succeed_count": succeeded,
+                "would_fail_count": total - succeeded,
+                "simulations": {
+                    sim_type: {
+                        "status": result.get("status"),
+                        "would_succeed": result.get("would_succeed_in_production"),
+                        "bc_number": result.get("simulated_bc_response", {}).get("number"),
+                        "failure_reason": result.get("failure_reason")
+                    }
+                    for sim_type, result in simulation_results.items()
+                }
+            },
+            "observation_only": True,
+            "pilot_mode": True
+        }
+
+
+# =============================================================================
 # BACKWARD COMPATIBILITY
 # =============================================================================
 

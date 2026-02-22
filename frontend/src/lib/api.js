@@ -112,4 +112,10 @@ export const startApproval = (docId, actor) => api.post(`/workflows/ap_invoice/$
 export const approveDocument = (docId, comment, actor) => api.post(`/workflows/ap_invoice/${docId}/approve`, { comment, actor });
 export const rejectDocument = (docId, reason, actor) => api.post(`/workflows/ap_invoice/${docId}/reject`, { reason, actor });
 
+// Generic Workflow Actions (for any doc type)
+export const exportDocument = (docId, destination, user) => api.post(`/workflows/${docId}/export`, null, { params: { export_destination: destination, user } });
+
+// Get AP Dashboard metrics (from doc-types dashboard filtered to AP)
+export const getAPDashboardMetrics = () => api.get('/dashboard/document-types', { params: { doc_type: 'AP_INVOICE' } });
+
 export default api;

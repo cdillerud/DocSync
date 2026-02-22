@@ -30,7 +30,10 @@ from sales_module import (
 )
 
 # Workflow Engine Service
-from services.workflow_engine import WorkflowEngine, WorkflowStatus, WorkflowEvent
+from services.workflow_engine import (
+    WorkflowEngine, WorkflowStatus, WorkflowEvent, 
+    DocType, SourceSystem, CaptureChannel, DocumentClassifier
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')

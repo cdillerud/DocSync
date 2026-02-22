@@ -637,4 +637,47 @@ All documents ingested during pilot automatically receive:
 
 ---
 
+## Daily Pilot Email Notification (Completed - February 22, 2026)
+
+### Overview
+An automated daily email notification system that sends pilot summary reports to stakeholders, with both scheduled and manual trigger capabilities.
+
+### Backend Components
+| Component | Path | Purpose |
+|-----------|------|---------|
+| email_service.py | `/backend/services/email_service.py` | Mock email service (stores emails in-memory) |
+| pilot_summary.py | `/backend/services/pilot_summary.py` | Generates HTML email body with pilot metrics |
+| APScheduler | server.py | Schedules daily job at 7:00 AM EST |
+
+### API Endpoints
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | /api/pilot/send-daily-summary | Manually trigger daily summary email |
+| GET | /api/pilot/email-logs | View history of sent emails |
+| GET | /api/pilot/email-config | Get email notification configuration |
+
+### Frontend Implementation
+- **"Send Summary Email Now" button** on `/pilot-dashboard` page
+- Conditionally rendered (only when pilot mode is active)
+- Includes loading state and toast notifications
+- Button has `data-testid="send-summary-email-btn"` for testing
+
+### Features
+- **Automated Scheduling**: APScheduler runs daily at 7:00 AM EST
+- **Manual Trigger**: Admin can send summary on-demand via dashboard button
+- **Mock Provider**: Stores emails in-memory list (replace with real provider for production)
+- **Rich HTML Content**: Summary includes total docs, accuracy score, AI usage, stuck documents
+
+### Test Results
+- **Backend API**: Verified via curl - returns `{"sent": true, "recipients": [...], "subject": "..."}`
+- **Frontend**: Screenshot verified - button visible, toast notification works
+- Recipients: 3 mock recipients configured
+
+### Future Work
+- Replace mock email service with Microsoft Graph API or SendGrid
+- Add recipient configuration UI
+- Add email template customization
+
+---
+
 *Last Updated: February 22, 2026*

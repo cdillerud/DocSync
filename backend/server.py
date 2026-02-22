@@ -50,6 +50,15 @@ from services.migration import (
 from services.migration.job import MigrationMode, MigrationJobBuilder
 from services.migration.sources import create_sample_migration_file
 
+# Pilot Configuration
+from services.pilot_config import (
+    PILOT_MODE_ENABLED, CURRENT_PILOT_PHASE,
+    get_pilot_metadata, is_pilot_document, get_pilot_capture_channel,
+    is_export_blocked, is_bc_validation_blocked, is_external_write_blocked,
+    create_pilot_workflow_entry, create_pilot_log_entry, get_pilot_status,
+    get_stuck_threshold_hours, STUCK_THRESHOLDS
+)
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 

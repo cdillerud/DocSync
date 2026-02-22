@@ -810,4 +810,64 @@ Phase 2 of Shadow Pilot: Simulates all BC write operations internally without ca
 
 ---
 
+## Simulation Dashboard (Completed - February 22, 2026)
+
+### Overview
+Visual dashboard for analyzing BC simulation results during Phase 2 shadow pilot. Groups documents by success/failure, failure reason, doc_type, and source_system.
+
+### Backend Components
+
+#### New Service Module
+- **File:** `/app/backend/services/simulation_metrics_service.py`
+- **Class:** `SimulationMetricsService`
+
+#### Metrics Calculated
+| Metric | Description |
+|--------|-------------|
+| total_simulated_docs | Unique documents simulated |
+| total_simulations | Total simulation runs |
+| success_count / failure_count | Would succeed/fail in production |
+| success_rate | Percentage success rate |
+| by_doc_type | Breakdown by document type |
+| by_failure_reason | Normalized failure reason codes |
+| by_source_system | Breakdown by source system |
+| by_workflow_status | Breakdown by workflow status |
+
+#### Failure Reason Codes
+- VENDOR_NOT_FOUND, CUSTOMER_NOT_FOUND, PO_NOT_FOUND
+- MISSING_VENDOR, MISSING_CUSTOMER, MISSING_INVOICE_NUMBER
+- MISSING_AMOUNT, MISSING_PO_NUMBER, MISSING_FILE_URL
+- MISSING_REQUIRED_FIELDS, VALIDATION_FAILED, OTHER
+
+### New API Endpoints
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/pilot/simulation/metrics | Global metrics summary |
+| GET | /api/pilot/simulation/metrics/failures | Failed simulation details |
+| GET | /api/pilot/simulation/metrics/successes | Success simulation details |
+| GET | /api/pilot/simulation/metrics/trend | Trend data for charting |
+| GET | /api/pilot/simulation/metrics/pending | Documents pending simulation |
+| GET | /api/pilot/simulation/failure-reasons | List of failure reason codes |
+
+### Frontend Page
+- **File:** `/app/frontend/src/pages/SimulationDashboardPage.js`
+- **Route:** `/simulation-dashboard`
+- **Navigation:** Added to sidebar with FlaskConical icon
+
+### UI Features
+- Summary cards: Total, Success Rate, Would Succeed, Would Fail
+- Breakdown cards: By Doc Type, By Failure Reason, By Source System
+- Trend chart: Daily success/failure over time
+- By Workflow Status breakdown
+- Recent Failed Simulations list with retry button
+- Documents Pending Simulation with batch run capability
+- Filter by days (7/14/30)
+- Filter by failure reason
+
+### Testing
+- Backend APIs tested via curl
+- Frontend visually verified via screenshot
+
+---
+
 *Last Updated: February 22, 2026*

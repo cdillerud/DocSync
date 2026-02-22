@@ -3,7 +3,7 @@ import {
   getJobTypes, updateJobType, getEmailWatcherConfig, updateEmailWatcherConfig,
   getEmailStats, classifyDocument,
   listMailboxSources, createMailboxSource, updateMailboxSource, deleteMailboxSource,
-  testMailboxConnection, pollMailboxNow
+  testMailboxConnection, pollMailboxNow, getMailboxPollingStatus
 } from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';

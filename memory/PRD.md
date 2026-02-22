@@ -202,6 +202,17 @@ Gamer Packaging, Inc. needs to:
 - [x] AI classifier service in `/app/backend/services/ai_classifier.py`
 - [x] 29 automated tests (16 unit tests for ai_classifier + 13 integration tests)
 
+#### Classification Dashboard Extension (NEW - Feb 22, 2026)
+- [x] `classification_counts` field per doc_type: deterministic, ai, other counts
+- [x] `ai_assisted_count` field: docs where AI successfully changed type from OTHER
+- [x] `ai_suggested_but_rejected_count` field: docs where AI was invoked but result rejected
+- [x] `classification` filter parameter on dashboard API (deterministic, ai, all)
+- [x] `classification_totals` in response: sum of classification counts across all doc_types
+- [x] CSV export includes classification columns
+- [x] Frontend "Classification" column with Det/AI/Other badges
+- [x] Frontend classification filter dropdown with counts
+- [x] 34 backend tests (12 existing + 22 new classification tests)
+
 ### In Progress / Shadow Mode
 - [x] AP automatic workflow trigger (VERIFIED WORKING)
 - [ ] BC record linking (manual only currently)

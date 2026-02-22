@@ -11280,9 +11280,10 @@ async def run_batch_simulation(
     
     results = []
     for doc in docs:
-        doc_id = doc.get("document_id")
+        doc_id = doc.get("id")
         try:
-            simulation_results = run_full_export_simulation(doc)
+            doc_for_sim = {**doc, "document_id": doc_id}
+            simulation_results = run_full_export_simulation(doc_for_sim)
             results_dict = {k: v.to_dict() for k, v in simulation_results.items()}
             
             # Store results
@@ -11296,7 +11297,7 @@ async def run_batch_simulation(
                 simulation_results=results_dict
             )
             await db.hub_documents.update_one(
-                {"document_id": doc_id},
+                {"id": doc_id},
                 {
                     "$push": {"workflow_history": history_entry},
                     "$set": {

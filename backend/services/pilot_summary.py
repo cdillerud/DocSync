@@ -154,7 +154,6 @@ async def generate_daily_pilot_summary(db) -> PilotDailySummary:
     
     deterministic_count = 0
     ai_count = 0
-    other_count = 0
     for r in classification_results:
         if r["_id"] == "deterministic":
             deterministic_count = r["count"]

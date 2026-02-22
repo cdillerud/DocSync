@@ -42,6 +42,14 @@ from services.ai_classifier import (
     DEFAULT_CONFIDENCE_THRESHOLD, AIClassificationResult as AIClassifierResult
 )
 
+# Migration Service
+from services.migration import (
+    MigrationJob, MigrationResult, LegacyDocumentSource, 
+    JsonFileSource, InMemorySource, WorkflowInitializer
+)
+from services.migration.job import MigrationMode, MigrationJobBuilder
+from services.migration.sources import create_sample_migration_file
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 

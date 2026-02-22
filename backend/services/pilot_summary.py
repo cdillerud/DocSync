@@ -112,7 +112,7 @@ async def generate_daily_pilot_summary(db) -> PilotDailySummary:
     try:
         pilot_start = datetime.strptime(PILOT_START_DATE, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         pilot_day = (now - pilot_start).days + 1
-    except:
+    except Exception:
         pilot_day = 1
     
     # Base match for pilot documents

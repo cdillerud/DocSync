@@ -11607,10 +11607,7 @@ async def reingest_single_document(doc_id: str):
         raise ValueError(f"Document {doc_id} not found")
     
     # Import classification and workflow functions
-    from services.workflow_engine import (
-        DocType, WorkflowStatus, WorkflowEvent,
-        get_initial_status, process_workflow_event
-    )
+    from services.workflow_engine import DocType, WorkflowStatus
     from services.bc_simulation_service import run_full_export_simulation
     
     # Step 1: Determine doc_type from existing data or re-classify
@@ -11629,11 +11626,8 @@ async def reingest_single_document(doc_id: str):
         else:
             doc_type = "OTHER"
     
-    # Step 2: Get initial workflow status for this doc_type
-    try:
-        initial_status = get_initial_status(doc_type)
-    except:
-        initial_status = "captured"
+    # Step 2: Initial workflow status is always "captured"
+    initial_status = WorkflowStatus.CAPTURED.value
     
     # Step 3: Create reset workflow history entry
     reset_entry = {
@@ -11677,9 +11671,9 @@ async def reingest_single_document(doc_id: str):
     # Set workflow status based on doc_type and simulation result
     if doc_type == "AP_INVOICE":
         if all_would_succeed:
-            new_status = "ready_for_approval"
+            new_status = WorkflowStatus.READY_FOR_APPROVAL.value
         else:
-            new_status = "data_correction_pending"
+            new_status = WorkflowStatus.DATA_CORRECTION_PENDING.value
     elif doc_type == "SALES_INVOICE":
         if all_would_succeed:
             new_status = "validated"

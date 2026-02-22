@@ -34,7 +34,8 @@ export default function Layout() {
     if (path === '/') return 'Dashboard';
     if (path === '/upload') return 'Upload Document';
     if (path === '/queue') return 'Document Queue';
-    if (path === '/workflow') return 'AP Workflow';
+    if (path === '/ap-workflows') return 'AP Workflows';
+    if (path === '/workflow') return 'Legacy Workflow';
     if (path === '/doc-types') return 'Document Types';
     if (path.startsWith('/documents/')) return 'Document Detail';
     if (path === '/email-parser') return 'Email Parser';

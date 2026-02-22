@@ -5896,9 +5896,12 @@ class ApprovalActionRequest(BaseModel):
 
 @api_router.get("/workflows/ap_invoice/status-counts")
 async def get_ap_workflow_status_counts():
-    """Get counts of AP_Invoice documents by workflow status."""
+    """Get counts of AP_INVOICE documents by workflow status."""
     pipeline = [
-        {"$match": {"document_type": "AP_Invoice"}},
+        {"$match": {"$or": [
+            {"doc_type": DocType.AP_INVOICE.value},
+            {"document_type": "AP_Invoice"}  # Backward compatibility
+        ]}},
         {"$group": {"_id": "$workflow_status", "count": {"$sum": 1}}},
         {"$sort": {"_id": 1}}
     ]
@@ -5911,7 +5914,7 @@ async def get_ap_workflow_status_counts():
         "status_counts": counts,
         "total": sum(counts.values()),
         "exception_queue_total": sum(
-            counts.get(s, 0) for s in WorkflowEngine.get_exception_statuses()
+            counts.get(s, 0) for s in WorkflowEngine.get_exception_statuses(DocType.AP_INVOICE.value)
         )
     }
 
@@ -5927,11 +5930,14 @@ async def get_vendor_pending_queue(
     date_to: Optional[str] = Query(None)
 ):
     """
-    Get AP_Invoice documents in vendor_pending status.
+    Get AP_INVOICE documents in vendor_pending status.
     These are documents where the vendor could not be automatically matched.
     """
     fq = {
-        "document_type": "AP_Invoice",
+        "$or": [
+            {"doc_type": DocType.AP_INVOICE.value},
+            {"document_type": "AP_Invoice"}
+        ],
         "workflow_status": WorkflowStatus.VENDOR_PENDING.value
     }
     

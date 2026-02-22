@@ -3351,6 +3351,17 @@ async def _internal_intake_document(
     
     await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
     
+    # Update workflow status based on processing results (for AP_Invoice documents)
+    if suggested_type == "AP_Invoice":
+        await _update_ap_workflow_status(
+            doc_id, 
+            confidence, 
+            normalized_fields, 
+            vendor_alias_result, 
+            validation_results,
+            ap_validation
+        )
+    
     # Create workflow audit trail entry
     workflow_run_id = uuid.uuid4().hex[:8]
     workflow = {

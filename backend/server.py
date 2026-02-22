@@ -1442,6 +1442,7 @@ async def export_document_types_dashboard(
     fieldnames = [
         'doc_type',
         'source_system',
+        'classification_filter',
         'total',
         'status',
         'status_count',
@@ -1455,7 +1456,12 @@ async def export_document_types_dashboard(
         'match_alias',
         'match_fuzzy',
         'match_manual',
-        'match_none'
+        'match_none',
+        'classification_deterministic',
+        'classification_ai',
+        'classification_other',
+        'ai_assisted_count',
+        'ai_suggested_but_rejected_count'
     ]
     
     writer = csv.DictWriter(output, fieldnames=fieldnames)
@@ -1465,49 +1471,42 @@ async def export_document_types_dashboard(
     for dt, type_data in sorted(by_type.items()):
         extraction = type_data.get("extraction", {})
         match_methods = type_data.get("match_methods", {})
+        classification_counts = type_data.get("classification_counts", {})
+        
+        # Common fields for all rows of this doc_type
+        common_fields = {
+            'doc_type': dt,
+            'source_system': source_system_filter,
+            'classification_filter': classification_filter_label,
+            'total': type_data.get("total", 0),
+            'vendor_extraction_rate': extraction.get("vendor", {}).get("rate", 0),
+            'invoice_number_extraction_rate': extraction.get("invoice_number", {}).get("rate", 0),
+            'amount_extraction_rate': extraction.get("amount", {}).get("rate", 0),
+            'po_number_extraction_rate': extraction.get("po_number", {}).get("rate", 0),
+            'due_date_extraction_rate': extraction.get("due_date", {}).get("rate", 0),
+            'match_exact': match_methods.get("exact", 0),
+            'match_normalized': match_methods.get("normalized", 0),
+            'match_alias': match_methods.get("alias", 0),
+            'match_fuzzy': match_methods.get("fuzzy", 0),
+            'match_manual': match_methods.get("manual", 0),
+            'match_none': match_methods.get("none", 0),
+            'classification_deterministic': classification_counts.get("deterministic", 0),
+            'classification_ai': classification_counts.get("ai", 0),
+            'classification_other': classification_counts.get("other", 0),
+            'ai_assisted_count': type_data.get("ai_assisted_count", 0),
+            'ai_suggested_but_rejected_count': type_data.get("ai_suggested_but_rejected_count", 0)
+        }
         
         # Get all statuses for this doc_type
         status_counts = type_data.get("status_counts", {})
         
         if not status_counts:
             # If no status counts, write one row with just the doc_type info
-            writer.writerow({
-                'doc_type': dt,
-                'source_system': source_system_filter,
-                'total': type_data.get("total", 0),
-                'status': '',
-                'status_count': 0,
-                'vendor_extraction_rate': extraction.get("vendor", {}).get("rate", 0),
-                'invoice_number_extraction_rate': extraction.get("invoice_number", {}).get("rate", 0),
-                'amount_extraction_rate': extraction.get("amount", {}).get("rate", 0),
-                'po_number_extraction_rate': extraction.get("po_number", {}).get("rate", 0),
-                'due_date_extraction_rate': extraction.get("due_date", {}).get("rate", 0),
-                'match_exact': match_methods.get("exact", 0),
-                'match_normalized': match_methods.get("normalized", 0),
-                'match_alias': match_methods.get("alias", 0),
-                'match_fuzzy': match_methods.get("fuzzy", 0),
-                'match_manual': match_methods.get("manual", 0),
-                'match_none': match_methods.get("none", 0)
-            })
+            writer.writerow({**common_fields, 'status': '', 'status_count': 0})
         else:
             # Write one row per status
             for status, count in sorted(status_counts.items()):
-                writer.writerow({
-                    'doc_type': dt,
-                    'source_system': source_system_filter,
-                    'total': type_data.get("total", 0),
-                    'status': status,
-                    'status_count': count,
-                    'vendor_extraction_rate': extraction.get("vendor", {}).get("rate", 0),
-                    'invoice_number_extraction_rate': extraction.get("invoice_number", {}).get("rate", 0),
-                    'amount_extraction_rate': extraction.get("amount", {}).get("rate", 0),
-                    'po_number_extraction_rate': extraction.get("po_number", {}).get("rate", 0),
-                    'due_date_extraction_rate': extraction.get("due_date", {}).get("rate", 0),
-                    'match_exact': match_methods.get("exact", 0),
-                    'match_normalized': match_methods.get("normalized", 0),
-                    'match_alias': match_methods.get("alias", 0),
-                    'match_fuzzy': match_methods.get("fuzzy", 0),
-                    'match_manual': match_methods.get("manual", 0),
+                writer.writerow({**common_fields, 'status': status, 'status_count': count})
                     'match_none': match_methods.get("none", 0)
                 })
     

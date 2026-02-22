@@ -55,6 +55,9 @@ DEMO_MODE = os.environ.get('DEMO_MODE', 'true').lower() == 'true'
 JWT_SECRET = os.environ.get('JWT_SECRET', 'gpi-hub-secret-key')
 # Feature flag for Phase 4: CREATE_DRAFT_HEADER (Sandbox only)
 ENABLE_CREATE_DRAFT_HEADER = os.environ.get('ENABLE_CREATE_DRAFT_HEADER', 'false').lower() == 'true'
+# AI Classification Config
+AI_CLASSIFICATION_ENABLED = os.environ.get('AI_CLASSIFICATION_ENABLED', 'true').lower() == 'true'
+AI_CLASSIFICATION_THRESHOLD = float(os.environ.get('AI_CLASSIFICATION_THRESHOLD', '0.8'))
 # Phase 7 C1: Email Polling Config (Observation Infrastructure)
 EMAIL_POLLING_ENABLED = os.environ.get('EMAIL_POLLING_ENABLED', 'false').lower() == 'true'
 EMAIL_POLLING_INTERVAL_MINUTES = int(os.environ.get('EMAIL_POLLING_INTERVAL_MINUTES', '5'))

@@ -11164,9 +11164,9 @@ async def simulate_attachment_endpoint(doc_id: str):
     result = simulate_attach_pdf(doc_for_sim)
     result_dict = result.to_dict()
     
-    # Store result
-    result_dict["_collection_timestamp"] = datetime.now(timezone.utc).isoformat()
-    await db.pilot_simulation_results.insert_one(result_dict)
+    # Store result (copy to avoid _id mutation)
+    result_copy = {**result_dict, "_collection_timestamp": datetime.now(timezone.utc).isoformat()}
+    await db.pilot_simulation_results.insert_one(result_copy)
     
     # Add to workflow history
     history_entry = SimulationHistoryEntry.create_simulation_entry(result_dict)

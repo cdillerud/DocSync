@@ -753,4 +753,61 @@ Read-only Business Central sandbox API integration for vendor, customer, PO, and
 
 ---
 
+## BC Simulation Service (Completed - February 22, 2026)
+
+### Overview
+Phase 2 of Shadow Pilot: Simulates all BC write operations internally without calling real BC APIs. All simulations are deterministic, logged to workflow history, and stored in MongoDB for analysis.
+
+### New Service Module
+- **File:** `/app/backend/services/bc_simulation_service.py`
+- **Purpose:** Simulated BC write operations for pilot observation mode
+
+### Simulation Functions
+| Function | Description |
+|----------|-------------|
+| `simulate_export_ap_invoice(doc)` | Simulate AP invoice export |
+| `simulate_create_purchase_invoice(doc)` | Simulate draft purchase invoice creation |
+| `simulate_attach_pdf(doc)` | Simulate PDF attachment to BC record |
+| `simulate_sales_invoice_export(doc)` | Simulate sales invoice export |
+| `simulate_po_linkage(doc)` | Simulate PO linkage |
+| `run_full_export_simulation(doc)` | Run all applicable simulations for a doc |
+
+### New Workflow Events
+- `ON_EXPORT_SIMULATED`
+- `ON_BC_CREATE_INVOICE_SIMULATED`
+- `ON_BC_ATTACHMENT_SIMULATED`
+- `ON_BC_LINKAGE_SIMULATED`
+- `ON_SIMULATION_SUCCESS`
+- `ON_SIMULATION_WOULD_FAIL`
+
+### API Endpoints
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/pilot/simulation/status | Service status |
+| POST | /api/pilot/simulation/document/{id}/run | Run full simulation |
+| POST | /api/pilot/simulation/ap-invoice/{id} | Simulate AP export |
+| POST | /api/pilot/simulation/sales-invoice/{id} | Simulate Sales export |
+| POST | /api/pilot/simulation/po-linkage/{id} | Simulate PO linkage |
+| POST | /api/pilot/simulation/attachment/{id} | Simulate PDF attachment |
+| GET | /api/pilot/simulation-results | Get simulation results |
+| GET | /api/pilot/simulation-summary | Get summary statistics |
+| POST | /api/pilot/simulation/batch | Run batch simulation |
+
+### Workflow Integration
+- `SimulationHistoryEntry` class for creating workflow history entries
+- Results stored in `pilot_simulation_results` MongoDB collection
+- `would_succeed_in_production` flag for each simulation
+
+### Test Coverage
+- **30 tests** in `/app/backend/tests/test_bc_simulation_service.py`
+- **66 total tests** (30 simulation + 36 sandbox)
+
+### Features
+- **Deterministic ID Generation:** Same input produces same output
+- **Validation Checks:** Each simulation validates prerequisites
+- **Failure Tracking:** `failure_reason` explains why simulation would fail
+- **No Real BC Writes:** All operations are read-only simulations
+
+---
+
 *Last Updated: February 22, 2026*

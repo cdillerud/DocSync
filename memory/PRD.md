@@ -173,6 +173,17 @@ Gamer Packaging, Inc. needs to:
 - [x] Frontend AP Workflow page (`/workflow`) with queue tabs and action dialogs
 - [x] 43 automated tests (21 unit + 22 API)
 
+#### Multi-Document Type Classification (NEW - Feb 22, 2026)
+- [x] Document classification model with `doc_type`, `source_system`, `capture_channel` fields
+- [x] 10 document types supported: AP_INVOICE, SALES_INVOICE, PURCHASE_ORDER, SALES_CREDIT_MEMO, PURCHASE_CREDIT_MEMO, STATEMENT, REMINDER, FINANCE_CHARGE_MEMO, QUALITY_DOC, OTHER
+- [x] Type-aware workflow engine with different state machines per doc_type
+- [x] Zetadocs set code mapping (ZD00015 -> AP_INVOICE, ZD00007 -> SALES_INVOICE, etc.)
+- [x] Square9 workflow name mapping
+- [x] Generic queue API: GET /api/workflows/generic/queue?doc_type=X&status=Y
+- [x] Status counts by type: GET /api/workflows/generic/status-counts-by-type
+- [x] Metrics by type: GET /api/workflows/generic/metrics-by-type
+- [x] 60 automated tests (22 workflow engine + 16 generic API + 22 AP queue)
+
 ### In Progress / Shadow Mode
 - [x] AP automatic workflow trigger (VERIFIED WORKING)
 - [ ] BC record linking (manual only currently)

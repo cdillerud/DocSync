@@ -64,6 +64,7 @@ export default function EmailParserPage() {
   
   // Mailbox sources state
   const [mailboxSources, setMailboxSources] = useState([]);
+  const [pollingStatus, setPollingStatus] = useState(null);
   const [showAddMailbox, setShowAddMailbox] = useState(false);
   const [editingMailbox, setEditingMailbox] = useState(null);
   const [mailboxForm, setMailboxForm] = useState({

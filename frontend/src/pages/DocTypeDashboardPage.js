@@ -9,9 +9,9 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { toast } from 'sonner';
 import { 
   RefreshCw, FileText, TrendingUp, CheckCircle, AlertCircle, 
-  Building2, Package, Receipt, FileCheck, HelpCircle, Filter
+  Building2, Package, Receipt, FileCheck, HelpCircle, Filter, Download
 } from 'lucide-react';
-import { getDocumentTypesDashboard } from '@/lib/api';
+import { getDocumentTypesDashboard, exportDocumentTypesDashboard } from '@/lib/api';
 
 const DOC_TYPE_CONFIG = {
   AP_INVOICE: { label: 'AP Invoice', icon: Receipt, color: 'bg-blue-500', description: 'Vendor invoices' },

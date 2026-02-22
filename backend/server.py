@@ -4062,7 +4062,9 @@ async def _internal_intake_document(
         "workflow_status_updated_utc": now,
         "created_utc": now,
         "updated_utc": now,
-        "last_error": None
+        "last_error": None,
+        # Pilot metadata (added if pilot mode enabled)
+        **get_pilot_metadata()
     }
     await db.hub_documents.insert_one(doc)
     

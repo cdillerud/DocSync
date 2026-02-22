@@ -3561,13 +3561,17 @@ async def _internal_intake_document(
         else:
             final_status = "Classified"
     
-    # Get the category from job type config
-    doc_category = job_configs.get("category", "Unknown")
+    # Get the category from job type config (fallback to our computed category)
+    doc_category = category if category != "Other" else job_configs.get("category", category)
     
     update_data = {
         "suggested_job_type": suggested_type,
         "document_type": suggested_type,
         "category": doc_category,
+        # Document classification fields
+        "doc_type": doc_type_value,
+        "source_system": SourceSystem.GPI_HUB_NATIVE.value,
+        "capture_channel": CaptureChannel.EMAIL.value if "email" in source.lower() else CaptureChannel.UPLOAD.value,
         "ai_confidence": confidence,
         "extracted_fields": extracted_fields,
         # Phase 7: Flat normalized fields on document

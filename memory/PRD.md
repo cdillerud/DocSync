@@ -549,4 +549,37 @@ A fully tested migration module for importing historical documents from Square9 
 
 ---
 
+## AP Workflows UI (Completed - February 22, 2026)
+
+### Overview
+A dedicated AP Invoice workflow management page at `/ap-workflows` providing AP users with a focused view of AP_INVOICE documents across all workflow stages.
+
+### Features Implemented
+- **Summary Cards**: Total AP Invoices, Active Queue Count, Vendor Extraction Rate, Export Rate
+- **Filters**: Vendor search, Source system, Date range, Amount range
+- **Queue Tabs**: 7 workflow status tabs (Vendor Pending, BC Validation, Failed, Ready, In Progress, Approved, Exported)
+- **Document Table**: Shows vendor, invoice #, amount, date, source, age for each document
+- **Detail Panel**: Side panel with document details, validation errors, workflow history timeline
+- **Row Actions**: Context-specific actions (Set Vendor, Override Validation, Approve/Reject, Export)
+
+### Reusable Components Created
+| Component | Path | Purpose |
+|-----------|------|---------|
+| WorkflowQueue | `/components/WorkflowQueue.js` | Generic queue component for any doc type |
+| DocumentDetailPanel | `/components/DocumentDetailPanel.js` | Document detail side panel |
+| workflowConstants | `/lib/workflowConstants.js` | Centralized status and config constants |
+
+### Architectural Pattern (Reusable for Other Doc Types)
+The implementation follows a pattern that can be replicated for Sales, Quality, and other doc types:
+1. Define status constants in `workflowConstants.js`
+2. Create a page that passes `docType` to `<WorkflowQueue>`
+3. Define `rowActions` based on status-specific business rules
+4. Reuse `DocumentDetailPanel` for consistent UX
+
+### Test Results
+- **Testing Agent**: 100% pass rate (9/9 features verified)
+- Test report: `/app/test_reports/iteration_18.json`
+
+---
+
 *Last Updated: February 22, 2026*

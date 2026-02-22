@@ -7255,6 +7255,523 @@ async def reject_document(doc_id: str, request: ApprovalActionRequest):
     }
 
 
+# ==================== GENERIC WORKFLOW MUTATION ENDPOINTS ====================
+
+@api_router.post("/workflows/{doc_id}/mark-ready-for-review")
+async def mark_ready_for_review(
+    doc_id: str,
+    reason: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Mark a document as ready for review.
+    Applicable to: STATEMENT, REMINDER, FINANCE_CHARGE_MEMO, QUALITY_DOC, OTHER
+    
+    Triggers: on_mark_ready_for_review event
+    """
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
+    
+    doc_type = doc.get("doc_type", DocType.OTHER.value)
+    
+    # Validate that this doc_type supports the ready_for_review state
+    valid_types = [
+        DocType.STATEMENT.value, DocType.REMINDER.value, 
+        DocType.FINANCE_CHARGE_MEMO.value, DocType.QUALITY_DOC.value
+    ]
+    
+    updated_doc, history_entry, success = WorkflowEngine.advance_workflow(
+        doc,
+        WorkflowEvent.ON_MARK_READY_FOR_REVIEW.value,
+        context={
+            "reason": reason or "Marked ready for review",
+            "metadata": {"triggered_by": current_user.get("username")}
+        },
+        actor=current_user.get("username", "system")
+    )
+    
+    if not success:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot transition to ready_for_review from status '{doc.get('workflow_status')}' for doc_type '{doc_type}'"
+        )
+    
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "workflow_status": updated_doc["workflow_status"],
+            "workflow_history": updated_doc["workflow_history"],
+            "workflow_status_updated_utc": updated_doc["workflow_status_updated_utc"]
+        }}
+    )
+    
+    return {
+        "document": updated_doc,
+        "workflow_transition": history_entry.to_dict(),
+        "message": "Document marked ready for review"
+    }
+
+
+@api_router.post("/workflows/{doc_id}/mark-reviewed")
+async def mark_reviewed(
+    doc_id: str,
+    reason: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Mark a document as reviewed.
+    Applicable to: STATEMENT, REMINDER, FINANCE_CHARGE_MEMO, QUALITY_DOC
+    
+    Triggers: on_reviewed event
+    """
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
+    
+    doc_type = doc.get("doc_type", DocType.OTHER.value)
+    
+    updated_doc, history_entry, success = WorkflowEngine.advance_workflow(
+        doc,
+        WorkflowEvent.ON_REVIEWED.value,
+        context={
+            "reason": reason or "Document reviewed",
+            "metadata": {"triggered_by": current_user.get("username")}
+        },
+        actor=current_user.get("username", "system")
+    )
+    
+    if not success:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot mark as reviewed from status '{doc.get('workflow_status')}' for doc_type '{doc_type}'"
+        )
+    
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "workflow_status": updated_doc["workflow_status"],
+            "workflow_history": updated_doc["workflow_history"],
+            "workflow_status_updated_utc": updated_doc["workflow_status_updated_utc"]
+        }}
+    )
+    
+    return {
+        "document": updated_doc,
+        "workflow_transition": history_entry.to_dict(),
+        "message": "Document marked as reviewed"
+    }
+
+
+@api_router.post("/workflows/{doc_id}/start-approval")
+async def start_approval_generic(
+    doc_id: str,
+    reason: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Start approval process for a document (generic version).
+    Applicable to: SALES_INVOICE, PURCHASE_ORDER, SALES_CREDIT_MEMO, PURCHASE_CREDIT_MEMO, QUALITY_DOC
+    
+    Triggers: on_approval_started event
+    """
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
+    
+    doc_type = doc.get("doc_type", DocType.OTHER.value)
+    
+    # For AP_INVOICE, redirect to the existing AP-specific endpoint
+    if doc_type == DocType.AP_INVOICE.value:
+        raise HTTPException(
+            status_code=400, 
+            detail="AP_INVOICE documents should use /api/workflows/ap_invoice/{doc_id}/start-approval"
+        )
+    
+    updated_doc, history_entry, success = WorkflowEngine.advance_workflow(
+        doc,
+        WorkflowEvent.ON_APPROVAL_STARTED.value,
+        context={
+            "reason": reason or "Approval process started",
+            "metadata": {"triggered_by": current_user.get("username")}
+        },
+        actor=current_user.get("username", "system")
+    )
+    
+    if not success:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot start approval from status '{doc.get('workflow_status')}' for doc_type '{doc_type}'"
+        )
+    
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "workflow_status": updated_doc["workflow_status"],
+            "workflow_history": updated_doc["workflow_history"],
+            "workflow_status_updated_utc": updated_doc["workflow_status_updated_utc"]
+        }}
+    )
+    
+    return {
+        "document": updated_doc,
+        "workflow_transition": history_entry.to_dict(),
+        "message": "Approval process started"
+    }
+
+
+@api_router.post("/workflows/{doc_id}/approve")
+async def approve_generic(
+    doc_id: str,
+    reason: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Approve a document (generic version).
+    Applicable to: SALES_INVOICE, PURCHASE_ORDER, SALES_CREDIT_MEMO, PURCHASE_CREDIT_MEMO
+    
+    Triggers: on_approved event
+    """
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
+    
+    doc_type = doc.get("doc_type", DocType.OTHER.value)
+    
+    # For AP_INVOICE, redirect to the existing AP-specific endpoint
+    if doc_type == DocType.AP_INVOICE.value:
+        raise HTTPException(
+            status_code=400, 
+            detail="AP_INVOICE documents should use /api/workflows/ap_invoice/{doc_id}/approve"
+        )
+    
+    updated_doc, history_entry, success = WorkflowEngine.advance_workflow(
+        doc,
+        WorkflowEvent.ON_APPROVED.value,
+        context={
+            "reason": reason or "Document approved",
+            "metadata": {"triggered_by": current_user.get("username")}
+        },
+        actor=current_user.get("username", "system")
+    )
+    
+    if not success:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot approve from status '{doc.get('workflow_status')}' for doc_type '{doc_type}'"
+        )
+    
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "workflow_status": updated_doc["workflow_status"],
+            "workflow_history": updated_doc["workflow_history"],
+            "workflow_status_updated_utc": updated_doc["workflow_status_updated_utc"]
+        }}
+    )
+    
+    return {
+        "document": updated_doc,
+        "workflow_transition": history_entry.to_dict(),
+        "message": "Document approved"
+    }
+
+
+@api_router.post("/workflows/{doc_id}/reject")
+async def reject_generic(
+    doc_id: str,
+    reason: str = Query(..., description="Reason for rejection (required)"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Reject a document (generic version).
+    Applicable to: SALES_INVOICE, PURCHASE_ORDER, SALES_CREDIT_MEMO, PURCHASE_CREDIT_MEMO, QUALITY_DOC
+    
+    Triggers: on_rejected event
+    """
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
+    
+    doc_type = doc.get("doc_type", DocType.OTHER.value)
+    
+    # For AP_INVOICE, redirect to the existing AP-specific endpoint
+    if doc_type == DocType.AP_INVOICE.value:
+        raise HTTPException(
+            status_code=400, 
+            detail="AP_INVOICE documents should use /api/workflows/ap_invoice/{doc_id}/reject"
+        )
+    
+    updated_doc, history_entry, success = WorkflowEngine.advance_workflow(
+        doc,
+        WorkflowEvent.ON_REJECTED.value,
+        context={
+            "reason": reason,
+            "metadata": {"triggered_by": current_user.get("username")}
+        },
+        actor=current_user.get("username", "system")
+    )
+    
+    if not success:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot reject from status '{doc.get('workflow_status')}' for doc_type '{doc_type}'"
+        )
+    
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "workflow_status": updated_doc["workflow_status"],
+            "workflow_history": updated_doc["workflow_history"],
+            "workflow_status_updated_utc": updated_doc["workflow_status_updated_utc"]
+        }}
+    )
+    
+    return {
+        "document": updated_doc,
+        "workflow_transition": history_entry.to_dict(),
+        "message": f"Document rejected: {reason}"
+    }
+
+
+@api_router.post("/workflows/{doc_id}/complete-triage")
+async def complete_triage(
+    doc_id: str,
+    reason: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Complete triage for an OTHER document.
+    Applicable to: OTHER
+    
+    Triggers: on_triage_completed event
+    """
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
+    
+    doc_type = doc.get("doc_type", DocType.OTHER.value)
+    
+    if doc_type != DocType.OTHER.value:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Triage completion is only applicable to OTHER documents, not {doc_type}"
+        )
+    
+    updated_doc, history_entry, success = WorkflowEngine.advance_workflow(
+        doc,
+        WorkflowEvent.ON_TRIAGE_COMPLETED.value,
+        context={
+            "reason": reason or "Triage completed",
+            "metadata": {"triggered_by": current_user.get("username")}
+        },
+        actor=current_user.get("username", "system")
+    )
+    
+    if not success:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot complete triage from status '{doc.get('workflow_status')}'"
+        )
+    
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "workflow_status": updated_doc["workflow_status"],
+            "workflow_history": updated_doc["workflow_history"],
+            "workflow_status_updated_utc": updated_doc["workflow_status_updated_utc"]
+        }}
+    )
+    
+    return {
+        "document": updated_doc,
+        "workflow_transition": history_entry.to_dict(),
+        "message": "Triage completed"
+    }
+
+
+@api_router.post("/workflows/{doc_id}/link-credit-to-invoice")
+async def link_credit_to_invoice(
+    doc_id: str,
+    invoice_id: str = Query(..., description="ID of the original invoice"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Link a credit memo to its original invoice.
+    Applicable to: SALES_CREDIT_MEMO, PURCHASE_CREDIT_MEMO
+    
+    Triggers: on_credit_linked_to_invoice event
+    """
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
+    
+    doc_type = doc.get("doc_type", DocType.OTHER.value)
+    
+    valid_types = [DocType.SALES_CREDIT_MEMO.value, DocType.PURCHASE_CREDIT_MEMO.value]
+    if doc_type not in valid_types:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invoice linkage is only applicable to credit memos, not {doc_type}"
+        )
+    
+    updated_doc, history_entry, success = WorkflowEngine.advance_workflow(
+        doc,
+        WorkflowEvent.ON_CREDIT_LINKED_TO_INVOICE.value,
+        context={
+            "reason": f"Linked to invoice {invoice_id}",
+            "metadata": {
+                "triggered_by": current_user.get("username"),
+                "linked_invoice_id": invoice_id
+            }
+        },
+        actor=current_user.get("username", "system")
+    )
+    
+    if not success:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot link to invoice from status '{doc.get('workflow_status')}'"
+        )
+    
+    # Store the linked invoice reference
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "workflow_status": updated_doc["workflow_status"],
+            "workflow_history": updated_doc["workflow_history"],
+            "workflow_status_updated_utc": updated_doc["workflow_status_updated_utc"],
+            "linked_invoice_id": invoice_id
+        }}
+    )
+    
+    updated_doc["linked_invoice_id"] = invoice_id
+    
+    return {
+        "document": updated_doc,
+        "workflow_transition": history_entry.to_dict(),
+        "message": f"Credit memo linked to invoice {invoice_id}"
+    }
+
+
+@api_router.post("/workflows/{doc_id}/tag-quality")
+async def tag_quality_doc(
+    doc_id: str,
+    tags: List[str] = Query(..., description="Quality tags to apply"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Tag a quality document for categorization.
+    Applicable to: QUALITY_DOC
+    
+    Triggers: on_quality_tagged event
+    """
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
+    
+    doc_type = doc.get("doc_type", DocType.OTHER.value)
+    
+    if doc_type != DocType.QUALITY_DOC.value:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Quality tagging is only applicable to QUALITY_DOC, not {doc_type}"
+        )
+    
+    updated_doc, history_entry, success = WorkflowEngine.advance_workflow(
+        doc,
+        WorkflowEvent.ON_QUALITY_TAGGED.value,
+        context={
+            "reason": f"Tagged with: {', '.join(tags)}",
+            "metadata": {
+                "triggered_by": current_user.get("username"),
+                "tags": tags
+            }
+        },
+        actor=current_user.get("username", "system")
+    )
+    
+    if not success:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot tag from status '{doc.get('workflow_status')}'"
+        )
+    
+    # Store the tags
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "workflow_status": updated_doc["workflow_status"],
+            "workflow_history": updated_doc["workflow_history"],
+            "workflow_status_updated_utc": updated_doc["workflow_status_updated_utc"],
+            "quality_tags": tags
+        }}
+    )
+    
+    updated_doc["quality_tags"] = tags
+    
+    return {
+        "document": updated_doc,
+        "workflow_transition": history_entry.to_dict(),
+        "message": f"Quality document tagged: {', '.join(tags)}"
+    }
+
+
+@api_router.post("/workflows/{doc_id}/export")
+async def export_document(
+    doc_id: str,
+    export_destination: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Mark a document as exported (generic version).
+    Applicable to all document types.
+    
+    Triggers: on_exported event
+    """
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
+    
+    doc_type = doc.get("doc_type", DocType.OTHER.value)
+    
+    updated_doc, history_entry, success = WorkflowEngine.advance_workflow(
+        doc,
+        WorkflowEvent.ON_EXPORTED.value,
+        context={
+            "reason": f"Exported to: {export_destination or 'default'}",
+            "metadata": {
+                "triggered_by": current_user.get("username"),
+                "export_destination": export_destination
+            }
+        },
+        actor=current_user.get("username", "system")
+    )
+    
+    if not success:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot export from status '{doc.get('workflow_status')}' for doc_type '{doc_type}'"
+        )
+    
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "workflow_status": updated_doc["workflow_status"],
+            "workflow_history": updated_doc["workflow_history"],
+            "workflow_status_updated_utc": updated_doc["workflow_status_updated_utc"],
+            "exported_utc": datetime.now(timezone.utc).isoformat(),
+            "export_destination": export_destination
+        }}
+    )
+    
+    return {
+        "document": updated_doc,
+        "workflow_transition": history_entry.to_dict(),
+        "message": "Document exported"
+    }
+
+
 # ==================== WORKFLOW METRICS ====================
 
 @api_router.get("/workflows/ap_invoice/metrics")

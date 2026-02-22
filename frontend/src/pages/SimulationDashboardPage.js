@@ -280,19 +280,32 @@ export default function SimulationDashboardPage() {
               <FileText className="h-4 w-4" />
               By Document Type
             </CardTitle>
+            <CardDescription>Click to view documents</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
+            <div className="space-y-2">
               {metrics?.by_doc_type && Object.entries(metrics.by_doc_type).map(([type, data]) => (
-                <div key={type} className="flex items-center justify-between">
+                <div key={type} className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 transition-colors">
                   <span className="text-sm font-medium">{type}</span>
                   <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="bg-green-500/10 text-green-500">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 bg-green-500/10 text-green-500 hover:bg-green-500/20"
+                      onClick={() => openDrillDown('doc_type_successes', { doc_type: type }, `${type} - Would Succeed`)}
+                      data-testid={`drill-${type}-success`}
+                    >
                       {data.success} ✓
-                    </Badge>
-                    <Badge variant="outline" className="bg-red-500/10 text-red-500">
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 bg-red-500/10 text-red-500 hover:bg-red-500/20"
+                      onClick={() => openDrillDown('doc_type_failures', { doc_type: type }, `${type} - Would Fail`)}
+                      data-testid={`drill-${type}-failure`}
+                    >
                       {data.failure} ✗
-                    </Badge>
+                    </Button>
                   </div>
                 </div>
               ))}
@@ -310,14 +323,34 @@ export default function SimulationDashboardPage() {
               <AlertTriangle className="h-4 w-4" />
               By Failure Reason
             </CardTitle>
+            <CardDescription>Click to view failed documents</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
+            <div className="space-y-2">
               {metrics?.by_failure_reason && Object.entries(metrics.by_failure_reason)
                 .sort((a, b) => b[1] - a[1])
                 .map(([reason, count]) => (
-                  <div key={reason} className="flex items-center justify-between">
-                    <span className="text-sm font-medium truncate max-w-[180px]" title={reason}>
+                  <div 
+                    key={reason} 
+                    className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors"
+                    onClick={() => openDrillDown('failures', { failure_reason: reason }, `Failed: ${reason.replace(/_/g, ' ')}`)}
+                    data-testid={`drill-reason-${reason}`}
+                  >
+                    <span className="text-sm font-medium truncate max-w-[160px]" title={reason}>
+                      {reason.replace(/_/g, ' ')}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="destructive">{count}</Badge>
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                  </div>
+                ))}
+              {(!metrics?.by_failure_reason || Object.keys(metrics.by_failure_reason).length === 0) && (
+                <p className="text-sm text-muted-foreground">No failures</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
                       {reason.replace(/_/g, ' ')}
                     </span>
                     <Badge variant="destructive">{count}</Badge>

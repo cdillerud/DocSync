@@ -11025,12 +11025,13 @@ async def run_simulation_for_document(doc_id: str):
     This simulates all applicable BC operations based on doc_type
     and stores results in workflow history and simulation_results collection.
     """
-    doc = await db.hub_documents.find_one({"document_id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    # Run full simulation
-    simulation_results = run_full_export_simulation(doc)
+    # Run full simulation - use 'id' as 'document_id' for simulation
+    doc_for_sim = {**doc, "document_id": doc_id}
+    simulation_results = run_full_export_simulation(doc_for_sim)
     
     # Convert results to dicts
     results_dict = {k: v.to_dict() for k, v in simulation_results.items()}

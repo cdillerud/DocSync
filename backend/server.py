@@ -6077,6 +6077,175 @@ async def get_ready_for_approval_queue(
     return {"documents": docs, "total": total, "queue": "ready_for_approval"}
 
 
+# ==================== GENERIC WORKFLOW QUEUE API ====================
+
+@api_router.get("/workflows/queue")
+async def get_workflow_queue(
+    doc_type: str = Query(..., description="Document type (required): AP_INVOICE, SALES_INVOICE, PURCHASE_ORDER, etc."),
+    status: Optional[str] = Query(None, description="Workflow status filter"),
+    vendor: Optional[str] = Query(None, description="Vendor name filter"),
+    min_amount: Optional[float] = Query(None),
+    max_amount: Optional[float] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    skip: int = Query(0),
+    limit: int = Query(50)
+):
+    """
+    Generic workflow queue endpoint supporting all document types.
+    Use this as a single entry point for building work queues for any doc_type.
+    
+    Required: doc_type
+    Optional: status (workflow_status), vendor, amount range, date range
+    """
+    fq = {"doc_type": doc_type}
+    
+    if status:
+        fq["workflow_status"] = status
+    if vendor:
+        fq["$or"] = [
+            {"vendor_raw": {"$regex": vendor, "$options": "i"}},
+            {"vendor_canonical": {"$regex": vendor, "$options": "i"}}
+        ]
+    if min_amount is not None:
+        fq["amount_float"] = {"$gte": min_amount}
+    if max_amount is not None:
+        fq.setdefault("amount_float", {})["$lte"] = max_amount
+    if date_from:
+        fq["created_utc"] = {"$gte": date_from}
+    if date_to:
+        fq.setdefault("created_utc", {})["$lte"] = date_to
+    
+    total = await db.hub_documents.count_documents(fq)
+    docs = await db.hub_documents.find(fq, {"_id": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
+    
+    return {
+        "documents": docs,
+        "total": total,
+        "doc_type": doc_type,
+        "status": status,
+        "skip": skip,
+        "limit": limit
+    }
+
+
+@api_router.get("/workflows/status-counts-by-type")
+async def get_status_counts_by_doc_type():
+    """
+    Get document counts grouped by doc_type and workflow_status.
+    Returns a nested structure for metrics dashboards.
+    """
+    pipeline = [
+        {"$group": {
+            "_id": {
+                "doc_type": "$doc_type",
+                "workflow_status": "$workflow_status"
+            },
+            "count": {"$sum": 1}
+        }},
+        {"$sort": {"_id.doc_type": 1, "_id.workflow_status": 1}}
+    ]
+    results = await db.hub_documents.aggregate(pipeline).to_list(500)
+    
+    # Structure the results by doc_type
+    documents_by_type_and_status = {}
+    for r in results:
+        doc_type = r["_id"].get("doc_type") or "unknown"
+        status = r["_id"].get("workflow_status") or "none"
+        count = r["count"]
+        
+        if doc_type not in documents_by_type_and_status:
+            documents_by_type_and_status[doc_type] = {"statuses": {}, "total": 0}
+        
+        documents_by_type_and_status[doc_type]["statuses"][status] = count
+        documents_by_type_and_status[doc_type]["total"] += count
+    
+    return {
+        "documents_by_type_and_status": documents_by_type_and_status,
+        "supported_doc_types": WorkflowEngine.get_all_doc_types(),
+        "supported_statuses": WorkflowEngine.get_all_statuses()
+    }
+
+
+@api_router.get("/workflows/metrics-by-type")
+async def get_workflow_metrics_by_doc_type(
+    days: int = Query(30, description="Number of days for metrics"),
+    doc_type: Optional[str] = Query(None, description="Filter by specific doc_type")
+):
+    """
+    Get workflow metrics grouped by document type.
+    Includes extraction rates, time-in-status, and completion rates per type.
+    """
+    from datetime import timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    
+    # Build match filter
+    match_filter = {"created_utc": {"$gte": cutoff}}
+    if doc_type:
+        match_filter["doc_type"] = doc_type
+    
+    # Aggregation for status distribution by type
+    status_pipeline = [
+        {"$match": match_filter},
+        {"$group": {
+            "_id": {
+                "doc_type": "$doc_type",
+                "workflow_status": "$workflow_status"
+            },
+            "count": {"$sum": 1}
+        }}
+    ]
+    status_results = await db.hub_documents.aggregate(status_pipeline).to_list(500)
+    
+    # Aggregation for extraction rates by type
+    extraction_pipeline = [
+        {"$match": match_filter},
+        {"$group": {
+            "_id": "$doc_type",
+            "total": {"$sum": 1},
+            "extracted": {"$sum": {"$cond": [{"$ne": ["$extracted_fields", None]}, 1, 0]}},
+            "high_confidence": {"$sum": {"$cond": [{"$gte": ["$ai_confidence", 0.8]}, 1, 0]}},
+            "avg_confidence": {"$avg": {"$ifNull": ["$ai_confidence", 0]}}
+        }}
+    ]
+    extraction_results = await db.hub_documents.aggregate(extraction_pipeline).to_list(50)
+    
+    # Structure results
+    metrics_by_type = {}
+    
+    # Process status counts
+    for r in status_results:
+        dt = r["_id"].get("doc_type") or "unknown"
+        status = r["_id"].get("workflow_status") or "none"
+        
+        if dt not in metrics_by_type:
+            metrics_by_type[dt] = {
+                "status_counts": {},
+                "total": 0,
+                "extraction_rate": 0,
+                "high_confidence_rate": 0,
+                "avg_confidence": 0
+            }
+        
+        metrics_by_type[dt]["status_counts"][status] = r["count"]
+        metrics_by_type[dt]["total"] += r["count"]
+    
+    # Add extraction metrics
+    for r in extraction_results:
+        dt = r["_id"] or "unknown"
+        if dt in metrics_by_type:
+            total = r["total"] or 1
+            metrics_by_type[dt]["extraction_rate"] = round((r["extracted"] / total) * 100, 2)
+            metrics_by_type[dt]["high_confidence_rate"] = round((r["high_confidence"] / total) * 100, 2)
+            metrics_by_type[dt]["avg_confidence"] = round(r["avg_confidence"] * 100, 2)
+    
+    return {
+        "period_days": days,
+        "metrics_by_type": metrics_by_type,
+        "cutoff_date": cutoff
+    }
+
+
 # ==================== AP INVOICE WORKFLOW MUTATIONS ====================
 
 @api_router.post("/workflows/ap_invoice/{doc_id}/set-vendor")

@@ -37,6 +37,10 @@ from services.workflow_engine import (
     WorkflowEngine, WorkflowStatus, WorkflowEvent, 
     DocType, SourceSystem, CaptureChannel, DocumentClassifier
 )
+from services.ai_classifier import (
+    classify_doc_type_with_ai, apply_ai_classification, 
+    DEFAULT_CONFIDENCE_THRESHOLD, AIClassificationResult
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')

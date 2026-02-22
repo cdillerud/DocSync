@@ -4223,26 +4223,38 @@ async def intake_document(
     }
     await db.hub_documents.insert_one(doc)
     
-    # Run AI classification
-    logger.info("Running AI classification for document %s", doc_id)
+    # Run AI field extraction (for extracting vendor, amount, etc.)
+    logger.info("Running AI field extraction for document %s", doc_id)
     classification = await classify_document_with_ai(str(file_path), final_filename)
     
     suggested_type = classification.get("suggested_job_type", "Unknown")
     confidence = classification.get("confidence", 0.0)
     extracted_fields = classification.get("extracted_fields", {})
     
-    # Determine doc_type from AI classification
-    doc_type_value = DocumentClassifier.classify_from_ai_result(suggested_type).value
+    # Deterministic-first document type classification
+    # Step 1: Try deterministic rules (Zetadocs, Square9, mailbox category)
+    # Step 2: If still OTHER, try AI classification if enabled
+    classification_result = await classify_document_type(
+        document=doc,
+        extracted_fields=extracted_fields,
+        suggested_type=suggested_type,
+        confidence=confidence,
+        metadata={
+            "mailbox_category": doc.get("mailbox_category"),
+            "zetadocs_set": doc.get("zetadocs_set_code"),
+            "square9_workflow": doc.get("square9_workflow_name")
+        }
+    )
     
-    # Set category based on doc_type
-    if doc_type_value == DocType.AP_INVOICE.value:
-        category = "AP"
-    elif doc_type_value in [DocType.SALES_INVOICE.value, DocType.SALES_CREDIT_MEMO.value]:
-        category = "Sales"
-    elif doc_type_value == DocType.PURCHASE_ORDER.value:
-        category = "Purchase"
-    else:
-        category = "Other"
+    doc_type_value = classification_result["doc_type"]
+    category = classification_result["category"]
+    ai_classification_audit = classification_result.get("ai_classification")
+    classification_method = classification_result.get("classification_method", "unknown")
+    
+    logger.info(
+        "Document %s classified as %s (category: %s, method: %s)",
+        doc_id, doc_type_value, category, classification_method
+    )
     
     # Phase 7: Compute normalized fields (flat, stored on document)
     normalized_fields = compute_ap_normalized_fields(extracted_fields)

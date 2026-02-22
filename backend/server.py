@@ -5967,11 +5967,14 @@ async def get_bc_validation_pending_queue(
     max_amount: Optional[float] = Query(None)
 ):
     """
-    Get AP_Invoice documents awaiting BC validation.
+    Get AP_INVOICE documents awaiting BC validation.
     These documents have matched vendors and are being validated against BC.
     """
     fq = {
-        "document_type": "AP_Invoice",
+        "$or": [
+            {"doc_type": DocType.AP_INVOICE.value},
+            {"document_type": "AP_Invoice"}
+        ],
         "workflow_status": WorkflowStatus.BC_VALIDATION_PENDING.value
     }
     
@@ -5996,11 +5999,14 @@ async def get_bc_validation_failed_queue(
     validation_error: Optional[str] = Query(None)
 ):
     """
-    Get AP_Invoice documents that failed BC validation.
+    Get AP_INVOICE documents that failed BC validation.
     These need manual override or data correction.
     """
     fq = {
-        "document_type": "AP_Invoice",
+        "$or": [
+            {"doc_type": DocType.AP_INVOICE.value},
+            {"document_type": "AP_Invoice"}
+        ],
         "workflow_status": WorkflowStatus.BC_VALIDATION_FAILED.value
     }
     
@@ -6021,11 +6027,14 @@ async def get_data_correction_pending_queue(
     limit: int = Query(50)
 ):
     """
-    Get AP_Invoice documents that need manual data correction.
+    Get AP_INVOICE documents that need manual data correction.
     These have incomplete or low-confidence extraction results.
     """
     fq = {
-        "document_type": "AP_Invoice",
+        "$or": [
+            {"doc_type": DocType.AP_INVOICE.value},
+            {"document_type": "AP_Invoice"}
+        ],
         "workflow_status": WorkflowStatus.DATA_CORRECTION_PENDING.value
     }
     
@@ -6044,11 +6053,14 @@ async def get_ready_for_approval_queue(
     max_amount: Optional[float] = Query(None)
 ):
     """
-    Get AP_Invoice documents ready for approval.
+    Get AP_INVOICE documents ready for approval.
     These have passed all validations and are waiting for human approval.
     """
     fq = {
-        "document_type": "AP_Invoice",
+        "$or": [
+            {"doc_type": DocType.AP_INVOICE.value},
+            {"document_type": "AP_Invoice"}
+        ],
         "workflow_status": WorkflowStatus.READY_FOR_APPROVAL.value
     }
     

@@ -14,6 +14,7 @@ import SettingsPage from "@/pages/SettingsPage";
 import EmailParserPage from "@/pages/EmailParserPage";
 import AuditDashboardPage from "@/pages/AuditDashboardPage";
 import SalesDashboardPage from "@/pages/SalesDashboardPage";
+import WorkflowQueuesPage from "@/pages/WorkflowQueuesPage";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();

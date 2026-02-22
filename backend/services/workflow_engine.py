@@ -91,6 +91,9 @@ SQUARE9_WORKFLOW_MAPPING = {
     "Credit Memo": DocType.SALES_CREDIT_MEMO,
     "Statement": DocType.STATEMENT,
     "Reminder": DocType.REMINDER,
+    "Quality": DocType.QUALITY_DOC,
+    "Quality_Doc": DocType.QUALITY_DOC,
+    "QC": DocType.QUALITY_DOC,
 }
 
 

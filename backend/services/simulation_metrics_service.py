@@ -420,7 +420,7 @@ class SimulationMetricsService:
                         by_date[date_key]["success"] += 1
                     else:
                         by_date[date_key]["failure"] += 1
-                except:
+                except (ValueError, TypeError):
                     pass
         
         # Convert to sorted list

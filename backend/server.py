@@ -6591,18 +6591,21 @@ async def approve_document(doc_id: str, request: ApprovalActionRequest):
 async def reject_document(doc_id: str, request: ApprovalActionRequest):
     """
     Reject a document. Moves to 'rejected' status.
+    Works for all document types.
     """
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
     
-    if doc.get("document_type") != "AP_Invoice":
-        raise HTTPException(status_code=400, detail="This endpoint only supports AP_Invoice documents")
+    # Get doc_type with backward compatibility
+    doc_type = doc.get("doc_type") or (DocType.AP_INVOICE.value if doc.get("document_type") == "AP_Invoice" else DocType.OTHER.value)
     
     current_status = doc.get("workflow_status")
     valid_statuses = [
         WorkflowStatus.READY_FOR_APPROVAL.value,
-        WorkflowStatus.APPROVAL_IN_PROGRESS.value
+        WorkflowStatus.APPROVAL_IN_PROGRESS.value,
+        WorkflowStatus.EXTRACTED.value,
+        WorkflowStatus.REVIEW_PENDING.value
     ]
     
     if current_status not in valid_statuses:
@@ -6625,7 +6628,7 @@ async def reject_document(doc_id: str, request: ApprovalActionRequest):
         WorkflowEvent.ON_REJECTED.value,
         context={
             "reason": request.reason,
-            "metadata": {"rejector": request.approver}
+            "metadata": {"rejector": request.approver, "doc_type": doc_type}
         },
         actor=request.approver or "system"
     )

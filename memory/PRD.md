@@ -193,6 +193,15 @@ Gamer Packaging, Inc. needs to:
 - [x] Frontend dashboard page at `/doc-types` with summary cards and table
 - [x] 12 API tests + frontend tests all passing
 
+#### AI-Assisted Document Classification (NEW - Feb 22, 2026)
+- [x] Deterministic-first classification pipeline: Zetadocs set codes → Square9 workflows → Mailbox category → Legacy AI extraction
+- [x] AI fallback classifier using EMERGENT_LLM_KEY when deterministic rules return OTHER
+- [x] Confidence threshold (0.8) for accepting AI classification
+- [x] AI classification audit trail (`ai_classification` field) saved only when AI is invoked
+- [x] Classification method tracking (`classification_method` field) for debugging/observability
+- [x] AI classifier service in `/app/backend/services/ai_classifier.py`
+- [x] 29 automated tests (16 unit tests for ai_classifier + 13 integration tests)
+
 ### In Progress / Shadow Mode
 - [x] AP automatic workflow trigger (VERIFIED WORKING)
 - [ ] BC record linking (manual only currently)

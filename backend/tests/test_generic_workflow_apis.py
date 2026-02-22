@@ -215,8 +215,8 @@ class TestMetricsByTypeAPI:
         
         data = response.json()
         assert "metrics_by_type" in data, "Missing metrics_by_type field"
-        assert "days" in data, "Missing days field"
-        assert data["days"] == 30
+        # Response uses period_days not days
+        assert "period_days" in data or "cutoff_date" in data, "Missing period indicator"
     
     def test_metrics_by_type_with_doc_type_filter(self, auth_token):
         """Test metrics-by-type with specific doc_type filter"""

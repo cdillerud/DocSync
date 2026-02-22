@@ -11034,8 +11034,8 @@ async def run_simulation_for_document(doc_id: str):
     doc_for_sim = {**doc, "document_id": doc_id}
     simulation_results = run_full_export_simulation(doc_for_sim)
     
-    # Convert results to dicts - make deep copies to avoid MongoDB mutation issues
-    results_dict = {k: copy.deepcopy(v.to_dict()) for k, v in simulation_results.items()}
+    # Convert results to dicts
+    results_dict = {k: v.to_dict() for k, v in simulation_results.items()}
     
     # Create workflow history entry
     history_entry = SimulationHistoryEntry.create_batch_simulation_entry(
@@ -11049,13 +11049,15 @@ async def run_simulation_for_document(doc_id: str):
         result_copy["_collection_timestamp"] = datetime.now(timezone.utc).isoformat()
         await db.pilot_simulation_results.insert_one(result_copy)
     
-    # Update document with simulation results and history
+    # Update document with simulation results and history (deep copy to avoid returning mutated data)
+    results_for_db = copy.deepcopy(results_dict)
+    history_for_db = copy.deepcopy(history_entry)
     await db.hub_documents.update_one(
         {"id": doc_id},
         {
-            "$push": {"workflow_history": history_entry},
+            "$push": {"workflow_history": history_for_db},
             "$set": {
-                "last_simulation_results": results_dict,
+                "last_simulation_results": results_for_db,
                 "last_simulation_timestamp": datetime.now(timezone.utc).isoformat()
             }
         }

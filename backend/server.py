@@ -6208,7 +6208,9 @@ async def migrate_sales_documents_to_unified():
                 "customer_name_extracted": sdoc.get("customer_name_extracted"),
                 "correlation_id": sdoc.get("correlation_id"),
                 "migrated_from": "sales_documents",
-                "migrated_at": now
+                "migrated_at": now,
+                # Pilot metadata (added if pilot mode enabled)
+                **get_pilot_metadata()
             }
             
             try:

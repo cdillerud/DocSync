@@ -1,333 +1,375 @@
-# GPI Document Hub - PRD
+# GPI Document Hub - Product Requirements Document
 
-## Original Problem Statement
-Build a "GPI Document Hub" test platform that replaces Zetadocs-style document linking in Microsoft Dynamics 365 Business Central by using SharePoint Online as the document repository and a middleware hub to orchestrate ingestion, metadata, approvals, and attachment linking back to BC.
+## Overview
 
-## Current Status: PHASE 7 - OBSERVATION MODE (Read-Only BC)
-
-**Shadow Mode Started:** February 18, 2026  
-**Observation Window:** 14 days  
-**BC Write Operations:** DISABLED (all integrations read-only)
+A **Document Intelligence Platform** that replaces Zetadocs-style document linking in Microsoft Dynamics 365 Business Central (BC). The hub orchestrates document ingestion from multiple email sources, AI-powered classification, SharePoint storage, and BC record linking.
 
 ---
 
-## Phase 7 Implementation Summary
+## Problem Statement
 
-### 1. Normalized Fields on Document Model ✅
+Gamer Packaging, Inc. needs to:
+1. Replace legacy Zetadocs document linking system
+2. Automate AP invoice processing from email attachments
+3. Track sales-related documents (POs, inventory reports, shipping docs)
+4. Provide observability into AI classification accuracy before enabling automation
+5. Support multiple document sources with unified processing
 
-For `document_type = "AP_Invoice"`, the following fields are computed at ingestion and stored flat on the document:
+---
 
-| Field | Description |
-|-------|-------------|
-| `vendor_raw` | Original extracted vendor string |
-| `vendor_normalized` | Lowercased, trimmed, multiple spaces collapsed |
-| `invoice_number_raw` | Original invoice number |
-| `invoice_number_clean` | Stripped of spaces/commas, uppercase |
-| `amount_raw` | Original amount string |
-| `amount_float` | Parsed numeric value as float |
-| `due_date_raw` | Original date string |
-| `due_date_iso` | Parsed ISO format (YYYY-MM-DD) |
-| `po_number_raw` | Original PO string (if any) |
-| `po_number_clean` | Normalized PO number for matching |
+## Architecture
 
-### 2. Required Field Completeness Check ✅
-
-**Required Fields for AP Invoice Header Readiness:**
-- `vendor_normalized`
-- `invoice_number_clean`
-- `amount_float`
-
-**Computed Fields:**
-| Field | Type | Description |
-|-------|------|-------------|
-| `draft_candidate` | boolean | True when all 3 required fields present and valid |
-| `validation_errors` | array | String codes: `missing_vendor`, `missing_invoice_number`, `missing_amount`, `low_classification_confidence`, `potential_duplicate_invoice` |
-| `validation_warnings` | array | Non-blocking: `missing_po_number` |
-
-### 3. Vendor Alias Support (Read-Only) ✅
-
-**Collection:** `vendor_aliases`
-```json
-{
-  "normalized": "tumalo creek transportation",
-  "canonical_vendor_id": "TUMALO CREEK",
-  "aliases": ["TUMALO CREEK Transportation", ...]
-}
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        EMAIL MAILBOXES                               │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐  │
+│  │ AP Invoices      │  │ Sales Orders     │  │ (Add more...)    │  │
+│  │ hub-ap-intake@   │  │ hub-sales-intake@│  │                  │  │
+│  └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘  │
+└───────────┼─────────────────────┼─────────────────────┼─────────────┘
+            │                     │                     │
+            ▼                     ▼                     ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    UNIFIED INGESTION PIPELINE                        │
+│  • Poll mailboxes via Graph API (read-only, no read status change)  │
+│  • Extract attachments                                               │
+│  • Deduplicate by message ID + file hash                            │
+└────────────────────────────────┬────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                      AI CLASSIFICATION (Gemini)                      │
+│  • Document Type: AP_Invoice, Sales_Order, Inventory_Report, etc.   │
+│  • Category: AP, Sales, Operations                                   │
+│  • Extract fields: vendor, invoice_number, PO, amount, etc.         │
+│  • Confidence score (0-1)                                            │
+└────────────────────────────────┬────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                         SHAREPOINT STORAGE                           │
+│  • Upload document to categorized folder                             │
+│  • Generate sharing link                                             │
+└────────────────────────────────┬────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    UNIFIED DOCUMENT QUEUE                            │
+│  hub_documents collection (MongoDB)                                  │
+│  • Filter by: Status, Category (AP/Sales), Document Type            │
+│  • View, review, approve, link to BC                                │
+└────────────────────────────────┬────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                 BUSINESS CENTRAL INTEGRATION                         │
+│  • Link documents to existing records (Level 1)                      │
+│  • Create draft purchase invoices (Level 2)                         │
+│  • Auto-populate line items (Level 3 - future)                      │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-**Computed Fields on Document:**
-| Field | Description |
-|-------|-------------|
-| `vendor_canonical` | Canonical vendor ID when found, else null |
-| `vendor_match_method` | `"alias"`, `"exact_name"`, or `"none"` |
+---
 
-### 4. Duplicate Safety Check ✅
+## Tech Stack
 
-**Logic:** A document is a possible duplicate if another non-deleted doc exists with:
-- Same `vendor_canonical` (if set) OR same `vendor_normalized`
-- Same `invoice_number_clean`
+| Component | Technology |
+|-----------|------------|
+| Backend | FastAPI (Python) |
+| Frontend | React + Tailwind CSS + Shadcn/UI |
+| Database | MongoDB |
+| AI | Gemini 2.5 Flash (via Emergent LLM Key) |
+| Email | Microsoft Graph API |
+| Storage | SharePoint Online |
+| ERP | Dynamics 365 Business Central |
+| Deployment | Docker Compose on Azure VM |
 
-**Computed Fields:**
-| Field | Type | Description |
-|-------|------|-------------|
-| `possible_duplicate` | boolean | True if duplicate detected |
-| `duplicate_of_document_id` | string | ID of existing doc, or null |
+---
 
-### 5. Status Logic for AP Invoices (Phase 7) ✅
+## Document Types & Categories
 
-**Conservative Observation Mode:**
-- All AP_Invoice documents → `status = "NeedsReview"`
-- `draft_candidate` flag visible in API/UI for observation
-- NO auto-advancement to BC-writing statuses
-- NO draft creation regardless of readiness
+### AP Category (Accounts Payable)
+| Type | Description | Automation |
+|------|-------------|------------|
+| AP_Invoice | Vendor invoices we receive | Level 1-2 |
+| AR_Invoice | Invoices we send (outgoing) | Level 0 |
+| Remittance | Payment confirmations | Level 1 |
+| Freight_Document | BOL, shipping docs | Level 1 |
+| Warehouse_Document | Receipts, shipments | Level 1 |
+| Sales_PO | Customer purchase orders | Level 1 |
 
-### 6. Metrics Endpoint - Extraction Quality ✅
+### Sales Category
+| Type | Description | Automation |
+|------|-------------|------------|
+| Sales_Order | Customer POs to us | Level 0 |
+| Sales_Quote | Price quotes/proposals | Level 0 |
+| Order_Confirmation | Order acknowledgments | Level 0 |
+| Inventory_Report | Stock/inventory status | Level 0 |
+| Shipping_Document | Shipping requests | Level 0 |
+| Quality_Issue | Complaints, NCRs | Level 0 |
+| Return_Request | RMAs, credit requests | Level 0 |
 
-**Endpoint:** `GET /api/metrics/extraction-quality?days=N`
+### Automation Levels
+- **Level 0**: Manual only (store and classify)
+- **Level 1**: Auto-link to existing BC records
+- **Level 2**: Auto-create draft BC documents
+- **Level 3**: Auto-populate line items (future)
 
-Returns:
-```json
-{
-  "period_days": 7,
-  "total_documents": 100,
-  "extraction_rates": {
-    "vendor": 87.0,
-    "invoice_number": 83.0,
-    "amount": 91.0,
-    "po_number": 65.0,
-    "due_date": 72.0
-  },
-  "readiness_metrics": {
-    "ready_for_draft": {"count": 82, "rate": 82.0},
-    "draft_candidates": {"count": 78, "rate": 78.0}
-  },
-  "completeness_summary": {
-    "all_required_fields": 82,
-    "missing_vendor": 13,
-    "missing_invoice_number": 17,
-    "missing_amount": 9
-  },
-  "vendor_variations": [...],
-  "stable_vendors": [...]
-}
+---
+
+## Current Implementation Status
+
+### Completed Features
+
+#### Core Platform
+- [x] FastAPI backend with MongoDB
+- [x] React frontend with Shadcn/UI components
+- [x] JWT authentication (mock for POC)
+- [x] Document upload and storage
+- [x] SharePoint integration for file storage
+
+#### Email Ingestion
+- [x] Microsoft Graph API integration
+- [x] Dynamic mailbox source configuration (add/edit/delete via UI)
+- [x] Email polling (configurable interval)
+- [x] Attachment extraction and deduplication
+- [x] Backfill endpoints for historical emails
+- [x] Read-only polling (doesn't change email read status)
+
+#### AI Classification
+- [x] Gemini-based document classification
+- [x] Support for AP and Sales document types
+- [x] Field extraction (vendor, invoice_number, amount, PO, etc.)
+- [x] Confidence scoring
+- [x] Category assignment (AP/Sales/Unknown)
+
+#### Document Queue
+- [x] Unified document queue (all sources in one view)
+- [x] Filter by status (Received, Classified, Linked, etc.)
+- [x] Filter by category (AP, Sales, All)
+- [x] Document detail view with extracted fields
+- [x] Manual review and approval workflow
+
+#### Observability & Metrics
+- [x] Dashboard with document counts and status breakdown
+- [x] Audit Dashboard with Phase 7 extraction quality metrics
+- [x] Email polling statistics
+- [x] Extraction miss tracking
+
+#### Sales Module (Phase 0)
+- [x] Sales-specific data models (customers, items, inventory, orders)
+- [x] Sales dashboard with customer selector
+- [x] Seed data endpoint for testing
+- [x] Sales email ingestion to unified pipeline
+
+### In Progress / Shadow Mode
+- [ ] AP automatic workflow trigger (needs verification)
+- [ ] BC record linking (manual only currently)
+- [ ] BC draft creation (disabled)
+
+### Pending / Future
+- [ ] Phase 8: Controlled vendor enablement
+- [ ] Vendor threshold overrides per-vendor
+- [ ] Entra ID SSO (replace mock auth)
+- [ ] Transaction automation (Level 3)
+- [ ] Zetadocs decommissioning plan
+
+---
+
+## Key API Endpoints
+
+### Documents
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/documents | List documents (filter by status, category, type) |
+| GET | /api/documents/{id} | Get document details |
+| POST | /api/documents/upload | Manual document upload |
+| POST | /api/documents/{id}/link | Link to BC record |
+| DELETE | /api/documents/{id} | Delete document |
+
+### Mailbox Sources
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/settings/mailbox-sources | List all mailboxes |
+| POST | /api/settings/mailbox-sources | Add new mailbox |
+| PUT | /api/settings/mailbox-sources/{id} | Update mailbox |
+| DELETE | /api/settings/mailbox-sources/{id} | Delete mailbox |
+| POST | /api/settings/mailbox-sources/{id}/test-connection | Test Graph API access |
+| POST | /api/settings/mailbox-sources/{id}/poll-now | Manual poll trigger |
+
+### Admin
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | /api/admin/backfill-ap-mailbox | Backfill AP emails |
+| POST | /api/admin/backfill-sales-mailbox | Backfill Sales emails |
+| POST | /api/admin/migrate-sales-to-unified | Migrate sales_documents to hub_documents |
+
+### Metrics
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/dashboard/stats | Dashboard statistics |
+| GET | /api/metrics/extraction-quality | AI extraction quality metrics |
+| GET | /api/metrics/extraction-misses | Documents with missing fields |
+
+---
+
+## Database Collections
+
+### Core Collections
+| Collection | Description |
+|------------|-------------|
+| hub_documents | All ingested documents (unified) |
+| hub_config | System configuration |
+| mailbox_sources | Configured email mailboxes |
+| mail_intake_log | Email processing log (deduplication) |
+| mail_poll_runs | Polling run statistics |
+| job_types | Document type configurations |
+| vendor_aliases | Vendor name normalization |
+| automation_metrics_daily | Daily automation metrics |
+
+### Sales Module Collections
+| Collection | Description |
+|------------|-------------|
+| sales_documents | Legacy (migrate to hub_documents) |
+| sales_customers | Customer master data |
+| sales_items | Item catalog |
+| sales_inventory_positions | Inventory levels |
+| sales_open_order_headers | Open sales orders |
+
+---
+
+## Deployment
+
+### Production (User's VM)
+- Location: `/opt/gpi-hub`
+- Docker Compose with backend, frontend, MongoDB containers
+- Environment variables in `/opt/gpi-hub/backend/.env`
+
+### Key Environment Variables
+```
+MONGO_URL=mongodb://...
+DB_NAME=gpi_hub
+EMAIL_CLIENT_ID=...
+EMAIL_CLIENT_SECRET=...
+EMAIL_TENANT_ID=...
+SHAREPOINT_SITE_ID=...
+BC_BASE_URL=...
+EMERGENT_LLM_KEY=...
 ```
 
-### 7. Extraction Misses Drilldown ✅
-
-**Endpoint:** `GET /api/metrics/extraction-misses?field=vendor|invoice_number|amount`
-
-Returns array with:
-- `document_id`
-- `file_name`
-- `document_type`
-- `status`
-- `vendor_raw`, `invoice_number_raw`, `amount_raw`, `due_date_raw`, `po_number_raw`
-- `ai_confidence`
-- `first_500_chars_text`
-
-### 8. Stable Vendors Endpoint ✅
-
-**Endpoint:** `GET /api/metrics/stable-vendors`
-
-Criteria:
-- `count >= 5`
-- `completeness >= 85%`
-- `alias variance <= 3`
-
-### 9. Draft Candidates Endpoint ✅
-
-**Endpoint:** `GET /api/metrics/draft-candidates`
-
-Shows distribution of `draft_candidate` flags without enabling drafts.
+### Deployment Commands
+```bash
+cd /opt/gpi-hub
+git pull origin main
+sudo docker compose build backend frontend
+sudo docker compose up -d
+```
 
 ---
 
-## Non-Goals for Phase 7 (Explicitly Disabled)
+## Current Operating Mode: Shadow Mode
 
-- ❌ `CREATE_DRAFT_HEADER` - Disabled
-- ❌ Auto-posting or draft creation in BC
-- ❌ Automatic document deletion
-- ❌ Freight workflow modifications
-- ❌ Email polling behavior changes
-- ❌ Match score threshold changes
-- ❌ Vendor overrides
-- ❌ AI prompt tuning
+The system is in **observation mode**:
+- ✅ Ingesting documents automatically from configured mailboxes
+- ✅ AI classifying all documents
+- ✅ Storing in SharePoint
+- ✅ Logging metrics for analysis
+- ❌ NOT auto-linking to BC (manual only)
+- ❌ NOT auto-creating BC records
 
----
-
-## API Endpoints Summary
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/metrics/extraction-quality` | GET | Extraction rates + draft readiness |
-| `/api/metrics/extraction-misses` | GET | Drilldown on missing fields |
-| `/api/metrics/stable-vendors` | GET | Vendors meeting stability criteria |
-| `/api/metrics/draft-candidates` | GET | Draft candidate distribution |
-| `/api/documents` | GET | Document list with new fields |
+**Purpose**: Validate AI classification accuracy before enabling automation.
 
 ---
 
-## Document Model (Phase 7 Fields)
+## Configured Mailboxes
 
-```javascript
-{
-  // ... existing fields ...
-  
-  // Phase 7: Normalized fields (flat)
-  "vendor_raw": "Tumalo Creek Transportation",
-  "vendor_normalized": "tumalo creek transportation",
-  "invoice_number_raw": "INV-2024-001",
-  "invoice_number_clean": "INV2024001",
-  "amount_raw": "$1,234.56",
-  "amount_float": 1234.56,
-  "due_date_raw": "March 15, 2024",
-  "due_date_iso": "2024-03-15",
-  "po_number_raw": "PO-123",
-  "po_number_clean": "PO123",
-  
-  // Phase 7: Vendor alias results
-  "vendor_canonical": "TUMALO CREEK",
-  "vendor_match_method": "alias",
-  
-  // Phase 7: Duplicate detection
-  "possible_duplicate": false,
-  "duplicate_of_document_id": null,
-  
-  // Phase 7: Validation
-  "validation_errors": [],
-  "validation_warnings": ["missing_po_number"],
-  "draft_candidate": true
-}
+| Name | Email | Category | Status |
+|------|-------|----------|--------|
+| AP Invoices | hub-ap-intake@gamerpackaging.com | AP | Active |
+| Sales Orders | hub-sales-intake@gamerpackaging.com | Sales | Active |
+
+---
+
+## Document Counts (As of Feb 21, 2026)
+
+| Source | Count | Location |
+|--------|-------|----------|
+| AP Documents | ~83 | hub_documents |
+| Sales Documents | ~129 | sales_documents (needs migration) |
+
+**To migrate Sales to unified collection:**
+```bash
+sudo docker exec gpi-backend curl -s -X POST "http://localhost:8001/api/admin/migrate-sales-to-unified"
 ```
 
 ---
 
 ## Next Steps
 
-1. **Deploy to VM:** `git pull origin main && sudo docker compose build backend && sudo docker compose up -d`
-2. **Re-process existing documents** to populate new fields (optional backfill)
-3. **Monitor metrics** during 14-day observation window
-4. **Phase 8 Planning:** When `draft_candidate` rate stabilizes ≥80%, plan controlled vendor enablement
+### Immediate
+1. Deploy latest code to VM
+2. Run migration to unify sales documents
+3. Verify all documents appear in Document Queue with correct categories
+
+### Short-term
+1. Monitor AI classification accuracy via Audit Dashboard
+2. Identify "stable vendors" with consistent extraction
+3. Review and fix any misclassifications
+
+### Medium-term (Phase 8)
+1. Enable Level 1 automation for stable AP vendors
+2. Enable Level 2 (draft creation) for highest-confidence vendors
+3. Implement vendor-specific threshold overrides
+
+### Long-term
+1. Entra ID SSO integration
+2. Level 3 automation (line item population)
+3. Zetadocs decommissioning
 
 ---
 
-## Testing Results
-- Phase 7 endpoints: All functional
-- Backend: Running with new validation logic
-- Dashboard: Updated with AP Invoice Extraction Quality section
-- BC writes: Confirmed DISABLED
-- **Sales Module Phase 0**: All endpoints functional, seed data populated
+## File Structure
 
----
-
-## Sales Inventory & Orders Module (Phase 0)
-
-**Status:** Implemented, BC Disconnected
-
-### Data Collections (10 new)
-- `sales_customers` - Customer master data
-- `sales_items` - Item/SKU master
-- `sales_customer_items` - Customer-specific SKU mappings
-- `sales_warehouses` - Warehouse locations
-- `sales_inventory_positions` - Inventory snapshots
-- `sales_open_order_headers` - Open order headers
-- `sales_open_order_lines` - Open order line items
-- `sales_lost_business` - Lost business tracking
-- `sales_pricing_tiers` - Customer item pricing
-- `sales_order_draft_candidates` - Draft candidate pattern
-
-### API Endpoints
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/sales/customers` | GET | Customer list |
-| `/api/sales/customers/{id}/dashboard` | GET | Dashboard data with summary, inventory, orders, alerts |
-| `/api/sales/customers/{id}/open-orders` | GET | Open orders with line detail |
-| `/api/sales/order-drafts` | GET | Draft candidates list |
-| `/api/sales/order-drafts/{id}` | GET | Draft candidate detail |
-| `/api/sales/warehouses` | GET | Warehouse list |
-| `/api/sales/items` | GET | Item list |
-| `/api/sales/seed-data` | POST | Initialize test data |
-
-### UI: Sales Dashboard
-- Customer selector dropdown
-- Summary cards: On Hand, Available, Open Orders, On Water, On Order
-- Inventory grid by item/warehouse with search
-- Open orders grid with status badges
-- Alerts panel: low stock, at-risk orders, lost business
-
-### Seed Data Customers
-- ET Browne
-- HOW (House of Wines)
-- Karlin
-- Wing Nien
-
-### Phase 0 Limitations
-- ❌ No BC API calls
-- ❌ bc_customer_no, bc_sales_order_no are null placeholders
-- ❌ No Excel ingestion (manual seed data only)
-- ❌ No draft creation to BC
-
----
-
-## Sales Email Polling (Shadow Mode)
-
-**Status:** Implemented, Ready to Enable
-
-### Configuration (.env)
-```bash
-SALES_EMAIL_POLLING_ENABLED=true
-SALES_EMAIL_POLLING_USER=hub-sales-intake@gamerpackaging.com
-SALES_EMAIL_POLLING_INTERVAL_MINUTES=5
+```
+/app/
+├── backend/
+│   ├── server.py           # Main API (monolith - needs refactoring)
+│   ├── sales_module.py     # Sales-specific logic
+│   ├── requirements.txt
+│   └── .env
+├── frontend/
+│   ├── src/
+│   │   ├── pages/
+│   │   │   ├── DashboardPage.js
+│   │   │   ├── QueuePage.js          # Unified document queue
+│   │   │   ├── EmailParserPage.js    # Mailbox configuration
+│   │   │   ├── AuditDashboardPage.js # Metrics & observability
+│   │   │   ├── SalesDashboardPage.js # Sales inventory view
+│   │   │   └── ...
+│   │   ├── components/ui/    # Shadcn components
+│   │   └── lib/api.js        # API client
+│   └── package.json
+├── docker-compose.yml
+└── memory/
+    └── PRD.md               # This file
 ```
 
-### Document Types (18 categories)
-| Type | Priority | Action | Description |
-|------|----------|--------|-------------|
-| Sales_Order | high | create_order_candidate | Customer PO |
-| Order_Change | high | flag_for_review | Order modification |
-| Shipping_Request | high | flag_for_review | Ship request |
-| Quality_Issue | high | flag_for_review | Quality complaint |
-| Return_Request | high | flag_for_review | RMA request |
-| Sales_Quote | medium | log_only | Price quote |
-| Order_Confirmation | medium | link_to_order | Confirmation |
-| Shipping_Schedule | medium | log_only | ETA/tracking |
-| Price_Inquiry | medium | log_only | Price question |
-| Inventory_Report | medium | log_only | Stock report |
-| Forecast | medium | log_only | Demand forecast |
-| Contract | medium | log_only | Agreement |
-| Bill_of_Lading | medium | log_only | BOL |
-| Packing_List | low | log_only | Pack list |
-| Price_List | low | log_only | Catalog |
-| Customer_Inquiry | low | log_only | General question |
-| Meeting_Notes | low | log_only | Call notes |
-| Unknown_Sales | low | log_only | Unclassified |
+---
 
-### API Endpoints
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/sales/email-polling/status` | GET | Polling config + stats |
-| `/api/sales/email-polling/trigger` | POST | Manual poll run |
-| `/api/sales/email-polling/logs` | GET | Intake logs |
-| `/api/sales/documents` | GET | Ingested documents |
-| `/api/sales/documents/{id}` | GET | Document detail |
-| `/api/sales/documents/stats/by-type` | GET | Stats by doc type |
-| `/api/sales/documents/stats/by-customer` | GET | Stats by customer |
+## Known Issues
 
-### Transport Rule Setup (Exchange Admin)
-1. Create shared mailbox: `hub-sales-intake@gamerpackaging.com`
-2. Transport rule: Copy emails with attachments FROM inside sales team TO shared mailbox
-3. Set `SALES_EMAIL_POLLING_USER` and `SALES_EMAIL_POLLING_ENABLED=true`
+1. **AP workflow trigger** - Automatic workflow may not be triggering on ingestion (needs verification)
+2. **AI misclassification** - Some AP vs AR invoice confusion (prompt hardening needed)
+3. **Re-submit button** - Document re-classification not working as expected
 
-### What Sales Shadow Mode Does
-- ✅ Polls mailbox for emails with attachments
-- ✅ AI classifies into 18 document types
-- ✅ Extracts customer name, PO#, dates, items
-- ✅ Attempts customer matching
-- ✅ All documents land in `NeedsReview`
-- ✅ Logs all intake for metrics
+---
 
-### What Sales Shadow Mode Does NOT Do
-- ❌ Create BC sales orders
-- ❌ Write to BC
-- ❌ Auto-process anything
-- ❌ Delete or move emails
+## Contact & Support
+
+- **Platform**: Emergent Agent
+- **User VM**: Azure VM at `/opt/gpi-hub`
+- **Git**: Save to Github via Emergent chat
+
+---
+
+*Last Updated: February 21, 2026*

@@ -2,6 +2,20 @@
 
 ## February 22, 2026
 
+### Multi-Document Type Workflow Engine
+- **NEW:** Full state machines for all 10 doc_types
+  - SALES_INVOICE: Standard approval workflow
+  - PURCHASE_ORDER: PO validation workflow (validation_pending, validation_failed)
+  - SALES_CREDIT_MEMO/PURCHASE_CREDIT_MEMO: Invoice linkage workflow (linked_to_invoice)
+  - STATEMENT/REMINDER/FINANCE_CHARGE_MEMO: Fast-path review workflows
+  - QUALITY_DOC: Tagging and review workflow (tagged, review_in_progress)
+  - OTHER: Triage workflow (triage_pending, triage_completed)
+- **NEW:** 13 workflow events: ON_PO_VALIDATION_STARTED, ON_PO_VALID, ON_PO_INVALID, etc.
+- **NEW:** 9 workflow statuses: VALIDATION_PENDING, VALIDATION_FAILED, LINKED_TO_INVOICE, etc.
+- **NEW:** 9 generic mutation endpoints for workflow transitions
+- **NEW:** Dashboard metric: active_queue_count per doc_type
+- **TESTS:** 45 automated tests (23 unit + 22 API)
+
 ### Classification Dashboard Extension
 - **NEW:** Classification method breakdown per doc_type
   - `classification_counts`: { deterministic, ai, other } for each document type

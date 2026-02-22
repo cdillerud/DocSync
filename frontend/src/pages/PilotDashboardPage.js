@@ -250,6 +250,16 @@ export default function PilotDashboardPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          {pilotStatus?.pilot_mode_enabled && (
+            <Button 
+              onClick={handleSendSummaryEmail} 
+              disabled={sendingEmail}
+              data-testid="send-summary-email-btn"
+            >
+              <Mail className={`mr-2 h-4 w-4 ${sendingEmail ? 'animate-pulse' : ''}`} />
+              {sendingEmail ? 'Sending...' : 'Send Summary Email Now'}
+            </Button>
+          )}
           <Button onClick={handleExportCSV} variant="outline" disabled={!dailyMetrics}>
             <Download className="mr-2 h-4 w-4" /> Export CSV
           </Button>

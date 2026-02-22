@@ -85,16 +85,18 @@ export default function EmailParserPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [jobRes, emailRes, statsRes, mailboxRes] = await Promise.all([
+      const [jobRes, emailRes, statsRes, mailboxRes, pollingRes] = await Promise.all([
         getJobTypes(),
         getEmailWatcherConfig(),
         getEmailStats(),
-        listMailboxSources()
+        listMailboxSources(),
+        getMailboxPollingStatus().catch(() => ({ data: null }))
       ]);
       setJobTypes(jobRes.data.job_types || []);
       setEmailConfig(emailRes.data);
       setEmailStats(statsRes.data);
       setMailboxSources(mailboxRes.data.mailbox_sources || []);
+      setPollingStatus(pollingRes.data);
     } catch (err) {
       toast.error('Failed to load email parser settings');
     } finally {

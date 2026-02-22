@@ -11461,6 +11461,278 @@ async def get_failure_reason_codes():
     }
 
 
+# ==================== BATCH RE-INGEST API ====================
+
+# Global state for tracking re-ingest progress
+_reingest_state = {
+    "running": False,
+    "total": 0,
+    "processed": 0,
+    "current_batch": 0,
+    "total_batches": 0,
+    "successes": 0,
+    "failures": 0,
+    "errors": [],
+    "started_at": None,
+    "completed_at": None
+}
+
+
+@api_router.get("/pilot/reingest/status")
+async def get_reingest_status():
+    """Get current re-ingest job status."""
+    return _reingest_state
+
+
+@api_router.post("/pilot/reingest/start")
+async def start_batch_reingest(
+    background_tasks: BackgroundTasks,
+    batch_size: int = Query(50, ge=10, le=100),
+    doc_type_filter: str = Query(None, description="Optional: only re-ingest specific doc_type")
+):
+    """
+    Start batch re-ingest of all documents.
+    
+    This will:
+    1. Reset workflow_status to initial state
+    2. Re-run document classification
+    3. Run workflow engine
+    4. Run BC simulations
+    
+    Processes in batches to avoid timeout.
+    """
+    global _reingest_state
+    
+    if _reingest_state["running"]:
+        raise HTTPException(status_code=409, detail="Re-ingest already in progress")
+    
+    # Count documents to process
+    query = {}
+    if doc_type_filter:
+        query["doc_type"] = doc_type_filter
+    
+    total_docs = await db.hub_documents.count_documents(query)
+    
+    if total_docs == 0:
+        return {"message": "No documents to re-ingest", "total": 0}
+    
+    # Initialize state
+    _reingest_state = {
+        "running": True,
+        "total": total_docs,
+        "processed": 0,
+        "current_batch": 0,
+        "total_batches": (total_docs + batch_size - 1) // batch_size,
+        "successes": 0,
+        "failures": 0,
+        "errors": [],
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "completed_at": None,
+        "batch_size": batch_size,
+        "doc_type_filter": doc_type_filter
+    }
+    
+    # Start background task
+    background_tasks.add_task(
+        run_batch_reingest,
+        batch_size=batch_size,
+        doc_type_filter=doc_type_filter
+    )
+    
+    return {
+        "message": "Re-ingest started",
+        "total_documents": total_docs,
+        "batch_size": batch_size,
+        "total_batches": _reingest_state["total_batches"],
+        "status_endpoint": "/api/pilot/reingest/status"
+    }
+
+
+async def run_batch_reingest(batch_size: int, doc_type_filter: str = None):
+    """Background task to run batch re-ingest."""
+    global _reingest_state
+    
+    try:
+        query = {}
+        if doc_type_filter:
+            query["doc_type"] = doc_type_filter
+        
+        # Get all document IDs
+        cursor = db.hub_documents.find(query, {"_id": 0, "id": 1})
+        all_docs = await cursor.to_list(10000)
+        doc_ids = [d["id"] for d in all_docs]
+        
+        # Process in batches
+        for batch_num in range(0, len(doc_ids), batch_size):
+            batch_ids = doc_ids[batch_num:batch_num + batch_size]
+            _reingest_state["current_batch"] = (batch_num // batch_size) + 1
+            
+            for doc_id in batch_ids:
+                try:
+                    await reingest_single_document(doc_id)
+                    _reingest_state["successes"] += 1
+                except Exception as e:
+                    _reingest_state["failures"] += 1
+                    if len(_reingest_state["errors"]) < 20:  # Keep max 20 errors
+                        _reingest_state["errors"].append({
+                            "document_id": doc_id,
+                            "error": str(e)
+                        })
+                
+                _reingest_state["processed"] += 1
+            
+            # Small delay between batches to prevent overload
+            await asyncio.sleep(0.5)
+        
+        _reingest_state["completed_at"] = datetime.now(timezone.utc).isoformat()
+        _reingest_state["running"] = False
+        
+    except Exception as e:
+        _reingest_state["running"] = False
+        _reingest_state["errors"].append({"global_error": str(e)})
+        _reingest_state["completed_at"] = datetime.now(timezone.utc).isoformat()
+
+
+async def reingest_single_document(doc_id: str):
+    """
+    Re-ingest a single document:
+    1. Reset workflow status
+    2. Re-classify
+    3. Run workflow
+    4. Run simulation
+    """
+    # Get document
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise ValueError(f"Document {doc_id} not found")
+    
+    # Import classification and workflow functions
+    from services.workflow_engine import (
+        DocType, WorkflowStatus, WorkflowEvent,
+        get_initial_status, process_workflow_event
+    )
+    from services.bc_simulation_service import run_full_export_simulation
+    
+    # Step 1: Determine doc_type from existing data or re-classify
+    doc_type = doc.get("doc_type", "OTHER")
+    
+    # If doc_type is missing or OTHER, try to classify based on content
+    if doc_type in [None, "OTHER", ""]:
+        # Simple rule-based classification based on existing fields
+        if doc.get("vendor_canonical") or doc.get("vendor_raw"):
+            if doc.get("po_number"):
+                doc_type = "PURCHASE_ORDER"
+            else:
+                doc_type = "AP_INVOICE"
+        elif doc.get("customer_number"):
+            doc_type = "SALES_INVOICE"
+        else:
+            doc_type = "OTHER"
+    
+    # Step 2: Get initial workflow status for this doc_type
+    try:
+        initial_status = get_initial_status(doc_type)
+    except:
+        initial_status = "captured"
+    
+    # Step 3: Create reset workflow history entry
+    reset_entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "event": "workflow_reset",
+        "actor": "batch_reingest",
+        "from_status": doc.get("workflow_status"),
+        "to_status": initial_status,
+        "note": "Document re-ingested during batch reset"
+    }
+    
+    # Step 4: Run simulation
+    doc_for_sim = {**doc, "document_id": doc_id, "doc_type": doc_type}
+    simulation_results = run_full_export_simulation(doc_for_sim)
+    
+    # Convert simulation results to dicts
+    import json as json_lib
+    results_dict = {}
+    for sim_key, sim_result in simulation_results.items():
+        result_dict = sim_result.to_dict()
+        clean_result = json_lib.loads(json_lib.dumps(result_dict))
+        results_dict[sim_key] = clean_result
+    
+    # Store simulation results
+    for sim_type, result in results_dict.items():
+        result_copy = json_lib.loads(json_lib.dumps(result))
+        result_copy["_collection_timestamp"] = datetime.now(timezone.utc).isoformat()
+        result_copy["_reingest_batch"] = True
+        await db.pilot_simulation_results.insert_one(result_copy)
+    
+    # Step 5: Create simulation history entry
+    from services.workflow_engine import SimulationHistoryEntry
+    sim_history_entry = SimulationHistoryEntry.create_batch_simulation_entry(
+        document_id=doc_id,
+        simulation_results=results_dict
+    )
+    
+    # Step 6: Determine workflow status based on simulation results
+    all_would_succeed = all(r.get("would_succeed_in_production") for r in results_dict.values())
+    
+    # Set workflow status based on doc_type and simulation result
+    if doc_type == "AP_INVOICE":
+        if all_would_succeed:
+            new_status = "ready_for_approval"
+        else:
+            new_status = "data_correction_pending"
+    elif doc_type == "SALES_INVOICE":
+        if all_would_succeed:
+            new_status = "validated"
+        else:
+            new_status = "validation_failed"
+    elif doc_type == "PURCHASE_ORDER":
+        if all_would_succeed:
+            new_status = "matched"
+        else:
+            new_status = "unmatched"
+    else:
+        new_status = initial_status
+    
+    # Step 7: Update document
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {
+            "$set": {
+                "doc_type": doc_type,
+                "workflow_status": new_status,
+                "last_simulation_results": results_dict,
+                "last_simulation_timestamp": datetime.now(timezone.utc).isoformat(),
+                "reingest_timestamp": datetime.now(timezone.utc).isoformat(),
+                "pilot_phase": "shadow_pilot_v1",
+                "pilot_date": datetime.now(timezone.utc).isoformat()
+            },
+            "$push": {
+                "workflow_history": {
+                    "$each": [reset_entry, sim_history_entry]
+                }
+            }
+        }
+    )
+
+
+@api_router.post("/pilot/reingest/stop")
+async def stop_reingest():
+    """Stop the running re-ingest job."""
+    global _reingest_state
+    
+    if not _reingest_state["running"]:
+        return {"message": "No re-ingest job running"}
+    
+    _reingest_state["running"] = False
+    _reingest_state["completed_at"] = datetime.now(timezone.utc).isoformat()
+    
+    return {
+        "message": "Re-ingest stopped",
+        "processed": _reingest_state["processed"],
+        "total": _reingest_state["total"]
+    }
+
+
 # ==================== APP SETUP ====================
 
 app.include_router(api_router)

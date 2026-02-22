@@ -166,8 +166,230 @@ export const AP_SECONDARY_QUEUES = [
   AP_WORKFLOW_STATUSES.REJECTED,
 ];
 
+// =============================================================================
+// SALES INVOICE WORKFLOW
+// =============================================================================
+
+export const SALES_WORKFLOW_STATUSES = {
+  CAPTURED: 'captured',
+  CLASSIFIED: 'classified',
+  EXTRACTED: 'extracted',
+  READY_FOR_APPROVAL: 'ready_for_approval',
+  APPROVAL_IN_PROGRESS: 'approval_in_progress',
+  APPROVED: 'approved',
+  EXPORTED: 'exported',
+  ARCHIVED: 'archived',
+};
+
+export const SALES_QUEUE_CONFIG = {
+  [SALES_WORKFLOW_STATUSES.EXTRACTED]: {
+    label: 'Extracted',
+    shortLabel: 'Extracted',
+    description: 'Data extracted, awaiting review',
+    color: 'bg-blue-500',
+    textColor: 'text-blue-500',
+    isActiveQueue: true,
+  },
+  [SALES_WORKFLOW_STATUSES.READY_FOR_APPROVAL]: {
+    label: 'Ready for Approval',
+    shortLabel: 'Ready',
+    description: 'Awaiting approval',
+    color: 'bg-green-500',
+    textColor: 'text-green-500',
+    isActiveQueue: true,
+  },
+  [SALES_WORKFLOW_STATUSES.APPROVAL_IN_PROGRESS]: {
+    label: 'Approval In Progress',
+    shortLabel: 'In Progress',
+    description: 'Being reviewed',
+    color: 'bg-purple-500',
+    textColor: 'text-purple-500',
+    isActiveQueue: true,
+  },
+  [SALES_WORKFLOW_STATUSES.APPROVED]: {
+    label: 'Approved',
+    shortLabel: 'Approved',
+    description: 'Approved',
+    color: 'bg-emerald-500',
+    textColor: 'text-emerald-500',
+    isActiveQueue: false,
+  },
+  [SALES_WORKFLOW_STATUSES.EXPORTED]: {
+    label: 'Exported',
+    shortLabel: 'Exported',
+    description: 'Exported',
+    color: 'bg-slate-500',
+    textColor: 'text-slate-400',
+    isActiveQueue: false,
+  },
+};
+
+export const SALES_PRIMARY_QUEUES = [
+  SALES_WORKFLOW_STATUSES.EXTRACTED,
+  SALES_WORKFLOW_STATUSES.READY_FOR_APPROVAL,
+  SALES_WORKFLOW_STATUSES.APPROVAL_IN_PROGRESS,
+];
+
+export const SALES_SECONDARY_QUEUES = [
+  SALES_WORKFLOW_STATUSES.APPROVED,
+  SALES_WORKFLOW_STATUSES.EXPORTED,
+];
+
+// =============================================================================
+// PURCHASE ORDER WORKFLOW
+// =============================================================================
+
+export const PO_WORKFLOW_STATUSES = {
+  CAPTURED: 'captured',
+  CLASSIFIED: 'classified',
+  EXTRACTED: 'extracted',
+  VALIDATION_PENDING: 'validation_pending',
+  VALIDATION_FAILED: 'validation_failed',
+  READY_FOR_APPROVAL: 'ready_for_approval',
+  APPROVED: 'approved',
+  EXPORTED: 'exported',
+};
+
+export const PO_QUEUE_CONFIG = {
+  [PO_WORKFLOW_STATUSES.VALIDATION_PENDING]: {
+    label: 'Validation Pending',
+    shortLabel: 'Validating',
+    description: 'Awaiting validation',
+    color: 'bg-yellow-500',
+    textColor: 'text-yellow-500',
+    isActiveQueue: true,
+  },
+  [PO_WORKFLOW_STATUSES.VALIDATION_FAILED]: {
+    label: 'Validation Failed',
+    shortLabel: 'Failed',
+    description: 'Validation errors',
+    color: 'bg-red-500',
+    textColor: 'text-red-500',
+    isActiveQueue: true,
+  },
+  [PO_WORKFLOW_STATUSES.READY_FOR_APPROVAL]: {
+    label: 'Ready for Approval',
+    shortLabel: 'Ready',
+    description: 'Awaiting approval',
+    color: 'bg-green-500',
+    textColor: 'text-green-500',
+    isActiveQueue: true,
+  },
+  [PO_WORKFLOW_STATUSES.APPROVED]: {
+    label: 'Approved',
+    shortLabel: 'Approved',
+    description: 'Approved',
+    color: 'bg-emerald-500',
+    textColor: 'text-emerald-500',
+    isActiveQueue: false,
+  },
+  [PO_WORKFLOW_STATUSES.EXPORTED]: {
+    label: 'Exported',
+    shortLabel: 'Exported',
+    description: 'Exported',
+    color: 'bg-slate-500',
+    textColor: 'text-slate-400',
+    isActiveQueue: false,
+  },
+};
+
+export const PO_PRIMARY_QUEUES = [
+  PO_WORKFLOW_STATUSES.VALIDATION_PENDING,
+  PO_WORKFLOW_STATUSES.VALIDATION_FAILED,
+  PO_WORKFLOW_STATUSES.READY_FOR_APPROVAL,
+];
+
+export const PO_SECONDARY_QUEUES = [
+  PO_WORKFLOW_STATUSES.APPROVED,
+  PO_WORKFLOW_STATUSES.EXPORTED,
+];
+
+// =============================================================================
+// QUALITY DOC WORKFLOW
+// =============================================================================
+
+export const QUALITY_WORKFLOW_STATUSES = {
+  CAPTURED: 'captured',
+  CLASSIFIED: 'classified',
+  TAGGED: 'tagged',
+  READY_FOR_REVIEW: 'ready_for_review',
+  REVIEW_IN_PROGRESS: 'review_in_progress',
+  REVIEWED: 'reviewed',
+  EXPORTED: 'exported',
+};
+
+export const QUALITY_QUEUE_CONFIG = {
+  [QUALITY_WORKFLOW_STATUSES.TAGGED]: {
+    label: 'Tagged',
+    shortLabel: 'Tagged',
+    description: 'Quality tags applied',
+    color: 'bg-blue-500',
+    textColor: 'text-blue-500',
+    isActiveQueue: true,
+  },
+  [QUALITY_WORKFLOW_STATUSES.READY_FOR_REVIEW]: {
+    label: 'Ready for Review',
+    shortLabel: 'Ready',
+    description: 'Awaiting review',
+    color: 'bg-yellow-500',
+    textColor: 'text-yellow-500',
+    isActiveQueue: true,
+  },
+  [QUALITY_WORKFLOW_STATUSES.REVIEW_IN_PROGRESS]: {
+    label: 'Review In Progress',
+    shortLabel: 'Reviewing',
+    description: 'Being reviewed',
+    color: 'bg-purple-500',
+    textColor: 'text-purple-500',
+    isActiveQueue: true,
+  },
+  [QUALITY_WORKFLOW_STATUSES.REVIEWED]: {
+    label: 'Reviewed',
+    shortLabel: 'Reviewed',
+    description: 'Review complete',
+    color: 'bg-emerald-500',
+    textColor: 'text-emerald-500',
+    isActiveQueue: false,
+  },
+  [QUALITY_WORKFLOW_STATUSES.EXPORTED]: {
+    label: 'Exported',
+    shortLabel: 'Exported',
+    description: 'Exported',
+    color: 'bg-slate-500',
+    textColor: 'text-slate-400',
+    isActiveQueue: false,
+  },
+};
+
+export const QUALITY_PRIMARY_QUEUES = [
+  QUALITY_WORKFLOW_STATUSES.TAGGED,
+  QUALITY_WORKFLOW_STATUSES.READY_FOR_REVIEW,
+  QUALITY_WORKFLOW_STATUSES.REVIEW_IN_PROGRESS,
+];
+
+export const QUALITY_SECONDARY_QUEUES = [
+  QUALITY_WORKFLOW_STATUSES.REVIEWED,
+  QUALITY_WORKFLOW_STATUSES.EXPORTED,
+];
+
+// =============================================================================
+// GENERIC HELPERS
+// =============================================================================
+
 // Get config for any status with fallback
-export function getQueueConfig(status) {
+export function getQueueConfig(status, docType = 'AP_INVOICE') {
+  // Try doc-type specific config first
+  if (docType === 'SALES_INVOICE' && SALES_QUEUE_CONFIG[status]) {
+    return SALES_QUEUE_CONFIG[status];
+  }
+  if (docType === 'PURCHASE_ORDER' && PO_QUEUE_CONFIG[status]) {
+    return PO_QUEUE_CONFIG[status];
+  }
+  if (docType === 'QUALITY_DOC' && QUALITY_QUEUE_CONFIG[status]) {
+    return QUALITY_QUEUE_CONFIG[status];
+  }
+  
+  // Fall back to AP config or default
   return AP_QUEUE_CONFIG[status] || {
     label: status,
     shortLabel: status,

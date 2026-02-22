@@ -7615,6 +7615,77 @@ app.add_middleware(
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# ==================== DYNAMIC MAILBOX POLLING WORKER ====================
+
+_dynamic_mailbox_polling_task = None
+_mailbox_last_poll_times = {}  # Track last poll time per mailbox
+
+async def dynamic_mailbox_polling_worker():
+    """
+    Background worker that polls all enabled mailbox sources from the database.
+    Each mailbox is polled at its configured interval.
+    """
+    logger.info("[DynamicMailboxWorker] Starting dynamic mailbox polling worker")
+    
+    # Initial delay to let the app fully start
+    await asyncio.sleep(30)
+    
+    while True:
+        try:
+            # Get all enabled mailbox sources
+            mailbox_sources = await db.mailbox_sources.find(
+                {"enabled": True}, 
+                {"_id": 0}
+            ).to_list(100)
+            
+            now = datetime.now(timezone.utc)
+            
+            for mailbox in mailbox_sources:
+                mailbox_id = mailbox.get("mailbox_id")
+                email_address = mailbox.get("email_address")
+                interval_minutes = mailbox.get("polling_interval_minutes", 5)
+                category = mailbox.get("category", "AP")
+                
+                if not email_address:
+                    continue
+                
+                # Check if it's time to poll this mailbox
+                last_poll = _mailbox_last_poll_times.get(mailbox_id)
+                if last_poll:
+                    elapsed = (now - last_poll).total_seconds() / 60
+                    if elapsed < interval_minutes:
+                        continue  # Not time yet
+                
+                # Time to poll!
+                logger.info("[DynamicMailboxWorker] Polling %s (%s)", mailbox.get("name"), email_address)
+                
+                try:
+                    stats = await poll_mailbox_for_documents(
+                        mailbox_address=email_address,
+                        default_category=category,
+                        source_id=mailbox_id
+                    )
+                    
+                    _mailbox_last_poll_times[mailbox_id] = now
+                    
+                    if stats.get("attachments_ingested", 0) > 0:
+                        logger.info("[DynamicMailboxWorker] %s: ingested %d documents", 
+                                   mailbox.get("name"), stats["attachments_ingested"])
+                    
+                except Exception as e:
+                    logger.error("[DynamicMailboxWorker] Error polling %s: %s", email_address, str(e))
+            
+            # Sleep for 1 minute before checking again
+            await asyncio.sleep(60)
+            
+        except asyncio.CancelledError:
+            logger.info("[DynamicMailboxWorker] Polling worker cancelled")
+            break
+        except Exception as e:
+            logger.error("[DynamicMailboxWorker] Worker error: %s", str(e))
+            await asyncio.sleep(60)  # Wait before retrying
+
+
 @app.on_event("startup")
 async def startup():
     global _email_polling_task

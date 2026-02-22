@@ -4353,7 +4353,7 @@ async def intake_document(
         # Document classification fields (will be updated after AI classification)
         "doc_type": DocType.OTHER.value,
         "source_system": SourceSystem.GPI_HUB_NATIVE.value,
-        "capture_channel": CaptureChannel.EMAIL.value if "email" in source.lower() else CaptureChannel.UPLOAD.value,
+        "capture_channel": get_pilot_capture_channel(CaptureChannel.EMAIL.value if "email" in source.lower() else CaptureChannel.UPLOAD.value) if PILOT_MODE_ENABLED else (CaptureChannel.EMAIL.value if "email" in source.lower() else CaptureChannel.UPLOAD.value),
         # Workflow tracking fields
         "workflow_status": WorkflowStatus.CAPTURED.value,
         "workflow_history": [{
@@ -4368,7 +4368,9 @@ async def intake_document(
         "workflow_status_updated_utc": now,
         "created_utc": now,
         "updated_utc": now,
-        "last_error": None
+        "last_error": None,
+        # Pilot metadata (added if pilot mode enabled)
+        **get_pilot_metadata()
     }
     await db.hub_documents.insert_one(doc)
     

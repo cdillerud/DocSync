@@ -9,7 +9,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { toast } from 'sonner';
 import { 
   RefreshCw, FileText, TrendingUp, CheckCircle, AlertCircle, 
-  Building2, Package, Receipt, FileCheck, HelpCircle, Filter, Download
+  Building2, Package, Receipt, FileCheck, HelpCircle, Filter, Download, Brain, Cpu
 } from 'lucide-react';
 import { getDocumentTypesDashboard, exportDocumentTypesDashboard } from '@/lib/api';
 

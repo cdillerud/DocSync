@@ -7271,7 +7271,7 @@ async def reject_document(doc_id: str, request: ApprovalActionRequest):
 async def mark_ready_for_review(
     doc_id: str,
     reason: Optional[str] = None,
-    current_user: dict = Depends(get_current_user)
+    user: Optional[str] = None
 ):
     """
     Mark a document as ready for review.
@@ -7284,21 +7284,16 @@ async def mark_ready_for_review(
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
     
     doc_type = doc.get("doc_type", DocType.OTHER.value)
-    
-    # Validate that this doc_type supports the ready_for_review state
-    valid_types = [
-        DocType.STATEMENT.value, DocType.REMINDER.value, 
-        DocType.FINANCE_CHARGE_MEMO.value, DocType.QUALITY_DOC.value
-    ]
+    actor = user or "system"
     
     updated_doc, history_entry, success = WorkflowEngine.advance_workflow(
         doc,
         WorkflowEvent.ON_MARK_READY_FOR_REVIEW.value,
         context={
             "reason": reason or "Marked ready for review",
-            "metadata": {"triggered_by": current_user.get("username")}
+            "metadata": {"triggered_by": actor}
         },
-        actor=current_user.get("username", "system")
+        actor=actor
     )
     
     if not success:
@@ -7327,7 +7322,7 @@ async def mark_ready_for_review(
 async def mark_reviewed(
     doc_id: str,
     reason: Optional[str] = None,
-    current_user: dict = Depends(get_current_user)
+    user: Optional[str] = None
 ):
     """
     Mark a document as reviewed.
@@ -7340,15 +7335,16 @@ async def mark_reviewed(
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
     
     doc_type = doc.get("doc_type", DocType.OTHER.value)
+    actor = user or "system"
     
     updated_doc, history_entry, success = WorkflowEngine.advance_workflow(
         doc,
         WorkflowEvent.ON_REVIEWED.value,
         context={
             "reason": reason or "Document reviewed",
-            "metadata": {"triggered_by": current_user.get("username")}
+            "metadata": {"triggered_by": actor}
         },
-        actor=current_user.get("username", "system")
+        actor=actor
     )
     
     if not success:
@@ -7377,7 +7373,7 @@ async def mark_reviewed(
 async def start_approval_generic(
     doc_id: str,
     reason: Optional[str] = None,
-    current_user: dict = Depends(get_current_user)
+    user: Optional[str] = None
 ):
     """
     Start approval process for a document (generic version).
@@ -7390,6 +7386,7 @@ async def start_approval_generic(
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
     
     doc_type = doc.get("doc_type", DocType.OTHER.value)
+    actor = user or "system"
     
     # For AP_INVOICE, redirect to the existing AP-specific endpoint
     if doc_type == DocType.AP_INVOICE.value:
@@ -7403,9 +7400,9 @@ async def start_approval_generic(
         WorkflowEvent.ON_APPROVAL_STARTED.value,
         context={
             "reason": reason or "Approval process started",
-            "metadata": {"triggered_by": current_user.get("username")}
+            "metadata": {"triggered_by": actor}
         },
-        actor=current_user.get("username", "system")
+        actor=actor
     )
     
     if not success:
@@ -7434,7 +7431,7 @@ async def start_approval_generic(
 async def approve_generic(
     doc_id: str,
     reason: Optional[str] = None,
-    current_user: dict = Depends(get_current_user)
+    user: Optional[str] = None
 ):
     """
     Approve a document (generic version).
@@ -7447,6 +7444,7 @@ async def approve_generic(
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
     
     doc_type = doc.get("doc_type", DocType.OTHER.value)
+    actor = user or "system"
     
     # For AP_INVOICE, redirect to the existing AP-specific endpoint
     if doc_type == DocType.AP_INVOICE.value:
@@ -7460,9 +7458,9 @@ async def approve_generic(
         WorkflowEvent.ON_APPROVED.value,
         context={
             "reason": reason or "Document approved",
-            "metadata": {"triggered_by": current_user.get("username")}
+            "metadata": {"triggered_by": actor}
         },
-        actor=current_user.get("username", "system")
+        actor=actor
     )
     
     if not success:
@@ -7491,7 +7489,7 @@ async def approve_generic(
 async def reject_generic(
     doc_id: str,
     reason: str = Query(..., description="Reason for rejection (required)"),
-    current_user: dict = Depends(get_current_user)
+    user: Optional[str] = None
 ):
     """
     Reject a document (generic version).
@@ -7504,6 +7502,7 @@ async def reject_generic(
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
     
     doc_type = doc.get("doc_type", DocType.OTHER.value)
+    actor = user or "system"
     
     # For AP_INVOICE, redirect to the existing AP-specific endpoint
     if doc_type == DocType.AP_INVOICE.value:
@@ -7517,9 +7516,9 @@ async def reject_generic(
         WorkflowEvent.ON_REJECTED.value,
         context={
             "reason": reason,
-            "metadata": {"triggered_by": current_user.get("username")}
+            "metadata": {"triggered_by": actor}
         },
-        actor=current_user.get("username", "system")
+        actor=actor
     )
     
     if not success:
@@ -7548,7 +7547,7 @@ async def reject_generic(
 async def complete_triage(
     doc_id: str,
     reason: Optional[str] = None,
-    current_user: dict = Depends(get_current_user)
+    user: Optional[str] = None
 ):
     """
     Complete triage for an OTHER document.
@@ -7561,6 +7560,7 @@ async def complete_triage(
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
     
     doc_type = doc.get("doc_type", DocType.OTHER.value)
+    actor = user or "system"
     
     if doc_type != DocType.OTHER.value:
         raise HTTPException(
@@ -7573,9 +7573,9 @@ async def complete_triage(
         WorkflowEvent.ON_TRIAGE_COMPLETED.value,
         context={
             "reason": reason or "Triage completed",
-            "metadata": {"triggered_by": current_user.get("username")}
+            "metadata": {"triggered_by": actor}
         },
-        actor=current_user.get("username", "system")
+        actor=actor
     )
     
     if not success:
@@ -7604,7 +7604,7 @@ async def complete_triage(
 async def link_credit_to_invoice(
     doc_id: str,
     invoice_id: str = Query(..., description="ID of the original invoice"),
-    current_user: dict = Depends(get_current_user)
+    user: Optional[str] = None
 ):
     """
     Link a credit memo to its original invoice.
@@ -7617,6 +7617,7 @@ async def link_credit_to_invoice(
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
     
     doc_type = doc.get("doc_type", DocType.OTHER.value)
+    actor = user or "system"
     
     valid_types = [DocType.SALES_CREDIT_MEMO.value, DocType.PURCHASE_CREDIT_MEMO.value]
     if doc_type not in valid_types:
@@ -7631,11 +7632,11 @@ async def link_credit_to_invoice(
         context={
             "reason": f"Linked to invoice {invoice_id}",
             "metadata": {
-                "triggered_by": current_user.get("username"),
+                "triggered_by": actor,
                 "linked_invoice_id": invoice_id
             }
         },
-        actor=current_user.get("username", "system")
+        actor=actor
     )
     
     if not success:
@@ -7668,7 +7669,7 @@ async def link_credit_to_invoice(
 async def tag_quality_doc(
     doc_id: str,
     tags: List[str] = Query(..., description="Quality tags to apply"),
-    current_user: dict = Depends(get_current_user)
+    user: Optional[str] = None
 ):
     """
     Tag a quality document for categorization.
@@ -7681,6 +7682,7 @@ async def tag_quality_doc(
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
     
     doc_type = doc.get("doc_type", DocType.OTHER.value)
+    actor = user or "system"
     
     if doc_type != DocType.QUALITY_DOC.value:
         raise HTTPException(
@@ -7694,11 +7696,11 @@ async def tag_quality_doc(
         context={
             "reason": f"Tagged with: {', '.join(tags)}",
             "metadata": {
-                "triggered_by": current_user.get("username"),
+                "triggered_by": actor,
                 "tags": tags
             }
         },
-        actor=current_user.get("username", "system")
+        actor=actor
     )
     
     if not success:
@@ -7731,7 +7733,7 @@ async def tag_quality_doc(
 async def export_document(
     doc_id: str,
     export_destination: Optional[str] = None,
-    current_user: dict = Depends(get_current_user)
+    user: Optional[str] = None
 ):
     """
     Mark a document as exported (generic version).
@@ -7744,6 +7746,7 @@ async def export_document(
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
     
     doc_type = doc.get("doc_type", DocType.OTHER.value)
+    actor = user or "system"
     
     updated_doc, history_entry, success = WorkflowEngine.advance_workflow(
         doc,
@@ -7751,11 +7754,11 @@ async def export_document(
         context={
             "reason": f"Exported to: {export_destination or 'default'}",
             "metadata": {
-                "triggered_by": current_user.get("username"),
+                "triggered_by": actor,
                 "export_destination": export_destination
             }
         },
-        actor=current_user.get("username", "system")
+        actor=actor
     )
     
     if not success:

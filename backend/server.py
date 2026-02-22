@@ -11034,28 +11034,32 @@ async def run_simulation_for_document(doc_id: str):
     doc_for_sim = {**doc, "document_id": doc_id}
     simulation_results = run_full_export_simulation(doc_for_sim)
     
-    # Convert results to dicts
-    results_dict = {k: v.to_dict() for k, v in simulation_results.items()}
+    # Convert results to dicts - use JSON round-trip to ensure clean serializable dicts
+    import json
+    results_dict = {}
+    for k, v in simulation_results.items():
+        result_json = json.dumps(v.to_dict())
+        results_dict[k] = json.loads(result_json)
     
-    # Create workflow history entry
-    history_entry = SimulationHistoryEntry.create_batch_simulation_entry(
+    # Create workflow history entry (also JSON-clean)
+    history_entry_raw = SimulationHistoryEntry.create_batch_simulation_entry(
         document_id=doc_id,
         simulation_results=results_dict
     )
+    history_entry = json.loads(json.dumps(history_entry_raw))
     
-    # Store simulation results in dedicated collection (deep copy to avoid _id mutation)
+    # Store simulation results in dedicated collection
     for sim_type, result in results_dict.items():
-        result_copy = copy.deepcopy(result)
+        result_copy = json.loads(json.dumps(result))
         result_copy["_collection_timestamp"] = datetime.now(timezone.utc).isoformat()
         await db.pilot_simulation_results.insert_one(result_copy)
     
-    # Update document with simulation results and history (deep copy to avoid returning mutated data)
-    results_for_db = copy.deepcopy(results_dict)
-    history_for_db = copy.deepcopy(history_entry)
+    # Update document with simulation results and history
+    results_for_db = json.loads(json.dumps(results_dict))
     await db.hub_documents.update_one(
         {"id": doc_id},
         {
-            "$push": {"workflow_history": history_for_db},
+            "$push": {"workflow_history": history_entry},
             "$set": {
                 "last_simulation_results": results_for_db,
                 "last_simulation_timestamp": datetime.now(timezone.utc).isoformat()

@@ -1,0 +1,83 @@
+{
+  "summary": "14-day Shadow Pilot Implementation - All 11 features verified. Backend: 15/15 tests pass (pilot status, daily-metrics, logs, accuracy, trend endpoints). Frontend: All 3 new pages render correctly with proper data-testids (Pilot Dashboard 13/13, Sales Workflows 8/8, Operations Workflows 7/7). Navigation includes all new workflow pages.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_pilot_endpoints.py",
+    "/app/test_reports/pytest/pilot_endpoints_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Pilot status API correctly returns pilot_mode_enabled=true, current_phase=shadow_pilot_v1, and blocking flags",
+    "Daily metrics API correctly aggregates by doc_type, classification method, and stuck documents",
+    "Document upload correctly adds pilot_phase and pilot_date metadata when pilot mode enabled",
+    "PilotDashboardPage shows all 5 summary cards (Total Docs, Accuracy, AI Usage, Vendor Extraction, Stuck)",
+    "SalesWorkflowsPage and OperationsWorkflowsPage show 'Observation Mode' badge and pilot warning banner",
+    "All pages have proper data-testid attributes for automated testing",
+    "Navigation sidebar correctly includes Pilot Dashboard, Sales Workflows, and Operations links"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_pilot_endpoints.py"
+  ],
+  "success_rate": {
+    "backend": "100% (15/15 pilot tests passed)",
+    "frontend": "100% (28/28 UI checks passed)"
+  },
+  "seed_data_creation": "Test pilot documents created during backend tests (cleaned up after)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Pilot implementation complete and verified. Key verified behaviors: 1) /api/pilot/status returns pilot_mode_enabled=true with exports_blocked and bc_validation_blocked, 2) /api/pilot/daily-metrics returns summary with total_documents, ai_usage_rate, vendor_extraction_rate, 3) /api/pilot/logs returns paginated logs with pilot_phase filter, 4) /api/pilot/accuracy returns accuracy_score and time_in_status_distribution, 5) /api/pilot/trend returns daily trend data by doc_type, 6) Document upload adds pilot_phase=shadow_pilot_v1 and pilot_date, 7) Pilot Dashboard page renders with shadow_pilot_v1 badge, 5 summary cards, Documents by Type breakdown, Daily Trend chart, Workflow Stalls and Misclassifications tables, 8) Sales Workflows page shows Observation Mode badge and Shadow Pilot Mode Active banner, 9) Operations Workflows page shows PO and Quality sections with Pilot Only filter, 10) All 3 new pages in navigation sidebar",
+  "verified_features": {
+    "pilot_status_api": {
+      "status": "VERIFIED",
+      "evidence": "GET /api/pilot/status returns 200 with pilot_mode_enabled=true"
+    },
+    "pilot_daily_metrics_api": {
+      "status": "VERIFIED",
+      "evidence": "GET /api/pilot/daily-metrics returns 200 with summary, by_doc_type, stuck_documents"
+    },
+    "pilot_logs_api": {
+      "status": "VERIFIED",
+      "evidence": "GET /api/pilot/logs returns 200 with paginated logs"
+    },
+    "pilot_accuracy_api": {
+      "status": "VERIFIED",
+      "evidence": "GET /api/pilot/accuracy returns 200 with accuracy_score and time_in_status_distribution"
+    },
+    "pilot_trend_api": {
+      "status": "VERIFIED",
+      "evidence": "GET /api/pilot/trend returns 200 with trend array and doc_types"
+    },
+    "document_upload_pilot_metadata": {
+      "status": "VERIFIED",
+      "evidence": "Upload adds pilot_phase=shadow_pilot_v1 and pilot_date to documents"
+    },
+    "pilot_dashboard_page": {
+      "status": "VERIFIED",
+      "evidence": "Page renders with all 13 expected elements including summary cards and charts"
+    },
+    "sales_workflows_page": {
+      "status": "VERIFIED",
+      "evidence": "Page renders with Observation Mode badge and 8/8 expected elements"
+    },
+    "operations_workflows_page": {
+      "status": "VERIFIED",
+      "evidence": "Page renders with PO and Quality sections, 7/7 expected elements"
+    },
+    "pilot_badge_on_documents": {
+      "status": "VERIFIED",
+      "evidence": "Pilot documents visible in Document Queue (test_pilot_doc.txt with pilot metadata)"
+    },
+    "navigation_includes_new_pages": {
+      "status": "VERIFIED",
+      "evidence": "All 3 nav links exist: pilot-dashboard, sales-workflows, operations-workflows"
+    }
+  }
+}

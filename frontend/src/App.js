@@ -37,6 +37,9 @@ function AppRoutes() {
         <Route path="queue" element={<QueuePage />} />
         <Route path="workflow" element={<WorkflowQueuesPage />} />
         <Route path="ap-workflows" element={<APWorkflowsPage />} />
+        <Route path="sales-workflows" element={<SalesWorkflowsPage />} />
+        <Route path="operations-workflows" element={<OperationsWorkflowsPage />} />
+        <Route path="pilot-dashboard" element={<PilotDashboardPage />} />
         <Route path="doc-types" element={<DocTypeDashboardPage />} />
         <Route path="documents/:id" element={<DocumentDetailPage />} />
         <Route path="email-parser" element={<EmailParserPage />} />

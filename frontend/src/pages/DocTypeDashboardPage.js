@@ -130,6 +130,9 @@ function DocTypeRow({ docType, data }) {
   const totalProcessed = extracted + readyForApproval + approved + exported;
   const progressPct = data.total > 0 ? Math.round((totalProcessed / data.total) * 100) : 0;
   
+  // Classification counts
+  const classificationCounts = data.classification_counts || { deterministic: 0, ai: 0, other: 0 };
+  
   return (
     <TableRow data-testid={`doctype-row-${docType}`}>
       <TableCell>
@@ -145,6 +148,15 @@ function DocTypeRow({ docType, data }) {
       </TableCell>
       <TableCell className="text-center font-bold text-lg">
         {data.total.toLocaleString()}
+      </TableCell>
+      <TableCell>
+        <div className="flex items-center gap-1">
+          <ClassificationBadge type="deterministic" count={classificationCounts.deterministic} />
+          <ClassificationBadge type="ai" count={classificationCounts.ai} />
+          {classificationCounts.other > 0 && (
+            <ClassificationBadge type="other" count={classificationCounts.other} />
+          )}
+        </div>
       </TableCell>
       <TableCell className="text-center">
         <TooltipProvider>
@@ -192,26 +204,6 @@ function DocTypeRow({ docType, data }) {
             count={data.extraction?.amount?.count || 0}
             label="Amount" 
           />
-        </div>
-      </TableCell>
-      <TableCell>
-        <div className="space-y-1 min-w-[120px]">
-          <ExtractionRateBar 
-            rate={data.extraction?.po_number?.rate || 0} 
-            count={data.extraction?.po_number?.count || 0}
-            label="PO #" 
-          />
-          <ExtractionRateBar 
-            rate={data.extraction?.due_date?.rate || 0} 
-            count={data.extraction?.due_date?.count || 0}
-            label="Due Date" 
-          />
-          <div className="flex justify-between text-xs">
-            <span className="text-muted-foreground">AI Conf</span>
-            <span className={data.avg_confidence >= 0.8 ? 'text-green-400' : data.avg_confidence >= 0.5 ? 'text-yellow-400' : 'text-red-400'}>
-              {Math.round((data.avg_confidence || 0) * 100)}%
-            </span>
-          </div>
         </div>
       </TableCell>
       <TableCell>

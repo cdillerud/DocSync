@@ -870,4 +870,42 @@ Visual dashboard for analyzing BC simulation results during Phase 2 shadow pilot
 
 ---
 
+## Simulation Dashboard Drill-Down Views (Completed - February 22, 2026)
+
+### Overview
+Added clickable drill-down functionality to the Simulation Dashboard, allowing users to view detailed document lists filtered by doc_type, failure_reason, or success status.
+
+### Features Added
+
+#### Clickable Breakdown Cards
+- **By Document Type:** Click success (✓) or failure (✗) counts to view filtered documents
+- **By Failure Reason:** Click any reason row to see all documents with that failure
+- **Recent Failed Simulations:** Click any row to open document detail panel
+
+#### Drill-Down Sheet
+- Opens as a side sheet with filtered document list
+- Shows document metadata: doc_type, workflow_status, source_system
+- For failures: displays failure_reason_code
+- For successes: displays simulated_bc_number
+- Click any document row to open DocumentDetailPanel
+
+#### Document Detail Panel Integration
+- Reuses existing `DocumentDetailPanel` component
+- Opens as a secondary sheet for document inspection
+- Full document details with workflow history
+
+### Technical Implementation
+- Uses Shadcn Sheet components for slide-out panels
+- Leverages existing `/api/pilot/simulation/metrics/failures` and `/api/pilot/simulation/metrics/successes` endpoints
+- Maintains state for drill-down type, filters, and selected document
+
+### UI Flow
+1. User views Simulation Dashboard
+2. Clicks on a breakdown card (doc_type success/failure, failure reason)
+3. Drill-down sheet opens with filtered document list
+4. User clicks on a document row
+5. DocumentDetailPanel opens with full document details
+
+---
+
 *Last Updated: February 22, 2026*

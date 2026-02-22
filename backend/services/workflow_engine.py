@@ -115,9 +115,26 @@ class WorkflowStatus(str, Enum):
     BC_VALIDATION_PENDING = "bc_validation_pending" # Awaiting BC validation
     BC_VALIDATION_FAILED = "bc_validation_failed"   # BC validation failed, needs override
     
+    # PO validation states (PURCHASE_ORDER)
+    VALIDATION_PENDING = "validation_pending"       # PO awaiting validation
+    VALIDATION_FAILED = "validation_failed"         # PO validation failed
+    
+    # Credit memo states (SALES_CREDIT_MEMO, PURCHASE_CREDIT_MEMO)
+    LINKED_TO_INVOICE = "linked_to_invoice"         # Credit memo linked to original invoice
+    
+    # Quality doc states (QUALITY_DOC)
+    TAGGED = "tagged"                               # Quality doc tagged/categorized
+    REVIEW_IN_PROGRESS = "review_in_progress"       # Quality review in progress
+    
+    # OTHER doc states (triage)
+    TRIAGE_PENDING = "triage_pending"               # Awaiting triage
+    TRIAGE_COMPLETED = "triage_completed"           # Triage completed
+    
     # General exception queues (all types)
     DATA_CORRECTION_PENDING = "data_correction_pending"  # Extraction incomplete
     REVIEW_PENDING = "review_pending"              # General review queue
+    READY_FOR_REVIEW = "ready_for_review"          # Ready for review (STATEMENT, REMINDER, etc.)
+    REVIEWED = "reviewed"                          # Document reviewed
     
     # Approval stage (most types)
     READY_FOR_APPROVAL = "ready_for_approval"

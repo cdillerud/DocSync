@@ -141,4 +141,16 @@ export const getPilotAccuracy = (phase = 'shadow_pilot_v1') =>
 export const getPilotTrend = (phase = 'shadow_pilot_v1', days = 14) => 
   api.get('/pilot/trend', { params: { phase, days } });
 
+// Send daily pilot summary email manually
+export const sendPilotSummaryEmail = () => 
+  api.post('/pilot/send-daily-summary');
+
+// Get pilot email logs
+export const getPilotEmailLogs = (limit = 20, skip = 0) =>
+  api.get('/pilot/email-logs', { params: { limit, skip } });
+
+// Get pilot email config
+export const getPilotEmailConfig = () =>
+  api.get('/pilot/email-config');
+
 export default api;

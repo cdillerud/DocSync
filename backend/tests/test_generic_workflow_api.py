@@ -557,13 +557,15 @@ class TestAPInvoiceWorkflowUnchanged:
         """Test that AP-specific queue endpoints still work"""
         session = requests.Session()
         
-        # Test the AP exception queues endpoint
-        response = session.get(f"{BASE_URL}/api/workflows/exception-queues")
+        # Test the vendor pending queue endpoint (AP-specific)
+        response = session.get(f"{BASE_URL}/api/workflows/ap_invoice/vendor-pending")
         
         assert response.status_code == 200
         data = response.json()
-        assert "vendor_pending" in data or "queues" in data or isinstance(data, dict)
-        print("SUCCESS: AP exception queues endpoint works")
+        assert "documents" in data
+        assert "queue" in data
+        assert data["queue"] == "vendor_pending"
+        print("SUCCESS: AP vendor_pending queue endpoint works")
 
 
 class TestDashboardActiveQueueCount:

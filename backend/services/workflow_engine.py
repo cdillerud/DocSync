@@ -1165,6 +1165,152 @@ class WorkflowEngine:
 
 
 # =============================================================================
+# BC VALIDATION WORKFLOW HELPERS
+# =============================================================================
+
+class BCValidationHistoryEntry:
+    """
+    Creates workflow history entries specifically for BC validation events.
+    Used during observation mode to track BC lookup results without affecting workflow state.
+    """
+    
+    @staticmethod
+    def create_bc_lookup_entry(
+        event: str,
+        lookup_type: str,
+        lookup_key: str,
+        bc_result: Dict,
+        actor: str = "bc_sandbox_service",
+        observation_only: bool = True
+    ) -> Dict:
+        """
+        Create a workflow history entry for a BC lookup.
+        
+        Args:
+            event: The WorkflowEvent value (e.g., ON_BC_LOOKUP_SUCCESS)
+            lookup_type: Type of lookup (vendor, customer, po, invoice)
+            lookup_key: The key used for lookup (vendor_number, etc.)
+            bc_result: The BCLookupResult.to_dict() data
+            actor: Who/what performed the lookup
+            observation_only: Whether this is observation mode (no workflow changes)
+            
+        Returns:
+            Workflow history entry dict
+        """
+        return {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": event,
+            "actor": actor,
+            "bc_validation": {
+                "lookup_type": lookup_type,
+                "lookup_key": lookup_key,
+                "status": bc_result.get("status"),
+                "timing_ms": bc_result.get("timing_ms"),
+                "endpoint": bc_result.get("endpoint"),
+                "response_size": bc_result.get("response_size"),
+                "found": bc_result.get("status") in ["success", "demo_mode"] and bool(bc_result.get("data")),
+                "error": bc_result.get("error"),
+            },
+            "observation_only": observation_only,
+            "metadata": {
+                "bc_data_summary": _summarize_bc_data(bc_result.get("data", {}), lookup_type)
+            }
+        }
+    
+    @staticmethod
+    def create_bc_validation_entry(
+        validation_type: str,
+        validation_result: Dict,
+        actor: str = "bc_sandbox_service"
+    ) -> Dict:
+        """
+        Create a workflow history entry for a full BC validation.
+        
+        Args:
+            validation_type: Type of validation (ap_invoice, sales_invoice, purchase_order)
+            validation_result: The full validation result dict
+            actor: Who/what performed the validation
+            
+        Returns:
+            Workflow history entry dict
+        """
+        checks_passed = sum(1 for c in validation_result.get("checks", []) if c.get("passed"))
+        checks_total = len(validation_result.get("checks", []))
+        
+        return {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": WorkflowEvent.ON_BC_LOOKUP_SUCCESS.value if validation_result.get("overall_valid") else WorkflowEvent.ON_BC_LOOKUP_FAILED.value,
+            "actor": actor,
+            "bc_validation": {
+                "validation_type": validation_type,
+                "overall_valid": validation_result.get("overall_valid"),
+                "checks_passed": checks_passed,
+                "checks_total": checks_total,
+                "total_timing_ms": validation_result.get("total_timing_ms"),
+                "warnings": validation_result.get("warnings", []),
+                "errors": validation_result.get("errors", []),
+            },
+            "observation_only": validation_result.get("observation_only", True),
+            "pilot_mode": validation_result.get("pilot_mode", True),
+            "metadata": {
+                "checks": [
+                    {
+                        "name": c.get("check_name"),
+                        "passed": c.get("passed"),
+                        "timing_ms": c.get("bc_lookup", {}).get("timing_ms")
+                    }
+                    for c in validation_result.get("checks", [])
+                ]
+            }
+        }
+
+
+def _summarize_bc_data(data: Dict, lookup_type: str) -> Dict:
+    """Summarize BC data for workflow history (exclude sensitive/large fields)."""
+    if not data:
+        return {}
+    
+    summary = {}
+    
+    if lookup_type == "vendor":
+        summary = {
+            "number": data.get("number"),
+            "displayName": data.get("displayName"),
+            "balance": data.get("balance")
+        }
+    elif lookup_type == "customer":
+        summary = {
+            "number": data.get("number"),
+            "displayName": data.get("displayName"),
+            "balance": data.get("balance")
+        }
+    elif lookup_type == "purchase_order":
+        summary = {
+            "number": data.get("number"),
+            "vendorNumber": data.get("vendorNumber"),
+            "status": data.get("status"),
+            "totalAmount": data.get("totalAmount")
+        }
+    elif lookup_type == "purchase_invoice":
+        summary = {
+            "number": data.get("number"),
+            "vendorNumber": data.get("vendorNumber"),
+            "vendorInvoiceNumber": data.get("vendorInvoiceNumber"),
+            "status": data.get("status"),
+            "totalAmountIncludingTax": data.get("totalAmountIncludingTax")
+        }
+    elif lookup_type == "sales_invoice":
+        summary = {
+            "number": data.get("number"),
+            "customerNumber": data.get("customerNumber"),
+            "status": data.get("status"),
+            "totalAmountIncludingTax": data.get("totalAmountIncludingTax")
+        }
+    
+    return summary
+
+
+# =============================================================================
 # BACKWARD COMPATIBILITY
 # =============================================================================
 

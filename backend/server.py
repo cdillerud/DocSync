@@ -7763,7 +7763,14 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
-    global _email_polling_task, _sales_polling_task
+    global _email_polling_task, _sales_polling_task, _dynamic_mailbox_polling_task
+    # Cancel dynamic mailbox polling worker
+    if _dynamic_mailbox_polling_task and not _dynamic_mailbox_polling_task.done():
+        _dynamic_mailbox_polling_task.cancel()
+        try:
+            await _dynamic_mailbox_polling_task
+        except asyncio.CancelledError:
+            logger.info("Dynamic mailbox polling worker stopped")
     # Cancel AP email polling worker if running
     if _email_polling_task and not _email_polling_task.done():
         _email_polling_task.cancel()

@@ -3174,7 +3174,7 @@ async def _internal_intake_document(
     file_path = UPLOAD_DIR / doc_id
     file_path.write_bytes(file_content)
     
-    # Create document record
+    # Create document record with workflow tracking
     doc = {
         "id": doc_id,
         "source": source,
@@ -3202,6 +3202,18 @@ async def _internal_intake_document(
         "bc_record_id": None,
         "bc_document_no": None,
         "status": "Received",
+        # Workflow tracking fields
+        "workflow_status": WorkflowStatus.CAPTURED.value,
+        "workflow_history": [{
+            "timestamp": now,
+            "from_status": None,
+            "to_status": WorkflowStatus.CAPTURED.value,
+            "event": WorkflowEvent.ON_CAPTURE.value,
+            "actor": "system",
+            "reason": "Document captured from " + source,
+            "metadata": {"source": source, "sender": sender}
+        }],
+        "workflow_status_updated_utc": now,
         "created_utc": now,
         "updated_utc": now,
         "last_error": None

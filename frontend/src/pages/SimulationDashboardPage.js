@@ -594,6 +594,112 @@ export default function SimulationDashboardPage() {
           <span className="text-yellow-500">READ-ONLY: No real BC writes</span>
         </p>
       </div>
+
+      {/* Drill-Down Sheet */}
+      <Sheet open={drillDownOpen} onOpenChange={setDrillDownOpen}>
+        <SheetContent className="w-[600px] sm:max-w-[600px]" data-testid="drill-down-sheet">
+          <SheetHeader>
+            <SheetTitle className="flex items-center gap-2">
+              {drillDownType.includes('success') ? (
+                <CheckCircle className="h-5 w-5 text-green-500" />
+              ) : (
+                <XCircle className="h-5 w-5 text-red-500" />
+              )}
+              {drillDownTitle}
+            </SheetTitle>
+            <SheetDescription>
+              {drillDownData.length} documents • Click a row to view details
+            </SheetDescription>
+          </SheetHeader>
+          
+          <ScrollArea className="h-[calc(100vh-150px)] mt-4">
+            {drillDownLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              <div className="space-y-2 pr-4">
+                {drillDownData.map((item, index) => (
+                  <div
+                    key={`${item.document_id}-${index}`}
+                    className="p-3 border rounded-lg hover:bg-muted/50 cursor-pointer transition-colors"
+                    onClick={() => openDocumentDetail(item.document_id)}
+                    data-testid={`drill-item-${index}`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline">{item.doc_type || 'Unknown'}</Badge>
+                        <span className="text-sm font-mono text-muted-foreground">
+                          {item.document_id?.slice(0, 12)}...
+                        </span>
+                      </div>
+                      <Button variant="ghost" size="sm">
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      {item.workflow_status && (
+                        <Badge variant="secondary">{item.workflow_status}</Badge>
+                      )}
+                      {item.source_system && (
+                        <Badge variant="outline">{item.source_system}</Badge>
+                      )}
+                      {item.simulation_type && (
+                        <span className="text-muted-foreground">{item.simulation_type}</span>
+                      )}
+                    </div>
+                    
+                    {item.failure_reason_code && (
+                      <div className="mt-2">
+                        <Badge variant="destructive" className="text-xs">
+                          {item.failure_reason_code.replace(/_/g, ' ')}
+                        </Badge>
+                      </div>
+                    )}
+                    
+                    {item.simulated_bc_number && (
+                      <div className="mt-2 text-xs text-muted-foreground">
+                        Simulated BC #: {item.simulated_bc_number}
+                      </div>
+                    )}
+                    
+                    {(item.vendor || item.customer || item.invoice) && (
+                      <div className="mt-2 flex gap-4 text-xs text-muted-foreground">
+                        {item.vendor && <span>Vendor: {item.vendor}</span>}
+                        {item.customer && <span>Customer: {item.customer}</span>}
+                        {item.invoice && <span>Invoice: {item.invoice}</span>}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                
+                {drillDownData.length === 0 && (
+                  <p className="text-center text-muted-foreground py-8">
+                    No documents found
+                  </p>
+                )}
+              </div>
+            )}
+          </ScrollArea>
+        </SheetContent>
+      </Sheet>
+
+      {/* Document Detail Panel */}
+      <Sheet open={detailPanelOpen} onOpenChange={setDetailPanelOpen}>
+        <SheetContent className="w-[700px] sm:max-w-[700px] p-0" data-testid="document-detail-sheet">
+          {selectedDocument && (
+            <DocumentDetailPanel
+              document={selectedDocument}
+              onClose={() => setDetailPanelOpen(false)}
+              onUpdate={(updated) => {
+                setSelectedDocument(updated);
+                fetchAll();
+              }}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

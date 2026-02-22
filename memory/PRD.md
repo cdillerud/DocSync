@@ -582,4 +582,59 @@ The implementation follows a pattern that can be replicated for Sales, Quality, 
 
 ---
 
+## 14-Day Shadow Pilot Implementation (Completed - February 22, 2026)
+
+### Overview
+A comprehensive shadow pilot infrastructure enabling read-only validation of document ingestion across all document types (AP, AR/Sales, Warehouse) without affecting external systems.
+
+### Pilot Configuration
+- **Phase**: `shadow_pilot_v1`
+- **Duration**: Feb 22 - Mar 8, 2026 (14 days)
+- **Feature Flag**: `PILOT_MODE_ENABLED=true`
+- **Guards**: Exports blocked, BC validation blocked, external writes blocked
+
+### Backend - New APIs
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/pilot/status | Pilot mode status and configuration |
+| GET | /api/pilot/daily-metrics | Daily metrics (counts, classification method, stuck docs) |
+| GET | /api/pilot/logs | Audit logs with pagination |
+| GET | /api/pilot/accuracy | Accuracy report (corrections, time-in-status distribution) |
+| GET | /api/pilot/trend | Daily trend data for charting |
+
+### Backend - Pilot Metadata
+All documents ingested during pilot automatically receive:
+- `pilot_phase`: "shadow_pilot_v1"
+- `pilot_date`: ISO timestamp of ingestion
+- `capture_channel`: SHADOW_PILOT_* variants
+
+### Frontend - New Pages
+| Route | Page | Description |
+|-------|------|-------------|
+| /pilot-dashboard | PilotDashboardPage | Summary cards, trend chart, misclassifications, stalls |
+| /sales-workflows | SalesWorkflowsPage | Sales invoice workflow observation |
+| /operations-workflows | OperationsWorkflowsPage | PO + Quality doc workflow observation |
+
+### Frontend - Reusable Components Updated
+- **WorkflowQueue**: Added pilot badge on rows where `pilot_phase != null`
+- **workflowConstants.js**: Added SALES, PO, QUALITY workflow statuses and queue configs
+- **api.js**: Added 5 pilot API functions
+
+### Test Results
+- **Testing Agent**: 100% pass rate (11 features verified)
+- **Backend Tests**: 15/15 passed
+- **Frontend Tests**: 28/28 UI checks passed
+- Test report: `/app/test_reports/iteration_19.json`
+
+### Acceptance Criteria Status
+1. ✅ All ingestion sources route documents with correct pilot metadata
+2. ✅ Workflows progress through states without error
+3. ✅ Pilot dashboard displays accurate counts and trends
+4. ✅ AP Workflows UI works with pilot filters
+5. ✅ Sales and Operations workflow pages load and show queues
+6. ✅ No writes to BC or external systems (guards in place)
+7. ✅ Full test coverage for new logic
+
+---
+
 *Last Updated: February 22, 2026*

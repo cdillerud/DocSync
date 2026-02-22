@@ -30,6 +30,7 @@ export const getMe = () => api.get('/auth/me');
 
 // Dashboard
 export const getDashboardStats = () => api.get('/dashboard/stats');
+export const getDocumentTypesDashboard = (params) => api.get('/dashboard/document-types', { params });
 
 // Documents
 export const uploadDocument = (formData) => api.post('/documents/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } });

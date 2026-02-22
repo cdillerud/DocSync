@@ -8,6 +8,7 @@
  * - Misclassification table
  * - Workflow stall table
  * - CSV export
+ * - Send daily summary email button
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -19,20 +20,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import { 
   RefreshCw, Download, FileText, Brain, TrendingUp, 
-  AlertTriangle, CheckCircle, Clock, BarChart3, Eye
+  AlertTriangle, CheckCircle, Clock, BarChart3, Eye, Mail
 } from 'lucide-react';
 
 import {
   PILOT_CONFIG,
-  DOC_TYPES,
-  formatDate,
 } from '@/lib/workflowConstants';
 import {
   getPilotStatus,
   getPilotDailyMetrics,
   getPilotAccuracy,
   getPilotTrend,
-  getPilotLogs,
+  sendPilotSummaryEmail,
 } from '@/lib/api';
 
 // Summary card component

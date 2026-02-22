@@ -17,6 +17,9 @@ import SalesDashboardPage from "@/pages/SalesDashboardPage";
 import WorkflowQueuesPage from "@/pages/WorkflowQueuesPage";
 import DocTypeDashboardPage from "@/pages/DocTypeDashboardPage";
 import APWorkflowsPage from "@/pages/APWorkflowsPage";
+import SalesWorkflowsPage from "@/pages/SalesWorkflowsPage";
+import OperationsWorkflowsPage from "@/pages/OperationsWorkflowsPage";
+import PilotDashboardPage from "@/pages/PilotDashboardPage";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();

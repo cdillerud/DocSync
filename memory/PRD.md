@@ -222,6 +222,23 @@ Gamer Packaging, Inc. needs to:
 | GET | /api/metrics/extraction-quality | AI extraction quality metrics |
 | GET | /api/metrics/extraction-misses | Documents with missing fields |
 
+### AP Invoice Workflow (NEW - Feb 22, 2026)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/workflows/ap_invoice/status-counts | Get counts by workflow status |
+| GET | /api/workflows/ap_invoice/vendor-pending | Documents awaiting vendor match |
+| GET | /api/workflows/ap_invoice/bc-validation-pending | Documents in BC validation |
+| GET | /api/workflows/ap_invoice/bc-validation-failed | Documents that failed BC validation |
+| GET | /api/workflows/ap_invoice/data-correction-pending | Documents needing data correction |
+| GET | /api/workflows/ap_invoice/ready-for-approval | Documents ready for approval |
+| GET | /api/workflows/ap_invoice/metrics | Workflow metrics (daily counts) |
+| POST | /api/workflows/ap_invoice/{id}/set-vendor | Manually set vendor for document |
+| POST | /api/workflows/ap_invoice/{id}/update-fields | Update extracted fields |
+| POST | /api/workflows/ap_invoice/{id}/override-bc-validation | Override validation failure |
+| POST | /api/workflows/ap_invoice/{id}/start-approval | Start approval process |
+| POST | /api/workflows/ap_invoice/{id}/approve | Approve document |
+| POST | /api/workflows/ap_invoice/{id}/reject | Reject document |
+
 ---
 
 ## Database Collections

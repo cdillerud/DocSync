@@ -2,6 +2,19 @@
 
 ## February 22, 2026
 
+### Classification Dashboard Extension
+- **NEW:** Classification method breakdown per doc_type
+  - `classification_counts`: { deterministic, ai, other } for each document type
+  - `ai_assisted_count`: Documents where AI successfully changed type from OTHER
+  - `ai_suggested_but_rejected_count`: Documents where AI was invoked but result rejected
+- **NEW:** Classification filter on dashboard API
+  - Query param: `?classification=deterministic|ai|all`
+  - `classification_totals` in response for summary stats
+- **NEW:** CSV export includes classification columns
+- **NEW:** Frontend "Classification" column with compact badges (Det/AI/Other)
+- **NEW:** Frontend classification filter dropdown with counts
+- **TESTS:** 22 new tests for classification dashboard (34 total backend tests)
+
 ### AI-Assisted Document Classification
 - **NEW:** Deterministic-first classification pipeline
   - Priority order: Zetadocs set codes → Square9 workflows → Mailbox category → Legacy AI extraction → AI fallback

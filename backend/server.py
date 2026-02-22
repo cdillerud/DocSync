@@ -8081,6 +8081,426 @@ async def get_supported_migration_types():
     }
 
 
+# ==================== PILOT ENDPOINTS ====================
+
+@api_router.get("/pilot/status")
+async def get_pilot_status_endpoint():
+    """
+    Get current pilot mode status and configuration.
+    """
+    return get_pilot_status()
+
+
+@api_router.get("/pilot/daily-metrics")
+async def get_pilot_daily_metrics(
+    phase: str = Query(default=CURRENT_PILOT_PHASE, description="Pilot phase to query"),
+    date: Optional[str] = Query(default=None, description="Specific date (YYYY-MM-DD) or None for all")
+):
+    """
+    Get daily metrics for the shadow pilot.
+    
+    Includes:
+    - Document counts per doc_type
+    - Classification method breakdown (deterministic vs AI)
+    - Stuck document counts (>24h in status)
+    - Vendor extraction rates
+    - Export rates
+    """
+    # Build date filter
+    date_match = {}
+    if date:
+        date_start = f"{date}T00:00:00"
+        date_end = f"{date}T23:59:59"
+        date_match = {"pilot_date": {"$gte": date_start, "$lte": date_end}}
+    
+    # Base match for pilot documents
+    base_match = {"pilot_phase": phase, **date_match}
+    
+    # Total counts by doc_type
+    doc_type_pipeline = [
+        {"$match": base_match},
+        {"$group": {
+            "_id": {"$ifNull": ["$doc_type", "OTHER"]},
+            "count": {"$sum": 1}
+        }}
+    ]
+    doc_type_results = await db.hub_documents.aggregate(doc_type_pipeline).to_list(20)
+    by_doc_type = {r["_id"]: r["count"] for r in doc_type_results}
+    
+    # Classification method breakdown
+    classification_pipeline = [
+        {"$match": base_match},
+        {"$group": {
+            "_id": {"$ifNull": ["$classification_method", "unknown"]},
+            "count": {"$sum": 1}
+        }}
+    ]
+    classification_results = await db.hub_documents.aggregate(classification_pipeline).to_list(20)
+    by_classification = {r["_id"]: r["count"] for r in classification_results}
+    
+    # Deterministic vs AI counts
+    deterministic_count = sum(c for k, c in by_classification.items() if k.startswith("deterministic"))
+    ai_count = sum(c for k, c in by_classification.items() if k.startswith("ai:"))
+    other_count = sum(c for k, c in by_classification.items() if not k.startswith("deterministic") and not k.startswith("ai:"))
+    
+    # Stuck documents (>24h in status)
+    now = datetime.now(timezone.utc)
+    threshold_24h = (now - timedelta(hours=24)).isoformat()
+    
+    stuck_statuses = ["vendor_pending", "bc_validation_pending", "extracted", "validation_pending"]
+    stuck_pipeline = [
+        {"$match": {
+            **base_match,
+            "workflow_status": {"$in": stuck_statuses},
+            "workflow_status_updated_utc": {"$lt": threshold_24h}
+        }},
+        {"$group": {
+            "_id": "$workflow_status",
+            "count": {"$sum": 1}
+        }}
+    ]
+    stuck_results = await db.hub_documents.aggregate(stuck_pipeline).to_list(20)
+    stuck_by_status = {r["_id"]: r["count"] for r in stuck_results}
+    
+    # Vendor extraction rate for AP_INVOICE
+    ap_total_pipeline = [
+        {"$match": {**base_match, "doc_type": "AP_INVOICE"}},
+        {"$count": "total"}
+    ]
+    ap_total_result = await db.hub_documents.aggregate(ap_total_pipeline).to_list(1)
+    ap_total = ap_total_result[0]["total"] if ap_total_result else 0
+    
+    ap_vendor_pipeline = [
+        {"$match": {
+            **base_match,
+            "doc_type": "AP_INVOICE",
+            "$or": [
+                {"vendor_no": {"$exists": True, "$ne": None}},
+                {"vendor_canonical": {"$exists": True, "$ne": None}}
+            ]
+        }},
+        {"$count": "with_vendor"}
+    ]
+    ap_vendor_result = await db.hub_documents.aggregate(ap_vendor_pipeline).to_list(1)
+    ap_with_vendor = ap_vendor_result[0]["with_vendor"] if ap_vendor_result else 0
+    
+    vendor_extraction_rate = (ap_with_vendor / ap_total * 100) if ap_total > 0 else 0
+    
+    # Export rate
+    exported_pipeline = [
+        {"$match": {**base_match, "workflow_status": "exported"}},
+        {"$count": "exported"}
+    ]
+    exported_result = await db.hub_documents.aggregate(exported_pipeline).to_list(1)
+    exported_count = exported_result[0]["exported"] if exported_result else 0
+    
+    total_docs = sum(by_doc_type.values())
+    export_rate = (exported_count / total_docs * 100) if total_docs > 0 else 0
+    
+    # Documents missing required fields
+    missing_fields_pipeline = [
+        {"$match": {
+            **base_match,
+            "$or": [
+                {"$and": [
+                    {"doc_type": "AP_INVOICE"},
+                    {"$or": [
+                        {"vendor_name": {"$exists": False}},
+                        {"vendor_name": None},
+                        {"invoice_number_clean": {"$exists": False}},
+                        {"invoice_number_clean": None}
+                    ]}
+                ]},
+                {"$and": [
+                    {"doc_type": "SALES_INVOICE"},
+                    {"$or": [
+                        {"customer_no": {"$exists": False}},
+                        {"customer_no": None}
+                    ]}
+                ]}
+            ]
+        }},
+        {"$group": {
+            "_id": "$doc_type",
+            "count": {"$sum": 1}
+        }}
+    ]
+    missing_results = await db.hub_documents.aggregate(missing_fields_pipeline).to_list(20)
+    missing_by_type = {r["_id"]: r["count"] for r in missing_results}
+    
+    return {
+        "phase": phase,
+        "date": date or "all",
+        "query_timestamp": now.isoformat(),
+        "summary": {
+            "total_documents": total_docs,
+            "deterministic_classified": deterministic_count,
+            "ai_classified": ai_count,
+            "other_classified": other_count,
+            "ai_usage_rate": (ai_count / total_docs * 100) if total_docs > 0 else 0,
+            "vendor_extraction_rate": vendor_extraction_rate,
+            "export_rate": export_rate
+        },
+        "by_doc_type": by_doc_type,
+        "by_classification_method": by_classification,
+        "stuck_documents": {
+            "total": sum(stuck_by_status.values()),
+            "by_status": stuck_by_status
+        },
+        "missing_required_fields": missing_by_type,
+        "exported_count": exported_count
+    }
+
+
+@api_router.get("/pilot/logs")
+async def get_pilot_logs(
+    phase: str = Query(default=CURRENT_PILOT_PHASE, description="Pilot phase to query"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    doc_type: Optional[str] = Query(default=None, description="Filter by doc_type"),
+    classification_method: Optional[str] = Query(default=None, description="Filter by classification_method")
+):
+    """
+    Get pilot ingestion logs for audit purposes.
+    
+    Returns documents ingested during the pilot with classification details.
+    """
+    # Build match
+    match = {"pilot_phase": phase}
+    if doc_type:
+        match["doc_type"] = doc_type
+    if classification_method:
+        if classification_method == "deterministic":
+            match["classification_method"] = {"$regex": "^deterministic"}
+        elif classification_method == "ai":
+            match["classification_method"] = {"$regex": "^ai:"}
+        else:
+            match["classification_method"] = classification_method
+    
+    # Count total
+    total = await db.hub_documents.count_documents(match)
+    
+    # Fetch paginated results
+    skip = (page - 1) * page_size
+    cursor = db.hub_documents.find(
+        match,
+        {
+            "_id": 0,
+            "id": 1,
+            "file_name": 1,
+            "doc_type": 1,
+            "source_system": 1,
+            "capture_channel": 1,
+            "classification_method": 1,
+            "ai_classification": 1,
+            "workflow_status": 1,
+            "pilot_phase": 1,
+            "pilot_date": 1,
+            "created_utc": 1,
+            "workflow_status_updated_utc": 1
+        }
+    ).sort("pilot_date", -1).skip(skip).limit(page_size)
+    
+    docs = await cursor.to_list(page_size)
+    
+    # Add computed fields
+    for doc in docs:
+        # Calculate time to status initialization
+        if doc.get("pilot_date") and doc.get("workflow_status_updated_utc"):
+            try:
+                pilot_dt = datetime.fromisoformat(doc["pilot_date"].replace("Z", "+00:00"))
+                status_dt = datetime.fromisoformat(doc["workflow_status_updated_utc"].replace("Z", "+00:00"))
+                doc["time_to_status_initialization_ms"] = int((status_dt - pilot_dt).total_seconds() * 1000)
+            except:
+                doc["time_to_status_initialization_ms"] = None
+    
+    return {
+        "phase": phase,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "total_pages": (total + page_size - 1) // page_size,
+        "logs": docs
+    }
+
+
+@api_router.get("/pilot/accuracy")
+async def get_pilot_accuracy_report(
+    phase: str = Query(default=CURRENT_PILOT_PHASE, description="Pilot phase to query")
+):
+    """
+    Get pilot accuracy report.
+    
+    Includes:
+    - Incorrect classifications (manually corrected)
+    - Misrouted workflow statuses
+    - Documents with missing required metadata
+    - Time-in-status distribution
+    """
+    base_match = {"pilot_phase": phase}
+    
+    # Find manually corrected documents (where doc_type was changed after initial classification)
+    # These would have multiple entries in workflow_history with different doc_types
+    # For now, we look for documents with classification_override or manual_correction fields
+    corrected_pipeline = [
+        {"$match": {
+            **base_match,
+            "$or": [
+                {"classification_override": {"$exists": True}},
+                {"manual_doc_type_correction": {"$exists": True}}
+            ]
+        }},
+        {"$project": {
+            "_id": 0,
+            "id": 1,
+            "file_name": 1,
+            "original_doc_type": "$ai_classification.suggested_type",
+            "corrected_doc_type": "$doc_type",
+            "correction_reason": "$classification_override_reason"
+        }}
+    ]
+    corrected_docs = await db.hub_documents.aggregate(corrected_pipeline).to_list(100)
+    
+    # Time-in-status distribution
+    now = datetime.now(timezone.utc)
+    time_distribution_pipeline = [
+        {"$match": base_match},
+        {"$addFields": {
+            "status_age_hours": {
+                "$divide": [
+                    {"$subtract": [now, {"$dateFromString": {"dateString": "$workflow_status_updated_utc"}}]},
+                    3600000  # Convert ms to hours
+                ]
+            }
+        }},
+        {"$bucket": {
+            "groupBy": "$status_age_hours",
+            "boundaries": [0, 1, 4, 8, 24, 48, 168, 999999],
+            "default": "unknown",
+            "output": {
+                "count": {"$sum": 1},
+                "statuses": {"$push": "$workflow_status"}
+            }
+        }}
+    ]
+    
+    try:
+        time_distribution = await db.hub_documents.aggregate(time_distribution_pipeline).to_list(20)
+    except Exception as e:
+        logger.warning(f"Time distribution aggregation failed: {e}")
+        time_distribution = []
+    
+    # Format time buckets
+    time_buckets = {
+        "0-1h": 0,
+        "1-4h": 0,
+        "4-8h": 0,
+        "8-24h": 0,
+        "24-48h": 0,
+        "48h-1w": 0,
+        ">1w": 0
+    }
+    
+    bucket_labels = ["0-1h", "1-4h", "4-8h", "8-24h", "24-48h", "48h-1w", ">1w"]
+    for i, bucket in enumerate(time_distribution):
+        if i < len(bucket_labels):
+            time_buckets[bucket_labels[i]] = bucket.get("count", 0)
+    
+    # Overall accuracy score (documents correctly classified on first pass)
+    total_docs = await db.hub_documents.count_documents(base_match)
+    corrected_count = len(corrected_docs)
+    accuracy_score = ((total_docs - corrected_count) / total_docs * 100) if total_docs > 0 else 100
+    
+    return {
+        "phase": phase,
+        "report_timestamp": now.isoformat(),
+        "accuracy_score": round(accuracy_score, 2),
+        "total_documents": total_docs,
+        "corrected_documents": corrected_count,
+        "corrections": corrected_docs[:50],  # Limit to 50
+        "time_in_status_distribution": time_buckets,
+        "stall_warnings": {
+            "description": "Documents in actionable status > 24 hours",
+            "threshold_hours": 24
+        }
+    }
+
+
+@api_router.get("/pilot/trend")
+async def get_pilot_trend_data(
+    phase: str = Query(default=CURRENT_PILOT_PHASE, description="Pilot phase to query"),
+    days: int = Query(default=14, ge=1, le=30, description="Number of days to include")
+):
+    """
+    Get daily trend data for pilot documents.
+    
+    Returns daily counts by doc_type for charting.
+    """
+    # Calculate date range
+    end_date = datetime.now(timezone.utc)
+    start_date = end_date - timedelta(days=days)
+    
+    pipeline = [
+        {"$match": {
+            "pilot_phase": phase,
+            "pilot_date": {"$gte": start_date.isoformat()}
+        }},
+        {"$addFields": {
+            "date": {"$substr": ["$pilot_date", 0, 10]}
+        }},
+        {"$group": {
+            "_id": {
+                "date": "$date",
+                "doc_type": {"$ifNull": ["$doc_type", "OTHER"]}
+            },
+            "count": {"$sum": 1}
+        }},
+        {"$sort": {"_id.date": 1}}
+    ]
+    
+    results = await db.hub_documents.aggregate(pipeline).to_list(500)
+    
+    # Organize by date
+    trend_data = {}
+    all_doc_types = set()
+    
+    for r in results:
+        date = r["_id"]["date"]
+        doc_type = r["_id"]["doc_type"]
+        count = r["count"]
+        
+        if date not in trend_data:
+            trend_data[date] = {}
+        trend_data[date][doc_type] = count
+        all_doc_types.add(doc_type)
+    
+    # Fill in missing dates and doc_types
+    current = start_date
+    while current <= end_date:
+        date_str = current.strftime("%Y-%m-%d")
+        if date_str not in trend_data:
+            trend_data[date_str] = {}
+        for dt in all_doc_types:
+            if dt not in trend_data[date_str]:
+                trend_data[date_str][dt] = 0
+        current += timedelta(days=1)
+    
+    # Convert to array format for charting
+    chart_data = []
+    for date in sorted(trend_data.keys()):
+        entry = {"date": date, **trend_data[date]}
+        chart_data.append(entry)
+    
+    return {
+        "phase": phase,
+        "days": days,
+        "start_date": start_date.strftime("%Y-%m-%d"),
+        "end_date": end_date.strftime("%Y-%m-%d"),
+        "doc_types": sorted(list(all_doc_types)),
+        "trend": chart_data
+    }
+
+
 # ==================== WORKFLOW METRICS ====================
 
 @api_router.get("/workflows/ap_invoice/metrics")

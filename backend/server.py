@@ -11034,8 +11034,8 @@ async def run_simulation_for_document(doc_id: str):
     doc_for_sim = {**doc, "document_id": doc_id}
     simulation_results = run_full_export_simulation(doc_for_sim)
     
-    # Convert results to dicts
-    results_dict = {k: v.to_dict() for k, v in simulation_results.items()}
+    # Convert results to dicts - make deep copies to avoid MongoDB mutation issues
+    results_dict = {k: copy.deepcopy(v.to_dict()) for k, v in simulation_results.items()}
     
     # Create workflow history entry
     history_entry = SimulationHistoryEntry.create_batch_simulation_entry(

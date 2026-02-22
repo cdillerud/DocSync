@@ -162,8 +162,19 @@ Gamer Packaging, Inc. needs to:
 - [x] Seed data endpoint for testing
 - [x] Sales email ingestion to unified pipeline
 
+#### AP Invoice Workflow Engine (NEW - Feb 22, 2026)
+- [x] Pure state machine implementation in `/app/backend/services/workflow_engine.py`
+- [x] Workflow statuses: captured, classified, extracted, vendor_pending, bc_validation_pending, bc_validation_failed, data_correction_pending, ready_for_approval, approval_in_progress, approved, rejected, exported, archived
+- [x] Workflow history tracking on each document
+- [x] Queue APIs for each exception status (`/api/workflows/ap_invoice/*`)
+- [x] Mutation APIs for manual corrections (set-vendor, update-fields, override-bc-validation)
+- [x] Approval/rejection APIs
+- [x] Workflow metrics API
+- [x] Frontend AP Workflow page (`/workflow`) with queue tabs and action dialogs
+- [x] 43 automated tests (21 unit + 22 API)
+
 ### In Progress / Shadow Mode
-- [ ] AP automatic workflow trigger (needs verification)
+- [x] AP automatic workflow trigger (VERIFIED WORKING)
 - [ ] BC record linking (manual only currently)
 - [ ] BC draft creation (disabled)
 

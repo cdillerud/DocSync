@@ -514,10 +514,21 @@ export default function EmailParserPage() {
                 Configure email mailboxes to monitor for incoming documents
               </p>
             </div>
-            <Button onClick={handleAddMailbox} data-testid="add-mailbox-btn">
-              <Plus className="w-4 h-4 mr-2" />
-              Add Mailbox
-            </Button>
+            <div className="flex items-center gap-3">
+              {pollingStatus?.worker_running && (
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-200 rounded-full text-sm">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  Auto-polling active
+                </div>
+              )}
+              <Button onClick={handleAddMailbox} data-testid="add-mailbox-btn">
+                <Plus className="w-4 h-4 mr-2" />
+                Add Mailbox
+              </Button>
+            </div>
           </div>
 
           {/* Mailbox Sources List */}

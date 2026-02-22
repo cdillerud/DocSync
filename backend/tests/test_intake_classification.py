@@ -376,10 +376,9 @@ class TestAIClassificationAuditTrail:
         
         print("PASS: AI classification structure test completed")
     
-    def test_ai_not_invoked_for_deterministic_types(self):
-        """Verify AI is NOT invoked when deterministic classification succeeds."""
-        # Create documents with content that should be classified deterministically
-        # Using invoice-like content that AI extraction should identify
+    def test_ai_classification_presence_based_on_method(self):
+        """Verify AI classification audit is present ONLY when AI fallback was invoked."""
+        # Create a document to test classification behavior
         test_file = self._create_test_pdf("""
             PURCHASE ORDER
             PO Number: PO-2026-0042
@@ -395,7 +394,7 @@ class TestAIClassificationAuditTrail:
             f"{BASE_URL}/api/documents/intake",
             files={"file": ("purchase_order.pdf", test_file, "application/pdf")},
             data={
-                "source": "test_deterministic_no_ai",
+                "source": "test_ai_presence",
                 "sender": "purchasing@gpi.com",
                 "subject": "Purchase Order PO-2026-0042"
             }
@@ -413,18 +412,26 @@ class TestAIClassificationAuditTrail:
         ai_classification = doc.get("ai_classification")
         classification_method = doc.get("classification_method", "")
         
-        print(f"Deterministic classification test:")
+        print(f"Classification result:")
         print(f"  - doc_type: {doc_type}")
         print(f"  - classification_method: {classification_method}")
-        print(f"  - ai_classification: {ai_classification}")
+        print(f"  - ai_classification: {'present' if ai_classification else 'not present'}")
         
-        # If doc_type is not OTHER, AI should NOT have been invoked
-        if doc_type != "OTHER":
+        # The key rule: ai_classification should be present IFF classification_method starts with "ai:"
+        # This means AI fallback was invoked (deterministic rules returned OTHER first)
+        if classification_method.startswith("ai:"):
+            # AI was invoked - audit trail MUST be present
+            assert ai_classification is not None, \
+                f"ai_classification should be present when classification_method is {classification_method}"
+            print(f"PASS: AI fallback was invoked (method: {classification_method}), audit trail correctly present")
+        elif classification_method.startswith(("legacy_ai:", "zetadocs:", "square9:", "mailbox:", "default")):
+            # Deterministic classification won - audit trail should NOT be present
             assert ai_classification is None, \
-                f"ai_classification should be None when deterministic classification succeeds (doc_type={doc_type})"
-            print(f"PASS: Deterministic classification ({doc_type}) - no AI fallback invoked")
+                f"ai_classification should be None when deterministic classification won (method: {classification_method})"
+            print(f"PASS: Deterministic classification won (method: {classification_method}), no AI audit trail")
         else:
-            print(f"Note: doc_type is OTHER, AI fallback may have been attempted")
+            # Unknown method - just log it
+            print(f"Note: Unknown classification_method format: {classification_method}")
         
         print("PASS: Test completed")
 

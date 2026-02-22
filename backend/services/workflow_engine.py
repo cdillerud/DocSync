@@ -223,6 +223,14 @@ class WorkflowEvent(str, Enum):
     ON_EXPORTED = "on_exported"
     ON_ARCHIVED = "on_archived"
     
+    # Simulation events (Phase 2 Shadow Pilot)
+    ON_EXPORT_SIMULATED = "on_export_simulated"
+    ON_BC_CREATE_INVOICE_SIMULATED = "on_bc_create_invoice_simulated"
+    ON_BC_ATTACHMENT_SIMULATED = "on_bc_attachment_simulated"
+    ON_BC_LINKAGE_SIMULATED = "on_bc_linkage_simulated"
+    ON_SIMULATION_SUCCESS = "on_simulation_success"
+    ON_SIMULATION_WOULD_FAIL = "on_simulation_would_fail"
+    
     # Error events
     ON_ERROR = "on_error"
     ON_RETRY = "on_retry"

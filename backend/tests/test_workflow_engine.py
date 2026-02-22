@@ -203,11 +203,11 @@ class TestSalesInvoiceWorkflow:
         assert can is True
         assert next_status == WorkflowStatus.EXTRACTED.value
         
-        # extracted -> ready_for_approval (via review complete)
+        # extracted -> ready_for_approval (via mark ready for approval)
         can, next_status, _ = WorkflowEngine.can_transition(
             DocType.SALES_INVOICE.value,
             WorkflowStatus.EXTRACTED.value,
-            WorkflowEvent.ON_REVIEW_COMPLETE.value
+            WorkflowEvent.ON_MARK_READY_FOR_APPROVAL.value
         )
         assert can is True
         assert next_status == WorkflowStatus.READY_FOR_APPROVAL.value

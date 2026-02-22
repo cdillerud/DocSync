@@ -1367,10 +1367,14 @@ async def get_document_types_dashboard(
     - Total counts and workflow status breakdown
     - Field extraction rates (vendor, invoice_number, amount, po_number, due_date)
     - Match method distribution (exact, normalized, alias, fuzzy, manual, none)
+    - Classification method counts (deterministic, ai, other)
     
-    Supports filtering by source_system and specific doc_type.
+    Supports filtering by source_system, doc_type, and classification method.
     """
-    data = await _aggregate_document_types_data(source_system, doc_type)
+    # Normalize classification filter
+    classification_filter = classification if classification in ("deterministic", "ai") else None
+    
+    data = await _aggregate_document_types_data(source_system, doc_type, classification_filter)
     
     by_type = data["by_type"]
     source_systems = data["source_systems"]
@@ -1382,15 +1386,27 @@ async def get_document_types_dashboard(
     # Calculate totals
     grand_total = sum(v["total"] for v in by_type.values())
     
+    # Calculate classification totals across all doc_types
+    total_deterministic = sum(v.get("classification_counts", {}).get("deterministic", 0) for v in by_type.values())
+    total_ai = sum(v.get("classification_counts", {}).get("ai", 0) for v in by_type.values())
+    total_other = sum(v.get("classification_counts", {}).get("other", 0) for v in by_type.values())
+    
     return {
         "by_type": by_type,
         "filters": {
             "source_system": source_system,
-            "doc_type": doc_type
+            "doc_type": doc_type,
+            "classification": classification_filter
         },
         "source_systems_available": source_systems,
         "doc_types_available": list(by_type.keys()),
-        "grand_total": grand_total
+        "classification_methods_available": ["all", "deterministic", "ai"],
+        "grand_total": grand_total,
+        "classification_totals": {
+            "deterministic": total_deterministic,
+            "ai": total_ai,
+            "other": total_other
+        }
     }
 
 
@@ -1398,6 +1414,7 @@ async def get_document_types_dashboard(
 async def export_document_types_dashboard(
     source_system: Optional[str] = Query(None, description="Filter by source_system"),
     doc_type: Optional[str] = Query(None, description="Filter by doc_type"),
+    classification: Optional[str] = Query(None, description="Filter by classification method: deterministic, ai, all"),
     format: str = Query("csv", description="Export format (csv)")
 ):
     """
@@ -1406,10 +1423,14 @@ async def export_document_types_dashboard(
     
     Returns one row per (doc_type, status) combination with all metrics.
     """
-    data = await _aggregate_document_types_data(source_system, doc_type)
+    # Normalize classification filter
+    classification_filter = classification if classification in ("deterministic", "ai") else None
+    
+    data = await _aggregate_document_types_data(source_system, doc_type, classification_filter)
     
     by_type = data["by_type"]
     source_system_filter = data["source_system_filter"] or "ALL"
+    classification_filter_label = classification_filter or "ALL"
     
     # Remove empty doc_types unless specifically filtered
     if not doc_type:

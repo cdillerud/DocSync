@@ -5682,6 +5682,41 @@ async def poll_mailbox_now(mailbox_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@api_router.get("/settings/mailbox-sources/polling-status")
+async def get_mailbox_polling_status():
+    """Get the status of the dynamic mailbox polling worker."""
+    global _dynamic_mailbox_polling_task, _mailbox_last_poll_times
+    
+    worker_running = _dynamic_mailbox_polling_task is not None and not _dynamic_mailbox_polling_task.done()
+    
+    # Get all mailbox sources with their last poll times
+    sources = await db.mailbox_sources.find({}, {"_id": 0}).to_list(100)
+    
+    mailbox_statuses = []
+    for source in sources:
+        mailbox_id = source.get("mailbox_id")
+        last_poll = _mailbox_last_poll_times.get(mailbox_id)
+        
+        mailbox_statuses.append({
+            "mailbox_id": mailbox_id,
+            "name": source.get("name"),
+            "email_address": source.get("email_address"),
+            "enabled": source.get("enabled", True),
+            "polling_interval_minutes": source.get("polling_interval_minutes", 5),
+            "last_poll_utc": last_poll.isoformat() if last_poll else None,
+            "next_poll_in_seconds": max(0, (source.get("polling_interval_minutes", 5) * 60) - 
+                                        ((datetime.now(timezone.utc) - last_poll).total_seconds() if last_poll else 0))
+                                   if last_poll else None
+        })
+    
+    return {
+        "worker_running": worker_running,
+        "mailboxes": mailbox_statuses,
+        "legacy_ap_polling_enabled": EMAIL_POLLING_ENABLED,
+        "legacy_sales_polling_enabled": SALES_EMAIL_POLLING_ENABLED
+    }
+
+
 async def poll_mailbox_for_documents(mailbox_address: str, default_category: str = "AP", source_id: str = None):
     """
     Unified mailbox polling function that ingests documents into the main hub_documents collection.

@@ -272,6 +272,8 @@ Gamer Packaging, Inc. needs to:
 | GET | /api/dashboard/document-types | Aggregated metrics by doc_type (status, extraction, match methods) |
 | GET | /api/dashboard/document-types?source_system=X | Filter by source_system |
 | GET | /api/dashboard/document-types?doc_type=X | Filter by specific doc_type |
+| GET | /api/dashboard/document-types/export | CSV export of dashboard data |
+| GET | /api/dashboard/document-types/export?source_system=X&doc_type=Y | CSV export with filters |
 
 ---
 

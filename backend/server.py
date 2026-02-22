@@ -1097,19 +1097,10 @@ async def get_dashboard_stats():
     }
 
 
-@api_router.get("/dashboard/document-types")
-async def get_document_types_dashboard(
-    source_system: Optional[str] = Query(None, description="Filter by source_system: SQUARE9, ZETADOCS, GPI_HUB_NATIVE"),
-    doc_type: Optional[str] = Query(None, description="Filter to specific doc_type")
-):
+async def _aggregate_document_types_data(source_system: Optional[str] = None, doc_type: Optional[str] = None) -> Dict:
     """
-    Document Type Dashboard API.
-    Returns comprehensive metrics per doc_type:
-    - Total counts and workflow status breakdown
-    - Field extraction rates (vendor, invoice_number, amount, po_number, due_date)
-    - Match method distribution (exact, normalized, alias, fuzzy, manual, none)
-    
-    Supports filtering by source_system and specific doc_type.
+    Shared aggregation logic for document types dashboard.
+    Reused by both the JSON endpoint and CSV export endpoint.
     """
     # Build base match filter
     base_match = {}
@@ -1257,6 +1248,33 @@ async def get_document_types_dashboard(
     # Build source system filter options
     source_systems = {r["_id"]: r["count"] for r in source_system_results}
     
+    return {
+        "by_type": by_type,
+        "source_systems": source_systems,
+        "source_system_filter": source_system,
+        "doc_type_filter": doc_type
+    }
+
+
+@api_router.get("/dashboard/document-types")
+async def get_document_types_dashboard(
+    source_system: Optional[str] = Query(None, description="Filter by source_system: SQUARE9, ZETADOCS, GPI_HUB_NATIVE"),
+    doc_type: Optional[str] = Query(None, description="Filter to specific doc_type")
+):
+    """
+    Document Type Dashboard API.
+    Returns comprehensive metrics per doc_type:
+    - Total counts and workflow status breakdown
+    - Field extraction rates (vendor, invoice_number, amount, po_number, due_date)
+    - Match method distribution (exact, normalized, alias, fuzzy, manual, none)
+    
+    Supports filtering by source_system and specific doc_type.
+    """
+    data = await _aggregate_document_types_data(source_system, doc_type)
+    
+    by_type = data["by_type"]
+    source_systems = data["source_systems"]
+    
     # Remove doc_types with 0 documents unless specifically filtered
     if not doc_type:
         by_type = {k: v for k, v in by_type.items() if v["total"] > 0}
@@ -1274,6 +1292,118 @@ async def get_document_types_dashboard(
         "doc_types_available": list(by_type.keys()),
         "grand_total": grand_total
     }
+
+
+@api_router.get("/dashboard/document-types/export")
+async def export_document_types_dashboard(
+    source_system: Optional[str] = Query(None, description="Filter by source_system"),
+    doc_type: Optional[str] = Query(None, description="Filter by doc_type"),
+    format: str = Query("csv", description="Export format (csv)")
+):
+    """
+    Export Document Type Dashboard data as CSV.
+    Reuses the same aggregation logic as /api/dashboard/document-types.
+    
+    Returns one row per (doc_type, status) combination with all metrics.
+    """
+    data = await _aggregate_document_types_data(source_system, doc_type)
+    
+    by_type = data["by_type"]
+    source_system_filter = data["source_system_filter"] or "ALL"
+    
+    # Remove empty doc_types unless specifically filtered
+    if not doc_type:
+        by_type = {k: v for k, v in by_type.items() if v["total"] > 0}
+    
+    # Prepare CSV output
+    output = io.StringIO()
+    
+    fieldnames = [
+        'doc_type',
+        'source_system',
+        'total',
+        'status',
+        'status_count',
+        'vendor_extraction_rate',
+        'invoice_number_extraction_rate',
+        'amount_extraction_rate',
+        'po_number_extraction_rate',
+        'due_date_extraction_rate',
+        'match_exact',
+        'match_normalized',
+        'match_alias',
+        'match_fuzzy',
+        'match_manual',
+        'match_none'
+    ]
+    
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    
+    # Flatten data: one row per (doc_type, status) combination
+    for dt, type_data in sorted(by_type.items()):
+        extraction = type_data.get("extraction", {})
+        match_methods = type_data.get("match_methods", {})
+        
+        # Get all statuses for this doc_type
+        status_counts = type_data.get("status_counts", {})
+        
+        if not status_counts:
+            # If no status counts, write one row with just the doc_type info
+            writer.writerow({
+                'doc_type': dt,
+                'source_system': source_system_filter,
+                'total': type_data.get("total", 0),
+                'status': '',
+                'status_count': 0,
+                'vendor_extraction_rate': extraction.get("vendor", {}).get("rate", 0),
+                'invoice_number_extraction_rate': extraction.get("invoice_number", {}).get("rate", 0),
+                'amount_extraction_rate': extraction.get("amount", {}).get("rate", 0),
+                'po_number_extraction_rate': extraction.get("po_number", {}).get("rate", 0),
+                'due_date_extraction_rate': extraction.get("due_date", {}).get("rate", 0),
+                'match_exact': match_methods.get("exact", 0),
+                'match_normalized': match_methods.get("normalized", 0),
+                'match_alias': match_methods.get("alias", 0),
+                'match_fuzzy': match_methods.get("fuzzy", 0),
+                'match_manual': match_methods.get("manual", 0),
+                'match_none': match_methods.get("none", 0)
+            })
+        else:
+            # Write one row per status
+            for status, count in sorted(status_counts.items()):
+                writer.writerow({
+                    'doc_type': dt,
+                    'source_system': source_system_filter,
+                    'total': type_data.get("total", 0),
+                    'status': status,
+                    'status_count': count,
+                    'vendor_extraction_rate': extraction.get("vendor", {}).get("rate", 0),
+                    'invoice_number_extraction_rate': extraction.get("invoice_number", {}).get("rate", 0),
+                    'amount_extraction_rate': extraction.get("amount", {}).get("rate", 0),
+                    'po_number_extraction_rate': extraction.get("po_number", {}).get("rate", 0),
+                    'due_date_extraction_rate': extraction.get("due_date", {}).get("rate", 0),
+                    'match_exact': match_methods.get("exact", 0),
+                    'match_normalized': match_methods.get("normalized", 0),
+                    'match_alias': match_methods.get("alias", 0),
+                    'match_fuzzy': match_methods.get("fuzzy", 0),
+                    'match_manual': match_methods.get("manual", 0),
+                    'match_none': match_methods.get("none", 0)
+                })
+    
+    csv_content = output.getvalue()
+    output.close()
+    
+    # Generate filename with timestamp
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filename = f"document_types_dashboard_{timestamp}.csv"
+    
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        }
+    )
 
 
 # ==================== BC PROXY ====================

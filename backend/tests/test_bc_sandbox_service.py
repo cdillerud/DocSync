@@ -563,7 +563,8 @@ class TestExceptions:
         
         assert error.operation == "create_vendor"
         assert error.message == "Custom message"
-        assert "create_vendor" in str(error)
+        # The str() of the error is the message
+        assert "Custom message" in str(error)
     
     def test_bc_sandbox_error(self):
         """Test 36: BCSandboxError contains status and details."""

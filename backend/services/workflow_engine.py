@@ -172,11 +172,32 @@ class WorkflowEvent(str, Enum):
     ON_BC_INVALID = "on_bc_invalid"
     ON_BC_VALIDATION_OVERRIDE = "on_bc_validation_override"
     
+    # PO validation events (PURCHASE_ORDER)
+    ON_PO_VALIDATION_STARTED = "on_po_validation_started"
+    ON_PO_VALID = "on_po_valid"
+    ON_PO_INVALID = "on_po_invalid"
+    
+    # Credit memo events (SALES_CREDIT_MEMO, PURCHASE_CREDIT_MEMO)
+    ON_CREDIT_LINKED_TO_INVOICE = "on_credit_linked_to_invoice"
+    
+    # Quality doc events (QUALITY_DOC)
+    ON_QUALITY_TAGGED = "on_quality_tagged"
+    ON_REVIEW_STARTED = "on_review_started"
+    
+    # Triage events (OTHER)
+    ON_TRIAGE_NEEDED = "on_triage_needed"
+    ON_TRIAGE_COMPLETED = "on_triage_completed"
+    
+    # Review events (STATEMENT, REMINDER, FINANCE_CHARGE_MEMO, QUALITY_DOC)
+    ON_MARK_READY_FOR_REVIEW = "on_mark_ready_for_review"
+    ON_REVIEWED = "on_reviewed"
+    
     # Data/Review events
     ON_DATA_CORRECTED = "on_data_corrected"
     ON_REVIEW_COMPLETE = "on_review_complete"
     
     # Approval events
+    ON_MARK_READY_FOR_APPROVAL = "on_mark_ready_for_approval"
     ON_APPROVAL_STARTED = "on_approval_started"
     ON_APPROVED = "on_approved"
     ON_REJECTED = "on_rejected"

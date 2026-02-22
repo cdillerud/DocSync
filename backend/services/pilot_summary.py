@@ -160,8 +160,7 @@ async def generate_daily_pilot_summary(db) -> PilotDailySummary:
             deterministic_count = r["count"]
         elif r["_id"] == "ai":
             ai_count = r["count"]
-        else:
-            other_count = r["count"]
+        # 'other' count not currently used but captured in aggregate
     
     # Corrected documents
     corrected_pipeline = [

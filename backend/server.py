@@ -6096,7 +6096,7 @@ async def get_ready_for_approval_queue(
 
 # ==================== GENERIC WORKFLOW QUEUE API ====================
 
-@api_router.get("/workflows/queue")
+@api_router.get("/workflows/generic/queue")
 async def get_workflow_queue(
     doc_type: str = Query(..., description="Document type (required): AP_INVOICE, SALES_INVOICE, PURCHASE_ORDER, etc."),
     status: Optional[str] = Query(None, description="Workflow status filter"),

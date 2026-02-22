@@ -252,6 +252,15 @@ export default function DocTypeDashboardPage() {
   const overallAmountRate = totalDocs > 0 ? Math.round((totalWithAmount / totalDocs) * 100) : 0;
   const overallExportRate = totalDocs > 0 ? Math.round((totalExported / totalDocs) * 100) : 0;
 
+  const handleExportCSV = () => {
+    const params = {};
+    if (sourceSystemFilter !== 'all') params.source_system = sourceSystemFilter;
+    if (docTypeFilter !== 'all') params.doc_type = docTypeFilter;
+    
+    toast.success('Starting CSV export...');
+    exportDocumentTypesDashboard(params);
+  };
+
   return (
     <div className="space-y-6" data-testid="doctype-dashboard-page">
       <div className="flex items-center justify-between">
@@ -259,9 +268,14 @@ export default function DocTypeDashboardPage() {
           <h1 className="text-2xl font-bold">Document Type Dashboard</h1>
           <p className="text-muted-foreground">Migration progress and extraction quality by document type</p>
         </div>
-        <Button onClick={fetchData} variant="outline" disabled={loading} data-testid="refresh-dashboard">
-          <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={handleExportCSV} variant="outline" disabled={loading || grandTotal === 0} data-testid="export-csv-btn">
+            <Download className="mr-2 h-4 w-4" /> Export CSV
+          </Button>
+          <Button onClick={fetchData} variant="outline" disabled={loading} data-testid="refresh-dashboard">
+            <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}

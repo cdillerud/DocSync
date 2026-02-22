@@ -1300,11 +1300,16 @@ async def _aggregate_document_types_data(
                 "avg_confidence": 0.0,
                 "classification_counts": {"deterministic": 0, "ai": 0, "other": 0},
                 "ai_assisted_count": 0,
-                "ai_suggested_but_rejected_count": 0
+                "ai_suggested_but_rejected_count": 0,
+                "active_queue_count": 0
             }
         
         by_type[dt]["status_counts"][status] = count
         by_type[dt]["total"] += count
+        
+        # Compute active queue count (non-terminal statuses)
+        if status not in terminal_statuses:
+            by_type[dt]["active_queue_count"] += count
     
     # Populate extraction rates
     for r in extraction_results:

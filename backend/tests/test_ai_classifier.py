@@ -186,7 +186,8 @@ class TestClassifyDocTypeWithAI:
         mock_chat.send_message = AsyncMock(return_value=mock_response)
         
         with patch.dict(os.environ, {"EMERGENT_LLM_KEY": "test-key"}):
-            with patch('services.ai_classifier.LlmChat', return_value=mock_chat):
+            # Patch the import inside the function
+            with patch.dict('sys.modules', {'emergentintegrations.llm.chat': MagicMock(LlmChat=lambda **kwargs: mock_chat, UserMessage=lambda **kwargs: None)}):
                 document = {
                     "id": "doc-123",
                     "file_name": "invoice.pdf",
@@ -209,7 +210,7 @@ class TestClassifyDocTypeWithAI:
         mock_chat.send_message = AsyncMock(return_value=mock_response)
         
         with patch.dict(os.environ, {"EMERGENT_LLM_KEY": "test-key"}):
-            with patch('services.ai_classifier.LlmChat', return_value=mock_chat):
+            with patch.dict('sys.modules', {'emergentintegrations.llm.chat': MagicMock(LlmChat=lambda **kwargs: mock_chat, UserMessage=lambda **kwargs: None)}):
                 document = {"id": "doc-123", "file_name": "unknown.pdf"}
                 result = await classify_doc_type_with_ai(document)
                 
@@ -225,7 +226,7 @@ class TestClassifyDocTypeWithAI:
         mock_chat.send_message = AsyncMock(side_effect=Exception("API timeout"))
         
         with patch.dict(os.environ, {"EMERGENT_LLM_KEY": "test-key"}):
-            with patch('services.ai_classifier.LlmChat', return_value=mock_chat):
+            with patch.dict('sys.modules', {'emergentintegrations.llm.chat': MagicMock(LlmChat=lambda **kwargs: mock_chat, UserMessage=lambda **kwargs: None)}):
                 document = {"id": "doc-123", "file_name": "test.pdf"}
                 result = await classify_doc_type_with_ai(document)
                 

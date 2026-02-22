@@ -4016,6 +4016,10 @@ async def _internal_intake_document(
     file_path = UPLOAD_DIR / doc_id
     file_path.write_bytes(file_content)
     
+    # Apply pilot capture channel if pilot mode is enabled
+    base_capture_channel = CaptureChannel.EMAIL.value if "email" in source.lower() else CaptureChannel.UPLOAD.value
+    capture_channel = get_pilot_capture_channel(base_capture_channel) if PILOT_MODE_ENABLED else base_capture_channel
+    
     # Create document record with workflow tracking
     doc = {
         "id": doc_id,

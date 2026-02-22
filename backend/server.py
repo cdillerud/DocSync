@@ -6184,7 +6184,7 @@ async def get_status_counts_by_doc_type():
     }
 
 
-@api_router.get("/workflows/metrics-by-type")
+@api_router.get("/workflows/generic/metrics-by-type")
 async def get_workflow_metrics_by_doc_type(
     days: int = Query(30, description="Number of days for metrics"),
     doc_type: Optional[str] = Query(None, description="Filter by specific doc_type")

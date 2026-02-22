@@ -3,12 +3,17 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../co
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '../components/ui/sheet';
+import { ScrollArea } from '../components/ui/scroll-area';
+import { Separator } from '../components/ui/separator';
 import { toast } from 'sonner';
 import { 
   RefreshCw, CheckCircle, XCircle, AlertTriangle, BarChart3, 
-  FileText, Building2, GitBranch, Clock, ArrowRight, Play
+  FileText, Building2, GitBranch, Clock, ArrowRight, Play,
+  ChevronRight, Eye, X
 } from 'lucide-react';
 import api from '../lib/api';
+import DocumentDetailPanel from '../components/DocumentDetailPanel';
 
 export default function SimulationDashboardPage() {
   const [metrics, setMetrics] = useState(null);

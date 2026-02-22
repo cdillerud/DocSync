@@ -4031,6 +4031,7 @@ async def _internal_intake_document(
         "doc_type": doc_type_value,
         "source_system": SourceSystem.GPI_HUB_NATIVE.value,
         "capture_channel": CaptureChannel.EMAIL.value if "email" in source.lower() else CaptureChannel.UPLOAD.value,
+        "classification_method": classification_method,
         "ai_confidence": confidence,
         "extracted_fields": extracted_fields,
         # Phase 7: Flat normalized fields on document

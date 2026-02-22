@@ -3562,7 +3562,7 @@ async def intake_document(
     file_path = UPLOAD_DIR / doc_id
     file_path.write_bytes(file_content)
     
-    # Create document record
+    # Create document record with workflow tracking
     doc = {
         "id": doc_id,
         "source": source,
@@ -3579,6 +3579,7 @@ async def intake_document(
         "sharepoint_web_url": None,
         "sharepoint_share_link_url": None,
         "document_type": None,
+        "category": None,
         "suggested_job_type": None,
         "ai_confidence": None,
         "extracted_fields": None,
@@ -3589,6 +3590,18 @@ async def intake_document(
         "bc_record_id": None,
         "bc_document_no": None,
         "status": "Received",
+        # Workflow tracking fields
+        "workflow_status": WorkflowStatus.CAPTURED.value,
+        "workflow_history": [{
+            "timestamp": now,
+            "from_status": None,
+            "to_status": WorkflowStatus.CAPTURED.value,
+            "event": WorkflowEvent.ON_CAPTURE.value,
+            "actor": "system",
+            "reason": f"Document captured from {source}",
+            "metadata": {"source": source, "sender": sender}
+        }],
+        "workflow_status_updated_utc": now,
         "created_utc": now,
         "updated_utc": now,
         "last_error": None

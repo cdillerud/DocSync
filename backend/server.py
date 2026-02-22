@@ -29,6 +29,9 @@ from sales_module import (
     _sales_email_config
 )
 
+# Workflow Engine Service
+from services.workflow_engine import WorkflowEngine, WorkflowStatus, WorkflowEvent
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 

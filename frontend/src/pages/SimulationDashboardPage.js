@@ -351,17 +351,6 @@ export default function SimulationDashboardPage() {
             </div>
           </CardContent>
         </Card>
-                      {reason.replace(/_/g, ' ')}
-                    </span>
-                    <Badge variant="destructive">{count}</Badge>
-                  </div>
-                ))}
-              {(!metrics?.by_failure_reason || Object.keys(metrics.by_failure_reason).length === 0) && (
-                <p className="text-sm text-muted-foreground">No failures</p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
 
         {/* By Source System */}
         <Card data-testid="by-source-system-card">
@@ -370,11 +359,12 @@ export default function SimulationDashboardPage() {
               <Building2 className="h-4 w-4" />
               By Source System
             </CardTitle>
+            <CardDescription>Click to filter by source</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
+            <div className="space-y-2">
               {metrics?.by_source_system && Object.entries(metrics.by_source_system).map(([source, data]) => (
-                <div key={source} className="flex items-center justify-between">
+                <div key={source} className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 transition-colors">
                   <span className="text-sm font-medium">{source || 'Unknown'}</span>
                   <div className="flex items-center gap-2">
                     <Badge variant="outline" className="bg-green-500/10 text-green-500">

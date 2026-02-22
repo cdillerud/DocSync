@@ -514,4 +514,39 @@ sudo docker exec gpi-backend curl -s -X POST "http://localhost:8001/api/admin/mi
 
 ---
 
+## Legacy Document Migration (Completed - February 22, 2026)
+
+### Overview
+A fully tested migration module for importing historical documents from Square9 and Zetadocs into GPI Hub.
+
+### Features
+- **Dry Run Mode**: Preview and validate migration without writing to database
+- **Real Mode**: Actually migrate documents with duplicate detection
+- **Document Classification**: Automatic classification using Zetadocs set codes, Square9 workflow names, or field inference
+- **Workflow Initialization**: Sets appropriate workflow states based on legacy status flags (is_paid, is_posted, is_exported, etc.)
+
+### API Endpoints
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | /api/migration/run | Execute migration (dry_run or real mode) |
+| GET | /api/migration/preview | Preview documents before migration |
+| GET | /api/migration/stats | Get statistics about migrated documents |
+| GET | /api/migration/supported-types | List supported doc types and mappings |
+| POST | /api/migration/generate-sample | Generate sample migration JSON file |
+
+### Test Coverage
+- **71 automated tests** covering:
+  - Unit tests for sources, workflow initialization, transformation
+  - Async integration tests for MigrationJob.run()
+  - API integration tests for all migration endpoints
+  - End-to-end workflow tests
+
+### Current Migration Stats
+- 10 sample documents migrated
+- Source systems: SQUARE9 (6), ZETADOCS (4)
+- Doc types: AP_INVOICE (3), PURCHASE_ORDER (2), QUALITY_DOC (2), STATEMENT (1), SALES_INVOICE (1), OTHER (1)
+- Workflow states: exported (5), approved (2), reviewed (1), tagged (1), triage_pending (1)
+
+---
+
 *Last Updated: February 22, 2026*

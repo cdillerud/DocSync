@@ -3945,10 +3945,11 @@ async def _internal_intake_document(
     doc_type_value = classification_result["doc_type"]
     category = classification_result["category"]
     ai_classification_audit = classification_result.get("ai_classification")
+    classification_method = classification_result.get("classification_method", "unknown")
     
     logger.info(
         "Document %s classified as %s (category: %s, method: %s)",
-        doc_id, doc_type_value, category, classification_result.get("classification_method", "unknown")
+        doc_id, doc_type_value, category, classification_method
     )
     
     # Phase 7: Compute normalized fields (flat, stored on document)

@@ -250,6 +250,44 @@ Gamer Packaging, Inc. needs to:
 | POST | /api/workflows/ap_invoice/{id}/approve | Approve document |
 | POST | /api/workflows/ap_invoice/{id}/reject | Reject document |
 
+### Generic Multi-Type Workflow (NEW - Feb 22, 2026)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/workflows/generic/queue | Generic queue - requires doc_type param, optional status |
+| GET | /api/workflows/generic/status-counts-by-type | Counts grouped by doc_type and workflow_status |
+| GET | /api/workflows/generic/metrics-by-type | Metrics per doc_type (extraction rates, confidence) |
+
+---
+
+## Document Classification Model
+
+### Document Type (doc_type)
+| Value | Description | Zetadocs Set | Square9 Workflow |
+|-------|-------------|--------------|------------------|
+| AP_INVOICE | Vendor invoices we receive | ZD00015 | AP_Invoice |
+| SALES_INVOICE | Invoices we send | ZD00007 | Sales Invoice |
+| PURCHASE_ORDER | Purchase orders | ZD00002 | Purchase Order |
+| SALES_CREDIT_MEMO | Credit memos we issue | ZD00009 | Credit Memo |
+| PURCHASE_CREDIT_MEMO | Credit memos we receive | - | - |
+| STATEMENT | Account statements | - | Statement |
+| REMINDER | Payment reminders | - | Reminder |
+| FINANCE_CHARGE_MEMO | Finance charge documents | - | - |
+| QUALITY_DOC | Quality documentation | - | - |
+| OTHER | Unclassified documents | - | - |
+
+### Source System (source_system)
+- SQUARE9: Migrated from Square9
+- ZETADOCS: Migrated from Zetadocs
+- GPI_HUB_NATIVE: Created in GPI Hub
+- MIGRATION: Data migration job
+
+### Capture Channel (capture_channel)
+- EMAIL: Email ingestion
+- UPLOAD: Manual upload
+- API: API integration
+- MIGRATION_JOB: Migration process
+- ORDER_CONFIRMATION: Order confirmation flow
+
 ---
 
 ## Database Collections

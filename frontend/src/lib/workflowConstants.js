@@ -5,6 +5,13 @@
  * events, and document types used across the frontend.
  */
 
+// Pilot Configuration
+export const PILOT_CONFIG = {
+  CURRENT_PHASE: 'shadow_pilot_v1',
+  START_DATE: '2026-02-22',
+  END_DATE: '2026-03-08',
+};
+
 // Document Types supported by the system
 export const DOC_TYPES = {
   AP_INVOICE: 'AP_INVOICE',

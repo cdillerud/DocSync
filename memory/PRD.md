@@ -184,6 +184,15 @@ Gamer Packaging, Inc. needs to:
 - [x] Metrics by type: GET /api/workflows/generic/metrics-by-type
 - [x] 60 automated tests (22 workflow engine + 16 generic API + 22 AP queue)
 
+#### Document Type Dashboard (NEW - Feb 22, 2026)
+- [x] Backend API: GET /api/dashboard/document-types
+- [x] Aggregated metrics per doc_type: total, status_counts, extraction rates, match_methods
+- [x] Field extraction rates: vendor, invoice_number, amount, po_number, due_date
+- [x] Match method distribution: exact, normalized, alias, fuzzy, manual, none
+- [x] Filters for source_system and doc_type
+- [x] Frontend dashboard page at `/doc-types` with summary cards and table
+- [x] 12 API tests + frontend tests all passing
+
 ### In Progress / Shadow Mode
 - [x] AP automatic workflow trigger (VERIFIED WORKING)
 - [ ] BC record linking (manual only currently)

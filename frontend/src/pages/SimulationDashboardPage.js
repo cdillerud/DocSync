@@ -491,7 +491,9 @@ export default function SimulationDashboardPage() {
             {failureDetails?.failures?.map((failure) => (
               <div 
                 key={`${failure.document_id}-${failure.simulation_type}`}
-                className="flex items-center justify-between p-3 bg-muted/50 rounded-lg"
+                className="flex items-center justify-between p-3 bg-muted/50 rounded-lg hover:bg-muted cursor-pointer transition-colors"
+                onClick={() => openDocumentDetail(failure.document_id)}
+                data-testid={`failure-row-${failure.document_id?.slice(0,8)}`}
               >
                 <div className="flex items-center gap-3">
                   <Badge variant="outline">{failure.doc_type || 'Unknown'}</Badge>
@@ -509,9 +511,22 @@ export default function SimulationDashboardPage() {
                   <Button 
                     size="sm" 
                     variant="ghost"
-                    onClick={() => runSingleSimulation(failure.document_id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      runSingleSimulation(failure.document_id);
+                    }}
                   >
                     <Play className="h-3 w-3" />
+                  </Button>
+                  <Button 
+                    size="sm" 
+                    variant="ghost"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openDocumentDetail(failure.document_id);
+                    }}
+                  >
+                    <Eye className="h-3 w-3" />
                   </Button>
                 </div>
               </div>

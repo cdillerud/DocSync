@@ -1292,7 +1292,10 @@ async def _aggregate_document_types_data(
                     "due_date": {"rate": 0.0, "count": 0}
                 },
                 "match_methods": {},
-                "avg_confidence": 0.0
+                "avg_confidence": 0.0,
+                "classification_counts": {"deterministic": 0, "ai": 0, "other": 0},
+                "ai_assisted_count": 0,
+                "ai_suggested_but_rejected_count": 0
             }
         
         by_type[dt]["status_counts"][status] = count
@@ -1327,6 +1330,18 @@ async def _aggregate_document_types_data(
             continue
         
         by_type[dt]["match_methods"][method] = count
+    
+    # Populate classification counts
+    for r in classification_results:
+        dt = r["_id"]
+        if dt not in by_type:
+            continue
+        
+        by_type[dt]["classification_counts"]["deterministic"] = r.get("deterministic_count", 0)
+        by_type[dt]["classification_counts"]["ai"] = r.get("ai_count", 0)
+        by_type[dt]["classification_counts"]["other"] = r.get("other_count", 0)
+        by_type[dt]["ai_assisted_count"] = r.get("ai_assisted_count", 0)
+        by_type[dt]["ai_suggested_but_rejected_count"] = r.get("ai_suggested_but_rejected_count", 0)
     
     # Build source system filter options
     source_systems = {r["_id"]: r["count"] for r in source_system_results}

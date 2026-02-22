@@ -1093,6 +1093,186 @@ async def get_dashboard_stats():
         "demo_mode": DEMO_MODE
     }
 
+
+@api_router.get("/dashboard/document-types")
+async def get_document_types_dashboard(
+    source_system: Optional[str] = Query(None, description="Filter by source_system: SQUARE9, ZETADOCS, GPI_HUB_NATIVE"),
+    doc_type: Optional[str] = Query(None, description="Filter to specific doc_type")
+):
+    """
+    Document Type Dashboard API.
+    Returns comprehensive metrics per doc_type:
+    - Total counts and workflow status breakdown
+    - Field extraction rates (vendor, invoice_number, amount, po_number, due_date)
+    - Match method distribution (exact, normalized, alias, fuzzy, manual, none)
+    
+    Supports filtering by source_system and specific doc_type.
+    """
+    # Build base match filter
+    base_match = {}
+    if source_system:
+        base_match["source_system"] = source_system
+    if doc_type:
+        base_match["doc_type"] = doc_type
+    
+    # Aggregate status counts by doc_type
+    status_pipeline = [
+        {"$match": base_match} if base_match else {"$match": {}},
+        {"$group": {
+            "_id": {
+                "doc_type": {"$ifNull": ["$doc_type", "OTHER"]},
+                "workflow_status": {"$ifNull": ["$workflow_status", "none"]}
+            },
+            "count": {"$sum": 1}
+        }}
+    ]
+    status_results = await db.hub_documents.aggregate(status_pipeline).to_list(500)
+    
+    # Aggregate extraction field presence by doc_type
+    extraction_pipeline = [
+        {"$match": base_match} if base_match else {"$match": {}},
+        {"$group": {
+            "_id": {"$ifNull": ["$doc_type", "OTHER"]},
+            "total": {"$sum": 1},
+            "has_vendor": {"$sum": {"$cond": [{"$or": [
+                {"$ne": ["$vendor_raw", None]},
+                {"$ne": ["$vendor_canonical", None]}
+            ]}, 1, 0]}},
+            "has_invoice_number": {"$sum": {"$cond": [{"$or": [
+                {"$ne": ["$invoice_number_raw", None]},
+                {"$ne": ["$invoice_number_clean", None]}
+            ]}, 1, 0]}},
+            "has_amount": {"$sum": {"$cond": [{"$ne": ["$amount_float", None]}, 1, 0]}},
+            "has_po_number": {"$sum": {"$cond": [{"$or": [
+                {"$ne": ["$po_number_raw", None]},
+                {"$ne": ["$po_number_clean", None]}
+            ]}, 1, 0]}},
+            "has_due_date": {"$sum": {"$cond": [{"$or": [
+                {"$ne": ["$due_date_raw", None]},
+                {"$ne": ["$due_date_iso", None]}
+            ]}, 1, 0]}},
+            "avg_confidence": {"$avg": {"$ifNull": ["$ai_confidence", 0]}}
+        }}
+    ]
+    extraction_results = await db.hub_documents.aggregate(extraction_pipeline).to_list(50)
+    
+    # Aggregate match_method distribution by doc_type
+    match_method_pipeline = [
+        {"$match": base_match} if base_match else {"$match": {}},
+        {"$group": {
+            "_id": {
+                "doc_type": {"$ifNull": ["$doc_type", "OTHER"]},
+                "match_method": {"$ifNull": ["$vendor_match_method", "none"]}
+            },
+            "count": {"$sum": 1}
+        }}
+    ]
+    match_method_results = await db.hub_documents.aggregate(match_method_pipeline).to_list(200)
+    
+    # Aggregate source_system counts for the filter dropdown
+    source_system_pipeline = [
+        {"$group": {
+            "_id": {"$ifNull": ["$source_system", "UNKNOWN"]},
+            "count": {"$sum": 1}
+        }}
+    ]
+    source_system_results = await db.hub_documents.aggregate(source_system_pipeline).to_list(20)
+    
+    # Build the response structure
+    by_type = {}
+    
+    # Initialize with all supported doc_types
+    for dt in WorkflowEngine.get_all_doc_types():
+        by_type[dt] = {
+            "total": 0,
+            "status_counts": {},
+            "extraction": {
+                "vendor": {"rate": 0.0, "count": 0},
+                "invoice_number": {"rate": 0.0, "count": 0},
+                "amount": {"rate": 0.0, "count": 0},
+                "po_number": {"rate": 0.0, "count": 0},
+                "due_date": {"rate": 0.0, "count": 0}
+            },
+            "match_methods": {},
+            "avg_confidence": 0.0
+        }
+    
+    # Populate status counts
+    for r in status_results:
+        dt = r["_id"]["doc_type"]
+        status = r["_id"]["workflow_status"]
+        count = r["count"]
+        
+        if dt not in by_type:
+            by_type[dt] = {
+                "total": 0,
+                "status_counts": {},
+                "extraction": {
+                    "vendor": {"rate": 0.0, "count": 0},
+                    "invoice_number": {"rate": 0.0, "count": 0},
+                    "amount": {"rate": 0.0, "count": 0},
+                    "po_number": {"rate": 0.0, "count": 0},
+                    "due_date": {"rate": 0.0, "count": 0}
+                },
+                "match_methods": {},
+                "avg_confidence": 0.0
+            }
+        
+        by_type[dt]["status_counts"][status] = count
+        by_type[dt]["total"] += count
+    
+    # Populate extraction rates
+    for r in extraction_results:
+        dt = r["_id"]
+        if dt not in by_type:
+            continue
+        
+        total = r["total"] or 1
+        by_type[dt]["extraction"]["vendor"]["count"] = r.get("has_vendor", 0)
+        by_type[dt]["extraction"]["vendor"]["rate"] = round(r.get("has_vendor", 0) / total, 2)
+        by_type[dt]["extraction"]["invoice_number"]["count"] = r.get("has_invoice_number", 0)
+        by_type[dt]["extraction"]["invoice_number"]["rate"] = round(r.get("has_invoice_number", 0) / total, 2)
+        by_type[dt]["extraction"]["amount"]["count"] = r.get("has_amount", 0)
+        by_type[dt]["extraction"]["amount"]["rate"] = round(r.get("has_amount", 0) / total, 2)
+        by_type[dt]["extraction"]["po_number"]["count"] = r.get("has_po_number", 0)
+        by_type[dt]["extraction"]["po_number"]["rate"] = round(r.get("has_po_number", 0) / total, 2)
+        by_type[dt]["extraction"]["due_date"]["count"] = r.get("has_due_date", 0)
+        by_type[dt]["extraction"]["due_date"]["rate"] = round(r.get("has_due_date", 0) / total, 2)
+        by_type[dt]["avg_confidence"] = round(r.get("avg_confidence", 0), 2)
+    
+    # Populate match methods
+    for r in match_method_results:
+        dt = r["_id"]["doc_type"]
+        method = r["_id"]["match_method"]
+        count = r["count"]
+        
+        if dt not in by_type:
+            continue
+        
+        by_type[dt]["match_methods"][method] = count
+    
+    # Build source system filter options
+    source_systems = {r["_id"]: r["count"] for r in source_system_results}
+    
+    # Remove doc_types with 0 documents unless specifically filtered
+    if not doc_type:
+        by_type = {k: v for k, v in by_type.items() if v["total"] > 0}
+    
+    # Calculate totals
+    grand_total = sum(v["total"] for v in by_type.values())
+    
+    return {
+        "by_type": by_type,
+        "filters": {
+            "source_system": source_system,
+            "doc_type": doc_type
+        },
+        "source_systems_available": source_systems,
+        "doc_types_available": list(by_type.keys()),
+        "grand_total": grand_total
+    }
+
+
 # ==================== BC PROXY ====================
 
 @api_router.get("/bc/companies")

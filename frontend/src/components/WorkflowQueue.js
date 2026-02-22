@@ -210,6 +210,7 @@ function WorkflowQueueRow({ doc, rowActions, onSelect }) {
   const invoiceDate = doc.invoice_date || extractedFields.invoice_date;
   const sourceSystem = doc.source_system || 'UNKNOWN';
   const ageDays = calculateAgeDays(doc.workflow_status_updated_utc || doc.created_utc);
+  const isPilotDoc = !!doc.pilot_phase;
 
   return (
     <TableRow
@@ -218,7 +219,14 @@ function WorkflowQueueRow({ doc, rowActions, onSelect }) {
     >
       <TableCell onClick={onSelect}>
         <div className="max-w-[180px]">
-          <p className="font-medium truncate" title={vendorName}>{vendorName}</p>
+          <div className="flex items-center gap-2">
+            <p className="font-medium truncate" title={vendorName}>{vendorName}</p>
+            {isPilotDoc && (
+              <Badge variant="secondary" className="text-[10px] px-1 py-0 bg-blue-500/20 text-blue-400 border-blue-500/30">
+                Pilot
+              </Badge>
+            )}
+          </div>
           {vendorNo && <p className="text-xs text-muted-foreground">{vendorNo}</p>}
         </div>
       </TableCell>

@@ -1,0 +1,84 @@
+{
+  "summary": "Backend testing of deterministic-first document classification pipeline completed. All 29 tests passed (13 new intake classification tests + 16 existing AI classifier unit tests). The classification pipeline correctly prioritizes deterministic rules and invokes AI fallback only when doc_type is OTHER.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_intake_classification.py",
+    "/app/backend/tests/test_ai_classifier.py",
+    "/app/test_reports/pytest/intake_classification_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Deterministic-first classification correctly implemented in classify_document_type() function (line 3728)",
+    "AI fallback only invoked when doc_type is OTHER after all deterministic rules fail",
+    "ai_classification audit trail correctly saved ONLY when AI classifier is invoked",
+    "classification_method field properly records the source (legacy_ai:AP_Invoice, ai:gpt-5.2:0.94, default, etc.)",
+    "Confidence threshold check (0.8) working correctly - AI results below threshold don't change doc_type"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_intake_classification.py"
+  ],
+  "success_rate": {
+    "backend": "100% (29/29 tests passed)",
+    "frontend": "Not tested (backend-only request)"
+  },
+  "seed_data_creation": "Test documents created and cleaned up during testing",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Document classification pipeline fully tested. Key behaviors verified: 1) Deterministic rules (zetadocs, square9, mailbox, legacy_ai) are checked first, 2) AI fallback only triggers when doc_type=OTHER, 3) ai_classification audit field saved only when AI is invoked, 4) classification_method correctly records the classification source.",
+  "verified_behaviors": {
+    "deterministic_first": {
+      "status": "VERIFIED",
+      "evidence": "Document with suggested_job_type=AP_Invoice has classification_method=legacy_ai:AP_Invoice and ai_classification=null",
+      "explanation": "When AI field extraction identifies a clear type like AP_Invoice, the deterministic rule wins and AI fallback is NOT invoked"
+    },
+    "ai_fallback_for_other": {
+      "status": "VERIFIED",
+      "evidence": "Documents with doc_type=OTHER have ai_classification audit trail present",
+      "explanation": "When deterministic rules cannot classify (return OTHER), AI fallback is invoked and audit trail is saved"
+    },
+    "confidence_threshold": {
+      "status": "VERIFIED",
+      "evidence": "Document with ai_classification.confidence=0.24 remained doc_type=OTHER",
+      "explanation": "AI results below 0.8 threshold do not change the doc_type"
+    },
+    "ai_classification_audit": {
+      "status": "VERIFIED",
+      "evidence": "ai_classification field contains proposed_doc_type, confidence, model_name, timestamp",
+      "explanation": "Audit trail has correct structure per AIClassificationResult.to_dict()"
+    }
+  },
+  "test_cases_summary": {
+    "TestIntakeClassificationPipeline": [
+      "test_intake_endpoint_exists - PASS",
+      "test_intake_returns_classification_fields - PASS",
+      "test_deterministic_classification_from_legacy_ai - PASS",
+      "test_ai_classification_audit_trail_for_other_type - PASS",
+      "test_ap_invoice_no_ai_fallback - PASS",
+      "test_classification_method_recorded - PASS",
+      "test_fetch_document_includes_classification_fields - PASS"
+    ],
+    "TestAIClassificationAuditTrail": [
+      "test_ai_classification_structure - PASS",
+      "test_ai_classification_presence_based_on_method - PASS"
+    ],
+    "TestDeterministicVsAIClassification": [
+      "test_ap_invoice_uses_legacy_ai_method - PASS",
+      "test_ai_fallback_for_unknown_document - PASS"
+    ],
+    "TestDashboardStats": [
+      "test_dashboard_stats_endpoint - PASS",
+      "test_document_types_dashboard - PASS"
+    ],
+    "TestAIClassifier_Unit": [
+      "16 unit tests for AIClassificationResult and classify_doc_type_with_ai - ALL PASS"
+    ]
+  }
+}

@@ -39,7 +39,7 @@ from services.workflow_engine import (
 )
 from services.ai_classifier import (
     classify_doc_type_with_ai, apply_ai_classification, 
-    DEFAULT_CONFIDENCE_THRESHOLD, AIClassificationResult
+    DEFAULT_CONFIDENCE_THRESHOLD, AIClassificationResult as AIClassifierResult
 )
 
 ROOT_DIR = Path(__file__).parent

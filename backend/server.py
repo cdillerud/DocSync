@@ -1271,8 +1271,13 @@ async def _aggregate_document_types_data(
                 "other": 0
             },
             "ai_assisted_count": 0,
-            "ai_suggested_but_rejected_count": 0
+            "ai_suggested_but_rejected_count": 0,
+            # NEW: Active queue count (non-terminal statuses)
+            "active_queue_count": 0
         }
+    
+    # Terminal statuses (documents no longer in active processing)
+    terminal_statuses = ["approved", "exported", "archived", "rejected", "failed"]
     
     # Populate status counts
     for r in status_results:

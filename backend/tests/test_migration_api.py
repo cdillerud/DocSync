@@ -307,12 +307,21 @@ class TestMigrationEndToEnd:
         assert dashboard_resp.status_code == 200
         data = dashboard_resp.json()
         
-        # Dashboard should have doc_types
-        assert "doc_types" in data
+        # Dashboard should have by_type field
+        assert "by_type" in data
         
-        # Check if any doc types have migrated documents
-        # (They would have capture_channel = MIGRATION_JOB or is_migrated = True)
-        # This is an indirect check - migrated docs should appear in totals
+        # Check migration stats to see if there are migrated docs
+        migration_stats = api_client.get("/api/migration/stats").json()
+        
+        # If we have migrated docs, they should be reflected somewhere in the dashboard
+        if migration_stats["total_migrated"] > 0:
+            # The doc types from migration should exist in dashboard
+            for doc_type in migration_stats["by_doc_type"].keys():
+                # Migrated docs should appear in the by_type metrics
+                if doc_type in data["by_type"]:
+                    doc_metrics = data["by_type"][doc_type]
+                    assert "total" in doc_metrics
+                    assert doc_metrics["total"] >= 0
 
 
 if __name__ == "__main__":

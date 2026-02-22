@@ -10981,7 +10981,7 @@ async def bc_sandbox_validate_document(doc_id: str, background_tasks: Background
     # Add history entry to document (if we have one)
     if history_entry:
         await db.hub_documents.update_one(
-            {"document_id": doc_id},
+            {"id": doc_id},
             {
                 "$push": {"workflow_history": history_entry},
                 "$set": {

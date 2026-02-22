@@ -213,6 +213,24 @@ export default function PilotDashboardPage() {
     toast.success('CSV exported');
   };
 
+  const [sendingEmail, setSendingEmail] = useState(false);
+  
+  const handleSendSummaryEmail = async () => {
+    setSendingEmail(true);
+    try {
+      const res = await sendPilotSummaryEmail();
+      if (res.data.sent) {
+        toast.success(`Daily summary email sent to ${res.data.recipients?.length || 0} recipients`);
+      } else {
+        toast.error(`Email not sent: ${res.data.reason || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error('Failed to send summary email:', err);
+      toast.error(err.response?.data?.detail || 'Failed to send summary email');
+    }
+    setSendingEmail(false);
+  };
+
   const summary = dailyMetrics?.summary || {};
   const byDocType = dailyMetrics?.by_doc_type || {};
 

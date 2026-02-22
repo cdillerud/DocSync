@@ -202,6 +202,33 @@ Gamer Packaging, Inc. needs to:
 - [x] AI classifier service in `/app/backend/services/ai_classifier.py`
 - [x] 29 automated tests (16 unit tests for ai_classifier + 13 integration tests)
 
+#### Multi-Document Type Workflow Engine (NEW - Feb 22, 2026)
+- [x] Full state machines for all 10 doc_types in WORKFLOW_DEFINITIONS:
+  - AP_INVOICE: Full workflow with vendor matching and BC validation (unchanged)
+  - SALES_INVOICE: Standard approval workflow (captured → classified → extracted → ready_for_approval → approved → exported)
+  - PURCHASE_ORDER: Workflow with PO validation step (validation_pending, validation_failed states)
+  - SALES_CREDIT_MEMO: Invoice linkage workflow (linked_to_invoice state)
+  - PURCHASE_CREDIT_MEMO: Invoice linkage workflow (same as SALES_CREDIT_MEMO)
+  - STATEMENT: Fast-path review workflow (ready_for_review → reviewed → archived)
+  - REMINDER: Simple review workflow
+  - FINANCE_CHARGE_MEMO: Simple review workflow
+  - QUALITY_DOC: Tagging and review workflow (tagged, review_in_progress states)
+  - OTHER: Triage workflow (triage_pending, triage_completed states)
+- [x] New workflow events: ON_PO_VALIDATION_STARTED, ON_PO_VALID, ON_PO_INVALID, ON_CREDIT_LINKED_TO_INVOICE, ON_QUALITY_TAGGED, ON_REVIEW_STARTED, ON_TRIAGE_NEEDED, ON_TRIAGE_COMPLETED, ON_MARK_READY_FOR_REVIEW, ON_REVIEWED
+- [x] New workflow statuses: VALIDATION_PENDING, VALIDATION_FAILED, LINKED_TO_INVOICE, TAGGED, REVIEW_IN_PROGRESS, TRIAGE_PENDING, TRIAGE_COMPLETED, READY_FOR_REVIEW, REVIEWED
+- [x] Generic mutation endpoints:
+  - POST /api/workflows/{doc_id}/mark-ready-for-review
+  - POST /api/workflows/{doc_id}/mark-reviewed
+  - POST /api/workflows/{doc_id}/start-approval
+  - POST /api/workflows/{doc_id}/approve (generic)
+  - POST /api/workflows/{doc_id}/reject (generic)
+  - POST /api/workflows/{doc_id}/complete-triage
+  - POST /api/workflows/{doc_id}/link-credit-to-invoice
+  - POST /api/workflows/{doc_id}/tag-quality
+  - POST /api/workflows/{doc_id}/export
+- [x] Dashboard metric: active_queue_count per doc_type
+- [x] 45 automated tests (23 unit tests for multi-type workflows + 22 API tests)
+
 #### Classification Dashboard Extension (NEW - Feb 22, 2026)
 - [x] `classification_counts` field per doc_type: deterministic, ai, other counts
 - [x] `ai_assisted_count` field: docs where AI successfully changed type from OTHER

@@ -73,6 +73,7 @@ export const updateMailboxSource = (id, data) => api.put(`/settings/mailbox-sour
 export const deleteMailboxSource = (id) => api.delete(`/settings/mailbox-sources/${id}`);
 export const testMailboxConnection = (id) => api.post(`/settings/mailbox-sources/${id}/test-connection`);
 export const pollMailboxNow = (id) => api.post(`/settings/mailbox-sources/${id}/poll-now`);
+export const getMailboxPollingStatus = () => api.get('/settings/mailbox-sources/polling-status');
 
 // Email Stats Dashboard
 export const getEmailStats = () => api.get('/dashboard/email-stats');

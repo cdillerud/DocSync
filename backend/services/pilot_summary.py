@@ -636,8 +636,6 @@ async def send_daily_pilot_summary(db, email_service) -> Dict[str, Any]:
     Returns:
         Dict with summary data and email result
     """
-    from services.pilot_config import PILOT_MODE_ENABLED
-    
     # Check if pilot mode is enabled
     if not PILOT_MODE_ENABLED:
         logger.info("Pilot mode disabled - skipping daily summary email")

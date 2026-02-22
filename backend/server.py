@@ -59,6 +59,14 @@ from services.pilot_config import (
     get_stuck_threshold_hours, STUCK_THRESHOLDS
 )
 
+# Email and Summary Services
+from services.email_service import EmailService, set_email_service
+from services.pilot_summary import (
+    generate_daily_pilot_summary, send_daily_pilot_summary,
+    PILOT_SUMMARY_RECIPIENTS, DAILY_PILOT_EMAIL_ENABLED,
+    PILOT_SUMMARY_CRON_HOUR_UTC
+)
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 

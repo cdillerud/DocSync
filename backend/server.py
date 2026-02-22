@@ -10813,6 +10813,20 @@ async def startup():
         _sales_polling_task = asyncio.create_task(_sales_email_polling_worker())
         logger.info("Sales email polling worker started (interval: %d min, user: %s)", 
                    SALES_EMAIL_POLLING_INTERVAL_MINUTES, SALES_EMAIL_POLLING_USER)
+    
+    # Initialize email service
+    email_service = EmailService(db=db)
+    set_email_service(email_service)
+    await db.email_logs.create_index("message_id")
+    await db.email_logs.create_index("sent_at")
+    logger.info("Email service initialized (provider: mock)")
+    
+    # Start daily pilot summary scheduler if enabled
+    global _pilot_summary_task
+    if PILOT_MODE_ENABLED and DAILY_PILOT_EMAIL_ENABLED:
+        _pilot_summary_task = asyncio.create_task(_daily_pilot_summary_scheduler())
+        logger.info("Daily pilot summary scheduler started (cron: %d:00 UTC)", PILOT_SUMMARY_CRON_HOUR_UTC)
+    
     logger.info("GPI Document Hub started. Demo mode: %s, Loaded %d vendor aliases", DEMO_MODE, len(aliases))
 
 @app.on_event("shutdown")

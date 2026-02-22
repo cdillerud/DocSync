@@ -6146,7 +6146,7 @@ async def get_workflow_queue(
     }
 
 
-@api_router.get("/workflows/status-counts-by-type")
+@api_router.get("/workflows/generic/status-counts-by-type")
 async def get_status_counts_by_doc_type():
     """
     Get document counts grouped by doc_type and workflow_status.

@@ -1007,18 +1007,39 @@ class WorkflowEngine:
     
     @staticmethod
     def get_exception_statuses(doc_type: str = None) -> List[str]:
-        """Get exception statuses for a document type."""
+        """Get exception statuses (statuses requiring manual intervention) for a document type."""
         if doc_type == DocType.AP_INVOICE.value:
             return [
                 WorkflowStatus.VENDOR_PENDING.value,
                 WorkflowStatus.BC_VALIDATION_PENDING.value,
                 WorkflowStatus.BC_VALIDATION_FAILED.value,
                 WorkflowStatus.DATA_CORRECTION_PENDING.value,
-                WorkflowStatus.REVIEW_PENDING.value,
+            ]
+        elif doc_type == DocType.PURCHASE_ORDER.value:
+            return [
+                WorkflowStatus.VALIDATION_PENDING.value,
+                WorkflowStatus.VALIDATION_FAILED.value,
+                WorkflowStatus.DATA_CORRECTION_PENDING.value,
+            ]
+        elif doc_type in [DocType.SALES_CREDIT_MEMO.value, DocType.PURCHASE_CREDIT_MEMO.value]:
+            return [
+                WorkflowStatus.DATA_CORRECTION_PENDING.value,
+            ]
+        elif doc_type == DocType.QUALITY_DOC.value:
+            return [
+                WorkflowStatus.READY_FOR_REVIEW.value,
+                WorkflowStatus.REVIEW_IN_PROGRESS.value,
+            ]
+        elif doc_type == DocType.OTHER.value:
+            return [
+                WorkflowStatus.TRIAGE_PENDING.value,
+            ]
+        elif doc_type in [DocType.STATEMENT.value, DocType.REMINDER.value, DocType.FINANCE_CHARGE_MEMO.value]:
+            return [
+                WorkflowStatus.READY_FOR_REVIEW.value,
             ]
         return [
             WorkflowStatus.DATA_CORRECTION_PENDING.value,
-            WorkflowStatus.REVIEW_PENDING.value,
         ]
     
     @staticmethod
@@ -1028,7 +1049,18 @@ class WorkflowEngine:
             WorkflowStatus.EXPORTED.value,
             WorkflowStatus.ARCHIVED.value,
             WorkflowStatus.REJECTED.value,
+            WorkflowStatus.APPROVED.value,  # Approved is also terminal for most types
         ]
+    
+    @staticmethod
+    def get_active_statuses() -> List[str]:
+        """Get non-terminal statuses (document still requires processing)."""
+        terminal = [
+            WorkflowStatus.EXPORTED.value,
+            WorkflowStatus.ARCHIVED.value,
+            WorkflowStatus.FAILED.value,
+        ]
+        return [s.value for s in WorkflowStatus if s.value not in terminal]
     
     @staticmethod
     def get_all_statuses() -> List[str]:
@@ -1036,19 +1068,58 @@ class WorkflowEngine:
         return [s.value for s in WorkflowStatus]
     
     @staticmethod
+    def get_all_events() -> List[str]:
+        """Get all possible workflow event values."""
+        return [e.value for e in WorkflowEvent]
+    
+    @staticmethod
     def get_all_doc_types() -> List[str]:
         """Get all supported document types."""
         return [d.value for d in DocType]
     
     @staticmethod
+    def get_valid_statuses_for_doc_type(doc_type: str) -> List[str]:
+        """Get all valid statuses for a specific document type based on its workflow definition."""
+        workflow_def = WorkflowEngine.get_workflow_definition(doc_type)
+        statuses = set()
+        for current_status, transitions in workflow_def.items():
+            if current_status is not None:
+                statuses.add(current_status)
+            for next_status in transitions.values():
+                statuses.add(next_status)
+        return list(statuses)
+    
+    @staticmethod
+    def get_valid_events_for_status(doc_type: str, status: str) -> List[str]:
+        """Get valid events that can be triggered from a specific status for a document type."""
+        workflow_def = WorkflowEngine.get_workflow_definition(doc_type)
+        status_transitions = workflow_def.get(status, {})
+        return list(status_transitions.keys())
+    
+    @staticmethod
     def get_queue_for_status(status: str, doc_type: str = None) -> Optional[str]:
         """Map a workflow status to its corresponding queue name."""
         queue_mapping = {
+            # AP Invoice specific
             WorkflowStatus.VENDOR_PENDING.value: "vendor_pending",
             WorkflowStatus.BC_VALIDATION_PENDING.value: "bc_validation_pending",
             WorkflowStatus.BC_VALIDATION_FAILED.value: "bc_validation_failed",
+            # PO specific
+            WorkflowStatus.VALIDATION_PENDING.value: "validation_pending",
+            WorkflowStatus.VALIDATION_FAILED.value: "validation_failed",
+            # Credit memo specific
+            WorkflowStatus.LINKED_TO_INVOICE.value: "linked_to_invoice",
+            # Quality doc specific
+            WorkflowStatus.TAGGED.value: "tagged",
+            WorkflowStatus.REVIEW_IN_PROGRESS.value: "review_in_progress",
+            # OTHER specific
+            WorkflowStatus.TRIAGE_PENDING.value: "triage_pending",
+            WorkflowStatus.TRIAGE_COMPLETED.value: "triage_completed",
+            # Generic
             WorkflowStatus.DATA_CORRECTION_PENDING.value: "data_correction_pending",
             WorkflowStatus.REVIEW_PENDING.value: "review_pending",
+            WorkflowStatus.READY_FOR_REVIEW.value: "ready_for_review",
+            WorkflowStatus.REVIEWED.value: "reviewed",
             WorkflowStatus.READY_FOR_APPROVAL.value: "ready_for_approval",
             WorkflowStatus.APPROVAL_IN_PROGRESS.value: "approval_in_progress",
         }

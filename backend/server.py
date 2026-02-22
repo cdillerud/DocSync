@@ -3750,6 +3750,9 @@ async def intake_document(
         "document_type": suggested_type,
         "ai_confidence": confidence,
         "extracted_fields": extracted_fields,
+        # Document classification fields
+        "doc_type": doc_type_value,
+        "category": category,
         # Phase 7: Flat normalized fields on document
         "vendor_raw": normalized_fields.get("vendor_raw"),
         "vendor_normalized": normalized_fields.get("vendor_normalized"),

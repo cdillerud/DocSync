@@ -3639,6 +3639,10 @@ async def intake_document(
         "bc_record_id": None,
         "bc_document_no": None,
         "status": "Received",
+        # Document classification fields (will be updated after AI classification)
+        "doc_type": DocType.OTHER.value,
+        "source_system": SourceSystem.GPI_HUB_NATIVE.value,
+        "capture_channel": CaptureChannel.EMAIL.value if "email" in source.lower() else CaptureChannel.UPLOAD.value,
         # Workflow tracking fields
         "workflow_status": WorkflowStatus.CAPTURED.value,
         "workflow_history": [{
@@ -3664,6 +3668,19 @@ async def intake_document(
     suggested_type = classification.get("suggested_job_type", "Unknown")
     confidence = classification.get("confidence", 0.0)
     extracted_fields = classification.get("extracted_fields", {})
+    
+    # Determine doc_type from AI classification
+    doc_type_value = DocumentClassifier.classify_from_ai_result(suggested_type).value
+    
+    # Set category based on doc_type
+    if doc_type_value == DocType.AP_INVOICE.value:
+        category = "AP"
+    elif doc_type_value in [DocType.SALES_INVOICE.value, DocType.SALES_CREDIT_MEMO.value]:
+        category = "Sales"
+    elif doc_type_value == DocType.PURCHASE_ORDER.value:
+        category = "Purchase"
+    else:
+        category = "Other"
     
     # Phase 7: Compute normalized fields (flat, stored on document)
     normalized_fields = compute_ap_normalized_fields(extracted_fields)

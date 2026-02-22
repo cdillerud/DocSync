@@ -12,6 +12,7 @@ import re
 import asyncio
 import csv
 import io
+import copy
 from pathlib import Path
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any

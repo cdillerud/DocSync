@@ -1350,14 +1350,16 @@ async def _aggregate_document_types_data(
         "by_type": by_type,
         "source_systems": source_systems,
         "source_system_filter": source_system,
-        "doc_type_filter": doc_type
+        "doc_type_filter": doc_type,
+        "classification_filter": classification
     }
 
 
 @api_router.get("/dashboard/document-types")
 async def get_document_types_dashboard(
     source_system: Optional[str] = Query(None, description="Filter by source_system: SQUARE9, ZETADOCS, GPI_HUB_NATIVE"),
-    doc_type: Optional[str] = Query(None, description="Filter to specific doc_type")
+    doc_type: Optional[str] = Query(None, description="Filter to specific doc_type"),
+    classification: Optional[str] = Query(None, description="Filter by classification method: deterministic, ai, all")
 ):
     """
     Document Type Dashboard API.

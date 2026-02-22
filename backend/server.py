@@ -6253,13 +6253,16 @@ async def set_vendor_for_document(doc_id: str, request: SetVendorRequest):
     """
     Manually set/resolve vendor for a document in vendor_pending status.
     This moves the document from vendor_pending to bc_validation_pending.
+    Only for AP_INVOICE documents.
     """
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
     
-    if doc.get("document_type") != "AP_Invoice":
-        raise HTTPException(status_code=400, detail="This endpoint only supports AP_Invoice documents")
+    # Check doc_type (with backward compatibility for document_type)
+    doc_type = doc.get("doc_type") or (DocType.AP_INVOICE.value if doc.get("document_type") == "AP_Invoice" else None)
+    if doc_type != DocType.AP_INVOICE.value:
+        raise HTTPException(status_code=400, detail="This endpoint only supports AP_INVOICE documents")
     
     current_status = doc.get("workflow_status")
     if current_status != WorkflowStatus.VENDOR_PENDING.value:

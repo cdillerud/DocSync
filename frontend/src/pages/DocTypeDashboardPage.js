@@ -320,7 +320,7 @@ export default function DocTypeDashboardPage() {
         <CardContent className="p-4">
           <div className="flex items-center gap-4">
             <Filter className="h-4 w-4 text-muted-foreground" />
-            <div className="flex gap-4">
+            <div className="flex gap-4 flex-wrap">
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">Source System</label>
                 <Select value={sourceSystemFilter} onValueChange={setSourceSystemFilter}>
@@ -350,6 +350,36 @@ export default function DocTypeDashboardPage() {
                         {DOC_TYPE_CONFIG[dt]?.label || dt}
                       </SelectItem>
                     ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Classification</label>
+                <Select value={classificationFilter} onValueChange={setClassificationFilter}>
+                  <SelectTrigger className="w-[180px]" data-testid="classification-filter">
+                    <SelectValue placeholder="All Methods" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">
+                      <span className="flex items-center gap-2">
+                        All Methods
+                        <span className="text-muted-foreground text-xs">({grandTotal})</span>
+                      </span>
+                    </SelectItem>
+                    <SelectItem value="deterministic">
+                      <span className="flex items-center gap-2">
+                        <Cpu className="h-3 w-3 text-emerald-400" />
+                        Deterministic
+                        <span className="text-muted-foreground text-xs">({classificationTotals.deterministic})</span>
+                      </span>
+                    </SelectItem>
+                    <SelectItem value="ai">
+                      <span className="flex items-center gap-2">
+                        <Brain className="h-3 w-3 text-violet-400" />
+                        AI Assisted
+                        <span className="text-muted-foreground text-xs">({classificationTotals.ai})</span>
+                      </span>
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>

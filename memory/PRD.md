@@ -266,6 +266,13 @@ Gamer Packaging, Inc. needs to:
 | GET | /api/workflows/generic/status-counts-by-type | Counts grouped by doc_type and workflow_status |
 | GET | /api/workflows/generic/metrics-by-type | Metrics per doc_type (extraction rates, confidence) |
 
+### Document Type Dashboard (NEW - Feb 22, 2026)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/dashboard/document-types | Aggregated metrics by doc_type (status, extraction, match methods) |
+| GET | /api/dashboard/document-types?source_system=X | Filter by source_system |
+| GET | /api/dashboard/document-types?doc_type=X | Filter by specific doc_type |
+
 ---
 
 ## Document Classification Model

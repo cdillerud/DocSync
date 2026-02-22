@@ -11293,9 +11293,10 @@ async def run_batch_simulation(
             simulation_results = run_full_export_simulation(doc_for_sim)
             results_dict = {k: v.to_dict() for k, v in simulation_results.items()}
             
-            # Store results (copy to avoid _id mutation)
+            # Store results (deep copy to avoid _id mutation)
             for sim_type, result in results_dict.items():
-                result_copy = {**result, "_collection_timestamp": datetime.now(timezone.utc).isoformat()}
+                result_copy = copy.deepcopy(result)
+                result_copy["_collection_timestamp"] = datetime.now(timezone.utc).isoformat()
                 await db.pilot_simulation_results.insert_one(result_copy)
             
             # Update document

@@ -1,0 +1,171 @@
+{
+  "source_name": "Sample Legacy Export",
+  "exported_at": "2026-02-22T12:00:00Z",
+  "documents": [
+    {
+      "metadata": {
+        "legacy_system": "SQUARE9",
+        "legacy_id": "S9-AP-001",
+        "legacy_workflow_name": "AP_Invoice",
+        "vendor_name": "Acme Supplies Inc",
+        "vendor_no": "V10001",
+        "invoice_number": "INV-2024-0001",
+        "amount": 5250.0,
+        "currency": "USD",
+        "invoice_date": "2024-01-15",
+        "due_date": "2024-02-15",
+        "po_number": "PO-2024-0050",
+        "is_posted": true,
+        "is_paid": true,
+        "created_date": "2024-01-15T09:30:00Z"
+      },
+      "binary_reference": "/legacy/square9/ap/2024/INV-2024-0001.pdf"
+    },
+    {
+      "metadata": {
+        "legacy_system": "SQUARE9",
+        "legacy_id": "S9-AP-002",
+        "legacy_workflow_name": "AP_Invoice",
+        "vendor_name": "Office Pro Ltd",
+        "vendor_no": "V10002",
+        "invoice_number": "INV-2024-0002",
+        "amount": 1200.5,
+        "currency": "USD",
+        "invoice_date": "2024-01-20",
+        "due_date": "2024-02-20",
+        "is_approved": true,
+        "is_posted": false,
+        "created_date": "2024-01-20T14:00:00Z"
+      },
+      "binary_reference": "/legacy/square9/ap/2024/INV-2024-0002.pdf"
+    },
+    {
+      "metadata": {
+        "legacy_system": "ZETADOCS",
+        "legacy_id": "ZD-15-00123",
+        "legacy_zetadocs_set_code": "ZD00015",
+        "legacy_bc_doc_no": "PI-00123",
+        "vendor_name": "Global Parts Co",
+        "vendor_no": "V20001",
+        "invoice_number": "GP-2024-500",
+        "amount": 8750.0,
+        "currency": "EUR",
+        "invoice_date": "2024-02-01",
+        "due_date": "2024-03-01",
+        "is_exported": true,
+        "created_date": "2024-02-01T11:00:00Z"
+      },
+      "binary_reference": "/legacy/zetadocs/ZD00015/2024/GP-2024-500.pdf"
+    },
+    {
+      "metadata": {
+        "legacy_system": "ZETADOCS",
+        "legacy_id": "ZD-07-00456",
+        "legacy_zetadocs_set_code": "ZD00007",
+        "legacy_bc_doc_no": "SI-00456",
+        "customer_name": "Big Customer Inc",
+        "customer_no": "C30001",
+        "invoice_number": "SI-2024-0456",
+        "amount": 15000.0,
+        "currency": "USD",
+        "invoice_date": "2024-01-25",
+        "due_date": "2024-02-25",
+        "is_posted": true,
+        "is_exported": true,
+        "created_date": "2024-01-25T16:00:00Z"
+      },
+      "binary_reference": "/legacy/zetadocs/ZD00007/2024/SI-2024-0456.pdf"
+    },
+    {
+      "metadata": {
+        "legacy_system": "ZETADOCS",
+        "legacy_id": "ZD-02-00789",
+        "legacy_zetadocs_set_code": "ZD00002",
+        "legacy_bc_doc_no": "PO-00789",
+        "vendor_name": "Equipment World",
+        "vendor_no": "V10005",
+        "document_number": "PO-2024-0789",
+        "amount": 25000.0,
+        "currency": "USD",
+        "is_closed": true,
+        "created_date": "2024-01-10T08:00:00Z"
+      },
+      "binary_reference": "/legacy/zetadocs/ZD00002/2024/PO-2024-0789.pdf"
+    },
+    {
+      "metadata": {
+        "legacy_system": "ZETADOCS",
+        "legacy_id": "ZD-02-00790",
+        "legacy_zetadocs_set_code": "ZD00002",
+        "vendor_name": "Tech Supplies",
+        "vendor_no": "V10006",
+        "document_number": "PO-2024-0790",
+        "amount": 5500.0,
+        "currency": "USD",
+        "is_closed": false,
+        "is_approved": true,
+        "created_date": "2024-02-15T10:30:00Z"
+      },
+      "binary_reference": "/legacy/zetadocs/ZD00002/2024/PO-2024-0790.pdf"
+    },
+    {
+      "metadata": {
+        "legacy_system": "SQUARE9",
+        "legacy_id": "S9-ST-001",
+        "legacy_workflow_name": "Statement",
+        "vendor_name": "Bank of Commerce",
+        "document_number": "STMT-2024-JAN",
+        "invoice_date": "2024-01-31",
+        "is_reviewed": true,
+        "created_date": "2024-02-01T09:00:00Z"
+      },
+      "binary_reference": "/legacy/square9/statements/2024/STMT-2024-JAN.pdf"
+    },
+    {
+      "metadata": {
+        "legacy_system": "SQUARE9",
+        "legacy_id": "S9-QD-001",
+        "legacy_workflow_name": "Quality",
+        "document_number": "QC-2024-0001",
+        "quality_tags": [
+          "inspection",
+          "passed"
+        ],
+        "quality_category": "Incoming Inspection",
+        "vendor_name": "Parts Supplier Co",
+        "is_reviewed": true,
+        "is_closed": true,
+        "created_date": "2024-01-18T14:30:00Z"
+      },
+      "binary_reference": "/legacy/square9/quality/2024/QC-2024-0001.pdf"
+    },
+    {
+      "metadata": {
+        "legacy_system": "SQUARE9",
+        "legacy_id": "S9-QD-002",
+        "legacy_workflow_name": "Quality",
+        "document_number": "QC-2024-0002",
+        "quality_tags": [
+          "inspection",
+          "pending"
+        ],
+        "quality_category": "Final QC",
+        "is_reviewed": false,
+        "created_date": "2024-02-10T11:00:00Z"
+      },
+      "binary_reference": "/legacy/square9/quality/2024/QC-2024-0002.pdf"
+    },
+    {
+      "metadata": {
+        "legacy_system": "SQUARE9",
+        "legacy_id": "S9-MISC-001",
+        "document_number": "MISC-2024-001",
+        "created_date": "2024-02-20T09:00:00Z",
+        "extra": {
+          "notes": "Unclassified correspondence"
+        }
+      },
+      "binary_reference": "/legacy/square9/misc/2024/MISC-2024-001.pdf"
+    }
+  ]
+}

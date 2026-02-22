@@ -11075,14 +11075,15 @@ async def run_simulation_for_document(doc_id: str):
 @api_router.post("/pilot/simulation/ap-invoice/{doc_id}")
 async def simulate_ap_invoice_export(doc_id: str):
     """Simulate AP invoice export to BC."""
-    doc = await db.hub_documents.find_one({"document_id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
     if doc.get("doc_type") != "AP_INVOICE":
         raise HTTPException(status_code=400, detail=f"Document is {doc.get('doc_type')}, not AP_INVOICE")
     
-    result = simulate_export_ap_invoice(doc)
+    doc_for_sim = {**doc, "document_id": doc_id}
+    result = simulate_export_ap_invoice(doc_for_sim)
     result_dict = result.to_dict()
     
     # Store result
@@ -11092,7 +11093,7 @@ async def simulate_ap_invoice_export(doc_id: str):
     # Add to workflow history
     history_entry = SimulationHistoryEntry.create_simulation_entry(result_dict)
     await db.hub_documents.update_one(
-        {"document_id": doc_id},
+        {"id": doc_id},
         {"$push": {"workflow_history": history_entry}}
     )
     
@@ -11102,14 +11103,15 @@ async def simulate_ap_invoice_export(doc_id: str):
 @api_router.post("/pilot/simulation/sales-invoice/{doc_id}")
 async def simulate_sales_invoice_export_endpoint(doc_id: str):
     """Simulate sales invoice export to BC."""
-    doc = await db.hub_documents.find_one({"document_id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
     if doc.get("doc_type") != "SALES_INVOICE":
         raise HTTPException(status_code=400, detail=f"Document is {doc.get('doc_type')}, not SALES_INVOICE")
     
-    result = simulate_sales_invoice_export(doc)
+    doc_for_sim = {**doc, "document_id": doc_id}
+    result = simulate_sales_invoice_export(doc_for_sim)
     result_dict = result.to_dict()
     
     # Store result
@@ -11119,7 +11121,7 @@ async def simulate_sales_invoice_export_endpoint(doc_id: str):
     # Add to workflow history
     history_entry = SimulationHistoryEntry.create_simulation_entry(result_dict)
     await db.hub_documents.update_one(
-        {"document_id": doc_id},
+        {"id": doc_id},
         {"$push": {"workflow_history": history_entry}}
     )
     
@@ -11129,11 +11131,12 @@ async def simulate_sales_invoice_export_endpoint(doc_id: str):
 @api_router.post("/pilot/simulation/po-linkage/{doc_id}")
 async def simulate_po_linkage_endpoint(doc_id: str):
     """Simulate PO linkage in BC."""
-    doc = await db.hub_documents.find_one({"document_id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    result = simulate_po_linkage(doc)
+    doc_for_sim = {**doc, "document_id": doc_id}
+    result = simulate_po_linkage(doc_for_sim)
     result_dict = result.to_dict()
     
     # Store result
@@ -11143,7 +11146,7 @@ async def simulate_po_linkage_endpoint(doc_id: str):
     # Add to workflow history
     history_entry = SimulationHistoryEntry.create_simulation_entry(result_dict)
     await db.hub_documents.update_one(
-        {"document_id": doc_id},
+        {"id": doc_id},
         {"$push": {"workflow_history": history_entry}}
     )
     
@@ -11153,11 +11156,12 @@ async def simulate_po_linkage_endpoint(doc_id: str):
 @api_router.post("/pilot/simulation/attachment/{doc_id}")
 async def simulate_attachment_endpoint(doc_id: str):
     """Simulate PDF attachment to BC record."""
-    doc = await db.hub_documents.find_one({"document_id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    result = simulate_attach_pdf(doc)
+    doc_for_sim = {**doc, "document_id": doc_id}
+    result = simulate_attach_pdf(doc_for_sim)
     result_dict = result.to_dict()
     
     # Store result
@@ -11167,7 +11171,7 @@ async def simulate_attachment_endpoint(doc_id: str):
     # Add to workflow history
     history_entry = SimulationHistoryEntry.create_simulation_entry(result_dict)
     await db.hub_documents.update_one(
-        {"document_id": doc_id},
+        {"id": doc_id},
         {"$push": {"workflow_history": history_entry}}
     )
     

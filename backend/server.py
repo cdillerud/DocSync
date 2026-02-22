@@ -836,6 +836,10 @@ async def upload_document(
     file_path = UPLOAD_DIR / doc_id
     file_path.write_bytes(file_content)
 
+    # Determine doc_type from document_type parameter
+    doc_type_value = DocumentClassifier.classify_from_ai_result(document_type or "").value if document_type else DocType.OTHER.value
+    capture_channel = CaptureChannel.UPLOAD.value
+
     doc = {
         "id": doc_id, "source": source, "file_name": file.filename,
         "sha256_hash": sha256_hash, "file_size": len(file_content),
@@ -844,6 +848,10 @@ async def upload_document(
         "sharepoint_web_url": None, "sharepoint_share_link_url": None,
         "document_type": document_type,
         "category": None,
+        # Document classification fields
+        "doc_type": doc_type_value,
+        "source_system": SourceSystem.GPI_HUB_NATIVE.value,
+        "capture_channel": capture_channel,
         "bc_record_type": "SalesOrder" if document_type == "SalesOrder" else None,
         "bc_company_id": bc_company_id, "bc_record_id": bc_record_id,
         "bc_document_no": bc_document_no,
@@ -856,7 +864,7 @@ async def upload_document(
             "event": WorkflowEvent.ON_CAPTURE.value,
             "actor": "system",
             "reason": f"Document captured from {source}",
-            "metadata": {"source": source}
+            "metadata": {"source": source, "doc_type": doc_type_value}
         }],
         "workflow_status_updated_utc": now,
         "status": "Received", "created_utc": now, "updated_utc": now, "last_error": None

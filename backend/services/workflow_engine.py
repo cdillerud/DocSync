@@ -280,7 +280,9 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
     },
     
     # =========================================================================
-    # SALES_INVOICE: Standard workflow (skip vendor matching, BC validation)
+    # SALES_INVOICE: Standard approval workflow
+    # States: captured -> classified -> extracted -> ready_for_approval ->
+    #         approval_in_progress -> approved -> exported
     # =========================================================================
     DocType.SALES_INVOICE.value: {
         None: {
@@ -296,14 +298,20 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
             WorkflowEvent.ON_EXTRACTION_FAILED.value: WorkflowStatus.DATA_CORRECTION_PENDING.value,
         },
         WorkflowStatus.EXTRACTED.value: {
-            WorkflowEvent.ON_REVIEW_COMPLETE.value: WorkflowStatus.READY_FOR_APPROVAL.value,
-            WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,  # Fast-track approval
+            WorkflowEvent.ON_MARK_READY_FOR_APPROVAL.value: WorkflowStatus.READY_FOR_APPROVAL.value,
+            # Direct approval path
+            WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
         },
         WorkflowStatus.DATA_CORRECTION_PENDING.value: {
             WorkflowEvent.ON_DATA_CORRECTED.value: WorkflowStatus.EXTRACTED.value,
             WorkflowEvent.ON_ERROR.value: WorkflowStatus.FAILED.value,
         },
         WorkflowStatus.READY_FOR_APPROVAL.value: {
+            WorkflowEvent.ON_APPROVAL_STARTED.value: WorkflowStatus.APPROVAL_IN_PROGRESS.value,
+            WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
+            WorkflowEvent.ON_REJECTED.value: WorkflowStatus.REJECTED.value,
+        },
+        WorkflowStatus.APPROVAL_IN_PROGRESS.value: {
             WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
             WorkflowEvent.ON_REJECTED.value: WorkflowStatus.REJECTED.value,
         },
@@ -322,7 +330,9 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
     },
     
     # =========================================================================
-    # PURCHASE_ORDER: Standard workflow
+    # PURCHASE_ORDER: Workflow with PO validation step
+    # States: captured -> classified -> extracted -> validation_pending ->
+    #         ready_for_approval -> approval_in_progress -> approved -> exported
     # =========================================================================
     DocType.PURCHASE_ORDER.value: {
         None: {
@@ -338,14 +348,29 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
             WorkflowEvent.ON_EXTRACTION_FAILED.value: WorkflowStatus.DATA_CORRECTION_PENDING.value,
         },
         WorkflowStatus.EXTRACTED.value: {
-            WorkflowEvent.ON_REVIEW_COMPLETE.value: WorkflowStatus.READY_FOR_APPROVAL.value,
-            WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
+            WorkflowEvent.ON_PO_VALIDATION_STARTED.value: WorkflowStatus.VALIDATION_PENDING.value,
+            # Direct approval path (skip validation if not needed)
+            WorkflowEvent.ON_MARK_READY_FOR_APPROVAL.value: WorkflowStatus.READY_FOR_APPROVAL.value,
+        },
+        WorkflowStatus.VALIDATION_PENDING.value: {
+            WorkflowEvent.ON_PO_VALID.value: WorkflowStatus.READY_FOR_APPROVAL.value,
+            WorkflowEvent.ON_PO_INVALID.value: WorkflowStatus.VALIDATION_FAILED.value,
+        },
+        WorkflowStatus.VALIDATION_FAILED.value: {
+            WorkflowEvent.ON_DATA_CORRECTED.value: WorkflowStatus.VALIDATION_PENDING.value,
+            WorkflowEvent.ON_MARK_READY_FOR_APPROVAL.value: WorkflowStatus.READY_FOR_APPROVAL.value,  # Override
+            WorkflowEvent.ON_ERROR.value: WorkflowStatus.FAILED.value,
         },
         WorkflowStatus.DATA_CORRECTION_PENDING.value: {
             WorkflowEvent.ON_DATA_CORRECTED.value: WorkflowStatus.EXTRACTED.value,
             WorkflowEvent.ON_ERROR.value: WorkflowStatus.FAILED.value,
         },
         WorkflowStatus.READY_FOR_APPROVAL.value: {
+            WorkflowEvent.ON_APPROVAL_STARTED.value: WorkflowStatus.APPROVAL_IN_PROGRESS.value,
+            WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
+            WorkflowEvent.ON_REJECTED.value: WorkflowStatus.REJECTED.value,
+        },
+        WorkflowStatus.APPROVAL_IN_PROGRESS.value: {
             WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
             WorkflowEvent.ON_REJECTED.value: WorkflowStatus.REJECTED.value,
         },
@@ -364,7 +389,9 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
     },
     
     # =========================================================================
-    # SALES_CREDIT_MEMO: Standard workflow
+    # SALES_CREDIT_MEMO: Workflow with invoice linkage
+    # States: captured -> classified -> extracted -> linked_to_invoice ->
+    #         ready_for_approval -> approval_in_progress -> approved -> exported
     # =========================================================================
     DocType.SALES_CREDIT_MEMO.value: {
         None: {
@@ -380,7 +407,13 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
             WorkflowEvent.ON_EXTRACTION_FAILED.value: WorkflowStatus.DATA_CORRECTION_PENDING.value,
         },
         WorkflowStatus.EXTRACTED.value: {
-            WorkflowEvent.ON_REVIEW_COMPLETE.value: WorkflowStatus.READY_FOR_APPROVAL.value,
+            WorkflowEvent.ON_CREDIT_LINKED_TO_INVOICE.value: WorkflowStatus.LINKED_TO_INVOICE.value,
+            # Direct approval path (skip linkage if not needed)
+            WorkflowEvent.ON_MARK_READY_FOR_APPROVAL.value: WorkflowStatus.READY_FOR_APPROVAL.value,
+        },
+        WorkflowStatus.LINKED_TO_INVOICE.value: {
+            WorkflowEvent.ON_MARK_READY_FOR_APPROVAL.value: WorkflowStatus.READY_FOR_APPROVAL.value,
+            # Fast-track to approval
             WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
         },
         WorkflowStatus.DATA_CORRECTION_PENDING.value: {
@@ -388,6 +421,11 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
             WorkflowEvent.ON_ERROR.value: WorkflowStatus.FAILED.value,
         },
         WorkflowStatus.READY_FOR_APPROVAL.value: {
+            WorkflowEvent.ON_APPROVAL_STARTED.value: WorkflowStatus.APPROVAL_IN_PROGRESS.value,
+            WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
+            WorkflowEvent.ON_REJECTED.value: WorkflowStatus.REJECTED.value,
+        },
+        WorkflowStatus.APPROVAL_IN_PROGRESS.value: {
             WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
             WorkflowEvent.ON_REJECTED.value: WorkflowStatus.REJECTED.value,
         },
@@ -406,7 +444,9 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
     },
     
     # =========================================================================
-    # PURCHASE_CREDIT_MEMO: Standard workflow
+    # PURCHASE_CREDIT_MEMO: Workflow with invoice linkage (same as SALES_CREDIT_MEMO)
+    # States: captured -> classified -> extracted -> linked_to_invoice ->
+    #         ready_for_approval -> approval_in_progress -> approved -> exported
     # =========================================================================
     DocType.PURCHASE_CREDIT_MEMO.value: {
         None: {
@@ -422,7 +462,12 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
             WorkflowEvent.ON_EXTRACTION_FAILED.value: WorkflowStatus.DATA_CORRECTION_PENDING.value,
         },
         WorkflowStatus.EXTRACTED.value: {
-            WorkflowEvent.ON_REVIEW_COMPLETE.value: WorkflowStatus.READY_FOR_APPROVAL.value,
+            WorkflowEvent.ON_CREDIT_LINKED_TO_INVOICE.value: WorkflowStatus.LINKED_TO_INVOICE.value,
+            # Direct approval path
+            WorkflowEvent.ON_MARK_READY_FOR_APPROVAL.value: WorkflowStatus.READY_FOR_APPROVAL.value,
+        },
+        WorkflowStatus.LINKED_TO_INVOICE.value: {
+            WorkflowEvent.ON_MARK_READY_FOR_APPROVAL.value: WorkflowStatus.READY_FOR_APPROVAL.value,
             WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
         },
         WorkflowStatus.DATA_CORRECTION_PENDING.value: {
@@ -430,6 +475,11 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
             WorkflowEvent.ON_ERROR.value: WorkflowStatus.FAILED.value,
         },
         WorkflowStatus.READY_FOR_APPROVAL.value: {
+            WorkflowEvent.ON_APPROVAL_STARTED.value: WorkflowStatus.APPROVAL_IN_PROGRESS.value,
+            WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
+            WorkflowEvent.ON_REJECTED.value: WorkflowStatus.REJECTED.value,
+        },
+        WorkflowStatus.APPROVAL_IN_PROGRESS.value: {
             WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
             WorkflowEvent.ON_REJECTED.value: WorkflowStatus.REJECTED.value,
         },
@@ -448,7 +498,9 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
     },
     
     # =========================================================================
-    # STATEMENT: Simplified workflow
+    # STATEMENT: High volume, fast path review workflow
+    # States: captured -> classified -> extracted -> ready_for_review ->
+    #         reviewed -> archived/exported
     # =========================================================================
     DocType.STATEMENT.value: {
         None: {
@@ -460,17 +512,20 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
         },
         WorkflowStatus.CLASSIFIED.value: {
             WorkflowEvent.ON_EXTRACTION_SUCCESS.value: WorkflowStatus.EXTRACTED.value,
-            WorkflowEvent.ON_EXTRACTION_FAILED.value: WorkflowStatus.REVIEW_PENDING.value,
+            WorkflowEvent.ON_EXTRACTION_FAILED.value: WorkflowStatus.READY_FOR_REVIEW.value,
         },
         WorkflowStatus.EXTRACTED.value: {
-            WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
+            WorkflowEvent.ON_MARK_READY_FOR_REVIEW.value: WorkflowStatus.READY_FOR_REVIEW.value,
+            # Fast-track to export
             WorkflowEvent.ON_EXPORTED.value: WorkflowStatus.EXPORTED.value,
+            WorkflowEvent.ON_ARCHIVED.value: WorkflowStatus.ARCHIVED.value,
         },
-        WorkflowStatus.REVIEW_PENDING.value: {
-            WorkflowEvent.ON_REVIEW_COMPLETE.value: WorkflowStatus.EXTRACTED.value,
+        WorkflowStatus.READY_FOR_REVIEW.value: {
+            WorkflowEvent.ON_REVIEWED.value: WorkflowStatus.REVIEWED.value,
             WorkflowEvent.ON_ERROR.value: WorkflowStatus.FAILED.value,
         },
-        WorkflowStatus.APPROVED.value: {
+        WorkflowStatus.REVIEWED.value: {
+            WorkflowEvent.ON_ARCHIVED.value: WorkflowStatus.ARCHIVED.value,
             WorkflowEvent.ON_EXPORTED.value: WorkflowStatus.EXPORTED.value,
         },
         WorkflowStatus.EXPORTED.value: {
@@ -482,7 +537,8 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
     },
     
     # =========================================================================
-    # REMINDER: Simplified workflow
+    # REMINDER: Simple review workflow (shared pattern with FINANCE_CHARGE_MEMO)
+    # States: captured -> classified -> extracted -> ready_for_review -> reviewed -> exported
     # =========================================================================
     DocType.REMINDER.value: {
         None: {
@@ -494,17 +550,18 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
         },
         WorkflowStatus.CLASSIFIED.value: {
             WorkflowEvent.ON_EXTRACTION_SUCCESS.value: WorkflowStatus.EXTRACTED.value,
-            WorkflowEvent.ON_EXTRACTION_FAILED.value: WorkflowStatus.REVIEW_PENDING.value,
+            WorkflowEvent.ON_EXTRACTION_FAILED.value: WorkflowStatus.READY_FOR_REVIEW.value,
         },
         WorkflowStatus.EXTRACTED.value: {
-            WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
+            WorkflowEvent.ON_MARK_READY_FOR_REVIEW.value: WorkflowStatus.READY_FOR_REVIEW.value,
+            # Fast-track to export
             WorkflowEvent.ON_EXPORTED.value: WorkflowStatus.EXPORTED.value,
         },
-        WorkflowStatus.REVIEW_PENDING.value: {
-            WorkflowEvent.ON_REVIEW_COMPLETE.value: WorkflowStatus.EXTRACTED.value,
+        WorkflowStatus.READY_FOR_REVIEW.value: {
+            WorkflowEvent.ON_REVIEWED.value: WorkflowStatus.REVIEWED.value,
             WorkflowEvent.ON_ERROR.value: WorkflowStatus.FAILED.value,
         },
-        WorkflowStatus.APPROVED.value: {
+        WorkflowStatus.REVIEWED.value: {
             WorkflowEvent.ON_EXPORTED.value: WorkflowStatus.EXPORTED.value,
         },
         WorkflowStatus.EXPORTED.value: {
@@ -516,7 +573,8 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
     },
     
     # =========================================================================
-    # FINANCE_CHARGE_MEMO: Simplified workflow
+    # FINANCE_CHARGE_MEMO: Simple review workflow (same as REMINDER)
+    # States: captured -> classified -> extracted -> ready_for_review -> reviewed -> exported
     # =========================================================================
     DocType.FINANCE_CHARGE_MEMO.value: {
         None: {
@@ -528,17 +586,17 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
         },
         WorkflowStatus.CLASSIFIED.value: {
             WorkflowEvent.ON_EXTRACTION_SUCCESS.value: WorkflowStatus.EXTRACTED.value,
-            WorkflowEvent.ON_EXTRACTION_FAILED.value: WorkflowStatus.REVIEW_PENDING.value,
+            WorkflowEvent.ON_EXTRACTION_FAILED.value: WorkflowStatus.READY_FOR_REVIEW.value,
         },
         WorkflowStatus.EXTRACTED.value: {
-            WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
+            WorkflowEvent.ON_MARK_READY_FOR_REVIEW.value: WorkflowStatus.READY_FOR_REVIEW.value,
             WorkflowEvent.ON_EXPORTED.value: WorkflowStatus.EXPORTED.value,
         },
-        WorkflowStatus.REVIEW_PENDING.value: {
-            WorkflowEvent.ON_REVIEW_COMPLETE.value: WorkflowStatus.EXTRACTED.value,
+        WorkflowStatus.READY_FOR_REVIEW.value: {
+            WorkflowEvent.ON_REVIEWED.value: WorkflowStatus.REVIEWED.value,
             WorkflowEvent.ON_ERROR.value: WorkflowStatus.FAILED.value,
         },
-        WorkflowStatus.APPROVED.value: {
+        WorkflowStatus.REVIEWED.value: {
             WorkflowEvent.ON_EXPORTED.value: WorkflowStatus.EXPORTED.value,
         },
         WorkflowStatus.EXPORTED.value: {
@@ -550,7 +608,9 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
     },
     
     # =========================================================================
-    # QUALITY_DOC: Simplified workflow
+    # QUALITY_DOC: Quality review workflow with tagging step
+    # States: captured -> classified -> extracted -> tagged -> ready_for_review ->
+    #         review_in_progress -> reviewed -> exported
     # =========================================================================
     DocType.QUALITY_DOC.value: {
         None: {
@@ -562,21 +622,33 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
         },
         WorkflowStatus.CLASSIFIED.value: {
             WorkflowEvent.ON_EXTRACTION_SUCCESS.value: WorkflowStatus.EXTRACTED.value,
-            WorkflowEvent.ON_EXTRACTION_FAILED.value: WorkflowStatus.REVIEW_PENDING.value,
+            WorkflowEvent.ON_EXTRACTION_FAILED.value: WorkflowStatus.READY_FOR_REVIEW.value,
         },
         WorkflowStatus.EXTRACTED.value: {
-            WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
-            WorkflowEvent.ON_EXPORTED.value: WorkflowStatus.EXPORTED.value,
+            WorkflowEvent.ON_QUALITY_TAGGED.value: WorkflowStatus.TAGGED.value,
+            # Direct review path
+            WorkflowEvent.ON_MARK_READY_FOR_REVIEW.value: WorkflowStatus.READY_FOR_REVIEW.value,
         },
-        WorkflowStatus.REVIEW_PENDING.value: {
-            WorkflowEvent.ON_REVIEW_COMPLETE.value: WorkflowStatus.EXTRACTED.value,
-            WorkflowEvent.ON_ERROR.value: WorkflowStatus.FAILED.value,
+        WorkflowStatus.TAGGED.value: {
+            WorkflowEvent.ON_MARK_READY_FOR_REVIEW.value: WorkflowStatus.READY_FOR_REVIEW.value,
         },
-        WorkflowStatus.APPROVED.value: {
+        WorkflowStatus.READY_FOR_REVIEW.value: {
+            WorkflowEvent.ON_REVIEW_STARTED.value: WorkflowStatus.REVIEW_IN_PROGRESS.value,
+            WorkflowEvent.ON_REVIEWED.value: WorkflowStatus.REVIEWED.value,
+            WorkflowEvent.ON_REJECTED.value: WorkflowStatus.REJECTED.value,
+        },
+        WorkflowStatus.REVIEW_IN_PROGRESS.value: {
+            WorkflowEvent.ON_REVIEWED.value: WorkflowStatus.REVIEWED.value,
+            WorkflowEvent.ON_REJECTED.value: WorkflowStatus.REJECTED.value,
+        },
+        WorkflowStatus.REVIEWED.value: {
             WorkflowEvent.ON_EXPORTED.value: WorkflowStatus.EXPORTED.value,
         },
         WorkflowStatus.EXPORTED.value: {
             WorkflowEvent.ON_ARCHIVED.value: WorkflowStatus.ARCHIVED.value,
+        },
+        WorkflowStatus.REJECTED.value: {
+            WorkflowEvent.ON_RETRY.value: WorkflowStatus.READY_FOR_REVIEW.value,
         },
         WorkflowStatus.FAILED.value: {
             WorkflowEvent.ON_RETRY.value: WorkflowStatus.CAPTURED.value,
@@ -584,7 +656,9 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
     },
     
     # =========================================================================
-    # OTHER: Minimal workflow (capture -> classify -> archive)
+    # OTHER: Triage workflow for unclassified/edge case documents
+    # States: captured -> classified -> extracted -> triage_pending ->
+    #         triage_completed -> exported
     # =========================================================================
     DocType.OTHER.value: {
         None: {
@@ -592,23 +666,24 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
         },
         WorkflowStatus.CAPTURED.value: {
             WorkflowEvent.ON_CLASSIFICATION_SUCCESS.value: WorkflowStatus.CLASSIFIED.value,
-            WorkflowEvent.ON_CLASSIFICATION_FAILED.value: WorkflowStatus.REVIEW_PENDING.value,
+            WorkflowEvent.ON_CLASSIFICATION_FAILED.value: WorkflowStatus.TRIAGE_PENDING.value,
         },
         WorkflowStatus.CLASSIFIED.value: {
             WorkflowEvent.ON_EXTRACTION_SUCCESS.value: WorkflowStatus.EXTRACTED.value,
-            WorkflowEvent.ON_EXTRACTION_FAILED.value: WorkflowStatus.REVIEW_PENDING.value,
-            WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
+            WorkflowEvent.ON_EXTRACTION_FAILED.value: WorkflowStatus.TRIAGE_PENDING.value,
+            WorkflowEvent.ON_TRIAGE_NEEDED.value: WorkflowStatus.TRIAGE_PENDING.value,
         },
         WorkflowStatus.EXTRACTED.value: {
-            WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
+            WorkflowEvent.ON_TRIAGE_NEEDED.value: WorkflowStatus.TRIAGE_PENDING.value,
+            WorkflowEvent.ON_TRIAGE_COMPLETED.value: WorkflowStatus.TRIAGE_COMPLETED.value,
+            # Direct export for simple OTHER documents
             WorkflowEvent.ON_EXPORTED.value: WorkflowStatus.EXPORTED.value,
         },
-        WorkflowStatus.REVIEW_PENDING.value: {
-            WorkflowEvent.ON_REVIEW_COMPLETE.value: WorkflowStatus.CLASSIFIED.value,
-            WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
+        WorkflowStatus.TRIAGE_PENDING.value: {
+            WorkflowEvent.ON_TRIAGE_COMPLETED.value: WorkflowStatus.TRIAGE_COMPLETED.value,
             WorkflowEvent.ON_ERROR.value: WorkflowStatus.FAILED.value,
         },
-        WorkflowStatus.APPROVED.value: {
+        WorkflowStatus.TRIAGE_COMPLETED.value: {
             WorkflowEvent.ON_EXPORTED.value: WorkflowStatus.EXPORTED.value,
         },
         WorkflowStatus.EXPORTED.value: {

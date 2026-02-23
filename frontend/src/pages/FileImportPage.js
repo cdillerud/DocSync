@@ -93,7 +93,7 @@ export default function FileImportPage() {
         formData.append('sheet_name', sheetName);
       }
 
-      const response = await api.post('/api/sales/file-import/parse', formData, {
+      const response = await api.post('/sales/file-import/parse', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
 

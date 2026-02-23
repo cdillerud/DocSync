@@ -501,16 +501,28 @@ sudo docker exec gpi-backend curl -s -X POST "http://localhost:8001/api/admin/mi
 ├── backend/
 │   ├── server.py           # Main API (monolith - needs refactoring)
 │   ├── sales_module.py     # Sales-specific logic
+│   ├── services/
+│   │   ├── workflow_engine.py
+│   │   ├── ai_classifier.py
+│   │   ├── bc_sandbox_service.py      # BC read-only integration
+│   │   ├── bc_simulation_service.py   # BC write simulation
+│   │   ├── simulation_metrics_service.py
+│   │   ├── file_ingestion_service.py  # Excel/CSV file import
+│   │   ├── email_service.py
+│   │   └── pilot_summary.py
 │   ├── requirements.txt
 │   └── .env
 ├── frontend/
 │   ├── src/
 │   │   ├── pages/
 │   │   │   ├── DashboardPage.js
-│   │   │   ├── QueuePage.js          # Unified document queue
-│   │   │   ├── EmailParserPage.js    # Mailbox configuration
-│   │   │   ├── AuditDashboardPage.js # Metrics & observability
-│   │   │   ├── SalesDashboardPage.js # Sales inventory view
+│   │   │   ├── QueuePage.js           # Unified document queue
+│   │   │   ├── EmailParserPage.js     # Mailbox configuration
+│   │   │   ├── AuditDashboardPage.js  # Metrics & observability
+│   │   │   ├── SalesDashboardPage.js  # Sales inventory view
+│   │   │   ├── FileImportPage.js      # Excel/CSV file import (NEW)
+│   │   │   ├── SimulationDashboardPage.js
+│   │   │   ├── PilotDashboardPage.js
 │   │   │   └── ...
 │   │   ├── components/ui/    # Shadcn components
 │   │   └── lib/api.js        # API client

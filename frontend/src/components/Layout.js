@@ -40,6 +40,7 @@ export default function Layout() {
     if (path === '/ap-workflows') return 'AP Workflows';
     if (path === '/sales-workflows') return 'Sales Workflows';
     if (path === '/operations-workflows') return 'Operations';
+    if (path === '/file-import') return 'File Import';
     if (path === '/pilot-dashboard') return 'Pilot Dashboard';
     if (path === '/simulation-dashboard') return 'Simulation Dashboard';
     if (path === '/workflow') return 'Legacy Workflow';

@@ -6,7 +6,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator
 } from '../components/ui/dropdown-menu';
 import {
-  LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, Brain, BarChart3, ShoppingCart, GitBranch, PieChart, Receipt, Package, Eye, FlaskConical
+  LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, Brain, BarChart3, ShoppingCart, GitBranch, PieChart, Receipt, Package, Eye, FlaskConical, FileSpreadsheet
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -17,6 +17,7 @@ const navItems = [
   { to: '/ap-workflows', icon: Receipt, label: 'AP Workflows' },
   { to: '/sales-workflows', icon: ShoppingCart, label: 'Sales Workflows' },
   { to: '/operations-workflows', icon: Package, label: 'Operations' },
+  { to: '/file-import', icon: FileSpreadsheet, label: 'File Import' },
   { to: '/pilot-dashboard', icon: Eye, label: 'Pilot Dashboard' },
   { to: '/simulation-dashboard', icon: FlaskConical, label: 'Simulation' },
   { to: '/doc-types', icon: PieChart, label: 'Doc Types' },

@@ -33,6 +33,11 @@ from sales_module import (
     _sales_email_config
 )
 
+# File Ingestion Service
+from services.file_ingestion_service import (
+    file_ingestion_service, set_file_ingestion_db, IngestionType
+)
+
 # Workflow Engine Service
 from services.workflow_engine import (
     WorkflowEngine, WorkflowStatus, WorkflowEvent, 

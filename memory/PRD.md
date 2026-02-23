@@ -260,7 +260,8 @@ Gamer Packaging, Inc. needs to:
 - [ ] BC draft creation (disabled)
 
 ### Pending / Future
-- [ ] Phase 8: Controlled vendor enablement
+- [ ] Phase 8: Controlled vendor enablement (P2)
+- [ ] "Stable Vendor" metric based on extraction consistency and volume (P2)
 - [ ] Vendor threshold overrides per-vendor
 - [ ] Entra ID SSO (replace mock auth)
 - [ ] Transaction automation (Level 3)

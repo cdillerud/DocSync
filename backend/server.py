@@ -12066,6 +12066,8 @@ async def startup():
     # Sales Module (Phase 0): Initialize database and indexes
     set_sales_db(db)
     await initialize_sales_indexes(db)
+    # File Ingestion Service: Initialize database
+    set_file_ingestion_db(db)
     # Configure Sales email polling
     configure_sales_email_polling(
         enabled=SALES_EMAIL_POLLING_ENABLED,

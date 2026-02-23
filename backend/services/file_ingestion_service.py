@@ -518,7 +518,7 @@ class FileIngestionService:
         dry_run: bool = False
     ) -> Dict[str, Any]:
         """Import inventory positions from parsed file data."""
-        if not self.db:
+        if self.db is None:
             return {"success": False, "error": "Database not configured"}
         
         if not parsed_result.success:

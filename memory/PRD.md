@@ -303,6 +303,15 @@ Gamer Packaging, Inc. needs to:
 | GET | /api/metrics/extraction-quality | AI extraction quality metrics |
 | GET | /api/metrics/extraction-misses | Documents with missing fields |
 
+### File Import (NEW - Feb 23, 2026)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | /api/sales/file-import/parse | Parse Excel/CSV file and return validation |
+| POST | /api/sales/file-import/import-orders | Import sales orders (supports dry_run) |
+| POST | /api/sales/file-import/import-inventory | Import inventory positions |
+| GET | /api/sales/file-import/column-mappings | Get expected columns for ingestion type |
+| GET | /api/sales/file-import/history | Get import history log |
+
 ### AP Invoice Workflow (NEW - Feb 22, 2026)
 | Method | Endpoint | Description |
 |--------|----------|-------------|

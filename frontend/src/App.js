@@ -43,6 +43,7 @@ function AppRoutes() {
         <Route path="operations-workflows" element={<OperationsWorkflowsPage />} />
         <Route path="pilot-dashboard" element={<PilotDashboardPage />} />
         <Route path="simulation-dashboard" element={<SimulationDashboardPage />} />
+        <Route path="file-import" element={<FileImportPage />} />
         <Route path="doc-types" element={<DocTypeDashboardPage />} />
         <Route path="documents/:id" element={<DocumentDetailPage />} />
         <Route path="email-parser" element={<EmailParserPage />} />

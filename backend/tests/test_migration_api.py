@@ -10,7 +10,7 @@ sys.path.insert(0, '/app/backend')
 
 
 # Test configuration
-API_BASE_URL = "https://workflow-classifier.preview.emergentagent.com"
+API_BASE_URL = "https://pilot-sim-dash.preview.emergentagent.com"
 
 
 @pytest.fixture

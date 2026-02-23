@@ -1,0 +1,102 @@
+{
+  "summary": "Excel/CSV File Ingestion Feature - All 15 backend tests pass, frontend working after bug fix. Fixed duplicate /api prefix in frontend API calls. Feature allows uploading CSV/Excel files, parsing with auto-column-mapping, dry-run preview, and actual import to MongoDB.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_file_import.py",
+    "/app/test_reports/pytest/file_import_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Fixed duplicate /api prefix bug in FileImportPage.js - API calls were using '/api/sales/file-import/...' but api.js baseURL already includes '/api', resulting in '/api/api/...' 404 errors",
+    "File ingestion service properly groups order lines by customer_po into order headers",
+    "All required columns (customer_po, item_no, quantity) validated correctly",
+    "Column auto-detection working with known aliases",
+    "Dry-run mode correctly previews without database writes"
+  ],
+  "updated_files": [
+    "/app/frontend/src/pages/FileImportPage.js",
+    "/app/backend/tests/test_file_import.py"
+  ],
+  "success_rate": {
+    "backend": "100% (15/15 tests passed)",
+    "frontend": "100% (all UI elements working)"
+  },
+  "seed_data_creation": "Test orders created via actual import test (PO-IMPORT-* unique per run)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "File Import feature fully tested. Key APIs: POST /api/sales/file-import/parse, POST /api/sales/file-import/import-orders (with dry_run param), GET /api/sales/file-import/column-mappings, GET /api/sales/file-import/history. Test file at /tmp/test_orders.csv has 4 lines grouping into 3 orders (PO-2024-001 has 2 lines). Frontend at /file-import with tabs: Upload, Preview, Result.",
+  "verified_features": {
+    "backend_parse_csv": {
+      "status": "VERIFIED",
+      "evidence": "POST /api/sales/file-import/parse returns 200 with rows_parsed=4, rows_valid=4 for test CSV"
+    },
+    "backend_column_mappings": {
+      "status": "VERIFIED",
+      "evidence": "GET /api/sales/file-import/column-mappings returns required/optional columns with aliases"
+    },
+    "backend_import_dry_run": {
+      "status": "VERIFIED",
+      "evidence": "POST /api/sales/file-import/import-orders with dry_run=true returns orders_created=3, lines_created=4"
+    },
+    "backend_import_actual": {
+      "status": "VERIFIED",
+      "evidence": "POST /api/sales/file-import/import-orders with dry_run=false creates records in MongoDB"
+    },
+    "backend_import_history": {
+      "status": "VERIFIED",
+      "evidence": "GET /api/sales/file-import/history returns past imports with pagination"
+    },
+    "backend_inventory_import": {
+      "status": "VERIFIED",
+      "evidence": "POST /api/sales/file-import/import-inventory works for inventory_position type"
+    },
+    "frontend_file_import_page": {
+      "status": "VERIFIED",
+      "evidence": "Page loads at /file-import with all elements: tabs, dropdown, file input, parse button"
+    },
+    "frontend_tabs": {
+      "status": "VERIFIED",
+      "evidence": "Upload/Preview/Result tabs work correctly with data-testid attributes"
+    },
+    "frontend_ingestion_type_dropdown": {
+      "status": "VERIFIED",
+      "evidence": "Dropdown shows Sales Orders, Inventory Positions, Customer Items options"
+    },
+    "frontend_column_mapping_guide": {
+      "status": "VERIFIED",
+      "evidence": "Shows Expected Columns for Sales Orders with Required (red badges) and Optional columns after API fix"
+    },
+    "frontend_file_upload": {
+      "status": "VERIFIED",
+      "evidence": "File input accepts CSV, Parse File button triggers parsing"
+    },
+    "frontend_preview_tab": {
+      "status": "VERIFIED",
+      "evidence": "Shows Total/Valid/Invalid Rows stats, Mapped Columns count, Data Preview table"
+    },
+    "frontend_import_preview": {
+      "status": "VERIFIED",
+      "evidence": "Preview Import button triggers dry-run, shows Orders Created/Order Lines/Total Quantity stats"
+    },
+    "frontend_result_tab": {
+      "status": "VERIFIED",
+      "evidence": "Shows Created Records Preview JSON, Confirm Import button for actual import"
+    }
+  },
+  "bug_fixed": {
+    "description": "Fixed duplicate /api prefix in frontend API calls",
+    "file": "/app/frontend/src/pages/FileImportPage.js",
+    "lines_changed": [39, 65, 96, 132, 133],
+    "before": "api.get('/api/sales/file-import/...')",
+    "after": "api.get('/sales/file-import/...')",
+    "root_cause": "Frontend api.js sets baseURL to '${REACT_APP_BACKEND_URL}/api', so paths should not include /api prefix"
+  }
+}

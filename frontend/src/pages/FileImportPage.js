@@ -62,7 +62,7 @@ export default function FileImportPage() {
       try {
         const formData = new FormData();
         formData.append('file', selectedFile);
-        const response = await api.post('/api/sales/file-import/excel-sheets', formData, {
+        const response = await api.post('/sales/file-import/excel-sheets', formData, {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
         setSheets(response.data.sheets || []);

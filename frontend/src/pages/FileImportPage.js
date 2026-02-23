@@ -36,7 +36,7 @@ export default function FileImportPage() {
   // Fetch column mappings when ingestion type changes
   const fetchColumnMappings = useCallback(async (type) => {
     try {
-      const response = await api.get(`/api/sales/file-import/column-mappings?ingestion_type=${type}`);
+      const response = await api.get(`/sales/file-import/column-mappings?ingestion_type=${type}`);
       setColumnMappings(response.data);
     } catch (err) {
       console.error("Failed to fetch column mappings:", err);

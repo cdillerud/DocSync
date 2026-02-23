@@ -420,7 +420,6 @@ class FileIngestionService:
         
         created_orders = []
         created_lines = []
-        errors = []
         
         for po_no, order_data in orders_by_po.items():
             order_id = f"ord_{uuid.uuid4().hex[:8]}"

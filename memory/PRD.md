@@ -240,6 +240,20 @@ Gamer Packaging, Inc. needs to:
 - [x] Frontend classification filter dropdown with counts
 - [x] 34 backend tests (12 existing + 22 new classification tests)
 
+#### Excel/CSV File Ingestion for Sales (NEW - Feb 23, 2026)
+- [x] Backend file ingestion service (`/app/backend/services/file_ingestion_service.py`)
+- [x] Support for Excel (.xlsx, .xls) and CSV (.csv) formats
+- [x] Auto-detection of column mappings based on known aliases
+- [x] Three ingestion types: sales_order, inventory_position, customer_item
+- [x] File parsing with validation for required columns
+- [x] Dry-run mode to preview import before committing
+- [x] Order grouping: lines with same customer_po grouped into single order
+- [x] Import history tracking in `file_ingestion_log` collection
+- [x] Frontend page at `/file-import` with 3-step workflow (Upload, Preview, Result)
+- [x] Column mapping guide showing required vs optional columns
+- [x] Data preview table before import
+- [x] 15 backend tests + frontend verification
+
 ### In Progress / Shadow Mode
 - [x] AP automatic workflow trigger (VERIFIED WORKING)
 - [ ] BC record linking (manual only currently)

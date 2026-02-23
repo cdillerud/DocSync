@@ -395,7 +395,7 @@ class FileIngestionService:
         
         Groups order lines by customer_po into order headers and lines.
         """
-        if not self.db:
+        if self.db is None:
             return {"success": False, "error": "Database not configured"}
         
         if not parsed_result.success:

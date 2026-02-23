@@ -129,8 +129,8 @@ export default function FileImportPage() {
       if (warehouseId) formData.append('warehouse_id', warehouseId);
 
       const endpoint = ingestionType === "sales_order" 
-        ? '/api/sales/file-import/import-orders'
-        : '/api/sales/file-import/import-inventory';
+        ? '/sales/file-import/import-orders'
+        : '/sales/file-import/import-inventory';
 
       const response = await api.post(endpoint, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }

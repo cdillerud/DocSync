@@ -21,6 +21,7 @@ import SalesWorkflowsPage from "@/pages/SalesWorkflowsPage";
 import OperationsWorkflowsPage from "@/pages/OperationsWorkflowsPage";
 import PilotDashboardPage from "@/pages/PilotDashboardPage";
 import SimulationDashboardPage from "@/pages/SimulationDashboardPage";
+import FileImportPage from "@/pages/FileImportPage";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();

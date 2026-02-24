@@ -391,6 +391,15 @@ export default function DocumentDetailPage() {
               </CardContent>
             </Card>
           )}
+
+          {/* Square9 Workflow Tracker */}
+          <Square9WorkflowTracker 
+            documentId={id} 
+            onRetry={(result) => {
+              toast.success(`Retry ${result.retry_count} completed`);
+              fetchData(); // Refresh document data
+            }}
+          />
         </div>
 
         {/* Right: Workflow Audit Trail */}

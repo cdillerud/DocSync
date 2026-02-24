@@ -2,7 +2,7 @@
 
 ## Overview
 
-A **Document Intelligence Platform** that replaces Zetadocs-style document linking in Microsoft Dynamics 365 Business Central (BC). The hub orchestrates document ingestion from multiple email sources, AI-powered classification, SharePoint storage, and BC record linking.
+A **Document Intelligence Platform** that replaces Zetadocs-style document linking in Microsoft Dynamics 365 Business Central (BC). The hub orchestrates document ingestion from multiple sources, AI-powered classification, and BC record linking.
 
 ---
 
@@ -17,7 +17,31 @@ Gamer Packaging, Inc. needs to:
 
 ---
 
-## Architecture
+## Simplified Architecture (Refactored Feb 2026)
+
+```
+SOURCES                    HUB                      WORKFLOWS
+─────────────────────────────────────────────────────────────
+                          ┌─────────────┐
+Email (Graph API) ───────►│             │──► AP Invoice Workflow
+                          │   hub_      │
+File Upload ─────────────►│  documents  │──► Sales Order Workflow  
+                          │             │
+Excel/CSV Import ────────►│  (single    │──► Purchase Order Workflow
+                          │   source    │
+Legacy Systems ──────────►│   of truth) │──► Other/Triage
+                          │             │
+                          └─────────────┘
+
+Key Principles:
+• ONE collection (hub_documents) for ALL documents
+• ONE ingestion pipeline (all sources → classify → route)
+• ONE unified queue UI (filter by doc_type/status)
+```
+
+---
+
+## Architecture (Original)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐

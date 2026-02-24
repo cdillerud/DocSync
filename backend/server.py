@@ -56,6 +56,14 @@ from services.migration import (
 from services.migration.job import MigrationMode, MigrationJobBuilder
 from services.migration.sources import create_sample_migration_file
 
+# Square9 Workflow Alignment
+from services.square9_workflow import (
+    Square9Stage, DEFAULT_WORKFLOW_CONFIG,
+    initialize_retry_state, increment_retry, reset_retry_counter,
+    validate_location_code, determine_square9_stage, get_square9_stage_info,
+    validate_required_fields, should_retry, get_workflow_summary
+)
+
 # Pilot Configuration
 from services.pilot_config import (
     PILOT_MODE_ENABLED, CURRENT_PILOT_PHASE,

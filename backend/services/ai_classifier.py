@@ -98,7 +98,7 @@ async def classify_doc_type_with_ai(
         AIClassificationResult with proposed_doc_type and confidence
     """
     timestamp = datetime.now(timezone.utc).isoformat()
-    model_name = "gpt-5.2"  # Default model
+    model_name = AI_MODEL_NAME
     
     # Check if EMERGENT_LLM_KEY is configured
     api_key = os.environ.get("EMERGENT_LLM_KEY")

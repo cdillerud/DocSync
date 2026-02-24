@@ -358,6 +358,13 @@ export default function UnifiedQueuePage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="w-10 pl-4">
+                        <Checkbox 
+                          checked={documents.length > 0 && selectedDocs.size === documents.length}
+                          onCheckedChange={toggleSelectAll}
+                          data-testid="select-all-checkbox"
+                        />
+                      </TableHead>
                       <TableHead>Document</TableHead>
                       <TableHead>Type</TableHead>
                       <TableHead>Status</TableHead>
@@ -370,10 +377,17 @@ export default function UnifiedQueuePage() {
                     {documents.map((doc) => (
                       <TableRow 
                         key={doc.id} 
-                        className="cursor-pointer hover:bg-muted/50"
+                        className={`cursor-pointer hover:bg-muted/50 ${selectedDocs.has(doc.id) ? 'bg-primary/5' : ''}`}
                         onClick={() => navigate(`/documents/${doc.id}`)}
                         data-testid={`doc-row-${doc.id}`}
                       >
+                        <TableCell className="pl-4" onClick={(e) => e.stopPropagation()}>
+                          <Checkbox 
+                            checked={selectedDocs.has(doc.id)}
+                            onCheckedChange={() => toggleSelect(doc.id)}
+                            data-testid={`select-doc-${doc.id}`}
+                          />
+                        </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
                             <FileText className="h-4 w-4 text-muted-foreground" />

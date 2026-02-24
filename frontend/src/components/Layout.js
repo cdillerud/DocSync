@@ -33,6 +33,7 @@ export default function Layout() {
   useEffect(() => {
     const fetchBCStatus = async () => {
       try {
+        // Try the BC status endpoint first
         const res = await fetch(`${API}/api/bc-sandbox/status`);
         if (res.ok) {
           const data = await res.json();
@@ -55,12 +56,33 @@ export default function Layout() {
             environment: data.config?.environment || 'Unknown'
           });
         } else {
-          console.warn('[BC Status] API returned non-ok:', res.status);
-          setBcStatus({ loading: false, connected: false, demoMode: false, environment: 'Error' });
+          // If BC status fails, try settings endpoint as fallback
+          console.warn('[BC Status] Primary endpoint failed:', res.status, '- trying settings fallback');
+          try {
+            const settingsRes = await fetch(`${API}/api/settings`);
+            if (settingsRes.ok) {
+              const settings = await settingsRes.json();
+              const bcConfig = settings.bc_sandbox || {};
+              const hasSecret = bcConfig.client_secret_set || bcConfig.has_secret;
+              setBcStatus({
+                loading: false,
+                connected: hasSecret === true,
+                demoMode: !hasSecret,
+                environment: bcConfig.environment || 'Configured'
+              });
+              console.log('[BC Status] Using settings fallback:', bcConfig);
+            } else {
+              setBcStatus({ loading: false, connected: false, demoMode: true, environment: '' });
+            }
+          } catch (fallbackErr) {
+            console.warn('[BC Status] Settings fallback also failed:', fallbackErr);
+            setBcStatus({ loading: false, connected: false, demoMode: true, environment: '' });
+          }
         }
       } catch (err) {
-        console.error('[BC Status] Fetch failed:', err);
-        setBcStatus({ loading: false, connected: false, demoMode: false, environment: 'Offline' });
+        console.error('[BC Status] Fetch failed:', err.message);
+        // On network error, show neutral state instead of error
+        setBcStatus({ loading: false, connected: false, demoMode: true, environment: '' });
       }
     };
     fetchBCStatus();

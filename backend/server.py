@@ -2088,6 +2088,7 @@ class VendorMatchMethod:
 class TransactionAction:
     """Track what action was taken on the BC side"""
     NONE = "NONE"                       # No BC action taken
+    VALIDATED = "VALIDATED"             # Square9: Validation passed, stored in SharePoint
     LINKED_ONLY = "LINKED_ONLY"         # Document attached to existing record
     DRAFT_CREATED = "DRAFT_CREATED"     # Draft invoice header created
     DRAFT_WITH_LINES = "DRAFT_WITH_LINES"  # Future: draft with lines

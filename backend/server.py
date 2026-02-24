@@ -2582,6 +2582,13 @@ Always respond with valid JSON in this exact format:
         "payment_date": "...",
         "payment_amount": "...",
         "tracking_number": "...",
+        "bol_number": "...",
+        "pro_number": "...",
+        "shipper": "...",
+        "consignee": "...",
+        "carrier": "...",
+        "weight": "...",
+        "pieces": "...",
         "warehouse": "...",
         "items": "...",
         "ship_to": "..."

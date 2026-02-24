@@ -8,19 +8,10 @@ import Layout from "@/components/Layout";
 import LoginPage from "@/pages/LoginPage";
 import DashboardPage from "@/pages/DashboardPage";
 import UploadPage from "@/pages/UploadPage";
-import QueuePage from "@/pages/QueuePage";
+import UnifiedQueuePage from "@/pages/UnifiedQueuePage";
 import DocumentDetailPage from "@/pages/DocumentDetailPage";
 import SettingsPage from "@/pages/SettingsPage";
 import EmailParserPage from "@/pages/EmailParserPage";
-import AuditDashboardPage from "@/pages/AuditDashboardPage";
-import SalesDashboardPage from "@/pages/SalesDashboardPage";
-import WorkflowQueuesPage from "@/pages/WorkflowQueuesPage";
-import DocTypeDashboardPage from "@/pages/DocTypeDashboardPage";
-import APWorkflowsPage from "@/pages/APWorkflowsPage";
-import SalesWorkflowsPage from "@/pages/SalesWorkflowsPage";
-import OperationsWorkflowsPage from "@/pages/OperationsWorkflowsPage";
-import PilotDashboardPage from "@/pages/PilotDashboardPage";
-import SimulationDashboardPage from "@/pages/SimulationDashboardPage";
 import FileImportPage from "@/pages/FileImportPage";
 
 function ProtectedRoute({ children }) {
@@ -36,19 +27,10 @@ function AppRoutes() {
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route index element={<DashboardPage />} />
         <Route path="upload" element={<UploadPage />} />
-        <Route path="queue" element={<QueuePage />} />
-        <Route path="workflow" element={<WorkflowQueuesPage />} />
-        <Route path="ap-workflows" element={<APWorkflowsPage />} />
-        <Route path="sales-workflows" element={<SalesWorkflowsPage />} />
-        <Route path="operations-workflows" element={<OperationsWorkflowsPage />} />
-        <Route path="pilot-dashboard" element={<PilotDashboardPage />} />
-        <Route path="simulation-dashboard" element={<SimulationDashboardPage />} />
+        <Route path="queue" element={<UnifiedQueuePage />} />
         <Route path="file-import" element={<FileImportPage />} />
-        <Route path="doc-types" element={<DocTypeDashboardPage />} />
         <Route path="documents/:id" element={<DocumentDetailPage />} />
         <Route path="email-parser" element={<EmailParserPage />} />
-        <Route path="audit" element={<AuditDashboardPage />} />
-        <Route path="sales" element={<SalesDashboardPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

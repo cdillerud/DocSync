@@ -10,7 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { toast } from 'sonner';
 import {
   ArrowLeft, ExternalLink, Link, RefreshCw, FileText,
-  CheckCircle2, AlertCircle, Clock, Loader2, Copy, RotateCcw
+  CheckCircle2, AlertCircle, Clock, Loader2, Copy, RotateCcw, 
+  ShieldCheck, ShieldAlert, Building2, FileSearch, Receipt
 } from 'lucide-react';
 
 const STATUS_CLASSES = {

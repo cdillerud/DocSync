@@ -5419,18 +5419,13 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
         "status": new_status,
         "transaction_action": transaction_action,
         "reprocessed_utc": datetime.now(timezone.utc).isoformat(),
-        "updated_utc": datetime.now(timezone.utc).isoformat()
+        "updated_utc": datetime.now(timezone.utc).isoformat(),
+        "last_error": None  # Clear any previous errors on successful reprocess
     }
-    
-    if bc_linked:
-        update_data["bc_record_id"] = bc_record_id
-        update_data["last_error"] = None
-    elif link_error:
-        update_data["last_error"] = link_error
     
     await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
     
-    # Log reprocess workflow
+    # Log reprocess workflow (Square9 aligned)
     workflow = {
         "id": str(uuid.uuid4()),
         "document_id": doc_id,
@@ -5447,22 +5442,22 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
                     "new_match_method": new_match_method,
                     "validation_passed": validation_results.get("all_passed"),
                     "decision": decision,
-                    "draft_creation_skipped": True,  # Reprocess never creates drafts
-                    "reason": "Reprocess only links to existing BC records, no draft creation"
+                    "square9_aligned": True,
+                    "reason": "Square9 workflow: validate data, confirm SharePoint storage. BC attachment handled separately."
                 }
             },
             {
                 "step": "status_transition",
-                "status": "completed" if bc_linked or new_status != old_status else "no_change",
+                "status": "completed" if new_status != old_status else "no_change",
                 "result": {
                     "old_status": old_status,
                     "new_status": new_status,
-                    "bc_linked": bc_linked
+                    "sharepoint_stored": bool(share_link)
                 }
             }
         ],
         "correlation_id": str(uuid.uuid4()),
-        "error": link_error
+        "error": None
     }
     await db.hub_workflow_runs.insert_one(workflow)
     
@@ -5476,7 +5471,8 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
         "match_method_changed": old_match_method != new_match_method,
         "old_match_method": old_match_method,
         "new_match_method": new_match_method,
-        "bc_linked": bc_linked,
+        "validation_passed": validation_results.get("all_passed"),
+        "sharepoint_stored": bool(share_link),
         "document": updated_doc,
         "reasoning": reasoning
     }

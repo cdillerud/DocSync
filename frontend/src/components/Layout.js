@@ -8,7 +8,9 @@ import {
 import {
   LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, Brain, FileSpreadsheet, ChevronRight
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+
+const API = process.env.REACT_APP_BACKEND_URL;
 
 // Simplified navigation - removed redundant workflow pages
 const navItems = [

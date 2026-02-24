@@ -95,11 +95,17 @@ export default function DashboardPage() {
     ? Object.entries(stats.by_status).map(([name, value]) => ({ name, value }))
     : [];
 
+  // Calculate BC readiness percentage
+  const bcReadyRate = extractionQuality?.readiness_metrics?.ready_for_draft?.rate || 0;
+  const bcReadyCount = extractionQuality?.readiness_metrics?.ready_for_draft?.count || 0;
+  const draftCandidateRate = extractionQuality?.readiness_metrics?.draft_candidates?.rate || 0;
+  const draftCandidateCount = extractionQuality?.readiness_metrics?.draft_candidates?.count || 0;
+
   const metricCards = [
     { label: 'Total Documents', value: stats?.total_documents || 0, icon: FileText, color: 'text-blue-500' },
-    { label: 'Linked to BC', value: stats?.by_status?.LinkedToBC || 0, icon: Link, color: 'text-emerald-500' },
+    { label: 'Ready for BC', value: `${bcReadyRate.toFixed(0)}%`, subtext: `${bcReadyCount} docs`, icon: CheckCircle2, color: 'text-emerald-500' },
     { label: 'Exceptions', value: stats?.by_status?.Exception || 0, icon: AlertCircle, color: 'text-red-500' },
-    { label: 'Completed', value: stats?.by_status?.Completed || 0, icon: CheckCircle2, color: 'text-gray-500' },
+    { label: 'Draft Candidates', value: `${draftCandidateRate.toFixed(0)}%`, subtext: `${draftCandidateCount} docs`, icon: Zap, color: 'text-purple-500' },
   ];
 
   return (
@@ -116,7 +122,7 @@ export default function DashboardPage() {
 
       {/* Metric cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4" data-testid="stats-grid">
-        {metricCards.map(({ label, value, icon: Icon, color }, i) => (
+        {metricCards.map(({ label, value, subtext, icon: Icon, color }, i) => (
           <Card key={label} className={`border border-border hover:border-primary/30 transition-colors animate-fade-in-up animate-delay-${i}00`}>
             <CardContent className="p-5">
               <div className="flex items-center justify-between mb-3">
@@ -126,6 +132,7 @@ export default function DashboardPage() {
               <p className="text-3xl font-black tracking-tight" style={{ fontFamily: 'Chivo, sans-serif' }} data-testid={`stat-${label.toLowerCase().replace(/\s+/g, '-')}`}>
                 {value}
               </p>
+              {subtext && <p className="text-xs text-muted-foreground mt-1">{subtext}</p>}
             </CardContent>
           </Card>
         ))}

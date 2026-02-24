@@ -36,17 +36,31 @@ export default function Layout() {
         const res = await fetch(`${API}/api/bc-sandbox/status`);
         if (res.ok) {
           const data = await res.json();
+          // Determine connection status based on config
+          const hasCredentials = data.config?.has_secret === true;
+          const isNotDemoMode = data.demo_mode === false;
+          const isConnected = isNotDemoMode && hasCredentials;
+          
+          console.log('[BC Status]', { 
+            demo_mode: data.demo_mode, 
+            has_secret: data.config?.has_secret,
+            environment: data.config?.environment,
+            computed_connected: isConnected 
+          });
+          
           setBcStatus({
             loading: false,
-            connected: !data.demo_mode && data.config?.has_secret,
-            demoMode: data.demo_mode,
+            connected: isConnected,
+            demoMode: data.demo_mode === true,
             environment: data.config?.environment || 'Unknown'
           });
         } else {
-          setBcStatus({ loading: false, connected: false, demoMode: true, environment: 'Error' });
+          console.warn('[BC Status] API returned non-ok:', res.status);
+          setBcStatus({ loading: false, connected: false, demoMode: false, environment: 'Error' });
         }
       } catch (err) {
-        setBcStatus({ loading: false, connected: false, demoMode: true, environment: 'Offline' });
+        console.error('[BC Status] Fetch failed:', err);
+        setBcStatus({ loading: false, connected: false, demoMode: false, environment: 'Offline' });
       }
     };
     fetchBCStatus();

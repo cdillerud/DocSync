@@ -2856,24 +2856,16 @@ async def match_vendor_in_bc(
         
         vendors = resp.json().get("value", [])
         
-        logger.info(f"BC matching: vendor_name='{vendor_name}', strategies={strategies}, num_vendors={len(vendors)}")
-        logger.info(f"VENDOR_ALIAS_MAP keys: {list(VENDOR_ALIAS_MAP.keys())[:5]}")
-        
         # Check alias map first
         if "alias" in strategies and vendor_name in VENDOR_ALIAS_MAP:
             alias_target = VENDOR_ALIAS_MAP[vendor_name]
-            logger.info(f"Found alias: '{vendor_name}' -> '{alias_target}'")
             for v in vendors:
                 if v.get("displayName", "").lower() == alias_target.lower():
-                    logger.info(f"ALIAS MATCH: {v.get('number')} - {v.get('displayName')}")
                     result["matched"] = True
                     result["match_method"] = "alias"
                     result["selected_vendor"] = v
                     result["score"] = 1.0
                     return result
-            logger.info(f"No BC vendor matched alias_target='{alias_target}'")
-        else:
-            logger.info(f"Alias strategy check failed: 'alias' in strategies={('alias' in strategies)}, vendor_name in map={vendor_name in VENDOR_ALIAS_MAP}")
         
         # Try each strategy in order
         candidates = []

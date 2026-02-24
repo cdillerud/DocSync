@@ -39,6 +39,8 @@ function formatDate(iso) {
 
 export default function DashboardPage() {
   const [stats, setStats] = useState(null);
+  const [extractionQuality, setExtractionQuality] = useState(null);
+  const [dailyTrends, setDailyTrends] = useState([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
@@ -46,6 +48,22 @@ export default function DashboardPage() {
     try {
       const res = await getDashboardStats();
       setStats(res.data);
+      
+      // Fetch extraction quality metrics
+      try {
+        const qualityRes = await api.get('/metrics/extraction-quality?days=7');
+        setExtractionQuality(qualityRes.data);
+      } catch (e) {
+        console.log('Extraction quality API not available');
+      }
+      
+      // Fetch daily trends
+      try {
+        const trendsRes = await api.get('/metrics/daily?days=7');
+        setDailyTrends(trendsRes.data?.daily || []);
+      } catch (e) {
+        console.log('Daily trends API not available');
+      }
     } catch (err) {
       toast.error('Failed to load dashboard');
     } finally {

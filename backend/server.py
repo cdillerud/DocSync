@@ -2549,9 +2549,11 @@ Inventory_Report: Stock/inventory status reports
 - Extract: warehouse, items, quantities
 - Look for "Inventory", "Stock", "On Hand", "Available"
 
-Shipping_Document: Shipping requests, BOLs, tracking
-- Extract: tracking_number, ship_date, customer
-- Look for "Ship", "Delivery", "Dispatch", "Bill of Lading", "BOL"
+Shipping_Document: Shipping documents, BOLs, Bills of Lading
+- Extract: bol_number, ship_date, po_number, shipper, consignee, carrier, tracking_number, pro_number, weight, pieces
+- Look for "Ship", "Delivery", "Dispatch", "Bill of Lading", "BOL", "Straight Bill", "Shipper", "Consignee"
+- BOL Number is the primary document identifier (often labeled "B/L No" or "BOL#")
+- Pro Number is the carrier's tracking/reference number
 
 Quality_Issue: Quality complaints or issues
 - Extract: customer, item, description

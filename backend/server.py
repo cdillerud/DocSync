@@ -123,6 +123,8 @@ _sales_polling_task = None
 _pilot_summary_task = None
 
 # ==================== AUTH ====================
+# NOTE: Auth endpoints moved to routes/auth.py
+from routes.auth import router as auth_router
 import jwt as pyjwt
 
 TEST_USER = {"username": "admin", "password": "admin", "display_name": "Hub Admin", "role": "administrator"}
@@ -141,6 +143,7 @@ def create_token(username: str) -> str:
     payload = {"sub": username, "exp": datetime.now(timezone.utc).timestamp() + 86400}
     return pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
+# Auth endpoints are now in routes/auth.py - keeping these for backward compatibility during migration
 @api_router.post("/auth/login")
 async def login(req: LoginRequest):
     if req.username == TEST_USER["username"] and req.password == TEST_USER["password"]:

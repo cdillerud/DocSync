@@ -7,12 +7,13 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { 
   Search, Filter, RefreshCw, FileText, Clock, CheckCircle2, 
-  AlertCircle, Archive, ChevronRight, Inbox, FileCheck
+  AlertCircle, Archive, ChevronRight, Inbox, FileCheck, Play
 } from "lucide-react";
-import api from "@/lib/api";
+import api, { bulkResubmitDocuments } from "@/lib/api";
 
 // Document types and their display names
 const DOC_TYPES = {

@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Progress } from '../components/ui/progress';
 import { toast } from 'sonner';
 import {
-  FileText, Link, AlertCircle, CheckCircle2, RefreshCw, ArrowRight, UploadCloud, Files,
+  FileText, AlertCircle, CheckCircle2, RefreshCw, ArrowRight, UploadCloud, Files,
   TrendingUp, Target, Zap, Clock
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';

@@ -1048,3 +1048,60 @@ Refactoring the monolithic `server.py` (~12,000 lines) into modular router files
 ---
 
 *Last Updated: February 24, 2026*
+
+---
+
+## Square9 Workflow Alignment (Completed - February 24, 2026)
+
+### Overview
+Implemented Square9-compatible workflow features to closely mirror the legacy Square9 system while adding improvements.
+
+### Features Implemented
+
+#### 1. Retry Counter System
+- **Max Retries**: 4 attempts (configurable, matches Square9)
+- **Auto-Escalation**: After 4 retries, documents are escalated to Manual Review (improved over Square9's auto-delete)
+- **Reset Capability**: Manual reset of retry counter after intervention
+
+#### 2. Square9 Workflow Stages
+17 stages mapped to Square9 workflow diagram:
+- Import, Classification, Unclassified
+- Validation, Missing PO, Missing Invoice, Missing Vendor, Missing Location, Missing Date
+- BC Validation, BC Failed
+- Valid (green checkmark), Error Recovery
+- Ready for Export, Exported, Deleted, Manual Review
+
+#### 3. New API Endpoints
+- `GET /api/documents/{id}/square9-status` - Get Square9 workflow status
+- `POST /api/documents/{id}/retry` - Retry document with counter increment
+- `POST /api/documents/{id}/reset-retries` - Reset retry counter
+- `GET /api/square9/config` - Get workflow configuration
+- `GET /api/square9/stage-counts` - Document counts by stage
+
+#### 4. Frontend Components
+- **Square9WorkflowTracker**: Shows current stage, retry count, progress bar, retry history
+- **Square9StageSummary**: Dashboard widget showing stage distribution
+
+### Files Created/Modified
+- `backend/services/square9_workflow.py` (NEW)
+- `frontend/src/components/Square9WorkflowTracker.js` (NEW)
+- `backend/server.py` (MODIFIED - added Square9 endpoints)
+- `frontend/src/pages/DocumentDetailPage.js` (MODIFIED - added tracker)
+- `frontend/src/pages/DashboardPage.js` (MODIFIED - added stage summary)
+
+### Configuration
+```python
+DEFAULT_WORKFLOW_CONFIG = {
+    "max_retry_attempts": 4,
+    "auto_delete_on_max_retries": False,  # Safety improvement
+    "auto_escalate_on_max_retries": True,
+    "retry_delay_minutes": 5,
+}
+```
+
+### Square9 Comparison Document
+Created `/app/memory/SQUARE9_COMPARISON.md` documenting alignment status.
+
+---
+
+*Last Updated: February 24, 2026*

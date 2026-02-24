@@ -1251,7 +1251,8 @@ async def link_document(doc_id: str):
                 bc_record_id=bc_record_id or orders[0]["id"], 
                 share_link=doc["sharepoint_share_link_url"], 
                 file_name=doc["file_name"],
-                file_content=file_content
+                file_content=file_content,
+                bc_entity=bc_entity
             )
             if link_result.get("success"):
                 steps[-1]["status"] = "completed"

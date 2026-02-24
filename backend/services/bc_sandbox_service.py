@@ -1159,6 +1159,13 @@ def get_bc_sandbox_status() -> Dict[str, Any]:
     Returns:
         Status dict with config info (secrets masked)
     """
+    # Import the server's BC credentials which may be loaded from database settings
+    try:
+        from server import BC_CLIENT_SECRET as SERVER_BC_SECRET
+        effective_secret = BC_SANDBOX_CLIENT_SECRET or SERVER_BC_SECRET
+    except ImportError:
+        effective_secret = BC_SANDBOX_CLIENT_SECRET
+    
     return {
         "service": "bc_sandbox_service",
         "demo_mode": DEMO_MODE,
@@ -1170,7 +1177,7 @@ def get_bc_sandbox_status() -> Dict[str, Any]:
             "tenant_id": BC_SANDBOX_TENANT_ID,
             "environment": BC_SANDBOX_ENVIRONMENT,
             "company_name": BC_SANDBOX_COMPANY_NAME or "(not set)",
-            "has_secret": bool(BC_SANDBOX_CLIENT_SECRET),
+            "has_secret": bool(effective_secret),
         },
         "api_base": BC_API_BASE,
         "available_operations": [

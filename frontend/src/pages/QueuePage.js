@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { listDocuments, deleteDocument } from '../lib/api';
+import { listDocuments, deleteDocument, bulkResubmitDocuments, bulkRetryDocuments } from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -8,8 +8,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Checkbox } from '../components/ui/checkbox';
 import { toast } from 'sonner';
-import { Search, RefreshCw, FileText, ExternalLink, Filter, RotateCcw, Trash2, FolderOpen } from 'lucide-react';
+import { Search, RefreshCw, FileText, ExternalLink, Filter, RotateCcw, Trash2, FolderOpen, CheckSquare, Play } from 'lucide-react';
 
 const STATUS_CLASSES = {
   Received: 'status-received',

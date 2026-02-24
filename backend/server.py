@@ -2734,11 +2734,13 @@ def compute_ap_normalized_fields(extracted_fields: dict) -> dict:
 
 async def lookup_vendor_alias(vendor_normalized: str) -> dict:
     """
-    Phase 7: Look up vendor in alias collection.
+    Phase 7: Look up vendor in alias collection, BC cache, or live BC API.
     
     Returns:
     - vendor_canonical: the canonical_vendor_id if found, else None
-    - vendor_match_method: "alias", "exact_name", or "none"
+    - vendor_match_method: "alias", "exact_name", "bc_search", "fuzzy_bc", or "none"
+    - vendor_name: matched vendor name
+    - vendor_no: matched vendor number
     """
     if not vendor_normalized:
         return {"vendor_canonical": None, "vendor_match_method": "none"}
@@ -2756,7 +2758,9 @@ async def lookup_vendor_alias(vendor_normalized: str) -> dict:
         canonical_id = alias_doc.get("canonical_vendor_id") or alias_doc.get("vendor_no") or alias_doc.get("vendor_name")
         return {
             "vendor_canonical": canonical_id,
-            "vendor_match_method": "alias"
+            "vendor_match_method": "alias",
+            "vendor_name": alias_doc.get("vendor_name"),
+            "vendor_no": alias_doc.get("vendor_no")
         }
     
     # Check if exact match in cached BC vendors (if available)
@@ -2770,8 +2774,99 @@ async def lookup_vendor_alias(vendor_normalized: str) -> dict:
     if bc_vendor:
         return {
             "vendor_canonical": bc_vendor.get("number") or bc_vendor.get("id"),
-            "vendor_match_method": "exact_name"
+            "vendor_match_method": "exact_name",
+            "vendor_name": bc_vendor.get("displayName"),
+            "vendor_no": bc_vendor.get("number")
         }
+    
+    # Try live BC search with different search terms
+    try:
+        # Get the original vendor name (before normalization) for better matching
+        vendor_search_term = vendor_normalized.title()  # Convert to title case
+        
+        # Try BC API search
+        bc_result = await search_vendors_by_name(vendor_search_term, limit=10)
+        
+        if bc_result.status == BCLookupStatus.SUCCESS:
+            vendors = bc_result.data.get("vendors", [])
+            
+            if vendors:
+                # Try to find best match
+                for vendor in vendors:
+                    bc_name = vendor.get("displayName", "").lower()
+                    # Check if normalized names match (case-insensitive)
+                    bc_normalized = re.sub(r'\s+', ' ', bc_name.strip())
+                    
+                    if bc_normalized == vendor_normalized:
+                        # Exact match found
+                        return {
+                            "vendor_canonical": vendor.get("number") or vendor.get("id"),
+                            "vendor_match_method": "bc_search",
+                            "vendor_name": vendor.get("displayName"),
+                            "vendor_no": vendor.get("number")
+                        }
+                
+                # If no exact match, try fuzzy matching
+                best_match = None
+                best_score = 0
+                
+                for vendor in vendors:
+                    bc_name = vendor.get("displayName", "").lower()
+                    bc_normalized = re.sub(r'\s+', ' ', bc_name.strip())
+                    
+                    # Simple similarity: check if all words from search are in BC name or vice versa
+                    search_words = set(vendor_normalized.split())
+                    bc_words = set(bc_normalized.split())
+                    
+                    # Calculate overlap score
+                    overlap = len(search_words & bc_words)
+                    total = len(search_words | bc_words)
+                    score = overlap / total if total > 0 else 0
+                    
+                    if score > best_score and score >= 0.6:  # At least 60% overlap
+                        best_score = score
+                        best_match = vendor
+                
+                if best_match:
+                    return {
+                        "vendor_canonical": best_match.get("number") or best_match.get("id"),
+                        "vendor_match_method": "fuzzy_bc",
+                        "vendor_name": best_match.get("displayName"),
+                        "vendor_no": best_match.get("number"),
+                        "match_score": best_score
+                    }
+        
+        # Try with first word only (company name often starts with key identifier)
+        first_word = vendor_normalized.split()[0] if vendor_normalized else ""
+        if first_word and len(first_word) >= 3:
+            bc_result2 = await search_vendors_by_name(first_word.title(), limit=10)
+            
+            if bc_result2.status == BCLookupStatus.SUCCESS:
+                vendors2 = bc_result2.data.get("vendors", [])
+                
+                for vendor in vendors2:
+                    bc_name = vendor.get("displayName", "").lower()
+                    bc_normalized = re.sub(r'\s+', ' ', bc_name.strip())
+                    
+                    # Check if vendor name starts with same word
+                    if bc_normalized.startswith(first_word):
+                        search_words = set(vendor_normalized.split())
+                        bc_words = set(bc_normalized.split())
+                        overlap = len(search_words & bc_words)
+                        total = len(search_words | bc_words)
+                        score = overlap / total if total > 0 else 0
+                        
+                        if score >= 0.5:  # At least 50% overlap for partial match
+                            return {
+                                "vendor_canonical": vendor.get("number") or vendor.get("id"),
+                                "vendor_match_method": "fuzzy_bc",
+                                "vendor_name": vendor.get("displayName"),
+                                "vendor_no": vendor.get("number"),
+                                "match_score": score
+                            }
+                            
+    except Exception as e:
+        logger.warning(f"BC vendor search failed: {e}")
     
     return {"vendor_canonical": None, "vendor_match_method": "none"}
 

@@ -450,7 +450,7 @@ async def link_document_to_bc(bc_record_id: str, share_link: str, file_name: str
             }
         
         # Step 2: Upload the actual file content using PATCH with attachmentContent
-        content_url = f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/salesOrders({bc_record_id})/documentAttachments({attachment_id})/attachmentContent"
+        content_url = f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/{bc_entity}({bc_record_id})/documentAttachments({attachment_id})/attachmentContent"
         
         upload_resp = await c.patch(
             content_url,

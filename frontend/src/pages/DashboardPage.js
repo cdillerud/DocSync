@@ -215,33 +215,36 @@ export default function DashboardPage() {
             <p className="text-xs text-muted-foreground">Field extraction success rates (last 7 days)</p>
           </CardHeader>
           <CardContent className="space-y-4">
-            {extractionQuality ? (
+            {extractionQuality?.extraction_rates ? (
               <>
                 <div className="space-y-3">
                   <div>
                     <div className="flex justify-between text-sm mb-1">
                       <span>Vendor</span>
-                      <span className="font-mono">{extractionQuality.vendor_rate || 0}%</span>
+                      <span className="font-mono">{extractionQuality.extraction_rates.vendor?.toFixed(1) || 0}%</span>
                     </div>
-                    <Progress value={extractionQuality.vendor_rate || 0} className="h-2" />
+                    <Progress value={extractionQuality.extraction_rates.vendor || 0} className="h-2" />
                   </div>
                   <div>
                     <div className="flex justify-between text-sm mb-1">
                       <span>Invoice Number</span>
-                      <span className="font-mono">{extractionQuality.invoice_rate || 0}%</span>
+                      <span className="font-mono">{extractionQuality.extraction_rates.invoice_number?.toFixed(1) || 0}%</span>
                     </div>
-                    <Progress value={extractionQuality.invoice_rate || 0} className="h-2" />
+                    <Progress value={extractionQuality.extraction_rates.invoice_number || 0} className="h-2" />
                   </div>
                   <div>
                     <div className="flex justify-between text-sm mb-1">
                       <span>Amount</span>
-                      <span className="font-mono">{extractionQuality.amount_rate || 0}%</span>
+                      <span className="font-mono">{extractionQuality.extraction_rates.amount?.toFixed(1) || 0}%</span>
                     </div>
-                    <Progress value={extractionQuality.amount_rate || 0} className="h-2" />
+                    <Progress value={extractionQuality.extraction_rates.amount || 0} className="h-2" />
                   </div>
                 </div>
-                <div className="pt-2 border-t text-xs text-muted-foreground">
-                  Based on {extractionQuality.total_documents || 0} documents
+                <div className="pt-2 border-t">
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>Based on {extractionQuality.total_documents || 0} documents</span>
+                    <span className="text-green-500">{extractionQuality.readiness_metrics?.ready_for_draft?.count || 0} ready for draft</span>
+                  </div>
                 </div>
               </>
             ) : (

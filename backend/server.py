@@ -356,22 +356,23 @@ async def get_bc_sales_orders(order_no: str = None):
             raise Exception(f"BC sales orders error: {data['error'].get('message', data['error'])}")
         return data.get("value", [])
 
-async def link_document_to_bc(bc_record_id: str, share_link: str, file_name: str, file_content: bytes = None, content_type: str = None):
+async def link_document_to_bc(bc_record_id: str, share_link: str, file_name: str, file_content: bytes = None, content_type: str = None, bc_entity: str = "salesOrders"):
     """
-    Attach a document to a BC Sales Order using the documentAttachments API.
+    Attach a document to a BC record using the documentAttachments API.
     
     Args:
-        bc_record_id: The GUID of the Sales Order in BC
+        bc_record_id: The GUID of the BC record
         share_link: SharePoint sharing link (stored in attachment notes if possible)
         file_name: Name of the file to attach
         file_content: Binary content of the file to upload
         content_type: MIME type of the file (e.g., 'application/pdf')
+        bc_entity: The BC entity type (e.g., 'salesOrders', 'purchaseInvoices', 'salesInvoices')
     
     Returns:
         dict with success status and attachment details
     """
     if DEMO_MODE or not BC_CLIENT_ID:
-        return {"success": True, "method": "mock", "note": "In production: file will be attached to BC Sales Order via documentAttachments API"}
+        return {"success": True, "method": "mock", "note": f"In production: file will be attached to BC {bc_entity} via documentAttachments API"}
     
     if not file_content:
         return {"success": False, "method": "api", "error": "No file content provided for attachment"}
@@ -385,8 +386,8 @@ async def link_document_to_bc(bc_record_id: str, share_link: str, file_name: str
     
     async with httpx.AsyncClient(timeout=60.0) as c:
         # Step 1: Create the attachment metadata record
-        # Using documentAttachments entity bound to salesOrders
-        attach_url = f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/salesOrders({bc_record_id})/documentAttachments"
+        # Using documentAttachments entity bound to the specified bc_entity
+        attach_url = f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/{bc_entity}({bc_record_id})/documentAttachments"
         
         # Determine content type
         if not content_type:

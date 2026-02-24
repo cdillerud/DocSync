@@ -278,6 +278,28 @@ Key Principles:
 - [x] Data preview table before import
 - [x] 15 backend tests + frontend verification
 
+#### Architecture Refactor (IN PROGRESS - Feb 24, 2026)
+**Goal:** Simplify over-engineered architecture into clean, maintainable system.
+
+**Frontend Refactor (COMPLETED):**
+- [x] Reduced navigation from 13 items to 6 items
+- [x] Created `UnifiedQueuePage.js` - single queue for all document types
+- [x] Removed redundant pages: APWorkflowsPage, SalesWorkflowsPage, OperationsWorkflowsPage, WorkflowQueuesPage, PilotDashboardPage, SimulationDashboardPage, DocTypeDashboardPage, AuditDashboardPage, SalesDashboardPage
+- [x] Simplified navigation: Dashboard, Upload, Document Queue, File Import, Email Config, Settings
+
+**Backend Refactor (PREPARED, NOT ACTIVATED):**
+- [x] Created modular route files in `/app/backend/routes/`:
+  - `documents.py` - Document CRUD operations
+  - `ingestion.py` - Unified ingestion from all sources
+  - `workflows.py` - Workflow transitions and queues
+  - `dashboard.py` - Stats and metrics
+  - `config.py` - Settings and mailbox sources
+- [x] Created `server_new.py` - Simplified entry point (~200 lines vs 12K)
+- [ ] Switch from server.py to server_new.py (requires testing)
+- [ ] Remove sales_module.py (integrate into main)
+- [ ] Database collection cleanup
+
+
 ### In Progress / Shadow Mode
 - [x] AP automatic workflow trigger (VERIFIED WORKING)
 - [ ] BC record linking (manual only currently)

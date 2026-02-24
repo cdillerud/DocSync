@@ -87,8 +87,8 @@ export default function Layout() {
 
         <div className="p-3 border-t border-border shrink-0">
           <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
-            <div className="w-2 h-2 rounded-full bg-emerald-500" />
-            <span className="font-mono">DEMO MODE</span>
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="font-mono">BC CONNECTED</span>
           </div>
         </div>
       </aside>

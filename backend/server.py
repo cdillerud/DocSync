@@ -5337,6 +5337,9 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
     share_link = doc.get("sharepoint_share_link_url")
     bc_record_id = validation_results.get("bc_record_id")
     
+    # Get the correct BC entity from job config
+    bc_entity = job_configs.get("bc_entity", "salesOrders")
+    
     if validation_results.get("all_passed") and decision in ("auto_link", "auto_create"):
         if share_link and bc_record_id and file_content:
             try:
@@ -5344,7 +5347,8 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
                     bc_record_id=bc_record_id,
                     share_link=share_link,
                     file_name=doc["file_name"],
-                    file_content=file_content
+                    file_content=file_content,
+                    bc_entity=bc_entity
                 )
                 if link_result.get("success"):
                     bc_linked = True

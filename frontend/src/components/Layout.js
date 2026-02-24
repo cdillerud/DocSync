@@ -27,6 +27,30 @@ export default function Layout() {
   const { theme, setTheme } = useTheme();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [bcStatus, setBcStatus] = useState({ loading: true, connected: false, demoMode: false, environment: '' });
+
+  // Fetch BC sandbox status on mount
+  useEffect(() => {
+    const fetchBCStatus = async () => {
+      try {
+        const res = await fetch(`${API}/api/bc-sandbox/status`);
+        if (res.ok) {
+          const data = await res.json();
+          setBcStatus({
+            loading: false,
+            connected: !data.demo_mode && data.config?.has_secret,
+            demoMode: data.demo_mode,
+            environment: data.config?.environment || 'Unknown'
+          });
+        } else {
+          setBcStatus({ loading: false, connected: false, demoMode: true, environment: 'Error' });
+        }
+      } catch (err) {
+        setBcStatus({ loading: false, connected: false, demoMode: true, environment: 'Offline' });
+      }
+    };
+    fetchBCStatus();
+  }, []);
 
   const getPageTitle = () => {
     const path = location.pathname;

@@ -112,9 +112,28 @@ export default function Layout() {
         </nav>
 
         <div className="p-3 border-t border-border shrink-0">
-          <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="font-mono">BC CONNECTED</span>
+          <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground" data-testid="bc-status-indicator">
+            {bcStatus.loading ? (
+              <>
+                <div className="w-2 h-2 rounded-full bg-gray-400 animate-pulse" />
+                <span className="font-mono">CHECKING...</span>
+              </>
+            ) : bcStatus.connected ? (
+              <>
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="font-mono text-emerald-600 dark:text-emerald-400">BC LIVE</span>
+              </>
+            ) : bcStatus.demoMode ? (
+              <>
+                <div className="w-2 h-2 rounded-full bg-amber-500" />
+                <span className="font-mono text-amber-600 dark:text-amber-400">DEMO MODE</span>
+              </>
+            ) : (
+              <>
+                <div className="w-2 h-2 rounded-full bg-red-500" />
+                <span className="font-mono text-red-600 dark:text-red-400">BC OFFLINE</span>
+              </>
+            )}
           </div>
         </div>
       </aside>

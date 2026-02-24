@@ -211,6 +211,9 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Square9 Workflow Stages */}
+      <Square9StageSummary />
+
       {/* Validation Metrics Section */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Extraction Quality */}

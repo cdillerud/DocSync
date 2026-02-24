@@ -988,6 +988,163 @@ async def delete_document(doc_id: str):
     return {"message": "Document deleted", "id": doc_id}
 
 
+# =============================================================================
+# SQUARE9 WORKFLOW ENDPOINTS
+# =============================================================================
+
+@api_router.get("/documents/{doc_id}/square9-status")
+async def get_square9_status(doc_id: str):
+    """Get Square9-style workflow status for a document."""
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    summary = get_workflow_summary(doc)
+    return {
+        "document_id": doc_id,
+        **summary,
+        "retry_history": doc.get("retry_history", []),
+    }
+
+
+@api_router.post("/documents/{doc_id}/retry")
+async def retry_document(doc_id: str, reason: str = "Manual retry"):
+    """
+    Retry a document's workflow processing.
+    Increments retry counter and re-runs workflow if within limits.
+    """
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Check if retry is allowed
+    can_do_retry, retry_reason = should_retry(doc)
+    if not can_do_retry:
+        return {
+            "success": False,
+            "message": retry_reason,
+            "document_id": doc_id,
+            "retry_count": doc.get("retry_count", 0),
+            "max_retries": doc.get("max_retries", DEFAULT_WORKFLOW_CONFIG["max_retry_attempts"]),
+        }
+    
+    # Increment retry counter
+    update_dict, escalated, message = increment_retry(doc, reason)
+    update_dict["updated_utc"] = datetime.now(timezone.utc).isoformat()
+    
+    await db.hub_documents.update_one({"id": doc_id}, {"$set": update_dict})
+    
+    if escalated:
+        return {
+            "success": False,
+            "escalated": True,
+            "message": message,
+            "document_id": doc_id,
+            "retry_count": update_dict["retry_count"],
+        }
+    
+    # Re-run workflow (using existing resubmit logic)
+    file_path = UPLOAD_DIR / doc_id
+    if not file_path.exists():
+        return {
+            "success": False,
+            "message": "Stored file not found - cannot retry",
+            "document_id": doc_id,
+        }
+    
+    # Read file and re-run workflow
+    file_content = file_path.read_bytes()
+    file_name = doc.get("file_name", f"{doc_id}.pdf")
+    document_type = doc.get("document_type", "Invoice")
+    bc_record_id = doc.get("bc_record_id")
+    bc_document_no = doc.get("bc_document_no")
+    
+    workflow_id, final_status = await run_upload_and_link_workflow(
+        doc_id, file_content, file_name, document_type, bc_record_id, bc_document_no
+    )
+    
+    # Update Square9 stage after workflow
+    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    new_stage = determine_square9_stage(updated_doc) if updated_doc else None
+    
+    if new_stage:
+        await db.hub_documents.update_one(
+            {"id": doc_id}, 
+            {"$set": {"square9_stage": new_stage}}
+        )
+    
+    return {
+        "success": True,
+        "message": message,
+        "document_id": doc_id,
+        "workflow_id": workflow_id,
+        "final_status": final_status,
+        "retry_count": update_dict["retry_count"],
+        "square9_stage": new_stage,
+    }
+
+
+@api_router.post("/documents/{doc_id}/reset-retries")
+async def reset_document_retries(doc_id: str, reason: str = "Manual reset"):
+    """Reset retry counter for a document (after manual intervention)."""
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    update_dict = reset_retry_counter(doc, reason)
+    update_dict["updated_utc"] = datetime.now(timezone.utc).isoformat()
+    
+    await db.hub_documents.update_one({"id": doc_id}, {"$set": update_dict})
+    
+    return {
+        "success": True,
+        "message": f"Retry counter reset: {reason}",
+        "document_id": doc_id,
+        "retry_count": 0,
+    }
+
+
+@api_router.get("/square9/config")
+async def get_square9_config():
+    """Get Square9 workflow configuration."""
+    return {
+        "config": DEFAULT_WORKFLOW_CONFIG,
+        "stages": [
+            {"value": stage.value, **get_square9_stage_info(stage.value)}
+            for stage in Square9Stage
+        ],
+    }
+
+
+@api_router.get("/square9/stage-counts")
+async def get_square9_stage_counts():
+    """Get document counts by Square9 stage."""
+    # Get all documents and compute their stages
+    docs = await db.hub_documents.find({}, {"_id": 0, "id": 1, "workflow_status": 1, "validation_results": 1, "auto_escalated": 1, "square9_stage": 1}).to_list(10000)
+    
+    stage_counts = {}
+    for doc in docs:
+        # Use stored stage or compute it
+        stage = doc.get("square9_stage") or determine_square9_stage(doc)
+        stage_counts[stage] = stage_counts.get(stage, 0) + 1
+    
+    # Enhance with stage info
+    result = []
+    for stage in Square9Stage:
+        count = stage_counts.get(stage.value, 0)
+        info = get_square9_stage_info(stage.value)
+        result.append({
+            "stage": stage.value,
+            "count": count,
+            **info,
+        })
+    
+    return {
+        "stages": result,
+        "total_documents": len(docs),
+    }
+
+
 
 @api_router.post("/documents/{doc_id}/resubmit")
 async def resubmit_document(doc_id: str):

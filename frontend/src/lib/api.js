@@ -48,6 +48,39 @@ export const linkDocument = (id) => api.post(`/documents/${id}/link`);
 export const deleteDocument = (id) => api.delete(`/documents/${id}`);
 export const resubmitDocument = (id) => api.post(`/documents/${id}/reprocess?reclassify=true`);
 
+// Square9 Workflow Retry
+export const retryDocument = (id, reason = 'Manual retry') => api.post(`/documents/${id}/retry?reason=${encodeURIComponent(reason)}`);
+export const resetDocumentRetries = (id, reason = 'Manual reset') => api.post(`/documents/${id}/reset-retries?reason=${encodeURIComponent(reason)}`);
+export const getSquare9Status = (id) => api.get(`/documents/${id}/square9-status`);
+export const getSquare9StageCounts = () => api.get('/square9/stage-counts');
+
+// Bulk operations
+export const bulkRetryDocuments = async (docIds, reason = 'Bulk retry') => {
+  const results = { success: [], failed: [] };
+  for (const id of docIds) {
+    try {
+      const res = await retryDocument(id, reason);
+      results.success.push({ id, data: res.data });
+    } catch (err) {
+      results.failed.push({ id, error: err.response?.data?.detail || err.message });
+    }
+  }
+  return results;
+};
+
+export const bulkResubmitDocuments = async (docIds) => {
+  const results = { success: [], failed: [] };
+  for (const id of docIds) {
+    try {
+      const res = await resubmitDocument(id);
+      results.success.push({ id, data: res.data });
+    } catch (err) {
+      results.failed.push({ id, error: err.response?.data?.detail || err.message });
+    }
+  }
+  return results;
+};
+
 // Workflows
 export const listWorkflows = (params) => api.get('/workflows', { params });
 export const getWorkflow = (id) => api.get(`/workflows/${id}`);

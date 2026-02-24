@@ -13,6 +13,7 @@ import {
   CheckCircle2, AlertCircle, Clock, Loader2, Copy, RotateCcw, 
   ShieldCheck, ShieldAlert, Building2, FileSearch, Receipt
 } from 'lucide-react';
+import { Square9WorkflowTracker } from '../components/Square9WorkflowTracker';
 
 const STATUS_CLASSES = {
   Received: 'status-received',

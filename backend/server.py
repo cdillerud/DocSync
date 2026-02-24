@@ -1913,7 +1913,7 @@ DEFAULT_JOB_TYPES = {
         "allow_duplicate_check_override": False,
         "requires_human_review_if_exception": True,
         "vendor_match_threshold": 0.80,
-        "vendor_match_strategies": ["exact_no", "exact_name", "normalized", "fuzzy"],
+        "vendor_match_strategies": ["alias", "exact_no", "exact_name", "normalized", "fuzzy"],
         "sharepoint_folder": "AP_Invoices",
         "bc_entity": "purchaseInvoices",
         "required_extractions": ["vendor", "invoice_number", "amount"],

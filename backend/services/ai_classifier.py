@@ -24,14 +24,21 @@ VALID_DOC_TYPES = [
     "AP_INVOICE",
     "SALES_INVOICE",
     "PURCHASE_ORDER",
+    "SALES_ORDER",
     "SALES_CREDIT_MEMO",
     "PURCHASE_CREDIT_MEMO",
     "STATEMENT",
     "REMINDER",
     "FINANCE_CHARGE_MEMO",
     "QUALITY_DOC",
+    "PACKING_SLIP",
+    "BILL_OF_LADING",
     "OTHER"
 ]
+
+# AI Model configuration
+AI_MODEL_PROVIDER = "gemini"
+AI_MODEL_NAME = "gemini-3-flash-preview"
 
 # Default confidence threshold for accepting AI classification
 DEFAULT_CONFIDENCE_THRESHOLD = 0.8

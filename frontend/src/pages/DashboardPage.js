@@ -1,15 +1,18 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getDashboardStats, retryWorkflow } from '../lib/api';
+import api from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { Progress } from '../components/ui/progress';
 import { toast } from 'sonner';
 import {
-  FileText, Link, AlertCircle, CheckCircle2, RefreshCw, ArrowRight, UploadCloud, Files
+  FileText, Link, AlertCircle, CheckCircle2, RefreshCw, ArrowRight, UploadCloud, Files,
+  TrendingUp, Target, Zap, Clock
 } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
 
 const STATUS_COLORS = {
   Received: 'status-received',

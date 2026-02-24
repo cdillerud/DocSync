@@ -3170,16 +3170,27 @@ async def match_vendor_in_bc(
         
         vendors = resp.json().get("value", [])
         
-        # Check alias map first
-        if "alias" in strategies and vendor_name in VENDOR_ALIAS_MAP:
-            alias_target = VENDOR_ALIAS_MAP[vendor_name]
-            for v in vendors:
-                if v.get("displayName", "").lower() == alias_target.lower():
-                    result["matched"] = True
-                    result["match_method"] = "alias"
-                    result["selected_vendor"] = v
-                    result["score"] = 1.0
-                    return result
+        # Check alias map first (case-insensitive)
+        if "alias" in strategies:
+            # Try exact match, then lowercase, then normalized
+            alias_target = (
+                VENDOR_ALIAS_MAP.get(vendor_name) or 
+                VENDOR_ALIAS_MAP.get(vendor_name.lower()) or 
+                VENDOR_ALIAS_MAP.get(normalized_input)
+            )
+            if alias_target:
+                # alias_target is the vendor_name or vendor_no from the alias
+                for v in vendors:
+                    v_display = v.get("displayName", "")
+                    v_number = v.get("number", "")
+                    # Match against vendor name or number
+                    if (v_display.lower() == alias_target.lower() or 
+                        v_number.lower() == alias_target.lower()):
+                        result["matched"] = True
+                        result["match_method"] = "alias"
+                        result["selected_vendor"] = v
+                        result["score"] = 1.0
+                        return result
         
         # Try each strategy in order
         candidates = []

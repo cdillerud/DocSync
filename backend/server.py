@@ -923,6 +923,8 @@ async def upload_document(
             "metadata": {"source": source, "doc_type": doc_type_value}
         }],
         "workflow_status_updated_utc": now,
+        # Square9 workflow alignment
+        **initialize_retry_state({}),
         "status": "Received", "created_utc": now, "updated_utc": now, "last_error": None,
         # Pilot metadata (added if pilot mode enabled)
         **get_pilot_metadata()

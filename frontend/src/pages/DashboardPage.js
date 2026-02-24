@@ -60,7 +60,7 @@ export default function DashboardPage() {
       // Fetch daily trends
       try {
         const trendsRes = await api.get('/metrics/daily?days=7');
-        setDailyTrends(trendsRes.data?.daily || []);
+        setDailyTrends(trendsRes.data?.daily_metrics || []);
       } catch (e) {
         console.log('Daily trends API not available');
       }

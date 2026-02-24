@@ -2362,7 +2362,7 @@ Always respond with valid JSON in this exact format:
 }
 
 Only include fields that you can actually extract from the document. Leave out fields that are not present."""
-        ).with_model("gemini", "gemini-2.5-flash")
+        ).with_model("gemini", "gemini-3-flash-preview")
         
         # Create file attachment
         file_content = FileContentWithMimeType(

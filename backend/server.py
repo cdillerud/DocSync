@@ -4768,6 +4768,8 @@ async def classify_document(doc_id: str):
         "suggested_job_type": suggested_type,
         "document_type": suggested_type,
         "ai_confidence": confidence,
+        "classification_method": f"ai:{classification.get('model', 'gemini-3-flash-preview')}",
+        "ai_model": classification.get("model", "gemini-3-flash-preview"),
         "extracted_fields": extracted_fields,
         "normalized_fields": validation_results.get("normalized_fields", {}),
         "validation_results": validation_results,

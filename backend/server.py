@@ -770,6 +770,15 @@ async def run_upload_and_link_workflow(doc_id: str, file_content: bytes, file_na
     correlation_id = str(uuid.uuid4())
     started = datetime.now(timezone.utc).isoformat()
     steps = []
+    
+    # Determine BC entity from document type
+    doc_type_to_bc_entity = {
+        "SalesOrder": "salesOrders",
+        "SalesInvoice": "salesInvoices",
+        "PurchaseInvoice": "purchaseInvoices",
+        "PurchaseOrder": "purchaseOrders"
+    }
+    bc_entity = doc_type_to_bc_entity.get(doc_type, "salesOrders")
 
     try:
         # Step 1: Upload to SharePoint

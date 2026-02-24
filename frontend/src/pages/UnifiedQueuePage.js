@@ -197,10 +197,39 @@ export default function UnifiedQueuePage() {
             Manage all documents across workflows
           </p>
         </div>
-        <Button onClick={handleRefresh} variant="outline" size="sm">
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* Bulk Actions */}
+          {selectedDocs.size > 0 && (
+            <div className="flex items-center gap-2 mr-2 px-3 py-1.5 bg-primary/10 rounded-lg">
+              <span className="text-sm font-medium">{selectedDocs.size} selected</span>
+              <Button 
+                variant="default" 
+                size="sm"
+                onClick={handleBulkRetry}
+                disabled={bulkProcessing}
+                data-testid="bulk-retry-btn"
+              >
+                {bulkProcessing ? (
+                  <RefreshCw className="w-3 h-3 mr-1 animate-spin" />
+                ) : (
+                  <Play className="w-3 h-3 mr-1" />
+                )}
+                Retry Validation
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="sm"
+                onClick={() => setSelectedDocs(new Set())}
+              >
+                Clear
+              </Button>
+            </div>
+          )}
+          <Button onClick={handleRefresh} variant="outline" size="sm">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Quick Stats */}

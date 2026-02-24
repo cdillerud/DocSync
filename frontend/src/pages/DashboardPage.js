@@ -203,6 +203,100 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Validation Metrics Section */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Extraction Quality */}
+        <Card className="border border-border" data-testid="extraction-quality-card">
+          <CardHeader className="pb-2">
+            <div className="flex items-center gap-2">
+              <Target className="w-4 h-4 text-blue-500" />
+              <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Extraction Quality</CardTitle>
+            </div>
+            <p className="text-xs text-muted-foreground">Field extraction success rates (last 7 days)</p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {extractionQuality ? (
+              <>
+                <div className="space-y-3">
+                  <div>
+                    <div className="flex justify-between text-sm mb-1">
+                      <span>Vendor</span>
+                      <span className="font-mono">{extractionQuality.vendor_rate || 0}%</span>
+                    </div>
+                    <Progress value={extractionQuality.vendor_rate || 0} className="h-2" />
+                  </div>
+                  <div>
+                    <div className="flex justify-between text-sm mb-1">
+                      <span>Invoice Number</span>
+                      <span className="font-mono">{extractionQuality.invoice_rate || 0}%</span>
+                    </div>
+                    <Progress value={extractionQuality.invoice_rate || 0} className="h-2" />
+                  </div>
+                  <div>
+                    <div className="flex justify-between text-sm mb-1">
+                      <span>Amount</span>
+                      <span className="font-mono">{extractionQuality.amount_rate || 0}%</span>
+                    </div>
+                    <Progress value={extractionQuality.amount_rate || 0} className="h-2" />
+                  </div>
+                </div>
+                <div className="pt-2 border-t text-xs text-muted-foreground">
+                  Based on {extractionQuality.total_documents || 0} documents
+                </div>
+              </>
+            ) : (
+              <div className="text-sm text-muted-foreground text-center py-4">
+                <Zap className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                <p>No extraction data yet</p>
+                <p className="text-xs mt-1">Upload documents to see quality metrics</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Processing Trends */}
+        <Card className="border border-border" data-testid="processing-trends-card">
+          <CardHeader className="pb-2">
+            <div className="flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-green-500" />
+              <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Processing Trends</CardTitle>
+            </div>
+            <p className="text-xs text-muted-foreground">Documents processed per day (last 7 days)</p>
+          </CardHeader>
+          <CardContent>
+            {dailyTrends.length > 0 ? (
+              <ResponsiveContainer width="100%" height={150}>
+                <LineChart data={dailyTrends}>
+                  <XAxis 
+                    dataKey="date" 
+                    tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} 
+                    axisLine={false} 
+                    tickLine={false}
+                    tickFormatter={(val) => val?.slice(5) || ''} 
+                  />
+                  <YAxis 
+                    tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} 
+                    axisLine={false} 
+                    tickLine={false}
+                    allowDecimals={false}
+                  />
+                  <Tooltip
+                    contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '0.5rem', fontSize: '12px' }}
+                  />
+                  <Line type="monotone" dataKey="total" stroke="#22c55e" strokeWidth={2} dot={{ fill: '#22c55e', r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="text-sm text-muted-foreground text-center py-8">
+                <Clock className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                <p>No trend data yet</p>
+                <p className="text-xs mt-1">Processing trends will appear after a few days</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
       {/* Recent Workflows */}
       <Card className="border border-border" data-testid="recent-workflows-card">
         <CardHeader className="pb-2">

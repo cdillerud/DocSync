@@ -13,6 +13,7 @@ import {
   TrendingUp, Target, Zap, Clock
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
+import { Square9StageSummary } from '../components/Square9WorkflowTracker';
 
 const STATUS_COLORS = {
   Received: 'status-received',

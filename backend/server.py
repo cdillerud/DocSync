@@ -5388,39 +5388,23 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
     # Determine if status should change
     old_status = doc.get("status")
     new_status = old_status
-    bc_linked = False
-    link_error = None
     transaction_action = doc.get("transaction_action", TransactionAction.NONE)
     
-    # If validation now passes and we have SharePoint info, try to link to BC
-    # NOTE: Reprocess does NOT create drafts - only links to existing records
+    # Square9 Workflow Alignment:
+    # Reprocess validates data and confirms SharePoint storage.
+    # It does NOT create BC records or attach documents to BC.
+    # BC record creation/attachment happens outside this workflow (manual or separate process).
     share_link = doc.get("sharepoint_share_link_url")
-    bc_record_id = validation_results.get("bc_record_id")
     
-    # Get the correct BC entity from job config
-    bc_entity = job_configs.get("bc_entity", "salesOrders")
-    
-    if validation_results.get("all_passed") and decision in ("auto_link", "auto_create"):
-        if share_link and bc_record_id and file_content:
-            try:
-                link_result = await link_document_to_bc(
-                    bc_record_id=bc_record_id,
-                    share_link=share_link,
-                    file_name=doc["file_name"],
-                    file_content=file_content,
-                    bc_entity=bc_entity
-                )
-                if link_result.get("success"):
-                    bc_linked = True
-                    new_status = "LinkedToBC"
-                    transaction_action = TransactionAction.LINKED_ONLY
-                else:
-                    link_error = link_result.get("error")
-            except Exception as e:
-                link_error = str(e)
-        elif share_link and bc_record_id and not file_content:
-            # File not available but SharePoint link exists - partial success
-            new_status = "StoredInSP"
+    if validation_results.get("all_passed"):
+        # Validation passed - document is ready for downstream processing
+        if share_link:
+            # Document is validated AND stored in SharePoint - success per Square9 workflow
+            new_status = "Validated"
+            transaction_action = TransactionAction.VALIDATED
+        else:
+            # Validation passed but no SharePoint link yet - needs SP upload
+            new_status = "ValidationPassed"
     elif decision == "needs_review":
         new_status = "NeedsReview"
     

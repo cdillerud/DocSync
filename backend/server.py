@@ -5063,7 +5063,8 @@ async def intake_document(
                     bc_record_id=bc_record_id,
                     share_link=share_link,
                     file_name=final_filename,
-                    file_content=file_content
+                    file_content=file_content,
+                    bc_entity=bc_entity
                 )
                 if link_result.get("success"):
                     final_status = "LinkedToBC"

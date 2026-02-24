@@ -52,6 +52,8 @@ export default function QueuePage() {
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
+  const [selectedDocs, setSelectedDocs] = useState(new Set());
+  const [bulkProcessing, setBulkProcessing] = useState(false);
   const navigate = useNavigate();
   const limit = 20;
 
@@ -65,6 +67,7 @@ export default function QueuePage() {
       const res = await listDocuments(params);
       setDocs(res.data.documents || []);
       setTotal(res.data.total || 0);
+      setSelectedDocs(new Set()); // Clear selection on refresh
     } catch (err) {
       toast.error('Failed to load documents');
     } finally {
@@ -89,6 +92,46 @@ export default function QueuePage() {
       fetchDocs();
     } catch (err) {
       toast.error('Delete failed: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  // Selection handlers
+  const toggleSelectAll = () => {
+    if (selectedDocs.size === docs.length) {
+      setSelectedDocs(new Set());
+    } else {
+      setSelectedDocs(new Set(docs.map(d => d.id)));
+    }
+  };
+
+  const toggleSelect = (docId) => {
+    const newSelected = new Set(selectedDocs);
+    if (newSelected.has(docId)) {
+      newSelected.delete(docId);
+    } else {
+      newSelected.add(docId);
+    }
+    setSelectedDocs(newSelected);
+  };
+
+  // Bulk retry handler
+  const handleBulkRetry = async () => {
+    if (selectedDocs.size === 0) return;
+    if (!window.confirm(`Retry validation for ${selectedDocs.size} document(s)?`)) return;
+    
+    setBulkProcessing(true);
+    try {
+      const results = await bulkResubmitDocuments([...selectedDocs]);
+      toast.success(`Retried ${results.success.length} documents. ${results.failed.length} failed.`);
+      if (results.failed.length > 0) {
+        console.error('Failed retries:', results.failed);
+      }
+      setSelectedDocs(new Set());
+      fetchDocs();
+    } catch (err) {
+      toast.error('Bulk retry failed: ' + err.message);
+    } finally {
+      setBulkProcessing(false);
     }
   };
 

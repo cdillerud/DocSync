@@ -36,9 +36,6 @@ export default function Layout() {
     if (path === '/email-parser') return 'Email Config';
     if (path === '/settings') return 'Settings';
     return 'GPI Document Hub';
-    if (path === '/sales') return 'Sales';
-    if (path === '/settings') return 'Settings';
-    return 'GPI Document Hub';
   };
 
   return (

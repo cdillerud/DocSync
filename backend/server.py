@@ -3174,6 +3174,7 @@ async def match_vendor_in_bc(
 ) -> dict:
     """
     Multi-strategy vendor matching against BC.
+    Uses server-side filtering for efficient matching.
     Returns candidates and best match.
     """
     result = {
@@ -3189,18 +3190,40 @@ async def match_vendor_in_bc(
     
     normalized_input = normalize_vendor_name(vendor_name)
     
+    # Extract key search terms for server-side filtering
+    # Use the longest word (likely the most distinctive) for filtering
+    search_terms = [w for w in normalized_input.split() if len(w) >= 3]
+    primary_search_term = max(search_terms, key=len) if search_terms else None
+    
     async with httpx.AsyncClient(timeout=30.0) as c:
-        # Fetch all vendors (in production, use $top and pagination)
-        resp = await c.get(
-            f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
-            headers={"Authorization": f"Bearer {token}"},
-            params={"$select": "id,number,displayName", "$top": "500"}
-        )
+        vendors = []
         
-        if resp.status_code != 200:
-            return result
+        # Strategy 1: Try server-side search with contains() filter
+        if primary_search_term and len(primary_search_term) >= 4:
+            # Use OData $filter to narrow down results server-side
+            filter_query = f"contains(displayName, '{primary_search_term}')"
+            resp = await c.get(
+                f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"$select": "id,number,displayName", "$filter": filter_query, "$top": "100"}
+            )
+            
+            if resp.status_code == 200:
+                vendors = resp.json().get("value", [])
+                logger.info("BC vendor search for '%s' returned %d candidates", primary_search_term, len(vendors))
         
-        vendors = resp.json().get("value", [])
+        # Strategy 2: If no results from filtered search, fall back to broader fetch
+        if not vendors:
+            resp = await c.get(
+                f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"$select": "id,number,displayName", "$top": "1000"}
+            )
+            
+            if resp.status_code != 200:
+                return result
+            
+            vendors = resp.json().get("value", [])
         
         # Check alias map first (case-insensitive)
         if "alias" in strategies:

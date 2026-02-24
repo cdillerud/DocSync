@@ -474,14 +474,15 @@ async def link_document_to_bc(bc_record_id: str, share_link: str, file_name: str
                 "error": f"Failed to upload attachment content (HTTP {upload_resp.status_code}): {error_msg}"
             }
         
-        logger.info("Successfully attached document '%s' to BC Sales Order %s", file_name, bc_record_id)
+        logger.info("Successfully attached document '%s' to BC %s %s", file_name, bc_entity, bc_record_id)
         
         return {
             "success": True,
             "method": "api",
             "attachment_id": attachment_id,
             "file_name": file_name,
-            "note": f"Document attached to Sales Order in BC. SharePoint link: {share_link}"
+            "bc_entity": bc_entity,
+            "note": f"Document attached to {bc_entity} in BC. SharePoint link: {share_link}"
         }
 
 # ==================== PHASE 4: CREATE_DRAFT_HEADER ====================

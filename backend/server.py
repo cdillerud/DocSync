@@ -2402,7 +2402,8 @@ Only include fields that you can actually extract from the document. Leave out f
             "suggested_job_type": result.get("document_type", "Unknown"),
             "confidence": float(result.get("confidence", 0.0)),
             "extracted_fields": result.get("extracted_fields", {}),
-            "reasoning": result.get("reasoning", "")
+            "reasoning": result.get("reasoning", ""),
+            "model": "gemini-3-flash-preview"
         }
         
     except Exception as e:

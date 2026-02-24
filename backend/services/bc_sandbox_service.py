@@ -40,7 +40,8 @@ logger = logging.getLogger(__name__)
 # BC Sandbox credentials - use provided app registration
 BC_SANDBOX_CLIENT_ID = os.environ.get('BC_SANDBOX_CLIENT_ID', '22c4e601-51e8-4305-bd63-d4aa7d19defd')
 BC_SANDBOX_TENANT_ID = os.environ.get('BC_SANDBOX_TENANT_ID', 'c7b2de14-71d9-4c49-a0b9-2bec103a6fdc')
-BC_SANDBOX_CLIENT_SECRET = os.environ.get('BC_SANDBOX_CLIENT_SECRET', '')
+# Check both env var names for the secret (BC_SANDBOX_CLIENT_SECRET or BC_CLIENT_SECRET)
+BC_SANDBOX_CLIENT_SECRET = os.environ.get('BC_SANDBOX_CLIENT_SECRET') or os.environ.get('BC_CLIENT_SECRET', '')
 BC_SANDBOX_ENVIRONMENT = os.environ.get('BC_SANDBOX_ENVIRONMENT', 'Sandbox')
 BC_SANDBOX_COMPANY_NAME = os.environ.get('BC_SANDBOX_COMPANY_NAME', '')
 

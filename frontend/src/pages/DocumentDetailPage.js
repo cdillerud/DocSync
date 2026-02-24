@@ -252,6 +252,144 @@ export default function DocumentDetailPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* BC Validation Results Card */}
+          {doc.validation_results && (
+            <Card className="border border-border" data-testid="doc-bc-validation-card">
+              <CardHeader className="pb-3">
+                <div className="flex items-center gap-2">
+                  {doc.validation_results.all_passed ? (
+                    <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                  ) : (
+                    <ShieldAlert className="w-4 h-4 text-amber-500" />
+                  )}
+                  <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>
+                    BC Validation
+                  </CardTitle>
+                  <Badge variant={doc.validation_results.all_passed ? "secondary" : "destructive"} className="text-[10px]">
+                    {doc.validation_results.all_passed ? 'PASSED' : 'FAILED'}
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {/* Validation Checks */}
+                {doc.validation_results.checks?.map((check, idx) => (
+                  <div key={idx} className={`flex items-start gap-2 p-2 rounded-md ${check.passed ? 'bg-emerald-50 dark:bg-emerald-950/30' : 'bg-red-50 dark:bg-red-950/30'}`}>
+                    {check.passed ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium">
+                        {check.check_name?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                      </p>
+                      {check.details && (
+                        <p className="text-[11px] text-muted-foreground mt-0.5">{check.details}</p>
+                      )}
+                      {check.match_method && (
+                        <p className="text-[10px] text-muted-foreground mt-1 font-mono">
+                          Method: {check.match_method} | Score: {(check.score * 100).toFixed(0)}%
+                        </p>
+                      )}
+                      {check.vendor_no && (
+                        <p className="text-[10px] text-muted-foreground font-mono">
+                          BC Vendor: {check.vendor_no} - {check.vendor_name}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+
+                {/* Extraction Quality */}
+                {doc.validation_results.extraction_quality && (
+                  <div className="border-t border-border pt-3 mt-3">
+                    <p className="text-xs font-medium mb-2 flex items-center gap-1.5">
+                      <FileSearch className="w-3 h-3" /> Extraction Quality
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                      <div className="bg-muted/50 rounded px-2 py-1">
+                        <span className="text-muted-foreground">Fields Extracted:</span>
+                        <span className="font-mono ml-1">{doc.validation_results.extraction_quality.extracted_count || 0}/{doc.validation_results.extraction_quality.total_fields || 0}</span>
+                      </div>
+                      <div className="bg-muted/50 rounded px-2 py-1">
+                        <span className="text-muted-foreground">Completeness:</span>
+                        <span className="font-mono ml-1">{((doc.validation_results.extraction_quality.completeness_score || 0) * 100).toFixed(0)}%</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Match Info */}
+                {doc.validation_results.match_method && (
+                  <div className="border-t border-border pt-3 mt-3">
+                    <p className="text-xs font-medium mb-2 flex items-center gap-1.5">
+                      <Building2 className="w-3 h-3" /> Vendor Match Details
+                    </p>
+                    <div className="bg-muted/50 rounded p-2 text-[11px] space-y-1">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Match Method:</span>
+                        <span className="font-mono font-medium">{doc.validation_results.match_method}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Match Score:</span>
+                        <span className="font-mono font-medium">{((doc.validation_results.match_score || 0) * 100).toFixed(0)}%</span>
+                      </div>
+                      {doc.validation_results.bc_record_info && (
+                        <>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">BC Vendor No:</span>
+                            <span className="font-mono">{doc.validation_results.bc_record_info.number}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">BC Vendor Name:</span>
+                            <span className="font-mono truncate max-w-[150px]">{doc.validation_results.bc_record_info.displayName}</span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Warnings */}
+                {doc.validation_results.warnings?.length > 0 && (
+                  <div className="border-t border-border pt-3 mt-3">
+                    <p className="text-xs font-medium mb-2 text-amber-600 dark:text-amber-400">Warnings</p>
+                    {doc.validation_results.warnings.map((warn, idx) => (
+                      <p key={idx} className="text-[11px] text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 rounded px-2 py-1 mb-1">
+                        {typeof warn === 'string' ? warn : warn.message || JSON.stringify(warn)}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* AI Classification Card */}
+          {(doc.ai_confidence || doc.classification_method) && (
+            <Card className="border border-border" data-testid="doc-ai-classification-card">
+              <CardHeader className="pb-3">
+                <div className="flex items-center gap-2">
+                  <Receipt className="w-4 h-4 text-blue-500" />
+                  <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>
+                    AI Classification
+                  </CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                {doc.ai_model && (
+                  <InfoRow label="Model" value={doc.ai_model} mono />
+                )}
+                {doc.classification_method && (
+                  <InfoRow label="Method" value={doc.classification_method} mono />
+                )}
+                {doc.ai_confidence !== undefined && (
+                  <InfoRow label="Confidence" value={`${(doc.ai_confidence * 100).toFixed(0)}%`} />
+                )}
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* Right: Workflow Audit Trail */}

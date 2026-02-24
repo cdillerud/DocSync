@@ -6,23 +6,17 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator
 } from '../components/ui/dropdown-menu';
 import {
-  LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, Brain, BarChart3, ShoppingCart, GitBranch, PieChart, Receipt, Package, Eye, FlaskConical, FileSpreadsheet
+  LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, Brain, FileSpreadsheet
 } from 'lucide-react';
 import { useState } from 'react';
 
+// Simplified navigation - removed redundant workflow pages
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', exact: true },
   { to: '/upload', icon: UploadCloud, label: 'Upload' },
   { to: '/queue', icon: Files, label: 'Document Queue' },
-  { to: '/ap-workflows', icon: Receipt, label: 'AP Workflows' },
-  { to: '/sales-workflows', icon: ShoppingCart, label: 'Sales Workflows' },
-  { to: '/operations-workflows', icon: Package, label: 'Operations' },
   { to: '/file-import', icon: FileSpreadsheet, label: 'File Import' },
-  { to: '/pilot-dashboard', icon: Eye, label: 'Pilot Dashboard' },
-  { to: '/simulation-dashboard', icon: FlaskConical, label: 'Simulation' },
-  { to: '/doc-types', icon: PieChart, label: 'Doc Types' },
-  { to: '/email-parser', icon: Brain, label: 'Email Parser' },
-  { to: '/audit', icon: BarChart3, label: 'Audit Dashboard' },
+  { to: '/email-parser', icon: Brain, label: 'Email Config' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 
@@ -37,17 +31,11 @@ export default function Layout() {
     if (path === '/') return 'Dashboard';
     if (path === '/upload') return 'Upload Document';
     if (path === '/queue') return 'Document Queue';
-    if (path === '/ap-workflows') return 'AP Workflows';
-    if (path === '/sales-workflows') return 'Sales Workflows';
-    if (path === '/operations-workflows') return 'Operations';
     if (path === '/file-import') return 'File Import';
-    if (path === '/pilot-dashboard') return 'Pilot Dashboard';
-    if (path === '/simulation-dashboard') return 'Simulation Dashboard';
-    if (path === '/workflow') return 'Legacy Workflow';
-    if (path === '/doc-types') return 'Document Types';
     if (path.startsWith('/documents/')) return 'Document Detail';
-    if (path === '/email-parser') return 'Email Parser';
-    if (path === '/audit') return 'Audit Dashboard';
+    if (path === '/email-parser') return 'Email Config';
+    if (path === '/settings') return 'Settings';
+    return 'GPI Document Hub';
     if (path === '/sales') return 'Sales';
     if (path === '/settings') return 'Settings';
     return 'GPI Document Hub';

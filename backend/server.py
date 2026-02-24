@@ -1216,6 +1216,25 @@ async def link_document(doc_id: str):
     if file_path.exists():
         file_content = file_path.read_bytes()
 
+    # Determine BC entity from document type or job_type
+    doc_type = doc.get("document_type", "Other")
+    job_type = doc.get("suggested_job_type", "")
+    
+    # Try to get bc_entity from job config first
+    job_config = await db.hub_job_types.find_one({"job_type": job_type}, {"_id": 0})
+    if job_config:
+        bc_entity = job_config.get("bc_entity", "salesOrders")
+    else:
+        # Fallback mapping
+        doc_type_to_bc_entity = {
+            "SalesOrder": "salesOrders",
+            "SalesInvoice": "salesInvoices", 
+            "PurchaseInvoice": "purchaseInvoices",
+            "PurchaseOrder": "purchaseOrders",
+            "AP_Invoice": "purchaseInvoices"
+        }
+        bc_entity = doc_type_to_bc_entity.get(doc_type, doc_type_to_bc_entity.get(job_type, "salesOrders"))
+
     workflow_id = str(uuid.uuid4())
     correlation_id = str(uuid.uuid4())
     started = datetime.now(timezone.utc).isoformat()

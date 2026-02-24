@@ -159,15 +159,12 @@ export default function Layout() {
                 <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                 <span className="font-mono text-emerald-600 dark:text-emerald-400">BC SANDBOX</span>
               </>
-            ) : bcStatus.demoMode ? (
-              <>
-                <div className="w-2 h-2 rounded-full bg-amber-500" />
-                <span className="font-mono text-amber-600 dark:text-amber-400">DEMO MODE</span>
-              </>
             ) : (
               <>
-                <div className="w-2 h-2 rounded-full bg-red-500" />
-                <span className="font-mono text-red-600 dark:text-red-400">BC ERROR</span>
+                <div className="w-2 h-2 rounded-full bg-amber-500" />
+                <span className="font-mono text-amber-600 dark:text-amber-400">
+                  {bcStatus.demoMode ? 'DEMO MODE' : 'BC STANDBY'}
+                </span>
               </>
             )}
           </div>

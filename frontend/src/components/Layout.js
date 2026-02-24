@@ -135,7 +135,7 @@ export default function Layout() {
             ) : bcStatus.connected ? (
               <>
                 <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="font-mono text-emerald-600 dark:text-emerald-400">BC LIVE</span>
+                <span className="font-mono text-emerald-600 dark:text-emerald-400">BC SANDBOX</span>
               </>
             ) : bcStatus.demoMode ? (
               <>
@@ -145,7 +145,7 @@ export default function Layout() {
             ) : (
               <>
                 <div className="w-2 h-2 rounded-full bg-red-500" />
-                <span className="font-mono text-red-600 dark:text-red-400">BC OFFLINE</span>
+                <span className="font-mono text-red-600 dark:text-red-400">BC ERROR</span>
               </>
             )}
           </div>

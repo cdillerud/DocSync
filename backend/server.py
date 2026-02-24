@@ -3447,19 +3447,34 @@ async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: d
         }
     }
     
-    # Calculate extraction completeness score
-    required_fields = ["vendor", "invoice_number", "amount"]
-    optional_fields = ["po_number", "due_date"]
+    # Calculate extraction completeness score - use job config required fields
+    required_fields = job_config.get("required_extractions", ["vendor", "invoice_number", "amount"])
+    optional_fields = job_config.get("optional_extractions", ["po_number", "due_date"])
     
-    required_count = sum(1 for f in required_fields if normalized_fields.get(f))
-    optional_count = sum(1 for f in optional_fields if normalized_fields.get(f))
+    # Count how many required/optional fields were extracted
+    required_count = sum(1 for f in required_fields if normalized_fields.get(f) or extracted_fields.get(f))
+    optional_count = sum(1 for f in optional_fields if normalized_fields.get(f) or extracted_fields.get(f))
     
     # Completeness: required fields worth 80%, optional worth 20%
-    completeness = (required_count / len(required_fields)) * 0.8 + (optional_count / len(optional_fields)) * 0.2
+    if required_fields:
+        req_score = (required_count / len(required_fields)) * 0.8
+    else:
+        req_score = 0.8  # No required fields = full required score
+    
+    if optional_fields:
+        opt_score = (optional_count / len(optional_fields)) * 0.2
+    else:
+        opt_score = 0.2  # No optional fields = full optional score
+    
+    completeness = req_score + opt_score
     validation_results["extraction_quality"]["completeness_score"] = round(completeness, 2)
+    validation_results["extraction_quality"]["required_fields"] = required_fields
+    validation_results["extraction_quality"]["required_extracted"] = required_count
+    validation_results["extraction_quality"]["optional_fields"] = optional_fields
+    validation_results["extraction_quality"]["optional_extracted"] = optional_count
     
     # Ready for draft candidate if all required fields extracted
-    validation_results["extraction_quality"]["ready_for_draft_candidate"] = required_count == len(required_fields)
+    validation_results["extraction_quality"]["ready_for_draft_candidate"] = required_count == len(required_fields) if required_fields else True
     
     if DEMO_MODE or not BC_CLIENT_ID:
         validation_results["checks"].append({

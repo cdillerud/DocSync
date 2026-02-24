@@ -228,6 +228,13 @@ export default function QueuePage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10 pl-4">
+                    <Checkbox 
+                      checked={docs.length > 0 && selectedDocs.size === docs.length}
+                      onCheckedChange={toggleSelectAll}
+                      data-testid="select-all-checkbox"
+                    />
+                  </TableHead>
                   <TableHead className="text-xs uppercase tracking-wider">File</TableHead>
                   <TableHead className="text-xs uppercase tracking-wider">Category</TableHead>
                   <TableHead className="text-xs uppercase tracking-wider">Type</TableHead>
@@ -242,10 +249,17 @@ export default function QueuePage() {
                 {docs.map((doc) => (
                   <TableRow
                     key={doc.id}
-                    className="cursor-pointer"
+                    className={`cursor-pointer ${selectedDocs.has(doc.id) ? 'bg-primary/5' : ''}`}
                     onClick={() => navigate(`/documents/${doc.id}`)}
                     data-testid={`queue-row-${doc.id}`}
                   >
+                    <TableCell className="pl-4" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox 
+                        checked={selectedDocs.has(doc.id)}
+                        onCheckedChange={() => toggleSelect(doc.id)}
+                        data-testid={`select-doc-${doc.id}`}
+                      />
+                    </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2.5">
                         <FileText className="w-4 h-4 text-muted-foreground shrink-0" />

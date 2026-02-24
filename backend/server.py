@@ -47,6 +47,9 @@ from services.ai_classifier import (
     classify_doc_type_with_ai, apply_ai_classification, 
     DEFAULT_CONFIDENCE_THRESHOLD, AIClassificationResult as AIClassifierResult
 )
+from services.bc_sandbox_service import (
+    search_vendors_by_name, BCLookupStatus
+)
 
 # Migration Service
 from services.migration import (

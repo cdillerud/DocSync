@@ -143,6 +143,33 @@ export default function QueuePage() {
           <p className="text-sm text-muted-foreground mt-0.5">{total} document{total !== 1 ? 's' : ''} total</p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Bulk Actions */}
+          {selectedDocs.size > 0 && (
+            <div className="flex items-center gap-2 mr-2 px-3 py-1 bg-primary/10 rounded-lg">
+              <span className="text-sm font-medium">{selectedDocs.size} selected</span>
+              <Button 
+                variant="default" 
+                size="sm"
+                onClick={handleBulkRetry}
+                disabled={bulkProcessing}
+                data-testid="bulk-retry-btn"
+              >
+                {bulkProcessing ? (
+                  <RefreshCw className="w-3 h-3 mr-1 animate-spin" />
+                ) : (
+                  <Play className="w-3 h-3 mr-1" />
+                )}
+                Retry Validation
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="sm"
+                onClick={() => setSelectedDocs(new Set())}
+              >
+                Clear
+              </Button>
+            </div>
+          )}
           <form onSubmit={handleSearch} className="flex gap-2">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />

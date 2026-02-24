@@ -219,7 +219,7 @@ Respond with only the JSON object."""
             api_key=api_key,
             session_id=f"doc_classify_{document.get('id', 'unknown')}",
             system_message=system_message
-        ).with_model("openai", model_name)
+        ).with_model(AI_MODEL_PROVIDER, AI_MODEL_NAME)
         
         user_message = UserMessage(text=user_prompt)
         response = await chat.send_message(user_message)

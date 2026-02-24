@@ -5202,6 +5202,7 @@ async def resolve_and_link_document(doc_id: str, resolve: ResolveRequest):
             job_configs = DEFAULT_JOB_TYPES.get(bc_record_type, DEFAULT_JOB_TYPES["AP_Invoice"])
         
         folder = job_configs.get("sharepoint_folder", "Incoming")
+        bc_entity = job_configs.get("bc_entity", "salesOrders")
         try:
             sp_result = await upload_to_sharepoint(file_content, doc["file_name"], folder)
             share_link = await create_sharing_link(sp_result["drive_id"], sp_result["item_id"])

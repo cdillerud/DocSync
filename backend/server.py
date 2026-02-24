@@ -5228,7 +5228,8 @@ async def resolve_and_link_document(doc_id: str, resolve: ResolveRequest):
                 bc_record_id=bc_record_id,
                 share_link=share_link or "",
                 file_name=doc["file_name"],
-                file_content=file_content
+                file_content=file_content,
+                bc_entity=bc_entity
             )
             link_success = link_result.get("success", False)
             if not link_success:

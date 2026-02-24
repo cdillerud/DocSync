@@ -817,7 +817,8 @@ async def run_upload_and_link_workflow(doc_id: str, file_content: bytes, file_na
                         bc_record_id=bc_record_id or orders[0]["id"], 
                         share_link=share_link, 
                         file_name=file_name,
-                        file_content=file_content
+                        file_content=file_content,
+                        bc_entity=bc_entity
                     )
                     # Check if BC attachment succeeded
                     if link_result.get("success"):

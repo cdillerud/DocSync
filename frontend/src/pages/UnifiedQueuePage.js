@@ -82,6 +82,10 @@ export default function UnifiedQueuePage() {
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("pending");
+  
+  // Selection for bulk actions
+  const [selectedDocs, setSelectedDocs] = useState(new Set());
+  const [bulkProcessing, setBulkProcessing] = useState(false);
 
   const fetchDocuments = useCallback(async () => {
     setLoading(true);
@@ -101,6 +105,7 @@ export default function UnifiedQueuePage() {
       
       const response = await api.get(`/documents?${params.toString()}`);
       setDocuments(response.data.documents || []);
+      setSelectedDocs(new Set()); // Clear selection on refresh
     } catch (err) {
       console.error("Failed to fetch documents:", err);
       toast.error("Failed to load documents");
@@ -126,6 +131,47 @@ export default function UnifiedQueuePage() {
     fetchDocuments();
     fetchStats();
   }, [fetchDocuments, fetchStats]);
+
+  // Selection handlers
+  const toggleSelectAll = () => {
+    if (selectedDocs.size === documents.length) {
+      setSelectedDocs(new Set());
+    } else {
+      setSelectedDocs(new Set(documents.map(d => d.id)));
+    }
+  };
+
+  const toggleSelect = (docId) => {
+    const newSelected = new Set(selectedDocs);
+    if (newSelected.has(docId)) {
+      newSelected.delete(docId);
+    } else {
+      newSelected.add(docId);
+    }
+    setSelectedDocs(newSelected);
+  };
+
+  // Bulk retry handler
+  const handleBulkRetry = async () => {
+    if (selectedDocs.size === 0) return;
+    if (!window.confirm(`Retry validation for ${selectedDocs.size} document(s)? This will re-run classification and BC validation.`)) return;
+    
+    setBulkProcessing(true);
+    try {
+      const results = await bulkResubmitDocuments([...selectedDocs]);
+      toast.success(`Retried ${results.success.length} documents. ${results.failed.length} failed.`);
+      if (results.failed.length > 0) {
+        console.error('Failed retries:', results.failed);
+      }
+      setSelectedDocs(new Set());
+      fetchDocuments();
+      fetchStats();
+    } catch (err) {
+      toast.error('Bulk retry failed: ' + err.message);
+    } finally {
+      setBulkProcessing(false);
+    }
+  };
 
   const handleRefresh = () => {
     fetchDocuments();

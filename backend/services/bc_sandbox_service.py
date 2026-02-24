@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List, Tuple
 from enum import Enum
 import httpx
+from dotenv import load_dotenv
+load_dotenv()  # Load .env before reading environment variables
 
 from services.pilot_config import (
     PILOT_MODE_ENABLED, is_external_write_blocked,

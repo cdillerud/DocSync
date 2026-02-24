@@ -991,3 +991,60 @@ Added clickable drill-down functionality to the Simulation Dashboard, allowing u
 ---
 
 *Last Updated: February 22, 2026*
+
+---
+
+## Dynamic BC Connection Status Indicator (Completed - February 24, 2026)
+
+### Overview
+Replaced static "BC CONNECTED" indicator in the sidebar with a dynamic status that reflects the actual connection state to the Business Central sandbox.
+
+### Implementation
+- **File Modified:** `/app/frontend/src/components/Layout.js`
+- **API Used:** `GET /api/bc-sandbox/status`
+
+### Status States
+| State | Color | Text | Condition |
+|-------|-------|------|-----------|
+| Loading | Gray | CHECKING... | Initial fetch |
+| Live | Green | BC LIVE | demo_mode=false AND has_secret=true |
+| Demo | Amber | DEMO MODE | demo_mode=true |
+| Offline | Red | BC OFFLINE | API error or unreachable |
+
+### Code Changes
+1. Added `useEffect` hook to fetch BC status on component mount
+2. Created `bcStatus` state object with `loading`, `connected`, `demoMode`, `environment` properties
+3. Conditional rendering based on status state
+
+---
+
+## Backend Modular Router Structure (In Progress - February 24, 2026)
+
+### Overview
+Refactoring the monolithic `server.py` (~12,000 lines) into modular router files under `/app/backend/routes/`.
+
+### Router Files Created
+| File | Prefix | Purpose | Wired |
+|------|--------|---------|-------|
+| `auth.py` | /auth | Authentication endpoints | YES |
+| `documents.py` | /documents | Document CRUD operations | Pending |
+| `workflows.py` | /workflows | Workflow state transitions | Pending |
+| `config.py` | /config | System settings, mailboxes | Pending |
+| `dashboard.py` | /dashboard | Statistics and metrics | Pending |
+| `ingestion.py` | /ingestion | File import endpoints | Pending |
+
+### Migration Strategy
+1. Create router file with endpoint definitions
+2. Import router in server.py 
+3. Keep original endpoints for backward compatibility during migration
+4. Test new router endpoints
+5. Remove original endpoints after verification
+
+### Current Status
+- Auth router created and imported (backward-compatible mode)
+- Other routers exist but are not yet wired to main app
+- Full migration planned in phases to minimize risk
+
+---
+
+*Last Updated: February 24, 2026*

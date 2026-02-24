@@ -4815,6 +4815,9 @@ async def intake_document(
     # Make automation decision (returns 3-tuple with metadata)
     decision, reasoning, decision_metadata = make_automation_decision(job_configs, confidence, validation_results)
     
+    # Get BC entity for linking
+    bc_entity = job_configs.get("bc_entity", "salesOrders")
+    
     # ALWAYS upload to SharePoint first - regardless of validation status
     # This ensures document is preserved even if BC linking fails
     folder = job_configs.get("sharepoint_folder", "Incoming")

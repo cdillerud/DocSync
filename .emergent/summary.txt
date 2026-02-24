@@ -8,66 +8,88 @@ The user's core objective is to build a GPI Document Hub to replace their legacy
     *   A central Dashboard with key performance and validation metrics.
 2.  **Legacy Data & Ingestion:**
     *   A legacy data migration job.
-    *   Ingestion from Excel/CSV files for the Sales module (Completed in this session).
+    *   Ingestion from Excel/CSV files for the Sales module.
 3.  **Business Central (BC) Integration:**
-    *   **Phase 1 (Live):** A live, read-only integration with the BC sandbox for data validation (e.g., vendor lookups, duplicate checks).
-    *   **Phase 2 (Simulated):** Simulated BC write actions to test end-to-end logic without making real API calls.
+    *   **Phase 1 (Live):** A live, read-only integration with the BC sandbox for data validation.
+    *   **Phase 2 (Simulated):** Simulated BC write actions to test end-to-end logic.
     *   **Vendor Alias System:** Ability to map invoice vendor names to official BC vendors.
 4.  **AI & Automation:**
     *   Use the latest available AI models (Gemini 3+) for document classification and data extraction.
     *   Log AI model details and classification methods for transparency.
 5.  **Architecture Simplification (User-driven Goal):**
-    *   Refactor the application to simplify the user interface and backend architecture.
-    *   The user's goal is a clear, simple flow: ingest -> classify -> route to workflow.
+    *   Refactor the application to simplify the user interface and backend architecture. The user's goal is a clear, simple flow: ingest -> classify -> route to workflow.
 
 **User's preferred language**: English
 
 **what currently exists?**
-The application is a full-stack document processing hub (FastAPI/React/MongoDB) that has undergone significant refactoring. The frontend has been simplified, replacing multiple workflow-specific pages with a single, unified Document Queue. The main dashboard has been enhanced to show critical validation metrics like extraction quality and Business Central (BC) readiness.
+The application is a full-stack document processing hub (FastAPI/React/MongoDB). It features a simplified UI with a unified Document Queue, a dashboard with validation metrics, and a live, read-only connection to the user's Business Central (BC) sandbox. The system includes an AI classifier (Gemini 3 Flash), a vendor alias system, and a feature to ingest Sales Orders from Excel/CSV.
 
-Crucially, the system is now **fully connected to the live BC sandbox** for read-only validation, moving beyond its previous demo-only mode. This includes a working vendor alias system to handle discrepancies between invoice data and BC master data. The AI classification pipeline has been upgraded to use **Gemini 3 Flash** and now correctly logs its metadata to the database. A feature for ingesting Sales Orders from Excel/CSV files has also been completed.
+Most recently, the agent and user collaboratively debugged and fixed a complex series of vendor matching issues on the user's production VM. This involved correcting BC credential environment variables, fixing database configuration, and patching the vendor matching logic to be case-insensitive and handle API pagination limits. A bulk retry feature was also added to the UI.
 
 **Last working item**:
-- **Last item agent was working:** The agent was making a final UI tweak to reflect the live BC connection status. It successfully removed a hardcoded DEMO MODE text indicator from the main layout but was in the process of replacing it with a dynamic status indicator based on the actual API health check.
-- **Status:** IN PROGRESS
-- **Agent Testing Done:** N
-- **Which testing method agent to use?** screenshot tool (To verify the final UI change on the main layout after logging in).
-- **User Testing Done:** N
+- **Last item agent was working:** The agent and user successfully fixed a long-standing vendor matching issue for Tumalo Creek Transportation on the user's production VM. The fix involved correcting multiple layers of configuration and code bugs. However, upon successful validation, a new bug emerged where the system tried to link an AP Invoice to the wrong BC endpoint ( instead of ).
+- **Status:** USER VERIFICATION PENDING
+- **Agent Testing Done:** Y
+- **Which testing method agent to use?** The next agent will need to debug the backend  workflow. This can be tested by creating a failing document in the preview environment and using  to trigger the reprocess endpoint, then checking logs.
+- **User Testing Done:** Y
 
 **All Pending/In progress Issue list**:
--   **Issue 1: Implement Dynamic BC Connection Status Indicator (P1)**
-    -   **Description:** The frontend layout  had a static DEMO MODE label. The agent removed it but has not yet implemented the logic to dynamically show the BC connection status (e.g., BC Sandbox: Connected or BC Sandbox: Error).
-    -   **Next debug checklist:**
-        1.  Modify .
-        2.  Add a  hook to call an existing backend health/status endpoint (like ).
-        3.  Use the response to set a state variable (e.g., ).
-        4.  Render a badge or text in the layout footer displaying the status.
-    -   **Why fix this issue and what will be achieved with the fix?** This provides immediate visual feedback to the user about the health of the critical BC integration.
-    -   **Status:** NOT STARTED
-    -   **Is recurring issue?** N
-    -   **Should Test frontend/backend/both after fix?** Frontend
+- **Issue 1: (P0) Attachment Error:  tries to link AP Invoices to .**
+- **Issue 2: (P1) Backend Refactor is Incomplete.**
+- **Issue 3: (P2) Improve Fuzzy Matching to eliminate need for aliases.**
+
+**Issues Detail:**
+- **Issue 1: Attachment Error during Reprocess**
+    - **Description:** After fixing vendor matching, reprocessing an AP Invoice correctly validates the vendor but then fails when trying to link the document in BC. The audit trail shows it's incorrectly trying to attach to a  record, which is the wrong type for an AP Invoice.
+    - **Next debug checklist:**
+        1.  Examine the  function in .
+        2.  Trace the logic to where it calls .
+        3.  Inspect  to see how it constructs the API URL. It is likely hardcoded or is not correctly using the document's  to determine the endpoint ( vs. ).
+    - **Why fix this issue and what will be achieved with the fix?** This is a critical bug blocking the core workflow. The reprocess feature is broken until AP Invoices can be correctly linked to Purchase Invoices in BC.
+    - **Status:** NOT STARTED
+    - **Is recurring issue?** N
+    - **Should Test frontend/backend/both after fix?** Backend
+
+- **Issue 2: Backend Refactor is Incomplete**
+    - **Description:** The monolithic  file (12k+ lines) is a major source of complexity. The user's primary goal is to simplify the architecture. While the  routes have been moved to a separate file, the rest of the endpoint logic remains in the monolith.
+    - **Next debug checklist:**
+        1.  In , pick the next logical group of endpoints (e.g., all document-related routes).
+        2.  Move them into the corresponding router file (e.g., ).
+        3.  Fix all necessary imports in the new file.
+        4.  Import and include the new router (e.g., ) in the main FastAPI app in .
+        5.  Restart and thoroughly test the moved endpoints.
+    - **Why fix this issue and what will be achieved with the fix?** Fulfills the user's main request for architectural simplification, making the backend more maintainable, scalable, and easier to debug.
+    - **Status:** IN PROGRESS
+    - **Is recurring issue?** N
+    - **Should Test frontend/backend/both after fix?** Backend
+
+- **Issue 3: Improve Fuzzy Matching to eliminate aliases**
+    - **Description:** The user is frustrated with needing to manually create vendor aliases. The system should be smart enough to match TUMALO CREEK TRANSPORTATION to Tumalo Creek Transportation in BC. The temporary fix was to increase the vendor fetch limit from 500 to 2000, which is not a scalable solution.
+    - **Attempted fixes:** Increasing API fetch limit to 2000.
+    - **Next debug checklist:**
+        1.  Modify the  function in .
+        2.  Change the BC API call. Instead of fetching all vendors, use a  parameter to search for vendors containing a key term from the input name (e.g., ).
+        3.  This returns a smaller, more relevant list of candidates, which makes the fuzzy matching logic more efficient and scalable, removing the need for a high  limit.
+    - **Why fix this issue and what will be achieved with the fix?** Addresses a major user pain point, makes the system more intelligent, and reduces manual configuration.
+    - **Status:** IN PROGRESS
+    - **Is recurring issue?** Y
+    - **Should Test frontend/backend/both after fix?** Backend
 
 **In progress Task List**:
--   **Task 1: Complete Backend Refactor by Splitting  (P0)**
-    -   **Description:** The user requested a full architecture review to simplify the system. The agent started by creating modular router files (, , , , ) inside  but paused the effort to refactor the frontend first. The monolithic  still contains all endpoint logic and needs to be broken down.
-    -   **Where to resume:**
-        1.  In , progressively comment out a block of related endpoints (e.g., all auth routes).
-        2.  In the main application factory function within , import and include the corresponding router (e.g., ).
-        3.  Restart the server and run targeted tests (using  or by checking the UI) to ensure the moved routes still work correctly.
-        4.  Repeat this process for each module (, , etc.) until  is reduced to mainly application setup and router inclusions.
-    -   **What will be achieved with this?** Fulfills the user's primary request for architectural simplification, making the backend more maintainable, scalable, and easier to debug.
-    -   **Status:** IN PROGRESS
-    -   **Should Test frontend/backend/both after fix?** Backend (extensive testing required).
-    -   **Blocked on something:** No.
+- **Task 1: Complete Backend Refactor by Splitting  (P1)**
+    - **Where to resume:** Continue moving endpoint groups (e.g., documents, workflows) from  into their respective files in .
+    - **What will be achieved with this?** A more maintainable and scalable backend architecture.
+    - **Status:** IN PROGRESS
+    - **Blocked on something:** No.
 
 **Upcoming and Future Tasks**
 **Upcoming Tasks:**
 -   **Task 1 (P1):** Define Stable Vendor as a metric based on extraction consistency and volume.
--   **Task 2 (P2):** Phase 8 - Controlled Vendor Enablement: Enable automated draft creation in BC for a small subset of stable AP vendors (post-pilot).
+-   **Task 2 (P2):** Phase 8 - Controlled Vendor Enablement: Enable automated draft creation in BC for a small subset of stable AP vendors.
 
 **Future Tasks:**
--   Wire in real data connectors (e.g., file system, database access) to the migration job.
--   Replace the mock email service with a real provider (e.g., Microsoft Graph).
+-   Wire in real data connectors to the migration job.
+-   Replace the mock email service with a real provider.
 -   Flesh out approval routing logic with multi-step approvals.
 -   Implement a Vendor Threshold Override architecture.
 -   Plan and execute the full decommissioning of the legacy Zetadocs system.
@@ -75,113 +97,90 @@ Crucially, the system is now **fully connected to the live BC sandbox** for read
 -   Replace mock JWT auth with Entra ID SSO.
 
 **Completed work in this session**
--   **Excel/CSV Ingestion for Sales Module (DONE):** Implemented a full-stack feature with a new service (), backend APIs, and a dedicated  frontend. Tested with .
--   **Major Frontend Refactor (DONE):** Simplified the UI by creating a unified , reducing the main navigation from 13 items to 6.
--   **Dashboard Enhancement (DONE):** Added key validation metrics (Extraction Quality, Processing Trends, BC Readiness %) to .
--   **Live Business Central Sandbox Integration (DONE):** Successfully configured, debugged, and enabled a live, read-only connection to the user's BC sandbox environment, moving the application out of its previous demo mode.
--   **Vendor Alias Functionality (DONE):** Implemented and debugged the system for mapping invoice vendor names to official BC vendors, overcoming a complex configuration issue where database settings were overriding code defaults.
--   **AI Model Upgrade & Fixes (DONE):** Upgraded the AI classifier to use , added PURCHASE_ORDER as a supported document type, and fixed the workflow to correctly save  and  to the database.
-
-**Earlier issues found/mentioned but not fixed**
--   None in this session.
+-   **BC Connection and Vendor Matching Debug (DONE):** Collaboratively diagnosed and fixed a complex series of issues on the user's production VM related to BC credentials, environment variables, database configuration, and flawed vendor matching logic.
+-   **Case-Insensitive Alias Lookup (DONE):** Patched the  function to perform case-insensitive lookups on the alias map, resolving a key matching failure.
+-   **Detailed Validation Feedback UI (DONE):** Added a new BC Validation card to the document detail page, showing rich feedback on match method, score, and duplicate checks.
+-   **Square9 Workflow Alignment (DONE):** Implemented a retry counter and workflow stage tracking, with new UI components on the dashboard and document detail pages.
+-   **Bulk Document Retry (DONE):** Added checkboxes and a Retry Validation button to the Document Queue page for reprocessing multiple documents at once.
 
 **Known issue recurrence from previous fork**
-- **Configuration Caching/Overrides:** A recurring theme in this session was debugging issues where changes in the code were not reflected in the application's behavior. The root cause was consistently one of two things:
-    1.  **In-memory cache:** A Python dictionary or variable populated at server startup required a backend restart to pick up new database values (e.g., the ).
-    2.  **Database Overrides:** Application configurations (like workflow strategies) were stored in a MongoDB collection () and took precedence over default configurations defined in .
-- **Status:** RESOLVED (The agent learned to check for these patterns.)
-- **Note:** The next agent should be aware of this pattern: if a configuration change in the code doesn't seem to work, check if the configuration is stored and cached from the database and if a server restart is needed.
+- **Configuration Complexity:** The session was dominated by debugging issues caused by multiple, conflicting sources of configuration:  vs.  environment variables, database settings in , and in-code defaults. The next agent must be extremely careful to check all configuration sources when troubleshooting.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
--   **Backend:** FastAPI, Pydantic, MongoDB (Pymongo)
--   **Frontend:** React, Tailwind CSS, Shadcn/UI, Recharts
--   **AI:** Gemini 3 Flash via  for document classification and data extraction.
--   **Key Patterns:**
-    -   **Frontend-First Refactoring:** Simplifying the UI to reduce the API surface area before refactoring the backend.
-    -   **Live API Integration:** Moving from a mocked/demo service to a live, authenticated third-party API (Business Central).
-    -   **Configuration Management:** Understanding the hierarchy where database configurations override in-code defaults, a critical debugging insight for this project.
-    -   **Vendor Alias Mapping:** A business logic pattern to bridge data inconsistencies between incoming documents and a system of record.
+-   **Remote Debugging on Production VM:** The agent and user worked together to debug the live production environment using , , , and  commands.
+-   **Configuration Hell:** The root of most problems was a tangled web of configurations for the same service (BC) spread across different  variables, database collections, and code defaults.
+-   **Vendor Matching Logic:** The session involved a deep dive into vendor matching, revealing and fixing bugs related to case-sensitivity, API pagination, and strategy definitions.
+-   **Docker Environment:** The production environment is a Docker Compose setup. Debugging required inspecting containers, checking environment variables, and restarting services.
 
 **key DB schema**
--   ****: uid=0(root) gid=0(root) groups=0(root), , , ,  (String, new),  (String, new).
--   ****: Stores live workflow configurations, including . This collection overrides code defaults.
--   ****: , , .
+-   ****: uid=0(root) gid=0(root) groups=0(root), , ,  (new),  (new).
+-   ****: ,  (modified to include alias).
+-   ****: , . An alias for Tumalo Creek Transportation was added as a workaround.
 
 **All files of reference**
--   **New Files Created:**
-    -   
-    -   
-    -   
-    -    (staged for refactor)
--   **Key Files Modified:**
-    -   : Heavily modified with new endpoints, logic fixes, and configuration updates. Targeted for refactoring.
-    -   : Upgraded to use Gemini 3 Flash.
-    -   : Switched from demo to live mode and updated with correct credentials.
-    -   : Enhanced with several new validation metric cards.
-    -   : Navigation simplified.
-    -   : Routes simplified to point to the new unified queue page.
-    -   : Updated with live BC sandbox credentials.
+-   **/app/backend/server.py**: Main focus of debugging. The  and  functions were heavily modified. The  endpoint contains the next critical bug.
+-   **/app/backend/services/bc_sandbox_service.py**: Modified to fix credential loading.
+-   **/app/frontend/src/pages/DocumentQueuePage.js**: Modified for bulk retry functionality.
+-   **/app/frontend/src/pages/DocumentDetailPage.js**: Modified to add detailed validation and workflow cards.
+-   **/opt/gpi-hub/backend/.env** (on user's VM): Modified multiple times to correct BC credentials.
+-   **/opt/gpi-hub/docker-compose.yml** (on user's VM): Inspected to understand the environment setup.
 
 **Areas that need refactoring**:
--   ****: This is the highest priority. It is still a monolith containing hundreds of lines of endpoint logic. The modular files in  have been created, and the next step is to migrate the logic into them and include the routers in the main FastAPI app.
+-   **/app/backend/server.py**: This remains the highest refactoring priority. The debugging session highlighted its complexity.
+-   **BC Credential Management:** The code must be refactored to use a single, consistent set of environment variables for the BC connection across all services to prevent future bugs.
 
 **key api endpoints**
--   **File Ingestion (New):**
-    -   
-    -   
-    -   
-    -   
--   **Vendor Alias (New):**
-    -   
--   **BC Sandbox (Now Live):**
-    -   
-    -   
+-   : New endpoint for bulk re-processing of documents.
+-   : The endpoint that now triggers the  bug.
 
 **Critical Info for New Agent**
--   **Top Priority is the Backend Refactor:** The user's primary request is to simplify the architecture. The next immediate task should be to continue the work of splitting the monolithic  into the already-created router files in .
--   **BC Integration is LIVE:** The application now communicates directly with the user's BC sandbox environment. Any work on validation or workflows will have real-world effects in that sandbox. The credentials are in .
--   **Check the Database for Config:** Be aware that critical configurations (like workflow strategies in ) are stored in MongoDB and override defaults in the code. If a code change doesn't work as expected, query the database to check the live configuration.
--   **Restart the Backend After Config/DB Changes:** The backend caches some data (like the vendor alias map) at startup. After making changes to the database or environment variables, you must restart the backend service for them to take effect.
+-   **You will be debugging on the user's production VM.** The user will provide terminal output and screenshots. The environment is Docker-based at , and the main containers are  and .
+-   **The user is very frustrated.** The core vendor matching functionality is finally working, but a new blocker appeared. You must address the user's frustration by being direct, efficient, and focusing on solving root causes, not just applying temporary fixes.
+-   **The immediate priority is the  attachment bug.** This is blocking all reprocessing workflows. After that, improve the fuzzy matching to be more scalable and automatic, as this is a major user request.
+-   **Assume all configuration is suspect.** When debugging, systematically check  files, database collections (), and code defaults. The history of this project shows this is the most common source of error.
 
 **documents and test reports created in this job**
--    (updated multiple times)
--    (from testing the file import feature)
+-    (updated)
+-    (New document comparing current implementation to legacy system)
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **user:** Asks if AI is being used for classification.
-2.  **agent:** Confirms AI is working but metadata isn't being saved.
-3.  **user:** Asks if Gemini 2.5 is the latest model available.
-4.  **agent:** Proposes checking for newer models and implementing all related fixes.
-5.  **user:** Confirms to proceed with all fixes.
-6.  **agent:** Implements upgrade to Gemini 3 Flash, adds Purchase Order type, and fixes metadata saving. Confirms success.
-7.  **agent:** Presents the updated dashboard with improved metrics and asks to remove the final DEMO MODE UI badge.
-8.  **user:** (Implied yes to remove the badge)
-9.  **agent:** Removes the static DEMO MODE badge.
-10. **agent:** Proposes to make the status indicator dynamic. (This is the current pending step).
+1.  **user:**  (Questions the alias strategy, wants a smarter solution.)
+2.  **user:**  (Extremely frustrated that the agent forgot the correct BC environment name.)
+3.  **user:** (Provides screenshot showing BC vendor card with correct environment name.)
+4.  **user:**  (Reports vendor matching still fails even after BC API connection is fixed.)
+5.  **user:**  (Confirms that an attempted fix for the  function did not work.)
+6.  **user:**  (Confirms vendor validation finally PASSED, but points out the new  linking error.)
+7.  **user:**  (Asks for the next plan after the partial success.)
+8.  **user:**  (Instructs the agent to fix both the  bug and improve the fuzzy matching.)
+9.  **user:**  (Confirms a Python script fix did not apply correctly.)
+10. **user:**  (Reports that a  command broke the server with an IndentationError.)
 
 **Project Health Check:**
--   **Broken:** None
+-   **Broken:**
+    -   **Document Reprocessing:** The  workflow is broken. While validation passes, the final step to link the document in BC fails because it uses the wrong API endpoint ( for AP Invoices).
 -   **Mocked:**
-    -   **Business Central Writes:** Write operations are still *simulated* via . Reads are now live.
-    -   **Email Service:** Uses a mock provider.
-    -   **Legacy Data Source:** Migration job uses a stub.
+    -   Business Central Writes (still simulated)
+    -   Email Service (mock provider)
+    -   Legacy Data Source (stub)
 
 **3rd Party Integrations**
--   **Dynamics 365 Business Central API:** Live read-only connection to the  environment.
--   **Gemini (via Emergent LLM Key):** Upgraded to  for AI classification.
+-   **Dynamics 365 Business Central API:** Live read-only connection to the  environment is now fully working after extensive debugging.
+-   **Gemini (via Emergent LLM Key):** No changes.
 -   **APScheduler:** Used for scheduled jobs.
 
 **Testing status**
--   **Testing agent used after significant changes:** YES (for the file import feature).
--   **Troubleshoot agent used after agent stuck in loop:** NO
--   **Test files created:** None, but agent used extensive  commands and ad-hoc test files (, ).
--   **Known regressions:** None.
+-   **Testing agent used after significant changes:** NO
+-   **Troubleshoot agent used after agent stuck in loop:** NO (Agent and user debugged manually).
+-   **Test files created:** None.
+-   **Known regressions:** The fix for vendor matching introduced a new bug where reprocessed AP Invoices are incorrectly handled as Sales Orders during BC linking.
 
 **Credentials to test flow:**
-- User credentials for the web UI are  / .
+-   Web UI:  / 
 
 **What agent forgot to execute**
-The agent correctly prioritized user feedback. The main forgotten or rather postponed task is the completion of the backend refactor. The modular files were created, but the logic from  was not migrated into them. This remains the most significant piece of planned but incomplete work.</analysis>
+-   The agent did not complete the primary task of refactoring .
+-   The agent repeatedly forgot key details of the user's production environment (e.g., the BC environment name), which destroyed user trust and wasted time.
+-   The agent initially implemented a non-scalable vendor search (fetching all vendors) instead of a more efficient filtered search, which was a root cause of the matching issue.</analysis>

@@ -1,186 +1,193 @@
 <analysis>**original_problem_statement:**
-The user's core objective is to build a GPI Document Hub to replace their legacy Square9 and Zetadocs systems.
+The user's primary objective is to build a GPI Document Hub to replace their legacy Square9 and Zetadocs systems. This involves creating a unified document processing queue, a central dashboard, and integrating with Business Central (BC).
 
-**PRODUCT REQUIREMENTS (as of last update):**
-1.  **Document Hub Foundation:**
-    *   Multi-Type Document Classification and a type-aware workflow engine.
-    *   A unified Document Queue for processing.
-    *   A central Dashboard with key performance and validation metrics.
-2.  **Legacy Data & Ingestion:**
-    *   A legacy data migration job.
-    *   Ingestion from Excel/CSV files for the Sales module.
-3.  **Business Central (BC) Integration:**
-    *   **Phase 1 (Live):** A live, read-only integration with the BC sandbox for data validation.
-    *   **Phase 2 (Simulated):** Simulated BC write actions to test end-to-end logic.
-    *   **Vendor Alias System:** Ability to map invoice vendor names to official BC vendors.
-4.  **AI & Automation:**
-    *   Use the latest available AI models (Gemini 3+) for document classification and data extraction.
-    *   Log AI model details and classification methods for transparency.
-5.  **Architecture Simplification (User-driven Goal):**
-    *   Refactor the application to simplify the user interface and backend architecture. The user's goal is a clear, simple flow: ingest -> classify -> route to workflow.
+A significant new feature request was added: build a complete Accounts Payable Invoice Automation module within the existing hub to replicate the Zetadocs AP workflow. This includes:
+1.  **AP Invoice Review Workspace:** A new UI with a PDF preview and editable fields for extracted invoice data.
+2.  **BusinessCentralService:** A backend integration layer for real-time communication with BC (vendor search, PO search, purchase invoice creation).
+3.  **Extended Document Model:** Adding fields to the schema for BC posting status, IDs, and errors.
+4.  **Document Posting Workflow:** Logic to validate and post an invoice to BC when a user clicks Post to BC.
+5.  **Outbound Document Delivery Module:** A future-scoped module to query and email posted sales invoices.
+
+The immediate goal is to implement the **AP Invoice Review Workspace** and the **BC Posting Integration** (Phases 1 and 2), connecting them to the user's real BC Sandbox environment for end-to-end testing.
 
 **User's preferred language**: English
 
 **what currently exists?**
-The application is a full-stack document processing hub (FastAPI/React/MongoDB). It features a simplified UI with a unified Document Queue, a dashboard with validation metrics, and a live, read-only connection to the user's Business Central (BC) sandbox. The system includes an AI classifier (Gemini 3 Flash), a vendor alias system, and a feature to ingest Sales Orders from Excel/CSV.
+The application is a full-stack document processing hub (FastAPI/React/MongoDB). It features a document queue, dashboard, and AI-powered classification. The system has been successfully connected to the user's real **Business Central (BC) Sandbox** and **SharePoint** environments using user-provided credentials.
 
-Most recently, the agent and user collaboratively debugged and fixed a complex series of vendor matching issues on the user's production VM. This involved correcting BC credential environment variables, fixing database configuration, and patching the vendor matching logic to be case-insensitive and handle API pagination limits. A bulk retry feature was also added to the UI.
+A new **AP Review Workspace** has been implemented. When viewing an AP Invoice, the UI now shows a PDF preview alongside an editable form for invoice data. This workspace is connected to the real BC Sandbox, allowing users to search for and select real vendors and purchase orders. The original Square9 workflow logic has been replicated, where documents are validated and stored in SharePoint without being automatically attached in BC.
 
 **Last working item**:
-- **Last item agent was working:** The agent and user successfully fixed a long-standing vendor matching issue for Tumalo Creek Transportation on the user's production VM. The fix involved correcting multiple layers of configuration and code bugs. However, upon successful validation, a new bug emerged where the system tried to link an AP Invoice to the wrong BC endpoint ( instead of ).
-- **Status:** USER VERIFICATION PENDING
-- **Agent Testing Done:** Y
-- **Which testing method agent to use?** The next agent will need to debug the backend  workflow. This can be tested by creating a failing document in the preview environment and using  to trigger the reprocess endpoint, then checking logs.
-- **User Testing Done:** Y
+- **Last item agent was working:** The agent was debugging a  error received from the real Business Central API when attempting to post a Purchase Invoice from the new AP Review workspace. The agent identified from the logs that the error was , indicating the JSON payload sent to BC was using an incorrect field name.
+- **Status:** IN PROGRESS
+- **Agent Testing Done:** N
+- **Which testing method agent to use?** backend testing agent
+- **User Testing Done:** N
 
 **All Pending/In progress Issue list**:
-- **Issue 1: (P0) Attachment Error:  tries to link AP Invoices to .**
-- **Issue 2: (P1) Backend Refactor is Incomplete.**
-- **Issue 3: (P2) Improve Fuzzy Matching to eliminate need for aliases.**
+- **Issue 1: (P0) BC Purchase Invoice Posting Fails with 400 Bad Request.**
+- **Issue 2: (P1) Document Queue status is inconsistent with Detail Page.**
+- **Issue 3: (P1) Backend Refactor is Incomplete.**
+- **Issue 4: (P2) Fuzzy Matching logic may still need improvement.**
 
 **Issues Detail:**
-- **Issue 1: Attachment Error during Reprocess**
-    - **Description:** After fixing vendor matching, reprocessing an AP Invoice correctly validates the vendor but then fails when trying to link the document in BC. The audit trail shows it's incorrectly trying to attach to a  record, which is the wrong type for an AP Invoice.
+- **Issue 1: BC Purchase Invoice Posting Fails with 400 Bad Request**
+    - **Description:** When the user clicks Post to BC in the AP Review workspace, the backend service attempts to create a purchase invoice in the real BC Sandbox but receives a 400 Bad Request. The logs show the BC API rejected the request because the payload contains an invalid property: .
+    - **Attempted fixes:** The agent successfully identified the specific error message from the logs.
     - **Next debug checklist:**
-        1.  Examine the  function in .
-        2.  Trace the logic to where it calls .
-        3.  Inspect  to see how it constructs the API URL. It is likely hardcoded or is not correctly using the document's  to determine the endpoint ( vs. ).
-    - **Why fix this issue and what will be achieved with the fix?** This is a critical bug blocking the core workflow. The reprocess feature is broken until AP Invoices can be correctly linked to Purchase Invoices in BC.
-    - **Status:** NOT STARTED
-    - **Is recurring issue?** N
-    - **Should Test frontend/backend/both after fix?** Backend
-
-- **Issue 2: Backend Refactor is Incomplete**
-    - **Description:** The monolithic  file (12k+ lines) is a major source of complexity. The user's primary goal is to simplify the architecture. While the  routes have been moved to a separate file, the rest of the endpoint logic remains in the monolith.
-    - **Next debug checklist:**
-        1.  In , pick the next logical group of endpoints (e.g., all document-related routes).
-        2.  Move them into the corresponding router file (e.g., ).
-        3.  Fix all necessary imports in the new file.
-        4.  Import and include the new router (e.g., ) in the main FastAPI app in .
-        5.  Restart and thoroughly test the moved endpoints.
-    - **Why fix this issue and what will be achieved with the fix?** Fulfills the user's main request for architectural simplification, making the backend more maintainable, scalable, and easier to debug.
+        1.  Examine the  method in .
+        2.  Search the web for Business Central purchaseInvoices API documentation to find the correct field name for the external invoice number (it is likely ).
+        3.  Update the payload construction logic in  to use the correct field name.
+        4.  Use  against the container's IP to re-test the  endpoint.
+    - **Why fix this issue and what will be achieved with the fix?** This is the final and most critical step of the Zetadocs AP automation workflow. Fixing it will enable end-to-end testing of the entire AP posting pipeline.
     - **Status:** IN PROGRESS
     - **Is recurring issue?** N
     - **Should Test frontend/backend/both after fix?** Backend
-
-- **Issue 3: Improve Fuzzy Matching to eliminate aliases**
-    - **Description:** The user is frustrated with needing to manually create vendor aliases. The system should be smart enough to match TUMALO CREEK TRANSPORTATION to Tumalo Creek Transportation in BC. The temporary fix was to increase the vendor fetch limit from 500 to 2000, which is not a scalable solution.
-    - **Attempted fixes:** Increasing API fetch limit to 2000.
+- **Issue 2: Document Queue status is inconsistent with Detail Page**
+    - **Description:** The user reported that a document shows as Validated on the detail page, but the main Document Queue page still shows its status as Vendor Pending. This is because the  logic updates the document's  but not the  field that the queue page displays.
+    - **Attempted fixes:** The agent created a python script () to patch the logic but it was never run on the user's VM as the focus shifted.
     - **Next debug checklist:**
-        1.  Modify the  function in .
-        2.  Change the BC API call. Instead of fetching all vendors, use a  parameter to search for vendors containing a key term from the input name (e.g., ).
-        3.  This returns a smaller, more relevant list of candidates, which makes the fuzzy matching logic more efficient and scalable, removing the need for a high  limit.
-    - **Why fix this issue and what will be achieved with the fix?** Addresses a major user pain point, makes the system more intelligent, and reduces manual configuration.
+        1.  Locate the  function in .
+        2.  Modify the database update logic within this function to set the  and  fields in addition to the  field (e.g., set  to validated).
+        3.  Test by reprocessing a document that is stuck in the Vendor Pending state.
+    - **Why fix this issue and what will be achieved with the fix?** This fix will provide a consistent user experience and remove confusion about a document's true state.
+    - **Status:** NOT STARTED
+    - **Is recurring issue?** Y
+    - **Should Test frontend/backend/both after fix?** Both
+- **Issue 3: Backend Refactor is Incomplete**
+    - **Description:** The main  file is still a monolith containing most of the application's endpoints, making it difficult to maintain and debug.
+    - **Next debug checklist:** Continue the refactoring process by moving logical groups of endpoints (e.g., document management, dashboard stats) into separate router files under .
+    - **Why fix this issue and what will be achieved with the fix?** Simplifies the architecture, which is a primary goal for the user, and improves maintainability.
+    - **Status:** IN PROGRESS
+    - **Is recurring issue?** N
+    - **Should Test frontend/backend/both after fix?** Backend
+- **Issue 4: Improve Fuzzy Matching to eliminate aliases**
+    - **Description:** The user wants the system to be smart enough to match vendor names without requiring manual aliases (e.g., match TUMALO CREEK TRANSPORTATION to Tumalo Creek Transportation).
+    - **Attempted fixes:** The vendor search logic was updated to use a  query on the BC API, which is more efficient than fetching all vendors.
+    - **Next debug checklist:** The effectiveness of this change has not been fully validated by the user. Further improvements may involve more advanced fuzzy matching libraries or algorithms on the backend if the current filter is insufficient.
+    - **Why fix this issue and what will be achieved with the fix?** Reduces manual configuration and addresses a major user frustration.
     - **Status:** IN PROGRESS
     - **Is recurring issue?** Y
     - **Should Test frontend/backend/both after fix?** Backend
 
 **In progress Task List**:
-- **Task 1: Complete Backend Refactor by Splitting  (P1)**
-    - **Where to resume:** Continue moving endpoint groups (e.g., documents, workflows) from  into their respective files in .
-    - **What will be achieved with this?** A more maintainable and scalable backend architecture.
+- **Task 1: Complete Phase 2 - BC Posting Integration (P0)**
+    - **Where to resume:** In , fix the payload in the  method.
+    - **What will be achieved with this?** A fully functional, end-to-end workflow for posting AP Invoices from the GPI Hub into the real BC Sandbox.
     - **Status:** IN PROGRESS
     - **Blocked on something:** No.
 
 **Upcoming and Future Tasks**
 **Upcoming Tasks:**
--   **Task 1 (P1):** Define Stable Vendor as a metric based on extraction consistency and volume.
--   **Task 2 (P2):** Phase 8 - Controlled Vendor Enablement: Enable automated draft creation in BC for a small subset of stable AP vendors.
+-   **Task 1 (P1):** Implement the Outbound Document Delivery module for emailing posted sales invoices.
+-   **Task 2 (P2):** Define Stable Vendor as a metric and implement Phase 8 (Controlled Vendor Enablement for automated draft creation).
 
 **Future Tasks:**
--   Wire in real data connectors to the migration job.
 -   Replace the mock email service with a real provider.
--   Flesh out approval routing logic with multi-step approvals.
+-   Implement multi-step approval routing.
 -   Implement a Vendor Threshold Override architecture.
 -   Plan and execute the full decommissioning of the legacy Zetadocs system.
 -   Implement automated creation of Purchase Invoice *lines* in BC.
 -   Replace mock JWT auth with Entra ID SSO.
 
 **Completed work in this session**
--   **BC Connection and Vendor Matching Debug (DONE):** Collaboratively diagnosed and fixed a complex series of issues on the user's production VM related to BC credentials, environment variables, database configuration, and flawed vendor matching logic.
--   **Case-Insensitive Alias Lookup (DONE):** Patched the  function to perform case-insensitive lookups on the alias map, resolving a key matching failure.
--   **Detailed Validation Feedback UI (DONE):** Added a new BC Validation card to the document detail page, showing rich feedback on match method, score, and duplicate checks.
--   **Square9 Workflow Alignment (DONE):** Implemented a retry counter and workflow stage tracking, with new UI components on the dashboard and document detail pages.
--   **Bulk Document Retry (DONE):** Added checkboxes and a Retry Validation button to the Document Queue page for reprocessing multiple documents at once.
+-   **Square9 Workflow Alignment (DONE):** Fixed the  logic to correctly validate documents and store them in SharePoint without attempting a premature BC attachment, resolving the  vs  bug.
+-   **Production Environment Debugging (DONE):** Diagnosed and created patches for path divergences ( vs ) between the preview and the user's production VM. Also resolved Docker networking issues ( vs container IP).
+-   **Warehouse Document Enhancement (DONE):** Updated the  job type with required fields (, ) and improved the AI extraction prompt to successfully extract data from Bills of Lading (BOLs).
+-   **AP Review Workspace (Phase 1 & 2) (DONE):**
+    -   Created a  and  router in the backend.
+    -   Created  and  components in the frontend.
+    -   Integrated the new UI into the Document Detail page for AP Invoices.
+-   **Real BC Sandbox & SharePoint Integration (DONE):** Successfully configured the application with user-provided credentials to connect to the real BC Sandbox and SharePoint. Vendor and PO lookups in the AP Review workspace are now powered by live data.
+
+**Earlier issues found/mentioned but not fixed**
+-   **Issue 1: Document Queue status is inconsistent with Detail Page**
+    -   **Debug checklist:** The agent identified the root cause ( not being updated) and prepared a fix script, but the user did not run it. The fix needs to be applied to the  function in .
+    -   **Why to solve this issue and what will be achieved with this?** To ensure UI consistency and avoid user confusion.
+    -   **Should Test frontend/backend/both after fix:** Both.
+    -   **Is recurring issue?** Y
 
 **Known issue recurrence from previous fork**
-- **Configuration Complexity:** The session was dominated by debugging issues caused by multiple, conflicting sources of configuration:  vs.  environment variables, database settings in , and in-code defaults. The next agent must be extremely careful to check all configuration sources when troubleshooting.
+- **Configuration & Environment Divergence:** The agent again encountered issues due to differences between the preview environment and the user's production VM (e.g., file paths for , database names, required  variables). This remains a persistent risk.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
--   **Remote Debugging on Production VM:** The agent and user worked together to debug the live production environment using , , , and  commands.
--   **Configuration Hell:** The root of most problems was a tangled web of configurations for the same service (BC) spread across different  variables, database collections, and code defaults.
--   **Vendor Matching Logic:** The session involved a deep dive into vendor matching, revealing and fixing bugs related to case-sensitivity, API pagination, and strategy definitions.
--   **Docker Environment:** The production environment is a Docker Compose setup. Debugging required inspecting containers, checking environment variables, and restarting services.
+-   **Real-time VM Debugging:** Extensive use of , , and on-the-fly Python patching scripts to debug and fix issues directly on the user's production VM.
+-   **Docker Networking:** Encountered and solved issues where  did not resolve to the container, requiring the use of the container's internal IP address for testing.
+-   **BC API Integration:** Interfaced with the real Business Central OData API, including debugging filter syntax and payload structures for .
+-   **Environment Configuration:** Managed multiple sets of credentials for different services (BC API, MS Graph API) and ensured they were correctly loaded from  files.
 
 **key DB schema**
--   ****: uid=0(root) gid=0(root) groups=0(root), , ,  (new),  (new).
--   ****: ,  (modified to include alias).
--   ****: , . An alias for Tumalo Creek Transportation was added as a workaround.
+-   ****: The schema needs to be extended to support the AP workflow. The following fields were specified but **have not yet been added**: , , , , , , .
+-   ** (Enum in code):** The  state was added to represent the Square9 workflow completion state.
 
 **All files of reference**
--   **/app/backend/server.py**: Main focus of debugging. The  and  functions were heavily modified. The  endpoint contains the next critical bug.
--   **/app/backend/services/bc_sandbox_service.py**: Modified to fix credential loading.
--   **/app/frontend/src/pages/DocumentQueuePage.js**: Modified for bulk retry functionality.
--   **/app/frontend/src/pages/DocumentDetailPage.js**: Modified to add detailed validation and workflow cards.
--   **/opt/gpi-hub/backend/.env** (on user's VM): Modified multiple times to correct BC credentials.
--   **/opt/gpi-hub/docker-compose.yml** (on user's VM): Inspected to understand the environment setup.
+-   **/app/backend/server.py**: Heavily modified to fix Square9 workflow logic and enhance shipping document processing. Still the architectural monolith.
+-   **/app/backend/services/business_central_service.py**: **New file** that encapsulates all logic for interacting with the Business Central API.
+-   **/app/backend/routes/ap_review.py**: **New file** containing API endpoints for the AP Review workspace.
+-   **/app/frontend/src/pages/DocumentDetailPage.js**: Modified to conditionally render the new  and  for AP Invoices.
+-   **/app/frontend/src/components/APReviewPanel.js**: **New file** for the AP invoice review form.
+-   **/app/frontend/src/components/PDFPreview.js**: **New file** for embedding and viewing PDF documents.
+-   **/app/backend/.env**: Updated with real, user-provided credentials for BC and MS Graph.
 
 **Areas that need refactoring**:
--   **/app/backend/server.py**: This remains the highest refactoring priority. The debugging session highlighted its complexity.
--   **BC Credential Management:** The code must be refactored to use a single, consistent set of environment variables for the BC connection across all services to prevent future bugs.
+-   **/app/backend/server.py**: This remains the highest priority for refactoring. It contains over 12,000 lines of code.
+-   **Environment Synchronization:** A strategy is needed to align the preview and production environments to prevent recurring path and configuration issues.
+-   **BC Payload Construction:** The logic for building the  payload should be more robust and validated against the BC schema, potentially using Pydantic models.
 
 **key api endpoints**
--   : New endpoint for bulk re-processing of documents.
--   : The endpoint that now triggers the  bug.
+-   : Creates a Purchase Invoice in BC. **(Currently failing with 400)**.
+-   : Searches for vendors in BC.
+-   : Searches for open POs for a vendor in BC.
+-   : Serves the document file for the PDF previewer.
+-   : The endpoint that was fixed to align with Square9 workflow.
 
 **Critical Info for New Agent**
--   **You will be debugging on the user's production VM.** The user will provide terminal output and screenshots. The environment is Docker-based at , and the main containers are  and .
--   **The user is very frustrated.** The core vendor matching functionality is finally working, but a new blocker appeared. You must address the user's frustration by being direct, efficient, and focusing on solving root causes, not just applying temporary fixes.
--   **The immediate priority is the  attachment bug.** This is blocking all reprocessing workflows. After that, improve the fuzzy matching to be more scalable and automatic, as this is a major user request.
--   **Assume all configuration is suspect.** When debugging, systematically check  files, database collections (), and code defaults. The history of this project shows this is the most common source of error.
+-   **The application is connected to the user's REAL BC Sandbox and SharePoint.** Be cautious with any operations that write data.
+-   **You will be debugging on the user's production VM.** The environment has known differences from the preview (e.g.,  path).
+-   **Use container IP for  tests.** On the user's VM,  does not correctly route to the backend container. Use  to get the IP address.
+-   **The immediate priority is the BC posting bug.** Fix the  on . After that, address the inconsistent status in the document queue.
+-   **The document model has not been updated yet.** The schema in MongoDB is missing fields like  and . These will need to be added to fully complete the posting workflow.
 
 **documents and test reports created in this job**
--    (updated)
--    (New document comparing current implementation to legacy system)
+-    (updated with AP Automation requirements)
+-   Temporary patch scripts created on the user's VM: , , , . The logic from these scripts has been integrated into the codebase.
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **user:**  (Questions the alias strategy, wants a smarter solution.)
-2.  **user:**  (Extremely frustrated that the agent forgot the correct BC environment name.)
-3.  **user:** (Provides screenshot showing BC vendor card with correct environment name.)
-4.  **user:**  (Reports vendor matching still fails even after BC API connection is fixed.)
-5.  **user:**  (Confirms that an attempted fix for the  function did not work.)
-6.  **user:**  (Confirms vendor validation finally PASSED, but points out the new  linking error.)
-7.  **user:**  (Asks for the next plan after the partial success.)
-8.  **user:**  (Instructs the agent to fix both the  bug and improve the fuzzy matching.)
-9.  **user:**  (Confirms a Python script fix did not apply correctly.)
-10. **user:**  (Reports that a  command broke the server with an IndentationError.)
+1.  **user**: (Provides screenshot) The document detail page is not updating with the newly extracted BOL fields.
+2.  **user**: (Provides screenshot) The extraction completeness calculation is still wrong.
+3.  **user**: (Confirms commands to run) 
+4.  **user**: (Reports error)  - curl response was empty.
+5.  **user**: (Provides a large prompt detailing the Zetadocs AP automation feature to be built).
+6.  **user**: (Provides a more detailed, phased prompt for building the AP Review Workspace and BC Posting integration).
+7.  **user**: (Provides credentials) for the Business Central API App registration.
+8.  **user**: Asks if the agent is connecting to SharePoint.
+9.  **user**: (Provides credentials) for the IT Help Desk Email Integration Application to be used for Graph/SharePoint.
+10. **user**: (Provides a duplicate of the large feature request prompt).
 
 **Project Health Check:**
 -   **Broken:**
-    -   **Document Reprocessing:** The  workflow is broken. While validation passes, the final step to link the document in BC fails because it uses the wrong API endpoint ( for AP Invoices).
+    -   **Purchase Invoice Posting:** The core function to create an invoice in BC is failing with a 400 Bad Request due to an incorrect payload.
 -   **Mocked:**
-    -   Business Central Writes (still simulated)
-    -   Email Service (mock provider)
-    -   Legacy Data Source (stub)
+    -   None. The system is fully connected to the BC Sandbox and SharePoint.
 
 **3rd Party Integrations**
--   **Dynamics 365 Business Central API:** Live read-only connection to the  environment is now fully working after extensive debugging.
--   **Gemini (via Emergent LLM Key):** No changes.
--   **APScheduler:** Used for scheduled jobs.
+-   **Dynamics 365 Business Central API:** ✅ Live, real-time read/write connection to the user's  environment.
+-   **Microsoft Graph API / SharePoint:** ✅ Live, real-time connection for file storage in the  SharePoint site.
+-   **Gemini (via Emergent LLM Key):** Used for document classification and extraction.
+-   **APScheduler:** Used for scheduled background jobs like email polling.
 
 **Testing status**
 -   **Testing agent used after significant changes:** NO
--   **Troubleshoot agent used after agent stuck in loop:** NO (Agent and user debugged manually).
--   **Test files created:** None.
--   **Known regressions:** The fix for vendor matching introduced a new bug where reprocessed AP Invoices are incorrectly handled as Sales Orders during BC linking.
+-   **Troubleshoot agent used after agent stuck in loop:** NO
+-   **Test files created:** None. Testing was performed manually via  and by observing UI behavior.
+-   **Known regressions:** None.
 
 **Credentials to test flow:**
 -   Web UI:  / 
 
 **What agent forgot to execute**
--   The agent did not complete the primary task of refactoring .
--   The agent repeatedly forgot key details of the user's production environment (e.g., the BC environment name), which destroyed user trust and wasted time.
--   The agent initially implemented a non-scalable vendor search (fetching all vendors) instead of a more efficient filtered search, which was a root cause of the matching issue.</analysis>
+-   The agent did not fix the  display bug on the Document Queue page, which the user pointed out.
+-   The agent did not add the new required fields (, , etc.) to the  schema in MongoDB, which is a necessary step for the posting workflow to be complete.</analysis>

@@ -5467,6 +5467,17 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
         new_status = "NeedsReview"
     
     # Update document
+    # Map status to workflow_status for consistency in queue display
+    workflow_status_map = {
+        "Validated": "validated",
+        "ValidationPassed": "validation_passed",
+        "NeedsReview": "needs_review",
+        "LinkedToBC": "linked_to_bc",
+        "Posted": "posted",
+        "ReadyForPost": "ready_for_post"
+    }
+    new_workflow_status = workflow_status_map.get(new_status, new_status.lower() if new_status else "pending")
+    
     update_data = {
         "validation_results": validation_results,
         "automation_decision": decision,
@@ -5475,6 +5486,8 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
         "vendor_candidates": decision_metadata.get("vendor_candidates", []),
         "customer_candidates": decision_metadata.get("customer_candidates", []),
         "status": new_status,
+        "workflow_status": new_workflow_status,  # Keep workflow_status in sync
+        "square9_stage": new_workflow_status,    # Also update square9_stage
         "transaction_action": transaction_action,
         "reprocessed_utc": datetime.now(timezone.utc).isoformat(),
         "updated_utc": datetime.now(timezone.utc).isoformat(),

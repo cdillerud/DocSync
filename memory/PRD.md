@@ -278,6 +278,43 @@ Key Principles:
 - [x] Data preview table before import
 - [x] 15 backend tests + frontend verification
 
+#### Square9 Workflow Alignment (NEW - Feb 24, 2026)
+- [x] Aligned reprocess logic with Square9 workflows
+- [x] AP Workflow: validate → store to SharePoint → status "Validated" (no BC attachment)
+- [x] Warehouse Workflow: validate → store to SharePoint → status "Validated"
+- [x] Removed automatic BC attachment attempts from reprocess
+- [x] Updated Shipping_Document job config with required extractions: bol_number, ship_date
+- [x] Improved AI extraction for BOL documents (shipper, consignee, carrier, pro_number, etc.)
+- [x] Fixed `link_document_to_bc` to accept `bc_entity` parameter for correct endpoint routing
+- [x] Improved fuzzy vendor matching with server-side BC API filtering
+
+#### AP Invoice Review Workspace (NEW - Feb 25, 2026)
+- [x] Phase 1: AP Review Workspace (Core)
+  - [x] PDF Preview panel with zoom controls and fullscreen mode
+  - [x] AP Invoice Review panel with editable form fields
+  - [x] Vendor search dropdown (BC API integration with mock fallback)
+  - [x] PO search dropdown (BC API integration with mock fallback)
+  - [x] Save Changes functionality persists edits to document
+  - [x] Mark Ready for Post sets review_status to "ready_for_post"
+  - [x] Line items management (add/edit/remove)
+  - [x] Integration into existing Document Detail page for AP_Invoice documents
+- [x] Phase 2: BC Posting Integration
+  - [x] BusinessCentralService class (`/app/backend/services/business_central_service.py`)
+    - [x] get_vendors() - search vendors with filter
+    - [x] get_open_purchase_orders() - search POs by vendor
+    - [x] create_purchase_invoice() - create PI in BC
+    - [x] Mock mode with sample data for development
+    - [x] Real BC API integration ready (OAuth, HTTP client)
+  - [x] AP Review API routes (`/app/backend/routes/ap_review.py`)
+    - [x] GET /api/ap-review/vendors - vendor search
+    - [x] GET /api/ap-review/purchase-orders - PO search
+    - [x] PUT /api/ap-review/documents/{id} - save AP review
+    - [x] POST /api/ap-review/documents/{id}/mark-ready - mark ready for post
+    - [x] POST /api/ap-review/documents/{id}/post-to-bc - post to BC
+    - [x] GET /api/ap-review/documents/{id}/bc-status - get posting status
+  - [x] Document model extensions: vendor_id, vendor_name_resolved, review_status, bc_posting_status, bc_document_id, bc_posting_error
+  - [x] GET /api/documents/{id}/file endpoint for PDF preview
+
 #### Architecture Refactor (IN PROGRESS - Feb 24, 2026)
 **Goal:** Simplify over-engineered architecture into clean, maintainable system.
 

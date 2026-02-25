@@ -1996,10 +1996,10 @@ async def test_connection(service: str = Query(...)):
             token = await get_graph_token()
             if token == "mock-graph-token":
                 return {"service": "graph", "status": "demo", "detail": "Running in demo mode"}
-            # Test site resolution
+            # Test site resolution (format: sites/{hostname}:/{server-relative-path}:)
             async with httpx.AsyncClient(timeout=15.0) as c:
                 site_resp = await c.get(
-                    f"https://graph.microsoft.com/v1.0/sites/{SHAREPOINT_SITE_HOSTNAME}:{SHAREPOINT_SITE_PATH}",
+                    f"https://graph.microsoft.com/v1.0/sites/{SHAREPOINT_SITE_HOSTNAME}:{SHAREPOINT_SITE_PATH}:",
                     headers={"Authorization": f"Bearer {token}"})
                 if site_resp.status_code == 200:
                     site_data = site_resp.json()

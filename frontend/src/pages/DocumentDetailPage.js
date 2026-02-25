@@ -403,8 +403,19 @@ export default function DocumentDetailPage() {
           />
         </div>
 
-        {/* Right: Workflow Audit Trail */}
+        {/* Right: AP Review (for AP_Invoice) + Workflow Audit Trail */}
         <div className="lg:col-span-2 space-y-4">
+          {/* AP Review Panel - only for AP Invoice documents */}
+          {(doc.document_type === 'AP_Invoice' || doc.suggested_job_type === 'AP_Invoice') && (
+            <APReviewPanel 
+              document={doc} 
+              onUpdate={(updatedDoc) => {
+                setDoc(prev => ({ ...prev, ...updatedDoc }));
+                fetchDoc();
+              }} 
+            />
+          )}
+          
           <Card className="border border-border" data-testid="workflow-audit-card">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>

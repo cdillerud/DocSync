@@ -398,10 +398,24 @@ async def post_document_to_bc(doc_id: str, request: Optional[PostToBCRequest] = 
             
             if sharepoint_url and bc_document_id:
                 try:
-                    writeback_result = await service.update_purchase_invoice_link(bc_document_id, sharepoint_url)
+                    # Get additional SharePoint details from document
+                    sp_drive_id = doc.get("sharepoint_drive_id")
+                    sp_item_id = doc.get("sharepoint_item_id")
+                    
+                    writeback_result = await service.update_purchase_invoice_link(
+                        invoice_id=bc_document_id,
+                        sharepoint_url=sharepoint_url,
+                        bc_document_no=bc_document_number,
+                        sharepoint_drive_id=sp_drive_id,
+                        sharepoint_item_id=sp_item_id,
+                        uploaded_by="GPI Hub"
+                    )
                     if writeback_result.get("success"):
                         link_writeback_status = "success"
-                        logger.info("SharePoint link written to BC invoice %s", bc_document_id)
+                        if writeback_result.get("fallback"):
+                            link_writeback_status = "success_fallback"
+                        logger.info("SharePoint link written to BC for invoice %s (action: %s)", 
+                                   bc_document_id, writeback_result.get("action", "unknown"))
                     elif writeback_result.get("skipped"):
                         link_writeback_status = "skipped"
                         link_writeback_error = writeback_result.get("reason")

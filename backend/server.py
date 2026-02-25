@@ -247,9 +247,9 @@ async def upload_to_sharepoint(file_content: bytes, file_name: str, folder: str)
         }
     token = await get_graph_token()
     async with httpx.AsyncClient(timeout=30.0) as c:
-        # Step 1: Resolve site
+        # Step 1: Resolve site (format: sites/{hostname}:/{server-relative-path}:)
         site_resp = await c.get(
-            f"https://graph.microsoft.com/v1.0/sites/{SHAREPOINT_SITE_HOSTNAME}:{SHAREPOINT_SITE_PATH}",
+            f"https://graph.microsoft.com/v1.0/sites/{SHAREPOINT_SITE_HOSTNAME}:{SHAREPOINT_SITE_PATH}:",
             headers={"Authorization": f"Bearer {token}"})
         site_data = site_resp.json()
         if site_resp.status_code == 401 or site_resp.status_code == 403:

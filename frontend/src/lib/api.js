@@ -186,4 +186,36 @@ export const getPilotEmailLogs = (limit = 20, skip = 0) =>
 export const getPilotEmailConfig = () =>
   api.get('/pilot/email-config');
 
+// =============================================================================
+// AP REVIEW APIs
+// =============================================================================
+
+// Search vendors from BC
+export const searchVendors = (query = '', limit = 50) => 
+  api.get('/ap-review/vendors', { params: { q: query, limit } });
+
+// Get vendor by ID
+export const getVendor = (vendorId) => 
+  api.get(`/ap-review/vendors/${vendorId}`);
+
+// Search purchase orders from BC
+export const searchPurchaseOrders = (vendorId = null, limit = 50) => 
+  api.get('/ap-review/purchase-orders', { params: { vendor_id: vendorId, limit } });
+
+// Save AP review edits
+export const saveAPReview = (docId, data) => 
+  api.put(`/ap-review/documents/${docId}`, data);
+
+// Mark document ready for posting
+export const markReadyForPost = (docId) => 
+  api.post(`/ap-review/documents/${docId}/mark-ready`);
+
+// Post document to BC
+export const postToBC = (docId, data = null) => 
+  api.post(`/ap-review/documents/${docId}/post-to-bc`, data);
+
+// Get BC posting status
+export const getBCPostingStatus = (docId) => 
+  api.get(`/ap-review/documents/${docId}/bc-status`);
+
 export default api;

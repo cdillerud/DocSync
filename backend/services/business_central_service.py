@@ -42,6 +42,9 @@ BC_COMPANY_NAME = os.environ.get('BC_COMPANY_NAME') or os.environ.get('BC_SANDBO
 BC_MOCK_MODE = os.environ.get('BC_MOCK_MODE', 'false').lower() == 'true'
 DEMO_MODE = os.environ.get('DEMO_MODE', 'false').lower() == 'true'
 
+# Feature flag for BC link writeback
+BC_WRITEBACK_LINK_ENABLED = os.environ.get('BC_WRITEBACK_LINK_ENABLED', 'true').lower() == 'true'
+
 # Auto-enable mock mode ONLY if explicitly set or credentials are missing
 # Changed: DEMO_MODE=false now means use real BC
 USE_MOCK = BC_MOCK_MODE or (not BC_CLIENT_ID) or (not BC_CLIENT_SECRET) or (not BC_TENANT_ID)

@@ -152,10 +152,11 @@ class BusinessCentralService:
         Initialize the service.
         
         Args:
-            use_mock: Override mock mode setting. If None, uses BC_MOCK_MODE env var.
+            use_mock: Override mock mode setting. If None, uses auto-detected mode.
         """
-        self.use_mock = use_mock if use_mock is not None else (BC_MOCK_MODE or DEMO_MODE)
+        self.use_mock = use_mock if use_mock is not None else USE_MOCK
         self._company_id = None
+        logger.info("BusinessCentralService initialized (mock_mode=%s)", self.use_mock)
     
     async def _get_company_id(self) -> str:
         """Get and cache the company ID."""

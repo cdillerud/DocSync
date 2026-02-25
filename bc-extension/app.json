@@ -1,0 +1,33 @@
+{
+  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "name": "GPI Document Links",
+  "publisher": "Gamer Packaging Inc",
+  "version": "1.0.0.0",
+  "brief": "Link SharePoint documents to BC Purchase Invoices",
+  "description": "Provides a factbox on Purchase Invoice pages showing linked SharePoint documents from GPI Document Hub. Replaces Zetadocs document linking functionality.",
+  "privacyStatement": "",
+  "EULA": "",
+  "help": "",
+  "url": "",
+  "logo": "",
+  "dependencies": [],
+  "screenshots": [],
+  "platform": "24.0.0.0",
+  "application": "24.0.0.0",
+  "idRanges": [
+    {
+      "from": 50100,
+      "to": 50199
+    }
+  ],
+  "resourceExposurePolicy": {
+    "allowDebugging": true,
+    "allowDownloadingSource": true,
+    "includeSourceInSymbolFile": true
+  },
+  "runtime": "14.0",
+  "target": "Cloud",
+  "features": [
+    "NoImplicitWith"
+  ]
+}

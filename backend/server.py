@@ -2011,8 +2011,19 @@ async def test_connection(service: str = Query(...)):
                     return {"service": "graph", "status": "error",
                         "detail": f"Site not found (HTTP 404). Verify hostname='{SHAREPOINT_SITE_HOSTNAME}' and path='{SHAREPOINT_SITE_PATH}'. The path should be like '/sites/YourSiteName' (not a full URL)."}
                 else:
+                    error_body = site_resp.text[:500]
+                    try:
+                        error_json = site_resp.json()
+                        error_msg = error_json.get('error', {}).get('message', error_body)
+                        error_code = error_json.get('error', {}).get('code', '')
+                    except:
+                        error_msg = error_body
+                        error_code = ''
+                    logger.error(f"Graph site resolution failed (HTTP {site_resp.status_code}): {error_msg}")
                     return {"service": "graph", "status": "error",
-                        "detail": f"Unexpected HTTP {site_resp.status_code}: {site_resp.json().get('error', {}).get('message', site_resp.text[:200])}"}
+                        "detail": f"HTTP {site_resp.status_code}: {error_msg}",
+                        "error_code": error_code,
+                        "hint": f"URL tried: https://graph.microsoft.com/v1.0/sites/{SHAREPOINT_SITE_HOSTNAME}:{SHAREPOINT_SITE_PATH}:"}
         except Exception as e:
             return {"service": "graph", "status": "error", "detail": str(e)}
     elif service == "bc":

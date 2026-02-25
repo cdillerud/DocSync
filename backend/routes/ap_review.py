@@ -59,6 +59,10 @@ class PostToBCResponse(BaseModel):
     bc_posting_status: str
     message: str
     error: Optional[str] = None
+    # Link writeback status
+    sharepoint_url: Optional[str] = None
+    bc_link_writeback_status: Optional[str] = None  # "success", "failed", "skipped"
+    bc_link_writeback_error: Optional[str] = None
 
 
 # =============================================================================

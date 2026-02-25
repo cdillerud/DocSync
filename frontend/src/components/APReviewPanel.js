@@ -570,7 +570,12 @@ export function APReviewPanel({ document, onUpdate }) {
               <p className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">BC Link Writeback</p>
               {document.bc_link_writeback_status === 'success' && (
                 <p className="text-[10px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" /> Link written to BC invoice
+                  <CheckCircle2 className="w-3 h-3" /> Link written to BC GPI Documents
+                </p>
+              )}
+              {document.bc_link_writeback_status === 'success_fallback' && (
+                <p className="text-[10px] text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" /> Link written as comment line (GPI extension pending)
                 </p>
               )}
               {document.bc_link_writeback_status === 'failed' && (

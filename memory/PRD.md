@@ -1198,3 +1198,32 @@ Created `/app/memory/SQUARE9_COMPARISON.md` documenting alignment status.
 ---
 
 *Last Updated: February 25, 2026*
+
+---
+
+## Session Update 2: February 25, 2026 - SharePoint Fix
+
+### Completed
+
+#### SharePoint Upload Fix
+- **Issue**: SharePoint upload failed with "Invalid hostname for this tenancy" (HTTP 400)
+- **Root Cause**: 
+  1. Wrong hostname: `gamerpackaging.sharepoint.com` → should be `gamerpackaging1.sharepoint.com`
+  2. Wrong site path: `/sites/GPI-DocumentHub` → should be `/sites/GPI-DocumentHub-Test`
+  3. Missing trailing colon in Graph API URL format
+- **Fixes Applied**:
+  1. Updated `/app/backend/.env` with correct SharePoint credentials:
+     - `SHAREPOINT_SITE_HOSTNAME=gamerpackaging1.sharepoint.com`
+     - `SHAREPOINT_SITE_PATH=/sites/GPI-DocumentHub-Test`
+     - `SHAREPOINT_LIBRARY_NAME=Shared Documents`
+     - New Graph app credentials (SharePointBackupApp)
+  2. Fixed Graph API URL format to include trailing colon: `sites/{hostname}:{path}:`
+  3. Added better error logging for Graph API failures
+- **Test Results**:
+  - Graph connection test: ✅ "Connected. Site: GPI-DocumentHub-Test"
+  - Document upload: ✅ Successfully uploaded to `https://gamerpackaging1.sharepoint.com/sites/GPI-DocumentHub-Test/Shared%20Documents/AP_Invoices/`
+  - Sharing link generated: ✅
+
+### Files Modified
+- `/app/backend/.env` - Updated SharePoint hostname, path, and credentials
+- `/app/backend/server.py` - Fixed Graph API URL format (added trailing colon), improved error logging

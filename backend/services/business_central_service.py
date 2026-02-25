@@ -163,7 +163,12 @@ class BusinessCentralService:
         """
         self.use_mock = use_mock if use_mock is not None else USE_MOCK
         self._company_id = None
-        logger.info("BusinessCentralService initialized (mock_mode=%s)", self.use_mock)
+        
+        if self.use_mock:
+            logger.info("BusinessCentralService initialized in MOCK mode")
+        else:
+            logger.info("BusinessCentralService initialized in REAL mode (tenant=%s, env=%s)", 
+                       BC_TENANT_ID[:8] + "..." if BC_TENANT_ID else "N/A", BC_ENVIRONMENT)
     
     async def _get_company_id(self) -> str:
         """Get and cache the company ID."""

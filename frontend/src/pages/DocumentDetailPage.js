@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { Square9WorkflowTracker } from '../components/Square9WorkflowTracker';
 import APReviewPanel from '../components/APReviewPanel';
+import PDFPreviewPanel from '../components/PDFPreviewPanel';
 
 const STATUS_CLASSES = {
   Received: 'status-received',

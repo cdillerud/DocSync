@@ -1227,3 +1227,47 @@ Created `/app/memory/SQUARE9_COMPARISON.md` documenting alignment status.
 ### Files Modified
 - `/app/backend/.env` - Updated SharePoint hostname, path, and credentials
 - `/app/backend/server.py` - Fixed Graph API URL format (added trailing colon), improved error logging
+
+---
+
+## Session Update 3: February 25, 2026 - BC Link Writeback
+
+### Completed
+
+#### BC Link Writeback Feature
+- **Requirement**: After posting AP invoice to BC, write SharePoint URL back to BC purchase invoice so users can click from BC to open the document
+- **Implementation**: 
+  1. Added `update_purchase_invoice_link()` method to `BusinessCentralService` that creates a Comment line on the BC purchase invoice containing the SharePoint URL
+  2. Added feature flag `BC_WRITEBACK_LINK_ENABLED=true` in `.env`
+  3. Updated `post_document_to_bc` endpoint to call writeback after successful posting
+  4. Added non-blocking error handling - if writeback fails, BC posting still succeeds
+  5. Updated UI to show writeback status (success/failed/skipped)
+
+- **Technical Details**:
+  - Method: Creates a "Comment" line type on the purchase invoice with SharePoint URL in description field
+  - URL is truncated to 100 chars if needed (BC field limit)
+  - Writeback is non-blocking - BC posting remains successful even if writeback fails
+  
+- **Test Results**:
+  - ✅ Posted Invoice #72520 to BC
+  - ✅ SharePoint link written to BC invoice as comment line
+  - ✅ UI shows "Link written to BC invoice" status
+
+### Files Modified
+- `/app/backend/services/business_central_service.py` - Added `update_purchase_invoice_link()` method, `BC_WRITEBACK_LINK_ENABLED` flag
+- `/app/backend/routes/ap_review.py` - Updated `post_document_to_bc` to call writeback, extended `PostToBCResponse` model
+- `/app/backend/.env` - Added `BC_WRITEBACK_LINK_ENABLED=true`
+- `/app/frontend/src/components/APReviewPanel.js` - Added BC link writeback status display in Posted section
+
+### API Changes
+| Endpoint | Change |
+|----------|--------|
+| `POST /api/ap-review/documents/{id}/post-to-bc` | Now includes `sharepoint_url`, `bc_link_writeback_status`, `bc_link_writeback_error` in response |
+
+### Document Schema Additions
+- `bc_link_writeback_status`: "success" | "failed" | "skipped"
+- `bc_link_writeback_error`: Error message if writeback failed
+
+---
+
+*Last Updated: February 25, 2026*

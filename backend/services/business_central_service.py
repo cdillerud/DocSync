@@ -484,6 +484,87 @@ class BusinessCentralService:
                 raise Exception(f"Failed to get purchase invoice: {resp.status_code}")
             
             return resp.json()
+    
+    async def update_purchase_invoice_link(self, invoice_id: str, sharepoint_url: str) -> Dict[str, Any]:
+        """
+        Write SharePoint link back to BC purchase invoice as a comment line.
+        
+        This creates a comment line on the purchase invoice containing the SharePoint URL,
+        allowing users to click through from BC to view the source document.
+        
+        Args:
+            invoice_id: The BC purchase invoice ID (GUID)
+            sharepoint_url: The SharePoint sharing link or web URL
+            
+        Returns:
+            Dict with success status and any error details
+        """
+        # Check feature flag
+        if not BC_WRITEBACK_LINK_ENABLED:
+            return {
+                "success": False,
+                "skipped": True,
+                "reason": "BC_WRITEBACK_LINK_ENABLED is false"
+            }
+        
+        if self.use_mock:
+            logger.info("MOCK: Would write SharePoint link to BC invoice %s: %s", invoice_id, sharepoint_url)
+            return {
+                "success": True,
+                "mock": True,
+                "message": "SharePoint link writeback simulated (mock mode)"
+            }
+        
+        try:
+            token = await get_bc_token()
+            company_id = await self._get_company_id()
+            
+            # Create a comment line on the purchase invoice with the SharePoint URL
+            url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseInvoices({invoice_id})/purchaseInvoiceLines"
+            
+            # Truncate URL if too long (BC description field is typically 100 chars)
+            link_text = f"GPI Doc Hub: {sharepoint_url}"
+            if len(link_text) > 100:
+                # Keep the URL portion, truncate prefix if needed
+                link_text = sharepoint_url[:100]
+            
+            async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+                resp = await client.post(
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "lineType": "Comment",
+                        "description": link_text
+                    }
+                )
+                
+                if resp.status_code in (200, 201):
+                    line_data = resp.json()
+                    logger.info("Successfully wrote SharePoint link to BC invoice %s (line %s)", 
+                               invoice_id, line_data.get("id"))
+                    return {
+                        "success": True,
+                        "lineId": line_data.get("id"),
+                        "message": "SharePoint link written to BC purchase invoice"
+                    }
+                else:
+                    error_text = resp.text[:300]
+                    logger.error("Failed to write SharePoint link to BC invoice %s: %s", invoice_id, error_text)
+                    return {
+                        "success": False,
+                        "error": f"BC API error (HTTP {resp.status_code})",
+                        "details": error_text
+                    }
+                    
+        except Exception as e:
+            logger.error("Exception writing SharePoint link to BC: %s", str(e))
+            return {
+                "success": False,
+                "error": str(e)
+            }
 
 
 # =============================================================================

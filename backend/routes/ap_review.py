@@ -386,14 +386,47 @@ async def post_document_to_bc(doc_id: str, request: Optional[PostToBCRequest] = 
         result = await service.create_purchase_invoice(invoice_data)
         
         if result.get("success"):
-            # Success - update document with BC details
+            bc_document_id = result.get("bcDocumentId")
+            bc_document_number = result.get("bcDocumentNumber")
+            
+            # Get SharePoint URL from document (if uploaded)
+            sharepoint_url = doc.get("sharepoint_share_link_url") or doc.get("sharepoint_web_url")
+            
+            # Attempt to write SharePoint link back to BC (non-blocking)
+            link_writeback_status = "skipped"
+            link_writeback_error = None
+            
+            if sharepoint_url and bc_document_id:
+                try:
+                    writeback_result = await service.update_purchase_invoice_link(bc_document_id, sharepoint_url)
+                    if writeback_result.get("success"):
+                        link_writeback_status = "success"
+                        logger.info("SharePoint link written to BC invoice %s", bc_document_id)
+                    elif writeback_result.get("skipped"):
+                        link_writeback_status = "skipped"
+                        link_writeback_error = writeback_result.get("reason")
+                    else:
+                        link_writeback_status = "failed"
+                        link_writeback_error = writeback_result.get("error") or writeback_result.get("details")
+                        logger.warning("BC link writeback failed for doc %s: %s", doc_id, link_writeback_error)
+                except Exception as wb_err:
+                    link_writeback_status = "failed"
+                    link_writeback_error = str(wb_err)
+                    logger.warning("BC link writeback exception for doc %s: %s", doc_id, wb_err)
+            elif not sharepoint_url:
+                link_writeback_status = "skipped"
+                link_writeback_error = "No SharePoint URL available"
+            
+            # Success - update document with BC details and writeback status
             await db.hub_documents.update_one(
                 {"id": doc_id},
                 {"$set": {
-                    "bc_document_id": result.get("bcDocumentId"),
-                    "bc_document_number": result.get("bcDocumentNumber"),
+                    "bc_document_id": bc_document_id,
+                    "bc_document_number": bc_document_number,
                     "bc_posting_status": "posted",
                     "bc_posting_error": None,
+                    "bc_link_writeback_status": link_writeback_status,
+                    "bc_link_writeback_error": link_writeback_error,
                     "review_status": "posted",
                     "status": "Posted",
                     "workflow_status": "posted",
@@ -406,10 +439,13 @@ async def post_document_to_bc(doc_id: str, request: Optional[PostToBCRequest] = 
             
             return PostToBCResponse(
                 success=True,
-                bc_document_id=result.get("bcDocumentId"),
-                bc_document_number=result.get("bcDocumentNumber"),
+                bc_document_id=bc_document_id,
+                bc_document_number=bc_document_number,
                 bc_posting_status="posted",
-                message=result.get("message", "Posted successfully")
+                message=result.get("message", "Posted successfully"),
+                sharepoint_url=sharepoint_url,
+                bc_link_writeback_status=link_writeback_status,
+                bc_link_writeback_error=link_writeback_error
             )
         else:
             # Failure - record error

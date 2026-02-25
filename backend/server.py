@@ -12342,6 +12342,8 @@ async def get_import_history(
 app.include_router(api_router)
 # Sales Module (Phase 0 - BC disconnected)
 app.include_router(sales_router)
+# AP Review Module
+app.include_router(ap_review_router)
 
 @app.get("/api/health")
 async def health_check():

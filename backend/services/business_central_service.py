@@ -485,16 +485,28 @@ class BusinessCentralService:
             
             return resp.json()
     
-    async def update_purchase_invoice_link(self, invoice_id: str, sharepoint_url: str) -> Dict[str, Any]:
+    async def update_purchase_invoice_link(
+        self, 
+        invoice_id: str, 
+        sharepoint_url: str,
+        bc_document_no: str = None,
+        sharepoint_drive_id: str = None,
+        sharepoint_item_id: str = None,
+        uploaded_by: str = "GPI Hub"
+    ) -> Dict[str, Any]:
         """
-        Write SharePoint link back to BC purchase invoice as a comment line.
+        Write SharePoint link to BC via the GPI Document Links custom API.
         
-        This creates a comment line on the purchase invoice containing the SharePoint URL,
-        allowing users to click through from BC to view the source document.
+        This creates or updates a record in the GPI Document Link table in BC,
+        which is displayed in the "GPI Documents" factbox on Purchase Invoice pages.
         
         Args:
-            invoice_id: The BC purchase invoice ID (GUID)
+            invoice_id: The BC purchase invoice ID (SystemId/GUID)
             sharepoint_url: The SharePoint sharing link or web URL
+            bc_document_no: Optional BC document number for display
+            sharepoint_drive_id: Optional SharePoint drive ID
+            sharepoint_item_id: Optional SharePoint item ID
+            uploaded_by: Who uploaded the document (default: "GPI Hub")
             
         Returns:
             Dict with success status and any error details
@@ -508,7 +520,7 @@ class BusinessCentralService:
             }
         
         if self.use_mock:
-            logger.info("MOCK: Would write SharePoint link to BC invoice %s: %s", invoice_id, sharepoint_url)
+            logger.info("MOCK: Would write SharePoint link to BC GPI Document Links for invoice %s: %s", invoice_id, sharepoint_url)
             return {
                 "success": True,
                 "mock": True,
@@ -519,13 +531,120 @@ class BusinessCentralService:
             token = await get_bc_token()
             company_id = await self._get_company_id()
             
-            # Create a comment line on the purchase invoice with the SharePoint URL
+            # Use the GPI Document Links custom API endpoint
+            api_base_url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/gpi/documents/v1.0/companies({company_id})/documentLinks"
+            
+            async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+                # First, check if a link already exists for this invoice
+                filter_query = f"documentType eq 'Purchase Invoice' and targetSystemId eq {invoice_id}"
+                check_url = f"{api_base_url}?$filter={filter_query}"
+                
+                check_resp = await client.get(
+                    check_url,
+                    headers={"Authorization": f"Bearer {token}"}
+                )
+                
+                existing_link = None
+                if check_resp.status_code == 200:
+                    data = check_resp.json()
+                    links = data.get("value", [])
+                    if links:
+                        existing_link = links[0]
+                
+                # Build the payload
+                payload = {
+                    "documentType": "Purchase Invoice",
+                    "targetSystemId": invoice_id,
+                    "sharePointUrl": sharepoint_url,
+                    "uploadedAt": datetime.now(timezone.utc).isoformat(),
+                    "uploadedBy": uploaded_by,
+                    "source": "GPIHub"
+                }
+                
+                if bc_document_no:
+                    payload["bcDocumentNo"] = bc_document_no
+                if sharepoint_drive_id:
+                    payload["sharePointDriveId"] = sharepoint_drive_id
+                if sharepoint_item_id:
+                    payload["sharePointItemId"] = sharepoint_item_id
+                
+                if existing_link:
+                    # PATCH existing record
+                    link_id = existing_link.get("id")
+                    patch_url = f"{api_base_url}({link_id})"
+                    resp = await client.patch(
+                        patch_url,
+                        headers={
+                            "Authorization": f"Bearer {token}",
+                            "Content-Type": "application/json",
+                            "If-Match": "*"  # Overwrite regardless of etag
+                        },
+                        json=payload
+                    )
+                    action = "updated"
+                else:
+                    # POST new record
+                    resp = await client.post(
+                        api_base_url,
+                        headers={
+                            "Authorization": f"Bearer {token}",
+                            "Content-Type": "application/json"
+                        },
+                        json=payload
+                    )
+                    action = "created"
+                
+                if resp.status_code in (200, 201):
+                    link_data = resp.json()
+                    logger.info("Successfully %s GPI Document Link for BC invoice %s (link id: %s)", 
+                               action, invoice_id, link_data.get("id"))
+                    return {
+                        "success": True,
+                        "action": action,
+                        "linkId": link_data.get("id"),
+                        "entryNo": link_data.get("entryNo"),
+                        "message": f"SharePoint link {action} in BC GPI Documents"
+                    }
+                else:
+                    error_text = resp.text[:500]
+                    logger.error("Failed to write GPI Document Link for BC invoice %s: HTTP %s - %s", 
+                               invoice_id, resp.status_code, error_text)
+                    
+                    # If custom API not available, fall back to comment line method
+                    if resp.status_code == 404 and "api/gpi" in str(resp.url):
+                        logger.warning("GPI custom API not found, falling back to comment line method")
+                        return await self._write_link_as_comment_line(invoice_id, sharepoint_url, company_id, token)
+                    
+                    return {
+                        "success": False,
+                        "error": f"BC API error (HTTP {resp.status_code})",
+                        "details": error_text
+                    }
+                    
+        except Exception as e:
+            logger.error("Exception writing GPI Document Link to BC: %s", str(e))
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def _write_link_as_comment_line(
+        self, 
+        invoice_id: str, 
+        sharepoint_url: str, 
+        company_id: str, 
+        token: str
+    ) -> Dict[str, Any]:
+        """
+        Fallback method: Write SharePoint link as a comment line on the purchase invoice.
+        Used when the GPI custom API extension is not installed.
+        """
+        try:
             url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseInvoices({invoice_id})/purchaseInvoiceLines"
             
             # Truncate URL if too long (BC description field is typically 100 chars)
-            link_text = f"GPI Doc Hub: {sharepoint_url}"
+            link_text = f"GPI Doc: {sharepoint_url}"
             if len(link_text) > 100:
-                # Keep the URL portion, truncate prefix if needed
                 link_text = sharepoint_url[:100]
             
             async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
@@ -543,21 +662,24 @@ class BusinessCentralService:
                 
                 if resp.status_code in (200, 201):
                     line_data = resp.json()
-                    logger.info("Successfully wrote SharePoint link to BC invoice %s (line %s)", 
-                               invoice_id, line_data.get("id"))
+                    logger.info("Fallback: Wrote SharePoint link as comment line on BC invoice %s", invoice_id)
                     return {
                         "success": True,
+                        "fallback": True,
                         "lineId": line_data.get("id"),
-                        "message": "SharePoint link written to BC purchase invoice"
+                        "message": "SharePoint link written as comment line (GPI extension not installed)"
                     }
                 else:
-                    error_text = resp.text[:300]
-                    logger.error("Failed to write SharePoint link to BC invoice %s: %s", invoice_id, error_text)
                     return {
                         "success": False,
-                        "error": f"BC API error (HTTP {resp.status_code})",
-                        "details": error_text
+                        "error": f"Fallback failed: HTTP {resp.status_code}",
+                        "details": resp.text[:300]
                     }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Fallback exception: {str(e)}"
+            }
                     
         except Exception as e:
             logger.error("Exception writing SharePoint link to BC: %s", str(e))

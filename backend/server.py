@@ -12448,6 +12448,12 @@ async def startup():
     await db.hub_documents.create_index("vendor_canonical")
     await db.hub_documents.create_index("draft_candidate")
     await db.hub_documents.create_index("possible_duplicate")
+    # AP Review indexes
+    await db.hub_documents.create_index("review_status")
+    await db.hub_documents.create_index("bc_posting_status")
+    await db.hub_documents.create_index("vendor_id")
+    # Initialize AP Review router dependencies
+    set_ap_review_deps(db, get_bc_service())
     # Legacy indexes (keep for backward compat)
     await db.hub_documents.create_index([("canonical_fields.vendor_normalized", 1)])
     await db.hub_workflow_runs.create_index("id", unique=True)

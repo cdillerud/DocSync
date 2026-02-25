@@ -14,6 +14,7 @@ import {
   ShieldCheck, ShieldAlert, Building2, FileSearch, Receipt
 } from 'lucide-react';
 import { Square9WorkflowTracker } from '../components/Square9WorkflowTracker';
+import APReviewPanel from '../components/APReviewPanel';
 
 const STATUS_CLASSES = {
   Received: 'status-received',

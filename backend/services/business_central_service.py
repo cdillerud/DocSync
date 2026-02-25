@@ -40,6 +40,9 @@ BC_COMPANY_ID = os.environ.get('BC_COMPANY_ID', '')
 BC_MOCK_MODE = os.environ.get('BC_MOCK_MODE', 'false').lower() == 'true'
 DEMO_MODE = os.environ.get('DEMO_MODE', 'true').lower() == 'true'
 
+# Auto-enable mock mode if BC credentials aren't configured
+USE_MOCK = BC_MOCK_MODE or DEMO_MODE or not (BC_CLIENT_ID and BC_CLIENT_SECRET)
+
 BC_API_BASE = "https://api.businesscentral.dynamics.com/v2.0"
 BC_REQUEST_TIMEOUT = 30.0
 

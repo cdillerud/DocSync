@@ -306,8 +306,9 @@ class BusinessCentralService:
         company_id = await self._get_company_id()
         
         url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseOrders"
+        # Note: BC purchaseOrders API has different field names - use valid ones only
         params = {
-            "$select": "id,number,vendorNumber,vendorName,orderDate,status,totalAmountIncludingVat",
+            "$select": "id,number,vendorNumber,vendorName,orderDate,status",
             "$filter": "status eq 'Open'",
             "$top": str(limit)
         }
@@ -319,8 +320,20 @@ class BusinessCentralService:
             resp = await client.get(url, headers={"Authorization": f"Bearer {token}"}, params=params)
             
             if resp.status_code != 200:
-                logger.error("Failed to get purchase orders: %s", resp.text)
-                raise Exception(f"Failed to get purchase orders: {resp.status_code}")
+                # Try without status filter if it fails
+                logger.warning("PO search with filter failed: %s, trying without status filter", resp.text[:200])
+                params = {
+                    "$select": "id,number,vendorNumber,vendorName,orderDate",
+                    "$top": str(limit)
+                }
+                if vendor_id:
+                    params["$filter"] = f"vendorNumber eq '{vendor_id}'"
+                
+                resp = await client.get(url, headers={"Authorization": f"Bearer {token}"}, params=params)
+                
+                if resp.status_code != 200:
+                    logger.error("Failed to get purchase orders: %s", resp.text)
+                    raise Exception(f"Failed to get purchase orders: {resp.status_code}")
             
             data = resp.json()
             pos = data.get("value", [])

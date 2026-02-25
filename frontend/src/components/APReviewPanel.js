@@ -539,11 +539,55 @@ export function APReviewPanel({ document, onUpdate }) {
         
         {/* BC Document Info (if posted) */}
         {isPosted && document?.bc_document_id && (
-          <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-md p-2.5">
-            <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">Posted to Business Central</p>
-            <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5 font-mono">
-              BC Document: {document.bc_document_number || document.bc_document_id}
-            </p>
+          <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-md p-2.5 space-y-2">
+            <div>
+              <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">Posted to Business Central</p>
+              <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5 font-mono">
+                BC Document: {document.bc_document_number || document.bc_document_id}
+              </p>
+            </div>
+            
+            {/* SharePoint URL */}
+            {document.sharepoint_share_link_url && (
+              <div className="pt-1.5 border-t border-emerald-200 dark:border-emerald-700">
+                <p className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">SharePoint Document</p>
+                <a 
+                  href={document.sharepoint_share_link_url} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-[10px] text-blue-600 hover:underline break-all"
+                  data-testid="sharepoint-link"
+                >
+                  {document.sharepoint_share_link_url.length > 60 
+                    ? document.sharepoint_share_link_url.substring(0, 60) + '...' 
+                    : document.sharepoint_share_link_url}
+                </a>
+              </div>
+            )}
+            
+            {/* BC Link Writeback Status */}
+            <div className="pt-1.5 border-t border-emerald-200 dark:border-emerald-700">
+              <p className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">BC Link Writeback</p>
+              {document.bc_link_writeback_status === 'success' && (
+                <p className="text-[10px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" /> Link written to BC invoice
+                </p>
+              )}
+              {document.bc_link_writeback_status === 'failed' && (
+                <p className="text-[10px] text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3" /> 
+                  Writeback failed: {document.bc_link_writeback_error || 'Unknown error'}
+                </p>
+              )}
+              {document.bc_link_writeback_status === 'skipped' && (
+                <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                  Skipped: {document.bc_link_writeback_error || 'No SharePoint URL'}
+                </p>
+              )}
+              {!document.bc_link_writeback_status && (
+                <p className="text-[10px] text-muted-foreground">Not attempted</p>
+              )}
+            </div>
           </div>
         )}
         

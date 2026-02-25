@@ -406,15 +406,20 @@ export default function DocumentDetailPage() {
 
         {/* Right: AP Review (for AP_Invoice) + Workflow Audit Trail */}
         <div className="lg:col-span-2 space-y-4">
-          {/* AP Review Panel - only for AP Invoice documents */}
+          {/* PDF Preview + AP Review Panel - only for AP Invoice documents */}
           {(doc.document_type === 'AP_Invoice' || doc.suggested_job_type === 'AP_Invoice') && (
-            <APReviewPanel 
-              document={doc} 
-              onUpdate={(updatedDoc) => {
-                setDoc(prev => ({ ...prev, ...updatedDoc }));
-                fetchDoc();
-              }} 
-            />
+            <>
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <PDFPreviewPanel document={doc} />
+                <APReviewPanel 
+                  document={doc} 
+                  onUpdate={(updatedDoc) => {
+                    setDoc(prev => ({ ...prev, ...updatedDoc }));
+                    fetchDoc();
+                  }} 
+                />
+              </div>
+            </>
           )}
           
           <Card className="border border-border" data-testid="workflow-audit-card">

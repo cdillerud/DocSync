@@ -1265,8 +1265,65 @@ Created `/app/memory/SQUARE9_COMPARISON.md` documenting alignment status.
 | `POST /api/ap-review/documents/{id}/post-to-bc` | Now includes `sharepoint_url`, `bc_link_writeback_status`, `bc_link_writeback_error` in response |
 
 ### Document Schema Additions
-- `bc_link_writeback_status`: "success" | "failed" | "skipped"
+- `bc_link_writeback_status`: "success" | "success_fallback" | "failed" | "skipped"
 - `bc_link_writeback_error`: Error message if writeback failed
+
+---
+
+## Session Update 4: February 25, 2026 - GPI Documents BC Extension
+
+### Part A: Business Central Extension (AL)
+
+Created a complete BC extension for the "GPI Documents" factbox at `/app/bc-extension/`:
+
+**Objects Created:**
+| Object | ID | Name | Purpose |
+|--------|-----|------|---------|
+| Enum | 50100 | GPI Doc Link Type | Document type (Purchase Invoice, Posted Purchase Invoice, etc.) |
+| Enum | 50101 | GPI Doc Link Source | Source (GPIHub, Manual) |
+| Table | 50100 | GPI Document Link | Stores SharePoint URLs linked to BC records |
+| Page | 50100 | GPI Document Link Factbox | CardPart shown on Purchase Invoice |
+| Page | 50101 | GPI Document Link List | Admin list view |
+| Page | 50102 | GPI Document Link Card | Admin card view |
+| Page | 50110 | GPI Document Link API | REST API endpoint |
+| PageExt | 50100 | GPI Purch Invoice Extension | Adds factbox to Purchase Invoice |
+| PageExt | 50101 | GPI Posted Purch Inv Extension | Adds factbox to Posted Purchase Invoice |
+
+**Custom API Endpoint (after extension is published):**
+```
+POST/PATCH /api/gpi/documents/v1.0/companies({companyId})/documentLinks
+```
+
+**Extension Files:** `/app/bc-extension/`
+
+### Part B: GPI Hub Backend Writeback
+
+Updated `BusinessCentralService.update_purchase_invoice_link()` to:
+1. First try the new GPI custom API endpoint
+2. If 404 (extension not installed), fall back to comment line method
+3. Non-blocking error handling - BC posting succeeds even if writeback fails
+
+**Writeback Status Values:**
+- `success` - Written to GPI Documents table via custom API
+- `success_fallback` - Written as comment line (custom API not available)
+- `failed` - Writeback failed (BC posting still succeeded)
+- `skipped` - No SharePoint URL or feature disabled
+
+### Files Modified
+- `/app/backend/services/business_central_service.py` - New `update_purchase_invoice_link()` with dual-path logic
+- `/app/backend/routes/ap_review.py` - Pass additional parameters to writeback
+- `/app/frontend/src/components/APReviewPanel.js` - Show writeback status including fallback
+
+### Test Results
+- ✅ BC posting works: Invoice #72522 created
+- ✅ Custom API tried first, gets 404 (extension not published yet)
+- ✅ Fallback to comment line succeeds
+- ✅ UI shows "Link written as comment line (GPI extension pending)"
+
+### Next Steps to Complete
+1. **Publish BC Extension:** Use VS Code with AL Language extension to compile and publish
+2. **Verify Factbox:** Open Purchase Invoice in BC, confirm "GPI Documents" factbox appears
+3. **Test Full Flow:** Post new invoice → verify link appears in BC factbox automatically
 
 ---
 

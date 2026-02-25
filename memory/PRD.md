@@ -1141,4 +1141,60 @@ Created `/app/memory/SQUARE9_COMPARISON.md` documenting alignment status.
 
 ---
 
-*Last Updated: February 24, 2026*
+## Session Update: February 25, 2026
+
+### Completed
+
+#### 1. **BC Purchase Invoice Posting Fix (P0 - CRITICAL)**
+- **Issue**: POST to BC purchaseInvoices API was returning 400 Bad Request
+- **Root Cause**: Payload used incorrect field name `externalDocumentNumber`
+- **Fix**: Changed to correct BC API field name `vendorInvoiceNumber` in `/app/backend/services/business_central_service.py`
+- **Tested**: Successfully created Purchase Invoice #72518 in BC Sandbox via `POST /api/ap-review/documents/{id}/post-to-bc`
+
+#### 2. **Document Queue Status Consistency Fix (P1)**
+- **Issue**: Document Queue showed stale `workflow_status` (e.g., "Vendor Pending") while Detail Page showed correct status ("Validated")
+- **Root Cause**: `reprocess_document` function updated `status` field but not `workflow_status` or `square9_stage`
+- **Fix**: Added `workflow_status` and `square9_stage` updates to `reprocess_document` function in `/app/backend/server.py`
+- **Tested**: Reprocessed documents now show consistent status across Queue and Detail pages
+
+#### 3. **BC Credentials Configuration**
+- Updated `/app/backend/.env` with correct Azure AD credentials:
+  - Tenant ID: `c7b2de14-71d9-4c49-a0b9-2bec103a6fdc`
+  - Client ID: `6ac62e44-8968-4ad9-b781-434507a5c83a`
+- BC Sandbox is now fully functional for vendor search, PO lookup, and invoice posting
+
+### Files Modified
+- `/app/backend/services/business_central_service.py` - Fixed `vendorInvoiceNumber` field name
+- `/app/backend/server.py` - Added `workflow_status` and `square9_stage` sync in `reprocess_document`
+- `/app/backend/.env` - Updated BC/Graph credentials
+
+### API Endpoints Status
+| Endpoint | Status | Notes |
+|----------|--------|-------|
+| `POST /api/ap-review/documents/{id}/post-to-bc` | ✅ Working | Creates Purchase Invoice in BC |
+| `GET /api/ap-review/vendors` | ✅ Working | Searches vendors in real BC |
+| `GET /api/ap-review/purchase-orders` | ✅ Working | Searches open POs in real BC |
+| `POST /api/documents/{id}/reprocess` | ✅ Working | Now syncs workflow_status |
+
+---
+
+## Remaining Tasks
+
+### P1 - In Progress
+- [ ] Continue backend refactoring (move endpoints from server.py to routers)
+- [ ] Add missing schema fields to documents: `bcDocumentId`, `bcPostingStatus`, `bcPostingErrors`, `reviewStatus`
+
+### P2 - Upcoming
+- [ ] Outbound Document Delivery module (email posted sales invoices)
+- [ ] "Stable Vendor" metric implementation
+- [ ] Fuzzy matching improvements
+
+### Future/Backlog
+- [ ] Replace mock email service with real provider
+- [ ] Multi-step approval routing
+- [ ] Entra ID SSO integration
+- [ ] Automated Purchase Invoice line items in BC
+
+---
+
+*Last Updated: February 25, 2026*

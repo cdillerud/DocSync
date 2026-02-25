@@ -137,6 +137,10 @@ _pilot_summary_task = None
 # ==================== AUTH ====================
 # NOTE: Auth endpoints moved to routes/auth.py
 from routes.auth import router as auth_router
+
+# ==================== AP REVIEW ====================
+from routes.ap_review import ap_review_router, set_dependencies as set_ap_review_deps
+from services.business_central_service import BusinessCentralService, get_bc_service
 import jwt as pyjwt
 
 TEST_USER = {"username": "admin", "password": "admin", "display_name": "Hub Admin", "role": "administrator"}

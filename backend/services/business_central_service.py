@@ -216,13 +216,31 @@ class BusinessCentralService:
         params = {"$select": "id,number,displayName,email,phoneNumber", "$top": str(limit)}
         
         if filter_text:
-            # Use OData filter for server-side filtering
-            params["$filter"] = f"contains(displayName, '{filter_text}') or contains(number, '{filter_text}')"
+            # BC doesn't support OR on distinct fields, so filter by displayName only
+            # We'll do client-side filtering for number matches
+            params["$filter"] = f"contains(displayName, '{filter_text}')"
         
         async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
             resp = await client.get(url, headers={"Authorization": f"Bearer {token}"}, params=params)
             
             if resp.status_code != 200:
+                # If filter fails, try without filter and do client-side filtering
+                if filter_text:
+                    logger.warning("BC vendor filter failed, falling back to client-side filter")
+                    params.pop("$filter", None)
+                    params["$top"] = "500"  # Get more to filter client-side
+                    resp = await client.get(url, headers={"Authorization": f"Bearer {token}"}, params=params)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        vendors = data.get("value", [])
+                        filter_lower = filter_text.lower()
+                        vendors = [v for v in vendors if filter_lower in v.get("displayName", "").lower() or filter_lower in v.get("number", "").lower()]
+                        return {
+                            "vendors": vendors[:limit],
+                            "total": len(vendors),
+                            "mock": False
+                        }
+                
                 logger.error("Failed to get vendors: %s", resp.text)
                 raise Exception(f"Failed to get vendors: {resp.status_code}")
             

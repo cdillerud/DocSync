@@ -382,9 +382,10 @@ class BusinessCentralService:
         company_id = await self._get_company_id()
         
         # Build the invoice payload per BC API spec
+        # Note: BC API uses 'vendorInvoiceNumber' (not 'externalDocumentNumber') for the vendor's invoice reference
         payload = {
             "vendorNumber": invoice_data.get("vendorNumber") or invoice_data.get("vendor_no"),
-            "externalDocumentNumber": invoice_data.get("invoiceNumber") or invoice_data.get("invoice_number"),
+            "vendorInvoiceNumber": invoice_data.get("invoiceNumber") or invoice_data.get("invoice_number"),
             "invoiceDate": invoice_data.get("invoiceDate") or invoice_data.get("invoice_date"),
             "dueDate": invoice_data.get("dueDate") or invoice_data.get("due_date"),
             "currencyCode": invoice_data.get("currencyCode") or invoice_data.get("currency") or "USD",

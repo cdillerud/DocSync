@@ -308,19 +308,73 @@ export default function SharePointMigrationPage() {
             SharePoint Migration POC
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            OneGamer → One_Gamer-Flat-Test • Customer Relations folder
+            Source: {sourceConfig.siteUrl.split('/sites/')[1] || 'OneGamer'}/{sourceConfig.folderPath} → One_Gamer-Flat-Test/Documents
           </p>
         </div>
-        <Button 
-          variant="outline" 
-          size="sm" 
-          onClick={() => { fetchSummary(); fetchCandidates(); }}
-          disabled={loading}
-        >
-          <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => setShowSourceConfig(!showSourceConfig)}
+          >
+            Configure Source
+          </Button>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => { fetchSummary(); fetchCandidates(); }}
+            disabled={loading}
+          >
+            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+        </div>
       </div>
+
+      {/* Source Configuration */}
+      {showSourceConfig && (
+        <Card className="border-blue-200 bg-blue-50/50 dark:bg-blue-950/20">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium">Source Configuration</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <Label className="text-xs">SharePoint Site URL</Label>
+                <Input 
+                  value={sourceConfig.siteUrl}
+                  onChange={(e) => setSourceConfig({...sourceConfig, siteUrl: e.target.value})}
+                  placeholder="https://tenant.sharepoint.com/sites/SiteName"
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">Library Name</Label>
+                <Input 
+                  value={sourceConfig.libraryName}
+                  onChange={(e) => setSourceConfig({...sourceConfig, libraryName: e.target.value})}
+                  placeholder="Documents"
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">Folder Path (leave empty for root)</Label>
+                <Input 
+                  value={sourceConfig.folderPath}
+                  onChange={(e) => setSourceConfig({...sourceConfig, folderPath: e.target.value})}
+                  placeholder="Customer Relations"
+                  className="mt-1"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <Button size="sm" variant="outline" onClick={() => setShowSourceConfig(false)}>
+                Done
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Summary Cards */}
       {summary && (

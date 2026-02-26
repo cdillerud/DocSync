@@ -950,7 +950,7 @@ Legacy path: {legacy_path}
         list_id: str,
         token: str
     ) -> None:
-        """Ensure required columns exist in destination library."""
+        """Ensure required columns exist in destination library based on Excel metadata structure."""
         async with httpx.AsyncClient(timeout=60.0) as client:
             # Get existing columns
             resp = await client.get(
@@ -975,9 +975,19 @@ Legacy path: {legacy_path}
                     }
                     
                     if col_def["type"] == "text":
-                        col_payload["text"] = {"allowMultipleLines": col_def["name"] in ["LegacyPath", "LegacyUrl"]}
+                        # Use multi-line text for potentially long fields
+                        col_payload["text"] = {
+                            "allowMultipleLines": col_def["name"] in ["LegacyPath", "LegacyUrl", "DocumentSubType"]
+                        }
                     elif col_def["type"] == "dateTime":
                         col_payload["dateTime"] = {"displayAs": "default"}
+                    elif col_def["type"] == "choice":
+                        # SharePoint choice column
+                        col_payload["choice"] = {
+                            "allowTextEntry": True,  # Allow custom values
+                            "choices": col_def.get("choices", []),
+                            "displayAs": "dropDownMenu"
+                        }
                     
                     create_resp = await client.post(
                         f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/columns",
@@ -990,6 +1000,8 @@ Legacy path: {legacy_path}
                     
                     if create_resp.status_code not in (200, 201):
                         logger.warning(f"Could not create column {col_def['name']}: {create_resp.status_code} - {create_resp.text[:200]}")
+                    else:
+                        logger.info(f"Created column: {col_def['name']}")
     
     async def _get_list_id(self, site_id: str, library_name: str, token: str) -> str:
         """Get the list ID for a document library."""

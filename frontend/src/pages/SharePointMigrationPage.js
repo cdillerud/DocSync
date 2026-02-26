@@ -146,8 +146,29 @@ export default function SharePointMigrationPage() {
       // Handle URLs like:
       // https://tenant.sharepoint.com/sites/SiteName/Shared%20Documents/Folder/Subfolder
       // https://tenant.sharepoint.com/sites/SiteName/Shared%20Documents/Forms/AllItems.aspx?id=%2Fsites%2FSiteName%2FShared%20Documents%2FFolder
+      // https://tenant.sharepoint.com/:f:/s/SiteName/EncodedHash?e=xxx (sharing links)
       
       let cleanUrl = decodeURIComponent(url).trim();
+      
+      // Handle sharing link format: /:f:/s/SiteName/hash
+      const sharingMatch = cleanUrl.match(/https:\/\/([^\/]+)\/:f:\/s\/([^\/]+)\/([^?]+)/);
+      if (sharingMatch) {
+        const tenant = sharingMatch[1];
+        const siteName = sharingMatch[2];
+        const siteUrl = `https://${tenant}/sites/${siteName}`;
+        
+        // For sharing links, we can't decode the path - ask user to provide it
+        setSourceConfig({
+          siteUrl,
+          libraryName: 'Shared Documents',
+          folderPath: ''
+        });
+        setPasteUrl('');
+        toast.success(`Parsed site: ${siteName}. Please enter the folder path manually below.`, {
+          duration: 5000
+        });
+        return;
+      }
       
       // Extract from ?id= parameter if present
       const idMatch = cleanUrl.match(/[?&]id=([^&]+)/);

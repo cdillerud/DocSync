@@ -1193,7 +1193,7 @@ Legacy path: {legacy_path}
         }
     
     async def get_summary(self) -> Dict[str, Any]:
-        """Get summary statistics for migration candidates."""
+        """Get summary statistics for migration candidates including new Excel metadata."""
         total = await self.collection.count_documents({})
         
         # Count by status
@@ -1202,7 +1202,7 @@ Legacy path: {legacy_path}
             count = await self.collection.count_documents({"status": status})
             status_counts[status] = count
         
-        # Count by doc_type
+        # Count by legacy doc_type
         doc_type_counts = {}
         pipeline = [
             {"$match": {"doc_type": {"$ne": None}}},
@@ -1210,6 +1210,33 @@ Legacy path: {legacy_path}
         ]
         async for doc in self.collection.aggregate(pipeline):
             doc_type_counts[doc["_id"]] = doc["count"]
+        
+        # Count by NEW document_type (from Excel structure)
+        document_type_counts = {}
+        pipeline = [
+            {"$match": {"document_type": {"$ne": None}}},
+            {"$group": {"_id": "$document_type", "count": {"$sum": 1}}}
+        ]
+        async for doc in self.collection.aggregate(pipeline):
+            document_type_counts[doc["_id"]] = doc["count"]
+        
+        # Count by acct_type
+        acct_type_counts = {}
+        pipeline = [
+            {"$match": {"acct_type": {"$ne": None}}},
+            {"$group": {"_id": "$acct_type", "count": {"$sum": 1}}}
+        ]
+        async for doc in self.collection.aggregate(pipeline):
+            acct_type_counts[doc["_id"]] = doc["count"]
+        
+        # Count by document_status
+        document_status_counts = {}
+        pipeline = [
+            {"$match": {"document_status": {"$ne": None}}},
+            {"$group": {"_id": "$document_status", "count": {"$sum": 1}}}
+        ]
+        async for doc in self.collection.aggregate(pipeline):
+            document_status_counts[doc["_id"]] = doc["count"]
         
         # Count by confidence bands
         confidence_bands = {
@@ -1243,7 +1270,10 @@ Legacy path: {legacy_path}
         return {
             "total_candidates": total,
             "by_status": status_counts,
-            "by_doc_type": doc_type_counts,
+            "by_doc_type": doc_type_counts,  # Legacy
+            "by_document_type": document_type_counts,  # NEW: Excel structure
+            "by_acct_type": acct_type_counts,  # NEW: Excel structure
+            "by_document_status": document_status_counts,  # NEW: Excel structure
             "by_confidence": confidence_bands,
             "by_classification_source": classification_source,
             "by_level1": level1_counts

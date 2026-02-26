@@ -1327,4 +1327,83 @@ Updated `BusinessCentralService.update_purchase_invoice_link()` to:
 
 ---
 
-*Last Updated: February 25, 2026*
+## Session Update 5: February 26, 2026 - SharePoint Migration POC
+
+### Feature Complete: OneGamer → One_Gamer-Flat-Test SharePoint Migration
+
+Built a complete SharePoint Migration POC inside GPI Hub that can:
+1. **Discover** files from source SharePoint folder (recursive)
+2. **Classify** files using AI to infer metadata
+3. **Migrate** files to destination library with metadata columns
+4. **Admin UI** for review, approval, and manual editing
+
+### Backend Implementation
+
+**New Files:**
+- `/app/backend/services/sharepoint_migration_service.py` - Core migration service
+- `/app/backend/routes/sharepoint_migration.py` - REST API endpoints
+
+**API Endpoints:**
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/migration/sharepoint/summary` | GET | Get stats by status, doc_type, confidence |
+| `/api/migration/sharepoint/discover` | POST | Discover files in source folder |
+| `/api/migration/sharepoint/classify` | POST | Classify discovered files with AI |
+| `/api/migration/sharepoint/migrate` | POST | Migrate ready files to destination |
+| `/api/migration/sharepoint/candidates` | GET | List candidates with filters |
+| `/api/migration/sharepoint/candidates/{id}` | GET/PATCH | Get/update single candidate |
+| `/api/migration/sharepoint/candidates/{id}/approve` | POST | Mark low-confidence for migration |
+
+**Database Collection:** `migration_candidates`
+- Fields: id, source_site_url, source_item_id, file_name, legacy_path, legacy_url, status
+- AI metadata: doc_type, department, customer_name, vendor_name, document_date, retention_category, classification_confidence
+- Migration result: target_site_url, target_item_id, target_url, migration_timestamp, migration_error
+
+### Frontend Implementation
+
+**New Page:** `/app/frontend/src/pages/SharePointMigrationPage.js`
+- Route: `/migration/onegamer-poc`
+- Summary cards showing counts by status
+- Action buttons: Discover, Classify, Migrate
+- Filterable table with all candidates
+- Detail dialog for viewing/editing metadata
+- Approve button for low-confidence items
+
+### AI Classification
+
+Using Gemini 2.0 Flash via Emergent LLM Key:
+- Extracts: doc_type, department, customer_name, vendor_name, document_date, retention_category
+- Uses file name and legacy path as context
+- Confidence threshold: 0.85 for auto-ready
+- Classification method tracking (ai_with_path, ai_filename_only)
+
+### Test Results
+
+**Discovery:**
+- Source: `OneGamer/Documents/Customer Relations` (recursive)
+- Found: 29 files across multiple subfolders
+
+**Classification:**
+- 11 high confidence (≥90%), auto-marked ready_for_migration
+- 1 low confidence (75%), requires manual review
+- Customer "Duke Cannon" correctly identified from file names
+
+**Migration:**
+- 5 files successfully migrated to `One_Gamer-Flat-Test/Documents`
+- Metadata columns populated in destination
+- Old-to-new URL mapping stored
+
+### Configuration
+
+Source:
+- Site: `https://gamerpackaging1.sharepoint.com/sites/OneGamer`
+- Library: `Documents`
+- Folder: `Customer Relations`
+
+Target:
+- Site: `https://gamerpackaging1.sharepoint.com/sites/One_Gamer-Flat-Test`
+- Library: `Documents`
+
+---
+
+*Last Updated: February 26, 2026*

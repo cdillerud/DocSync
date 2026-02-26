@@ -925,7 +925,7 @@ Legacy path: {legacy_path}
                                 year = "20" + year
                         result["document_date"] = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
                         break
-                    except:
+                    except (ValueError, IndexError):
                         pass
         
         # Part number patterns

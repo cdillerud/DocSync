@@ -253,7 +253,8 @@ class SharePointMigrationService:
             existing = await self.collection.find_one({"source_item_id": source_item_id})
             
             # Build legacy path and URL
-            legacy_path = f"/{source_library_name}/{source_folder_path}/{file_info['name']}"
+            folder_in_lib = file_info.get("folder_path", source_folder_path)
+            legacy_path = f"/{source_library_name}/{folder_in_lib}/{file_info['name']}"
             legacy_url = file_info["web_url"]
             
             candidate_data = {

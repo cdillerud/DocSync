@@ -79,7 +79,14 @@ class MigrateResponse(BaseModel):
 
 
 class CandidateUpdate(BaseModel):
-    """Request body for updating a candidate."""
+    """Request body for updating a candidate - aligned with Excel metadata structure."""
+    # NEW: Excel metadata fields
+    acct_type: Optional[str] = None
+    acct_name: Optional[str] = None
+    document_type: Optional[str] = None
+    document_sub_type: Optional[str] = None
+    document_status: Optional[str] = None
+    # Legacy fields
     doc_type: Optional[str] = None
     department: Optional[str] = None
     customer_name: Optional[str] = None

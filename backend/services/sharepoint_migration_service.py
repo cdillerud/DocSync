@@ -276,18 +276,58 @@ class SharePointMigrationService:
         # Legacy field mapping (for backwards compatibility)
         # ============================================================
         
-        # Map Level1 to legacy Department field
+        # Map Level1 to legacy Department field - expanded mapping
         department_map = {
             "Customer Relations": "CustomerRelations",
             "Marketing": "Marketing",
             "Sales": "Sales",
             "General": "General",
-            "Custom Projects": "CustomProjects",
+            "Custom Projects": "Engineering",
             "HR Programs and Benefits": "HR",
-            "Supplier Relations": "SupplierRelations",
-            "Product Knowledge": "ProductKnowledge",
+            "Supplier Relations": "Purchasing",
+            "Product Knowledge": "Engineering",
+            "Quality": "Quality",
+            "Warehouse": "Warehouse",
+            "Operations": "Operations",
+            "Finance": "Finance",
+            "Accounting": "Finance",
+            "IT": "IT",
+            "Engineering": "Engineering",
+            "Purchasing": "Purchasing",
         }
-        metadata["department"] = department_map.get(level1, level1 or "Unknown")
+        
+        # Try to determine department from path context
+        department = department_map.get(level1)
+        
+        if not department:
+            # Infer from all_levels if Level1 doesn't match
+            all_lower = all_levels.lower()
+            if "customer relation" in all_lower:
+                department = "CustomerRelations"
+            elif "sales" in all_lower or "order" in all_lower:
+                department = "Sales"
+            elif "marketing" in all_lower:
+                department = "Marketing"
+            elif "quality" in all_lower or "claim" in all_lower or "inspection" in all_lower:
+                department = "Quality"
+            elif "warehouse" in all_lower or "shipping" in all_lower or "wh doc" in all_lower:
+                department = "Warehouse"
+            elif "purchasing" in all_lower or "vendor" in all_lower or "supplier" in all_lower:
+                department = "Purchasing"
+            elif "engineering" in all_lower or "spec" in all_lower or "drawing" in all_lower:
+                department = "Engineering"
+            elif "operation" in all_lower or "production" in all_lower or "manufacturing" in all_lower:
+                department = "Operations"
+            elif "finance" in all_lower or "accounting" in all_lower or "invoice" in all_lower:
+                department = "Finance"
+            elif "hr" in all_lower or "human resource" in all_lower or "benefit" in all_lower:
+                department = "HR"
+            elif "it" in all_lower or "system" in all_lower or "technical" in all_lower:
+                department = "IT"
+            else:
+                department = level1 if level1 else "Unknown"
+        
+        metadata["department"] = department
         
         # Infer legacy doc_type from folder structure (simpler categories)
         doc_type = "unknown"

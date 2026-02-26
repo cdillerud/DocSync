@@ -451,7 +451,7 @@ export default function SharePointMigrationPage() {
               ) : (
                 <FolderSync className="w-4 h-4 mr-2" />
               )}
-              Discover Customer Relations Files
+              Discover Files from {sourceConfig.folderPath || 'Root'}
             </Button>
             
             <Button 

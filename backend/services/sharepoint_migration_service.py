@@ -603,7 +603,7 @@ class SharePointMigrationService:
         if ext in ["txt", "csv"]:
             try:
                 return content.decode("utf-8", errors="ignore")[:5000]
-            except:
+            except Exception:
                 return ""
         
         # For PDFs, try to extract text using a simple approach
@@ -618,7 +618,7 @@ class SharePointMigrationService:
                     if len(line) > 0 and sum(1 for c in line if 32 <= ord(c) < 127) / len(line) > 0.7:
                         readable_parts.append(line)
                 return "\n".join(readable_parts)[:5000]
-            except:
+            except Exception:
                 return ""
         
         # For Office documents, return empty (would need specialized libraries)

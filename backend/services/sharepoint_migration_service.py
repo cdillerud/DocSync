@@ -89,8 +89,15 @@ class MigrationCandidate:
     level5: Optional[str] = None
     classification_source: Optional[str] = None  # 'folder_tree', 'ai', 'hybrid'
     
-    # AI metadata fields
-    doc_type: Optional[str] = None
+    # NEW: Metadata fields from File MetaData Structure.xlsx
+    acct_type: Optional[str] = None  # Manufacturers/Vendors, Customer Accounts, Corporate Internal, System Resources
+    acct_name: Optional[str] = None  # Actual account/customer/vendor name
+    document_type: Optional[str] = None  # New expanded doc type from Excel
+    document_sub_type: Optional[str] = None  # Sub-type within document_type
+    document_status: Optional[str] = None  # Active, Archived, Pending
+    
+    # Legacy AI metadata fields (kept for backwards compatibility)
+    doc_type: Optional[str] = None  # Original simple doc_type
     department: Optional[str] = None
     customer_name: Optional[str] = None
     vendor_name: Optional[str] = None

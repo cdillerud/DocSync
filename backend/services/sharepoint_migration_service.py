@@ -632,13 +632,14 @@ class SharePointMigrationService:
         legacy_path: str, 
         text_content: str
     ) -> Dict[str, Any]:
-        """Use AI to classify the file and extract metadata."""
+        """Use AI to classify the file and extract metadata aligned with File MetaData Structure.xlsx."""
         api_key = os.environ.get("EMERGENT_LLM_KEY")
         if not api_key:
             logger.warning("EMERGENT_LLM_KEY not configured")
             return {
-                "doc_type": "unknown",
-                "department": "Unknown",
+                "acct_type": "Corporate Internal",
+                "document_type": "Other",
+                "document_status": "Active",
                 "confidence": 0.0,
                 "error": "API key not configured"
             }
@@ -646,31 +647,44 @@ class SharePointMigrationService:
         try:
             from emergentintegrations.llm.chat import LlmChat, UserMessage
             
-            # Build the classification prompt
+            # Build the classification prompt aligned with Excel metadata structure
             system_prompt = """You are a document classification expert for Gamer Packaging Inc.
-Your task is to analyze a file and extract metadata for organizing it in SharePoint.
+Your task is to analyze a file and extract metadata aligned with our SharePoint flat structure.
 
 You MUST respond with ONLY a JSON object in this exact format:
 {
-    "doc_type": "invoice | po | contract | sop | spec_sheet | quote | presentation | email_export | correspondence | report | artwork | unknown",
-    "department": "CustomerRelations | Sales | Marketing | Finance | Quality | Operations | IT | HR | Unknown",
-    "customer_name": "string or null",
-    "vendor_name": "string or null",
-    "project_or_part_number": "string or null",
-    "document_date": "YYYY-MM-DD or null",
+    "acct_type": "Manufacturers / Vendors | Customer Accounts | Corporate Internal | System Resources",
+    "acct_name": "string - The customer or vendor name (e.g., 'Duke Cannon', 'Acme Supplier')",
+    "document_type": "One of: Supplier Documents, Marketing Literature, Capabilities / Catalogs, SOPs / Resources, Plant Warehouse List, Dunnage, Product Specification Sheet, Product Pack-Out Specs, Product Drawings, Graphical Die Line, Forecasts, Inventory Reports, Transaction History, Price List, Misc., Customer Documents, Drawing Approval, Specification Approval, Prototype Approval, Graphics Approval, Project Timeline, Supplier Quote, Customer Quote, Cost Analysis, Training, Agreement Resources, New Business Dev Resources, Quality Documents, Claims/Cases, Warehouse & Consignment, Invoice & Hold Agreement, Supply Agreement, Supply Addendum, Other",
+    "document_sub_type": "string - More specific classification within document_type (e.g., 'Beard Care', 'Face Care', 'Bottle Specs')",
+    "document_status": "Active | Archived | Pending",
+    "project_or_part_number": "string or null - Part numbers like BT-1000-110, GPI-12345",
+    "document_date": "YYYY-MM-DD or null - Date extracted from filename or document",
     "retention_category": "CustomerComm_LongTerm | WorkingDoc_2yrs | Accounting_7yrs | Legal_10yrs | Unknown",
     "confidence": 0.0 to 1.0
 }
 
 IMPORTANT CLASSIFICATION HINTS:
-- The file path contains important context. "Customer Relations" folder strongly indicates CustomerRelations department.
-- "Duke Cannon" is a major customer - if you see this name, set customer_name="Duke Cannon"
-- Files with "Specification Binder" or "Spec Binder" are doc_type="spec_sheet"
-- Files in "Art Work Files" are doc_type="artwork"
-- Extract customer/vendor names if visible in the document or file name.
-- Use document_date for the primary date in the document (invoice date, contract date, etc.)
-- Date in filename like "(9.23.25)" means September 23, 2025 -> "2025-09-23"
-- confidence should reflect how certain you are about all fields combined. Use 0.85+ for high confidence.
+1. Path context is critical:
+   - "Customer Relations" folder → acct_type = "Customer Accounts"
+   - "Duke Cannon" in path → acct_name = "Duke Cannon" 
+   - Vendor/Manufacturer folders → acct_type = "Manufacturers / Vendors"
+
+2. Document Type mapping:
+   - "Spec Binder", "Specification Binder" → document_type = "Product Specification Sheet"
+   - "Art Work Files" folder → document_type = "Product Drawings" or "Graphical Die Line"
+   - SOPs, procedures, guides → document_type = "SOPs / Resources"
+   - Quotes → "Customer Quote" or "Supplier Quote" based on context
+
+3. Dates in filenames:
+   - "(9.23.25)" means September 23, 2025 → "2025-09-23"
+   - "(7.9.25)" means July 9, 2025 → "2025-07-09"
+
+4. Part numbers:
+   - Look for patterns like "BT-1000-110", "BT-150-45", "FCSPF"
+   - Product codes are often at the start of filenames
+
+5. Set document_status = "Active" unless the path contains "Previous Versions" or "Archive"
 
 RESPOND ONLY WITH THE JSON OBJECT, NO OTHER TEXT."""
             
@@ -713,13 +727,19 @@ Legacy path: {legacy_path}
             result = json.loads(response_text.strip())
             result["classification_method"] = "ai_with_path" if text_content else "ai_filename_only"
             
+            # Ensure all required fields exist
+            result.setdefault("document_status", "Active")
+            result.setdefault("acct_type", "Corporate Internal")
+            result.setdefault("document_type", "Other")
+            
             return result
             
         except Exception as e:
             logger.error(f"AI classification error: {e}")
             return {
-                "doc_type": "unknown",
-                "department": "Unknown",
+                "acct_type": "Corporate Internal",
+                "document_type": "Other",
+                "document_status": "Active",
                 "confidence": 0.0,
                 "error": str(e)
             }

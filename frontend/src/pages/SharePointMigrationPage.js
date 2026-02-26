@@ -482,7 +482,7 @@ export default function SharePointMigrationPage() {
           </div>
           
           <p className="text-xs text-muted-foreground mt-3">
-            Source: OneGamer/Documents/Customer Relations → Target: One_Gamer-Flat-Test/Documents
+            Source: {sourceConfig.siteUrl.split('/sites/')[1] || 'SharePoint'}/{sourceConfig.libraryName}/{sourceConfig.folderPath || '(root)'} → Target: One_Gamer-Flat-Test/Documents
           </p>
         </CardContent>
       </Card>

@@ -191,29 +191,80 @@ class SharePointMigrationService:
         # Map to NEW Excel Metadata Structure
         # ============================================================
         
-        # 1. Determine AcctType based on Level1 context
+        # 1. Determine AcctType and extract customer/vendor name based on folder structure
+        
+        # Pattern 1: Customer Relations/[CustomerName]/...
         if level1 == "Customer Relations":
             metadata["acct_type"] = "Customer Accounts"
-            # Level2 is the customer name
             if level2:
                 metadata["acct_name"] = level2
                 metadata["customer_name"] = level2
-        elif "Supplier" in level1 or "Vendor" in level1 or "Manufacturers" in level2:
+        
+        # Pattern 2: General/Manufacturers - Vendors/[VendorName]/...
+        elif level1 == "General" and level2 == "Manufacturers - Vendors":
+            metadata["acct_type"] = "Manufacturers / Vendors"
+            if level3:
+                metadata["acct_name"] = level3
+                metadata["vendor_name"] = level3
+        
+        # Pattern 3: General/Supply Chain/[Category]/[VendorName]/...
+        elif level1 == "General" and level2 == "Supply Chain":
+            metadata["acct_type"] = "Manufacturers / Vendors"
+            # Level3 might be category (Ball, CanPack, Glass) or vendor
+            # Level4 might be vendor or sub-category
+            if level4 and level4 not in ["Suppliers", "Megan", ""]:
+                metadata["acct_name"] = level4
+                metadata["vendor_name"] = level4
+            elif level3:
+                metadata["acct_name"] = level3
+                metadata["vendor_name"] = level3
+        
+        # Pattern 4: Supplier Relations/[SupplierName]/...
+        elif level1 == "Supplier Relations":
             metadata["acct_type"] = "Manufacturers / Vendors"
             if level2:
                 metadata["acct_name"] = level2
                 metadata["vendor_name"] = level2
-        elif level1 in ["Corporate Internal", "HR Programs and Benefits", "General", "Custom Projects", "Product Knowledge"]:
-            metadata["acct_type"] = "Corporate Internal"
-            # For Custom Projects, Level2 is often the project/customer name
+        
+        # Pattern 5: Custom Projects/[CustomerOrProjectName]/...
+        elif level1 == "Custom Projects":
+            metadata["acct_type"] = "Customer Accounts"
             if level2:
                 metadata["acct_name"] = level2
+                metadata["customer_name"] = level2
+        
+        # Pattern 6: Customer Quotes.../[CustomerName]/...
+        elif "Customer" in level1 and "Quote" in level1:
+            metadata["acct_type"] = "Customer Accounts"
+            if level2:
+                metadata["acct_name"] = level2
+                metadata["customer_name"] = level2
+        
+        # Pattern 7: General/New Vendor Set-Up Information/...
+        elif level1 == "General" and "Vendor" in (level2 or ""):
+            metadata["acct_type"] = "Manufacturers / Vendors"
+            if level3:
+                metadata["acct_name"] = level3
+                metadata["vendor_name"] = level3
+        
+        # Pattern 8: General/Agreement Resources/... or other internal
+        elif level1 in ["General", "Corporate Internal", "HR Programs and Benefits", "Product Knowledge", "Marketing", "Sales"]:
+            metadata["acct_type"] = "Corporate Internal"
+            # Check if Level3 or Level4 looks like a company name (not a category)
+            category_keywords = ["archive", "resources", "template", "form", "training", "sop", "guide", "report"]
+            if level3 and not any(kw in level3.lower() for kw in category_keywords):
+                # Might be a company name
+                if level2 in ["Agreement Resources", "New Business Development Resources"]:
+                    metadata["acct_name"] = level3
+        
+        # Pattern 9: System Resources
         elif level1 == "System Resources":
             metadata["acct_type"] = "System Resources"
+        
+        # Default fallback
         else:
-            # Default based on context
             metadata["acct_type"] = "Corporate Internal"
-            if level2:
+            if level2 and level2 not in ["", "Archive", "Templates", "Forms"]:
                 metadata["acct_name"] = level2
         
         # 2. Map to DocumentType based on folder structure

@@ -131,6 +131,14 @@ export default function SharePointMigrationPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
   
+  // Source configuration (editable)
+  const [sourceConfig, setSourceConfig] = useState({
+    siteUrl: 'https://gamerpackaging1.sharepoint.com/sites/OneGamer',
+    libraryName: 'Documents',
+    folderPath: 'Customer Relations'
+  });
+  const [showSourceConfig, setShowSourceConfig] = useState(false);
+  
   // Filters
   const [statusFilter, setStatusFilter] = useState('all');
   const [docTypeFilter, setDocTypeFilter] = useState('all');

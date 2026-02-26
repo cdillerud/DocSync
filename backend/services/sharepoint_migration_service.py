@@ -430,8 +430,6 @@ class SharePointMigrationService:
                     data = resp.json()
                     for item in data.get("value", []):
                         if "file" in item:
-                            # Calculate the relative path from the root folder
-                            rel_path = current_folder
                             files.append({
                                 "id": item["id"],
                                 "name": item["name"],

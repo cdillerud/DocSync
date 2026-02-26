@@ -500,6 +500,7 @@ export default function SharePointMigrationPage() {
             <SelectValue placeholder="Filter by status" />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="pending">Pending (Not Migrated)</SelectItem>
             <SelectItem value="all">All Statuses</SelectItem>
             <SelectItem value="discovered">Discovered</SelectItem>
             <SelectItem value="classified">Classified</SelectItem>

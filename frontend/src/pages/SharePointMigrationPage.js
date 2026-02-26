@@ -150,6 +150,10 @@ export default function SharePointMigrationPage() {
       
       let cleanUrl = decodeURIComponent(url).trim();
       
+      // Extract the base domain first (before any transformations)
+      const domainMatch = cleanUrl.match(/https:\/\/([^\/]+)/);
+      const domain = domainMatch ? domainMatch[1] : null;
+      
       // Handle sharing link format: /:f:/s/SiteName/hash
       const sharingMatch = cleanUrl.match(/https:\/\/([^\/]+)\/:f:\/s\/([^\/]+)\/([^?]+)/);
       if (sharingMatch) {
@@ -174,6 +178,10 @@ export default function SharePointMigrationPage() {
       const idMatch = cleanUrl.match(/[?&]id=([^&]+)/);
       if (idMatch) {
         cleanUrl = decodeURIComponent(idMatch[1]);
+        // If it's a relative path, prepend the domain
+        if (cleanUrl.startsWith('/') && domain) {
+          cleanUrl = `https://${domain}${cleanUrl}`;
+        }
       }
       
       // Remove query string and hash for simpler parsing

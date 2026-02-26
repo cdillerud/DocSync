@@ -140,7 +140,7 @@ export default function SharePointMigrationPage() {
   const [showSourceConfig, setShowSourceConfig] = useState(false);
   
   // Filters
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('pending'); // Default to pending (excludes migrated)
   const [docTypeFilter, setDocTypeFilter] = useState('all');
   const [search, setSearch] = useState('');
   

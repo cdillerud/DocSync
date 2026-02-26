@@ -1042,11 +1042,30 @@ Legacy path: {legacy_path}
             "not_classified": await self.collection.count_documents({"classification_confidence": None})
         }
         
+        # Count by classification source (hybrid tracking)
+        classification_source = {
+            "folder_tree": await self.collection.count_documents({"classification_source": "folder_tree"}),
+            "hybrid": await self.collection.count_documents({"classification_source": "hybrid"}),
+            "ai": await self.collection.count_documents({"classification_source": "ai"}),
+            "not_classified": await self.collection.count_documents({"classification_source": None})
+        }
+        
+        # Count by Level1 (Department from folder tree)
+        level1_counts = {}
+        pipeline = [
+            {"$match": {"level1": {"$ne": None}}},
+            {"$group": {"_id": "$level1", "count": {"$sum": 1}}}
+        ]
+        async for doc in self.collection.aggregate(pipeline):
+            level1_counts[doc["_id"]] = doc["count"]
+        
         return {
             "total_candidates": total,
             "by_status": status_counts,
             "by_doc_type": doc_type_counts,
-            "by_confidence": confidence_bands
+            "by_confidence": confidence_bands,
+            "by_classification_source": classification_source,
+            "by_level1": level1_counts
         }
     
     async def get_candidates(

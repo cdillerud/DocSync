@@ -13,7 +13,19 @@ import {
   ExternalLink, CheckCircle2, AlertCircle, Clock, FileText,
   ChevronRight, Loader2 
 } from 'lucide-react';
-import API from '../api';
+import axios from 'axios';
+
+const API_BASE = process.env.REACT_APP_BACKEND_URL;
+const API = axios.create({ baseURL: API_BASE });
+
+// Add auth interceptor
+API.interceptors.request.use((config) => {
+  const token = localStorage.getItem('gpi_token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
 
 const STATUS_BADGES = {
   discovered: { label: 'Discovered', variant: 'outline', icon: FileText },

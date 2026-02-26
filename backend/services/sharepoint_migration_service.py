@@ -377,7 +377,7 @@ Your task is to analyze a file and extract metadata for organizing it in SharePo
 
 You MUST respond with ONLY a JSON object in this exact format:
 {
-    "doc_type": "invoice | po | contract | sop | spec_sheet | quote | presentation | email_export | correspondence | report | unknown",
+    "doc_type": "invoice | po | contract | sop | spec_sheet | quote | presentation | email_export | correspondence | report | artwork | unknown",
     "department": "CustomerRelations | Sales | Marketing | Finance | Quality | Operations | IT | HR | Unknown",
     "customer_name": "string or null",
     "vendor_name": "string or null",
@@ -387,12 +387,17 @@ You MUST respond with ONLY a JSON object in this exact format:
     "confidence": 0.0 to 1.0
 }
 
-IMPORTANT:
+IMPORTANT CLASSIFICATION HINTS:
 - The file path contains important context. "Customer Relations" folder strongly indicates CustomerRelations department.
-- Extract customer/vendor names if visible in the document.
+- "Duke Cannon" is a major customer - if you see this name, set customer_name="Duke Cannon"
+- Files with "Specification Binder" or "Spec Binder" are doc_type="spec_sheet"
+- Files in "Art Work Files" are doc_type="artwork"
+- Extract customer/vendor names if visible in the document or file name.
 - Use document_date for the primary date in the document (invoice date, contract date, etc.)
-- confidence should reflect how certain you are about all fields combined.
-"""
+- Date in filename like "(9.23.25)" means September 23, 2025 -> "2025-09-23"
+- confidence should reflect how certain you are about all fields combined. Use 0.85+ for high confidence.
+
+RESPOND ONLY WITH THE JSON OBJECT, NO OTHER TEXT."""
             
             user_content = f"""Classify this file:
 
@@ -405,15 +410,17 @@ Legacy path: {legacy_path}
             else:
                 user_content += "No text content available - classify based on file name and path only."
             
+            # Use the same pattern as ai_classifier.py
             chat = LlmChat(
                 api_key=api_key,
-                model="gemini-2.0-flash"
-            )
-            
-            response = await chat.send_async(
-                messages=[UserMessage(user_content)],
+                session_id=f"migration_classify_{file_name[:30]}",
                 system_message=system_prompt
-            )
+            ).with_model("gemini", "gemini-2.0-flash")
+            
+            user_message = UserMessage(text=user_content)
+            response = await chat.send_message(user_message)
+            
+            logger.info(f"AI classification response for {file_name}: {response[:200]}")
             
             # Parse JSON response
             import json
@@ -423,8 +430,12 @@ Legacy path: {legacy_path}
             if response_text.startswith("```"):
                 lines = response_text.split("\n")
                 response_text = "\n".join(lines[1:-1])
+            if response_text.startswith("```json"):
+                response_text = response_text[7:]
+            if response_text.endswith("```"):
+                response_text = response_text[:-3]
             
-            result = json.loads(response_text)
+            result = json.loads(response_text.strip())
             result["classification_method"] = "ai_with_path" if text_content else "ai_filename_only"
             
             return result

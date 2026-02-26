@@ -138,6 +138,65 @@ export default function SharePointMigrationPage() {
     folderPath: 'Customer Relations'
   });
   const [showSourceConfig, setShowSourceConfig] = useState(false);
+  const [pasteUrl, setPasteUrl] = useState('');
+
+  // Parse SharePoint URL to extract site, library, and folder
+  const parseSharePointUrl = (url) => {
+    try {
+      // Handle URLs like:
+      // https://tenant.sharepoint.com/sites/SiteName/Shared%20Documents/Folder/Subfolder
+      // https://tenant.sharepoint.com/sites/SiteName/Shared%20Documents/Forms/AllItems.aspx?id=%2Fsites%2FSiteName%2FShared%20Documents%2FFolder
+      
+      let cleanUrl = decodeURIComponent(url).trim();
+      
+      // Extract from ?id= parameter if present
+      const idMatch = cleanUrl.match(/[?&]id=([^&]+)/);
+      if (idMatch) {
+        cleanUrl = decodeURIComponent(idMatch[1]);
+      }
+      
+      // Remove query string and hash for simpler parsing
+      cleanUrl = cleanUrl.split('?')[0].split('#')[0];
+      
+      // Extract site URL (everything up to and including /sites/SiteName)
+      const siteMatch = cleanUrl.match(/(https:\/\/[^\/]+\/sites\/[^\/]+)/);
+      if (!siteMatch) {
+        toast.error('Could not parse SharePoint URL. Make sure it contains /sites/SiteName');
+        return;
+      }
+      const siteUrl = siteMatch[1];
+      
+      // Get the path after the site
+      const afterSite = cleanUrl.substring(siteUrl.length);
+      const pathParts = afterSite.split('/').filter(p => p && p !== 'Forms' && p !== 'AllItems.aspx');
+      
+      // First part is usually the library name (Shared Documents, Documents, etc.)
+      let libraryName = 'Documents';
+      let folderPath = '';
+      
+      if (pathParts.length > 0) {
+        // Handle "Shared Documents" vs "Documents"
+        if (pathParts[0] === 'Shared Documents' || pathParts[0] === 'Shared%20Documents') {
+          libraryName = 'Shared Documents';
+          folderPath = pathParts.slice(1).join('/');
+        } else {
+          libraryName = pathParts[0];
+          folderPath = pathParts.slice(1).join('/');
+        }
+      }
+      
+      setSourceConfig({
+        siteUrl,
+        libraryName,
+        folderPath
+      });
+      setPasteUrl('');
+      toast.success(`Parsed: ${siteUrl.split('/sites/')[1]} / ${libraryName} / ${folderPath || '(root)'}`);
+      
+    } catch (err) {
+      toast.error('Failed to parse URL: ' + err.message);
+    }
+  };
   
   // Filters
   const [statusFilter, setStatusFilter] = useState('pending'); // Default to pending (excludes migrated)

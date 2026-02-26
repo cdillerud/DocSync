@@ -27,11 +27,11 @@ GRAPH_CLIENT_SECRET = os.environ.get('GRAPH_CLIENT_SECRET', '')
 
 # Default source and destination for the POC
 DEFAULT_SOURCE_SITE = "https://gamerpackaging1.sharepoint.com/sites/OneGamer"
-DEFAULT_SOURCE_LIBRARY = "Shared Documents"
+DEFAULT_SOURCE_LIBRARY = "Documents"
 DEFAULT_SOURCE_FOLDER = "Customer Relations"
 
 DEFAULT_TARGET_SITE = "https://gamerpackaging1.sharepoint.com/sites/One_Gamer-Flat-Test"
-DEFAULT_TARGET_LIBRARY = "Shared Documents"
+DEFAULT_TARGET_LIBRARY = "Documents"
 
 # Required columns in destination library
 REQUIRED_COLUMNS = [

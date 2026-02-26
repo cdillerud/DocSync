@@ -10,7 +10,7 @@ sys.path.insert(0, '/app/backend')
 
 
 # Test configuration
-API_BASE_URL = "https://ap-automation-lab.preview.emergentagent.com"
+API_BASE_URL = "https://doc-migration-test.preview.emergentagent.com"
 
 
 @pytest.fixture

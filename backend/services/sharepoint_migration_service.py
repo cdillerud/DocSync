@@ -1104,16 +1104,23 @@ Legacy path: {legacy_path}
                     if list_item_resp.status_code == 200:
                         list_item_id = list_item_resp.json()["id"]
                         
-                        # Prepare metadata fields
+                        # Prepare metadata fields based on new Excel structure
                         fields = {
-                            "DocType": candidate.get("doc_type") or "unknown",
-                            "Department": candidate.get("department") or "Unknown",
-                            "CustomerName": candidate.get("customer_name") or "",
-                            "VendorName": candidate.get("vendor_name") or "",
+                            # NEW: Excel metadata columns
+                            "AcctType": candidate.get("acct_type") or "Corporate Internal",
+                            "AcctName": candidate.get("acct_name") or candidate.get("customer_name") or candidate.get("vendor_name") or "",
+                            "DocumentType": candidate.get("document_type") or "Other",
+                            "DocumentSubType": candidate.get("document_sub_type") or "",
+                            "DocumentStatus": candidate.get("document_status") or "Active",
+                            # Legacy/tracking fields
                             "ProjectOrPartNumber": candidate.get("project_or_part_number") or "",
                             "RetentionCategory": candidate.get("retention_category") or "Unknown",
                             "LegacyPath": candidate.get("legacy_path") or "",
-                            "LegacyUrl": candidate.get("legacy_url") or ""
+                            "LegacyUrl": candidate.get("legacy_url") or "",
+                            # Folder tree levels for auditing
+                            "Level1": candidate.get("level1") or "",
+                            "Level2": candidate.get("level2") or "",
+                            "Level3": candidate.get("level3") or "",
                         }
                         
                         # Add DocumentDate if available
@@ -1131,7 +1138,7 @@ Legacy path: {legacy_path}
                         )
                         
                         if update_resp.status_code not in (200, 201):
-                            logger.warning(f"Could not update metadata for {file_name}: {update_resp.status_code}")
+                            logger.warning(f"Could not update metadata for {file_name}: {update_resp.status_code} - {update_resp.text[:200]}")
                     
                     # Update candidate record
                     await self.collection.update_one(

@@ -517,7 +517,13 @@ class SharePointMigrationService:
                     "level4": None,
                     "level5": None,
                     "classification_source": None,
-                    # Initialize metadata fields as None
+                    # NEW: Initialize Excel metadata fields
+                    "acct_type": None,
+                    "acct_name": None,
+                    "document_type": None,
+                    "document_sub_type": None,
+                    "document_status": "Active",
+                    # Legacy metadata fields
                     "doc_type": None,
                     "department": None,
                     "customer_name": None,
@@ -551,6 +557,13 @@ class SharePointMigrationService:
                         "level4": folder_class.get("level4"),
                         "level5": folder_class.get("level5"),
                         "classification_source": "folder_tree",
+                        # NEW: Excel metadata fields
+                        "acct_type": metadata.get("acct_type"),
+                        "acct_name": metadata.get("acct_name"),
+                        "document_type": metadata.get("document_type"),
+                        "document_sub_type": metadata.get("document_sub_type"),
+                        "document_status": metadata.get("document_status", "Active"),
+                        # Legacy fields
                         "doc_type": metadata.get("doc_type"),
                         "department": metadata.get("department"),
                         "customer_name": metadata.get("customer_name"),

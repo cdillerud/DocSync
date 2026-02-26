@@ -274,7 +274,7 @@ export default function SharePointMigrationPage() {
 
       {/* Summary Cards */}
       {summary && (
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
           <Card>
             <CardContent className="pt-4">
               <div className="text-2xl font-bold">{summary.total_candidates}</div>
@@ -309,6 +309,12 @@ export default function SharePointMigrationPage() {
             <CardContent className="pt-4">
               <div className="text-2xl font-bold text-red-600">{summary.by_status?.error || 0}</div>
               <div className="text-xs text-muted-foreground">Errors</div>
+            </CardContent>
+          </Card>
+          <Card className="bg-purple-50 dark:bg-purple-950/30">
+            <CardContent className="pt-4">
+              <div className="text-2xl font-bold text-purple-600">{summary.by_classification_source?.folder_tree || 0}</div>
+              <div className="text-xs text-muted-foreground">Folder Tree Matches</div>
             </CardContent>
           </Card>
         </div>

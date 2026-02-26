@@ -335,7 +335,7 @@ class SharePointMigrationService:
             "Customer Relations": "CustomerRelations",
             "Marketing": "Marketing",
             "Sales": "Sales",
-            "General": "General",
+            "General": "Operations",  # Will refine based on Level2
             "Custom Projects": "Engineering",
             "HR Programs and Benefits": "HR",
             "Supplier Relations": "Purchasing",
@@ -352,6 +352,25 @@ class SharePointMigrationService:
         
         # Try to determine department from path context
         department = department_map.get(level1)
+        
+        # Refine department for "General" based on Level2
+        if level1 == "General":
+            level2_dept_map = {
+                "Manufacturers - Vendors": "Purchasing",
+                "Supply Chain": "Purchasing",
+                "Marketing": "Marketing",
+                "HR For Employees": "HR",
+                "Inside Sale Resources": "Sales",
+                "New Business Development Resources": "Sales",
+                "Accounting Forms": "Finance",
+                "Agreement Resources": "Operations",
+                "GAMER SOP's": "Operations",
+                "Product Knowledge": "Engineering",
+                "System Resources": "IT",
+                "New Vendor Set-Up Information": "Purchasing",
+                "Sales Meeting Presentations": "Sales",
+            }
+            department = level2_dept_map.get(level2, "Operations")
         
         if not department:
             # Infer from all_levels if Level1 doesn't match

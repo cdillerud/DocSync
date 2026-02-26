@@ -34,16 +34,34 @@ DEFAULT_TARGET_SITE = "https://gamerpackaging1.sharepoint.com/sites/One_Gamer-Fl
 DEFAULT_TARGET_LIBRARY = "Documents"
 
 # Required columns in destination library
+# Updated based on File MetaData Structure.xlsx
 REQUIRED_COLUMNS = [
-    {"name": "DocType", "type": "text"},
-    {"name": "Department", "type": "text"},
-    {"name": "CustomerName", "type": "text"},
-    {"name": "VendorName", "type": "text"},
+    # Core metadata from Excel structure
+    {"name": "AcctType", "type": "choice", "choices": ["Manufacturers / Vendors", "Customer Accounts", "Corporate Internal", "System Resources"]},
+    {"name": "AcctName", "type": "text"},
+    {"name": "DocumentType", "type": "choice", "choices": [
+        "Supplier Documents", "Marketing Literature", "Capabilities / Catalogs", "SOPs / Resources",
+        "Plant Warehouse List", "Dunnage", "Product Specification Sheet", "Product Pack-Out Specs",
+        "Product Drawings", "Graphical Die Line", "Forecasts", "Inventory Reports", "Transaction History",
+        "Price List", "Misc.", "Customer Documents", "Drawing Approval", "Specification Approval",
+        "Prototype Approval", "Graphics Approval", "Project Timeline", "Supplier Quote", "Customer Quote",
+        "Cost Analysis", "Training", "Agreement Resources", "New Business Dev Resources", "Quality Documents",
+        "Claims/Cases", "Warehouse & Consignment", "Invoice & Hold Agreement", "Supply Agreement",
+        "Supply Addendum", "Other"
+    ]},
+    {"name": "DocumentSubType", "type": "text"},
+    {"name": "DocumentStatus", "type": "choice", "choices": ["Active", "Archived", "Pending"]},
+    # Legacy fields for migration tracking
+    {"name": "LegacyPath", "type": "text"},
+    {"name": "LegacyUrl", "type": "text"},
+    # Additional metadata inferred by hybrid classification
     {"name": "ProjectOrPartNumber", "type": "text"},
     {"name": "DocumentDate", "type": "dateTime"},
     {"name": "RetentionCategory", "type": "text"},
-    {"name": "LegacyPath", "type": "text"},
-    {"name": "LegacyUrl", "type": "text"},
+    # Folder tree levels (for auditing the source classification)
+    {"name": "Level1", "type": "text"},
+    {"name": "Level2", "type": "text"},
+    {"name": "Level3", "type": "text"},
 ]
 
 # Classification confidence threshold

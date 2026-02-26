@@ -1310,6 +1310,9 @@ Legacy path: {legacy_path}
     async def update_candidate(self, candidate_id: str, updates: Dict) -> bool:
         """Update a candidate's fields (for manual editing)."""
         allowed_fields = [
+            # NEW: Excel metadata fields
+            "acct_type", "acct_name", "document_type", "document_sub_type", "document_status",
+            # Legacy fields
             "doc_type", "department", "customer_name", "vendor_name",
             "project_or_part_number", "document_date", "retention_category",
             "status"

@@ -1280,6 +1280,7 @@ Legacy path: {legacy_path}
     async def get_candidates(
         self,
         status: Optional[str] = None,
+        exclude_status: Optional[str] = None,
         doc_type: Optional[str] = None,
         min_confidence: Optional[float] = None,
         max_confidence: Optional[float] = None,
@@ -1291,6 +1292,8 @@ Legacy path: {legacy_path}
         
         if status:
             query["status"] = status
+        if exclude_status:
+            query["status"] = {"$ne": exclude_status}
         if doc_type:
             query["doc_type"] = doc_type
         if min_confidence is not None:

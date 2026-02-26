@@ -313,7 +313,9 @@ export default function SharePointMigrationPage() {
           </Card>
           <Card className="bg-purple-50 dark:bg-purple-950/30">
             <CardContent className="pt-4">
-              <div className="text-2xl font-bold text-purple-600">{summary.by_classification_source?.folder_tree || 0}</div>
+              <div className="text-2xl font-bold text-purple-600">
+                {(summary.by_classification_source?.folder_tree || 0) + (summary.by_classification_source?.hybrid || 0)}
+              </div>
               <div className="text-xs text-muted-foreground">Folder Tree Matches</div>
             </CardContent>
           </Card>

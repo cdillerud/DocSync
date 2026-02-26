@@ -203,13 +203,16 @@ class SharePointMigrationService:
             if level2:
                 metadata["acct_name"] = level2
                 metadata["vendor_name"] = level2
-        elif level1 in ["Corporate Internal", "HR Programs and Benefits", "General"]:
+        elif level1 in ["Corporate Internal", "HR Programs and Benefits", "General", "Custom Projects", "Product Knowledge"]:
             metadata["acct_type"] = "Corporate Internal"
+            # For Custom Projects, Level2 is often the project/customer name
+            if level2:
+                metadata["acct_name"] = level2
         elif level1 == "System Resources":
             metadata["acct_type"] = "System Resources"
         else:
             # Default based on context
-            metadata["acct_type"] = "Customer Accounts" if level2 else "Corporate Internal"
+            metadata["acct_type"] = "Corporate Internal"
             if level2:
                 metadata["acct_name"] = level2
         

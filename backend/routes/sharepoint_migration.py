@@ -184,6 +184,7 @@ async def migrate_candidates(request: MigrateRequest):
 @router.get("/candidates")
 async def list_candidates(
     status: Optional[str] = Query(None, description="Filter by status"),
+    exclude_status: Optional[str] = Query(None, description="Exclude this status"),
     doc_type: Optional[str] = Query(None, description="Filter by doc_type"),
     min_confidence: Optional[float] = Query(None, ge=0, le=1, description="Minimum confidence"),
     max_confidence: Optional[float] = Query(None, ge=0, le=1, description="Maximum confidence"),
@@ -198,6 +199,7 @@ async def list_candidates(
     try:
         candidates = await service.get_candidates(
             status=status,
+            exclude_status=exclude_status,
             doc_type=doc_type,
             min_confidence=min_confidence,
             max_confidence=max_confidence,

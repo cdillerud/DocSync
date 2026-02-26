@@ -792,10 +792,15 @@ Legacy path: {legacy_path}
                         candidate["legacy_path"]
                     )
                     
+                    # Determine document_status from path
+                    legacy_path_lower = (candidate.get("legacy_path") or "").lower()
+                    document_status = "Archived" if "previous version" in legacy_path_lower else "Active"
+                    
                     # Merge AI results with folder tree data
                     update_data = {
                         "document_date": ai_result.get("document_date") or candidate.get("document_date"),
                         "project_or_part_number": ai_result.get("project_or_part_number") or candidate.get("project_or_part_number"),
+                        "document_status": document_status,
                         "classification_source": "hybrid",
                         "classification_method": "folder_tree_plus_ai",
                         "status": "ready_for_migration",
@@ -839,11 +844,18 @@ Legacy path: {legacy_path}
                     else:
                         low_confidence += 1
                     
-                    # Update candidate with AI results
+                    # Update candidate with AI results (includes new Excel metadata fields)
                     update_data = {
+                        # NEW: Excel metadata fields
+                        "acct_type": result.get("acct_type"),
+                        "acct_name": result.get("acct_name"),
+                        "document_type": result.get("document_type"),
+                        "document_sub_type": result.get("document_sub_type"),
+                        "document_status": result.get("document_status", "Active"),
+                        # Legacy fields
                         "doc_type": result.get("doc_type"),
                         "department": result.get("department"),
-                        "customer_name": result.get("customer_name"),
+                        "customer_name": result.get("customer_name") or result.get("acct_name"),
                         "vendor_name": result.get("vendor_name"),
                         "project_or_part_number": result.get("project_or_part_number"),
                         "document_date": result.get("document_date"),

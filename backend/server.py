@@ -141,6 +141,11 @@ from routes.auth import router as auth_router
 # ==================== AP REVIEW ====================
 from routes.ap_review import ap_review_router, set_dependencies as set_ap_review_deps
 from services.business_central_service import BusinessCentralService, get_bc_service
+
+# ==================== SHAREPOINT MIGRATION ====================
+from routes.sharepoint_migration import router as sharepoint_migration_router
+import routes.sharepoint_migration as sharepoint_migration_module
+
 import jwt as pyjwt
 
 TEST_USER = {"username": "admin", "password": "admin", "display_name": "Hub Admin", "role": "administrator"}

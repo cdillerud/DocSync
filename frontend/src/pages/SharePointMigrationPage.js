@@ -317,6 +317,7 @@ export default function SharePointMigrationPage() {
             size="sm" 
             onClick={() => setShowSourceConfig(!showSourceConfig)}
           >
+            <Settings className="w-4 h-4 mr-2" />
             Configure Source
           </Button>
           <Button 

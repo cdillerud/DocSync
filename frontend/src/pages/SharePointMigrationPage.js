@@ -459,14 +459,14 @@ export default function SharePointMigrationPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[280px]">File Name</TableHead>
+                <TableHead className="w-[260px]">File Name</TableHead>
                 <TableHead>Source</TableHead>
-                <TableHead>Level1/Level2</TableHead>
-                <TableHead>Doc Type</TableHead>
-                <TableHead>Customer</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead>Confidence</TableHead>
+                <TableHead>Acct Type</TableHead>
+                <TableHead>Document Type</TableHead>
+                <TableHead>Acct Name</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Confidence</TableHead>
+                <TableHead>Migration</TableHead>
                 <TableHead className="w-10"></TableHead>
               </TableRow>
             </TableHeader>
@@ -494,7 +494,7 @@ export default function SharePointMigrationPage() {
                       <div className="flex items-center gap-2">
                         <FileText className="w-4 h-4 text-gray-400 flex-shrink-0" />
                         <div className="min-w-0">
-                          <div className="font-medium text-sm truncate max-w-[260px]" title={candidate.file_name}>
+                          <div className="font-medium text-sm truncate max-w-[240px]" title={candidate.file_name}>
                             {candidate.file_name}
                           </div>
                         </div>
@@ -515,22 +515,34 @@ export default function SharePointMigrationPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      {candidate.level1 && (
-                        <div className="text-xs">
-                          <span className="font-medium">{candidate.level1}</span>
-                          {candidate.level2 && <span className="text-muted-foreground"> / {candidate.level2}</span>}
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {candidate.doc_type && (
-                        <Badge className={`text-[10px] ${DOC_TYPE_COLORS[candidate.doc_type] || DOC_TYPE_COLORS.unknown}`}>
-                          {candidate.doc_type}
+                      {candidate.acct_type && (
+                        <Badge className={`text-[10px] ${ACCT_TYPE_COLORS[candidate.acct_type] || 'bg-gray-100 text-gray-600'}`}>
+                          {candidate.acct_type === 'Manufacturers / Vendors' ? 'Vendor' : 
+                           candidate.acct_type === 'Customer Accounts' ? 'Customer' :
+                           candidate.acct_type === 'Corporate Internal' ? 'Internal' : 
+                           candidate.acct_type}
                         </Badge>
                       )}
                     </TableCell>
-                    <TableCell className="text-xs">{candidate.customer_name || '-'}</TableCell>
-                    <TableCell className="text-xs">{formatDate(candidate.document_date)}</TableCell>
+                    <TableCell>
+                      {candidate.document_type && (
+                        <Badge className={`text-[10px] ${DOCUMENT_TYPE_COLORS[candidate.document_type] || 'bg-gray-100 text-gray-600'}`}>
+                          {candidate.document_type.length > 20 
+                            ? candidate.document_type.substring(0, 20) + '...' 
+                            : candidate.document_type}
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs max-w-[120px] truncate" title={candidate.acct_name}>
+                      {candidate.acct_name || candidate.customer_name || candidate.vendor_name || '-'}
+                    </TableCell>
+                    <TableCell>
+                      {candidate.document_status && (
+                        <Badge className={`text-[10px] ${DOC_STATUS_COLORS[candidate.document_status] || 'bg-gray-100 text-gray-600'}`}>
+                          {candidate.document_status}
+                        </Badge>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <ConfidenceBadge confidence={candidate.classification_confidence} />
                     </TableCell>

@@ -781,54 +781,6 @@ Legacy path: {legacy_path}
                 break
         
         return result
-                new_status = "ready_for_migration" if confidence >= CONFIDENCE_THRESHOLD else "classified"
-                
-                if confidence >= CONFIDENCE_THRESHOLD:
-                    high_confidence += 1
-                else:
-                    low_confidence += 1
-                
-                # Update candidate
-                update_data = {
-                    "doc_type": result.get("doc_type"),
-                    "department": result.get("department"),
-                    "customer_name": result.get("customer_name"),
-                    "vendor_name": result.get("vendor_name"),
-                    "project_or_part_number": result.get("project_or_part_number"),
-                    "document_date": result.get("document_date"),
-                    "retention_category": result.get("retention_category"),
-                    "classification_confidence": confidence,
-                    "classification_method": result.get("classification_method", "ai"),
-                    "status": new_status,
-                    "updated_utc": now
-                }
-                
-                await self.collection.update_one(
-                    {"id": candidate["id"]},
-                    {"$set": update_data}
-                )
-                
-                processed += 1
-                
-            except Exception as e:
-                logger.error(f"Error classifying {candidate.get('file_name')}: {e}")
-                await self.collection.update_one(
-                    {"id": candidate["id"]},
-                    {"$set": {
-                        "status": "error",
-                        "migration_error": str(e),
-                        "updated_utc": now
-                    }}
-                )
-        
-        logger.info(f"Classification complete: {processed} processed, {high_confidence} high confidence, {low_confidence} low confidence")
-        
-        return {
-            "processed": processed,
-            "updated": processed,
-            "high_confidence": high_confidence,
-            "low_confidence": low_confidence
-        }
     
     async def _ensure_destination_columns(
         self,

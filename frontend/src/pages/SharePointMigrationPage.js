@@ -637,10 +637,10 @@ export default function SharePointMigrationPage() {
                 </div>
               </div>
 
-              {/* Metadata Fields */}
+              {/* Metadata Fields - NEW Excel Structure */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <div className="text-sm font-medium">AI-Inferred Metadata</div>
+                  <div className="text-sm font-medium">Metadata (Excel Structure)</div>
                   {!editMode && selectedCandidate.status !== 'migrated' && (
                     <Button variant="outline" size="sm" onClick={() => setEditMode(true)}>
                       Edit
@@ -649,81 +649,116 @@ export default function SharePointMigrationPage() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
+                  {/* Account Type */}
+                  <div>
+                    <Label className="text-xs">Account Type</Label>
+                    {editMode ? (
+                      <Select 
+                        value={editForm.acct_type} 
+                        onValueChange={(v) => setEditForm({...editForm, acct_type: v})}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Customer Accounts">Customer Accounts</SelectItem>
+                          <SelectItem value="Manufacturers / Vendors">Manufacturers / Vendors</SelectItem>
+                          <SelectItem value="Corporate Internal">Corporate Internal</SelectItem>
+                          <SelectItem value="System Resources">System Resources</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <div className="text-sm">{selectedCandidate.acct_type || '-'}</div>
+                    )}
+                  </div>
+
+                  {/* Account Name */}
+                  <div>
+                    <Label className="text-xs">Account Name</Label>
+                    {editMode ? (
+                      <Input 
+                        value={editForm.acct_name}
+                        onChange={(e) => setEditForm({...editForm, acct_name: e.target.value})}
+                        placeholder="Customer or vendor name"
+                      />
+                    ) : (
+                      <div className="text-sm">{selectedCandidate.acct_name || '-'}</div>
+                    )}
+                  </div>
+
+                  {/* Document Type (NEW - from Excel) */}
                   <div>
                     <Label className="text-xs">Document Type</Label>
                     {editMode ? (
                       <Select 
-                        value={editForm.doc_type} 
-                        onValueChange={(v) => setEditForm({...editForm, doc_type: v})}
+                        value={editForm.document_type} 
+                        onValueChange={(v) => setEditForm({...editForm, document_type: v})}
                       >
                         <SelectTrigger>
-                          <SelectValue />
+                          <SelectValue placeholder="Select type" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="spec_sheet">Spec Sheet</SelectItem>
-                          <SelectItem value="artwork">Artwork</SelectItem>
-                          <SelectItem value="invoice">Invoice</SelectItem>
-                          <SelectItem value="po">PO</SelectItem>
-                          <SelectItem value="contract">Contract</SelectItem>
-                          <SelectItem value="correspondence">Correspondence</SelectItem>
-                          <SelectItem value="report">Report</SelectItem>
-                          <SelectItem value="unknown">Unknown</SelectItem>
+                          <SelectItem value="Product Specification Sheet">Product Specification Sheet</SelectItem>
+                          <SelectItem value="Product Drawings">Product Drawings</SelectItem>
+                          <SelectItem value="Product Pack-Out Specs">Product Pack-Out Specs</SelectItem>
+                          <SelectItem value="Graphical Die Line">Graphical Die Line</SelectItem>
+                          <SelectItem value="Supplier Documents">Supplier Documents</SelectItem>
+                          <SelectItem value="Marketing Literature">Marketing Literature</SelectItem>
+                          <SelectItem value="Capabilities / Catalogs">Capabilities / Catalogs</SelectItem>
+                          <SelectItem value="SOPs / Resources">SOPs / Resources</SelectItem>
+                          <SelectItem value="Customer Documents">Customer Documents</SelectItem>
+                          <SelectItem value="Customer Quote">Customer Quote</SelectItem>
+                          <SelectItem value="Supplier Quote">Supplier Quote</SelectItem>
+                          <SelectItem value="Cost Analysis">Cost Analysis</SelectItem>
+                          <SelectItem value="Agreement Resources">Agreement Resources</SelectItem>
+                          <SelectItem value="Supply Agreement">Supply Agreement</SelectItem>
+                          <SelectItem value="Quality Documents">Quality Documents</SelectItem>
+                          <SelectItem value="Training">Training</SelectItem>
+                          <SelectItem value="Other">Other</SelectItem>
                         </SelectContent>
                       </Select>
                     ) : (
-                      <div className="text-sm">{selectedCandidate.doc_type || '-'}</div>
+                      <div className="text-sm">{selectedCandidate.document_type || '-'}</div>
                     )}
                   </div>
 
+                  {/* Document Sub Type */}
                   <div>
-                    <Label className="text-xs">Department</Label>
+                    <Label className="text-xs">Document Sub Type</Label>
+                    {editMode ? (
+                      <Input 
+                        value={editForm.document_sub_type}
+                        onChange={(e) => setEditForm({...editForm, document_sub_type: e.target.value})}
+                        placeholder="e.g., Beard Care, Face Care"
+                      />
+                    ) : (
+                      <div className="text-sm">{selectedCandidate.document_sub_type || '-'}</div>
+                    )}
+                  </div>
+
+                  {/* Document Status */}
+                  <div>
+                    <Label className="text-xs">Document Status</Label>
                     {editMode ? (
                       <Select 
-                        value={editForm.department} 
-                        onValueChange={(v) => setEditForm({...editForm, department: v})}
+                        value={editForm.document_status} 
+                        onValueChange={(v) => setEditForm({...editForm, document_status: v})}
                       >
                         <SelectTrigger>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="CustomerRelations">Customer Relations</SelectItem>
-                          <SelectItem value="Sales">Sales</SelectItem>
-                          <SelectItem value="Marketing">Marketing</SelectItem>
-                          <SelectItem value="Finance">Finance</SelectItem>
-                          <SelectItem value="Quality">Quality</SelectItem>
-                          <SelectItem value="Operations">Operations</SelectItem>
-                          <SelectItem value="Unknown">Unknown</SelectItem>
+                          <SelectItem value="Active">Active</SelectItem>
+                          <SelectItem value="Archived">Archived</SelectItem>
+                          <SelectItem value="Pending">Pending</SelectItem>
                         </SelectContent>
                       </Select>
                     ) : (
-                      <div className="text-sm">{selectedCandidate.department || '-'}</div>
+                      <div className="text-sm">{selectedCandidate.document_status || '-'}</div>
                     )}
                   </div>
 
-                  <div>
-                    <Label className="text-xs">Customer Name</Label>
-                    {editMode ? (
-                      <Input 
-                        value={editForm.customer_name}
-                        onChange={(e) => setEditForm({...editForm, customer_name: e.target.value})}
-                      />
-                    ) : (
-                      <div className="text-sm">{selectedCandidate.customer_name || '-'}</div>
-                    )}
-                  </div>
-
-                  <div>
-                    <Label className="text-xs">Vendor Name</Label>
-                    {editMode ? (
-                      <Input 
-                        value={editForm.vendor_name}
-                        onChange={(e) => setEditForm({...editForm, vendor_name: e.target.value})}
-                      />
-                    ) : (
-                      <div className="text-sm">{selectedCandidate.vendor_name || '-'}</div>
-                    )}
-                  </div>
-
+                  {/* Project/Part Number */}
                   <div>
                     <Label className="text-xs">Project/Part Number</Label>
                     {editMode ? (
@@ -736,6 +771,7 @@ export default function SharePointMigrationPage() {
                     )}
                   </div>
 
+                  {/* Document Date */}
                   <div>
                     <Label className="text-xs">Document Date</Label>
                     {editMode ? (
@@ -749,7 +785,8 @@ export default function SharePointMigrationPage() {
                     )}
                   </div>
 
-                  <div className="col-span-2">
+                  {/* Retention Category */}
+                  <div>
                     <Label className="text-xs">Retention Category</Label>
                     {editMode ? (
                       <Select 
@@ -772,6 +809,19 @@ export default function SharePointMigrationPage() {
                     )}
                   </div>
                 </div>
+
+                {/* Folder Tree Info (read-only) */}
+                {selectedCandidate.level1 && (
+                  <div className="mt-3 p-2 bg-gray-50 dark:bg-gray-800 rounded text-xs">
+                    <div className="font-medium text-gray-500 mb-1">Folder Tree Path</div>
+                    <div>
+                      {selectedCandidate.level1}
+                      {selectedCandidate.level2 && ` / ${selectedCandidate.level2}`}
+                      {selectedCandidate.level3 && ` / ${selectedCandidate.level3}`}
+                      {selectedCandidate.level4 && ` / ${selectedCandidate.level4}`}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

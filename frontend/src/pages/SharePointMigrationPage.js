@@ -11,7 +11,7 @@ import { toast } from 'sonner';
 import { 
   Search, RefreshCw, Play, FolderSync, Brain, Upload, 
   ExternalLink, CheckCircle2, AlertCircle, Clock, FileText,
-  ChevronRight, Loader2 
+  ChevronRight, Loader2, Settings 
 } from 'lucide-react';
 import axios from 'axios';
 

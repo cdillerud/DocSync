@@ -638,6 +638,7 @@ class SharePointMigrationService:
                 "acct_type": "Corporate Internal",
                 "document_type": "Other",
                 "document_status": "Active",
+                "department": "Unknown",
                 "confidence": 0.0,
                 "error": "API key not configured"
             }
@@ -646,54 +647,65 @@ class SharePointMigrationService:
             from emergentintegrations.llm.chat import LlmChat, UserMessage
             
             # Build the classification prompt aligned with Excel metadata structure
-            system_prompt = """You are a document classification expert for Gamer Packaging Inc.
+            system_prompt = """You are a document classification expert for Gamer Packaging Inc (GPI), a packaging company.
 Your task is to analyze a file and extract metadata aligned with our SharePoint flat structure.
 
 You MUST respond with ONLY a JSON object in this exact format:
 {
     "acct_type": "Manufacturers / Vendors | Customer Accounts | Corporate Internal | System Resources",
-    "acct_name": "string - The customer or vendor name (e.g., 'Duke Cannon', 'Acme Supplier')",
+    "acct_name": "string - The customer or vendor name (e.g., 'Duke Cannon', 'Menasha Packaging')",
+    "department": "CustomerRelations | Sales | Marketing | Operations | Quality | Finance | HR | IT | Purchasing | Warehouse | Engineering | Unknown",
     "document_type": "One of: Supplier Documents, Marketing Literature, Capabilities / Catalogs, SOPs / Resources, Plant Warehouse List, Dunnage, Product Specification Sheet, Product Pack-Out Specs, Product Drawings, Graphical Die Line, Forecasts, Inventory Reports, Transaction History, Price List, Misc., Customer Documents, Drawing Approval, Specification Approval, Prototype Approval, Graphics Approval, Project Timeline, Supplier Quote, Customer Quote, Cost Analysis, Training, Agreement Resources, New Business Dev Resources, Quality Documents, Claims/Cases, Warehouse & Consignment, Invoice & Hold Agreement, Supply Agreement, Supply Addendum, Other",
-    "document_sub_type": "string - More specific classification within document_type (e.g., 'Beard Care', 'Face Care', 'Bottle Specs')",
+    "document_sub_type": "string - More specific classification (e.g., 'Beard Care', 'Face Care', 'Corrugated')",
     "document_status": "Active | Archived | Pending",
     "project_or_part_number": "string or null - Part numbers like BT-1000-110, GPI-12345",
-    "document_date": "YYYY-MM-DD or null - Date extracted from filename or document",
+    "document_date": "YYYY-MM-DD or null - Date from filename or document",
     "retention_category": "CustomerComm_LongTerm | WorkingDoc_2yrs | Accounting_7yrs | Legal_10yrs | Unknown",
     "confidence": 0.0 to 1.0
 }
 
-IMPORTANT CLASSIFICATION HINTS:
-1. Path context is critical:
-   - "Customer Relations" folder → acct_type = "Customer Accounts"
-   - "Duke Cannon" in path → acct_name = "Duke Cannon" 
-   - Vendor/Manufacturer folders → acct_type = "Manufacturers / Vendors"
+CRITICAL DEPARTMENT CLASSIFICATION RULES:
+1. "Customer Relations" in path → department = "CustomerRelations", acct_type = "Customer Accounts"
+2. "Sales" in path OR sales orders/quotes → department = "Sales"
+3. "Marketing" in path OR marketing materials → department = "Marketing"
+4. "Quality" in path OR quality docs/claims/inspections → department = "Quality"
+5. "Warehouse" or "WH" or "Shipping" in path → department = "Warehouse"
+6. "Purchasing" or vendor-related procurement → department = "Purchasing"
+7. "Engineering" or technical drawings/specs → department = "Engineering"
+8. "Operations" or production/manufacturing docs → department = "Operations"
+9. "Finance" or "Accounting" or invoices/payments → department = "Finance"
+10. "HR" or employee/benefits docs → department = "HR"
+11. "IT" or technical/system docs → department = "IT"
 
-2. Document Type mapping:
-   - "Spec Binder", "Specification Binder" → document_type = "Product Specification Sheet"
-   - "Art Work Files" folder → document_type = "Product Drawings" or "Graphical Die Line"
-   - SOPs, procedures, guides → document_type = "SOPs / Resources"
-   - Quotes → "Customer Quote" or "Supplier Quote" based on context
+ACCT_TYPE RULES:
+- If dealing with a CUSTOMER (someone GPI sells to): acct_type = "Customer Accounts"
+- If dealing with a VENDOR/SUPPLIER (someone GPI buys from): acct_type = "Manufacturers / Vendors"
+- If internal company docs with no external party: acct_type = "Corporate Internal"
 
-3. Dates in filenames:
-   - "(9.23.25)" means September 23, 2025 → "2025-09-23"
-   - "(7.9.25)" means July 9, 2025 → "2025-07-09"
+DOCUMENT TYPE HINTS:
+- "Spec Binder", "Specification" → "Product Specification Sheet"
+- "Art Work", "Artwork", "Die Line" → "Product Drawings" or "Graphical Die Line"
+- "Quote" from customer → "Customer Quote"; Quote to customer → "Supplier Quote"
+- "PO", "Purchase Order" → "Supplier Documents"
+- "Invoice" → "Invoice & Hold Agreement"
+- "SOP", "Procedure", "Guide" → "SOPs / Resources"
+- "Agreement", "Contract" → "Agreement Resources" or "Supply Agreement"
 
-4. Part numbers:
-   - Look for patterns like "BT-1000-110", "BT-150-45", "FCSPF"
-   - Product codes are often at the start of filenames
-
-5. Set document_status = "Active" unless the path contains "Previous Versions" or "Archive"
+DATE PATTERNS IN FILENAMES:
+- "(9.23.25)" = September 23, 2025 → "2025-09-23"
+- "2025-01-15" → "2025-01-15"
+- "01152025" → "2025-01-15"
 
 RESPOND ONLY WITH THE JSON OBJECT, NO OTHER TEXT."""
             
-            user_content = f"""Classify this file:
+            user_content = f"""Classify this file for Gamer Packaging Inc:
 
 File name: {file_name}
-Legacy path: {legacy_path}
+Full path: {legacy_path}
 
 """
             if text_content:
-                user_content += f"Document text (excerpt):\n{text_content[:3000]}"
+                user_content += f"Document text (first 3000 chars):\n{text_content[:3000]}"
             else:
                 user_content += "No text content available - classify based on file name and path only."
             
@@ -725,10 +737,11 @@ Legacy path: {legacy_path}
             result = json.loads(response_text.strip())
             result["classification_method"] = "ai_with_path" if text_content else "ai_filename_only"
             
-            # Ensure all required fields exist
+            # Ensure all required fields exist with sensible defaults
             result.setdefault("document_status", "Active")
             result.setdefault("acct_type", "Corporate Internal")
             result.setdefault("document_type", "Other")
+            result.setdefault("department", "Unknown")
             
             return result
             
@@ -738,6 +751,7 @@ Legacy path: {legacy_path}
                 "acct_type": "Corporate Internal",
                 "document_type": "Other",
                 "document_status": "Active",
+                "department": "Unknown",
                 "confidence": 0.0,
                 "error": str(e)
             }

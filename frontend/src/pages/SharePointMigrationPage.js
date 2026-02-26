@@ -164,7 +164,7 @@ export default function SharePointMigrationPage() {
         // For sharing links, we can't decode the path - ask user to provide it
         setSourceConfig({
           siteUrl,
-          libraryName: 'Shared Documents',
+          libraryName: 'Documents', // API name, not display name
           folderPath: ''
         });
         setPasteUrl('');

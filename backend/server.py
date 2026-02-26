@@ -12581,6 +12581,13 @@ async def startup():
     await db.email_logs.create_index("sent_at")
     logger.info("Email service initialized (provider: mock)")
     
+    # Initialize SharePoint Migration module
+    sharepoint_migration_module.db = db
+    await db.migration_candidates.create_index("source_item_id", unique=True)
+    await db.migration_candidates.create_index("status")
+    await db.migration_candidates.create_index("doc_type")
+    logger.info("SharePoint Migration module initialized")
+    
     # Start daily pilot summary scheduler if enabled
     global _pilot_summary_task
     if PILOT_MODE_ENABLED and DAILY_PILOT_EMAIL_ENABLED:

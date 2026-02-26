@@ -162,7 +162,12 @@ export default function SharePointMigrationPage() {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (statusFilter !== 'all') params.append('status', statusFilter);
+      // 'pending' = all except migrated
+      if (statusFilter === 'pending') {
+        params.append('exclude_status', 'migrated');
+      } else if (statusFilter !== 'all') {
+        params.append('status', statusFilter);
+      }
       if (docTypeFilter !== 'all') params.append('doc_type', docTypeFilter);
       params.append('limit', '100');
       

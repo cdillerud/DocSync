@@ -12402,6 +12402,8 @@ app.include_router(api_router)
 app.include_router(sales_router)
 # AP Review Module
 app.include_router(ap_review_router)
+# SharePoint Migration Module
+app.include_router(sharepoint_migration_router, prefix="/api")
 
 @app.get("/api/health")
 async def health_check():

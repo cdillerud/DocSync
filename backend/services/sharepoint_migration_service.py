@@ -172,45 +172,54 @@ class SharePointMigrationService:
         site_url: str, 
         library_name: str, 
         folder_path: str,
-        token: str
+        token: str,
+        recursive: bool = True
     ) -> List[Dict]:
-        """List all files in a SharePoint folder."""
+        """List all files in a SharePoint folder, optionally recursively."""
         site_id = await self._get_site_id(site_url, token)
         drive_id = await self._get_drive_id(site_id, library_name, token)
         
-        # Build the folder path for the API
-        # folder_path is like "Customer Relations"
-        encoded_path = folder_path.replace(" ", "%20")
-        
         files = []
+        folders_to_process = [folder_path]
+        
         async with httpx.AsyncClient(timeout=60.0) as client:
-            # List items in the folder
-            url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{encoded_path}:/children"
-            
-            while url:
-                resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
-                if resp.status_code == 404:
-                    logger.warning(f"Folder not found: {folder_path}")
-                    return []
-                if resp.status_code != 200:
-                    raise Exception(f"Failed to list files: {resp.status_code} - {resp.text[:500]}")
+            while folders_to_process:
+                current_folder = folders_to_process.pop(0)
+                encoded_path = current_folder.replace(" ", "%20")
                 
-                data = resp.json()
-                for item in data.get("value", []):
-                    # Only include files (not folders) for this POC
-                    if "file" in item:
-                        files.append({
-                            "id": item["id"],
-                            "name": item["name"],
-                            "size": item.get("size", 0),
-                            "web_url": item.get("webUrl", ""),
-                            "created_datetime": item.get("createdDateTime"),
-                            "last_modified": item.get("lastModifiedDateTime"),
-                            "drive_id": drive_id
-                        })
+                # List items in the folder
+                url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{encoded_path}:/children"
                 
-                # Handle pagination
-                url = data.get("@odata.nextLink")
+                while url:
+                    resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+                    if resp.status_code == 404:
+                        logger.warning(f"Folder not found: {current_folder}")
+                        break
+                    if resp.status_code != 200:
+                        raise Exception(f"Failed to list files: {resp.status_code} - {resp.text[:500]}")
+                    
+                    data = resp.json()
+                    for item in data.get("value", []):
+                        if "file" in item:
+                            # Calculate the relative path from the root folder
+                            rel_path = current_folder
+                            files.append({
+                                "id": item["id"],
+                                "name": item["name"],
+                                "size": item.get("size", 0),
+                                "web_url": item.get("webUrl", ""),
+                                "created_datetime": item.get("createdDateTime"),
+                                "last_modified": item.get("lastModifiedDateTime"),
+                                "drive_id": drive_id,
+                                "folder_path": current_folder
+                            })
+                        elif "folder" in item and recursive:
+                            # Add subfolder to process
+                            subfolder_path = f"{current_folder}/{item['name']}"
+                            folders_to_process.append(subfolder_path)
+                    
+                    # Handle pagination
+                    url = data.get("@odata.nextLink")
         
         return files
     

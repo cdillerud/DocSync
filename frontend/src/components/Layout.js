@@ -98,6 +98,7 @@ export default function Layout() {
     if (path.startsWith('/documents/')) return 'Document Detail';
     if (path === '/email-parser') return 'Email Config';
     if (path === '/settings') return 'Settings';
+    if (path === '/migration/onegamer-poc') return 'SharePoint Migration POC';
     return 'GPI Document Hub';
   };
 

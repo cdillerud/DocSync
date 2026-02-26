@@ -184,9 +184,9 @@ export default function SharePointMigrationPage() {
     setActionLoading('discover');
     try {
       const res = await API.post('/api/migration/sharepoint/discover', {
-        sourceSiteUrl: 'https://gamerpackaging1.sharepoint.com/sites/OneGamer',
-        sourceLibraryName: 'Documents',
-        sourceFolderPath: 'Customer Relations'
+        sourceSiteUrl: sourceConfig.siteUrl,
+        sourceLibraryName: sourceConfig.libraryName,
+        sourceFolderPath: sourceConfig.folderPath
       });
       toast.success(`Discovered ${res.data.total_discovered} files (${res.data.new_candidates} new)`);
       await fetchSummary();

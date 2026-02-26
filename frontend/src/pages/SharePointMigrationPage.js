@@ -36,6 +36,7 @@ const STATUS_BADGES = {
 };
 
 const DOC_TYPE_COLORS = {
+  // Legacy doc_type colors
   spec_sheet: 'bg-blue-100 text-blue-800',
   artwork: 'bg-purple-100 text-purple-800',
   invoice: 'bg-green-100 text-green-800',
@@ -44,6 +45,40 @@ const DOC_TYPE_COLORS = {
   correspondence: 'bg-orange-100 text-orange-800',
   report: 'bg-cyan-100 text-cyan-800',
   unknown: 'bg-gray-100 text-gray-600',
+};
+
+// NEW: Document type colors from Excel structure
+const DOCUMENT_TYPE_COLORS = {
+  'Product Specification Sheet': 'bg-blue-100 text-blue-800',
+  'Product Drawings': 'bg-purple-100 text-purple-800',
+  'Product Pack-Out Specs': 'bg-indigo-100 text-indigo-800',
+  'Graphical Die Line': 'bg-violet-100 text-violet-800',
+  'Supplier Documents': 'bg-amber-100 text-amber-800',
+  'Marketing Literature': 'bg-pink-100 text-pink-800',
+  'Capabilities / Catalogs': 'bg-rose-100 text-rose-800',
+  'SOPs / Resources': 'bg-teal-100 text-teal-800',
+  'Customer Documents': 'bg-emerald-100 text-emerald-800',
+  'Customer Quote': 'bg-lime-100 text-lime-800',
+  'Supplier Quote': 'bg-orange-100 text-orange-800',
+  'Agreement Resources': 'bg-red-100 text-red-800',
+  'Quality Documents': 'bg-cyan-100 text-cyan-800',
+  'Training': 'bg-sky-100 text-sky-800',
+  'Other': 'bg-gray-100 text-gray-600',
+};
+
+// Acct Type colors
+const ACCT_TYPE_COLORS = {
+  'Customer Accounts': 'bg-green-100 text-green-800',
+  'Manufacturers / Vendors': 'bg-orange-100 text-orange-800',
+  'Corporate Internal': 'bg-blue-100 text-blue-800',
+  'System Resources': 'bg-gray-100 text-gray-600',
+};
+
+// Document Status colors
+const DOC_STATUS_COLORS = {
+  'Active': 'bg-green-100 text-green-800',
+  'Archived': 'bg-gray-100 text-gray-600',
+  'Pending': 'bg-yellow-100 text-yellow-800',
 };
 
 function formatDate(iso) {

@@ -1397,6 +1397,40 @@ Implemented rule-based + AI hybrid approach:
 - Lower cost (AI only used for date/part extraction or unknowns)
 - Customer names auto-extracted from Level2 (Duke Cannon, Prospecting, etc.)
 
+### EXCEL METADATA STRUCTURE INTEGRATION (Feb 26, 2026)
+
+Integrated metadata structure from `File MetaData Structure.xlsx` into the hybrid classification model.
+
+**New Metadata Fields (aligned with target flat structure):**
+
+| Field | Type | Values |
+|-------|------|--------|
+| `acct_type` | Choice | `Customer Accounts`, `Manufacturers / Vendors`, `Corporate Internal`, `System Resources` |
+| `acct_name` | Text | Customer or vendor name (e.g., "Duke Cannon", "Prospecting Lead") |
+| `document_type` | Choice | 30+ types including: `Product Specification Sheet`, `Product Drawings`, `Customer Documents`, `Supplier Documents`, `SOPs / Resources`, `Agreement Resources`, etc. |
+| `document_sub_type` | Text | Sub-category within document_type (e.g., "Beard Care", "Face Care") |
+| `document_status` | Choice | `Active`, `Archived`, `Pending` |
+
+**Mapping Logic:**
+- `level1 = "Customer Relations"` → `acct_type = "Customer Accounts"`
+- `level2` populated with actual customer/vendor name → `acct_name`
+- Folder path patterns mapped to specific `document_type` values
+- `document_status` defaults to "Active", set to "Archived" if path contains "Previous Versions"
+
+**API Updates:**
+- `GET /api/migration/sharepoint/summary` - Now returns `by_document_type`, `by_acct_type`, `by_document_status` breakdowns
+- `PATCH /api/migration/sharepoint/candidates/{id}` - Accepts all new Excel metadata fields
+- `GET /api/migration/sharepoint/candidates` - Returns candidates with new Excel metadata
+
+**Frontend Updates:**
+- Table columns: Acct Type, Document Type, Acct Name, Status (replacing legacy columns)
+- Detail dialog: "Metadata (Excel Structure)" section with dropdowns for editable fields
+- Summary cards: Added "Doc Types Found" counter
+
+**SharePoint Column Creation:**
+- Backend automatically creates choice columns (`AcctType`, `DocumentType`, `DocumentStatus`) and text columns in destination library
+- Metadata applied to migrated files via Graph API
+
 ### Test Results (Hybrid)
 
 **Discovery:**

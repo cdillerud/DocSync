@@ -225,6 +225,13 @@ export default function SharePointMigrationPage() {
   const handleRowClick = (candidate) => {
     setSelectedCandidate(candidate);
     setEditForm({
+      // NEW: Excel metadata fields
+      acct_type: candidate.acct_type || '',
+      acct_name: candidate.acct_name || '',
+      document_type: candidate.document_type || '',
+      document_sub_type: candidate.document_sub_type || '',
+      document_status: candidate.document_status || 'Active',
+      // Legacy fields
       doc_type: candidate.doc_type || '',
       department: candidate.department || '',
       customer_name: candidate.customer_name || '',

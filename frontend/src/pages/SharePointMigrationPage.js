@@ -204,9 +204,9 @@ export default function SharePointMigrationPage() {
       let folderPath = '';
       
       if (pathParts.length > 0) {
-        // Handle "Shared Documents" vs "Documents"
+        // Handle "Shared Documents" - SharePoint API often uses "Documents" internally
         if (pathParts[0] === 'Shared Documents' || pathParts[0] === 'Shared%20Documents') {
-          libraryName = 'Shared Documents';
+          libraryName = 'Documents'; // Use API name, not display name
           folderPath = pathParts.slice(1).join('/');
         } else {
           libraryName = pathParts[0];

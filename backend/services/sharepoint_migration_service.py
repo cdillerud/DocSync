@@ -393,6 +393,13 @@ class SharePointMigrationService:
                     "id": str(uuid.uuid4()),
                     "status": "discovered",
                     "created_utc": now,
+                    # Initialize folder tree levels
+                    "level1": None,
+                    "level2": None,
+                    "level3": None,
+                    "level4": None,
+                    "level5": None,
+                    "classification_source": None,
                     # Initialize metadata fields as None
                     "doc_type": None,
                     "department": None,
@@ -410,6 +417,32 @@ class SharePointMigrationService:
                     "migration_timestamp": None,
                     "migration_error": None
                 })
+                
+                # Lookup folder classification from imported CSV
+                folder_class = await self._lookup_folder_classification(
+                    file_info["name"],
+                    folder_in_lib
+                )
+                
+                if folder_class:
+                    # Pre-populate from folder tree
+                    metadata = self._map_folder_to_metadata(folder_class)
+                    candidate_data.update({
+                        "level1": folder_class.get("level1"),
+                        "level2": folder_class.get("level2"),
+                        "level3": folder_class.get("level3"),
+                        "level4": folder_class.get("level4"),
+                        "level5": folder_class.get("level5"),
+                        "classification_source": "folder_tree",
+                        "doc_type": metadata.get("doc_type"),
+                        "department": metadata.get("department"),
+                        "customer_name": metadata.get("customer_name"),
+                        "vendor_name": metadata.get("vendor_name"),
+                        "retention_category": metadata.get("retention_category"),
+                        "classification_confidence": 0.9,  # High confidence from folder tree
+                        "classification_method": "folder_tree_lookup",
+                    })
+                
                 await self.collection.insert_one(candidate_data)
                 new_count += 1
         

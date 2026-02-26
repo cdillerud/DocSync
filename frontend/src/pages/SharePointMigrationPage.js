@@ -422,9 +422,10 @@ export default function SharePointMigrationPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[300px]">File Name</TableHead>
+                <TableHead className="w-[280px]">File Name</TableHead>
+                <TableHead>Source</TableHead>
+                <TableHead>Level1/Level2</TableHead>
                 <TableHead>Doc Type</TableHead>
-                <TableHead>Department</TableHead>
                 <TableHead>Customer</TableHead>
                 <TableHead>Date</TableHead>
                 <TableHead>Confidence</TableHead>
@@ -435,13 +436,13 @@ export default function SharePointMigrationPage() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center py-8">
+                  <TableCell colSpan={9} className="text-center py-8">
                     <Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" />
                   </TableCell>
                 </TableRow>
               ) : filteredCandidates.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center py-8 text-gray-500">
+                  <TableCell colSpan={9} className="text-center py-8 text-gray-500">
                     No migration candidates found. Click "Discover" to start.
                   </TableCell>
                 </TableRow>
@@ -456,25 +457,43 @@ export default function SharePointMigrationPage() {
                       <div className="flex items-center gap-2">
                         <FileText className="w-4 h-4 text-gray-400 flex-shrink-0" />
                         <div className="min-w-0">
-                          <div className="font-medium text-sm truncate max-w-[280px]" title={candidate.file_name}>
+                          <div className="font-medium text-sm truncate max-w-[260px]" title={candidate.file_name}>
                             {candidate.file_name}
-                          </div>
-                          <div className="text-xs text-muted-foreground truncate max-w-[280px]" title={candidate.legacy_path}>
-                            {candidate.legacy_path}
                           </div>
                         </div>
                       </div>
                     </TableCell>
                     <TableCell>
+                      {candidate.classification_source === 'folder_tree' && (
+                        <Badge className="bg-purple-100 text-purple-800 text-[10px]">CSV</Badge>
+                      )}
+                      {candidate.classification_source === 'hybrid' && (
+                        <Badge className="bg-indigo-100 text-indigo-800 text-[10px]">Hybrid</Badge>
+                      )}
+                      {candidate.classification_source === 'ai' && (
+                        <Badge className="bg-blue-100 text-blue-800 text-[10px]">AI</Badge>
+                      )}
+                      {!candidate.classification_source && (
+                        <Badge variant="outline" className="text-[10px]">-</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {candidate.level1 && (
+                        <div className="text-xs">
+                          <span className="font-medium">{candidate.level1}</span>
+                          {candidate.level2 && <span className="text-muted-foreground"> / {candidate.level2}</span>}
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell>
                       {candidate.doc_type && (
-                        <Badge className={DOC_TYPE_COLORS[candidate.doc_type] || DOC_TYPE_COLORS.unknown}>
+                        <Badge className={`text-[10px] ${DOC_TYPE_COLORS[candidate.doc_type] || DOC_TYPE_COLORS.unknown}`}>
                           {candidate.doc_type}
                         </Badge>
                       )}
                     </TableCell>
-                    <TableCell className="text-sm">{candidate.department || '-'}</TableCell>
-                    <TableCell className="text-sm">{candidate.customer_name || '-'}</TableCell>
-                    <TableCell className="text-sm">{formatDate(candidate.document_date)}</TableCell>
+                    <TableCell className="text-xs">{candidate.customer_name || '-'}</TableCell>
+                    <TableCell className="text-xs">{formatDate(candidate.document_date)}</TableCell>
                     <TableCell>
                       <ConfidenceBadge confidence={candidate.classification_confidence} />
                     </TableCell>

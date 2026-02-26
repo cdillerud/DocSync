@@ -596,15 +596,17 @@ Legacy path: {legacy_path}
     
     async def classify_candidates(self, max_count: int = 25) -> Dict[str, int]:
         """
-        Classify discovered candidates using AI.
+        Classify discovered candidates using HYBRID approach:
+        1. First check if folder tree classification already exists
+        2. Use AI only for additional metadata (dates, part numbers) or unmatched paths
         
         Args:
             max_count: Maximum number of candidates to process
             
         Returns:
-            Dict with processed, updated, high_confidence, low_confidence counts
+            Dict with processed, updated, high_confidence, low_confidence, folder_tree_matches counts
         """
-        logger.info(f"Classifying up to {max_count} candidates")
+        logger.info(f"Classifying up to {max_count} candidates (hybrid approach)")
         
         # Get candidates to classify
         cursor = self.collection.find(
@@ -615,39 +617,170 @@ Legacy path: {legacy_path}
         
         if not candidates:
             logger.info("No candidates to classify")
-            return {"processed": 0, "updated": 0, "high_confidence": 0, "low_confidence": 0}
+            return {"processed": 0, "updated": 0, "high_confidence": 0, "low_confidence": 0, "folder_tree_matches": 0}
         
         token = await self._get_graph_token()
         processed = 0
         high_confidence = 0
         low_confidence = 0
+        folder_tree_matches = 0
         now = datetime.now(timezone.utc).isoformat()
         
         for candidate in candidates:
             try:
-                # Try to get file content for better classification
-                text_content = ""
-                try:
-                    content = await self._get_file_content(
-                        candidate["source_drive_id"],
-                        candidate["source_item_id"],
-                        token
-                    )
-                    text_content = await self._extract_text_from_file(
+                # Check if we already have folder tree classification
+                has_folder_tree = candidate.get("classification_source") == "folder_tree"
+                existing_confidence = candidate.get("classification_confidence", 0.0) or 0.0
+                
+                # If folder tree gives us high confidence, we mainly need AI for dates/part numbers
+                if has_folder_tree and existing_confidence >= 0.85:
+                    folder_tree_matches += 1
+                    
+                    # Use AI only for extracting dates and part numbers from filename
+                    ai_result = await self._extract_dates_and_parts(
                         candidate["file_name"],
-                        content
+                        candidate["legacy_path"]
                     )
-                except Exception as e:
-                    logger.warning(f"Could not extract content from {candidate['file_name']}: {e}")
+                    
+                    # Merge AI results with folder tree data
+                    update_data = {
+                        "document_date": ai_result.get("document_date") or candidate.get("document_date"),
+                        "project_or_part_number": ai_result.get("project_or_part_number") or candidate.get("project_or_part_number"),
+                        "classification_source": "hybrid",
+                        "classification_method": "folder_tree_plus_ai",
+                        "status": "ready_for_migration",
+                        "updated_utc": now
+                    }
+                    
+                    await self.collection.update_one(
+                        {"id": candidate["id"]},
+                        {"$set": update_data}
+                    )
+                    high_confidence += 1
+                    
+                else:
+                    # No folder tree match - use full AI classification
+                    text_content = ""
+                    try:
+                        content = await self._get_file_content(
+                            candidate["source_drive_id"],
+                            candidate["source_item_id"],
+                            token
+                        )
+                        text_content = await self._extract_text_from_file(
+                            candidate["file_name"],
+                            content
+                        )
+                    except Exception as e:
+                        logger.warning(f"Could not extract content from {candidate['file_name']}: {e}")
+                    
+                    # Full AI classification
+                    result = await self._classify_with_ai(
+                        candidate["file_name"],
+                        candidate["legacy_path"],
+                        text_content
+                    )
+                    
+                    confidence = result.get("confidence", 0.0)
+                    new_status = "ready_for_migration" if confidence >= CONFIDENCE_THRESHOLD else "classified"
+                    
+                    if confidence >= CONFIDENCE_THRESHOLD:
+                        high_confidence += 1
+                    else:
+                        low_confidence += 1
+                    
+                    # Update candidate with AI results
+                    update_data = {
+                        "doc_type": result.get("doc_type"),
+                        "department": result.get("department"),
+                        "customer_name": result.get("customer_name"),
+                        "vendor_name": result.get("vendor_name"),
+                        "project_or_part_number": result.get("project_or_part_number"),
+                        "document_date": result.get("document_date"),
+                        "retention_category": result.get("retention_category"),
+                        "classification_confidence": confidence,
+                        "classification_source": "ai",
+                        "classification_method": result.get("classification_method", "ai"),
+                        "status": new_status,
+                        "updated_utc": now
+                    }
+                    
+                    await self.collection.update_one(
+                        {"id": candidate["id"]},
+                        {"$set": update_data}
+                    )
                 
-                # Classify with AI
-                result = await self._classify_with_ai(
-                    candidate["file_name"],
-                    candidate["legacy_path"],
-                    text_content
+                processed += 1
+                
+            except Exception as e:
+                logger.error(f"Error classifying {candidate.get('file_name')}: {e}")
+                await self.collection.update_one(
+                    {"id": candidate["id"]},
+                    {"$set": {
+                        "status": "error",
+                        "migration_error": str(e),
+                        "updated_utc": now
+                    }}
                 )
-                
-                confidence = result.get("confidence", 0.0)
+        
+        logger.info(f"Classification complete: {processed} processed, {folder_tree_matches} folder tree matches, {high_confidence} high confidence, {low_confidence} low confidence")
+        
+        return {
+            "processed": processed,
+            "updated": processed,
+            "high_confidence": high_confidence,
+            "low_confidence": low_confidence,
+            "folder_tree_matches": folder_tree_matches
+        }
+    
+    async def _extract_dates_and_parts(self, file_name: str, legacy_path: str) -> Dict[str, Any]:
+        """
+        Use AI to extract just dates and part numbers from filename.
+        Lighter-weight than full classification.
+        """
+        import re
+        
+        result = {"document_date": None, "project_or_part_number": None}
+        
+        # Try regex extraction first (fast, no API call)
+        # Date patterns like (9.23.25), (09-23-2025), etc.
+        date_patterns = [
+            r'\((\d{1,2})[./](\d{1,2})[./](\d{2,4})\)',  # (9.23.25) or (9/23/25)
+            r'(\d{1,2})[./](\d{1,2})[./](\d{2,4})',      # 9.23.25
+            r'(\d{4})-(\d{2})-(\d{2})',                   # 2025-09-23
+        ]
+        
+        for pattern in date_patterns:
+            match = re.search(pattern, file_name)
+            if match:
+                groups = match.groups()
+                if len(groups) == 3:
+                    try:
+                        # Handle different formats
+                        if len(groups[0]) == 4:  # YYYY-MM-DD
+                            year, month, day = groups
+                        else:
+                            month, day, year = groups
+                            if len(year) == 2:
+                                year = "20" + year
+                        result["document_date"] = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+                        break
+                    except:
+                        pass
+        
+        # Part number patterns
+        part_patterns = [
+            r'([A-Z]{2,4}[-_]?\d{3,6})',  # GPI-12345, ABC123
+            r'(\d{5,8})',                   # 12345678 (5-8 digit numbers)
+        ]
+        
+        for pattern in part_patterns:
+            match = re.search(pattern, file_name)
+            if match:
+                result["project_or_part_number"] = match.group(1)
+                break
+        
+        return result
                 new_status = "ready_for_migration" if confidence >= CONFIDENCE_THRESHOLD else "classified"
                 
                 if confidence >= CONFIDENCE_THRESHOLD:

@@ -403,6 +403,39 @@ export default function SharePointMigrationPage() {
             <CardTitle className="text-sm font-medium">Source Configuration</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/* Paste URL Section */}
+            <div className="p-3 bg-white dark:bg-gray-900 rounded-lg border border-dashed border-blue-300">
+              <Label className="text-xs font-medium text-blue-700 dark:text-blue-400">
+                Quick Setup: Paste SharePoint URL
+              </Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Copy a folder URL from SharePoint and paste it here to auto-fill the fields below
+              </p>
+              <div className="flex gap-2">
+                <Input 
+                  value={pasteUrl}
+                  onChange={(e) => setPasteUrl(e.target.value)}
+                  placeholder="Paste SharePoint folder URL here..."
+                  className="flex-1"
+                  onPaste={(e) => {
+                    const pasted = e.clipboardData.getData('text');
+                    if (pasted.includes('sharepoint.com')) {
+                      e.preventDefault();
+                      parseSharePointUrl(pasted);
+                    }
+                  }}
+                />
+                <Button 
+                  size="sm" 
+                  onClick={() => parseSharePointUrl(pasteUrl)}
+                  disabled={!pasteUrl}
+                >
+                  Parse URL
+                </Button>
+              </div>
+            </div>
+
+            {/* Manual Configuration */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <Label className="text-xs">SharePoint Site URL</Label>

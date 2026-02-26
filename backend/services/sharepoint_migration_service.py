@@ -63,6 +63,14 @@ class MigrationCandidate:
     legacy_url: str
     status: str  # discovered, classified, ready_for_migration, migrated, error
     
+    # Folder tree classification (from CSV lookup)
+    level1: Optional[str] = None  # Department
+    level2: Optional[str] = None  # Customer/Category
+    level3: Optional[str] = None  # Sub-category
+    level4: Optional[str] = None
+    level5: Optional[str] = None
+    classification_source: Optional[str] = None  # 'folder_tree', 'ai', 'hybrid'
+    
     # AI metadata fields
     doc_type: Optional[str] = None
     department: Optional[str] = None

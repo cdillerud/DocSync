@@ -161,24 +161,122 @@ class SharePointMigrationService:
     def _map_folder_to_metadata(self, classification: Dict) -> Dict:
         """
         Map folder tree levels to document metadata fields.
+        Updated to align with File MetaData Structure.xlsx
         
         Level1 = Department (Customer Relations, Marketing, General, etc.)
         Level2 = Customer/Sub-department (Duke Cannon, Manufacturers - Vendors, etc.)
         Level3 = Document category (Spec Sheets, Art Work Files, etc.)
         """
-        metadata = {
-            "level1": classification.get("level1"),
-            "level2": classification.get("level2"),
-            "level3": classification.get("level3"),
-            "level4": classification.get("level4"),
-            "level5": classification.get("level5"),
-        }
-        
         level1 = classification.get("level1", "") or ""
         level2 = classification.get("level2", "") or ""
         level3 = classification.get("level3", "") or ""
+        level4 = classification.get("level4", "") or ""
+        level5 = classification.get("level5", "") or ""
         
-        # Map Level1 to Department
+        metadata = {
+            "level1": level1,
+            "level2": level2,
+            "level3": level3,
+            "level4": classification.get("level4"),
+            "level5": classification.get("level5"),
+            # Initialize new Excel-based fields
+            "acct_type": None,
+            "acct_name": None,
+            "document_type": None,
+            "document_sub_type": None,
+            "document_status": "Active",  # Default to Active for migration
+        }
+        
+        # ============================================================
+        # Map to NEW Excel Metadata Structure
+        # ============================================================
+        
+        # 1. Determine AcctType based on Level1 context
+        if level1 == "Customer Relations":
+            metadata["acct_type"] = "Customer Accounts"
+            # Level2 is the customer name
+            if level2:
+                metadata["acct_name"] = level2
+                metadata["customer_name"] = level2
+        elif "Supplier" in level1 or "Vendor" in level1 or "Manufacturers" in level2:
+            metadata["acct_type"] = "Manufacturers / Vendors"
+            if level2:
+                metadata["acct_name"] = level2
+                metadata["vendor_name"] = level2
+        elif level1 in ["Corporate Internal", "HR Programs and Benefits", "General"]:
+            metadata["acct_type"] = "Corporate Internal"
+        elif level1 == "System Resources":
+            metadata["acct_type"] = "System Resources"
+        else:
+            # Default based on context
+            metadata["acct_type"] = "Customer Accounts" if level2 else "Corporate Internal"
+            if level2:
+                metadata["acct_name"] = level2
+        
+        # 2. Map to DocumentType based on folder structure
+        all_levels = f"{level1}/{level2}/{level3}/{level4}/{level5}".lower()
+        
+        document_type_map = {
+            # Product specifications
+            ("spec sheet", "specification", "spec binder"): "Product Specification Sheet",
+            ("product drawing", "drawing"): "Product Drawings",
+            ("die line", "die-line", "dieline"): "Graphical Die Line",
+            ("pack-out", "packout", "pack out"): "Product Pack-Out Specs",
+            # Art and marketing
+            ("art work", "artwork"): "Product Drawings",  # or could be Marketing Literature
+            ("marketing", "literature"): "Marketing Literature",
+            ("catalog", "capabilities"): "Capabilities / Catalogs",
+            # Quotes and pricing
+            ("quote",): "Customer Quote" if "customer" in all_levels else "Supplier Quote",
+            ("price list", "pricing"): "Price List",
+            ("cost analysis",): "Cost Analysis",
+            # Approvals
+            ("drawing approval",): "Drawing Approval",
+            ("specification approval", "spec approval"): "Specification Approval",
+            ("prototype approval",): "Prototype Approval",
+            ("graphics approval",): "Graphics Approval",
+            # Operations
+            ("sop", "procedure", "resource"): "SOPs / Resources",
+            ("training",): "Training",
+            ("warehouse", "dunnage"): "Warehouse & Consignment",
+            # Agreements
+            ("agreement", "contract"): "Agreement Resources",
+            ("supply agreement",): "Supply Agreement",
+            ("addendum",): "Supply Addendum",
+            # Quality
+            ("quality", "claim", "case"): "Quality Documents",
+            # Transaction-related
+            ("invoice",): "Invoice & Hold Agreement",
+            ("forecast",): "Forecasts",
+            ("inventory",): "Inventory Reports",
+            ("transaction",): "Transaction History",
+            # Development
+            ("new business", "development"): "New Business Dev Resources",
+            ("project timeline",): "Project Timeline",
+        }
+        
+        document_type = "Other"  # Default
+        for keywords, doc_type_value in document_type_map.items():
+            for keyword in keywords:
+                if keyword in all_levels:
+                    document_type = doc_type_value
+                    break
+            if document_type != "Other":
+                break
+        
+        metadata["document_type"] = document_type
+        
+        # 3. Set DocumentSubType from Level3 or Level4 if specific
+        if level3 and level3 not in ["Art Work Files", "Spec Sheets"]:
+            metadata["document_sub_type"] = level3
+        elif level4:
+            metadata["document_sub_type"] = level4
+        
+        # ============================================================
+        # Legacy field mapping (for backwards compatibility)
+        # ============================================================
+        
+        # Map Level1 to legacy Department field
         department_map = {
             "Customer Relations": "CustomerRelations",
             "Marketing": "Marketing",
@@ -191,18 +289,8 @@ class SharePointMigrationService:
         }
         metadata["department"] = department_map.get(level1, level1 or "Unknown")
         
-        # Level2 often contains customer name
-        if level1 == "Customer Relations" and level2:
-            metadata["customer_name"] = level2
-        elif "Manufacturers" in level2 or "Vendors" in level2:
-            # This is supplier-related
-            if level3:
-                metadata["vendor_name"] = level3
-        
-        # Infer doc_type from folder structure
+        # Infer legacy doc_type from folder structure (simpler categories)
         doc_type = "unknown"
-        all_levels = f"{level1}/{level2}/{level3}/{classification.get('level4', '')}".lower()
-        
         if "spec" in all_levels or "specification" in all_levels:
             doc_type = "spec_sheet"
         elif "art work" in all_levels or "artwork" in all_levels:
@@ -224,14 +312,18 @@ class SharePointMigrationService:
         
         metadata["doc_type"] = doc_type
         
-        # Set retention based on department
+        # Set retention based on document type
         retention_map = {
-            "CustomerRelations": "CustomerComm_LongTerm",
-            "Finance": "Accounting_7yrs",
-            "HR": "Legal_10yrs",
-            "Sales": "CustomerComm_LongTerm",
+            "Product Specification Sheet": "CustomerComm_LongTerm",
+            "Product Drawings": "CustomerComm_LongTerm",
+            "Agreement Resources": "Legal_10yrs",
+            "Supply Agreement": "Legal_10yrs",
+            "Quality Documents": "Legal_10yrs",
+            "Invoice & Hold Agreement": "Accounting_7yrs",
+            "Training": "WorkingDoc_2yrs",
+            "SOPs / Resources": "WorkingDoc_2yrs",
         }
-        metadata["retention_category"] = retention_map.get(metadata["department"], "WorkingDoc_2yrs")
+        metadata["retention_category"] = retention_map.get(document_type, "WorkingDoc_2yrs")
         
         return metadata
         

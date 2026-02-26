@@ -104,7 +104,111 @@ class SharePointMigrationService:
     def __init__(self, db):
         self.db = db
         self.collection = db.migration_candidates
+        self.folder_classifications = db.folder_classifications
         self._token_cache = {}
+    
+    async def _lookup_folder_classification(self, file_name: str, folder_path: str) -> Optional[Dict]:
+        """
+        Lookup classification from the imported folder tree CSV.
+        Returns the classification record if found.
+        """
+        # Try exact match on relative_path first
+        record = await self.folder_classifications.find_one(
+            {"file_name": file_name},
+            {"_id": 0}
+        )
+        
+        if record and record.get("level1"):
+            return record
+        
+        # Try matching by folder path
+        if folder_path:
+            # Look for any file in the same folder path to get the classification
+            record = await self.folder_classifications.find_one(
+                {"folder_path": {"$regex": f"^{folder_path}", "$options": "i"}},
+                {"_id": 0}
+            )
+            if record:
+                return record
+        
+        return None
+    
+    def _map_folder_to_metadata(self, classification: Dict) -> Dict:
+        """
+        Map folder tree levels to document metadata fields.
+        
+        Level1 = Department (Customer Relations, Marketing, General, etc.)
+        Level2 = Customer/Sub-department (Duke Cannon, Manufacturers - Vendors, etc.)
+        Level3 = Document category (Spec Sheets, Art Work Files, etc.)
+        """
+        metadata = {
+            "level1": classification.get("level1"),
+            "level2": classification.get("level2"),
+            "level3": classification.get("level3"),
+            "level4": classification.get("level4"),
+            "level5": classification.get("level5"),
+        }
+        
+        level1 = classification.get("level1", "") or ""
+        level2 = classification.get("level2", "") or ""
+        level3 = classification.get("level3", "") or ""
+        
+        # Map Level1 to Department
+        department_map = {
+            "Customer Relations": "CustomerRelations",
+            "Marketing": "Marketing",
+            "Sales": "Sales",
+            "General": "General",
+            "Custom Projects": "CustomProjects",
+            "HR Programs and Benefits": "HR",
+            "Supplier Relations": "SupplierRelations",
+            "Product Knowledge": "ProductKnowledge",
+        }
+        metadata["department"] = department_map.get(level1, level1 or "Unknown")
+        
+        # Level2 often contains customer name
+        if level1 == "Customer Relations" and level2:
+            metadata["customer_name"] = level2
+        elif "Manufacturers" in level2 or "Vendors" in level2:
+            # This is supplier-related
+            if level3:
+                metadata["vendor_name"] = level3
+        
+        # Infer doc_type from folder structure
+        doc_type = "unknown"
+        all_levels = f"{level1}/{level2}/{level3}/{classification.get('level4', '')}".lower()
+        
+        if "spec" in all_levels or "specification" in all_levels:
+            doc_type = "spec_sheet"
+        elif "art work" in all_levels or "artwork" in all_levels:
+            doc_type = "artwork"
+        elif "quote" in all_levels:
+            doc_type = "quote"
+        elif "contract" in all_levels or "agreement" in all_levels:
+            doc_type = "contract"
+        elif "invoice" in all_levels:
+            doc_type = "invoice"
+        elif "po" in all_levels or "purchase order" in all_levels:
+            doc_type = "po"
+        elif "sop" in all_levels or "procedure" in all_levels:
+            doc_type = "sop"
+        elif "marketing" in all_levels:
+            doc_type = "marketing"
+        elif "catalog" in all_levels:
+            doc_type = "catalog"
+        
+        metadata["doc_type"] = doc_type
+        
+        # Set retention based on department
+        retention_map = {
+            "CustomerRelations": "CustomerComm_LongTerm",
+            "Finance": "Accounting_7yrs",
+            "HR": "Legal_10yrs",
+            "Sales": "CustomerComm_LongTerm",
+        }
+        metadata["retention_category"] = retention_map.get(metadata["department"], "WorkingDoc_2yrs")
+        
+        return metadata
         
     async def _get_graph_token(self) -> str:
         """Get Microsoft Graph API token."""

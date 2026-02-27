@@ -5753,6 +5753,12 @@ async def process_incoming_email(email_id: str, mailbox_address: str):
             confidence = classification.get("confidence", 0.0)
             extracted_fields = classification.get("extracted_fields", {})
             
+            # Phase 8: Compute normalized fields including invoice_date and line_items
+            normalized_fields = compute_ap_normalized_fields(extracted_fields)
+            
+            # Phase 7: Vendor alias lookup
+            vendor_alias_result = await lookup_vendor_alias(normalized_fields.get("vendor_normalized"))
+            
             # Get job config and validate
             job_configs = await db.hub_job_types.find_one({"job_type": suggested_type}, {"_id": 0})
             if not job_configs:
@@ -5761,13 +5767,32 @@ async def process_incoming_email(email_id: str, mailbox_address: str):
             validation_results = await validate_bc_match(suggested_type, extracted_fields, job_configs)
             decision, reasoning = make_automation_decision(job_configs, confidence, validation_results)
             
-            # Update document
+            # Update document with ALL extracted data including invoice_date and line_items
             new_status = "NeedsReview" if decision == "needs_review" else "Classified"
             await db.hub_documents.update_one({"id": doc_id}, {"$set": {
                 "suggested_job_type": suggested_type,
                 "document_type": suggested_type,
                 "ai_confidence": confidence,
                 "extracted_fields": extracted_fields,
+                # Phase 8: Flat normalized fields for BC posting
+                "vendor_raw": normalized_fields.get("vendor_raw"),
+                "vendor_normalized": normalized_fields.get("vendor_normalized"),
+                "invoice_number_raw": normalized_fields.get("invoice_number_raw"),
+                "invoice_number_clean": normalized_fields.get("invoice_number_clean"),
+                "amount_raw": normalized_fields.get("amount_raw"),
+                "amount_float": normalized_fields.get("amount_float"),
+                "due_date_raw": normalized_fields.get("due_date_raw"),
+                "due_date_iso": normalized_fields.get("due_date_iso"),
+                "po_number_raw": normalized_fields.get("po_number_raw"),
+                "po_number_clean": normalized_fields.get("po_number_clean"),
+                # CRITICAL: Invoice date and line items for automatic BC posting
+                "invoice_date": normalized_fields.get("invoice_date"),
+                "invoice_date_raw": normalized_fields.get("invoice_date_raw"),
+                "line_items": normalized_fields.get("line_items", []),
+                # Vendor matching
+                "vendor_canonical": vendor_alias_result.get("vendor_canonical"),
+                "vendor_match_method": vendor_alias_result.get("vendor_match_method"),
+                # Validation
                 "validation_results": validation_results,
                 "automation_decision": decision,
                 "status": new_status,

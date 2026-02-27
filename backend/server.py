@@ -146,6 +146,10 @@ from services.business_central_service import BusinessCentralService, get_bc_ser
 from routes.sharepoint_migration import router as sharepoint_migration_router
 import routes.sharepoint_migration as sharepoint_migration_module
 
+# ==================== SPIRO INTEGRATION ====================
+from routes.spiro import spiro_router, set_spiro_routes_db
+from services.spiro.spiro_sync import set_spiro_db
+
 import jwt as pyjwt
 
 TEST_USER = {"username": "admin", "password": "admin", "display_name": "Hub Admin", "role": "administrator"}

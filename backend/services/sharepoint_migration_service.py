@@ -278,16 +278,28 @@ class SharePointMigrationService:
                 metadata["vendor_name"] = level3
         
         # Pattern 3: General/Supply Chain/[Category]/[VendorName]/...
+        # Many Supply Chain files are internal tracking docs, not specific to a vendor
         elif level1 == "General" and level2 == "Supply Chain":
             metadata["acct_type"] = "Manufacturers / Vendors"
-            # Level3 might be category (Ball, CanPack, Glass) or vendor
-            # Level4 might be vendor or sub-category
-            if level4 and level4 not in ["Suppliers", "Megan", ""]:
+            # Common internal/category folders - NOT vendor names
+            internal_folders = [
+                "suppliers", "megan", "old- do not use", "archive", "templates", 
+                "rfq spec sheets", "plastics", "glass", "closures", "labels",
+                "medline rfp", "tools", "reports", "tracking", "documentation"
+            ]
+            # Check if level3/4 is a real vendor name or just a category
+            l3_lower = (level3 or "").lower()
+            l4_lower = (level4 or "").lower()
+            
+            if level4 and l4_lower not in internal_folders and len(level4) > 2:
                 metadata["acct_name"] = level4
                 metadata["vendor_name"] = level4
-            elif level3:
+            elif level3 and l3_lower not in internal_folders and len(level3) > 2:
                 metadata["acct_name"] = level3
                 metadata["vendor_name"] = level3
+            else:
+                # Internal supply chain document
+                metadata["acct_name"] = "Gamer Packaging"
         
         # Pattern 4: Supplier Relations/[SupplierName]/...
         elif level1 == "Supplier Relations":

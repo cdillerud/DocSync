@@ -813,6 +813,22 @@ export default function SharePointMigrationPage() {
                 Reset Migrated ({summary.by_status.migrated})
               </Button>
             )}
+            
+            {summary?.by_status?.error > 0 && (
+              <Button 
+                onClick={handleRetryFailed}
+                disabled={actionLoading !== null}
+                variant="outline"
+                className="text-red-600 border-red-300 hover:bg-red-50"
+              >
+                {actionLoading === 'retry' ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                )}
+                Retry Failed ({summary.by_status.error})
+              </Button>
+            )}
           </div>
           
           <p className="text-xs text-muted-foreground mt-3">

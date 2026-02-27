@@ -509,6 +509,61 @@ class SharePointMigrationService:
         metadata["retention_category"] = retention_map.get(document_type, "WorkingDoc_2yrs")
         
         return metadata
+    
+    async def _enhance_with_customer_match(self, metadata: Dict, file_name: str, folder_path: str) -> Dict:
+        """
+        Enhance metadata by matching against known customer list.
+        This improves acct_name accuracy and confirms customer vs vendor classification.
+        """
+        # Try to match customer name from various sources
+        texts_to_match = []
+        
+        # 1. Try the acct_name from folder extraction
+        if metadata.get("acct_name"):
+            texts_to_match.append(metadata["acct_name"])
+        if metadata.get("customer_name"):
+            texts_to_match.append(metadata["customer_name"])
+        
+        # 2. Try folder path components
+        parts = folder_path.split("/") if folder_path else []
+        for part in parts:
+            if part and len(part) >= 3 and part not in ["Documents", "Customer Relations", "General", "Archive", "Templates"]:
+                texts_to_match.append(part)
+        
+        # 3. Try file name (without extension)
+        import re
+        name_without_ext = re.sub(r'\.[^.]+$', '', file_name)
+        # Split by common separators and try each part
+        name_parts = re.split(r'[-_\s]+', name_without_ext)
+        for part in name_parts[:3]:  # First 3 parts only
+            if len(part) >= 4:
+                texts_to_match.append(part)
+        
+        # Try matching each text
+        best_match = None
+        for text in texts_to_match:
+            match = await self._match_customer(text)
+            if match:
+                if best_match is None or match["confidence"] > best_match["confidence"]:
+                    best_match = match
+        
+        # Apply best match if found
+        if best_match and best_match["confidence"] >= 0.7:
+            customer = best_match["customer"]
+            logger.info(f"Customer match for '{file_name}': {customer['name']} (confidence: {best_match['confidence']:.2f}, type: {best_match['match_type']})")
+            
+            # Update metadata
+            metadata["acct_name"] = customer["name"]
+            metadata["customer_name"] = customer["name"]
+            metadata["customer_number"] = customer.get("customer_number")
+            metadata["customer_match_confidence"] = best_match["confidence"]
+            metadata["customer_match_type"] = best_match["match_type"]
+            
+            # If we matched a customer, ensure acct_type is Customer Accounts
+            if metadata.get("acct_type") != "Manufacturers / Vendors":
+                metadata["acct_type"] = "Customer Accounts"
+        
+        return metadata
         
     async def _get_graph_token(self) -> str:
         """Get Microsoft Graph API token."""

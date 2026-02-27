@@ -2844,6 +2844,36 @@ def compute_ap_normalized_fields(extracted_fields: dict) -> dict:
         result["po_number_raw"] = None
         result["po_number_clean"] = None
     
+    # Invoice date to ISO (CRITICAL for BC posting)
+    invoice_date = extracted_fields.get("invoice_date")
+    if invoice_date:
+        result["invoice_date_raw"] = str(invoice_date)
+        try:
+            parsed_date = date_parser.parse(str(invoice_date))
+            result["invoice_date"] = parsed_date.strftime('%Y-%m-%d')
+        except Exception:
+            result["invoice_date"] = None
+    else:
+        result["invoice_date_raw"] = None
+        result["invoice_date"] = None
+    
+    # Line items (CRITICAL for BC posting)
+    line_items = extracted_fields.get("line_items")
+    if line_items and isinstance(line_items, list):
+        # Normalize line items
+        normalized_items = []
+        for item in line_items:
+            if isinstance(item, dict):
+                normalized_items.append({
+                    "description": item.get("description", ""),
+                    "quantity": float(item.get("quantity", 1) or 1),
+                    "unit_price": float(item.get("unit_price", 0) or 0),
+                    "total": float(item.get("total", 0) or 0)
+                })
+        result["line_items"] = normalized_items
+    else:
+        result["line_items"] = []
+    
     return result
 
 

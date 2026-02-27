@@ -241,6 +241,8 @@ async def save_ap_review(doc_id: str, data: APReviewData):
     # Fetch updated document
     updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     
+    logger.info(f"AP Review Save SUCCESS: doc_id={doc_id}")
+    
     return {
         "success": True,
         "message": "AP review saved",

@@ -171,15 +171,18 @@ async def migrate_candidates(request: MigrateRequest):
     
     Copies files and applies metadata columns.
     Idempotent - already migrated files are skipped.
+    For large files (videos), uses chunked upload.
     """
     service = get_service()
-    logger.info(f"Migration request: {request.targetSiteUrl}, maxCount={request.maxCount}")
+    # Limit to smaller batches to avoid timeout
+    batch_size = min(request.maxCount or 10, 10)
+    logger.info(f"Migration request: {request.targetSiteUrl}, maxCount={batch_size}")
     
     try:
         result = await service.migrate_candidates(
             target_site_url=request.targetSiteUrl,
             target_library_name=request.targetLibraryName,
-            max_count=request.maxCount,
+            max_count=batch_size,
             only_ids=request.onlyIds
         )
         return MigrateResponse(**result)

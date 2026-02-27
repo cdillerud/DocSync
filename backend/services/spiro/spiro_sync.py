@@ -525,7 +525,7 @@ async def sync_spiro_contacts(force_full: bool = False) -> Dict[str, Any]:
 async def get_spiro_sync_status() -> Dict[str, Any]:
     """Get current sync status."""
     db = get_spiro_db()
-    if not db:
+    if db is None:
         return {"enabled": False, "error": "Database not initialized"}
     
     service = SpiroSyncService(db)

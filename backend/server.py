@@ -142,6 +142,14 @@ from routes.auth import router as auth_router
 from routes.ap_review import ap_review_router, set_dependencies as set_ap_review_deps
 from services.business_central_service import BusinessCentralService, get_bc_service
 
+# ==================== AUTO-POST SERVICE ====================
+from services.auto_post_service import (
+    AUTO_POST_ENABLED, 
+    check_auto_post_eligibility, 
+    attempt_auto_post,
+    AutoPostResult
+)
+
 # ==================== SHAREPOINT MIGRATION ====================
 from routes.sharepoint_migration import router as sharepoint_migration_router
 import routes.sharepoint_migration as sharepoint_migration_module

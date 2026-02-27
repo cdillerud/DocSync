@@ -422,8 +422,10 @@ class BusinessCentralService:
             data = resp.json()
             
             # Add line items if provided
-            if invoice_data.get("lines"):
-                await self._add_invoice_lines(data["id"], invoice_data["lines"], token, company_id)
+            line_result = None
+            if invoice_data.get("lines") and len(invoice_data["lines"]) > 0:
+                logger.info("Adding %d line items to invoice %s", len(invoice_data["lines"]), data.get("id"))
+                line_result = await self._add_invoice_lines(data["id"], invoice_data["lines"], token, company_id)
             
             return {
                 "success": True,
@@ -433,7 +435,10 @@ class BusinessCentralService:
                 "message": "Purchase invoice created successfully",
                 "mock": False,
                 "createdAt": datetime.now(timezone.utc).isoformat(),
-                "bcResponse": data
+                "bcResponse": data,
+                "linesAdded": line_result.get("added", 0) if line_result else 0,
+                "linesTotal": line_result.get("total", 0) if line_result else 0,
+                "lineErrors": line_result.get("errors", []) if line_result else []
             }
     
     async def _add_invoice_lines(self, invoice_id: str, lines: List[Dict], token: str, company_id: str):

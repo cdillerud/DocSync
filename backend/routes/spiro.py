@@ -187,7 +187,7 @@ async def trigger_sync(request: SyncRequest = None):
     if not is_spiro_enabled():
         raise HTTPException(status_code=400, detail="Spiro integration is disabled")
     
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not initialized")
     
     request = request or SyncRequest()
@@ -303,7 +303,7 @@ async def list_spiro_opportunities(
     limit: int = Query(50, le=200)
 ):
     """List synced Spiro opportunities."""
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not initialized")
     
     query = {}
@@ -332,7 +332,7 @@ async def get_document_spiro_context(doc_id: str):
     """
     from services.spiro import get_spiro_context_for_document
     
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not initialized")
     
     # Get document

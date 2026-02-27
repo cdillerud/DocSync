@@ -218,4 +218,12 @@ export const postToBC = (docId, data = null) =>
 export const getBCPostingStatus = (docId) => 
   api.get(`/ap-review/documents/${docId}/bc-status`);
 
+// Extract invoice data using AI
+export const extractInvoiceData = (docId) => 
+  api.post(`/ap-review/documents/${docId}/extract-invoice-data`);
+
+// Get extraction status
+export const getExtractionStatus = (docId) => 
+  api.get(`/ap-review/documents/${docId}/extraction-status`);
+
 export default api;

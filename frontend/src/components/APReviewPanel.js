@@ -256,7 +256,15 @@ export function APReviewPanel({ document, onUpdate }) {
       const res = await extractInvoiceData(document.id);
       if (res.data.success) {
         const extracted = res.data.extracted_fields || {};
-        const lineItems = res.data.line_items || [];
+        const rawLineItems = res.data.line_items || [];
+        
+        // Map line items to the expected format (total -> line_total)
+        const lineItems = rawLineItems.map(item => ({
+          description: item.description || '',
+          quantity: item.quantity || 1,
+          unit_price: item.unit_price || 0,
+          line_total: item.total || item.line_total || (item.quantity * item.unit_price) || 0
+        }));
         
         // Update form with extracted data
         setFormData(prev => ({

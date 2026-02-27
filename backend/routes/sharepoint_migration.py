@@ -355,6 +355,8 @@ async def reset_candidates(request: ResetCandidatesRequest):
         # Build query
         if request.candidate_ids:
             query = {"id": {"$in": request.candidate_ids}}
+        elif request.force_all:
+            query = {}  # Match ALL candidates
         elif request.reset_from_status:
             query = {"status": request.reset_from_status}
         else:

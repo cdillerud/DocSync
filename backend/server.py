@@ -12634,6 +12634,21 @@ async def startup():
     await initialize_sales_indexes(db)
     # File Ingestion Service: Initialize database
     set_file_ingestion_db(db)
+    # Spiro Integration: Initialize database
+    set_spiro_db(db)
+    set_spiro_routes_db(db)
+    # Create Spiro indexes
+    await db.spiro_contacts.create_index("spiro_id", unique=True)
+    await db.spiro_contacts.create_index("email")
+    await db.spiro_contacts.create_index("email_domain")
+    await db.spiro_contacts.create_index("company_id")
+    await db.spiro_companies.create_index("spiro_id", unique=True)
+    await db.spiro_companies.create_index("name_normalized")
+    await db.spiro_companies.create_index("email_domain")
+    await db.spiro_opportunities.create_index("spiro_id", unique=True)
+    await db.spiro_opportunities.create_index("company_id")
+    await db.spiro_sync_status.create_index("entity_type", unique=True)
+    logger.info("Spiro integration initialized")
     # Configure Sales email polling
     configure_sales_email_polling(
         enabled=SALES_EMAIL_POLLING_ENABLED,

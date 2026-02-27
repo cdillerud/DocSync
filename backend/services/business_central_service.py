@@ -437,16 +437,48 @@ class BusinessCentralService:
             }
     
     async def _add_invoice_lines(self, invoice_id: str, lines: List[Dict], token: str, company_id: str):
-        """Add line items to a purchase invoice."""
+        """
+        Add line items to a purchase invoice.
+        
+        BC Purchase Invoice Lines API requires:
+        - lineType: "Item", "G/L Account", "Comment", etc.
+        - For service invoices (freight), use "G/L Account" type
+        - description: Line description
+        - quantity: Quantity (default 1 for services)
+        - unitCost: Cost per unit
+        """
         url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseInvoices({invoice_id})/purchaseInvoiceLines"
         
+        added_count = 0
+        errors = []
+        
         async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
-            for line in lines:
+            for idx, line in enumerate(lines):
+                # Get values with fallbacks
+                description = line.get("description", "")
+                quantity = float(line.get("quantity", 1) or 1)
+                unit_price = float(line.get("unitCost") or line.get("unit_price", 0) or 0)
+                line_total = float(line.get("total") or line.get("line_total", 0) or 0)
+                
+                # If we have a total but no unit price, calculate unit price
+                if line_total > 0 and unit_price == 0 and quantity > 0:
+                    unit_price = line_total / quantity
+                
+                # Skip empty lines
+                if not description and unit_price == 0:
+                    logger.debug("Skipping empty invoice line %d", idx)
+                    continue
+                
+                # Build line payload - use G/L Account type for service/freight charges
                 line_payload = {
-                    "description": line.get("description", ""),
-                    "quantity": float(line.get("quantity", 1)),
-                    "unitCost": float(line.get("unitCost") or line.get("unit_price", 0)),
+                    "lineType": "G/L Account",  # Use G/L Account for service charges
+                    "description": description[:100] if description else f"Line {idx + 1}",  # BC has 100 char limit
+                    "quantity": quantity,
+                    "unitCost": unit_price,
                 }
+                
+                logger.info("Adding invoice line %d: %s (qty=%s, unit=$%s)", 
+                           idx + 1, description[:50], quantity, unit_price)
                 
                 resp = await client.post(
                     url,
@@ -457,8 +489,21 @@ class BusinessCentralService:
                     json=line_payload
                 )
                 
-                if resp.status_code not in (200, 201):
-                    logger.warning("Failed to add invoice line: %s", resp.text[:200])
+                if resp.status_code in (200, 201):
+                    added_count += 1
+                    logger.info("Successfully added invoice line %d", idx + 1)
+                else:
+                    error_msg = resp.text[:300]
+                    logger.warning("Failed to add invoice line %d: HTTP %d - %s", 
+                                  idx + 1, resp.status_code, error_msg)
+                    errors.append({
+                        "line": idx + 1,
+                        "description": description[:50],
+                        "error": error_msg
+                    })
+        
+        logger.info("Invoice line addition complete: %d/%d lines added", added_count, len(lines))
+        return {"added": added_count, "total": len(lines), "errors": errors}
     
     async def get_purchase_invoice(self, invoice_id: str) -> Optional[Dict[str, Any]]:
         """Get a purchase invoice by ID."""

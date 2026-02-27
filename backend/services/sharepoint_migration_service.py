@@ -1057,6 +1057,24 @@ Full path: {legacy_path}
                         "updated_utc": now
                     }
                     
+                    # Enhance with customer matching
+                    enhanced = await self._enhance_with_customer_match(
+                        {
+                            "acct_name": candidate.get("acct_name"),
+                            "customer_name": candidate.get("customer_name"),
+                            "acct_type": candidate.get("acct_type"),
+                        },
+                        candidate["file_name"],
+                        candidate.get("legacy_path", "")
+                    )
+                    if enhanced.get("customer_match_confidence"):
+                        update_data["acct_name"] = enhanced["acct_name"]
+                        update_data["customer_name"] = enhanced["customer_name"]
+                        update_data["customer_number"] = enhanced.get("customer_number")
+                        update_data["customer_match_confidence"] = enhanced["customer_match_confidence"]
+                        if enhanced.get("acct_type"):
+                            update_data["acct_type"] = enhanced["acct_type"]
+                    
                     await self.collection.update_one(
                         {"id": candidate["id"]},
                         {"$set": update_data}

@@ -76,6 +76,13 @@ class MigrateResponse(BaseModel):
     attempted: int
     migrated: int
     errors: int
+    metadata_errors: int = 0
+
+
+class ResetCandidatesRequest(BaseModel):
+    """Request body for resetting candidates."""
+    candidate_ids: Optional[List[str]] = None  # Reset specific IDs, or all migrated if None
+    reset_to_status: str = "ready_for_migration"
 
 
 class CandidateUpdate(BaseModel):

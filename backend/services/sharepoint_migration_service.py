@@ -533,14 +533,16 @@ class SharePointMigrationService:
         acct_type = metadata.get("acct_type")
         acct_name = metadata.get("acct_name")
         
+        logger.debug(f"Customer match check for {file_name}: acct_type={acct_type}, acct_name={acct_name}")
+        
         # Skip customer matching for internal docs - they should stay as "Gamer Packaging"
         if acct_type in ["Corporate Internal", "System Resources"]:
-            logger.debug(f"Skipping customer match for {file_name}: internal doc type {acct_type}")
+            logger.info(f"Skipping customer match for {file_name}: internal doc type {acct_type}")
             return metadata
         
         # Skip if already set to default company name (internal doc default)
         if acct_name == "Gamer Packaging":
-            logger.debug(f"Skipping customer match for {file_name}: already set to Gamer Packaging")
+            logger.info(f"Skipping customer match for {file_name}: already set to Gamer Packaging")
             return metadata
         
         # Try to match customer name from various sources

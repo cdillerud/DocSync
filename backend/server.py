@@ -4788,6 +4788,10 @@ async def _internal_intake_document(
     if ai_classification_audit:
         update_data["ai_classification"] = ai_classification_audit
     
+    # Phase 8: Save Spiro context to document (Shadow Mode)
+    if spiro_context_dict:
+        update_data["spiro_context"] = spiro_context_dict
+    
     await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
     
     # Update workflow status based on processing results and doc_type

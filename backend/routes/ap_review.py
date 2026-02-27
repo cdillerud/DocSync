@@ -174,7 +174,10 @@ async def save_ap_review(doc_id: str, data: APReviewData):
     Save AP review edits to a document.
     Updates vendor, invoice details, line items, etc.
     """
+    logger.info(f"AP Review Save: doc_id={doc_id}, vendor_id={data.vendor_id}, invoice={data.invoice_number}")
+    
     if db is None:
+        logger.error("AP Review Save failed: Database not initialized")
         raise HTTPException(status_code=500, detail="Database not initialized")
     
     # Find document

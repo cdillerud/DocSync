@@ -4813,6 +4813,29 @@ async def _internal_intake_document(
             validation_results,
             ap_validation
         )
+        
+        # AUTO-POST: Attempt automatic posting to BC for eligible AP invoices
+        if AUTO_POST_ENABLED:
+            # Refresh document after workflow update to get latest state
+            updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+            if updated_doc:
+                try:
+                    bc_service = get_bc_service()
+                    auto_post_result = await attempt_auto_post(doc_id, updated_doc, db, bc_service)
+                    
+                    if auto_post_result.eligible:
+                        if auto_post_result.success:
+                            logger.info("AUTO-POST: Document %s auto-posted to BC as %s", 
+                                       doc_id, auto_post_result.bc_document_number)
+                            final_status = "Posted"  # Update final status for return
+                        else:
+                            logger.warning("AUTO-POST: Document %s eligible but failed: %s", 
+                                          doc_id, auto_post_result.error)
+                    else:
+                        logger.debug("AUTO-POST: Document %s not eligible: %s", 
+                                    doc_id, auto_post_result.reason)
+                except Exception as e:
+                    logger.error("AUTO-POST: Exception for %s: %s", doc_id, str(e))
     else:
         # For non-AP documents, use simplified workflow
         await _update_standard_workflow_status(

@@ -269,6 +269,25 @@ export default function SharePointMigrationPage() {
   });
   const [showSourceConfig, setShowSourceConfig] = useState(false);
   const [pasteUrl, setPasteUrl] = useState('');
+  
+  // Custom document types added by user
+  const [customDocTypes, setCustomDocTypes] = useState(() => {
+    // Load from localStorage if available
+    const saved = localStorage.getItem('gpi_custom_doc_types');
+    return saved ? JSON.parse(saved) : [];
+  });
+  
+  // Save custom doc types to localStorage when they change
+  useEffect(() => {
+    localStorage.setItem('gpi_custom_doc_types', JSON.stringify(customDocTypes));
+  }, [customDocTypes]);
+  
+  // Handler to add a new custom document type
+  const handleAddCustomDocType = (newType) => {
+    if (newType && !DEFAULT_DOCUMENT_TYPES.includes(newType) && !customDocTypes.includes(newType)) {
+      setCustomDocTypes(prev => [...prev, newType]);
+    }
+  };
 
   // Parse SharePoint URL to extract site, library, and folder
   const parseSharePointUrl = (url) => {

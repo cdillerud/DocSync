@@ -1241,54 +1241,9 @@ Full path: {legacy_path}
                     if list_item_resp.status_code == 200:
                         list_item_id = list_item_resp.json()["id"]
                         
-                        # Map department to match SharePoint column choices
-                        dept = candidate.get("department") or "Operations"
-                        dept_map = {
-                            "CustomerRelations": "Operations",  # Not in SharePoint choices
-                            "Sales": "Sales",
-                            "Marketing": "Operations",  # Not in SharePoint choices
-                            "Operations": "Operations",
-                            "Quality": "Quality",
-                            "Finance": "Finance",
-                            "HR": "Operations",  # Not in SharePoint choices
-                            "IT": "IT",
-                            "Purchasing": "Operations",
-                            "Warehouse": "Operations",
-                            "Engineering": "Operations",
-                        }
-                        sp_dept = dept_map.get(dept, "Operations")
-                        
-                        # Map document type to match SharePoint column choices
-                        doc_type = candidate.get("document_type") or "Other"
-                        doc_type_map = {
-                            "Product Specification Sheet": "Packaging Spec",
-                            "Product Drawings": "Packaging Spec",
-                            "Product Pack-Out Specs": "Packaging Spec",
-                            "Graphical Die Line": "Packaging Spec",
-                            "Supplier Documents": "Project Doc",
-                            "Marketing Literature": "Project Doc",
-                            "Capabilities / Catalogs": "Project Doc",
-                            "SOPs / Resources": "Project Doc",
-                            "Customer Documents": "Project Doc",
-                            "Customer Quote": "Quote",
-                            "Supplier Quote": "Quote",
-                            "Cost Analysis": "Quote",
-                            "Agreement Resources": "Contract",
-                            "Supply Agreement": "Contract",
-                            "Quality Documents": "Project Doc",
-                            "Training": "Project Doc",
-                            "Invoice & Hold Agreement": "Invoice",
-                            "Price List": "Quote",
-                            "Other": "Project Doc",
-                        }
-                        sp_doc_type = doc_type_map.get(doc_type, "Project Doc")
-                        
-                        # Prepare metadata fields - write to BOTH old and new column sets
+                        # Prepare metadata fields - our custom columns only
                         fields = {
-                            # Pre-existing SharePoint columns (displayed in view)
-                            "Department": sp_dept,
-                            "Document_x0020_Type": sp_doc_type,
-                            # Our new Excel metadata columns
+                            # Excel metadata columns
                             "AcctType": candidate.get("acct_type") or "Corporate Internal",
                             "AcctName": candidate.get("acct_name") or candidate.get("customer_name") or candidate.get("vendor_name") or "",
                             "DocumentType": candidate.get("document_type") or "Other",

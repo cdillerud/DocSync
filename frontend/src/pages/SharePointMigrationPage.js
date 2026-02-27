@@ -627,6 +627,22 @@ export default function SharePointMigrationPage() {
               )}
               Migrate Ready Files
             </Button>
+            
+            {summary?.by_status?.migrated > 0 && (
+              <Button 
+                onClick={handleResetMigrated}
+                disabled={actionLoading !== null}
+                variant="outline"
+                className="text-orange-600 border-orange-300 hover:bg-orange-50"
+              >
+                {actionLoading === 'reset' ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                )}
+                Reset Migrated ({summary.by_status.migrated})
+              </Button>
+            )}
           </div>
           
           <p className="text-xs text-muted-foreground mt-3">

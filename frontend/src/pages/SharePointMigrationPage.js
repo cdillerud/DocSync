@@ -313,11 +313,32 @@ export default function SharePointMigrationPage() {
         targetLibraryName: 'Documents',
         maxCount: 20
       });
-      toast.success(`Migrated ${res.data.migrated} files (${res.data.errors} errors)`);
+      const metaErrors = res.data.metadata_errors || 0;
+      toast.success(`Migrated ${res.data.migrated} files (${res.data.errors} errors, ${metaErrors} metadata failures)`);
       await fetchSummary();
       await fetchCandidates();
     } catch (err) {
       toast.error('Migration failed: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleResetMigrated = async () => {
+    if (!window.confirm('Reset all migrated files back to ready_for_migration? This will allow re-migration.')) {
+      return;
+    }
+    setActionLoading('reset');
+    try {
+      const res = await API.post('/api/migration/sharepoint/reset-candidates', {
+        candidate_ids: null,  // Reset all migrated
+        reset_to_status: 'ready_for_migration'
+      });
+      toast.success(`Reset ${res.data.reset_count} files to ready_for_migration`);
+      await fetchSummary();
+      await fetchCandidates();
+    } catch (err) {
+      toast.error('Reset failed: ' + (err.response?.data?.detail || err.message));
     } finally {
       setActionLoading(null);
     }

@@ -89,7 +89,7 @@ Key Principles:
 │                 BUSINESS CENTRAL INTEGRATION                         │
 │  • Link documents to existing records (Level 1)                      │
 │  • Create draft purchase invoices (Level 2)                         │
-│  • Auto-populate line items (Level 3 - future)                      │
+│  • Auto-populate line items from AI extraction (Level 3 - DONE)     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 

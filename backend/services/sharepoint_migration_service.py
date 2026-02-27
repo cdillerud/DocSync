@@ -1045,6 +1045,32 @@ Full path: {legacy_path}
                 has_folder_tree = candidate.get("classification_source") == "folder_tree"
                 existing_confidence = candidate.get("classification_confidence", 0.0) or 0.0
                 
+                # Re-apply folder metadata classification (in case logic was updated)
+                if candidate.get("level1"):
+                    folder_class = {
+                        "level1": candidate.get("level1"),
+                        "level2": candidate.get("level2"),
+                        "level3": candidate.get("level3"),
+                        "level4": candidate.get("level4"),
+                        "level5": candidate.get("level5"),
+                    }
+                    updated_metadata = self._map_folder_to_metadata(folder_class)
+                    # Update candidate with refreshed metadata from folder classification
+                    await self.collection.update_one(
+                        {"id": candidate["id"]},
+                        {"$set": {
+                            "acct_type": updated_metadata.get("acct_type"),
+                            "acct_name": updated_metadata.get("acct_name"),
+                            "document_type": updated_metadata.get("document_type"),
+                            "document_sub_type": updated_metadata.get("document_sub_type"),
+                            "customer_name": updated_metadata.get("customer_name"),
+                            "vendor_name": updated_metadata.get("vendor_name"),
+                            "retention_category": updated_metadata.get("retention_category"),
+                        }}
+                    )
+                    # Refresh candidate data for subsequent processing
+                    candidate.update(updated_metadata)
+                
                 # If folder tree gives us high confidence, we mainly need AI for dates/part numbers
                 if has_folder_tree and existing_confidence >= 0.85:
                     folder_tree_matches += 1

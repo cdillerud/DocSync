@@ -296,6 +296,8 @@ async def mark_ready_for_post(doc_id: str):
     
     updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     
+    logger.info(f"AP Review Mark Ready SUCCESS: doc_id={doc_id}")
+    
     return {
         "success": True,
         "message": "Document marked as ready for posting",

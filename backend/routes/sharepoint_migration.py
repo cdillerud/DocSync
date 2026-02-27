@@ -93,6 +93,7 @@ class ResetCandidatesRequest(BaseModel):
     candidate_ids: Optional[List[str]] = None  # Reset specific IDs
     reset_from_status: Optional[str] = None  # Reset only files with this status
     reset_to_status: str = "discovered"  # Default to discovered for re-classification
+    force_all: bool = False  # If True, reset ALL files regardless of status
 
 
 class CandidateUpdate(BaseModel):

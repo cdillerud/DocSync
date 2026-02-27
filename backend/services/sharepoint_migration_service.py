@@ -961,6 +961,14 @@ RESPOND ONLY WITH THE JSON OBJECT, NO OTHER TEXT."""
 File name: {file_name}
 Full path: {legacy_path}
 
+IMPORTANT: This file is in the Supply Chain folder. Determine if it relates to:
+1. A CUSTOMER (someone GPI sells packaging to) - e.g., RFQ from a customer, customer spec sheet
+2. A VENDOR/SUPPLIER (someone GPI buys from) - e.g., vendor quote, supplier spec, pricing from supplier
+3. INTERNAL (Gamer Packaging's own tracking docs) - e.g., master trackers, internal cost models
+
+Look for company names in the filename or path. Common customers include food/beverage brands.
+Common vendors include glass manufacturers (OI, Anchor, Ball), packaging suppliers.
+
 """
             if text_content:
                 user_content += f"Document text (first 3000 chars):\n{text_content[:3000]}"

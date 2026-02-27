@@ -1517,3 +1517,108 @@ Full path: {legacy_path}
         )
         
         return result.modified_count > 0
+
+    async def apply_metadata_to_migrated(self, candidate_id: str) -> Dict[str, Any]:
+        """
+        Apply metadata to an already migrated file in SharePoint.
+        
+        This is used to fix metadata on files that were migrated before columns existed.
+        """
+        candidate = await self.get_candidate_by_id(candidate_id)
+        if not candidate:
+            return {"success": False, "error": "Candidate not found", "status": "not_found"}
+        
+        if candidate.get("status") != "migrated" or not candidate.get("target_item_id"):
+            return {"success": False, "error": "Candidate must be migrated with target_item_id", "status": "invalid_state"}
+        
+        try:
+            token = await self._get_graph_token()
+            
+            # Get target site info
+            target_site_url = candidate.get("target_site_url", DEFAULT_TARGET_SITE)
+            target_library_name = candidate.get("target_library_name", DEFAULT_TARGET_LIBRARY)
+            target_item_id = candidate["target_item_id"]
+            
+            target_site_id = await self._get_site_id(target_site_url, token)
+            target_drive_id = await self._get_drive_id(target_site_id, target_library_name, token)
+            target_list_id = await self._get_list_id(target_site_id, target_library_name, token)
+            
+            # Ensure columns exist
+            column_mapping = await self._ensure_destination_columns(target_site_id, target_list_id, token)
+            
+            # Get the list item ID
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                list_item_resp = await client.get(
+                    f"https://graph.microsoft.com/v1.0/drives/{target_drive_id}/items/{target_item_id}/listItem",
+                    headers={"Authorization": f"Bearer {token}"}
+                )
+                
+                if list_item_resp.status_code != 200:
+                    error_msg = f"Could not get list item: {list_item_resp.status_code}"
+                    return {"success": False, "error": error_msg, "status": "list_item_error"}
+                
+                list_item_id = list_item_resp.json()["id"]
+                
+                # Use column mapping to get correct SharePoint column names
+                def get_col(name):
+                    return column_mapping.get(name, name)
+                
+                # Prepare metadata fields
+                fields = {
+                    get_col("AcctType"): candidate.get("acct_type") or "Corporate Internal",
+                    get_col("AcctName"): candidate.get("acct_name") or candidate.get("customer_name") or candidate.get("vendor_name") or "",
+                    get_col("DocumentType"): candidate.get("document_type") or "Other",
+                    get_col("DocumentSubType"): candidate.get("document_sub_type") or "",
+                    get_col("DocumentStatus"): candidate.get("document_status") or "Active",
+                    get_col("ProjectOrPartNumber"): candidate.get("project_or_part_number") or "",
+                    get_col("RetentionCategory"): candidate.get("retention_category") or "Unknown",
+                    get_col("LegacyPath"): candidate.get("legacy_path") or "",
+                    get_col("LegacyUrl"): candidate.get("legacy_url") or "",
+                    get_col("Level1"): candidate.get("level1") or "",
+                    get_col("Level2"): candidate.get("level2") or "",
+                    get_col("Level3"): candidate.get("level3") or "",
+                }
+                
+                if candidate.get("document_date"):
+                    fields[get_col("DocumentDate")] = candidate["document_date"]
+                
+                logger.info(f"Applying metadata to {candidate['file_name']}: {list(fields.keys())}")
+                
+                # Update list item fields
+                update_resp = await client.patch(
+                    f"https://graph.microsoft.com/v1.0/sites/{target_site_id}/lists/{target_list_id}/items/{list_item_id}/fields",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json"
+                    },
+                    json=fields
+                )
+                
+                if update_resp.status_code in (200, 201):
+                    # Update candidate record
+                    now = datetime.now(timezone.utc).isoformat()
+                    await self.collection.update_one(
+                        {"id": candidate_id},
+                        {"$set": {
+                            "metadata_write_status": "success",
+                            "metadata_write_error": None,
+                            "updated_utc": now
+                        }}
+                    )
+                    return {"success": True, "status": "success"}
+                else:
+                    error_msg = update_resp.text[:300]
+                    await self.collection.update_one(
+                        {"id": candidate_id},
+                        {"$set": {
+                            "metadata_write_status": "failed",
+                            "metadata_write_error": error_msg,
+                            "updated_utc": datetime.now(timezone.utc).isoformat()
+                        }}
+                    )
+                    return {"success": False, "error": error_msg, "status": "failed"}
+        
+        except Exception as e:
+            error_msg = str(e)[:250]
+            logger.error(f"Error applying metadata to {candidate_id}: {error_msg}")
+            return {"success": False, "error": error_msg, "status": "exception"}

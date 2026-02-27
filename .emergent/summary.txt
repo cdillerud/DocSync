@@ -1,192 +1,183 @@
 <analysis>**original_problem_statement:**
-The user's primary objective is to build a GPI Document Hub to replace legacy systems. The current focus is on two main initiatives:
-1.  **Accounts Payable Invoice Automation:** Replicate the Zetadocs AP workflow by building an AP Invoice Review Workspace, integrating with Business Central (BC) for posting, and creating a link-only Factbox in BC to show the document's SharePoint URL.
-2.  **SharePoint Flat Migration POC:** Build a proof-of-concept tool within the GPI Hub to migrate files from various SharePoint source folders to a new flat library (). This involves:
-    *   Discovering all files in the source folder recursively.
-    *   Using a hybrid classification model (combining a user-provided folder tree CSV and AI) to infer metadata, including customer/vendor names and departments.
-    *   Providing a UI for review, approval, and configuration of the source path.
-    *   Migrating the files and applying the inferred metadata as SharePoint columns.
-    *   The latest user requests focus on improving the usability and accuracy of this migration tool, such as parsing SharePoint URLs, improving classification logic, and managing the UI display of migrated files.
+The user wants to build a GPI Document Hub. The primary goals are:
+1.  **Accounts Payable Invoice Automation:** Replicate the legacy Zetadocs/Square9 workflow by ingesting AP invoices, using AI to extract data (vendor, invoice #, date, line items), automatically creating Purchase Invoices in Business Central (BC), and archiving documents in SharePoint.
+2.  **SharePoint Flat Migration POC:** A tool to migrate files from a source SharePoint folder to a new flat library with AI-inferred metadata.
+3.  **Spiro CRM Integration:** Integrate Spiro as an additional source of truth for companies, contacts, and opportunities. This data should be synced locally and used to enrich the AI document validation pipeline to improve classification and validation accuracy. The integration should be behind a feature flag and initially run in shadow mode.
 
 **User's preferred language**: English
 
 **what currently exists?**
-The application is a full-stack document processing hub (FastAPI/React/MongoDB) connected to the user's live Business Central (BC) Sandbox and SharePoint environments.
-
-Key features include:
-*   An **AP Review Workspace** that allows posting invoices to the BC Sandbox.
-*   A **BC Link Writeback** mechanism with source code for an AL extension created (though not yet deployed).
-*   A **SharePoint Migration POC** module () with a sophisticated UI. This module can:
-    *   Discover files from a user-configurable source SharePoint folder (Site URL, Library, Folder Path).
-    *   Parse SharePoint URLs (including sharing links) to auto-configure the source path.
-    *   Use a hybrid classification model powered by a 21,000+ entry folder-tree CSV () and AI (Gemini) to extract rich metadata, including customer/vendor names and departments.
-    *   Display candidates in a filterable table (e.g., hiding migrated files by default).
-    *   The backend is fully implemented to migrate files and apply metadata.
+The application is a full-stack document processing hub (FastAPI/React/MongoDB) connected to the user's Business Central Sandbox and SharePoint.
+-   An **AP Review Workspace** allows for viewing and manually posting invoices.
+-   **Automated AI Extraction:** The ingestion pipeline (especially for emails) now automatically uses a Gemini-based service () to extract invoice date, PO number, and line items from PDFs. This was a major fix to address user frustration with manual extraction.
+-   **Local PDF Preview:** The document previewer was fixed by replacing a broken SharePoint iframe with a -based client-side renderer, resolving cross-domain security issues.
+-   **Spiro Integration Foundation:** A complete module for Spiro integration has been built (). It includes services for OAuth2 authentication, data synchronization, and context generation. Admin API endpoints () are in place. The integration is feature-flagged and integrated into the document processing pipeline to add  in a shadow mode.
 
 **Last working item**:
-- **Last item agent was working:** The user reported that migrated files were defaulting to Department: Sales and Document Type: Invoice. The agent investigated and found an error  because the destination library in the preview environment did not have the  or  columns that were expected to exist based on a user's screenshot (likely from the production environment).
+- **Last item agent was working:** Completing the OAuth2 authorization flow for the new Spiro integration. The user provided an authorization code () to be exchanged for an access token. The agent forked before performing the token exchange.
 - **Status:** IN PROGRESS
-- **Agent Testing Done:** Y
-- **Which testing method agent to use?** both
+- **Agent Testing Done:** N
+- **Which testing method agent to use?** Manual testing by . The agent needs to call the  endpoint with the user-provided code. Then, verify success by calling the  endpoint and observing that  is .
 - **User Testing Done:** N
 
 **All Pending/In progress Issue list**:
-- **Issue 1: Incorrect metadata applied during migration (P0)**
-    - **Attempted fixes:** The agent initially tried to write to SharePoint columns named  and . This failed with a  error because these columns do not exist in the preview environment's SharePoint library. As a temporary fix, the agent removed the code that wrote to these non-existent fields.
-    - **Next debug checklist:**
-        1.  Verify with the user which SharePoint columns should be used for  and  in the destination library ().
-        2.  Check if these columns (, ) exist in the user's production SharePoint site.
-        3.  Implement a more robust solution:
-            *   **Option A (Preferred):** Update the  method in  to create these Choice columns if they don't exist, matching the schema from the production environment.
-            *   **Option B:** Make the destination column names configurable in the UI or an environment variable.
-    - **Why fix this issue and what will be achieved with the fix?** The core value of the migration is to apply correct metadata. This fix will ensure that the classified data is correctly written to the appropriate columns in SharePoint, resolving the user's primary complaint.
-    - **Status:** IN PROGRESS
-    - **Is recurring issue?** Y
-    - **Should Test frontend/backend/both after fix?** Both
-    - **Blocked on other issue:** No.
+-   **Issue 1: Complete Spiro Integration Authorization and Sync (P0)**
+    -   **Attempted fixes:** The agent built the entire integration framework and got the authorization code from the user.
+    -   **Next debug checklist:**
+        1.  Use the  tool to POST the authorization code () to the  endpoint.
+        2.  Verify the token was successfully stored by checking the  endpoint.
+        3.  Trigger a manual sync by calling the  endpoint.
+        4.  Verify that data appears in the  and  collections in MongoDB.
+    -   **Why fix this issue and what will be achieved with the fix?** This will complete the Spiro integration setup, allowing the system to start pulling CRM data to enrich document validation.
+    -   **Status:** IN PROGRESS
+    -   **Is recurring issue?** N
+    -   **Should Test frontend/backend/both after fix?** Backend
+    -   **Blocked on other issue:** No.
+
+-   **Issue 2: BC Purchase Invoice Lines Post Incorrectly (P1)**
+    -   **Attempted fixes:** The agent modified  to add lines using . The user clarified this is wrong; they use  which maps to COGS account .
+    -   **Next debug checklist:**
+        1.  Update  in .
+        2.  Change  from  to .
+        3.  The uid=0(root) gid=0(root) groups=0(root) field must now be the **Item's ID (GUID)**, not a G/L Account ID.
+        4.  The system needs a default Item code for freight charges. Ask the user for the specific Item code, then query the BC API to get its GUID.
+        5.  Hardcode or make this default Item ID configurable in .
+    -   **Why fix this issue and what will be achieved with the fix?** This is critical for the AP automation workflow. Fixing it will allow extracted invoice line items to be correctly created in Business Central, which is a core user requirement.
+    -   **Status:** IN PROGRESS
+    -   **Is recurring issue?** N
+    -   **Should Test frontend/backend/both after fix?** Backend
+    -   **Blocked on other issue:** No.
+
+-   **Issue 3: Verify Automatic AI Extraction on Production (P2)**
+    -   **Attempted fixes:** The agent fixed the email ingestion pipeline to correctly save  and .
+    -   **Next debug checklist:** The user is still reporting this isn't working automatically on their production VM. The agent must guide the user to  the latest changes, rebuild the Docker containers, and then monitor the  logs after a new document is ingested via email to confirm the extraction runs and saves the data.
+    -   **Why fix this issue and what will be achieved with the fix?** This is the central value proposition of the app. Confirming this works automatically is essential.
+    -   **Status:** USER VERIFICATION PENDING
+    -   **Is recurring issue?** Y
+    -   **Should Test frontend/backend/both after fix?** Backend
+    -   **Blocked on other issue:** No.
 
 **In progress Task List**:
-None. All in-flight tasks from the session were completed, leading to the discovery of the final blocking issue.
+None.
 
 **Upcoming and Future Tasks**
 
 **Upcoming Tasks:**
--   **Task 1 (P0): Complete and Verify End-to-End SharePoint Migration.**
-    -   Implement the logic to programmatically create the required metadata columns (, ) in the destination SharePoint library if they don't exist.
-    -   Execute the file copy/move operation.
-    -   Apply all inferred metadata to the columns of the newly migrated file in SharePoint.
-    -   Run an end-to-end test to confirm a file is discovered, classified, migrated, and appears in the destination with all metadata correctly populated.
--   **Task 2 (P1): Package and Publish the Business Central (AL) Extension.**
-    -   The source code exists in . It needs to be compiled into an  file and published to the user's BC Sandbox environment.
--   **Task 3 (P1): Implement Migration UI Detail Drawer.**
-    -   Create a detail view/drawer in the migration UI that allows an admin to manually edit AI-inferred fields and approve low-confidence documents.
--   **Task 4 (P2): Backend Refactor.**
-    -   Continue breaking down the monolithic  by moving logical groups of endpoints into separate router files.
+-   **Task 1 (P1): Move the Business Central Factbox.** Modify the AL extension code in  to change the layout position of the Factbox.
+-   **Task 2 (P2): Package and Publish the Business Central (AL) Extension.** After the Factbox position is adjusted, the extension needs to be compiled into an  file and published.
+-   **Task 3 (P2): Implement Migration UI Detail Drawer.** Create a detailed view in the migration UI to manually edit AI-inferred fields.
+-   **Task 4 (P3): Backend Refactor.** Continue breaking down the monolithic .
 
 **Future Tasks:**
--   Implement the Outbound Document Delivery module for emailing posted sales invoices.
--   Define Stable Vendor as a metric and implement controlled vendor enablement.
+-   Implement the Outbound Document Delivery module.
+-   Define and implement Stable Vendor enablement.
 -   Replace the mock email service with a real provider.
--   Implement multi-step approval routing and a Vendor Threshold Override architecture.
--   Plan and execute the full decommissioning of the legacy Zetadocs system.
--   Implement automated creation of Purchase Invoice *lines* in BC.
+-   Implement multi-step approval routing.
+-   Decommission the legacy Zetadocs system.
+-   Implement automated creation of Purchase Invoice *lines* in BC (this is now in progress).
 -   Replace mock JWT auth with Entra ID SSO.
 
 **Completed work in this session**
--   **New Metadata Integration:** Integrated the schema from  into the backend data models and frontend UI.
--   **Credential Issue Resolved:** Fixed persistent SharePoint/Graph API authentication failures by obtaining the correct, up-to-date credentials from the user's production  file and applying them to the preview environment.
--   **Production VM Deployment:** Guided the user through resolving usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
-           [--exec-path[=<path>]] [--html-path] [--man-path] [--info-path]
-           [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--bare]
-           [--git-dir=<path>] [--work-tree=<path>] [--namespace=<name>]
-           [--super-prefix=<path>] [--config-env=<name>=<envvar>]
-           <command> [<args>]
-
-These are common Git commands used in various situations:
-
-start a working area (see also: git help tutorial)
-   clone     Clone a repository into a new directory
-   init      Create an empty Git repository or reinitialize an existing one
-
-work on the current change (see also: git help everyday)
-   add       Add file contents to the index
-   mv        Move or rename a file, a directory, or a symlink
-   restore   Restore working tree files
-   rm        Remove files from the working tree and from the index
-
-examine the history and state (see also: git help revisions)
-   bisect    Use binary search to find the commit that introduced a bug
-   diff      Show changes between commits, commit and working tree, etc
-   grep      Print lines matching a pattern
-   log       Show commit logs
-   show      Show various types of objects
-   status    Show the working tree status
-
-grow, mark and tweak your common history
-   branch    List, create, or delete branches
-   commit    Record changes to the repository
-   merge     Join two or more development histories together
-   rebase    Reapply commits on top of another base tip
-   reset     Reset current HEAD to the specified state
-   switch    Switch branches
-   tag       Create, list, delete or verify a tag object signed with GPG
-
-collaborate (see also: git help workflows)
-   fetch     Download objects and refs from another repository
-   pull      Fetch from and integrate with another repository or a local branch
-   push      Update remote refs along with associated objects
-
-'git help -a' and 'git help -g' list available subcommands and some
-concept guides. See 'git help <command>' or 'git help <concept>'
-to read about a specific subcommand or concept.
-See 'git help git' for an overview of the system. merge conflicts and manually adding missing router registrations to  to get the new features working on their production VM.
--   **Configurable Migration Source:** The migration source is no longer hardcoded. The UI now has a Configure Source panel to set the SharePoint Site, Library, and Folder Path.
--   **SharePoint URL Parser:** Implemented a Quick Setup input that parses various SharePoint URL formats (including browser address bar URLs with  params and sharing links) to automatically populate the source configuration.
--   **UI/UX Improvements:**
-    -   Migrated files are now hidden by default. A new filter dropdown allows viewing Pending, Migrated, or All files.
-    -   The Discover button text dynamically updates to show the folder being targeted.
--   **Advanced Classification Logic:**
-    -   Significantly improved logic to extract customer/vendor names from folder paths based on observed patterns (e.g., , ).
-    -   Enhanced department inference using both an expanded folder-tree keyword map and a more explicit AI prompt.
--   **Data Ingestion:** Imported a 21,000+ record  into the database to power the folder-tree classification.
--   **Testing & Maintenance:** Used the testing agent to create a test suite for the migration API and added an endpoint to reset migration candidates.
+-   **Automated AI Invoice Data Extraction:** Correctly integrated the Gemini-based  into the document ingestion pipeline in , ensuring  and  are extracted automatically when documents are received, not just via a manual button.
+-   **PDF Preview Fix:** Replaced the non-functional SharePoint  with a client-side  renderer in , fixing the cross-domain  error.
+-   **Spiro Integration Scaffolding:** Built the entire backend foundation for Spiro CRM integration, including services for OAuth2, data synchronization (), and context enrichment (), all controlled by environment variables.
+-   **Spiro Admin Endpoints:** Created API routes in  to manage the integration (check status, get auth URL, handle callback, trigger sync).
 
 **Earlier issues found/mentioned but not fixed**
 -   **Issue 1: Backend Refactor is Incomplete**
-    -   **Debug checklist:** The main  file is still a large monolith.
-    -   **Why to solve this issue and what will be achieved with this?** Improves code maintainability, simplifies debugging, and aligns with standard software architecture practices.
+    -   **Debug checklist:** The main  file remains a large monolith.
+    -   **Why to solve this issue and what will be achieved with this?** Improves code maintainability and aligns with standard practices.
     -   **Should Test frontend/backend/both after fix:** Backend
     -   **Is recurring issue?** Y
 
 **Known issue recurrence from previous fork**
--   **Issue recurrence in previous fork:** Configuration & Environment Divergence.
--   **Recurrence count:** 3+
--   **Status:** RESOLVED (for now). This was a major blocker. The agent spent significant time debugging invalid Azure credentials (, ) which were placeholders in the preview  file. The issue was only resolved after the user provided the correct credentials directly from their production server's  file. This highlights that the preview environment's credentials cannot be trusted.
+-   **Issue recurrence in previous fork:** Configuration & Environment Divergence (Credentials).
+-   **Recurrence count:** 5+
+-   **Status:** RESOLVED (for now). The  file is reset on each fork, which deeply frustrates the user. Be prepared to restore credentials or guide the user. The user is also very frustrated with context loss between forks.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
--   **Hybrid AI Classification:** Combining a large-scale, rule-based folder tree CSV (21k+ records) with LLM-based data extraction for enrichment and fallback.
--   **Dynamic UI Configuration:** Allowing users to change core operational parameters (like the SharePoint source folder) directly in the UI, with state managed in React.
--   **Client-Side URL Parsing:** Using Regex in React to parse complex SharePoint URLs, extract parameters, and update application state, providing a seamless paste-to-configure UX.
--   **Environment Divergence Debugging:** Diagnosing and resolving issues caused by differences in credentials and configuration between the preview/development environment and the user's production environment.
+-   **Hybrid AI Classification & Extraction:** Using Gemini for document classification and structured data extraction (invoice date, line items).
+-   **Client-Side PDF Rendering:** Using  to render PDF files in the browser, avoiding  and cross-domain security issues.
+-   **3rd Party API Integration (OAuth2):** Built a service to handle the OAuth2  flow, including token storage and refresh, for the Spiro CRM API.
+-   **Background Task Processing (FastAPI ):** Used for long-running file migrations.
+-   **Production Environment Debugging:** Guiding the user to run , usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
+           [--exec-path[=<path>]] [--html-path] [--man-path] [--info-path]
+           [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--bare]
+           [--git-dir=<path>] [--work-tree=<path>] [--namespace=<name>]
+           [--super-prefix=<path>] [--config-env=<name>=<envvar>]
+           <command> [<args>]
+
+These are common Git commands used in various situations:
+
+start a working area (see also: git help tutorial)
+   clone     Clone a repository into a new directory
+   init      Create an empty Git repository or reinitialize an existing one
+
+work on the current change (see also: git help everyday)
+   add       Add file contents to the index
+   mv        Move or rename a file, a directory, or a symlink
+   restore   Restore working tree files
+   rm        Remove files from the working tree and from the index
+
+examine the history and state (see also: git help revisions)
+   bisect    Use binary search to find the commit that introduced a bug
+   diff      Show changes between commits, commit and working tree, etc
+   grep      Print lines matching a pattern
+   log       Show commit logs
+   show      Show various types of objects
+   status    Show the working tree status
+
+grow, mark and tweak your common history
+   branch    List, create, or delete branches
+   commit    Record changes to the repository
+   merge     Join two or more development histories together
+   rebase    Reapply commits on top of another base tip
+   reset     Reset current HEAD to the specified state
+   switch    Switch branches
+   tag       Create, list, delete or verify a tag object signed with GPG
+
+collaborate (see also: git help workflows)
+   fetch     Download objects and refs from another repository
+   pull      Fetch from and integrate with another repository or a local branch
+   push      Update remote refs along with associated objects
+
+'git help -a' and 'git help -g' list available subcommands and some
+concept guides. See 'git help <command>' or 'git help <concept>'
+to read about a specific subcommand or concept.
+See 'git help git' for an overview of the system., and python scripts on their separate production VM.
 
 **key DB schema**
--   **** (Extended Collection):
-    -   , ,  (now dynamic)
-    -   : (discovered, classified, ready_for_migration, migrated, error)
-    -   AI/Hybrid Metadata:
-        -    (from Excel)
-        -    (from Excel)
-        -    (from Excel)
-        -    (from Excel)
-        -    (from Excel)
-        -    (improved inference)
-        -    (newly extracted)
-        -    (newly extracted)
+-   ****: Added  (top-level),  (top-level, array of objects), and  (object for shadow mode).
+-   ****: New collection .
+-   ****: New collection to cache Spiro company data.
+-   ****: New collection to cache Spiro contact data.
+-   ****: New collection to cache Spiro opportunity data.
 
 **All files of reference**
-*   **/app/backend/services/sharepoint_migration_service.py**: Contains all core logic for discovery, classification (AI and folder-tree), and migration. Was heavily modified to add all new features.
-*   **/app/frontend/src/pages/SharepointMigrationPOC.js**: The entire UI for the migration POC. Was heavily modified to add the source configuration panel, URL parser, and status filters.
-*   **/app/backend/server.py**: Was manually patched on the user's VM to register the migration router.
-*   **/app/backend/.env**: Was updated with the correct, working Azure credentials provided by the user.
-*   **/app/data/OneGamer_FolderTree.csv**: The new, large dataset used for folder-based classification.
+*   **/app/backend/services/spiro/**: The new, complete module for Spiro integration.
+*   **/app/backend/server.py**: Heavily modified to integrate automated AI extraction and the Spiro context pipeline.
+*   **/app/frontend/src/components/DocumentPreview.js**: The fix for the document preview issue.
+*   **/app/backend/services/invoice_extractor.py**: The core Gemini AI extraction logic.
+*   **/app/backend/services/business_central_service.py**: Contains the incorrect line item logic that needs to be fixed (G/L vs. Item).
+*   **/app/memory/SPIRO_INTEGRATION.md**: Documentation for the new Spiro integration.
 
 **Areas that need refactoring**:
--   **/app/backend/server.py**: Remains a monolith and a high-priority refactoring target.
--   **SharePoint URL Parser:** The regex-based parser in  is becoming complex. It could be moved to a separate utility function for better testing and maintenance.
+-   **/app/backend/server.py**: Still a monolith. A high-priority refactoring target.
 
 **key api endpoints**
--   : Triggers discovery. Now accepts , ,  in the request body.
--   : Lists candidates. Now accepts an  query parameter.
--   : Runs classification.
--   : Triggers migration.
+-   : Manual AI extraction trigger.
+-   : Handles the OAuth2 callback to exchange a code for a token.
+-   : Checks the status of the Spiro integration.
+-   : Triggers a full data sync from Spiro.
 
 **Critical Info for New Agent**
--   **ENVIRONMENT DIVERGENCE IS A MAJOR ISSUE.** The preview environment's  file contains placeholder/stale credentials for Azure. The agent wasted significant time debugging this. The correct, working credentials were provided by the user from their production server (see message #222) and must be used. Assume the preview  is wrong for sensitive keys.
--   **SharePoint Column Mismatch:** The immediate task is to resolve why migrated files show incorrect metadata. The root cause is a difference in SharePoint columns between the user's environment and the preview environment. The preview destination library lacks the  and  columns. You must implement a solution that either creates these columns or makes the mapping configurable before proceeding.
--   **User's Production VM:** The user is actively deploying and testing changes on a production VM that runs Docker. They have encountered usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
+-   **USER FRUSTRATION IS HIGH:** The user is extremely frustrated with context loss between forks and having to repeat instructions. Be proactive and review the history carefully. Acknowledge their frustration directly and move to the fix.
+-   **COMPLETE SPIRO AUTH IMMEDIATELY:** The immediate next step is to use the OAuth code the user provided () to get the access token. This is P0.
+-   **FIX BC LINE ITEMS:** The second critical task is to change the BC line item creation from  to . You will need to ask the user for the specific Item code they use for freight and then find its GUID via the BC API.
+-   **PRODUCTION VM IS THE SOURCE OF TRUTH:** The user deploys to a separate VM. Be prepared to provide  and usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
            [--exec-path[=<path>]] [--html-path] [--man-path] [--info-path]
            [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--bare]
            [--git-dir=<path>] [--work-tree=<path>] [--namespace=<name>]
@@ -230,87 +221,51 @@ collaborate (see also: git help workflows)
 'git help -a' and 'git help -g' list available subcommands and some
 concept guides. See 'git help <command>' or 'git help <concept>'
 to read about a specific subcommand or concept.
-See 'git help git' for an overview of the system. merge conflicts and missing code, requiring the agent to provide usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
-           [--exec-path[=<path>]] [--html-path] [--man-path] [--info-path]
-           [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--bare]
-           [--git-dir=<path>] [--work-tree=<path>] [--namespace=<name>]
-           [--super-prefix=<path>] [--config-env=<name>=<envvar>]
-           <command> [<args>]
-
-These are common Git commands used in various situations:
-
-start a working area (see also: git help tutorial)
-   clone     Clone a repository into a new directory
-   init      Create an empty Git repository or reinitialize an existing one
-
-work on the current change (see also: git help everyday)
-   add       Add file contents to the index
-   mv        Move or rename a file, a directory, or a symlink
-   restore   Restore working tree files
-   rm        Remove files from the working tree and from the index
-
-examine the history and state (see also: git help revisions)
-   bisect    Use binary search to find the commit that introduced a bug
-   diff      Show changes between commits, commit and working tree, etc
-   grep      Print lines matching a pattern
-   log       Show commit logs
-   show      Show various types of objects
-   status    Show the working tree status
-
-grow, mark and tweak your common history
-   branch    List, create, or delete branches
-   commit    Record changes to the repository
-   merge     Join two or more development histories together
-   rebase    Reapply commits on top of another base tip
-   reset     Reset current HEAD to the specified state
-   switch    Switch branches
-   tag       Create, list, delete or verify a tag object signed with GPG
-
-collaborate (see also: git help workflows)
-   fetch     Download objects and refs from another repository
-   pull      Fetch from and integrate with another repository or a local branch
-   push      Update remote refs along with associated objects
-
-'git help -a' and 'git help -g' list available subcommands and some
-concept guides. See 'git help <command>' or 'git help <concept>'
-to read about a specific subcommand or concept.
-See 'git help git' for an overview of the system. and  commands to resolve issues. Be prepared to provide clear, step-by-step instructions for a production Linux environment.
+See 'git help git' for an overview of the system. commands. They do not like using .
 
 **documents and test reports created in this job**
 -   
--    (new user-provided artifact)
+-   
+-   
+-   
+-   
+-   
+-   
 -    (updated)
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **user**: Can we reset the stats in preview? (COMPLETED)
-2.  **agent**: Clears the migration candidates.
-3.  **user**: (Sends image) Metadata isn't being pulled in correctly after migration. (PENDING)
-4.  **agent**: Investigates and identifies the  error. Fixes it for the preview environment by removing the code writing to that field.
-5.  **user**: (Sends new ) Asks if this helps. (COMPLETED)
-6.  **agent**: Imports the new 21k+ record CSV to improve folder-based classification.
-7.  **user**: How can we parse customer/vendor names from paths? (COMPLETED)
-8.  **agent**: Implements improved logic to extract account names based on folder structure.
-9.  **user**: The classification defaults to department sales and document type invoice. (This is the same issue as #3, but reported again, indicating its importance).
-10. **agent**: Acknowledges the issue and starts investigating the migration process.
+1.  **user**: Asks what Spiro API credentials are needed.
+2.  **agent**: Lists requirements (API docs, creds, sync details).
+3.  **user**: Provides a very detailed PRD for the Spiro integration.
+4.  **agent**: Begins implementing the Spiro integration.
+5.  **user**: Provides Spiro client_id, client_secret, and base URL.
+6.  **agent**: Implements the credentials.
+7.  **user**: Provides the callback URL from the Spiro app setup.
+8.  **agent**: Generates the final OAuth authorization URL for the user.
+9.  **user**: Provides the redirect URL with the authorization code ().
+10. **user**: oh FFS. we are finally making progress and you fork and will probably regress??? (User is frustrated about the fork interrupting the Spiro auth flow).
 
 **Project Health Check:**
--   **Broken:** The metadata application during migration is not functioning as the user expects due to SharePoint column discrepancies between environments.
+-   **Broken:**
+    -   BC Purchase Invoice line item creation (posts empty lines because it uses G/L Account type instead of Item type).
+    -   Spiro integration is not functional because the OAuth flow was interrupted and is not yet authorized.
 -   **Mocked:** None.
 
 **3rd Party Integrations**
--   **Dynamics 365 Business Central API:** ✅ Live, connected, and verified.
--   **Microsoft Graph API / SharePoint:** ✅ Live, connected, and now verified with correct, user-provided credentials.
--   **Gemini (via Emergent LLM Key):** Used for document classification.
+-   **Dynamics 365 Business Central API:** ✅ Live and connected.
+-   **Microsoft Graph API / SharePoint:** ✅ Live and connected.
+-   **Gemini (via Emergent LLM Key):** ✅ Used for document classification and extraction.
+-   **Spiro CRM API:** 🟡 Partially integrated. Scaffolding is complete, but OAuth flow is not finished.
 -   **APScheduler:** Used for background jobs.
 
 **Testing status**
--   **Testing agent used after significant changes:** YES (for the initial metadata feature)
+-   **Testing agent used after significant changes:** NO
 -   **Troubleshoot agent used after agent stuck in loop:** NO
 -   **Test files created:** []
--   **Known regressions:** None.
+-   **Known regressions:** The platform's tendency to reset  files on fork is a recurring environmental regression.
 
 **Credentials to test flow:**
 -   Web UI:  / 
 
 **What agent forgot to execute**
--   The agent did not create a permanent solution for the SharePoint column mismatch. It applied a temporary patch to prevent errors in the preview environment but did not address the root cause, which is that the production environment likely has different columns that need to be written to. The agent should have proposed a robust fix, such as dynamically creating the columns or making the mapping configurable.</analysis>
+-   The agent forked immediately after the user provided the Spiro OAuth authorization code, without executing the final step to exchange that code for an access token. This is the most critical pending action for the next agent.</analysis>

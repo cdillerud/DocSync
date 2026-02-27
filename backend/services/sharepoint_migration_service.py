@@ -1246,6 +1246,31 @@ Full path: {legacy_path}
                     # Upload complete
                     logger.info(f"Large file upload complete: {file_name} ({file_size} bytes)")
                     return chunk_resp.json()
+                elif chunk_resp.status_code == 409:
+                    # Conflict - file was modified. Cancel session and retry with replace
+                    logger.warning(f"Conflict during upload for {file_name}, retrying with replace")
+                    # Cancel current session
+                    await client.delete(upload_url)
+                    # Create new session with replace behavior
+                    session_resp = await client.post(
+                        create_session_url,
+                        headers={
+                            "Authorization": f"Bearer {token}",
+                            "Content-Type": "application/json"
+                        },
+                        json={
+                            "item": {
+                                "@microsoft.graph.conflictBehavior": "replace",
+                                "name": file_name
+                            }
+                        }
+                    )
+                    if session_resp.status_code in (200, 201):
+                        upload_url = session_resp.json()["uploadUrl"]
+                        start = 0  # Restart from beginning
+                        continue
+                    else:
+                        raise Exception(f"Failed to create replacement upload session: {session_resp.status_code}")
                 else:
                     raise Exception(f"Chunk upload failed: {chunk_resp.status_code} - {chunk_resp.text[:200]}")
             

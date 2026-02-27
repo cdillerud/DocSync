@@ -534,7 +534,7 @@ async def get_spiro_context_for_document(doc_metadata: Dict[str, Any]) -> SpiroC
         })
     """
     db = get_spiro_db()
-    if not db:
+    if db is None:
         context = SpiroContext()
         context.enabled = False
         context.error = "Database not initialized"

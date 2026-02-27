@@ -1144,33 +1144,14 @@ export default function SharePointMigrationPage() {
                   <div>
                     <Label className="text-xs">Document Type</Label>
                     {editMode ? (
-                      <Select 
-                        value={editForm.document_type} 
-                        onValueChange={(v) => setEditForm({...editForm, document_type: v})}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Product Specification Sheet">Product Specification Sheet</SelectItem>
-                          <SelectItem value="Product Drawings">Product Drawings</SelectItem>
-                          <SelectItem value="Product Pack-Out Specs">Product Pack-Out Specs</SelectItem>
-                          <SelectItem value="Graphical Die Line">Graphical Die Line</SelectItem>
-                          <SelectItem value="Supplier Documents">Supplier Documents</SelectItem>
-                          <SelectItem value="Marketing Literature">Marketing Literature</SelectItem>
-                          <SelectItem value="Capabilities / Catalogs">Capabilities / Catalogs</SelectItem>
-                          <SelectItem value="SOPs / Resources">SOPs / Resources</SelectItem>
-                          <SelectItem value="Customer Documents">Customer Documents</SelectItem>
-                          <SelectItem value="Customer Quote">Customer Quote</SelectItem>
-                          <SelectItem value="Supplier Quote">Supplier Quote</SelectItem>
-                          <SelectItem value="Cost Analysis">Cost Analysis</SelectItem>
-                          <SelectItem value="Agreement Resources">Agreement Resources</SelectItem>
-                          <SelectItem value="Supply Agreement">Supply Agreement</SelectItem>
-                          <SelectItem value="Quality Documents">Quality Documents</SelectItem>
-                          <SelectItem value="Training">Training</SelectItem>
-                          <SelectItem value="Other">Other</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <EditableDocTypeSelect
+                        value={editForm.document_type}
+                        onChange={(v) => {
+                          setEditForm({...editForm, document_type: v});
+                          handleAddCustomDocType(v);
+                        }}
+                        customTypes={customDocTypes}
+                      />
                     ) : (
                       <div className="text-sm">{selectedCandidate.document_type || '-'}</div>
                     )}

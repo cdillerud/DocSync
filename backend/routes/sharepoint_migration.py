@@ -5,8 +5,9 @@ REST API endpoints for the OneGamer to One_Gamer-Flat-Test SharePoint migration 
 """
 
 import logging
+import asyncio
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from pydantic import BaseModel
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -25,6 +26,14 @@ router = APIRouter(prefix="/migration/sharepoint", tags=["SharePoint Migration"]
 
 # Will be set by server.py when mounting the router
 db: AsyncIOMotorDatabase = None
+
+# Track background migration status
+migration_status = {
+    "running": False,
+    "last_result": None,
+    "processed": 0,
+    "total": 0
+}
 
 
 def get_service() -> SharePointMigrationService:

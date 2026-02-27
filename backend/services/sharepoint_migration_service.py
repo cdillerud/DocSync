@@ -1297,17 +1297,19 @@ Full path: {legacy_path}
                             # Legacy/tracking fields
                             get_col("ProjectOrPartNumber"): candidate.get("project_or_part_number") or "",
                             get_col("RetentionCategory"): candidate.get("retention_category") or "Unknown",
-                            "LegacyPath": candidate.get("legacy_path") or "",
-                            "LegacyUrl": candidate.get("legacy_url") or "",
+                            get_col("LegacyPath"): candidate.get("legacy_path") or "",
+                            get_col("LegacyUrl"): candidate.get("legacy_url") or "",
                             # Folder tree levels for auditing
-                            "Level1": candidate.get("level1") or "",
-                            "Level2": candidate.get("level2") or "",
-                            "Level3": candidate.get("level3") or "",
+                            get_col("Level1"): candidate.get("level1") or "",
+                            get_col("Level2"): candidate.get("level2") or "",
+                            get_col("Level3"): candidate.get("level3") or "",
                         }
                         
                         # Add DocumentDate if available
                         if candidate.get("document_date"):
-                            fields["DocumentDate"] = candidate["document_date"]
+                            fields[get_col("DocumentDate")] = candidate["document_date"]
+                        
+                        logger.info(f"Writing metadata for {file_name}: {list(fields.keys())}")
                         
                         # Update list item fields
                         update_resp = await client.patch(
@@ -1319,8 +1321,17 @@ Full path: {legacy_path}
                             json=fields
                         )
                         
-                        if update_resp.status_code not in (200, 201):
-                            logger.warning(f"Could not update metadata for {file_name}: {update_resp.status_code} - {update_resp.text[:200]}")
+                        if update_resp.status_code in (200, 201):
+                            metadata_write_status = "success"
+                            logger.info(f"Metadata written successfully for {file_name}")
+                        else:
+                            metadata_write_status = "failed"
+                            metadata_write_error = update_resp.text[:300]
+                            metadata_errors += 1
+                            logger.warning(f"Could not update metadata for {file_name}: {update_resp.status_code} - {metadata_write_error}")
+                    else:
+                        metadata_write_status = "list_item_not_found"
+                        logger.warning(f"Could not get list item for {file_name}: {list_item_resp.status_code}")
                     
                     # Update candidate record
                     await self.collection.update_one(
@@ -1333,12 +1344,14 @@ Full path: {legacy_path}
                             "target_url": new_web_url,
                             "migration_timestamp": now,
                             "migration_error": None,
+                            "metadata_write_status": metadata_write_status,
+                            "metadata_write_error": metadata_write_error,
                             "updated_utc": now
                         }}
                     )
                     
                     migrated += 1
-                    logger.info(f"Migrated: {file_name}")
+                    logger.info(f"Migrated: {file_name} (metadata: {metadata_write_status})")
                     
                 except Exception as e:
                     errors += 1
@@ -1354,12 +1367,13 @@ Full path: {legacy_path}
                         }}
                     )
         
-        logger.info(f"Migration complete: {attempted} attempted, {migrated} migrated, {errors} errors")
+        logger.info(f"Migration complete: {attempted} attempted, {migrated} migrated, {errors} errors, {metadata_errors} metadata failures")
         
         return {
             "attempted": attempted,
             "migrated": migrated,
-            "errors": errors
+            "errors": errors,
+            "metadata_errors": metadata_errors
         }
     
     async def get_summary(self) -> Dict[str, Any]:

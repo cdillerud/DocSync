@@ -518,46 +518,38 @@ class SharePointMigrationService:
         Enhance metadata by matching against known customer list.
         This improves acct_name accuracy and confirms customer vs vendor classification.
         
-        Skips matching for internal/corporate documents or docs already defaulted to Gamer Packaging.
+        Only applies customer matching when:
+        1. AI classified as Customer Accounts
+        2. AI provided an acct_name that might match a customer
         """
         acct_type = metadata.get("acct_type")
         acct_name = metadata.get("acct_name")
         
         logger.debug(f"Customer match check for {file_name}: acct_type={acct_type}, acct_name={acct_name}")
         
-        # Skip customer matching for internal docs - they should stay as "Gamer Packaging"
-        if acct_type in ["Corporate Internal", "System Resources"]:
-            logger.info(f"Skipping customer match for {file_name}: internal doc type {acct_type}")
+        # Only try customer matching for Customer Accounts or Unknown types
+        if acct_type not in ["Customer Accounts", "Unknown - Needs AI Analysis", None]:
+            # For vendors and internal, keep what AI said
             return metadata
         
-        # Skip if already set to default company name (internal doc default)
-        if acct_name == "Gamer Packaging":
-            logger.info(f"Skipping customer match for {file_name}: already set to Gamer Packaging")
-            return metadata
-        
-        # Try to match customer name from various sources
+        # Try to match the AI-provided acct_name against customer list
         texts_to_match = []
         
-        # 1. Try the acct_name from folder extraction
-        if metadata.get("acct_name"):
-            texts_to_match.append(metadata["acct_name"])
-        if metadata.get("customer_name"):
+        # 1. Try the acct_name from AI
+        if acct_name and acct_name != "Gamer Packaging":
+            texts_to_match.append(acct_name)
+        
+        # 2. Try customer_name if different
+        if metadata.get("customer_name") and metadata.get("customer_name") != acct_name:
             texts_to_match.append(metadata["customer_name"])
         
-        # 2. Try folder path components
-        parts = folder_path.split("/") if folder_path else []
-        for part in parts:
-            if part and len(part) >= 3 and part not in ["Documents", "Customer Relations", "General", "Archive", "Templates"]:
-                texts_to_match.append(part)
-        
-        # 3. Try file name (without extension)
+        # 3. Try extracting from filename (common pattern: CustomerName_document.pdf)
         import re
         name_without_ext = re.sub(r'\.[^.]+$', '', file_name)
-        # Split by common separators and try each part
+        # Split by common separators and try first part
         name_parts = re.split(r'[-_\s]+', name_without_ext)
-        for part in name_parts[:3]:  # First 3 parts only
-            if len(part) >= 4:
-                texts_to_match.append(part)
+        if name_parts and len(name_parts[0]) >= 3:
+            texts_to_match.append(name_parts[0])
         
         # Try matching each text
         best_match = None
@@ -567,21 +559,20 @@ class SharePointMigrationService:
                 if best_match is None or match["confidence"] > best_match["confidence"]:
                     best_match = match
         
-        # Apply best match if found
+        # Apply best match if found with good confidence
         if best_match and best_match["confidence"] >= 0.7:
             customer = best_match["customer"]
             logger.info(f"Customer match for '{file_name}': {customer['name']} (confidence: {best_match['confidence']:.2f}, type: {best_match['match_type']})")
             
-            # Update metadata
+            # Update metadata with verified customer info
             metadata["acct_name"] = customer["name"]
             metadata["customer_name"] = customer["name"]
             metadata["customer_number"] = customer.get("customer_number")
             metadata["customer_match_confidence"] = best_match["confidence"]
             metadata["customer_match_type"] = best_match["match_type"]
             
-            # If we matched a customer, ensure acct_type is Customer Accounts
-            if metadata.get("acct_type") != "Manufacturers / Vendors":
-                metadata["acct_type"] = "Customer Accounts"
+            # Confirm acct_type as Customer Accounts
+            metadata["acct_type"] = "Customer Accounts"
         
         return metadata
         

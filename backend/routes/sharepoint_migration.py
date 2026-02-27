@@ -174,30 +174,67 @@ async def classify_candidates(request: ClassifyRequest):
 
 
 @router.post("/migrate", response_model=MigrateResponse)
-async def migrate_candidates(request: MigrateRequest):
+async def migrate_candidates(request: MigrateRequest, background_tasks: BackgroundTasks):
     """
     Migrate ready candidates to the target SharePoint site.
     
     Copies files and applies metadata columns.
     Idempotent - already migrated files are skipped.
     For large files (videos), uses chunked upload.
+    
+    Returns immediately and processes in background to avoid timeout.
     """
+    global migration_status
+    
+    if migration_status["running"]:
+        # Return current status if already running
+        return MigrateResponse(
+            attempted=migration_status["processed"],
+            migrated=0,
+            errors=0,
+            metadata_errors=0
+        )
+    
     service = get_service()
-    # Limit to smaller batches to avoid timeout
     batch_size = min(request.maxCount or 10, 10)
     logger.info(f"Migration request: {request.targetSiteUrl}, maxCount={batch_size}")
     
-    try:
-        result = await service.migrate_candidates(
-            target_site_url=request.targetSiteUrl,
-            target_library_name=request.targetLibraryName,
-            max_count=batch_size,
-            only_ids=request.onlyIds
-        )
-        return MigrateResponse(**result)
-    except Exception as e:
-        logger.error(f"Migration error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    async def run_migration():
+        global migration_status
+        migration_status["running"] = True
+        migration_status["processed"] = 0
+        try:
+            result = await service.migrate_candidates(
+                target_site_url=request.targetSiteUrl,
+                target_library_name=request.targetLibraryName,
+                max_count=batch_size,
+                only_ids=request.onlyIds
+            )
+            migration_status["last_result"] = result
+            migration_status["processed"] = result.get("attempted", 0)
+            logger.info(f"Background migration complete: {result}")
+        except Exception as e:
+            logger.error(f"Background migration error: {e}")
+            migration_status["last_result"] = {"error": str(e)}
+        finally:
+            migration_status["running"] = False
+    
+    # Start migration in background
+    background_tasks.add_task(run_migration)
+    
+    # Return immediately with pending status
+    return MigrateResponse(
+        attempted=0,
+        migrated=0,
+        errors=0,
+        metadata_errors=0
+    )
+
+
+@router.get("/migrate/status")
+async def get_migration_status():
+    """Get the current background migration status."""
+    return migration_status
 
 
 @router.get("/candidates")

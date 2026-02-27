@@ -443,27 +443,32 @@ class BusinessCentralService:
     
     async def _add_invoice_lines(self, invoice_id: str, lines: List[Dict], token: str, company_id: str):
         """
-        Add line items to a purchase invoice.
+        Add line items to a purchase invoice using Item type.
         
-        BC Purchase Invoice Lines API requires:
-        - lineType: "Item", "G/L Account", "Comment", etc.
-        - For G/L Account type, accountId is REQUIRED
-        - For Item type, itemId is required
-        - description: Line description
-        - quantity: Quantity (default 1 for services)
+        BC Purchase Invoice Lines API requires for Item type:
+        - lineType: "Item"
+        - itemId: The Item's GUID (not the item number/code)
+        - description: Line description (optional, defaults from item)
+        - quantity: Quantity
         - unitCost: Cost per unit
         
-        For freight/service invoices without specific items, we use "Comment" lineType
-        which only requires description - this allows capturing the line info without
-        needing a G/L Account setup.
+        Uses BC_DEFAULT_ITEM_CODE (e.g., "FREIGHT") as the default item for all lines.
+        The item's GUID is looked up dynamically from BC.
         """
         url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseInvoices({invoice_id})/purchaseInvoiceLines"
         
         added_count = 0
         errors = []
         
-        # Get default G/L Account for AP expense (if configured)
-        default_gl_account_id = os.environ.get("BC_DEFAULT_AP_GL_ACCOUNT_ID")
+        # Get default Item code and look up its GUID
+        default_item_code = os.environ.get("BC_DEFAULT_ITEM_CODE", "FREIGHT")
+        default_item_id = await self._get_item_id_by_code(default_item_code, token, company_id)
+        
+        if not default_item_id:
+            logger.error("Could not find Item '%s' in BC - cannot add invoice lines", default_item_code)
+            return {"added": 0, "total": len(lines), "errors": [{"line": 0, "error": f"Item '{default_item_code}' not found in BC"}]}
+        
+        logger.info("Using Item '%s' (ID: %s) for invoice lines", default_item_code, default_item_id)
         
         async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
             for idx, line in enumerate(lines):
@@ -477,33 +482,22 @@ class BusinessCentralService:
                 if line_total > 0 and unit_price == 0 and quantity > 0:
                     unit_price = line_total / quantity
                 
-                # Skip empty lines
+                # Skip empty lines (no description AND no amount)
                 if not description and unit_price == 0:
                     logger.debug("Skipping empty invoice line %d", idx)
                     continue
                 
-                # Build line payload based on what's configured
-                # If we have a G/L Account ID, use G/L Account type
-                # Otherwise, try Comment type (which doesn't post to GL but captures the info)
-                if default_gl_account_id:
-                    line_payload = {
-                        "lineType": "G/L Account",
-                        "accountId": default_gl_account_id,
-                        "description": description[:100] if description else f"Line {idx + 1}",
-                        "quantity": quantity,
-                        "unitCost": unit_price,
-                    }
-                else:
-                    # Fallback: Use Comment type - captures description but doesn't post to GL
-                    # User will need to manually edit in BC or configure a default GL account
-                    line_payload = {
-                        "lineType": "Comment",
-                        "description": f"{description[:80]} (Qty: {quantity}, Amount: ${unit_price * quantity:.2f})"[:100],
-                    }
-                    logger.warning("No BC_DEFAULT_AP_GL_ACCOUNT_ID configured - using Comment line type for line %d", idx + 1)
+                # Build line payload using Item type
+                line_payload = {
+                    "lineType": "Item",
+                    "itemId": default_item_id,
+                    "description": description[:100] if description else f"Line {idx + 1}",
+                    "quantity": quantity,
+                    "unitCost": unit_price,
+                }
                 
-                logger.info("Adding invoice line %d: %s (type=%s, qty=%s, unit=$%s)", 
-                           idx + 1, description[:50], line_payload.get("lineType"), quantity, unit_price)
+                logger.info("Adding invoice line %d: %s (Item=%s, qty=%s, unit=$%s)", 
+                           idx + 1, description[:50], default_item_code, quantity, unit_price)
                 
                 resp = await client.post(
                     url,
@@ -529,6 +523,49 @@ class BusinessCentralService:
         
         logger.info("Invoice line addition complete: %d/%d lines added", added_count, len(lines))
         return {"added": added_count, "total": len(lines), "errors": errors}
+    
+    async def _get_item_id_by_code(self, item_code: str, token: str, company_id: str) -> Optional[str]:
+        """
+        Look up an Item's GUID by its number/code.
+        
+        Args:
+            item_code: The item number (e.g., "FREIGHT")
+            token: BC API access token
+            company_id: BC company GUID
+            
+        Returns:
+            The item's GUID if found, None otherwise
+        """
+        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/items"
+        
+        try:
+            async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+                resp = await client.get(
+                    url,
+                    headers={"Authorization": f"Bearer {token}"},
+                    params={
+                        "$filter": f"number eq '{item_code}'",
+                        "$select": "id,number,displayName"
+                    }
+                )
+                
+                if resp.status_code == 200:
+                    items = resp.json().get("value", [])
+                    if items:
+                        item = items[0]
+                        logger.info("Found Item '%s': %s (ID: %s)", 
+                                   item_code, item.get("displayName"), item["id"])
+                        return item["id"]
+                    else:
+                        logger.warning("Item '%s' not found in BC", item_code)
+                        return None
+                else:
+                    logger.error("Failed to look up Item '%s': HTTP %d - %s", 
+                                item_code, resp.status_code, resp.text[:200])
+                    return None
+        except Exception as e:
+            logger.error("Error looking up Item '%s': %s", item_code, str(e))
+            return None
     
     async def get_purchase_invoice(self, invoice_id: str) -> Optional[Dict[str, Any]]:
         """Get a purchase invoice by ID."""

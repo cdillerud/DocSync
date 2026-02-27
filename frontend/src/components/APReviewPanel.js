@@ -15,14 +15,15 @@ import { toast } from 'sonner';
 import { 
   Save, Send, Search, Building2, FileText, 
   Package, DollarSign, Calendar, Hash, Loader2,
-  CheckCircle2, AlertCircle, Plus, Trash2
+  CheckCircle2, AlertCircle, Plus, Trash2, Sparkles
 } from 'lucide-react';
 import { 
   searchVendors, 
   searchPurchaseOrders, 
   saveAPReview, 
   markReadyForPost, 
-  postToBC 
+  postToBC,
+  extractInvoiceData
 } from '../lib/api';
 
 const CURRENCIES = ['USD', 'CAD', 'EUR', 'GBP', 'MXN'];
@@ -57,6 +58,7 @@ export function APReviewPanel({ document, onUpdate }) {
   const [saving, setSaving] = useState(false);
   const [posting, setPosting] = useState(false);
   const [markingReady, setMarkingReady] = useState(false);
+  const [extracting, setExtracting] = useState(false);
   
   // Initialize form from document
   useEffect(() => {

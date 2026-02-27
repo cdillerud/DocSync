@@ -90,8 +90,9 @@ class MigrateResponse(BaseModel):
 
 class ResetCandidatesRequest(BaseModel):
     """Request body for resetting candidates."""
-    candidate_ids: Optional[List[str]] = None  # Reset specific IDs, or all migrated if None
-    reset_to_status: str = "ready_for_migration"
+    candidate_ids: Optional[List[str]] = None  # Reset specific IDs
+    reset_from_status: Optional[str] = None  # Reset only files with this status
+    reset_to_status: str = "discovered"  # Default to discovered for re-classification
 
 
 class CandidateUpdate(BaseModel):

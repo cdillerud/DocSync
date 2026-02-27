@@ -1074,8 +1074,13 @@ Full path: {legacy_path}
         site_id: str,
         list_id: str,
         token: str
-    ) -> None:
-        """Ensure required columns exist in destination library based on Excel metadata structure."""
+    ) -> Dict[str, str]:
+        """
+        Ensure required columns exist in destination library based on Excel metadata structure.
+        Returns a mapping of our column names to SharePoint internal names.
+        """
+        column_mapping = {}  # Maps our names to SharePoint internal names
+        
         async with httpx.AsyncClient(timeout=60.0) as client:
             # Get existing columns
             resp = await client.get(
@@ -1084,49 +1089,80 @@ Full path: {legacy_path}
             )
             
             if resp.status_code != 200:
-                logger.warning(f"Could not get columns: {resp.status_code}")
-                return
+                logger.warning(f"Could not get columns: {resp.status_code} - {resp.text[:200]}")
+                return column_mapping
             
-            existing_columns = {col["name"] for col in resp.json().get("value", [])}
+            existing_columns_data = resp.json().get("value", [])
+            # Build lookup by both name and displayName (case-insensitive)
+            existing_by_name = {}
+            existing_by_display = {}
+            for col in existing_columns_data:
+                col_name = col.get("name", "")
+                col_display = col.get("displayName", "")
+                existing_by_name[col_name.lower()] = col_name
+                existing_by_display[col_display.lower()] = col_name
+            
+            logger.info(f"Existing columns in destination: {list(existing_by_name.keys())}")
             
             # Create missing columns
             for col_def in REQUIRED_COLUMNS:
-                if col_def["name"] not in existing_columns:
-                    logger.info(f"Creating column: {col_def['name']}")
-                    
-                    col_payload = {
-                        "name": col_def["name"],
-                        "displayName": col_def["name"]
+                target_name = col_def["name"]
+                target_lower = target_name.lower()
+                
+                # Check if column already exists (by name or displayName)
+                if target_lower in existing_by_name:
+                    column_mapping[target_name] = existing_by_name[target_lower]
+                    logger.debug(f"Column exists: {target_name} -> {column_mapping[target_name]}")
+                    continue
+                elif target_lower in existing_by_display:
+                    column_mapping[target_name] = existing_by_display[target_lower]
+                    logger.debug(f"Column exists (by display): {target_name} -> {column_mapping[target_name]}")
+                    continue
+                
+                # Column doesn't exist - create it
+                logger.info(f"Creating column: {target_name} (type: {col_def['type']})")
+                
+                col_payload = {
+                    "name": target_name,
+                    "displayName": target_name
+                }
+                
+                if col_def["type"] == "text":
+                    # Use multi-line text for potentially long fields
+                    col_payload["text"] = {
+                        "allowMultipleLines": target_name in ["LegacyPath", "LegacyUrl", "DocumentSubType"]
                     }
-                    
-                    if col_def["type"] == "text":
-                        # Use multi-line text for potentially long fields
-                        col_payload["text"] = {
-                            "allowMultipleLines": col_def["name"] in ["LegacyPath", "LegacyUrl", "DocumentSubType"]
-                        }
-                    elif col_def["type"] == "dateTime":
-                        col_payload["dateTime"] = {"displayAs": "default"}
-                    elif col_def["type"] == "choice":
-                        # SharePoint choice column
-                        col_payload["choice"] = {
-                            "allowTextEntry": True,  # Allow custom values
-                            "choices": col_def.get("choices", []),
-                            "displayAs": "dropDownMenu"
-                        }
-                    
-                    create_resp = await client.post(
-                        f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/columns",
-                        headers={
-                            "Authorization": f"Bearer {token}",
-                            "Content-Type": "application/json"
-                        },
-                        json=col_payload
-                    )
-                    
-                    if create_resp.status_code not in (200, 201):
-                        logger.warning(f"Could not create column {col_def['name']}: {create_resp.status_code} - {create_resp.text[:200]}")
-                    else:
-                        logger.info(f"Created column: {col_def['name']}")
+                elif col_def["type"] == "dateTime":
+                    col_payload["dateTime"] = {"displayAs": "default"}
+                elif col_def["type"] == "choice":
+                    # SharePoint choice column
+                    col_payload["choice"] = {
+                        "allowTextEntry": True,  # Allow custom values
+                        "choices": col_def.get("choices", []),
+                        "displayAs": "dropDownMenu"
+                    }
+                
+                create_resp = await client.post(
+                    f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/columns",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json"
+                    },
+                    json=col_payload
+                )
+                
+                if create_resp.status_code in (200, 201):
+                    created_col = create_resp.json()
+                    internal_name = created_col.get("name", target_name)
+                    column_mapping[target_name] = internal_name
+                    logger.info(f"Created column: {target_name} -> {internal_name}")
+                else:
+                    error_text = create_resp.text[:300]
+                    logger.warning(f"Could not create column {target_name}: {create_resp.status_code} - {error_text}")
+                    # Still add to mapping with assumed name - SharePoint might accept it
+                    column_mapping[target_name] = target_name
+        
+        return column_mapping
     
     async def _get_list_id(self, site_id: str, library_name: str, token: str) -> str:
         """Get the list ID for a document library."""

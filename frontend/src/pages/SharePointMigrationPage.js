@@ -1095,12 +1095,18 @@ export default function SharePointMigrationPage() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="text-sm font-medium">Metadata (Excel Structure)</div>
-                  {!editMode && selectedCandidate.status !== 'migrated' && (
+                  {!editMode && (
                     <Button variant="outline" size="sm" onClick={() => setEditMode(true)}>
                       Edit
                     </Button>
                   )}
                 </div>
+                
+                {editMode && selectedCandidate.status === 'migrated' && (
+                  <div className="text-xs text-amber-600 bg-amber-50 dark:bg-amber-900/20 p-2 rounded">
+                    Note: After saving changes, click "Apply Metadata" above to update SharePoint.
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-3">
                   {/* Account Type */}

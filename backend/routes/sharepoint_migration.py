@@ -370,7 +370,17 @@ async def reset_candidates(request: ResetCandidatesRequest):
                 "migration_timestamp": None,
                 "migration_error": None,
                 "metadata_write_status": None,
-                "metadata_write_error": None
+                "metadata_write_error": None,
+                # Clear classification data to force re-classification
+                "classification_source": None,
+                "classification_confidence": None,
+                "classification_method": None,
+                "acct_type": None,
+                "acct_name": None,
+                "customer_name": None,
+                "vendor_name": None,
+                "customer_number": None,
+                "customer_match_confidence": None,
             }}
         )
         

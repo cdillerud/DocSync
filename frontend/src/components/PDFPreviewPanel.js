@@ -1,16 +1,23 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
-import { FileText, ExternalLink, ZoomIn, ZoomOut, Maximize2, Download, Loader2 } from 'lucide-react';
+import { FileText, ExternalLink, ZoomIn, ZoomOut, Maximize2, Download, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import * as pdfjsLib from 'pdfjs-dist';
+
+// Set the worker source
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
 
 const API_BASE = process.env.REACT_APP_BACKEND_URL || '';
 
 export function PDFPreviewPanel({ document }) {
-  const [zoom, setZoom] = useState(100);
+  const canvasRef = useRef(null);
+  const [zoom, setZoom] = useState(1.0);
   const [fullscreen, setFullscreen] = useState(false);
-  const [pdfBlobUrl, setPdfBlobUrl] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [pdfDoc, setPdfDoc] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(0);
   
   // Get the backend file endpoint URL
   const backendFileUrl = document?.id ? `${API_BASE}/api/documents/${document.id}/file` : null;
@@ -18,29 +25,34 @@ export function PDFPreviewPanel({ document }) {
   // SharePoint URL for external link
   const sharePointUrl = document?.sharepoint_share_link_url || document?.sharepoint_web_url;
   
-  // Load PDF from backend when document changes
+  // Load PDF document
   useEffect(() => {
     if (!backendFileUrl) return;
     
     let cancelled = false;
-    let blobUrl = null;
     setLoading(true);
     setError(null);
     
-    // Fetch PDF from backend and create blob URL
     const token = localStorage.getItem('gpi_token');
+    
+    // Fetch the PDF file
     fetch(backendFileUrl, {
       headers: token ? { 'Authorization': `Bearer ${token}` } : {}
     })
       .then(res => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.blob();
+        return res.arrayBuffer();
       })
-      .then(blob => {
+      .then(data => {
         if (cancelled) return;
-        // Create object URL for the blob
-        blobUrl = URL.createObjectURL(blob);
-        setPdfBlobUrl(blobUrl);
+        // Load PDF with pdf.js
+        return pdfjsLib.getDocument({ data }).promise;
+      })
+      .then(pdf => {
+        if (cancelled || !pdf) return;
+        setPdfDoc(pdf);
+        setTotalPages(pdf.numPages);
+        setCurrentPage(1);
         setLoading(false);
       })
       .catch(err => {
@@ -52,12 +64,37 @@ export function PDFPreviewPanel({ document }) {
     
     return () => {
       cancelled = true;
-      // Clean up blob URL when component unmounts or document changes
-      if (blobUrl) {
-        URL.revokeObjectURL(blobUrl);
-      }
     };
   }, [backendFileUrl]);
+  
+  // Render current page
+  useEffect(() => {
+    if (!pdfDoc || !canvasRef.current) return;
+    
+    let cancelled = false;
+    
+    pdfDoc.getPage(currentPage).then(page => {
+      if (cancelled) return;
+      
+      const canvas = canvasRef.current;
+      const context = canvas.getContext('2d');
+      
+      const viewport = page.getViewport({ scale: zoom * 1.5 }); // 1.5 base scale for better quality
+      canvas.height = viewport.height;
+      canvas.width = viewport.width;
+      
+      const renderContext = {
+        canvasContext: context,
+        viewport: viewport
+      };
+      
+      page.render(renderContext);
+    });
+    
+    return () => {
+      cancelled = true;
+    };
+  }, [pdfDoc, currentPage, zoom]);
   
   if (!document?.id) {
     return (
@@ -90,20 +127,49 @@ export function PDFPreviewPanel({ document }) {
             Document Preview
           </CardTitle>
           <div className="flex items-center gap-1">
+            {/* Page navigation */}
+            {totalPages > 1 && (
+              <>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-7 w-7"
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage <= 1}
+                >
+                  <ChevronLeft className="w-3 h-3" />
+                </Button>
+                <span className="text-xs text-muted-foreground w-16 text-center">
+                  {currentPage} / {totalPages}
+                </span>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-7 w-7"
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage >= totalPages}
+                >
+                  <ChevronRight className="w-3 h-3" />
+                </Button>
+                <div className="w-px h-4 bg-border mx-1" />
+              </>
+            )}
+            
+            {/* Zoom controls */}
             <Button 
               variant="ghost" 
               size="icon" 
               className="h-7 w-7"
-              onClick={() => setZoom(z => Math.max(50, z - 25))}
+              onClick={() => setZoom(z => Math.max(0.5, z - 0.25))}
             >
               <ZoomOut className="w-3 h-3" />
             </Button>
-            <span className="text-xs text-muted-foreground w-10 text-center">{zoom}%</span>
+            <span className="text-xs text-muted-foreground w-10 text-center">{Math.round(zoom * 100)}%</span>
             <Button 
               variant="ghost" 
               size="icon" 
               className="h-7 w-7"
-              onClick={() => setZoom(z => Math.min(200, z + 25))}
+              onClick={() => setZoom(z => Math.min(3, z + 0.25))}
             >
               <ZoomIn className="w-3 h-3" />
             </Button>
@@ -133,7 +199,7 @@ export function PDFPreviewPanel({ document }) {
       </CardHeader>
       <CardContent className="p-2">
         <div 
-          className={`overflow-auto rounded-md border bg-muted/30 ${fullscreen ? 'h-[calc(100vh-120px)]' : 'h-[500px]'}`}
+          className={`overflow-auto rounded-md border bg-muted/30 flex justify-center ${fullscreen ? 'h-[calc(100vh-120px)]' : 'h-[500px]'}`}
         >
           {loading ? (
             <div className="w-full h-full flex items-center justify-center">
@@ -153,33 +219,8 @@ export function PDFPreviewPanel({ document }) {
                 </Button>
               )}
             </div>
-          ) : pdfBlobUrl ? (
-            <object
-              data={pdfBlobUrl}
-              type="application/pdf"
-              className="w-full h-full"
-              style={{ minHeight: '600px' }}
-            >
-              <div className="w-full h-full flex flex-col items-center justify-center p-4">
-                <p className="text-sm text-muted-foreground mb-4">PDF preview not available in this browser</p>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" asChild>
-                    <a href={pdfBlobUrl} download={document?.file_name || 'document.pdf'}>
-                      <Download className="w-3 h-3 mr-1" />
-                      Download
-                    </a>
-                  </Button>
-                  {sharePointUrl && (
-                    <Button variant="outline" size="sm" asChild>
-                      <a href={sharePointUrl} target="_blank" rel="noopener noreferrer">
-                        <ExternalLink className="w-3 h-3 mr-1" />
-                        Open in SharePoint
-                      </a>
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </object>
+          ) : pdfDoc ? (
+            <canvas ref={canvasRef} className="max-w-full" />
           ) : (
             <div className="w-full h-full flex items-center justify-center">
               <p className="text-sm text-muted-foreground">No preview available</p>

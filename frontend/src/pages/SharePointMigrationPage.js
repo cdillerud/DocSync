@@ -82,6 +82,135 @@ const DOC_STATUS_COLORS = {
   'Pending': 'bg-yellow-100 text-yellow-800',
 };
 
+// Default document types from Excel metadata structure
+const DEFAULT_DOCUMENT_TYPES = [
+  'Product Specification Sheet',
+  'Product Drawings',
+  'Product Pack-Out Specs',
+  'Graphical Die Line',
+  'Supplier Documents',
+  'Marketing Literature',
+  'Capabilities / Catalogs',
+  'SOPs / Resources',
+  'Customer Documents',
+  'Customer Quote',
+  'Supplier Quote',
+  'Cost Analysis',
+  'Agreement Resources',
+  'Supply Agreement',
+  'Quality Documents',
+  'Training',
+  'Invoice & Hold Agreement',
+  'Forecasts',
+  'Inventory Reports',
+  'Transaction History',
+  'Price List',
+  'Drawing Approval',
+  'Specification Approval',
+  'Prototype Approval',
+  'Graphics Approval',
+  'Project Timeline',
+  'New Business Dev Resources',
+  'Claims/Cases',
+  'Warehouse & Consignment',
+  'Supply Addendum',
+  'Other'
+];
+
+// Editable Combobox component for document types
+function EditableDocTypeSelect({ value, onChange, customTypes = [] }) {
+  const [open, setOpen] = useState(false);
+  const [inputValue, setInputValue] = useState(value || '');
+  const [showAddNew, setShowAddNew] = useState(false);
+  const inputRef = useRef(null);
+  
+  // Combine default types with any custom types
+  const allTypes = [...new Set([...DEFAULT_DOCUMENT_TYPES, ...customTypes])].sort();
+  
+  // Filter types based on input
+  const filteredTypes = inputValue 
+    ? allTypes.filter(t => t.toLowerCase().includes(inputValue.toLowerCase()))
+    : allTypes;
+  
+  // Check if input is a new type
+  const isNewType = inputValue && !allTypes.some(t => t.toLowerCase() === inputValue.toLowerCase());
+  
+  const handleSelect = (type) => {
+    onChange(type);
+    setInputValue(type);
+    setOpen(false);
+  };
+  
+  const handleAddNew = () => {
+    if (inputValue.trim()) {
+      onChange(inputValue.trim());
+      setOpen(false);
+      toast.success(`Added new document type: "${inputValue.trim()}"`);
+    }
+  };
+  
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="w-full justify-between font-normal"
+        >
+          <span className="truncate">{value || 'Select or type...'}</span>
+          <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[300px] p-0" align="start">
+        <div className="p-2 border-b">
+          <Input
+            ref={inputRef}
+            placeholder="Search or type new..."
+            value={inputValue}
+            onChange={(e) => {
+              setInputValue(e.target.value);
+              setShowAddNew(true);
+            }}
+            className="h-8"
+          />
+        </div>
+        <div className="max-h-[200px] overflow-y-auto">
+          {filteredTypes.length > 0 ? (
+            filteredTypes.map((type) => (
+              <div
+                key={type}
+                className={`px-3 py-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-between ${
+                  value === type ? 'bg-gray-50 dark:bg-gray-800' : ''
+                }`}
+                onClick={() => handleSelect(type)}
+              >
+                <span className="text-sm truncate">{type}</span>
+                {value === type && <Check className="h-4 w-4 text-green-600" />}
+              </div>
+            ))
+          ) : (
+            <div className="px-3 py-2 text-sm text-gray-500">No matching types</div>
+          )}
+        </div>
+        {isNewType && inputValue.trim() && (
+          <div className="p-2 border-t">
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full text-green-600 border-green-300 hover:bg-green-50"
+              onClick={handleAddNew}
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add "{inputValue.trim()}"
+            </Button>
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function formatDate(iso) {
   if (!iso) return '-';
   return new Date(iso).toLocaleDateString('en-US', { 

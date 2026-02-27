@@ -23,6 +23,7 @@ export function PDFPreviewPanel({ document }) {
     if (!backendFileUrl) return;
     
     let cancelled = false;
+    let blobUrl = null;
     setLoading(true);
     setError(null);
     
@@ -38,8 +39,8 @@ export function PDFPreviewPanel({ document }) {
       .then(blob => {
         if (cancelled) return;
         // Create object URL for the blob
-        const url = URL.createObjectURL(blob);
-        setPdfBlobUrl(url);
+        blobUrl = URL.createObjectURL(blob);
+        setPdfBlobUrl(blobUrl);
         setLoading(false);
       })
       .catch(err => {
@@ -52,8 +53,8 @@ export function PDFPreviewPanel({ document }) {
     return () => {
       cancelled = true;
       // Clean up blob URL when component unmounts or document changes
-      if (pdfBlobUrl) {
-        URL.revokeObjectURL(pdfBlobUrl);
+      if (blobUrl) {
+        URL.revokeObjectURL(blobUrl);
       }
     };
   }, [backendFileUrl]);

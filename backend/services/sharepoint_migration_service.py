@@ -528,10 +528,14 @@ class SharePointMigrationService:
         Enhance metadata by matching against known customer list.
         This improves acct_name accuracy and confirms customer vs vendor classification.
         
-        Skips matching for internal/corporate documents.
+        Skips matching for internal/corporate documents or docs already defaulted to Gamer Packaging.
         """
         # Skip customer matching for internal docs - they should stay as "Gamer Packaging"
         if metadata.get("acct_type") in ["Corporate Internal", "System Resources"]:
+            return metadata
+        
+        # Skip if already set to default company name (internal doc default)
+        if metadata.get("acct_name") == "Gamer Packaging":
             return metadata
         
         # Try to match customer name from various sources

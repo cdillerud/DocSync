@@ -1554,10 +1554,16 @@ Full path: {legacy_path}
                             return column_mapping.get(name, name)
                         
                         # Prepare metadata fields - our custom columns only
+                        acct_type = candidate.get("acct_type") or "Corporate Internal"
+                        # Default AcctName to "Gamer Packaging" for internal/system docs
+                        acct_name = candidate.get("acct_name") or candidate.get("customer_name") or candidate.get("vendor_name")
+                        if not acct_name and acct_type in ["Corporate Internal", "System Resources"]:
+                            acct_name = "Gamer Packaging"
+                        
                         fields = {
                             # Excel metadata columns
-                            get_col("AcctType"): candidate.get("acct_type") or "Corporate Internal",
-                            get_col("AcctName"): candidate.get("acct_name") or candidate.get("customer_name") or candidate.get("vendor_name") or "",
+                            get_col("AcctType"): acct_type,
+                            get_col("AcctName"): acct_name or "",
                             get_col("DocumentType"): candidate.get("document_type") or "Other",
                             get_col("DocumentSubType"): candidate.get("document_sub_type") or "",
                             get_col("DocumentStatus"): candidate.get("document_status") or "Active",

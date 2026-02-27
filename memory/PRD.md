@@ -1430,6 +1430,7 @@ Integrated metadata structure from `File MetaData Structure.xlsx` into the hybri
 **SharePoint Column Creation:**
 - Backend automatically creates choice columns (`AcctType`, `DocumentType`, `DocumentStatus`) and text columns in destination library
 - Metadata applied to migrated files via Graph API
+- **NEW:** Improved `_ensure_destination_columns` method with better column detection and mapping
 
 ### Test Results (Hybrid)
 
@@ -1460,4 +1461,82 @@ Target:
 
 ---
 
-*Last Updated: February 26, 2026*
+## Session Update 6: February 27, 2026 - Metadata Column Fix
+
+### Overview
+Fixed the SharePoint metadata application issue by improving column creation and metadata writing logic.
+
+### Backend Changes
+
+**File:** `/app/backend/services/sharepoint_migration_service.py`
+
+1. **Improved `_ensure_destination_columns` method:**
+   - Now returns a column mapping dictionary (our names → SharePoint internal names)
+   - Better column detection using both `name` and `displayName` (case-insensitive)
+   - Detailed logging of existing columns and creation results
+
+2. **Updated `migrate_candidates` method:**
+   - Uses column mapping for all metadata field writes
+   - Tracks `metadata_write_status` and `metadata_write_error` per candidate
+   - Returns `metadata_errors` count in response
+
+3. **New `apply_metadata_to_migrated` method:**
+   - Allows applying metadata to already migrated files
+   - Ensures columns exist before writing
+   - Returns detailed status for each operation
+
+**File:** `/app/backend/routes/sharepoint_migration.py`
+
+1. **New endpoints:**
+   - `POST /api/migration/sharepoint/reset-candidates` - Reset migrated files for re-migration
+   - `POST /api/migration/sharepoint/apply-metadata/{id}` - Apply metadata to single migrated file
+
+2. **Updated `MigrateResponse` model:**
+   - Added `metadata_errors` field
+
+### Frontend Changes
+
+**File:** `/app/frontend/src/pages/SharePointMigrationPage.js`
+
+1. **New "Metadata" column in table:**
+   - Shows "Applied" (green), "Failed" (red), or "Pending" (yellow) status
+   - Hover shows error message for failed items
+
+2. **New "Reset Migrated" button:**
+   - Visible when migrated files exist
+   - Resets all migrated files back to ready_for_migration status
+   - Allows re-migration with updated metadata logic
+
+3. **Enhanced detail dialog:**
+   - Shows metadata write status for migrated files
+   - "Apply Metadata" button for files where metadata isn't applied
+   - Error message display for failed metadata writes
+
+### API Changes
+| Endpoint | Change |
+|----------|--------|
+| `POST /api/migration/sharepoint/migrate` | Now returns `metadata_errors` count |
+| `POST /api/migration/sharepoint/reset-candidates` | NEW - Reset migrated files |
+| `POST /api/migration/sharepoint/apply-metadata/{id}` | NEW - Apply metadata to single file |
+
+### Document Schema Additions
+- `metadata_write_status`: "success" | "failed" | null
+- `metadata_write_error`: Error message string or null
+
+### Current Blocker
+The preview environment has placeholder Azure credentials (`migration-workspace`). To test the SharePoint metadata application:
+1. Update `/app/backend/.env` with correct credentials:
+   - `TENANT_ID` - Azure AD tenant ID
+   - `GRAPH_CLIENT_ID` - App registration client ID  
+   - `GRAPH_CLIENT_SECRET` - App registration client secret
+2. Restart backend: `sudo supervisorctl restart backend`
+3. Use "Reset Migrated" to reset files, then re-migrate
+
+### Files Modified
+- `/app/backend/services/sharepoint_migration_service.py`
+- `/app/backend/routes/sharepoint_migration.py`
+- `/app/frontend/src/pages/SharePointMigrationPage.js`
+
+---
+
+*Last Updated: February 27, 2026*

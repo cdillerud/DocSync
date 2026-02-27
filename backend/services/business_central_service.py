@@ -447,15 +447,23 @@ class BusinessCentralService:
         
         BC Purchase Invoice Lines API requires:
         - lineType: "Item", "G/L Account", "Comment", etc.
-        - For service invoices (freight), use "G/L Account" type
+        - For G/L Account type, accountId is REQUIRED
+        - For Item type, itemId is required
         - description: Line description
         - quantity: Quantity (default 1 for services)
         - unitCost: Cost per unit
+        
+        For freight/service invoices without specific items, we use "Comment" lineType
+        which only requires description - this allows capturing the line info without
+        needing a G/L Account setup.
         """
         url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseInvoices({invoice_id})/purchaseInvoiceLines"
         
         added_count = 0
         errors = []
+        
+        # Get default G/L Account for AP expense (if configured)
+        default_gl_account_id = os.environ.get("BC_DEFAULT_AP_GL_ACCOUNT_ID")
         
         async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
             for idx, line in enumerate(lines):
@@ -474,16 +482,28 @@ class BusinessCentralService:
                     logger.debug("Skipping empty invoice line %d", idx)
                     continue
                 
-                # Build line payload - use G/L Account type for service/freight charges
-                line_payload = {
-                    "lineType": "G/L Account",  # Use G/L Account for service charges
-                    "description": description[:100] if description else f"Line {idx + 1}",  # BC has 100 char limit
-                    "quantity": quantity,
-                    "unitCost": unit_price,
-                }
+                # Build line payload based on what's configured
+                # If we have a G/L Account ID, use G/L Account type
+                # Otherwise, try Comment type (which doesn't post to GL but captures the info)
+                if default_gl_account_id:
+                    line_payload = {
+                        "lineType": "G/L Account",
+                        "accountId": default_gl_account_id,
+                        "description": description[:100] if description else f"Line {idx + 1}",
+                        "quantity": quantity,
+                        "unitCost": unit_price,
+                    }
+                else:
+                    # Fallback: Use Comment type - captures description but doesn't post to GL
+                    # User will need to manually edit in BC or configure a default GL account
+                    line_payload = {
+                        "lineType": "Comment",
+                        "description": f"{description[:80]} (Qty: {quantity}, Amount: ${unit_price * quantity:.2f})"[:100],
+                    }
+                    logger.warning("No BC_DEFAULT_AP_GL_ACCOUNT_ID configured - using Comment line type for line %d", idx + 1)
                 
-                logger.info("Adding invoice line %d: %s (qty=%s, unit=$%s)", 
-                           idx + 1, description[:50], quantity, unit_price)
+                logger.info("Adding invoice line %d: %s (type=%s, qty=%s, unit=$%s)", 
+                           idx + 1, description[:50], line_payload.get("lineType"), quantity, unit_price)
                 
                 resp = await client.post(
                     url,

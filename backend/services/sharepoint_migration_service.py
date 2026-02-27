@@ -1222,12 +1222,14 @@ Full path: {legacy_path}
         target_drive_id = await self._get_drive_id(target_site_id, target_library_name, token)
         target_list_id = await self._get_list_id(target_site_id, target_library_name, token)
         
-        # Ensure destination columns exist
-        await self._ensure_destination_columns(target_site_id, target_list_id, token)
+        # Ensure destination columns exist and get mapping
+        column_mapping = await self._ensure_destination_columns(target_site_id, target_list_id, token)
+        logger.info(f"Column mapping: {column_mapping}")
         
         attempted = 0
         migrated = 0
         errors = 0
+        metadata_errors = 0
         now = datetime.now(timezone.utc).isoformat()
         
         async with httpx.AsyncClient(timeout=120.0) as client:
@@ -1274,20 +1276,27 @@ Full path: {legacy_path}
                         headers={"Authorization": f"Bearer {token}"}
                     )
                     
+                    metadata_write_status = "not_attempted"
+                    metadata_write_error = None
+                    
                     if list_item_resp.status_code == 200:
                         list_item_id = list_item_resp.json()["id"]
+                        
+                        # Use column mapping to get correct SharePoint column names
+                        def get_col(name):
+                            return column_mapping.get(name, name)
                         
                         # Prepare metadata fields - our custom columns only
                         fields = {
                             # Excel metadata columns
-                            "AcctType": candidate.get("acct_type") or "Corporate Internal",
-                            "AcctName": candidate.get("acct_name") or candidate.get("customer_name") or candidate.get("vendor_name") or "",
-                            "DocumentType": candidate.get("document_type") or "Other",
-                            "DocumentSubType": candidate.get("document_sub_type") or "",
-                            "DocumentStatus": candidate.get("document_status") or "Active",
+                            get_col("AcctType"): candidate.get("acct_type") or "Corporate Internal",
+                            get_col("AcctName"): candidate.get("acct_name") or candidate.get("customer_name") or candidate.get("vendor_name") or "",
+                            get_col("DocumentType"): candidate.get("document_type") or "Other",
+                            get_col("DocumentSubType"): candidate.get("document_sub_type") or "",
+                            get_col("DocumentStatus"): candidate.get("document_status") or "Active",
                             # Legacy/tracking fields
-                            "ProjectOrPartNumber": candidate.get("project_or_part_number") or "",
-                            "RetentionCategory": candidate.get("retention_category") or "Unknown",
+                            get_col("ProjectOrPartNumber"): candidate.get("project_or_part_number") or "",
+                            get_col("RetentionCategory"): candidate.get("retention_category") or "Unknown",
                             "LegacyPath": candidate.get("legacy_path") or "",
                             "LegacyUrl": candidate.get("legacy_url") or "",
                             # Folder tree levels for auditing

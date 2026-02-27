@@ -1318,23 +1318,36 @@ Full path: {legacy_path}
                         token
                     )
                     
-                    # Upload to destination
                     file_name = candidate["file_name"]
-                    upload_url = f"https://graph.microsoft.com/v1.0/drives/{target_drive_id}/root:/{file_name}:/content"
+                    file_size = len(file_content)
                     
-                    upload_resp = await client.put(
-                        upload_url,
-                        headers={
-                            "Authorization": f"Bearer {token}",
-                            "Content-Type": "application/octet-stream"
-                        },
-                        content=file_content
-                    )
+                    # Use chunked upload for files > 4MB
+                    if file_size > 4 * 1024 * 1024:
+                        logger.info(f"Using chunked upload for large file: {file_name} ({file_size} bytes)")
+                        new_item = await self._upload_large_file(
+                            target_drive_id,
+                            file_name,
+                            file_content,
+                            token
+                        )
+                    else:
+                        # Simple upload for small files
+                        upload_url = f"https://graph.microsoft.com/v1.0/drives/{target_drive_id}/root:/{file_name}:/content"
+                        
+                        upload_resp = await client.put(
+                            upload_url,
+                            headers={
+                                "Authorization": f"Bearer {token}",
+                                "Content-Type": "application/octet-stream"
+                            },
+                            content=file_content
+                        )
+                        
+                        if upload_resp.status_code not in (200, 201):
+                            raise Exception(f"Upload failed: {upload_resp.status_code} - {upload_resp.text[:200]}")
+                        
+                        new_item = upload_resp.json()
                     
-                    if upload_resp.status_code not in (200, 201):
-                        raise Exception(f"Upload failed: {upload_resp.status_code} - {upload_resp.text[:200]}")
-                    
-                    new_item = upload_resp.json()
                     new_item_id = new_item["id"]
                     new_web_url = new_item.get("webUrl", "")
                     

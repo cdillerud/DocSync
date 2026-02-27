@@ -1181,6 +1181,75 @@ Full path: {legacy_path}
                     return lst["id"]
             
             raise Exception(f"List '{library_name}' not found")
+
+    async def _upload_large_file(
+        self,
+        drive_id: str,
+        file_name: str,
+        file_content: bytes,
+        token: str
+    ) -> Dict[str, Any]:
+        """
+        Upload large files using resumable upload session.
+        Required for files > 4MB.
+        
+        Returns the created item info.
+        """
+        CHUNK_SIZE = 10 * 1024 * 1024  # 10MB chunks (must be multiple of 320KB)
+        
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            # Create upload session
+            create_session_url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{file_name}:/createUploadSession"
+            
+            session_resp = await client.post(
+                create_session_url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "item": {
+                        "@microsoft.graph.conflictBehavior": "replace",
+                        "name": file_name
+                    }
+                }
+            )
+            
+            if session_resp.status_code not in (200, 201):
+                raise Exception(f"Failed to create upload session: {session_resp.status_code} - {session_resp.text[:200]}")
+            
+            upload_url = session_resp.json()["uploadUrl"]
+            file_size = len(file_content)
+            
+            # Upload in chunks
+            start = 0
+            while start < file_size:
+                end = min(start + CHUNK_SIZE, file_size)
+                chunk = file_content[start:end]
+                
+                content_range = f"bytes {start}-{end-1}/{file_size}"
+                
+                chunk_resp = await client.put(
+                    upload_url,
+                    headers={
+                        "Content-Length": str(len(chunk)),
+                        "Content-Range": content_range
+                    },
+                    content=chunk
+                )
+                
+                if chunk_resp.status_code == 202:
+                    # More chunks needed
+                    start = end
+                    logger.debug(f"Uploaded chunk {start}/{file_size} for {file_name}")
+                elif chunk_resp.status_code in (200, 201):
+                    # Upload complete
+                    logger.info(f"Large file upload complete: {file_name} ({file_size} bytes)")
+                    return chunk_resp.json()
+                else:
+                    raise Exception(f"Chunk upload failed: {chunk_resp.status_code} - {chunk_resp.text[:200]}")
+            
+            raise Exception("Upload session completed without final response")
     
     async def migrate_candidates(
         self,

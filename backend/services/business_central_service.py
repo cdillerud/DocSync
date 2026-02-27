@@ -564,7 +564,17 @@ class BusinessCentralService:
                                    item_code, item.get("displayName"), item["id"])
                         return item["id"]
                     else:
-                        logger.warning("Item '%s' not found in BC", item_code)
+                        # Item not found - log available items to help debug
+                        logger.warning("Item '%s' not found in BC. Listing available items...", item_code)
+                        list_resp = await client.get(
+                            url,
+                            headers={"Authorization": f"Bearer {token}"},
+                            params={"$select": "number,displayName", "$top": "20"}
+                        )
+                        if list_resp.status_code == 200:
+                            available = list_resp.json().get("value", [])
+                            item_list = [f"{i.get('number')}: {i.get('displayName')}" for i in available]
+                            logger.warning("Available items in BC: %s", ", ".join(item_list[:10]))
                         return None
                 else:
                     logger.error("Failed to look up Item '%s': HTTP %d - %s", 

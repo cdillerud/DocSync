@@ -1104,7 +1104,10 @@ Full path: {legacy_path}
                         "classification_source": "hybrid",
                         "classification_method": "folder_tree_plus_ai",
                         "status": "ready_for_migration",
-                        "updated_utc": now
+                        "updated_utc": now,
+                        # Ensure acct_name/acct_type from refreshed folder classification are saved
+                        "acct_name": candidate.get("acct_name"),
+                        "acct_type": candidate.get("acct_type"),
                     }
                     
                     # Enhance with customer matching

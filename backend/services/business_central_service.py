@@ -447,22 +447,27 @@ class BusinessCentralService:
         
         BC Purchase Invoice Lines API for Item type requires:
         - lineType: "Item"
-        - lineObjectNumber: The Item code/number (e.g., "FREIGHT")
+        - itemId: The Item's GUID (REQUIRED - BC won't accept item number alone)
         - description: Line description (optional)
         - quantity: Quantity
         - unitCost: Cost per unit
         
         Uses BC_DEFAULT_ITEM_CODE (e.g., "FREIGHT") as the default item for all lines.
-        BC will automatically resolve the itemId from the lineObjectNumber.
         """
         url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseInvoices({invoice_id})/purchaseInvoiceLines"
         
         added_count = 0
         errors = []
         
-        # Get default Item code (BC will resolve the GUID from this number)
+        # Get default Item code and look up its GUID
         default_item_code = os.environ.get("BC_DEFAULT_ITEM_CODE", "FREIGHT")
-        logger.info("Using Item code '%s' for invoice lines (BC will resolve itemId)", default_item_code)
+        default_item_id = await self._get_item_id_by_code(default_item_code, token, company_id)
+        
+        if not default_item_id:
+            logger.error("Could not find Item '%s' in BC - cannot add invoice lines", default_item_code)
+            return {"added": 0, "total": len(lines), "errors": [{"line": 0, "error": f"Item '{default_item_code}' not found in BC. Please verify this item exists in Business Central."}]}
+        
+        logger.info("Using Item '%s' (ID: %s) for %d invoice lines", default_item_code, default_item_id, len(lines))
         
         async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
             for idx, line in enumerate(lines):
@@ -488,18 +493,18 @@ class BusinessCentralService:
                     logger.debug("Skipping empty invoice line %d", idx)
                     continue
                 
-                # Build line payload using Item type
-                # Use lineObjectNumber (item code) - BC will resolve itemId automatically
+                # Build line payload using Item type with itemId (GUID)
                 line_payload = {
                     "lineType": "Item",
-                    "lineObjectNumber": default_item_code,
+                    "itemId": default_item_id,
                     "description": description[:100] if description else f"Line {idx + 1}",
                     "quantity": quantity,
                     "unitCost": unit_price,
                 }
                 
-                logger.info("Adding invoice line %d: %s (Item=%s, qty=%s, unit=$%s)", 
-                           idx + 1, description[:50], default_item_code, quantity, unit_price)
+                logger.info("Adding invoice line %d: desc='%s', itemId=%s, qty=%s, unitCost=$%.2f", 
+                           idx + 1, description[:40], default_item_id[:8] + "...", quantity, unit_price)
+                logger.debug("Line payload: %s", line_payload)
                 
                 resp = await client.post(
                     url,

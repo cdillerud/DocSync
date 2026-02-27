@@ -270,7 +270,8 @@ class SpiroClient:
         headers = {
             "Authorization": f"Bearer {token}",
             "Accept": "application/json",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "X-Api-Version": "1"  # Required by Spiro API
         }
         
         for attempt in range(SPIRO_MAX_RETRIES):

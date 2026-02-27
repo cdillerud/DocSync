@@ -493,6 +493,27 @@ export default function SharePointMigrationPage() {
     }
   };
 
+  const handleRetryFailed = async () => {
+    if (!window.confirm('Retry all failed migrations? This will reset errors and re-attempt upload.')) {
+      return;
+    }
+    setActionLoading('retry');
+    try {
+      const res = await API.post('/api/migration/sharepoint/retry-failed', {
+        targetSiteUrl: 'https://gamerpackaging1.sharepoint.com/sites/One_Gamer-Flat-Test',
+        targetLibraryName: 'Documents',
+        maxCount: 50
+      });
+      toast.success(`Retried ${res.data.reset_count} files: ${res.data.migrated} succeeded, ${res.data.errors} failed`);
+      await fetchSummary();
+      await fetchCandidates();
+    } catch (err) {
+      toast.error('Retry failed: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const handleRowClick = (candidate) => {
     setSelectedCandidate(candidate);
     setEditForm({

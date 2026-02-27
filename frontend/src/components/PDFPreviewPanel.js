@@ -1,31 +1,64 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
-import { FileText, ExternalLink, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
+import { FileText, ExternalLink, ZoomIn, ZoomOut, Maximize2, Download, Loader2 } from 'lucide-react';
 
 const API_BASE = process.env.REACT_APP_BACKEND_URL || '';
 
 export function PDFPreviewPanel({ document }) {
   const [zoom, setZoom] = useState(100);
   const [fullscreen, setFullscreen] = useState(false);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   
-  // For SharePoint documents, we can use the share link
-  // For local files, we'll need a backend endpoint to serve them
-  const pdfUrl = document?.sharepoint_share_link_url 
-    ? document.sharepoint_share_link_url 
-    : document?.id 
-      ? `${API_BASE}/api/documents/${document.id}/file`
-      : null;
+  // Get the backend file endpoint URL
+  const backendFileUrl = document?.id ? `${API_BASE}/api/documents/${document.id}/file` : null;
   
-  // Use Google Docs viewer for SharePoint links (embeddable)
-  // Or direct embed for local files
-  const embedUrl = pdfUrl 
-    ? (pdfUrl.includes('sharepoint.com') 
-        ? pdfUrl.replace(':b:', ':x:') // Convert to embed format
-        : pdfUrl)
-    : null;
+  // SharePoint URL for external link
+  const sharePointUrl = document?.sharepoint_share_link_url || document?.sharepoint_web_url;
   
-  if (!pdfUrl) {
+  // Load PDF from backend when document changes
+  useEffect(() => {
+    if (!backendFileUrl) return;
+    
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    
+    // Fetch PDF from backend and create blob URL
+    const token = localStorage.getItem('gpi_token');
+    fetch(backendFileUrl, {
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+    })
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.blob();
+      })
+      .then(blob => {
+        if (cancelled) return;
+        // Create object URL for the blob
+        const url = URL.createObjectURL(blob);
+        setPdfBlobUrl(url);
+        setLoading(false);
+      })
+      .catch(err => {
+        if (cancelled) return;
+        console.error('PDF load error:', err);
+        setError(err.message);
+        setLoading(false);
+      });
+    
+    return () => {
+      cancelled = true;
+      // Clean up blob URL when component unmounts or document changes
+      if (pdfBlobUrl) {
+        URL.revokeObjectURL(pdfBlobUrl);
+      }
+    };
+  }, [backendFileUrl]);
+  
+  if (!document?.id) {
     return (
       <Card className="border border-border">
         <CardHeader className="pb-3">
@@ -81,53 +114,55 @@ export function PDFPreviewPanel({ document }) {
             >
               <Maximize2 className="w-3 h-3" />
             </Button>
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="h-7 ml-2"
-              asChild
-            >
-              <a href={pdfUrl} target="_blank" rel="noopener noreferrer">
-                <ExternalLink className="w-3 h-3 mr-1" />
-                Open
-              </a>
-            </Button>
+            {sharePointUrl && (
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="h-7 ml-2"
+                asChild
+              >
+                <a href={sharePointUrl} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink className="w-3 h-3 mr-1" />
+                  Open
+                </a>
+              </Button>
+            )}
           </div>
         </div>
       </CardHeader>
       <CardContent className="p-2">
         <div 
           className={`overflow-auto rounded-md border bg-muted/30 ${fullscreen ? 'h-[calc(100vh-120px)]' : 'h-[500px]'}`}
-          style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'top left' }}
         >
-          {document?.sharepoint_share_link_url ? (
-            // For SharePoint, use iframe with embed URL
+          {loading ? (
+            <div className="w-full h-full flex items-center justify-center">
+              <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+              <span className="ml-2 text-muted-foreground">Loading document...</span>
+            </div>
+          ) : error ? (
+            <div className="w-full h-full flex flex-col items-center justify-center p-4">
+              <p className="text-sm text-muted-foreground mb-2">Unable to load document preview</p>
+              <p className="text-xs text-red-500 mb-4">{error}</p>
+              {sharePointUrl && (
+                <Button variant="outline" size="sm" asChild>
+                  <a href={sharePointUrl} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="w-3 h-3 mr-1" />
+                    Open in SharePoint
+                  </a>
+                </Button>
+              )}
+            </div>
+          ) : pdfBlobUrl ? (
             <iframe
-              src={embedUrl}
+              src={pdfBlobUrl}
               className="w-full h-full min-h-[600px] border-0"
               title="Document Preview"
-              sandbox="allow-scripts allow-same-origin"
-              loading="lazy"
+              style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'top left' }}
             />
           ) : (
-            // For local files, use object/embed
-            <object
-              data={pdfUrl}
-              type="application/pdf"
-              className="w-full h-full min-h-[600px]"
-            >
-              <embed 
-                src={pdfUrl} 
-                type="application/pdf"
-                className="w-full h-full"
-              />
-              <p className="text-center p-4 text-muted-foreground">
-                Unable to display PDF. 
-                <a href={pdfUrl} target="_blank" rel="noopener noreferrer" className="text-primary ml-1">
-                  Download instead
-                </a>
-              </p>
-            </object>
+            <div className="w-full h-full flex items-center justify-center">
+              <p className="text-sm text-muted-foreground">No preview available</p>
+            </div>
           )}
         </div>
       </CardContent>

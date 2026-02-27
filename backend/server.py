@@ -4636,6 +4636,29 @@ async def _internal_intake_document(
     
     # Phase 7: Vendor alias lookup
     vendor_alias_result = await lookup_vendor_alias(normalized_fields.get("vendor_normalized"))
+
+    # Phase 8: Spiro context enrichment (Shadow Mode - logs only, doesn't affect decisions)
+    spiro_context_dict = None
+    try:
+        from services.spiro import get_spiro_context_for_document
+        from services.spiro.spiro_client import is_spiro_enabled
+        
+        if is_spiro_enabled():
+            doc_metadata = {
+                "vendor_raw": normalized_fields.get("vendor_raw"),
+                "vendor_normalized": normalized_fields.get("vendor_normalized"),
+                "extracted_fields": extracted_fields
+            }
+            spiro_context = await get_spiro_context_for_document(doc_metadata)
+            spiro_context_dict = spiro_context.to_dict()
+            
+            if spiro_context.matched_companies:
+                best = spiro_context.matched_companies[0]
+                logger.info("Spiro match for %s: %s (%.2f, ISR: %s)", 
+                           doc_id[:8], best.name, best.match_score, best.data.get("assigned_isr"))
+    except Exception as e:
+        logger.debug("Spiro context skipped: %s", str(e))
+
     
     # Phase 7: Duplicate check
     duplicate_result = await check_duplicate_document(

@@ -2702,6 +2702,13 @@ Only include fields that you can actually extract from the document. Leave out f
         
         result = json.loads(response_text)
         
+        # Log what we got from AI for debugging
+        extracted = result.get("extracted_fields", {})
+        logger.info("AI Classification result - doc_type: %s, confidence: %s", 
+                   result.get("document_type"), result.get("confidence"))
+        logger.info("AI extracted invoice_date: %s", extracted.get("invoice_date"))
+        logger.info("AI extracted line_items: %s", extracted.get("line_items"))
+        
         return {
             "suggested_job_type": result.get("document_type", "Unknown"),
             "confidence": float(result.get("confidence", 0.0)),

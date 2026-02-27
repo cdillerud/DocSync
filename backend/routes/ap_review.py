@@ -6,8 +6,10 @@ API endpoints for AP Invoice review workflow:
 - PO search  
 - Save AP review edits
 - Post to Business Central
+- AI-powered invoice data extraction
 """
 
+import os
 import logging
 from datetime import datetime, timezone
 from typing import Optional, List
@@ -18,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 # Create router
 ap_review_router = APIRouter(prefix="/api/ap-review", tags=["AP Review"])
+
+# Upload directory for document files
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 
 
 # =============================================================================

@@ -653,45 +653,62 @@ export function APReviewPanel({ document, onUpdate }) {
         )}
         
         {/* Action Buttons */}
-        <div className="flex gap-2 pt-2 border-t">
-          <Button 
-            variant="outline" 
-            size="sm" 
-            className="flex-1 h-8"
-            onClick={handleSave}
-            disabled={saving || isPosted}
-            data-testid="save-ap-review-btn"
-          >
-            {saving ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Save className="w-3 h-3 mr-1" />}
-            Save Changes
-          </Button>
-          
-          {!isReadyForPost && !isPosted && (
+        <div className="flex flex-col gap-2 pt-2 border-t">
+          {/* AI Extract Button - shown when not posted */}
+          {!isPosted && (
             <Button 
               variant="secondary" 
               size="sm" 
-              className="flex-1 h-8"
-              onClick={handleMarkReady}
-              disabled={markingReady || !formData.vendor_id || !formData.invoice_number}
-              data-testid="mark-ready-btn"
+              className="w-full h-8 bg-violet-100 hover:bg-violet-200 text-violet-800 dark:bg-violet-900/30 dark:hover:bg-violet-900/50 dark:text-violet-300"
+              onClick={handleExtractInvoice}
+              disabled={extracting}
+              data-testid="extract-invoice-btn"
             >
-              {markingReady ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <CheckCircle2 className="w-3 h-3 mr-1" />}
-              Mark Ready
+              {extracting ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Sparkles className="w-3 h-3 mr-1" />}
+              {extracting ? 'Extracting...' : 'AI Extract Invoice Data'}
             </Button>
           )}
           
-          {(isReadyForPost || bcPostingStatus === 'failed') && !isPosted && (
+          <div className="flex gap-2">
             <Button 
+              variant="outline" 
               size="sm" 
-              className="flex-1 h-8 bg-emerald-600 hover:bg-emerald-700"
-              onClick={handlePostToBC}
-              disabled={posting}
-              data-testid="post-to-bc-btn"
+              className="flex-1 h-8"
+              onClick={handleSave}
+              disabled={saving || isPosted}
+              data-testid="save-ap-review-btn"
             >
-              {posting ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Send className="w-3 h-3 mr-1" />}
-              Post to BC
+              {saving ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Save className="w-3 h-3 mr-1" />}
+              Save Changes
             </Button>
-          )}
+            
+            {!isReadyForPost && !isPosted && (
+              <Button 
+                variant="secondary" 
+                size="sm" 
+                className="flex-1 h-8"
+                onClick={handleMarkReady}
+                disabled={markingReady || !formData.vendor_id || !formData.invoice_number}
+                data-testid="mark-ready-btn"
+              >
+                {markingReady ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <CheckCircle2 className="w-3 h-3 mr-1" />}
+                Mark Ready
+              </Button>
+            )}
+            
+            {(isReadyForPost || bcPostingStatus === 'failed') && !isPosted && (
+              <Button 
+                size="sm" 
+                className="flex-1 h-8 bg-emerald-600 hover:bg-emerald-700"
+                onClick={handlePostToBC}
+                disabled={posting}
+                data-testid="post-to-bc-btn"
+              >
+                {posting ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Send className="w-3 h-3 mr-1" />}
+                Post to BC
+              </Button>
+            )}
+          </div>
         </div>
       </CardContent>
     </Card>

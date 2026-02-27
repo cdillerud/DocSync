@@ -66,7 +66,7 @@ async def get_spiro_status():
         "configured": client.is_configured(),
         "has_token": client.token_manager.get_access_token() is not None,
         "has_refresh_token": client.token_manager.get_refresh_token() is not None,
-        "sync_status": await get_spiro_sync_status() if db else {"error": "DB not initialized"}
+        "sync_status": await get_spiro_sync_status() if db is not None else {"error": "DB not initialized"}
     }
 
 

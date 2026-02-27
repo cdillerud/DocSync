@@ -2567,11 +2567,13 @@ DOCUMENT CATEGORIES AND TYPES:
 AP_Invoice: Vendor invoices we RECEIVE
 - The VENDOR is the company sending us the invoice (NOT Gamer Packaging)
 - If "Gamer Packaging" appears as Bill To/Customer, this is an AP_Invoice we received
-- Extract: vendor name (the sender), invoice_number, amount, po_number (if present), due_date
+- Extract: vendor name (the sender), invoice_number, invoice_date, amount, po_number (if present), due_date
+- CRITICAL: Always extract invoice_date (the date on the invoice itself)
+- CRITICAL: Extract ALL line items with description, quantity, unit_price, and total
 
 AR_Invoice: Invoices we send to customers (outgoing)
 - Our company name appears as the sender
-- Extract: customer name, invoice_number, amount, due_date
+- Extract: customer name, invoice_number, invoice_date, amount, due_date
 
 Remittance: Payment confirmations
 - Extract: vendor/customer, payment_amount, payment_date, invoice_references
@@ -2622,10 +2624,11 @@ Always respond with valid JSON in this exact format:
         "vendor": "...",
         "customer": "...",
         "invoice_number": "...",
+        "invoice_date": "YYYY-MM-DD format",
         "po_number": "...",
         "order_number": "...",
         "amount": "...",
-        "due_date": "...",
+        "due_date": "YYYY-MM-DD format",
         "order_date": "...",
         "ship_date": "...",
         "payment_date": "...",
@@ -2640,10 +2643,27 @@ Always respond with valid JSON in this exact format:
         "pieces": "...",
         "warehouse": "...",
         "items": "...",
-        "ship_to": "..."
+        "ship_to": "...",
+        "line_items": [
+            {
+                "description": "Item/service description",
+                "quantity": 1.0,
+                "unit_price": 0.00,
+                "total": 0.00
+            }
+        ]
     },
     "reasoning": "Brief explanation of classification"
 }
+
+IMPORTANT: For invoices (AP_Invoice, AR_Invoice), you MUST extract:
+- invoice_date: The date the invoice was issued (NOT due_date)
+- line_items: ALL line items showing what was purchased/charged
+
+For freight/transportation invoices, line items may include:
+- Weight, distance, rate, charges
+- Fuel surcharges, accessorial charges
+- Extract these as line items with appropriate descriptions
 
 Only include fields that you can actually extract from the document. Leave out fields that are not present."""
         ).with_model("gemini", "gemini-3-flash-preview")

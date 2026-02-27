@@ -831,6 +831,53 @@ export default function SharePointMigrationPage() {
                   <div className="text-xs text-green-600">
                     Migrated: {formatDate(selectedCandidate.migration_timestamp)}
                   </div>
+                  
+                  {/* Metadata Status */}
+                  <div className="mt-2 pt-2 border-t border-green-200">
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs">
+                        <span className="text-gray-500">Metadata: </span>
+                        {selectedCandidate.metadata_write_status === 'success' ? (
+                          <span className="text-green-700 font-medium">Applied ✓</span>
+                        ) : selectedCandidate.metadata_write_status === 'failed' ? (
+                          <span className="text-red-600 font-medium" title={selectedCandidate.metadata_write_error}>
+                            Failed ✗
+                          </span>
+                        ) : (
+                          <span className="text-yellow-600 font-medium">Pending</span>
+                        )}
+                      </div>
+                      {selectedCandidate.metadata_write_status !== 'success' && (
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          disabled={actionLoading === 'apply-metadata'}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            setActionLoading('apply-metadata');
+                            try {
+                              await API.post(`/api/migration/sharepoint/apply-metadata/${selectedCandidate.id}`);
+                              toast.success('Metadata applied successfully');
+                              loadData();
+                              setSelectedCandidate(null);
+                            } catch (err) {
+                              toast.error('Failed to apply metadata: ' + (err.response?.data?.detail || err.message));
+                            } finally {
+                              setActionLoading(null);
+                            }
+                          }}
+                        >
+                          {actionLoading === 'apply-metadata' ? (
+                            <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                          ) : null}
+                          Apply Metadata
+                        </Button>
+                      )}
+                    </div>
+                    {selectedCandidate.metadata_write_error && (
+                      <div className="text-xs text-red-500 mt-1">{selectedCandidate.metadata_write_error}</div>
+                    )}
+                  </div>
                 </div>
               )}
 

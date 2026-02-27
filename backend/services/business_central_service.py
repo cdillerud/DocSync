@@ -472,25 +472,34 @@ class BusinessCentralService:
         
         async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
             for idx, line in enumerate(lines):
-                # Get values with fallbacks
+                # Get values with fallbacks - support both AI extraction format and direct format
                 description = line.get("description", "")
                 quantity = float(line.get("quantity", 1) or 1)
-                unit_price = float(line.get("unitCost") or line.get("unit_price", 0) or 0)
-                line_total = float(line.get("total") or line.get("line_total", 0) or 0)
+                # AI extraction uses "unit_price", BC uses "unitCost"
+                unit_price = float(line.get("unit_price") or line.get("unitCost") or 0)
+                # AI extraction uses "total", also support "line_total"
+                line_total = float(line.get("total") or line.get("line_total") or 0)
                 
                 # If we have a total but no unit price, calculate unit price
                 if line_total > 0 and unit_price == 0 and quantity > 0:
                     unit_price = line_total / quantity
                 
-                # Skip empty lines (no description AND no amount)
-                if not description and unit_price == 0:
+                # If we still have no unit price but have a total, use total as unit price (qty=1)
+                if unit_price == 0 and line_total > 0:
+                    unit_price = line_total
+                    quantity = 1
+                
+                # Skip truly empty lines (no description AND no amount)
+                if not description and unit_price == 0 and line_total == 0:
                     logger.debug("Skipping empty invoice line %d", idx)
                     continue
                 
                 # Build line payload using Item type
+                # BC API requires both itemId (GUID) and lineObjectNumber (item code)
                 line_payload = {
                     "lineType": "Item",
                     "itemId": default_item_id,
+                    "lineObjectNumber": default_item_code,
                     "description": description[:100] if description else f"Line {idx + 1}",
                     "quantity": quantity,
                     "unitCost": unit_price,

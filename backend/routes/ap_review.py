@@ -254,7 +254,10 @@ async def mark_ready_for_post(doc_id: str):
     Mark a document as ready for posting to BC.
     Sets review_status to 'ready_for_post'.
     """
+    logger.info(f"AP Review Mark Ready: doc_id={doc_id}")
+    
     if db is None:
+        logger.error("AP Review Mark Ready failed: Database not initialized")
         raise HTTPException(status_code=500, detail="Database not initialized")
     
     # Find document

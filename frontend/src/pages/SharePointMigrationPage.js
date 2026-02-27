@@ -679,13 +679,13 @@ export default function SharePointMigrationPage() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center py-8">
+                  <TableCell colSpan={10} className="text-center py-8">
                     <Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" />
                   </TableCell>
                 </TableRow>
               ) : filteredCandidates.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center py-8 text-gray-500">
+                  <TableCell colSpan={10} className="text-center py-8 text-gray-500">
                     No migration candidates found. Click "Discover" to start.
                   </TableCell>
                 </TableRow>
@@ -754,6 +754,28 @@ export default function SharePointMigrationPage() {
                     </TableCell>
                     <TableCell>
                       <StatusBadge status={candidate.status} />
+                    </TableCell>
+                    <TableCell>
+                      {candidate.status === 'migrated' ? (
+                        candidate.metadata_write_status === 'success' ? (
+                          <Badge className="bg-green-100 text-green-800 text-[10px]">
+                            <CheckCircle2 className="w-3 h-3 mr-1" />
+                            Applied
+                          </Badge>
+                        ) : candidate.metadata_write_status === 'failed' ? (
+                          <Badge className="bg-red-100 text-red-800 text-[10px]" title={candidate.metadata_write_error}>
+                            <AlertCircle className="w-3 h-3 mr-1" />
+                            Failed
+                          </Badge>
+                        ) : (
+                          <Badge className="bg-yellow-100 text-yellow-800 text-[10px]">
+                            <Clock className="w-3 h-3 mr-1" />
+                            Pending
+                          </Badge>
+                        )
+                      ) : (
+                        <span className="text-gray-400 text-xs">-</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <ChevronRight className="w-4 h-4 text-gray-400" />

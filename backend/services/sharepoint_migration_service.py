@@ -1042,7 +1042,7 @@ Full path: {legacy_path}
         for candidate in candidates:
             try:
                 # Check if we already have folder tree classification
-                has_folder_tree = candidate.get("classification_source") == "folder_tree"
+                has_folder_tree = candidate.get("classification_source") in ["folder_tree", "hybrid"]
                 existing_confidence = candidate.get("classification_confidence", 0.0) or 0.0
                 
                 # Re-apply folder metadata classification (in case logic was updated)

@@ -539,3 +539,122 @@ async def get_bc_posting_status(doc_id: str):
         "bc_posting_error": doc.get("bc_posting_error"),
         "posted_to_bc_utc": doc.get("posted_to_bc_utc")
     }
+
+
+
+# =============================================================================
+# AI INVOICE DATA EXTRACTION ENDPOINTS
+# =============================================================================
+
+@ap_review_router.post("/documents/{doc_id}/extract-invoice-data")
+async def extract_invoice_data_endpoint(doc_id: str):
+    """
+    Extract invoice data from PDF using AI/OCR.
+    
+    Uses Gemini vision to extract:
+    - Invoice number, date, due date
+    - Vendor name
+    - PO number
+    - Line items (description, quantity, unit price, total)
+    - Total amount, tax amount
+    
+    The extracted data is saved to the document and returned.
+    """
+    logger.info(f"AI Invoice Extraction: doc_id={doc_id}")
+    
+    if db is None:
+        logger.error("AI Invoice Extraction failed: Database not initialized")
+        raise HTTPException(status_code=500, detail="Database not initialized")
+    
+    # Find document
+    doc = await db.hub_documents.find_one({"id": doc_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Get file path - check uploads directory
+    file_path = None
+    
+    # Try to find file in uploads directory
+    upload_path = os.path.join(UPLOAD_DIR, doc_id)
+    if os.path.exists(upload_path):
+        file_path = upload_path
+    else:
+        # Try with file extension
+        file_name = doc.get("file_name", "")
+        if file_name:
+            ext = os.path.splitext(file_name)[1]
+            upload_path_with_ext = os.path.join(UPLOAD_DIR, f"{doc_id}{ext}")
+            if os.path.exists(upload_path_with_ext):
+                file_path = upload_path_with_ext
+    
+    # Check if we have local_file_path stored
+    if not file_path and doc.get("local_file_path"):
+        if os.path.exists(doc["local_file_path"]):
+            file_path = doc["local_file_path"]
+    
+    if not file_path:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Document file not found on disk. Doc ID: {doc_id}"
+        )
+    
+    # Import and run extraction
+    try:
+        from services.invoice_extractor import extract_and_update_document
+        
+        result = await extract_and_update_document(doc_id, file_path, db)
+        
+        if result.get("success"):
+            logger.info(f"AI Invoice Extraction SUCCESS: doc_id={doc_id}, confidence={result.get('confidence')}, lines={result.get('line_items_count')}")
+            
+            # Fetch updated document
+            updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+            
+            return {
+                "success": True,
+                "document_id": doc_id,
+                "confidence": result.get("confidence"),
+                "can_auto_post": result.get("can_auto_post"),
+                "extracted_fields": result.get("extracted_fields"),
+                "line_items": result.get("line_items"),
+                "line_items_count": result.get("line_items_count"),
+                "document": updated_doc
+            }
+        else:
+            logger.error(f"AI Invoice Extraction FAILED: doc_id={doc_id}, error={result.get('error')}")
+            return {
+                "success": False,
+                "document_id": doc_id,
+                "error": result.get("error")
+            }
+            
+    except ImportError as e:
+        logger.error(f"AI Invoice Extraction import error: {e}")
+        raise HTTPException(status_code=500, detail=f"Invoice extractor not available: {str(e)}")
+    except Exception as e:
+        logger.error(f"AI Invoice Extraction exception: {e}")
+        raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
+
+
+@ap_review_router.get("/documents/{doc_id}/extraction-status")
+async def get_extraction_status(doc_id: str):
+    """Get the AI extraction status for a document."""
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not initialized")
+    
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    ai_extraction = doc.get("ai_extraction", {})
+    
+    return {
+        "document_id": doc_id,
+        "has_extraction": bool(ai_extraction),
+        "extraction_timestamp": ai_extraction.get("extracted_at"),
+        "confidence": ai_extraction.get("confidence"),
+        "can_auto_post": ai_extraction.get("can_auto_post", False),
+        "line_items_count": len(doc.get("line_items", [])),
+        "extracted_fields": doc.get("extracted_fields", {}),
+        "line_items": doc.get("line_items", [])
+    }

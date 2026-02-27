@@ -362,3 +362,40 @@ async def apply_metadata_to_existing(candidate_id: str):
     except Exception as e:
         logger.error(f"Error applying metadata: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/retry-failed")
+async def retry_failed_migrations(request: MigrateRequest):
+    """
+    Retry all failed migrations.
+    
+    Resets error status candidates to ready_for_migration and re-runs migration.
+    """
+    service = get_service()
+    
+    try:
+        # Reset all error candidates to ready_for_migration
+        reset_result = await service.collection.update_many(
+            {"status": "error"},
+            {"$set": {
+                "status": "ready_for_migration",
+                "migration_error": None
+            }}
+        )
+        
+        logger.info(f"Reset {reset_result.modified_count} failed candidates for retry")
+        
+        # Run migration
+        result = await service.migrate_candidates(
+            target_site_url=request.targetSiteUrl,
+            target_library_name=request.targetLibraryName,
+            max_count=request.maxCount or 50
+        )
+        
+        return {
+            "reset_count": reset_result.modified_count,
+            **result
+        }
+    except Exception as e:
+        logger.error(f"Error retrying failed migrations: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

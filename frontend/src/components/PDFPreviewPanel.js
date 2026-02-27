@@ -154,12 +154,32 @@ export function PDFPreviewPanel({ document }) {
               )}
             </div>
           ) : pdfBlobUrl ? (
-            <iframe
-              src={pdfBlobUrl}
-              className="w-full h-full min-h-[600px] border-0"
-              title="Document Preview"
-              style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'top left' }}
-            />
+            <object
+              data={pdfBlobUrl}
+              type="application/pdf"
+              className="w-full h-full"
+              style={{ minHeight: '600px' }}
+            >
+              <div className="w-full h-full flex flex-col items-center justify-center p-4">
+                <p className="text-sm text-muted-foreground mb-4">PDF preview not available in this browser</p>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" asChild>
+                    <a href={pdfBlobUrl} download={document?.file_name || 'document.pdf'}>
+                      <Download className="w-3 h-3 mr-1" />
+                      Download
+                    </a>
+                  </Button>
+                  {sharePointUrl && (
+                    <Button variant="outline" size="sm" asChild>
+                      <a href={sharePointUrl} target="_blank" rel="noopener noreferrer">
+                        <ExternalLink className="w-3 h-3 mr-1" />
+                        Open in SharePoint
+                      </a>
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </object>
           ) : (
             <div className="w-full h-full flex items-center justify-center">
               <p className="text-sm text-muted-foreground">No preview available</p>

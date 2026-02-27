@@ -457,18 +457,50 @@ export default function SharePointMigrationPage() {
   const handleMigrate = async () => {
     setActionLoading('migrate');
     try {
-      const res = await API.post('/api/migration/sharepoint/migrate', {
+      // Start migration (returns immediately, runs in background)
+      await API.post('/api/migration/sharepoint/migrate', {
         targetSiteUrl: 'https://gamerpackaging1.sharepoint.com/sites/One_Gamer-Flat-Test',
         targetLibraryName: 'Documents',
         maxCount: 20
       });
-      const metaErrors = res.data.metadata_errors || 0;
-      toast.success(`Migrated ${res.data.migrated} files (${res.data.errors} errors, ${metaErrors} metadata failures)`);
-      await fetchSummary();
-      await fetchCandidates();
+      
+      toast.info('Migration started in background...');
+      
+      // Poll for completion
+      let attempts = 0;
+      const maxAttempts = 120; // 2 minutes max
+      const pollInterval = setInterval(async () => {
+        attempts++;
+        try {
+          const statusRes = await API.get('/api/migration/sharepoint/migrate/status');
+          const status = statusRes.data;
+          
+          if (!status.running) {
+            clearInterval(pollInterval);
+            setActionLoading(null);
+            
+            if (status.last_result?.error) {
+              toast.error('Migration error: ' + status.last_result.error);
+            } else if (status.last_result) {
+              const r = status.last_result;
+              toast.success(`Migrated ${r.migrated} files (${r.errors} errors, ${r.metadata_errors || 0} metadata failures)`);
+            }
+            await fetchSummary();
+            await fetchCandidates();
+          } else if (attempts >= maxAttempts) {
+            clearInterval(pollInterval);
+            setActionLoading(null);
+            toast.info('Migration still running in background. Refresh to check status.');
+            await fetchSummary();
+            await fetchCandidates();
+          }
+        } catch (pollErr) {
+          // Ignore poll errors, keep trying
+        }
+      }, 1000);
+      
     } catch (err) {
       toast.error('Migration failed: ' + (err.response?.data?.detail || err.message));
-    } finally {
       setActionLoading(null);
     }
   };

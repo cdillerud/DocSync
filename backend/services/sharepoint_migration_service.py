@@ -320,22 +320,23 @@ class SharePointMigrationService:
         # Pattern 8: General/Agreement Resources/... or other internal
         elif level1 in ["General", "Corporate Internal", "HR Programs and Benefits", "Product Knowledge", "Marketing", "Sales"]:
             metadata["acct_type"] = "Corporate Internal"
+            metadata["acct_name"] = "Gamer Packaging"  # Default for internal docs
             # Check if Level3 or Level4 looks like a company name (not a category)
             category_keywords = ["archive", "resources", "template", "form", "training", "sop", "guide", "report"]
             if level3 and not any(kw in level3.lower() for kw in category_keywords):
-                # Might be a company name
+                # Might be a company name - override default if so
                 if level2 in ["Agreement Resources", "New Business Development Resources"]:
                     metadata["acct_name"] = level3
         
         # Pattern 9: System Resources
         elif level1 == "System Resources":
             metadata["acct_type"] = "System Resources"
+            metadata["acct_name"] = "Gamer Packaging"  # Default for system resources
         
         # Default fallback
         else:
             metadata["acct_type"] = "Corporate Internal"
-            if level2 and level2 not in ["", "Archive", "Templates", "Forms"]:
-                metadata["acct_name"] = level2
+            metadata["acct_name"] = "Gamer Packaging"  # Default for unknown internal
         
         # 2. Map to DocumentType based on folder structure
         all_levels = f"{level1}/{level2}/{level3}/{level4}/{level5}".lower()

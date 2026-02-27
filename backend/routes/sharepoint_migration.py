@@ -288,3 +288,77 @@ async def approve_candidate(candidate_id: str):
     except Exception as e:
         logger.error(f"Error approving candidate: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/reset-candidates")
+async def reset_candidates(request: ResetCandidatesRequest):
+    """
+    Reset migrated candidates back to ready_for_migration status.
+    
+    This allows re-migration to apply updated metadata to SharePoint.
+    Optionally accepts specific candidate_ids, or resets all migrated if not specified.
+    """
+    service = get_service()
+    
+    try:
+        # Build query
+        if request.candidate_ids:
+            query = {"id": {"$in": request.candidate_ids}}
+        else:
+            query = {"status": "migrated"}
+        
+        # Reset the candidates
+        result = await service.collection.update_many(
+            query,
+            {"$set": {
+                "status": request.reset_to_status,
+                "target_item_id": None,
+                "target_url": None,
+                "migration_timestamp": None,
+                "migration_error": None,
+                "metadata_write_status": None,
+                "metadata_write_error": None
+            }}
+        )
+        
+        return {
+            "success": True,
+            "reset_count": result.modified_count,
+            "reset_to_status": request.reset_to_status
+        }
+    except Exception as e:
+        logger.error(f"Error resetting candidates: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/apply-metadata/{candidate_id}")
+async def apply_metadata_to_existing(candidate_id: str):
+    """
+    Apply metadata to an already migrated file in SharePoint.
+    
+    Useful for fixing metadata on files that were migrated before columns existed.
+    """
+    service = get_service()
+    
+    try:
+        # Get the candidate
+        candidate = await service.get_candidate_by_id(candidate_id)
+        if not candidate:
+            raise HTTPException(status_code=404, detail="Candidate not found")
+        
+        if candidate.get("status") != "migrated" or not candidate.get("target_item_id"):
+            raise HTTPException(status_code=400, detail="Candidate must be in migrated status with target_item_id")
+        
+        # Apply metadata
+        result = await service.apply_metadata_to_migrated(candidate_id)
+        
+        return {
+            "success": result.get("success", False),
+            "metadata_write_status": result.get("status"),
+            "error": result.get("error")
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error applying metadata: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

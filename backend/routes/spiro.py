@@ -246,7 +246,7 @@ async def list_spiro_companies(
         search: Optional search term for company name
         limit: Maximum results to return
     """
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not initialized")
     
     query = {}
@@ -276,7 +276,7 @@ async def list_spiro_contacts(
         company_id: Filter by Spiro company ID
         limit: Maximum results to return
     """
-    if not db:
+    if db is None:
         raise HTTPException(status_code=500, detail="Database not initialized")
     
     query = {}

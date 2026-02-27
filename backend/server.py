@@ -4713,6 +4713,10 @@ async def _internal_intake_document(
         "due_date_iso": normalized_fields.get("due_date_iso"),
         "po_number_raw": normalized_fields.get("po_number_raw"),
         "po_number_clean": normalized_fields.get("po_number_clean"),
+        # Phase 8: Invoice date and line items for automatic BC posting
+        "invoice_date": normalized_fields.get("invoice_date"),
+        "invoice_date_raw": normalized_fields.get("invoice_date_raw"),
+        "line_items": normalized_fields.get("line_items", []),
         # Phase 7: Vendor alias results
         "vendor_canonical": vendor_alias_result.get("vendor_canonical"),
         "vendor_match_method": vendor_alias_result.get("vendor_match_method"),
@@ -5012,6 +5016,10 @@ async def intake_document(
         "due_date_iso": normalized_fields.get("due_date_iso"),
         "po_number_raw": normalized_fields.get("po_number_raw"),
         "po_number_clean": normalized_fields.get("po_number_clean"),
+        # Phase 8: Invoice date and line items for automatic BC posting
+        "invoice_date": normalized_fields.get("invoice_date"),
+        "invoice_date_raw": normalized_fields.get("invoice_date_raw"),
+        "line_items": normalized_fields.get("line_items", []),
         # Phase 7: Vendor alias results
         "vendor_canonical": vendor_alias_result.get("vendor_canonical"),
         "vendor_match_method": vendor_alias_result.get("vendor_match_method"),

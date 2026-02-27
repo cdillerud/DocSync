@@ -130,7 +130,77 @@ class SharePointMigrationService:
         self.db = db
         self.collection = db.migration_candidates
         self.folder_classifications = db.folder_classifications
+        self.customers = db.customers
         self._token_cache = {}
+        self._customer_cache = None  # Cache loaded customers for fast lookup
+    
+    async def _load_customer_cache(self) -> List[Dict]:
+        """Load all customers into memory for fast fuzzy matching."""
+        if self._customer_cache is None:
+            cursor = self.customers.find({}, {"_id": 0, "name": 1, "name_lower": 1, "name_normalized": 1, "customer_number": 1})
+            self._customer_cache = await cursor.to_list(length=5000)
+            logger.info(f"Loaded {len(self._customer_cache)} customers into cache")
+        return self._customer_cache
+    
+    async def _match_customer(self, text: str) -> Optional[Dict]:
+        """
+        Match text against known customer names.
+        Returns the best matching customer with confidence score.
+        
+        Uses multiple matching strategies:
+        1. Exact match (normalized)
+        2. Substring match (customer name in text)
+        3. Fuzzy match using simple ratio
+        """
+        if not text:
+            return None
+        
+        customers = await self._load_customer_cache()
+        text_lower = text.lower().strip()
+        text_normalized = text_lower
+        
+        # Remove common file extensions and separators
+        import re
+        text_normalized = re.sub(r'\.(pdf|doc|docx|xls|xlsx|ppt|pptx|jpg|png|mp4|zip)$', '', text_normalized, flags=re.IGNORECASE)
+        text_normalized = re.sub(r'[-_]', ' ', text_normalized)
+        
+        best_match = None
+        best_score = 0
+        
+        for customer in customers:
+            cust_name = customer.get("name_lower", "")
+            cust_normalized = customer.get("name_normalized", "")
+            
+            # 1. Exact match (highest confidence)
+            if cust_normalized == text_normalized or cust_name == text_lower:
+                return {"customer": customer, "confidence": 1.0, "match_type": "exact"}
+            
+            # 2. Customer name appears in text (high confidence)
+            if len(cust_normalized) >= 4 and cust_normalized in text_normalized:
+                score = len(cust_normalized) / len(text_normalized)
+                if score > best_score:
+                    best_score = score
+                    best_match = {"customer": customer, "confidence": min(0.95, 0.7 + score * 0.25), "match_type": "substring"}
+            
+            # 3. Text appears in customer name
+            if len(text_normalized) >= 4 and text_normalized in cust_normalized:
+                score = len(text_normalized) / len(cust_normalized)
+                if score > best_score:
+                    best_score = score
+                    best_match = {"customer": customer, "confidence": min(0.9, 0.6 + score * 0.3), "match_type": "reverse_substring"}
+            
+            # 4. Simple word overlap scoring
+            text_words = set(text_normalized.split())
+            cust_words = set(cust_normalized.split())
+            if text_words and cust_words:
+                overlap = text_words & cust_words
+                if overlap:
+                    score = len(overlap) / max(len(text_words), len(cust_words))
+                    if score > best_score and score >= 0.5:
+                        best_score = score
+                        best_match = {"customer": customer, "confidence": 0.5 + score * 0.35, "match_type": "word_overlap"}
+        
+        return best_match if best_match and best_match["confidence"] >= 0.6 else None
     
     async def _lookup_folder_classification(self, file_name: str, folder_path: str) -> Optional[Dict]:
         """

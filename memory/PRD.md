@@ -1539,4 +1539,43 @@ The preview environment has placeholder Azure credentials (`migration-workspace`
 
 ---
 
+## Session Update 7: February 27, 2026 - Editable Document Type Dropdown
+
+### Overview
+Added the ability to add custom document types that don't exist in the default dropdown list.
+
+### Implementation
+
+**New EditableDocTypeSelect Component:**
+- Searchable dropdown with type-ahead filtering
+- Shows "No matching types" when search doesn't match existing options
+- Green "Add [type]" button appears for new custom types
+- Custom types saved to localStorage for persistence across sessions
+- Toast notification confirms when new type is added
+
+**Default Document Types (38 types from Excel metadata):**
+- Product Specification Sheet, Product Drawings, Product Pack-Out Specs
+- Graphical Die Line, Supplier Documents, Marketing Literature
+- Capabilities / Catalogs, SOPs / Resources, Customer Documents
+- Customer Quote, Supplier Quote, Cost Analysis
+- Agreement Resources, Supply Agreement, Quality Documents
+- Training, Invoice & Hold Agreement, Forecasts
+- Inventory Reports, Transaction History, Price List
+- Drawing Approval, Specification Approval, Prototype Approval
+- Graphics Approval, Project Timeline, New Business Dev Resources
+- Claims/Cases, Warehouse & Consignment, Supply Addendum, Other
+
+**Edit Mode for Migrated Files:**
+- Edit button now visible for migrated files (previously hidden)
+- Amber warning note: "After saving changes, click 'Apply Metadata' above to update SharePoint"
+
+### User Experience
+1. Click a file → Click "Edit" → Click Document Type dropdown
+2. Start typing to search existing types
+3. If type doesn't exist, green "Add [your type]" button appears
+4. Click to add and select the new type
+5. Save changes, then "Apply Metadata" to push to SharePoint
+
+---
+
 *Last Updated: February 27, 2026*

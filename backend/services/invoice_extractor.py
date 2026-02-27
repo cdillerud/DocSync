@@ -177,8 +177,37 @@ async def extract_invoice_data(file_path: str) -> InvoiceExtractionResult:
             error=f"File not found: {file_path}"
         )
     
-    # Check file extension
+    # Check file extension or detect by magic bytes
     file_ext = Path(file_path).suffix.lower()
+    
+    # If no extension, detect file type from content
+    if not file_ext:
+        try:
+            with open(file_path, 'rb') as f:
+                header = f.read(10)
+            # PDF files start with %PDF
+            if header.startswith(b'%PDF'):
+                file_ext = '.pdf'
+            # PNG files start with specific bytes
+            elif header[:8] == b'\x89PNG\r\n\x1a\n':
+                file_ext = '.png'
+            # JPEG files start with FFD8FF
+            elif header[:3] == b'\xff\xd8\xff':
+                file_ext = '.jpg'
+            # TIFF files start with II or MM
+            elif header[:2] in (b'II', b'MM'):
+                file_ext = '.tiff'
+            else:
+                return InvoiceExtractionResult(
+                    success=False,
+                    error=f"Unable to detect file type from content"
+                )
+        except Exception as e:
+            return InvoiceExtractionResult(
+                success=False,
+                error=f"Error reading file header: {str(e)}"
+            )
+    
     if file_ext not in ['.pdf', '.png', '.jpg', '.jpeg', '.tiff', '.tif']:
         return InvoiceExtractionResult(
             success=False,

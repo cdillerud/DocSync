@@ -505,7 +505,7 @@ async def sync_all_spiro_data(force_full: bool = False) -> Dict[str, Any]:
         result = await sync_all_spiro_data()
     """
     db = get_spiro_db()
-    if not db:
+    if db is None:
         return {"success": False, "error": "Database not initialized"}
     
     service = SpiroSyncService(db)
@@ -515,7 +515,7 @@ async def sync_all_spiro_data(force_full: bool = False) -> Dict[str, Any]:
 async def sync_spiro_contacts(force_full: bool = False) -> Dict[str, Any]:
     """Convenience function to sync just contacts."""
     db = get_spiro_db()
-    if not db:
+    if db is None:
         return {"success": False, "error": "Database not initialized"}
     
     service = SpiroSyncService(db)

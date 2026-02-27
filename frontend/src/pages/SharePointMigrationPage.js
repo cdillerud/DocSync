@@ -672,6 +672,7 @@ export default function SharePointMigrationPage() {
                 <TableHead>Status</TableHead>
                 <TableHead>Confidence</TableHead>
                 <TableHead>Migration</TableHead>
+                <TableHead>Metadata</TableHead>
                 <TableHead className="w-10"></TableHead>
               </TableRow>
             </TableHeader>

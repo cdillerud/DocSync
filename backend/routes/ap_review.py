@@ -314,13 +314,12 @@ async def mark_ready_for_post(doc_id: str):
 async def post_document_to_bc(doc_id: str, request: Optional[PostToBCRequest] = None):
     """
     Post a document to Business Central as a purchase invoice.
-    """
-    logger.info(f"AP Review Post to BC: doc_id={doc_id}")
-    
     Creates a purchase invoice in BC with the document's extracted data.
     On success, stores the BC document ID and updates posting status.
     On failure, records error details for retry.
     """
+    logger.info(f"AP Review Post to BC: doc_id={doc_id}")
+    
     if db is None:
         raise HTTPException(status_code=500, detail="Database not initialized")
     

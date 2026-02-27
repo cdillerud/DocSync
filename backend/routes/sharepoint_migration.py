@@ -342,10 +342,10 @@ async def approve_candidate(candidate_id: str):
 @router.post("/reset-candidates")
 async def reset_candidates(request: ResetCandidatesRequest):
     """
-    Reset migrated candidates back to ready_for_migration status.
+    Reset candidates back to a specific status.
     
-    This allows re-migration to apply updated metadata to SharePoint.
-    Optionally accepts specific candidate_ids, or resets all migrated if not specified.
+    This allows re-classification or re-migration to apply updated metadata.
+    Optionally accepts specific candidate_ids, or resets based on status filter.
     """
     service = get_service()
     
@@ -353,8 +353,11 @@ async def reset_candidates(request: ResetCandidatesRequest):
         # Build query
         if request.candidate_ids:
             query = {"id": {"$in": request.candidate_ids}}
+        elif request.reset_from_status:
+            query = {"status": request.reset_from_status}
         else:
-            query = {"status": "migrated"}
+            # Default: reset all non-discovered (to force full re-classification)
+            query = {"status": {"$ne": "discovered"}}
         
         # Reset the candidates
         result = await service.collection.update_many(

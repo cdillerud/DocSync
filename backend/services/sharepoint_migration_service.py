@@ -530,12 +530,17 @@ class SharePointMigrationService:
         
         Skips matching for internal/corporate documents or docs already defaulted to Gamer Packaging.
         """
+        acct_type = metadata.get("acct_type")
+        acct_name = metadata.get("acct_name")
+        
         # Skip customer matching for internal docs - they should stay as "Gamer Packaging"
-        if metadata.get("acct_type") in ["Corporate Internal", "System Resources"]:
+        if acct_type in ["Corporate Internal", "System Resources"]:
+            logger.debug(f"Skipping customer match for {file_name}: internal doc type {acct_type}")
             return metadata
         
         # Skip if already set to default company name (internal doc default)
-        if metadata.get("acct_name") == "Gamer Packaging":
+        if acct_name == "Gamer Packaging":
+            logger.debug(f"Skipping customer match for {file_name}: already set to Gamer Packaging")
             return metadata
         
         # Try to match customer name from various sources

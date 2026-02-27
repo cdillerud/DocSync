@@ -219,7 +219,14 @@ export function APReviewPanel({ document, onUpdate }) {
     try {
       const res = await postToBC(document.id);
       if (res.data.success) {
-        toast.success(`Posted to BC: ${res.data.bc_document_number || res.data.bc_document_id}`);
+        let successMsg = `Posted to BC: ${res.data.bc_document_number || res.data.bc_document_id}`;
+        if (res.data.linesAdded !== undefined) {
+          successMsg += ` (${res.data.linesAdded}/${res.data.linesTotal} lines added)`;
+        }
+        toast.success(successMsg);
+        if (res.data.lineErrors?.length > 0) {
+          toast.warning(`Some line items failed: ${res.data.lineErrors.length} errors`);
+        }
         if (onUpdate) {
           // Refresh document
           const updatedDoc = {
@@ -239,6 +246,53 @@ export function APReviewPanel({ document, onUpdate }) {
       toast.error(err.response?.data?.detail || 'Failed to post to BC');
     } finally {
       setPosting(false);
+    }
+  };
+  
+  // Extract invoice data using AI
+  const handleExtractInvoice = async () => {
+    setExtracting(true);
+    try {
+      const res = await extractInvoiceData(document.id);
+      if (res.data.success) {
+        const extracted = res.data.extracted_fields || {};
+        const lineItems = res.data.line_items || [];
+        
+        // Update form with extracted data
+        setFormData(prev => ({
+          ...prev,
+          invoice_number: extracted.invoice_number || prev.invoice_number,
+          invoice_date: extracted.invoice_date || prev.invoice_date,
+          due_date: extracted.due_date || prev.due_date,
+          vendor_name_resolved: extracted.vendor || prev.vendor_name_resolved,
+          po_number: extracted.po_number || prev.po_number,
+          total_amount: extracted.amount || prev.total_amount,
+          line_items: lineItems.length > 0 ? lineItems : prev.line_items
+        }));
+        
+        // Also update vendor search field
+        if (extracted.vendor) {
+          setVendorSearch(extracted.vendor);
+        }
+        
+        const confidence = (res.data.confidence * 100).toFixed(0);
+        toast.success(`Extracted invoice data (${confidence}% confidence, ${lineItems.length} line items)`);
+        
+        if (res.data.can_auto_post) {
+          toast.info('High confidence extraction - ready for posting');
+        }
+        
+        // Update parent if callback provided
+        if (onUpdate && res.data.document) {
+          onUpdate(res.data.document);
+        }
+      } else {
+        toast.error(res.data.error || 'Failed to extract invoice data');
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to extract invoice data');
+    } finally {
+      setExtracting(false);
     }
   };
   

@@ -1055,19 +1055,30 @@ Full path: {legacy_path}
                         "level5": candidate.get("level5"),
                     }
                     updated_metadata = self._map_folder_to_metadata(folder_class)
-                    # Update candidate with refreshed metadata from folder classification
-                    await self.collection.update_one(
-                        {"id": candidate["id"]},
-                        {"$set": {
-                            "acct_type": updated_metadata.get("acct_type"),
-                            "acct_name": updated_metadata.get("acct_name"),
-                            "document_type": updated_metadata.get("document_type"),
-                            "document_sub_type": updated_metadata.get("document_sub_type"),
-                            "customer_name": updated_metadata.get("customer_name"),
-                            "vendor_name": updated_metadata.get("vendor_name"),
-                            "retention_category": updated_metadata.get("retention_category"),
-                        }}
-                    )
+                    logger.info(f"Folder metadata for {candidate['file_name'][:30]}: acct_name={updated_metadata.get('acct_name')}, acct_type={updated_metadata.get('acct_type')}")
+                    
+                    # Only update fields that have values
+                    update_fields = {}
+                    if updated_metadata.get("acct_type"):
+                        update_fields["acct_type"] = updated_metadata["acct_type"]
+                    if updated_metadata.get("acct_name"):
+                        update_fields["acct_name"] = updated_metadata["acct_name"]
+                    if updated_metadata.get("document_type"):
+                        update_fields["document_type"] = updated_metadata["document_type"]
+                    if updated_metadata.get("document_sub_type"):
+                        update_fields["document_sub_type"] = updated_metadata["document_sub_type"]
+                    if updated_metadata.get("customer_name"):
+                        update_fields["customer_name"] = updated_metadata["customer_name"]
+                    if updated_metadata.get("vendor_name"):
+                        update_fields["vendor_name"] = updated_metadata["vendor_name"]
+                    if updated_metadata.get("retention_category"):
+                        update_fields["retention_category"] = updated_metadata["retention_category"]
+                    
+                    if update_fields:
+                        await self.collection.update_one(
+                            {"id": candidate["id"]},
+                            {"$set": update_fields}
+                        )
                     # Refresh candidate data for subsequent processing
                     candidate.update(updated_metadata)
                 

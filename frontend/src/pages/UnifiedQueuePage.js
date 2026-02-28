@@ -417,7 +417,7 @@ export default function UnifiedQueuePage() {
                       <TableHead>Status</TableHead>
                       <TableHead>Source</TableHead>
                       <TableHead>Created</TableHead>
-                      <TableHead className="w-10"></TableHead>
+                      <TableHead className="w-20">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>

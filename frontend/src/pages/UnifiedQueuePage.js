@@ -13,7 +13,7 @@ import {
   Search, Filter, RefreshCw, FileText, Clock, CheckCircle2, 
   AlertCircle, Archive, ChevronRight, Inbox, FileCheck, Play
 } from "lucide-react";
-import api, { bulkResubmitDocuments } from "@/lib/api";
+import api, { bulkResubmitDocuments, bulkDeleteDocuments, deleteDocument } from "@/lib/api";
 
 // Document types and their display names
 const DOC_TYPES = {

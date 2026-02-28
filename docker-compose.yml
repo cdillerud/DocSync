@@ -45,7 +45,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        - REACT_APP_BACKEND_URL=http://4.204.41.190
+        - REACT_APP_BACKEND_URL=http://4.204.41.190:8080
     container_name: gpi-frontend
     restart: unless-stopped
     depends_on:

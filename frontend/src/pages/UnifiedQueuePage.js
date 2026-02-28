@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { 
   Search, Filter, RefreshCw, FileText, Clock, CheckCircle2, 
-  AlertCircle, Archive, ChevronRight, Inbox, FileCheck, Play
+  AlertCircle, Archive, ChevronRight, Inbox, FileCheck, Play, Trash2
 } from "lucide-react";
 import api, { bulkResubmitDocuments, bulkDeleteDocuments, deleteDocument } from "@/lib/api";
 

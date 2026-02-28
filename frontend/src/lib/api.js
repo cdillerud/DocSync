@@ -81,6 +81,19 @@ export const bulkResubmitDocuments = async (docIds) => {
   return results;
 };
 
+export const bulkDeleteDocuments = async (docIds) => {
+  const results = { success: [], failed: [] };
+  for (const id of docIds) {
+    try {
+      await deleteDocument(id);
+      results.success.push({ id });
+    } catch (err) {
+      results.failed.push({ id, error: err.response?.data?.detail || err.message });
+    }
+  }
+  return results;
+};
+
 // Workflows
 export const listWorkflows = (params) => api.get('/workflows', { params });
 export const getWorkflow = (id) => api.get(`/workflows/${id}`);

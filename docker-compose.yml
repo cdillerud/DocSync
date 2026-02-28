@@ -52,7 +52,7 @@ services:
       - backend
     ports:
       # Bind to all interfaces for external access
-      - "80:3000"
+      - "8080:3000"
     networks:
       - gpi-network
 

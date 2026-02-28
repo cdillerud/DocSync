@@ -462,8 +462,19 @@ export default function UnifiedQueuePage() {
                             {doc.created_utc ? new Date(doc.created_utc).toLocaleDateString() : "-"}
                           </span>
                         </TableCell>
-                        <TableCell>
-                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                              onClick={(e) => handleSingleDelete(e, doc.id, doc.file_name)}
+                              data-testid={`delete-doc-${doc.id}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}

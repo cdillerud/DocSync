@@ -173,6 +173,43 @@ export default function UnifiedQueuePage() {
     }
   };
 
+  // Bulk delete handler
+  const handleBulkDelete = async () => {
+    if (selectedDocs.size === 0) return;
+    if (!window.confirm(`Delete ${selectedDocs.size} document(s)? This action cannot be undone.`)) return;
+    
+    setBulkProcessing(true);
+    try {
+      const results = await bulkDeleteDocuments([...selectedDocs]);
+      toast.success(`Deleted ${results.success.length} documents. ${results.failed.length} failed.`);
+      if (results.failed.length > 0) {
+        console.error('Failed deletes:', results.failed);
+      }
+      setSelectedDocs(new Set());
+      fetchDocuments();
+      fetchStats();
+    } catch (err) {
+      toast.error('Bulk delete failed: ' + err.message);
+    } finally {
+      setBulkProcessing(false);
+    }
+  };
+
+  // Single delete handler
+  const handleSingleDelete = async (e, docId, fileName) => {
+    e.stopPropagation();
+    if (!window.confirm(`Delete "${fileName}"? This action cannot be undone.`)) return;
+    
+    try {
+      await deleteDocument(docId);
+      toast.success('Document deleted');
+      fetchDocuments();
+      fetchStats();
+    } catch (err) {
+      toast.error('Delete failed: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
   const handleRefresh = () => {
     fetchDocuments();
     fetchStats();

@@ -180,7 +180,17 @@ export default function QueuePage() {
                 ) : (
                   <Play className="w-3 h-3 mr-1" />
                 )}
-                Retry Validation
+                Retry
+              </Button>
+              <Button 
+                variant="destructive" 
+                size="sm"
+                onClick={handleBulkDelete}
+                disabled={bulkProcessing}
+                data-testid="bulk-delete-btn"
+              >
+                <Trash2 className="w-3 h-3 mr-1" />
+                Delete
               </Button>
               <Button 
                 variant="ghost" 

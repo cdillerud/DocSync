@@ -135,6 +135,27 @@ export default function QueuePage() {
     }
   };
 
+  // Bulk delete handler
+  const handleBulkDelete = async () => {
+    if (selectedDocs.size === 0) return;
+    if (!window.confirm(`Delete ${selectedDocs.size} document(s)? This cannot be undone.`)) return;
+    
+    setBulkProcessing(true);
+    try {
+      const results = await bulkDeleteDocuments([...selectedDocs]);
+      toast.success(`Deleted ${results.success.length} documents. ${results.failed.length} failed.`);
+      if (results.failed.length > 0) {
+        console.error('Failed deletes:', results.failed);
+      }
+      setSelectedDocs(new Set());
+      fetchDocs();
+    } catch (err) {
+      toast.error('Bulk delete failed: ' + err.message);
+    } finally {
+      setBulkProcessing(false);
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto" data-testid="queue-page">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { listDocuments, deleteDocument, bulkResubmitDocuments, bulkRetryDocuments } from '../lib/api';
+import { listDocuments, deleteDocument, bulkResubmitDocuments, bulkRetryDocuments, bulkDeleteDocuments } from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';

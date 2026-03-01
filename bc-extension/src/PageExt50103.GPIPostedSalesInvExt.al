@@ -1,9 +1,9 @@
 /// <summary>
-/// Page Extension 50103 "GPI Posted Sales Order Extension"
-/// Adds the GPI Documents factbox to the Posted Sales Order page.
+/// Page Extension 50103 "GPI Posted Sales Inv Ext"
+/// Adds the GPI Documents factbox to the Posted Sales Invoice page.
 /// Position: First in factbox area (top).
 /// </summary>
-pageextension 50103 "GPI Posted Sales Order Extension" extends "Posted Sales Invoice"
+pageextension 50103 "GPI Posted Sales Inv Ext" extends "Posted Sales Invoice"
 {
     layout
     {

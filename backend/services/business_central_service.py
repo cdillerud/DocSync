@@ -804,6 +804,175 @@ class BusinessCentralService:
                 "success": False,
                 "error": f"Fallback exception: {str(e)}"
             }
+
+    async def create_sales_order(self, order_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Create a Sales Order in Business Central.
+        
+        Args:
+            order_data: Dict containing:
+                - customerNumber: BC customer number (e.g., "NEW")
+                - orderDate: Order date (YYYY-MM-DD)
+                - requestedDeliveryDate: Requested delivery date (YYYY-MM-DD)
+                - externalDocumentNumber: Customer PO number
+                - currencyCode: Currency (e.g., "USD")
+                - lines: List of line items with itemNumber, quantity, unitPrice
+                
+        Returns:
+            Dict with created sales order details including bcDocumentId
+        """
+        if self.use_mock:
+            mock_bc_id = f"SO-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+            return {
+                "success": True,
+                "bcDocumentId": mock_bc_id,
+                "bcDocumentNumber": mock_bc_id,
+                "status": "Draft",
+                "message": "Sales order created (mock mode)",
+                "mock": True,
+                "createdAt": datetime.now(timezone.utc).isoformat()
+            }
+        
+        token = await get_bc_token()
+        company_id = await self._get_company_id()
+        
+        # Build the sales order payload per BC API spec
+        payload = {
+            "customerNumber": order_data.get("customerNumber") or order_data.get("customer_no"),
+            "orderDate": order_data.get("orderDate") or order_data.get("order_date") or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "externalDocumentNumber": order_data.get("externalDocumentNumber") or order_data.get("po_number") or order_data.get("customer_po"),
+            "currencyCode": order_data.get("currencyCode") or order_data.get("currency") or "USD",
+        }
+        
+        # Add optional fields
+        if order_data.get("requestedDeliveryDate") or order_data.get("delivery_date"):
+            payload["requestedDeliveryDate"] = order_data.get("requestedDeliveryDate") or order_data.get("delivery_date")
+        
+        if order_data.get("shipToName"):
+            payload["shipToName"] = order_data.get("shipToName")
+        if order_data.get("shipToAddressLine1"):
+            payload["shipToAddressLine1"] = order_data.get("shipToAddressLine1")
+        if order_data.get("shipToCity"):
+            payload["shipToCity"] = order_data.get("shipToCity")
+        if order_data.get("shipToState"):
+            payload["shipToState"] = order_data.get("shipToState")
+        if order_data.get("shipToPostCode"):
+            payload["shipToPostCode"] = order_data.get("shipToPostCode")
+        
+        # Remove None values
+        payload = {k: v for k, v in payload.items() if v is not None}
+        
+        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/salesOrders"
+        
+        logger.info("Creating Sales Order in BC for customer %s", payload.get("customerNumber"))
+        
+        async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+            resp = await client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json"
+                },
+                json=payload
+            )
+            
+            if resp.status_code not in (200, 201):
+                error_detail = resp.text[:500]
+                logger.error("Failed to create sales order: %s", error_detail)
+                return {
+                    "success": False,
+                    "error": f"BC API error: {resp.status_code}",
+                    "details": error_detail,
+                    "mock": False
+                }
+            
+            data = resp.json()
+            
+            # Add line items if provided
+            line_result = None
+            if order_data.get("lines") and len(order_data["lines"]) > 0:
+                logger.info("Adding %d line items to sales order %s", len(order_data["lines"]), data.get("id"))
+                line_result = await self._add_sales_order_lines(data["id"], order_data["lines"], token, company_id)
+            
+            logger.info("Sales Order created successfully: %s", data.get("number"))
+            
+            return {
+                "success": True,
+                "bcDocumentId": data.get("id"),
+                "bcDocumentNumber": data.get("number"),
+                "status": data.get("status", "Draft"),
+                "message": "Sales order created successfully",
+                "mock": False,
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "bcResponse": data,
+                "linesAdded": line_result.get("added", 0) if line_result else 0,
+                "linesTotal": line_result.get("total", 0) if line_result else 0,
+                "lineErrors": line_result.get("errors", []) if line_result else []
+            }
+
+    async def _add_sales_order_lines(self, order_id: str, lines: List[Dict], token: str, company_id: str):
+        """
+        Add line items to a sales order.
+        
+        BC Sales Order Lines API requires:
+        - lineType: "Item"
+        - itemNumber or itemId
+        - quantity
+        - unitPrice
+        """
+        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/salesOrders({order_id})/salesOrderLines"
+        
+        added_count = 0
+        errors = []
+        
+        async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+            for idx, line in enumerate(lines):
+                # Get values
+                item_number = line.get("itemNumber") or line.get("item_number") or line.get("item_no")
+                description = line.get("description", "")
+                quantity = float(line.get("quantity", 1) or 1)
+                unit_price = float(line.get("unitPrice") or line.get("unit_price", 0) or 0)
+                
+                # Skip empty lines
+                if not item_number and not description:
+                    continue
+                
+                line_payload = {
+                    "lineType": "Item",
+                    "quantity": quantity,
+                }
+                
+                if item_number:
+                    line_payload["itemNumber"] = item_number
+                if description:
+                    line_payload["description"] = description[:100]
+                if unit_price > 0:
+                    line_payload["unitPrice"] = unit_price
+                
+                logger.info("Adding sales order line %d: item=%s, qty=%s, price=$%s", 
+                           idx + 1, item_number or description[:30], quantity, unit_price)
+                
+                resp = await client.post(
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json"
+                    },
+                    json=line_payload
+                )
+                
+                if resp.status_code in (200, 201):
+                    added_count += 1
+                else:
+                    error_msg = resp.text[:300]
+                    logger.warning("Failed to add sales order line %d: HTTP %d - %s", 
+                                  idx + 1, resp.status_code, error_msg)
+                    errors.append({
+                        "line": idx + 1,
+                        "error": error_msg
+                    })
+        
+        return {"added": added_count, "total": len(lines), "errors": errors}
                     
         except Exception as e:
             logger.error("Exception writing SharePoint link to BC: %s", str(e))

@@ -973,13 +973,6 @@ class BusinessCentralService:
                     })
         
         return {"added": added_count, "total": len(lines), "errors": errors}
-                    
-        except Exception as e:
-            logger.error("Exception writing SharePoint link to BC: %s", str(e))
-            return {
-                "success": False,
-                "error": str(e)
-            }
 
 
 # =============================================================================

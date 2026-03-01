@@ -23,4 +23,12 @@ enum 50100 "GPI Doc Link Type"
     {
         Caption = 'Posted Sales Invoice';
     }
+    value(4; "Sales Order")
+    {
+        Caption = 'Sales Order';
+    }
+    value(5; "Posted Sales Order")
+    {
+        Caption = 'Posted Sales Order';
+    }
 }

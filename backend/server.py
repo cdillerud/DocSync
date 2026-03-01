@@ -11531,6 +11531,34 @@ async def bc_sandbox_validate_purchase_order(po_number: str = Query(...)):
     return validation_result
 
 
+@api_router.post("/bc/sales-orders/create")
+async def create_bc_sales_order(
+    customer_number: str = Query(..., description="BC Customer Number (e.g., 'NEW')"),
+    external_doc_number: str = Query(None, description="Customer PO number"),
+    order_date: str = Query(None, description="Order date (YYYY-MM-DD)"),
+    delivery_date: str = Query(None, description="Requested delivery date (YYYY-MM-DD)")
+):
+    """
+    Create a Sales Order in Business Central.
+    
+    Test endpoint for creating sales orders from customer POs.
+    """
+    from services.business_central_service import get_bc_service
+    
+    bc_service = get_bc_service()
+    
+    order_data = {
+        "customerNumber": customer_number,
+        "externalDocumentNumber": external_doc_number,
+        "orderDate": order_date or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "requestedDeliveryDate": delivery_date,
+        "lines": []  # Empty lines for now - just test header creation
+    }
+    
+    result = await bc_service.create_sales_order(order_data)
+    return result
+
+
 @api_router.post("/bc-sandbox/document/{doc_id}/validate")
 async def bc_sandbox_validate_document(doc_id: str, background_tasks: BackgroundTasks):
     """

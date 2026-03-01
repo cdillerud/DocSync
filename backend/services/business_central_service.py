@@ -1013,3 +1013,9 @@ async def post_purchase_invoice(invoice_data: Dict[str, Any]) -> Dict[str, Any]:
     """Convenience function to create a purchase invoice."""
     service = get_bc_service()
     return await service.create_purchase_invoice(invoice_data)
+
+
+async def post_sales_order(order_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Convenience function to create a sales order."""
+    service = get_bc_service()
+    return await service.create_sales_order(order_data)

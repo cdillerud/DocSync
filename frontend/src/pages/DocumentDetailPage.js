@@ -145,13 +145,11 @@ export default function DocumentDetailPage() {
               </a>
             </Button>
           )}
-          {/* Re-submit button - show for Exception, StoredInSP, Classified, Unknown status */}
-          {['Exception', 'StoredInSP', 'Classified', 'Received'].includes(doc.status) && (
-            <Button size="sm" variant="outline" onClick={handleResubmit} disabled={resubmitting} data-testid="resubmit-btn">
-              {resubmitting ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> : <RotateCcw className="w-3 h-3 mr-1.5" />}
-              {resubmitting ? 'Re-processing...' : 'Re-process'}
-            </Button>
-          )}
+          {/* Re-process button - always visible for all documents */}
+          <Button size="sm" variant="outline" onClick={handleResubmit} disabled={resubmitting} data-testid="resubmit-btn">
+            {resubmitting ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> : <RotateCcw className="w-3 h-3 mr-1.5" />}
+            {resubmitting ? 'Re-processing...' : 'Re-process'}
+          </Button>
           {(doc.status === 'Classified' || doc.status === 'Exception') && doc.bc_document_no && (
             <Button size="sm" onClick={handleLink} disabled={linking} data-testid="link-to-bc-btn">
               {linking ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> : <Link className="w-3 h-3 mr-1.5" />}
@@ -404,22 +402,20 @@ export default function DocumentDetailPage() {
           />
         </div>
 
-        {/* Right: AP Review (for AP_Invoice) + Workflow Audit Trail */}
+        {/* Right: Document Preview + AP Review (if AP_Invoice) + Workflow Audit Trail */}
         <div className="lg:col-span-2 space-y-4">
-          {/* PDF Preview + AP Review Panel - only for AP Invoice documents */}
+          {/* PDF Preview - show for ALL documents */}
+          <PDFPreviewPanel document={doc} />
+          
+          {/* AP Review Panel - only for AP Invoice documents */}
           {(doc.document_type === 'AP_Invoice' || doc.suggested_job_type === 'AP_Invoice') && (
-            <>
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                <PDFPreviewPanel document={doc} />
-                <APReviewPanel 
-                  document={doc} 
-                  onUpdate={(updatedDoc) => {
-                    setDoc(prev => ({ ...prev, ...updatedDoc }));
-                    fetchDoc();
-                  }} 
-                />
-              </div>
-            </>
+            <APReviewPanel 
+              document={doc} 
+              onUpdate={(updatedDoc) => {
+                setDoc(prev => ({ ...prev, ...updatedDoc }));
+                fetchDoc();
+              }} 
+            />
           )}
           
           <Card className="border border-border" data-testid="workflow-audit-card">

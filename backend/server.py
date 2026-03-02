@@ -2769,7 +2769,7 @@ def normalize_extracted_fields(fields: dict) -> dict:
                 normalized[f"{key}_raw"] = value
         
         # Date fields
-        elif key in ('due_date', 'invoice_date', 'order_date', 'payment_date'):
+        elif key in ('due_date', 'invoice_date', 'order_date', 'payment_date', 'ship_date', 'delivery_date', 'document_date'):
             try:
                 parsed_date = date_parser.parse(str(value))
                 normalized[key] = parsed_date.strftime('%Y-%m-%d')
@@ -4241,38 +4241,40 @@ async def _update_standard_workflow_status(
     
     # =============== WAREHOUSE WORKFLOW (Square9-aligned) ===============
     if doc_type in [DocType.SHIPMENT.value, DocType.RECEIPT.value, "Shipping_Document", "Warehouse_Document"]:
-        # Step 2: Check PO number
-        po_number = normalized_fields.get("po_number_clean") or normalized_fields.get("po_number_raw")
-        if not po_number:
-            update_dict, escalated, message = increment_retry(doc, "Missing PO Number", Square9Stage.MISSING_PO.value)
+        # Step 2: Check BOL/Document number (primary identifier for shipping docs)
+        bol_number = (normalized_fields.get("bol_number") or 
+                     normalized_fields.get("tracking_number") or
+                     normalized_fields.get("pro_number"))
+        
+        # Step 3: Check PO number (for linking to sales order)
+        po_number = normalized_fields.get("po_number_clean") or normalized_fields.get("po_number_raw") or normalized_fields.get("po_number")
+        
+        # Step 4: Check Ship Date
+        ship_date = (normalized_fields.get("ship_date") or 
+                    normalized_fields.get("document_date") or
+                    normalized_fields.get("delivery_date"))
+        
+        # For shipping docs, we're more lenient - just need SOME identifier
+        has_identifier = bool(bol_number or po_number)
+        
+        if not has_identifier:
+            update_dict, escalated, message = increment_retry(doc, "Missing BOL/PO Number", Square9Stage.MISSING_PO.value)
             update_dict["workflow_status"] = "data_correction_pending"
             update_dict["status"] = "NeedsReview"
             update_dict["square9_stage"] = Square9Stage.MISSING_PO.value
             await db.hub_documents.update_one({"id": doc_id}, {"$set": update_dict})
-            logger.info("[Warehouse Workflow] Doc %s: Missing PO - %s", doc_id, message)
+            logger.info("[Warehouse Workflow] Doc %s: Missing BOL/PO - %s", doc_id, message)
             return
         
-        # Step 3: Check Location Code (Square9 feature)
+        # Location code validation (optional for shipping docs)
         location_code = normalized_fields.get("location_code") or normalized_fields.get("warehouse")
         is_valid_location, location_msg, resolved_location = validate_location_code(location_code, doc_type)
         
         if not is_valid_location:
-            # Set location to fallback and continue (Square9 sets to "ShippedFrom")
             normalized_fields["location_code_resolved"] = resolved_location
             logger.info("[Warehouse Workflow] Doc %s: %s - using fallback: %s", doc_id, location_msg, resolved_location)
         
-        # Step 4: Check Document Date
-        doc_date = normalized_fields.get("ship_date") or normalized_fields.get("document_date")
-        if not doc_date:
-            update_dict, escalated, message = increment_retry(doc, "Missing Document Date", Square9Stage.MISSING_DATE.value)
-            update_dict["workflow_status"] = "data_correction_pending"
-            update_dict["status"] = "NeedsReview"
-            update_dict["square9_stage"] = Square9Stage.MISSING_DATE.value
-            await db.hub_documents.update_one({"id": doc_id}, {"$set": update_dict})
-            logger.info("[Warehouse Workflow] Doc %s: Missing Date - %s", doc_id, message)
-            return
-        
-        # All warehouse validations passed - mark as validated
+        # All warehouse validations passed - mark as validated/completed
         WorkflowEngine.advance_workflow(
             doc,
             WorkflowEvent.ON_EXTRACTION_SUCCESS.value,
@@ -4281,21 +4283,28 @@ async def _update_standard_workflow_status(
         WorkflowEngine.advance_workflow(
             doc,
             WorkflowEvent.ON_REVIEW_COMPLETE.value,
-            context={"reason": "Warehouse validation complete - ready for export"}
+            context={"reason": "Warehouse validation complete - archived"}
         )
         
+        # Shipping docs go directly to "Completed" since they're just archived
         await db.hub_documents.update_one(
             {"id": doc_id},
             {"$set": {
-                "workflow_status": "validated",
-                "status": "Validated",
-                "square9_stage": Square9Stage.VALID.value,
+                "workflow_status": "exported",
+                "status": "Completed",
+                "square9_stage": Square9Stage.EXPORTED.value,
                 "workflow_history": doc.get("workflow_history", []),
                 "workflow_status_updated_utc": now,
-                "location_code_resolved": resolved_location if not is_valid_location else location_code
+                "location_code_resolved": resolved_location if not is_valid_location else location_code,
+                "bol_number_extracted": bol_number,
+                "po_number_extracted": po_number,
+                "ship_date_extracted": ship_date,
+                "archived": True,
+                "archived_utc": now
             }}
         )
-        logger.info("[Warehouse Workflow] Doc %s: VALIDATED - ready for export", doc_id)
+        logger.info("[Warehouse Workflow] Doc %s: COMPLETED - BOL=%s, PO=%s, archived to SharePoint", 
+                   doc_id, bol_number, po_number)
         return
     
     # =============== SALES WORKFLOW ===============

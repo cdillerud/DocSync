@@ -60,8 +60,8 @@ class Square9Stage(str, Enum):
 # Default configuration - can be overridden per job type
 DEFAULT_WORKFLOW_CONFIG = {
     "max_retry_attempts": 4,              # Square9 uses 4
-    "auto_delete_on_max_retries": False,  # Safety: don't auto-delete, flag instead
-    "auto_escalate_on_max_retries": True, # Escalate to manual review
+    "auto_delete_on_max_retries": True,   # Square9 behavior: delete after max retries
+    "auto_escalate_on_max_retries": False, # Don't escalate, delete instead (Square9 style)
     "retry_delay_minutes": 5,             # Wait before auto-retry
     "required_fields": {
         "AP_INVOICE": ["vendor", "invoice_number", "amount"],

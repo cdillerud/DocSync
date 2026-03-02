@@ -6128,12 +6128,21 @@ async def preview_post_to_bc(doc_id: str, request: DryRunPreviewRequest = None):
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    # Use Production BC credentials for validation
-    # These are read-only operations
-    PROD_TENANT_ID = request.bc_tenant_id if request and request.bc_tenant_id else "***REMOVED_TENANT_ID***"
-    PROD_ENVIRONMENT = request.bc_environment if request and request.bc_environment else "Production"
-    PROD_CLIENT_ID = "***REMOVED_CLIENT_ID***"
-    PROD_CLIENT_SECRET = os.environ.get("BC_PROD_CLIENT_SECRET", "***REMOVED***")
+    # Use Production BC credentials for validation (read-only operations)
+    # Credentials should be set in environment variables
+    PROD_TENANT_ID = request.bc_tenant_id if request and request.bc_tenant_id else os.environ.get("BC_PROD_TENANT_ID", "")
+    PROD_ENVIRONMENT = request.bc_environment if request and request.bc_environment else os.environ.get("BC_PROD_ENVIRONMENT", "Production")
+    PROD_CLIENT_ID = os.environ.get("BC_PROD_CLIENT_ID", "")
+    PROD_CLIENT_SECRET = os.environ.get("BC_PROD_CLIENT_SECRET", "")
+    
+    # Check if Production BC credentials are configured
+    if not PROD_TENANT_ID or not PROD_CLIENT_ID or not PROD_CLIENT_SECRET:
+        return {
+            "doc_id": doc_id,
+            "dry_run": True,
+            "error": "Production BC credentials not configured. Set BC_PROD_TENANT_ID, BC_PROD_CLIENT_ID, BC_PROD_CLIENT_SECRET in environment.",
+            "errors": ["Missing BC_PROD_* environment variables"]
+        }
     
     preview_result = {
         "doc_id": doc_id,

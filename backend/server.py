@@ -3725,6 +3725,7 @@ async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: d
                 
                 # For freight invoices, also validate BOL/Order reference against Sales Orders
                 # This is important for linking freight costs to the right sales order
+                # AND detecting freight direction (outbound vs inbound)
                 bol_or_order = (
                     normalized_fields.get("bol_number") or
                     normalized_fields.get("order_number") or
@@ -3735,7 +3736,9 @@ async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: d
                 if bol_or_order:
                     bol_str = str(bol_or_order).strip()
                     logger.info("[BC Validation] AP Invoice - validating order reference: %s", bol_str)
+                    freight_direction = "unknown"
                     
+                    # Step 1: Try matching against Sales Orders (OUTBOUND freight)
                     resp = await c.get(
                         f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/salesOrders",
                         headers={"Authorization": f"Bearer {token}"},
@@ -3746,11 +3749,14 @@ async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: d
                         orders = resp.json().get("value", [])
                         if orders:
                             matched_order = orders[0]
+                            freight_direction = "outbound"
+                            validation_results["freight_direction"] = "outbound"
                             validation_results["checks"].append({
-                                "check_name": "order_reference_validation",
+                                "check_name": "freight_direction",
                                 "passed": True,
-                                "details": f"Order reference {bol_str} matches Sales Order for {matched_order.get('customerName')}",
+                                "details": f"OUTBOUND freight - Order {bol_str} matches Sales Order for {matched_order.get('customerName')}",
                                 "required": False,
+                                "freight_direction": "outbound",
                                 "matched_sales_order": matched_order.get("number"),
                                 "matched_customer": matched_order.get("customerName")
                             })
@@ -3761,13 +3767,49 @@ async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: d
                                 "customer_number": matched_order.get("customerNumber"),
                                 "order_date": matched_order.get("orderDate")
                             }
-                            logger.info("[BC Validation] AP Invoice - order reference VALIDATED: %s -> %s", 
+                            logger.info("[BC Validation] OUTBOUND freight - order %s -> customer %s", 
                                        bol_str, matched_order.get("customerName"))
-                        else:
-                            validation_results["warnings"].append({
-                                "check_name": "order_reference_not_found",
-                                "details": f"Order reference '{bol_str}' not found as Sales Order - will use as description only"
-                            })
+                    
+                    # Step 2: If no Sales Order match, try Purchase Orders (INBOUND freight)
+                    if freight_direction == "unknown":
+                        po_resp = await c.get(
+                            f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseOrders",
+                            headers={"Authorization": f"Bearer {token}"},
+                            params={"$filter": f"number eq '{bol_str}'"}
+                        )
+                        
+                        if po_resp.status_code == 200:
+                            pos = po_resp.json().get("value", [])
+                            if pos:
+                                matched_po = pos[0]
+                                freight_direction = "inbound"
+                                validation_results["freight_direction"] = "inbound"
+                                validation_results["checks"].append({
+                                    "check_name": "freight_direction",
+                                    "passed": True,
+                                    "details": f"INBOUND freight - Order {bol_str} matches Purchase Order from {matched_po.get('vendorName')}",
+                                    "required": False,
+                                    "freight_direction": "inbound",
+                                    "matched_purchase_order": matched_po.get("number"),
+                                    "matched_vendor": matched_po.get("vendorName")
+                                })
+                                validation_results["matched_purchase_order"] = {
+                                    "number": matched_po.get("number"),
+                                    "vendor_name": matched_po.get("vendorName"),
+                                    "vendor_number": matched_po.get("vendorNumber"),
+                                    "order_date": matched_po.get("orderDate")
+                                }
+                                logger.info("[BC Validation] INBOUND freight - order %s -> vendor %s", 
+                                           bol_str, matched_po.get("vendorName"))
+                    
+                    # Step 3: If neither matched
+                    if freight_direction == "unknown":
+                        validation_results["freight_direction"] = "unknown"
+                        validation_results["warnings"].append({
+                            "check_name": "freight_direction_unknown",
+                            "details": f"Order reference '{bol_str}' not found as Sales Order or Purchase Order - cannot determine freight direction"
+                        })
+                        logger.warning("[BC Validation] UNKNOWN freight direction - order %s not found in SO or PO", bol_str)
             
             # Customer match for Sales_PO, AR_Invoice
             elif job_type in ("Sales_PO", "AR_Invoice"):
@@ -6235,9 +6277,15 @@ async def preview_post_to_bc(doc_id: str, request: DryRunPreviewRequest = None):
                             "details": f"No vendor found matching '{vendor_name}'"
                         })
             
-            # Validate Sales Order reference (for freight invoices)
+            # =============== FREIGHT DIRECTION DETECTION ===============
+            # Outbound freight: BOL/Order matches a Sales Order (shipping TO customer)
+            # Inbound freight: BOL/Order matches a Purchase Order (receiving FROM vendor)
+            freight_direction = "unknown"
+            
             if order_reference:
                 order_str = str(order_reference).strip()
+                
+                # Step 1: Try matching against Sales Orders (OUTBOUND freight)
                 order_resp = await client.get(
                     f"https://api.businesscentral.dynamics.com/v2.0/{PROD_TENANT_ID}/{PROD_ENVIRONMENT}/api/v2.0/companies({company_id})/salesOrders",
                     headers={"Authorization": f"Bearer {token}"},
@@ -6248,6 +6296,13 @@ async def preview_post_to_bc(doc_id: str, request: DryRunPreviewRequest = None):
                     orders = order_resp.json().get("value", [])
                     if orders:
                         matched_order = orders[0]
+                        freight_direction = "outbound"
+                        preview_result["freight_direction"] = "outbound"
+                        preview_result["freight_direction_details"] = {
+                            "direction": "outbound",
+                            "reason": "Order reference matches a Sales Order",
+                            "description": "Freight cost for shipping TO customer"
+                        }
                         preview_result["sales_order_match"] = {
                             "found": True,
                             "number": matched_order.get("number"),
@@ -6258,19 +6313,68 @@ async def preview_post_to_bc(doc_id: str, request: DryRunPreviewRequest = None):
                             "total_amount": matched_order.get("totalAmountIncludingTax")
                         }
                         preview_result["validation"]["checks"].append({
-                            "check": "sales_order_match",
+                            "check": "freight_direction",
                             "passed": True,
-                            "details": f"Order {order_str} matches Sales Order for {matched_order.get('customerName')}"
+                            "details": f"OUTBOUND freight - Order {order_str} matches Sales Order for {matched_order.get('customerName')}"
                         })
-                    else:
-                        preview_result["sales_order_match"] = {
-                            "found": False,
-                            "searched_for": order_str
-                        }
-                        preview_result["validation"]["warnings"].append({
-                            "check": "sales_order_match",
-                            "details": f"No Sales Order found for '{order_str}' - will use as description only"
-                        })
+                
+                # Step 2: If no Sales Order match, try Purchase Orders (INBOUND freight)
+                if freight_direction == "unknown":
+                    po_resp = await client.get(
+                        f"https://api.businesscentral.dynamics.com/v2.0/{PROD_TENANT_ID}/{PROD_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseOrders",
+                        headers={"Authorization": f"Bearer {token}"},
+                        params={"$filter": f"number eq '{order_str}'"}
+                    )
+                    
+                    if po_resp.status_code == 200:
+                        pos = po_resp.json().get("value", [])
+                        if pos:
+                            matched_po = pos[0]
+                            freight_direction = "inbound"
+                            preview_result["freight_direction"] = "inbound"
+                            preview_result["freight_direction_details"] = {
+                                "direction": "inbound",
+                                "reason": "Order reference matches a Purchase Order",
+                                "description": "Freight cost for receiving FROM vendor/supplier"
+                            }
+                            preview_result["purchase_order_match"] = {
+                                "found": True,
+                                "number": matched_po.get("number"),
+                                "vendor_name": matched_po.get("vendorName"),
+                                "vendor_number": matched_po.get("vendorNumber"),
+                                "order_date": matched_po.get("orderDate"),
+                                "status": matched_po.get("status"),
+                                "total_amount": matched_po.get("totalAmountIncludingTax")
+                            }
+                            preview_result["validation"]["checks"].append({
+                                "check": "freight_direction",
+                                "passed": True,
+                                "details": f"INBOUND freight - Order {order_str} matches Purchase Order from {matched_po.get('vendorName')}"
+                            })
+                
+                # Step 3: If neither matched
+                if freight_direction == "unknown":
+                    preview_result["freight_direction"] = "unknown"
+                    preview_result["freight_direction_details"] = {
+                        "direction": "unknown",
+                        "reason": f"Order reference '{order_str}' not found in Sales Orders or Purchase Orders",
+                        "description": "Could not determine freight direction - manual review needed"
+                    }
+                    preview_result["validation"]["warnings"].append({
+                        "check": "freight_direction",
+                        "details": f"Could not determine freight direction - '{order_str}' not found as Sales Order or Purchase Order"
+                    })
+            else:
+                preview_result["freight_direction"] = "unknown"
+                preview_result["freight_direction_details"] = {
+                    "direction": "unknown",
+                    "reason": "No order reference extracted from document",
+                    "description": "Cannot determine freight direction without BOL/Order number"
+                }
+                preview_result["validation"]["warnings"].append({
+                    "check": "freight_direction",
+                    "details": "No order reference found - cannot determine if inbound or outbound freight"
+                })
             
             # Check for duplicate invoice
             if invoice_number:

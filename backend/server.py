@@ -4186,13 +4186,30 @@ async def _update_standard_workflow_status(
 ):
     """
     Update workflow status for non-AP document types.
-    Uses simplified workflow: captured -> classified -> extracted -> ready_for_approval
+    Implements Square9-style workflow for warehouse and sales documents.
+    
+    Warehouse Workflow (SHIPMENT, RECEIPT):
+    - Import -> Classification -> PO Validation -> Location Validation -> Export
+    
+    Sales Workflow (SALES_ORDER, SALES_INVOICE):
+    - Import -> Classification -> Customer Match -> BC Validation -> Export/Create
     """
+    from services.square9_workflow import (
+        initialize_retry_state, increment_retry, validate_location_code,
+        validate_required_fields, determine_square9_stage, Square9Stage
+    )
+    
     doc = await db.hub_documents.find_one({"id": doc_id})
     if not doc:
         return
     
     now = datetime.now(timezone.utc).isoformat()
+    
+    # Initialize retry state if not present
+    if "retry_count" not in doc:
+        retry_state = initialize_retry_state(doc)
+        doc.update(retry_state)
+        await db.hub_documents.update_one({"id": doc_id}, {"$set": retry_state})
     
     # Step 1: Classification done - move from captured to classified
     if confidence > 0:
@@ -4213,11 +4230,126 @@ async def _update_standard_workflow_status(
             {"$set": {
                 "workflow_status": doc.get("workflow_status"),
                 "workflow_history": doc.get("workflow_history", []),
-                "workflow_status_updated_utc": now
+                "workflow_status_updated_utc": now,
+                "square9_stage": Square9Stage.UNCLASSIFIED.value
             }}
         )
         return
     
+    # =============== WAREHOUSE WORKFLOW (Square9-aligned) ===============
+    if doc_type in [DocType.SHIPMENT.value, DocType.RECEIPT.value, "Shipping_Document", "Warehouse_Document"]:
+        # Step 2: Check PO number
+        po_number = normalized_fields.get("po_number_clean") or normalized_fields.get("po_number_raw")
+        if not po_number:
+            update_dict, escalated, message = increment_retry(doc, "Missing PO Number", Square9Stage.MISSING_PO.value)
+            update_dict["workflow_status"] = "data_correction_pending"
+            update_dict["status"] = "NeedsReview"
+            update_dict["square9_stage"] = Square9Stage.MISSING_PO.value
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": update_dict})
+            logger.info("[Warehouse Workflow] Doc %s: Missing PO - %s", doc_id, message)
+            return
+        
+        # Step 3: Check Location Code (Square9 feature)
+        location_code = normalized_fields.get("location_code") or normalized_fields.get("warehouse")
+        is_valid_location, location_msg, resolved_location = validate_location_code(location_code, doc_type)
+        
+        if not is_valid_location:
+            # Set location to fallback and continue (Square9 sets to "ShippedFrom")
+            normalized_fields["location_code_resolved"] = resolved_location
+            logger.info("[Warehouse Workflow] Doc %s: %s - using fallback: %s", doc_id, location_msg, resolved_location)
+        
+        # Step 4: Check Document Date
+        doc_date = normalized_fields.get("ship_date") or normalized_fields.get("document_date")
+        if not doc_date:
+            update_dict, escalated, message = increment_retry(doc, "Missing Document Date", Square9Stage.MISSING_DATE.value)
+            update_dict["workflow_status"] = "data_correction_pending"
+            update_dict["status"] = "NeedsReview"
+            update_dict["square9_stage"] = Square9Stage.MISSING_DATE.value
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": update_dict})
+            logger.info("[Warehouse Workflow] Doc %s: Missing Date - %s", doc_id, message)
+            return
+        
+        # All warehouse validations passed - mark as validated
+        WorkflowEngine.advance_workflow(
+            doc,
+            WorkflowEvent.ON_EXTRACTION_SUCCESS.value,
+            context={"reason": "Warehouse document validated successfully"}
+        )
+        WorkflowEngine.advance_workflow(
+            doc,
+            WorkflowEvent.ON_REVIEW_COMPLETE.value,
+            context={"reason": "Warehouse validation complete - ready for export"}
+        )
+        
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {
+                "workflow_status": "validated",
+                "status": "Validated",
+                "square9_stage": Square9Stage.VALID.value,
+                "workflow_history": doc.get("workflow_history", []),
+                "workflow_status_updated_utc": now,
+                "location_code_resolved": resolved_location if not is_valid_location else location_code
+            }}
+        )
+        logger.info("[Warehouse Workflow] Doc %s: VALIDATED - ready for export", doc_id)
+        return
+    
+    # =============== SALES WORKFLOW ===============
+    elif doc_type in [DocType.SALES_ORDER.value, DocType.SALES_INVOICE.value, "SalesOrder", "SalesInvoice"]:
+        # Step 2: Check Customer
+        customer = normalized_fields.get("customer") or normalized_fields.get("customer_raw")
+        if not customer:
+            update_dict, escalated, message = increment_retry(doc, "Missing Customer", Square9Stage.MISSING_VENDOR.value)
+            update_dict["workflow_status"] = "data_correction_pending"
+            update_dict["status"] = "NeedsReview"
+            update_dict["square9_stage"] = Square9Stage.MISSING_VENDOR.value
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": update_dict})
+            logger.info("[Sales Workflow] Doc %s: Missing Customer - %s", doc_id, message)
+            return
+        
+        # Step 3: Check Order/Invoice Number
+        order_number = (normalized_fields.get("order_number") or 
+                       normalized_fields.get("invoice_number_clean") or
+                       normalized_fields.get("customer_po"))
+        if not order_number:
+            update_dict, escalated, message = increment_retry(doc, "Missing Order/Invoice Number", Square9Stage.MISSING_INVOICE.value)
+            update_dict["workflow_status"] = "data_correction_pending"
+            update_dict["status"] = "NeedsReview"
+            update_dict["square9_stage"] = Square9Stage.MISSING_INVOICE.value
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": update_dict})
+            logger.info("[Sales Workflow] Doc %s: Missing Order Number - %s", doc_id, message)
+            return
+        
+        # All sales validations passed - mark as validated
+        WorkflowEngine.advance_workflow(
+            doc,
+            WorkflowEvent.ON_EXTRACTION_SUCCESS.value,
+            context={"reason": "Sales document validated successfully"}
+        )
+        WorkflowEngine.advance_workflow(
+            doc,
+            WorkflowEvent.ON_REVIEW_COMPLETE.value,
+            context={"reason": "Sales validation complete - ready for BC creation"}
+        )
+        
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {
+                "workflow_status": "validated",
+                "status": "Validated",
+                "square9_stage": Square9Stage.VALID.value,
+                "workflow_history": doc.get("workflow_history", []),
+                "workflow_status_updated_utc": now,
+                "bc_create_ready": True,
+                "customer_extracted": customer,
+                "order_number_extracted": order_number
+            }}
+        )
+        logger.info("[Sales Workflow] Doc %s: VALIDATED - ready for BC Sales Order creation", doc_id)
+        return
+    
+    # =============== DEFAULT/OTHER WORKFLOW ===============
     # Step 2: Check extraction quality
     vendor = normalized_fields.get("vendor_normalized") or normalized_fields.get("vendor_raw")
     invoice_number = normalized_fields.get("invoice_number_clean")
@@ -4270,7 +4402,8 @@ async def _update_standard_workflow_status(
         {"$set": {
             "workflow_status": doc.get("workflow_status"),
             "workflow_history": doc.get("workflow_history", []),
-            "workflow_status_updated_utc": now
+            "workflow_status_updated_utc": now,
+            "square9_stage": determine_square9_stage(doc)
         }}
     )
 

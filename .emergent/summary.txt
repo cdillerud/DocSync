@@ -1,57 +1,37 @@
 <analysis>**original_problem_statement:**
-The user wants to build a GPI Document Hub. The primary goals are:
-1.  **Accounts Payable Invoice Automation:** Replicate the legacy Zetadocs/Square9 workflow by ingesting AP invoices, using AI to extract data (vendor, invoice #, date, line items), automatically creating Purchase Invoices in Business Central (BC), and archiving documents in SharePoint.
-2.  **SharePoint Flat Migration POC:** A tool to migrate files from a source SharePoint folder to a new flat library with AI-inferred metadata.
-3.  **Spiro CRM Integration:** Integrate Spiro as an additional source of truth for companies, contacts, and opportunities. This data should be synced locally and used to enrich the AI document validation pipeline to improve classification and validation accuracy. The integration should be behind a feature flag and initially run in shadow mode.
+The user wants to build a GPI Document Hub to automate document processing workflows. The core requirements are:
+1.  **Accounts Payable Invoice Automation:** Ingest AP invoices, use AI to extract data, automatically create Purchase Invoices in Business Central (BC), and archive documents in SharePoint, replicating the legacy Square9 workflow. This now includes an auto-post feature for high-confidence invoices.
+2.  **Sales Order Automation:** Ingest customer Sales Orders, use AI to extract data, and create draft Sales Orders in Business Central.
+3.  **Warehouse Document Workflow:** Process related shipping documents (BOLs, Packing Lists) by extracting key data (PO#, BOL#), matching them to existing BC records, and archiving them in SharePoint.
+4.  **SharePoint Flat Migration POC:** A tool to migrate files from a source SharePoint folder to a new flat library with AI-inferred metadata.
+5.  **Spiro CRM Integration:** Integrate Spiro CRM to sync companies, contacts, and opportunities to enrich the document validation pipeline.
 
 **User's preferred language**: English
 
 **what currently exists?**
-The application is a full-stack document processing hub (FastAPI/React/MongoDB) connected to the user's Business Central Sandbox and SharePoint.
--   An **AP Review Workspace** allows for viewing and manually posting invoices.
--   **Automated AI Extraction:** The ingestion pipeline (especially for emails) now automatically uses a Gemini-based service () to extract invoice date, PO number, and line items from PDFs. This was a major fix to address user frustration with manual extraction.
--   **Local PDF Preview:** The document previewer was fixed by replacing a broken SharePoint iframe with a -based client-side renderer, resolving cross-domain security issues.
--   **Spiro Integration Foundation:** A complete module for Spiro integration has been built (). It includes services for OAuth2 authentication, data synchronization, and context generation. Admin API endpoints () are in place. The integration is feature-flagged and integrated into the document processing pipeline to add  in a shadow mode.
+The application is a full-stack document processing hub (FastAPI/React/MongoDB).
+-   **Core Workflows:** The system handles AP Invoices, Sales Orders, and Warehouse/Shipping documents.
+-   **Business Central Integration:**
+    -   Successfully creates Purchase Invoices with line items using .
+    -   Successfully creates draft Sales Orders with line items.
+    -   The custom AL extension has been updated to add a GPI Documents Factbox to Purchase Invoices, Posted Purchase Invoices, Sales Orders, and Posted Sales Orders.
+-   **Automation:** An  is implemented to automatically create Purchase Invoices in BC for documents that meet a high confidence threshold. A similar auto-create flow is in place for Sales Orders.
+-   **Spiro CRM Integration:** The integration is fully authenticated and is actively syncing company and contact data in the background.
+-   **Frontend:** The document queue UI () has been enhanced with single and bulk document deletion capabilities. The document detail page () has been fixed to reliably show the document preview and a Re-process button for all document types.
+-   **Environment Configuration:** The  file in the repository has been updated to use port  for the frontend and includes the correct , aligning the preview environment with the user's production setup to prevent future configuration drift.
 
 **Last working item**:
-- **Last item agent was working:** Completing the OAuth2 authorization flow for the new Spiro integration. The user provided an authorization code () to be exchanged for an access token. The agent forked before performing the token exchange.
-- **Status:** IN PROGRESS
-- **Agent Testing Done:** N
-- **Which testing method agent to use?** Manual testing by . The agent needs to call the  endpoint with the user-provided code. Then, verify success by calling the  endpoint and observing that  is .
-- **User Testing Done:** N
+- **Last item agent was working:** Debugging and resolving a frontend build/caching issue on the user's production VM. The user was not seeing the updated  which included a persistent Re-process button and a document preview panel for all file types. The agent diagnosed the problem as aggressive Docker and browser caching, guided the user through clearing caches, and the user's final screenshots confirmed the UI was finally displaying correctly.
+- **Status:** USER VERIFICATION PENDING
+- **Agent Testing Done:** Y
+- **Which testing method agent to use?** Frontend testing agent to run a regression test on the document detail page to ensure all expected UI elements (Preview, Re-process button, Metadata) render correctly for various document types and statuses.
+- **User Testing Done:** Y
 
 **All Pending/In progress Issue list**:
--   **Issue 1: Complete Spiro Integration Authorization and Sync (P0)**
-    -   **Attempted fixes:** The agent built the entire integration framework and got the authorization code from the user.
-    -   **Next debug checklist:**
-        1.  Use the  tool to POST the authorization code () to the  endpoint.
-        2.  Verify the token was successfully stored by checking the  endpoint.
-        3.  Trigger a manual sync by calling the  endpoint.
-        4.  Verify that data appears in the  and  collections in MongoDB.
-    -   **Why fix this issue and what will be achieved with the fix?** This will complete the Spiro integration setup, allowing the system to start pulling CRM data to enrich document validation.
-    -   **Status:** IN PROGRESS
-    -   **Is recurring issue?** N
-    -   **Should Test frontend/backend/both after fix?** Backend
-    -   **Blocked on other issue:** No.
-
--   **Issue 2: BC Purchase Invoice Lines Post Incorrectly (P1)**
-    -   **Attempted fixes:** The agent modified  to add lines using . The user clarified this is wrong; they use  which maps to COGS account .
-    -   **Next debug checklist:**
-        1.  Update  in .
-        2.  Change  from  to .
-        3.  The uid=0(root) gid=0(root) groups=0(root) field must now be the **Item's ID (GUID)**, not a G/L Account ID.
-        4.  The system needs a default Item code for freight charges. Ask the user for the specific Item code, then query the BC API to get its GUID.
-        5.  Hardcode or make this default Item ID configurable in .
-    -   **Why fix this issue and what will be achieved with the fix?** This is critical for the AP automation workflow. Fixing it will allow extracted invoice line items to be correctly created in Business Central, which is a core user requirement.
-    -   **Status:** IN PROGRESS
-    -   **Is recurring issue?** N
-    -   **Should Test frontend/backend/both after fix?** Backend
-    -   **Blocked on other issue:** No.
-
--   **Issue 3: Verify Automatic AI Extraction on Production (P2)**
-    -   **Attempted fixes:** The agent fixed the email ingestion pipeline to correctly save  and .
-    -   **Next debug checklist:** The user is still reporting this isn't working automatically on their production VM. The agent must guide the user to  the latest changes, rebuild the Docker containers, and then monitor the  logs after a new document is ingested via email to confirm the extraction runs and saves the data.
-    -   **Why fix this issue and what will be achieved with the fix?** This is the central value proposition of the app. Confirming this works automatically is essential.
+-   **Issue 1: Verify Automatic AI Extraction on Production (P0)**
+    -   **Attempted fixes:** The agent has implemented robust AI extraction pipelines for AP, Sales, and Warehouse documents.
+    -   **Next debug checklist:** The user needs to ingest a few new documents of each type via email and confirm that the system automatically classifies, extracts data, and (for AP/Sales) auto-creates records in BC without manual intervention. The agent should guide the user to monitor the backend logs on their production VM during this process.
+    -   **Why fix this issue and what will be achieved with the fix?** This is the central value proposition of the application. Confirming this works automatically is essential for user adoption and decommissioning the legacy system.
     -   **Status:** USER VERIFICATION PENDING
     -   **Is recurring issue?** Y
     -   **Should Test frontend/backend/both after fix?** Backend
@@ -63,121 +43,75 @@ None.
 **Upcoming and Future Tasks**
 
 **Upcoming Tasks:**
--   **Task 1 (P1): Move the Business Central Factbox.** Modify the AL extension code in  to change the layout position of the Factbox.
--   **Task 2 (P2): Package and Publish the Business Central (AL) Extension.** After the Factbox position is adjusted, the extension needs to be compiled into an  file and published.
--   **Task 3 (P2): Implement Migration UI Detail Drawer.** Create a detailed view in the migration UI to manually edit AI-inferred fields.
--   **Task 4 (P3): Backend Refactor.** Continue breaking down the monolithic .
+-   **Task 1 (P0): Package and Publish the Business Central (AL) Extension.** The AL extension code in  has been significantly updated (Factbox position, added Sales Order support). The user needs to compile and publish the new  file to their BC Sandbox to see the changes.
+-   **Task 2 (P1): Add Create BC Sales Order Button to UI.** For sales documents that are validated but not auto-created, add a button on the Document Detail page to manually trigger the creation of a Sales Order in Business Central.
+-   **Task 3 (P2): Implement Migration UI Detail Drawer.** Create a detailed view in the SharePoint migration UI to manually edit AI-inferred fields before migration.
+-   **Task 4 (P3): Backend Refactor.** Continue breaking down the monolithic  into smaller, more manageable route and service files.
 
 **Future Tasks:**
 -   Implement the Outbound Document Delivery module.
--   Define and implement Stable Vendor enablement.
+-   Define and implement Stable Vendor enablement for more granular auto-posting rules.
 -   Replace the mock email service with a real provider.
--   Implement multi-step approval routing.
+-   Implement multi-step approval routing for invoices.
 -   Decommission the legacy Zetadocs system.
--   Implement automated creation of Purchase Invoice *lines* in BC (this is now in progress).
 -   Replace mock JWT auth with Entra ID SSO.
 
 **Completed work in this session**
--   **Automated AI Invoice Data Extraction:** Correctly integrated the Gemini-based  into the document ingestion pipeline in , ensuring  and  are extracted automatically when documents are received, not just via a manual button.
--   **PDF Preview Fix:** Replaced the non-functional SharePoint  with a client-side  renderer in , fixing the cross-domain  error.
--   **Spiro Integration Scaffolding:** Built the entire backend foundation for Spiro CRM integration, including services for OAuth2, data synchronization (), and context enrichment (), all controlled by environment variables.
--   **Spiro Admin Endpoints:** Created API routes in  to manage the integration (check status, get auth URL, handle callback, trigger sync).
+-   **BC Purchase Invoice Line Fix:** Resolved the critical bug where purchase invoice lines failed to post. The code was corrected to use  and dynamically look up the GUID for the  item.
+-   **BC Factbox Position Update:** Modified the AL extension code to move the GPI Documents factbox to the user's preferred position on the Purchase Invoice and Posted Purchase Invoice pages.
+-   **Auto-Posting Workflow:** Implemented a new  and integrated it into the document ingestion pipeline in  to automatically post high-confidence invoices to BC, mimicking the legacy Square9 workflow.
+-   **Document Deletion Feature:** Added both single-document and bulk-deletion capabilities to the frontend document queue () and implemented the corresponding backend API endpoint ().
+-   **Sales Order Creation:** Implemented the full flow for creating Sales Orders in Business Central from uploaded documents, including creating the header and adding line items via the BC API.
+-   **AL Extension for Sales Orders:** Extended the AL code to add the GPI Documents factbox to the Sales Order and Posted Sales Invoice pages.
+-   **Warehouse Document Workflow:** Implemented a specific workflow for shipping documents (BOLs, etc.) that focuses on data extraction and archival rather than record creation.
+-   **UI Bug Fix (Document Detail Page):** Corrected the React code in  to ensure the Re-process button and the document preview component are always visible, regardless of document type or status.
+-   **Production Environment Fixes:** Debugged and resolved multiple user-facing issues on their production VM, including fixing the  port mapping ( -> ), correcting the , and guiding the user through clearing persistent Docker build and browser caches. The fixes were committed to the repository to prevent recurrence.
 
 **Earlier issues found/mentioned but not fixed**
 -   **Issue 1: Backend Refactor is Incomplete**
-    -   **Debug checklist:** The main  file remains a large monolith.
-    -   **Why to solve this issue and what will be achieved with this?** Improves code maintainability and aligns with standard practices.
+    -   **Debug checklist:** The main  file remains a large monolith containing most of the application's logic.
+    -   **Why to solve this issue and what will be achieved with this?** Improves code maintainability, testability, and aligns with standard FastAPI project structure.
     -   **Should Test frontend/backend/both after fix:** Backend
     -   **Is recurring issue?** Y
 
 **Known issue recurrence from previous fork**
--   **Issue recurrence in previous fork:** Configuration & Environment Divergence (Credentials).
+-   **Issue recurrence in previous fork:** Configuration & Environment Divergence. This was a major problem in this session. The user's production  was overwritten by a , causing port conflicts. The  files in the preview environment were also reset, requiring the agent to re-add BC credentials.
 -   **Recurrence count:** 5+
--   **Status:** RESOLVED (for now). The  file is reset on each fork, which deeply frustrates the user. Be prepared to restore credentials or guide the user. The user is also very frustrated with context loss between forks.
+-   **Status:** RESOLVED (for now). The agent has committed the user's production port configuration () to the  file in the main branch to prevent this specific issue from recurring. However, the underlying platform issue of resetting  files remains.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
--   **Hybrid AI Classification & Extraction:** Using Gemini for document classification and structured data extraction (invoice date, line items).
--   **Client-Side PDF Rendering:** Using  to render PDF files in the browser, avoiding  and cross-domain security issues.
--   **3rd Party API Integration (OAuth2):** Built a service to handle the OAuth2  flow, including token storage and refresh, for the Spiro CRM API.
--   **Background Task Processing (FastAPI ):** Used for long-running file migrations.
--   **Production Environment Debugging:** Guiding the user to run , usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
-           [--exec-path[=<path>]] [--html-path] [--man-path] [--info-path]
-           [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--bare]
-           [--git-dir=<path>] [--work-tree=<path>] [--namespace=<name>]
-           [--super-prefix=<path>] [--config-env=<name>=<envvar>]
-           <command> [<args>]
-
-These are common Git commands used in various situations:
-
-start a working area (see also: git help tutorial)
-   clone     Clone a repository into a new directory
-   init      Create an empty Git repository or reinitialize an existing one
-
-work on the current change (see also: git help everyday)
-   add       Add file contents to the index
-   mv        Move or rename a file, a directory, or a symlink
-   restore   Restore working tree files
-   rm        Remove files from the working tree and from the index
-
-examine the history and state (see also: git help revisions)
-   bisect    Use binary search to find the commit that introduced a bug
-   diff      Show changes between commits, commit and working tree, etc
-   grep      Print lines matching a pattern
-   log       Show commit logs
-   show      Show various types of objects
-   status    Show the working tree status
-
-grow, mark and tweak your common history
-   branch    List, create, or delete branches
-   commit    Record changes to the repository
-   merge     Join two or more development histories together
-   rebase    Reapply commits on top of another base tip
-   reset     Reset current HEAD to the specified state
-   switch    Switch branches
-   tag       Create, list, delete or verify a tag object signed with GPG
-
-collaborate (see also: git help workflows)
-   fetch     Download objects and refs from another repository
-   pull      Fetch from and integrate with another repository or a local branch
-   push      Update remote refs along with associated objects
-
-'git help -a' and 'git help -g' list available subcommands and some
-concept guides. See 'git help <command>' or 'git help <concept>'
-to read about a specific subcommand or concept.
-See 'git help git' for an overview of the system., and python scripts on their separate production VM.
+-   **AL Extension Development:** Modified existing page extensions and created new ones to add custom Factboxes to standard Business Central pages (Purchase Invoices, Sales Orders).
+-   **Debugging Production Environments:** Extensive debugging of user's remote VM, tackling issues related to git divergence, Docker port mappings, Docker build cache (), and browser cache.
+-   **Business Central API (Sales Orders):** Implemented logic to create  and associated  via the BC REST API.
+-   **Conditional UI Rendering:** Fixed React components to render UI elements like buttons and previews based on broader conditions, rather than being tied to specific document statuses.
 
 **key DB schema**
--   ****: Added  (top-level),  (top-level, array of objects), and  (object for shadow mode).
--   ****: New collection .
--   ****: New collection to cache Spiro company data.
--   ****: New collection to cache Spiro contact data.
--   ****: New collection to cache Spiro opportunity data.
+-   No new collections were added.
+-   ****: Schema was enhanced with additional fields to support more complex workflows, such as  (array of objects),  (boolean), and  (boolean).
 
 **All files of reference**
-*   **/app/backend/services/spiro/**: The new, complete module for Spiro integration.
-*   **/app/backend/server.py**: Heavily modified to integrate automated AI extraction and the Spiro context pipeline.
-*   **/app/frontend/src/components/DocumentPreview.js**: The fix for the document preview issue.
-*   **/app/backend/services/invoice_extractor.py**: The core Gemini AI extraction logic.
-*   **/app/backend/services/business_central_service.py**: Contains the incorrect line item logic that needs to be fixed (G/L vs. Item).
-*   **/app/memory/SPIRO_INTEGRATION.md**: Documentation for the new Spiro integration.
+*   : Major changes to fix purchase invoice lines and add sales order creation logic.
+*   : Major changes to add new endpoints (bulk delete, sales order test), integrate the auto-post service, and enhance workflow logic.
+*   : New service to handle the logic for automatically creating records in BC.
+*   : Added bulk delete functionality and confirmation dialogs.
+*   : Modified to make the Re-process button and document preview universally available.
+*   : Multiple files updated to reposition factboxes and add support for Sales Orders.
+*   : Updated to use the correct production port () and .
 
 **Areas that need refactoring**:
--   **/app/backend/server.py**: Still a monolith. A high-priority refactoring target.
+-   **/app/backend/server.py**: Still a monolith and the highest priority for refactoring.
 
 **key api endpoints**
--   : Manual AI extraction trigger.
--   : Handles the OAuth2 callback to exchange a code for a token.
--   : Checks the status of the Spiro integration.
--   : Triggers a full data sync from Spiro.
+-   : Deletes a list of documents by their IDs.
+-   : A temporary test endpoint to create a draft Sales Order in BC.
+-   : Used to re-trigger the entire processing workflow for a document.
 
 **Critical Info for New Agent**
--   **USER FRUSTRATION IS HIGH:** The user is extremely frustrated with context loss between forks and having to repeat instructions. Be proactive and review the history carefully. Acknowledge their frustration directly and move to the fix.
--   **COMPLETE SPIRO AUTH IMMEDIATELY:** The immediate next step is to use the OAuth code the user provided () to get the access token. This is P0.
--   **FIX BC LINE ITEMS:** The second critical task is to change the BC line item creation from  to . You will need to ask the user for the specific Item code they use for freight and then find its GUID via the BC API.
--   **PRODUCTION VM IS THE SOURCE OF TRUTH:** The user deploys to a separate VM. Be prepared to provide  and usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
+-   **User Frustration:** The user is extremely frustrated with environmental issues, especially configuration drift () and  resets between forks. The agent has fixed the  in the repo, but be vigilant about any changes to it. Proactively acknowledge this pain point and focus on forward progress.
+-   **Production Environment is Key:** The user's production VM is the source of truth. Be prepared to provide  and usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
            [--exec-path[=<path>]] [--html-path] [--man-path] [--info-path]
            [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--bare]
            [--git-dir=<path>] [--work-tree=<path>] [--namespace=<name>]
@@ -221,51 +155,44 @@ collaborate (see also: git help workflows)
 'git help -a' and 'git help -g' list available subcommands and some
 concept guides. See 'git help <command>' or 'git help <concept>'
 to read about a specific subcommand or concept.
-See 'git help git' for an overview of the system. commands. They do not like using .
+See 'git help git' for an overview of the system. commands and guide them through debugging steps like clearing the cache (, browser hard refresh). They do not like .
+-   **AL Extension Deployment:** The user must manually compile and deploy the updated AL extension from the  folder to their BC Sandbox to see the Factbox changes.
 
 **documents and test reports created in this job**
 -   
--   
--   
--   
--   
--   
--   
--    (updated)
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **user**: Asks what Spiro API credentials are needed.
-2.  **agent**: Lists requirements (API docs, creds, sync details).
-3.  **user**: Provides a very detailed PRD for the Spiro integration.
-4.  **agent**: Begins implementing the Spiro integration.
-5.  **user**: Provides Spiro client_id, client_secret, and base URL.
-6.  **agent**: Implements the credentials.
-7.  **user**: Provides the callback URL from the Spiro app setup.
-8.  **agent**: Generates the final OAuth authorization URL for the user.
-9.  **user**: Provides the redirect URL with the authorization code ().
-10. **user**: oh FFS. we are finally making progress and you fork and will probably regress??? (User is frustrated about the fork interrupting the Spiro auth flow).
+1.  **user**: Asks for  button and document preview on all documents.
+2.  **agent**: Implements the UI changes in .
+3.  **user**: Reports the changes are not visible in production after pulling and rebuilding. (Image provided)
+4.  **agent**: Suggests a no-cache build and checks if the code is in the repo.
+5.  **user**: Reports it's still not working after a no-cache build. (Image provided showing cached docker layers)
+6.  **agent**: Identifies the cached Docker layers and instructs the user to prune the Docker build cache.
+7.  **user**: Reports it's STILL not working.
+8.  **agent**: Concludes it must be browser cache and asks the user to hard-refresh or use an incognito window. The agent verifies the correct JS file is in the container.
+9.  **user**: Shares a screenshot of the browser's Network tab.
+10. **agent**: Notices the Disable cache checkbox in the user's DevTools screenshot and instructs them to check it and refresh. This finally resolves the issue.
 
 **Project Health Check:**
--   **Broken:**
-    -   BC Purchase Invoice line item creation (posts empty lines because it uses G/L Account type instead of Item type).
-    -   Spiro integration is not functional because the OAuth flow was interrupted and is not yet authorized.
+-   **Broken:** None. The core features implemented in this session are working. The updated AL extension is not yet deployed by the user, so the new Factboxes are not visible in their BC instance.
 -   **Mocked:** None.
 
 **3rd Party Integrations**
--   **Dynamics 365 Business Central API:** ✅ Live and connected.
--   **Microsoft Graph API / SharePoint:** ✅ Live and connected.
--   **Gemini (via Emergent LLM Key):** ✅ Used for document classification and extraction.
--   **Spiro CRM API:** 🟡 Partially integrated. Scaffolding is complete, but OAuth flow is not finished.
+-   **Dynamics 365 Business Central API:** ✅ Live and connected. Used for Purchase Invoices and Sales Orders.
+-   **Microsoft Graph API / SharePoint:** ✅ Live and connected. Used for document archival.
+-   **Gemini (via Emergent LLM Key):** ✅ Used for document classification and data extraction.
+-   **Spiro CRM API:** ✅ Live and connected. Actively syncing data.
 -   **APScheduler:** Used for background jobs.
 
 **Testing status**
 -   **Testing agent used after significant changes:** NO
 -   **Troubleshoot agent used after agent stuck in loop:** NO
--   **Test files created:** []
--   **Known regressions:** The platform's tendency to reset  files on fork is a recurring environmental regression.
+-   **Test files created:** None.
+-   **Known regressions:** A frontend build/cache issue caused a significant delay and user frustration. This highlights a fragility in the user's production deployment process.
 
 **Credentials to test flow:**
 -   Web UI:  / 
+-   Business Central credentials for the preview environment are present in .
 
 **What agent forgot to execute**
--   The agent forked immediately after the user provided the Spiro OAuth authorization code, without executing the final step to exchange that code for an access token. This is the most critical pending action for the next agent.</analysis>
+-   The agent identified the need for a manual Create BC Sales Order button in the UI for validated documents but did not implement it, leaving it as a next step. All other user requests were addressed.</analysis>

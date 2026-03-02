@@ -148,6 +148,63 @@ async def attempt_auto_post(doc_id: str, doc: Dict[str, Any], db, bc_service) ->
     # Build invoice data
     ai_extraction = doc.get("ai_extraction", {})
     extracted_fields = doc.get("extracted_fields", {})
+    normalized_fields = doc.get("normalized_fields", {})
+    
+    # Extract BOL/Order number for line item description
+    # This is critical for freight invoices to link back to sales orders
+    order_reference = (
+        doc.get("bol_number_extracted") or
+        doc.get("po_number_extracted") or
+        normalized_fields.get("bol_number") or
+        normalized_fields.get("po_number_clean") or
+        normalized_fields.get("po_number") or
+        extracted_fields.get("bol_number") or
+        extracted_fields.get("po_number") or
+        extracted_fields.get("order_number") or
+        ai_extraction.get("bol_number") or
+        ai_extraction.get("po_number") or
+        ai_extraction.get("order_number")
+    )
+    
+    # Get existing line items or create default
+    line_items = doc.get("line_items", [])
+    
+    # If we have an order reference, ensure it's in the line description
+    # This matches Square9/BC pattern where Description field contains order #
+    if order_reference:
+        order_ref_str = str(order_reference).strip()
+        logger.info("Auto-post: Using order reference '%s' for line description", order_ref_str)
+        
+        if not line_items:
+            # No line items - create a default freight line with order # as description
+            total_amount = float(
+                doc.get("amount_float") or 
+                extracted_fields.get("amount") or
+                ai_extraction.get("total_amount") or 0
+            )
+            line_items = [{
+                "description": order_ref_str,  # Order # goes in description
+                "quantity": 1,
+                "unit_price": total_amount
+            }]
+        else:
+            # Have line items - prepend order # to each description
+            for line in line_items:
+                existing_desc = line.get("description", "")
+                if order_ref_str not in str(existing_desc):
+                    line["description"] = order_ref_str if not existing_desc else f"{order_ref_str} - {existing_desc}"
+    elif not line_items:
+        # No order reference and no line items - create default line with amount
+        total_amount = float(
+            doc.get("amount_float") or 
+            extracted_fields.get("amount") or
+            ai_extraction.get("total_amount") or 0
+        )
+        line_items = [{
+            "description": "Freight",
+            "quantity": 1,
+            "unit_price": total_amount
+        }]
     
     invoice_data = {
         "vendorNumber": doc.get("vendor_id") or doc.get("vendor_canonical"),
@@ -167,7 +224,8 @@ async def attempt_auto_post(doc_id: str, doc: Dict[str, Any], db, bc_service) ->
             ai_extraction.get("due_date")
         ),
         "currencyCode": doc.get("currency", "USD"),
-        "lines": doc.get("line_items", [])
+        "lines": line_items,
+        "orderReference": order_reference  # Store for reference/logging
     }
     
     try:

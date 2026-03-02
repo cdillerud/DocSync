@@ -3722,6 +3722,52 @@ async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: d
                                 "details": "No duplicate invoice found",
                                 "required": True
                             })
+                
+                # For freight invoices, also validate BOL/Order reference against Sales Orders
+                # This is important for linking freight costs to the right sales order
+                bol_or_order = (
+                    normalized_fields.get("bol_number") or
+                    normalized_fields.get("order_number") or
+                    extracted_fields.get("bol_number") or
+                    extracted_fields.get("order_number")
+                )
+                
+                if bol_or_order:
+                    bol_str = str(bol_or_order).strip()
+                    logger.info("[BC Validation] AP Invoice - validating order reference: %s", bol_str)
+                    
+                    resp = await c.get(
+                        f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/salesOrders",
+                        headers={"Authorization": f"Bearer {token}"},
+                        params={"$filter": f"number eq '{bol_str}'"}
+                    )
+                    
+                    if resp.status_code == 200:
+                        orders = resp.json().get("value", [])
+                        if orders:
+                            matched_order = orders[0]
+                            validation_results["checks"].append({
+                                "check_name": "order_reference_validation",
+                                "passed": True,
+                                "details": f"Order reference {bol_str} matches Sales Order for {matched_order.get('customerName')}",
+                                "required": False,
+                                "matched_sales_order": matched_order.get("number"),
+                                "matched_customer": matched_order.get("customerName")
+                            })
+                            # Store matched order info for use in invoice line description
+                            validation_results["matched_sales_order"] = {
+                                "number": matched_order.get("number"),
+                                "customer_name": matched_order.get("customerName"),
+                                "customer_number": matched_order.get("customerNumber"),
+                                "order_date": matched_order.get("orderDate")
+                            }
+                            logger.info("[BC Validation] AP Invoice - order reference VALIDATED: %s -> %s", 
+                                       bol_str, matched_order.get("customerName"))
+                        else:
+                            validation_results["warnings"].append({
+                                "check_name": "order_reference_not_found",
+                                "details": f"Order reference '{bol_str}' not found as Sales Order - will use as description only"
+                            })
             
             # Customer match for Sales_PO, AR_Invoice
             elif job_type in ("Sales_PO", "AR_Invoice"):
@@ -3763,6 +3809,86 @@ async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: d
                             "required": True,
                             "candidates_available": len(customer_result["customer_candidates"]) > 0
                         })
+            
+            # =============== SHIPPING/WAREHOUSE DOCUMENT: Sales Order Validation ===============
+            # For shipping docs, validate that the BOL/Order number matches a Sales Order in BC
+            elif job_type in ("Shipping_Document", "Warehouse_Document", "SHIPMENT", "RECEIPT"):
+                # Get the order/BOL number from extracted fields
+                order_number = (
+                    normalized_fields.get("bol_number") or
+                    normalized_fields.get("po_number") or
+                    normalized_fields.get("order_number") or
+                    extracted_fields.get("bol_number") or
+                    extracted_fields.get("po_number") or
+                    extracted_fields.get("order_number")
+                )
+                
+                if order_number:
+                    order_number_str = str(order_number).strip()
+                    logger.info("[BC Validation] Shipping doc - looking up Sales Order: %s", order_number_str)
+                    
+                    # Look up Sales Order by number
+                    resp = await c.get(
+                        f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/salesOrders",
+                        headers={"Authorization": f"Bearer {token}"},
+                        params={"$filter": f"number eq '{order_number_str}'"}
+                    )
+                    
+                    if resp.status_code == 200:
+                        orders = resp.json().get("value", [])
+                        if orders:
+                            matched_order = orders[0]
+                            validation_results["match_method"] = "sales_order_number"
+                            validation_results["match_score"] = 1.0
+                            validation_results["bc_record_id"] = matched_order.get("id")
+                            validation_results["bc_record_info"] = {
+                                "id": matched_order.get("id"),
+                                "number": matched_order.get("number"),
+                                "customerName": matched_order.get("customerName"),
+                                "customerNumber": matched_order.get("customerNumber"),
+                                "orderDate": matched_order.get("orderDate"),
+                                "status": matched_order.get("status"),
+                                "totalAmountIncludingTax": matched_order.get("totalAmountIncludingTax")
+                            }
+                            
+                            validation_results["checks"].append({
+                                "check_name": "sales_order_match",
+                                "passed": True,
+                                "details": f"Found Sales Order #{matched_order.get('number')} for {matched_order.get('customerName')}",
+                                "required": True,
+                                "order_number": matched_order.get("number"),
+                                "customer_name": matched_order.get("customerName"),
+                                "customer_number": matched_order.get("customerNumber"),
+                                "order_date": matched_order.get("orderDate"),
+                                "total_amount": matched_order.get("totalAmountIncludingTax")
+                            })
+                            
+                            logger.info("[BC Validation] Shipping doc - MATCHED Sales Order %s -> %s", 
+                                       order_number_str, matched_order.get("customerName"))
+                        else:
+                            # Order not found - this is a warning, not a failure for shipping docs
+                            validation_results["warnings"].append({
+                                "check_name": "sales_order_not_found",
+                                "details": f"No Sales Order found matching '{order_number_str}' - document will still be archived"
+                            })
+                            validation_results["checks"].append({
+                                "check_name": "sales_order_match",
+                                "passed": False,
+                                "details": f"Sales Order '{order_number_str}' not found in BC",
+                                "required": False  # Not blocking for shipping docs
+                            })
+                            logger.warning("[BC Validation] Shipping doc - Sales Order %s NOT FOUND", order_number_str)
+                    else:
+                        logger.warning("[BC Validation] Sales Order lookup failed: HTTP %d", resp.status_code)
+                        validation_results["warnings"].append({
+                            "check_name": "sales_order_lookup_error",
+                            "details": f"Could not query Sales Orders: HTTP {resp.status_code}"
+                        })
+                else:
+                    validation_results["warnings"].append({
+                        "check_name": "no_order_number",
+                        "details": "No BOL/Order number extracted - cannot validate against Sales Orders"
+                    })
     
     except Exception as e:
         logger.error("BC validation failed: %s", str(e))

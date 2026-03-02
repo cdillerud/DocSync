@@ -147,7 +147,10 @@ from services.auto_post_service import (
     AUTO_POST_ENABLED, 
     check_auto_post_eligibility, 
     attempt_auto_post,
-    AutoPostResult
+    AutoPostResult,
+    AUTO_CREATE_SALES_ORDER_ENABLED,
+    check_sales_order_eligibility,
+    attempt_auto_create_sales_order
 )
 
 # ==================== SHAREPOINT MIGRATION ====================

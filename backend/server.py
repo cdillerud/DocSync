@@ -4350,6 +4350,29 @@ async def _update_standard_workflow_status(
             }}
         )
         logger.info("[Sales Workflow] Doc %s: VALIDATED - ready for BC Sales Order creation", doc_id)
+        
+        # AUTO-CREATE: Attempt to create BC Sales Order
+        if AUTO_CREATE_SALES_ORDER_ENABLED:
+            try:
+                # Refresh document after validation update
+                updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+                if updated_doc:
+                    bc_service = get_bc_service()
+                    auto_create_result = await attempt_auto_create_sales_order(doc_id, updated_doc, db, bc_service)
+                    
+                    if auto_create_result.eligible:
+                        if auto_create_result.success:
+                            logger.info("AUTO-CREATE: Document %s auto-created as BC Sales Order %s", 
+                                       doc_id, auto_create_result.bc_document_number)
+                        else:
+                            logger.warning("AUTO-CREATE: Document %s eligible but failed: %s", 
+                                          doc_id, auto_create_result.error)
+                    else:
+                        logger.debug("AUTO-CREATE: Document %s not eligible: %s", 
+                                    doc_id, auto_create_result.reason)
+            except Exception as e:
+                logger.error("AUTO-CREATE: Exception for %s: %s", doc_id, str(e))
+        
         return
     
     # =============== DEFAULT/OTHER WORKFLOW ===============

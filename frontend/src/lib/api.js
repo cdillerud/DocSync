@@ -31,6 +31,7 @@ export const getMe = () => api.get('/auth/me');
 // Dashboard
 export const getDashboardStats = () => api.get('/dashboard/stats');
 export const getDocumentTypesDashboard = (params) => api.get('/dashboard/document-types', { params });
+export const getWorkflowIntelligence = () => api.get('/dashboard/workflow-intelligence');
 export const exportDocumentTypesDashboard = (params) => {
   const queryString = new URLSearchParams(
     Object.entries(params || {}).filter(([_, v]) => v !== null && v !== undefined && v !== 'all')

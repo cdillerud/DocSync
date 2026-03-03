@@ -1632,5 +1632,75 @@ Added the ability to add custom document types that don't exist in the default d
 
 ---
 
+## Workflow Intelligence Dashboard Enhancement - March 3, 2026
+
+### Completed
+
+#### Comprehensive Workflow Intelligence Dashboard
+Added a rich, data-driven dashboard that provides real-time insights into the entire document processing automation pipeline.
+
+**New Backend Endpoint:**
+- `GET /api/dashboard/workflow-intelligence` - Returns comprehensive metrics about vendor matching, validation success, processing efficiency, BC integration, and SharePoint archival.
+
+**Dashboard Features:**
+
+| Tab | Metrics Displayed |
+|-----|-------------------|
+| **Overview** | Status chart, 7-day trends (Total/Validated/Exceptions), Validation Success, BC Integration, SharePoint Archive, Ingestion Sources pie chart |
+| **Vendor Intelligence** | Vendor Match Rate, Vendors Extracted, Cached Matches, Pending Review, Matches by Source (Spiro/SharePoint/BC), Match Methods distribution, Freight Carriers detected |
+| **Workflows** | Processing Health (Completed/Stuck/Auto-Cleared/Success Rate), Workflow Status Distribution, Validation Pass Rate, Top Failure Reasons |
+
+**Key Metrics Now Tracked:**
+1. **Vendor Intelligence**
+   - Vendor extraction rate (% of docs with matched vendors)
+   - Match sources breakdown (Document History, Spiro CRM, Business Central, SharePoint patterns)
+   - Match methods (alias, fuzzy, exact, etc.)
+   - Freight carrier auto-detection
+   - Spiro CRM integration stats (11,700+ companies)
+
+2. **Validation Metrics**
+   - Overall pass rate with visual progress bar
+   - Top failure reasons ranked by frequency
+   - Passed vs failed document counts
+
+3. **Processing Health**
+   - Completed/Stuck/Exception counts
+   - Auto-clear statistics
+   - Success rate percentage
+   - Retry activity (avg/max/total retries)
+   - Workflow status distribution
+
+4. **BC Integration**
+   - Linked to BC count
+   - Posted to BC count
+   - Link rate percentage
+   - Post failures
+
+5. **SharePoint Archival**
+   - Documents archived count
+   - Archive rate percentage
+   - Top folders by document count
+
+6. **Daily Trends (7-day chart)**
+   - Total documents processed
+   - Documents validated
+   - Exceptions encountered
+
+### Files Modified
+- `/app/backend/server.py` - Added `GET /api/dashboard/workflow-intelligence` endpoint with comprehensive aggregation queries
+- `/app/frontend/src/pages/DashboardPage.js` - Complete rewrite with tabbed interface and rich visualization components
+- `/app/frontend/src/lib/api.js` - Added `getWorkflowIntelligence()` function
+
+### UI Components Created
+- `VendorIntelligenceCard` - Displays vendor matching stats with source breakdown
+- `ValidationMetricsCard` - Shows pass rate and top failure reasons
+- `ProcessingMetricsCard` - Workflow throughput and retry stats
+- `BCIntegrationCard` - Business Central integration metrics
+- `SharePointCard` - Document archival metrics with top folders
+- `DailyTrendsChart` - 7-day line chart with Total/Validated/Exceptions
+- `IngestionSourcesChart` - Pie chart showing document sources
+
+---
+
 *Last Updated: March 3, 2026*
 

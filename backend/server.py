@@ -1560,6 +1560,295 @@ async def get_dashboard_stats():
     }
 
 
+@api_router.get("/dashboard/workflow-intelligence")
+async def get_workflow_intelligence_stats():
+    """
+    Comprehensive workflow intelligence metrics.
+    Provides insights into vendor matching, validation success, processing efficiency,
+    and automation performance across the entire document processing pipeline.
+    """
+    
+    # ============== VENDOR INTELLIGENCE ==============
+    # Vendor match statistics by source
+    vendor_match_pipeline = [
+        {"$match": {"vendor_canonical": {"$exists": True, "$ne": None}}},
+        {"$group": {
+            "_id": {"$ifNull": ["$unified_vendor_match.sources_checked", ["unknown"]]},
+            "count": {"$sum": 1}
+        }}
+    ]
+    
+    # Get vendor match method distribution
+    match_method_pipeline = [
+        {"$match": {"validation_results.match_method": {"$exists": True}}},
+        {"$group": {
+            "_id": "$validation_results.match_method",
+            "count": {"$sum": 1},
+            "avg_score": {"$avg": "$validation_results.match_score"}
+        }},
+        {"$sort": {"count": -1}}
+    ]
+    match_method_results = await db.hub_documents.aggregate(match_method_pipeline).to_list(20)
+    
+    # Vendor matches from cached collection
+    cached_matches_pipeline = [
+        {"$group": {
+            "_id": "$source",
+            "count": {"$sum": 1},
+            "avg_score": {"$avg": "$score"}
+        }}
+    ]
+    cached_by_source = await db.vendor_matches.aggregate(cached_matches_pipeline).to_list(10)
+    
+    # Freight carrier detection stats
+    freight_docs = await db.hub_documents.count_documents({
+        "$or": [
+            {"extracted_data.is_freight_carrier": True},
+            {"unified_vendor_match.is_freight_carrier": True},
+            {"validation_results.checks": {"$elemMatch": {"is_freight_carrier": True}}}
+        ]
+    })
+    
+    # Documents needing vendor attention
+    vendor_pending = await db.hub_documents.count_documents({
+        "$or": [
+            {"workflow_status": "vendor_pending"},
+            {"validation_results.match_method": "none"}
+        ],
+        "status": {"$nin": ["Completed", "Archived", "Posted"]}
+    })
+    
+    # ============== VALIDATION SUCCESS ==============
+    # Overall validation rates
+    total_validated = await db.hub_documents.count_documents({
+        "validation_results": {"$exists": True}
+    })
+    
+    validation_passed = await db.hub_documents.count_documents({
+        "validation_results.all_passed": True
+    })
+    
+    validation_failed = await db.hub_documents.count_documents({
+        "validation_results.all_passed": False
+    })
+    
+    # Validation failure reasons
+    failure_reasons_pipeline = [
+        {"$match": {"validation_results.all_passed": False}},
+        {"$unwind": "$validation_results.checks"},
+        {"$match": {"validation_results.checks.passed": False}},
+        {"$group": {
+            "_id": "$validation_results.checks.check_name",
+            "count": {"$sum": 1}
+        }},
+        {"$sort": {"count": -1}}
+    ]
+    failure_reasons = await db.hub_documents.aggregate(failure_reasons_pipeline).to_list(20)
+    
+    # ============== PROCESSING EFFICIENCY ==============
+    # Documents by workflow status
+    workflow_status_pipeline = [
+        {"$group": {
+            "_id": {"$ifNull": ["$workflow_status", "unknown"]},
+            "count": {"$sum": 1}
+        }},
+        {"$sort": {"count": -1}}
+    ]
+    by_workflow_status = await db.hub_documents.aggregate(workflow_status_pipeline).to_list(30)
+    
+    # Auto-clear statistics
+    auto_cleared = await db.hub_documents.count_documents({"auto_cleared": True})
+    
+    # Processing success (documents that reached Completed/Posted/Archived)
+    processing_complete = await db.hub_documents.count_documents({
+        "status": {"$in": ["Completed", "Posted", "Archived", "LinkedToBC"]}
+    })
+    
+    # Documents stuck (Exception status or auto_escalated)
+    stuck_docs = await db.hub_documents.count_documents({
+        "$or": [
+            {"status": "Exception"},
+            {"auto_escalated": True}
+        ]
+    })
+    
+    # Average retry count for documents
+    retry_stats_pipeline = [
+        {"$match": {"retry_count": {"$gt": 0}}},
+        {"$group": {
+            "_id": None,
+            "avg_retries": {"$avg": "$retry_count"},
+            "max_retries": {"$max": "$retry_count"},
+            "total_retries": {"$sum": "$retry_count"},
+            "docs_with_retries": {"$sum": 1}
+        }}
+    ]
+    retry_stats = await db.hub_documents.aggregate(retry_stats_pipeline).to_list(1)
+    retry_data = retry_stats[0] if retry_stats else {"avg_retries": 0, "max_retries": 0, "total_retries": 0, "docs_with_retries": 0}
+    
+    # ============== BC INTEGRATION SUCCESS ==============
+    # Documents linked to BC
+    bc_linked = await db.hub_documents.count_documents({
+        "$or": [
+            {"bc_record_id": {"$exists": True, "$ne": None}},
+            {"bc_document_id": {"$exists": True, "$ne": None}},
+            {"status": "LinkedToBC"}
+        ]
+    })
+    
+    # Documents posted to BC
+    bc_posted = await db.hub_documents.count_documents({
+        "$or": [
+            {"bc_posting_status": "posted"},
+            {"status": "Posted"}
+        ]
+    })
+    
+    # BC posting failures
+    bc_post_failed = await db.hub_documents.count_documents({
+        "bc_posting_status": {"$in": ["failed", "error"]}
+    })
+    
+    # ============== SHAREPOINT ARCHIVAL ==============
+    # Documents archived to SharePoint
+    sp_archived = await db.hub_documents.count_documents({
+        "sharepoint_item_id": {"$exists": True, "$ne": None}
+    })
+    
+    # Folder routing distribution
+    folder_routing_pipeline = [
+        {"$match": {"sharepoint_folder_path": {"$exists": True, "$ne": None}}},
+        {"$group": {
+            "_id": "$sharepoint_folder_path",
+            "count": {"$sum": 1}
+        }},
+        {"$sort": {"count": -1}},
+        {"$limit": 10}
+    ]
+    folder_distribution = await db.hub_documents.aggregate(folder_routing_pipeline).to_list(10)
+    
+    # ============== DOCUMENT SOURCES ==============
+    # Ingestion source breakdown
+    source_pipeline = [
+        {"$group": {
+            "_id": {"$ifNull": ["$source", "unknown"]},
+            "count": {"$sum": 1}
+        }},
+        {"$sort": {"count": -1}}
+    ]
+    by_source = await db.hub_documents.aggregate(source_pipeline).to_list(20)
+    
+    # ============== SPIRO INTEGRATION ==============
+    spiro_companies = await db.spiro_companies.count_documents({})
+    spiro_freight_carriers = await db.spiro_companies.count_documents({
+        "$or": [
+            {"industry": {"$regex": "freight|transport|logistics", "$options": "i"}},
+            {"is_freight": True}
+        ]
+    })
+    
+    # ============== TIME-BASED TRENDS (Last 7 days) ==============
+    from datetime import timedelta
+    seven_days_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    
+    daily_trend_pipeline = [
+        {"$match": {"created_utc": {"$gte": seven_days_ago}}},
+        {"$addFields": {
+            "date": {"$substr": ["$created_utc", 0, 10]}
+        }},
+        {"$group": {
+            "_id": "$date",
+            "total": {"$sum": 1},
+            "validated": {"$sum": {"$cond": [{"$eq": ["$validation_results.all_passed", True]}, 1, 0]}},
+            "exceptions": {"$sum": {"$cond": [{"$eq": ["$status", "Exception"]}, 1, 0]}}
+        }},
+        {"$sort": {"_id": 1}}
+    ]
+    daily_trends = await db.hub_documents.aggregate(daily_trend_pipeline).to_list(7)
+    
+    # Calculate totals
+    total_docs = await db.hub_documents.count_documents({})
+    docs_with_vendor = await db.hub_documents.count_documents({"vendor_canonical": {"$exists": True, "$ne": None}})
+    
+    # Calculate success rates
+    validation_rate = round((validation_passed / total_validated * 100) if total_validated > 0 else 0, 1)
+    processing_rate = round((processing_complete / total_docs * 100) if total_docs > 0 else 0, 1)
+    vendor_rate = round((docs_with_vendor / total_docs * 100) if total_docs > 0 else 0, 1)
+    
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "total_documents": total_docs,
+        
+        "vendor_intelligence": {
+            "total_with_vendor": docs_with_vendor,
+            "vendor_extraction_rate": vendor_rate,
+            "vendor_pending_review": vendor_pending,
+            "freight_carriers_detected": freight_docs,
+            "match_methods": {
+                item["_id"]: {
+                    "count": item["count"],
+                    "avg_score": round(item.get("avg_score", 0) * 100, 1) if item.get("avg_score") else 0
+                } for item in match_method_results if item["_id"]
+            },
+            "matches_by_source": {
+                item["_id"]: {
+                    "count": item["count"],
+                    "avg_score": round(item.get("avg_score", 0) * 100, 1) if item.get("avg_score") else 0
+                } for item in cached_by_source if item["_id"]
+            },
+            "cached_vendor_matches": await db.vendor_matches.count_documents({}),
+            "spiro_companies_available": spiro_companies,
+            "spiro_freight_carriers": spiro_freight_carriers
+        },
+        
+        "validation_metrics": {
+            "total_validated": total_validated,
+            "passed": validation_passed,
+            "failed": validation_failed,
+            "pass_rate": validation_rate,
+            "failure_reasons": {item["_id"]: item["count"] for item in failure_reasons if item["_id"]}
+        },
+        
+        "processing_metrics": {
+            "completed": processing_complete,
+            "stuck": stuck_docs,
+            "auto_cleared": auto_cleared,
+            "success_rate": processing_rate,
+            "retry_stats": {
+                "avg_retries": round(retry_data.get("avg_retries", 0), 1),
+                "max_retries": retry_data.get("max_retries", 0),
+                "total_retries": retry_data.get("total_retries", 0),
+                "docs_requiring_retry": retry_data.get("docs_with_retries", 0)
+            },
+            "by_workflow_status": {item["_id"]: item["count"] for item in by_workflow_status if item["_id"]}
+        },
+        
+        "bc_integration": {
+            "linked_to_bc": bc_linked,
+            "posted_to_bc": bc_posted,
+            "post_failures": bc_post_failed,
+            "link_rate": round((bc_linked / total_docs * 100) if total_docs > 0 else 0, 1)
+        },
+        
+        "sharepoint_archival": {
+            "documents_archived": sp_archived,
+            "archive_rate": round((sp_archived / total_docs * 100) if total_docs > 0 else 0, 1),
+            "top_folders": {item["_id"]: item["count"] for item in folder_distribution if item["_id"]}
+        },
+        
+        "ingestion_sources": {item["_id"]: item["count"] for item in by_source if item["_id"]},
+        
+        "daily_trends": [
+            {
+                "date": item["_id"],
+                "total": item["total"],
+                "validated": item["validated"],
+                "exceptions": item["exceptions"]
+            } for item in daily_trends
+        ]
+    }
+
+
 async def _aggregate_document_types_data(
     source_system: Optional[str] = None, 
     doc_type: Optional[str] = None,

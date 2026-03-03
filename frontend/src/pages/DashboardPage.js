@@ -1,18 +1,20 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getDashboardStats, retryWorkflow } from '../lib/api';
+import { getDashboardStats, retryWorkflow, getWorkflowIntelligence } from '../lib/api';
 import api from '../lib/api';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Progress } from '../components/ui/progress';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
 import {
   FileText, AlertCircle, CheckCircle2, RefreshCw, ArrowRight, UploadCloud, Files,
-  TrendingUp, Target, Zap, Clock
+  TrendingUp, Target, Zap, Clock, Users, Truck, Database, FolderArchive, 
+  BarChart3, PieChart, Activity, Layers, Network, Building2, GitBranch
 } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, PieChart as RechartsPieChart, Pie, Legend } from 'recharts';
 import { Square9StageSummary } from '../components/Square9WorkflowTracker';
 
 const STATUS_COLORS = {
@@ -23,48 +25,469 @@ const STATUS_COLORS = {
   Completed: 'status-completed',
 };
 
-const CHART_COLORS = ['#3b82f6', '#a855f7', '#22c55e', '#ef4444', '#6b7280'];
-
-function StatusBadge({ status }) {
-  return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${STATUS_COLORS[status] || ''}`}>
-      {status}
-    </span>
-  );
-}
+const CHART_COLORS = ['#3b82f6', '#22c55e', '#a855f7', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#84cc16'];
+const SOURCE_COLORS = {
+  document_history: '#22c55e',
+  spiro_crm: '#3b82f6',
+  business_central: '#a855f7',
+  sharepoint_patterns: '#f59e0b',
+  unknown: '#6b7280'
+};
 
 function formatDate(iso) {
   if (!iso) return '-';
   return new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
+function formatPercent(value) {
+  return value !== undefined ? `${value.toFixed(1)}%` : '0%';
+}
+
+// Vendor Intelligence Card Component
+function VendorIntelligenceCard({ data }) {
+  if (!data) return null;
+  
+  const sourceData = Object.entries(data.matches_by_source || {}).map(([name, info]) => ({
+    name: name.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase()),
+    value: info.count,
+    avgScore: info.avg_score
+  }));
+
+  const matchMethodData = Object.entries(data.match_methods || {}).map(([method, info]) => ({
+    name: method === 'none' ? 'No Match' : method.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase()),
+    value: info.count,
+    avgScore: info.avg_score
+  }));
+
+  return (
+    <Card className="border border-border" data-testid="vendor-intelligence-card">
+      <CardHeader className="pb-2">
+        <div className="flex items-center gap-2">
+          <Users className="w-4 h-4 text-blue-500" />
+          <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Vendor Intelligence</CardTitle>
+        </div>
+        <CardDescription>Vendor matching across all data sources</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Key Metrics */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-muted/50 rounded-lg p-3">
+            <div className="text-2xl font-bold text-green-500">{formatPercent(data.vendor_extraction_rate)}</div>
+            <div className="text-xs text-muted-foreground">Vendor Match Rate</div>
+          </div>
+          <div className="bg-muted/50 rounded-lg p-3">
+            <div className="text-2xl font-bold text-blue-500">{data.total_with_vendor || 0}</div>
+            <div className="text-xs text-muted-foreground">Vendors Extracted</div>
+          </div>
+          <div className="bg-muted/50 rounded-lg p-3">
+            <div className="text-2xl font-bold text-purple-500">{data.cached_vendor_matches || 0}</div>
+            <div className="text-xs text-muted-foreground">Cached Matches</div>
+          </div>
+          <div className="bg-muted/50 rounded-lg p-3">
+            <div className="text-2xl font-bold text-amber-500">{data.vendor_pending_review || 0}</div>
+            <div className="text-xs text-muted-foreground">Pending Review</div>
+          </div>
+        </div>
+
+        {/* Match Sources */}
+        {sourceData.length > 0 && (
+          <div>
+            <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+              <Network className="w-3 h-3" /> Matches by Source
+            </h4>
+            <div className="space-y-2">
+              {sourceData.map((item) => (
+                <div key={item.name} className="flex items-center gap-2">
+                  <div className="w-24 text-xs truncate">{item.name}</div>
+                  <div className="flex-1">
+                    <Progress value={(item.value / (data.total_with_vendor || 1)) * 100} className="h-2" />
+                  </div>
+                  <div className="w-16 text-xs text-right font-mono">
+                    {item.value} <span className="text-muted-foreground">({item.avgScore}%)</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Match Methods */}
+        {matchMethodData.length > 0 && (
+          <div>
+            <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+              <GitBranch className="w-3 h-3" /> Match Methods
+            </h4>
+            <div className="flex flex-wrap gap-2">
+              {matchMethodData.slice(0, 6).map((item) => (
+                <Badge key={item.name} variant="secondary" className="text-xs">
+                  {item.name}: {item.value}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Freight Detection */}
+        <div className="pt-2 border-t flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm">
+            <Truck className="w-4 h-4 text-amber-500" />
+            <span>Freight Carriers Detected</span>
+          </div>
+          <span className="font-bold">{data.freight_carriers_detected || 0}</span>
+        </div>
+
+        {/* Spiro Integration */}
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <span>Spiro CRM Companies</span>
+          <span className="font-mono">{(data.spiro_companies_available || 0).toLocaleString()}</span>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// Validation Metrics Card Component  
+function ValidationMetricsCard({ data }) {
+  if (!data) return null;
+
+  const failureData = Object.entries(data.failure_reasons || {})
+    .map(([reason, count]) => ({
+      name: reason.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      value: count
+    }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 5);
+
+  return (
+    <Card className="border border-border" data-testid="validation-metrics-card">
+      <CardHeader className="pb-2">
+        <div className="flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-green-500" />
+          <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Validation Success</CardTitle>
+        </div>
+        <CardDescription>Document validation and quality metrics</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Pass Rate Gauge */}
+        <div className="relative">
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-sm font-medium">Overall Pass Rate</span>
+            <span className="text-2xl font-bold text-green-500">{formatPercent(data.pass_rate)}</span>
+          </div>
+          <Progress value={data.pass_rate || 0} className="h-3" />
+          <div className="flex justify-between text-xs text-muted-foreground mt-1">
+            <span>{data.passed || 0} passed</span>
+            <span>{data.failed || 0} failed</span>
+          </div>
+        </div>
+
+        {/* Failure Reasons */}
+        {failureData.length > 0 && (
+          <div>
+            <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+              <AlertCircle className="w-3 h-3 text-red-500" /> Top Failure Reasons
+            </h4>
+            <div className="space-y-1.5">
+              {failureData.map((item, idx) => (
+                <div key={item.name} className="flex items-center gap-2 text-sm">
+                  <span className="w-5 text-center text-muted-foreground">{idx + 1}.</span>
+                  <span className="flex-1 truncate">{item.name}</span>
+                  <Badge variant="destructive" className="text-xs">{item.value}</Badge>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Total Validated */}
+        <div className="pt-2 border-t text-xs text-muted-foreground">
+          Based on {data.total_validated || 0} validated documents
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// Processing Metrics Card Component
+function ProcessingMetricsCard({ data }) {
+  if (!data) return null;
+
+  const workflowStatusData = Object.entries(data.by_workflow_status || {})
+    .filter(([status]) => status !== 'unknown' && status !== 'none')
+    .map(([status, count]) => ({
+      name: status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      value: count
+    }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 8);
+
+  return (
+    <Card className="border border-border" data-testid="processing-metrics-card">
+      <CardHeader className="pb-2">
+        <div className="flex items-center gap-2">
+          <Activity className="w-4 h-4 text-purple-500" />
+          <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Processing Health</CardTitle>
+        </div>
+        <CardDescription>Workflow throughput and efficiency</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Key Metrics Grid */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-green-500/10 rounded-lg p-3 text-center">
+            <div className="text-2xl font-bold text-green-500">{data.completed || 0}</div>
+            <div className="text-xs text-muted-foreground">Completed</div>
+          </div>
+          <div className="bg-red-500/10 rounded-lg p-3 text-center">
+            <div className="text-2xl font-bold text-red-500">{data.stuck || 0}</div>
+            <div className="text-xs text-muted-foreground">Stuck/Exception</div>
+          </div>
+          <div className="bg-blue-500/10 rounded-lg p-3 text-center">
+            <div className="text-2xl font-bold text-blue-500">{data.auto_cleared || 0}</div>
+            <div className="text-xs text-muted-foreground">Auto-Cleared</div>
+          </div>
+          <div className="bg-purple-500/10 rounded-lg p-3 text-center">
+            <div className="text-2xl font-bold text-purple-500">{formatPercent(data.success_rate)}</div>
+            <div className="text-xs text-muted-foreground">Success Rate</div>
+          </div>
+        </div>
+
+        {/* Retry Stats */}
+        {data.retry_stats && data.retry_stats.docs_requiring_retry > 0 && (
+          <div className="bg-amber-500/10 rounded-lg p-3">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-sm font-medium">Retry Activity</span>
+              <RefreshCw className="w-4 h-4 text-amber-500" />
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div>
+                <div className="font-bold">{data.retry_stats.docs_requiring_retry}</div>
+                <div className="text-muted-foreground">Docs Retried</div>
+              </div>
+              <div>
+                <div className="font-bold">{data.retry_stats.avg_retries.toFixed(1)}</div>
+                <div className="text-muted-foreground">Avg Retries</div>
+              </div>
+              <div>
+                <div className="font-bold">{data.retry_stats.total_retries}</div>
+                <div className="text-muted-foreground">Total Retries</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Workflow Status Distribution */}
+        {workflowStatusData.length > 0 && (
+          <div>
+            <h4 className="text-sm font-semibold mb-2">Workflow Status Distribution</h4>
+            <ResponsiveContainer width="100%" height={120}>
+              <BarChart data={workflowStatusData} layout="vertical" barCategoryGap="15%">
+                <XAxis type="number" hide />
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={100} axisLine={false} tickLine={false} />
+                <Tooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '0.5rem', fontSize: '11px' }} />
+                <Bar dataKey="value" fill="#a855f7" radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// BC Integration Card Component
+function BCIntegrationCard({ data }) {
+  if (!data) return null;
+
+  return (
+    <Card className="border border-border" data-testid="bc-integration-card">
+      <CardHeader className="pb-2">
+        <div className="flex items-center gap-2">
+          <Building2 className="w-4 h-4 text-indigo-500" />
+          <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Business Central</CardTitle>
+        </div>
+        <CardDescription>ERP integration success metrics</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-3 gap-3">
+          <div className="text-center">
+            <div className="text-2xl font-bold text-indigo-500">{data.linked_to_bc || 0}</div>
+            <div className="text-xs text-muted-foreground">Linked</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-green-500">{data.posted_to_bc || 0}</div>
+            <div className="text-xs text-muted-foreground">Posted</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-red-500">{data.post_failures || 0}</div>
+            <div className="text-xs text-muted-foreground">Failed</div>
+          </div>
+        </div>
+        <div>
+          <div className="flex justify-between text-sm mb-1">
+            <span>BC Link Rate</span>
+            <span className="font-bold">{formatPercent(data.link_rate)}</span>
+          </div>
+          <Progress value={data.link_rate || 0} className="h-2" />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// SharePoint Card Component
+function SharePointCard({ data }) {
+  if (!data) return null;
+
+  const topFolders = Object.entries(data.top_folders || {})
+    .map(([folder, count]) => ({
+      name: folder.split('/').pop() || folder,
+      fullPath: folder,
+      value: count
+    }))
+    .slice(0, 5);
+
+  return (
+    <Card className="border border-border" data-testid="sharepoint-card">
+      <CardHeader className="pb-2">
+        <div className="flex items-center gap-2">
+          <FolderArchive className="w-4 h-4 text-cyan-500" />
+          <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>SharePoint Archive</CardTitle>
+        </div>
+        <CardDescription>Document archival metrics</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-cyan-500/10 rounded-lg p-3 text-center">
+            <div className="text-2xl font-bold text-cyan-500">{data.documents_archived || 0}</div>
+            <div className="text-xs text-muted-foreground">Archived</div>
+          </div>
+          <div className="bg-cyan-500/10 rounded-lg p-3 text-center">
+            <div className="text-2xl font-bold text-cyan-500">{formatPercent(data.archive_rate)}</div>
+            <div className="text-xs text-muted-foreground">Archive Rate</div>
+          </div>
+        </div>
+        
+        {topFolders.length > 0 && (
+          <div>
+            <h4 className="text-sm font-semibold mb-2">Top Folders</h4>
+            <div className="space-y-1.5">
+              {topFolders.map((item, idx) => (
+                <div key={item.fullPath} className="flex items-center gap-2 text-xs">
+                  <span className="w-4 text-center text-muted-foreground">{idx + 1}.</span>
+                  <span className="flex-1 truncate" title={item.fullPath}>{item.name}</span>
+                  <span className="font-mono">{item.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// Daily Trends Chart Component
+function DailyTrendsChart({ data }) {
+  if (!data || data.length === 0) return null;
+
+  return (
+    <Card className="border border-border" data-testid="daily-trends-chart">
+      <CardHeader className="pb-2">
+        <div className="flex items-center gap-2">
+          <TrendingUp className="w-4 h-4 text-green-500" />
+          <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Processing Trends (7 Days)</CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <ResponsiveContainer width="100%" height={200}>
+          <LineChart data={data}>
+            <XAxis 
+              dataKey="date" 
+              tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} 
+              axisLine={false} 
+              tickLine={false}
+              tickFormatter={(val) => val?.slice(5) || ''} 
+            />
+            <YAxis 
+              tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} 
+              axisLine={false} 
+              tickLine={false}
+              allowDecimals={false}
+            />
+            <Tooltip
+              contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '0.5rem', fontSize: '11px' }}
+            />
+            <Legend verticalAlign="top" height={36} iconSize={10} />
+            <Line type="monotone" dataKey="total" name="Total" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
+            <Line type="monotone" dataKey="validated" name="Validated" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} />
+            <Line type="monotone" dataKey="exceptions" name="Exceptions" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} />
+          </LineChart>
+        </ResponsiveContainer>
+      </CardContent>
+    </Card>
+  );
+}
+
+// Ingestion Sources Chart Component
+function IngestionSourcesChart({ data }) {
+  if (!data || Object.keys(data).length === 0) return null;
+
+  const chartData = Object.entries(data)
+    .map(([source, count]) => ({
+      name: source.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      value: count
+    }))
+    .sort((a, b) => b.value - a.value);
+
+  return (
+    <Card className="border border-border" data-testid="ingestion-sources-chart">
+      <CardHeader className="pb-2">
+        <div className="flex items-center gap-2">
+          <Layers className="w-4 h-4 text-amber-500" />
+          <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Ingestion Sources</CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <ResponsiveContainer width="100%" height={180}>
+          <RechartsPieChart>
+            <Pie
+              data={chartData}
+              cx="50%"
+              cy="50%"
+              innerRadius={40}
+              outerRadius={70}
+              paddingAngle={2}
+              dataKey="value"
+              label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+              labelLine={false}
+            >
+              {chartData.map((entry, index) => (
+                <Cell key={entry.name} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+              ))}
+            </Pie>
+            <Tooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '0.5rem', fontSize: '11px' }} />
+          </RechartsPieChart>
+        </ResponsiveContainer>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function DashboardPage() {
   const [stats, setStats] = useState(null);
-  const [extractionQuality, setExtractionQuality] = useState(null);
-  const [dailyTrends, setDailyTrends] = useState([]);
+  const [intelligence, setIntelligence] = useState(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
   const fetchStats = async () => {
+    setLoading(true);
     try {
-      const res = await getDashboardStats();
-      setStats(res.data);
-      
-      // Fetch extraction quality metrics
-      try {
-        const qualityRes = await api.get('/metrics/extraction-quality?days=7');
-        setExtractionQuality(qualityRes.data);
-      } catch (e) {
-        console.log('Extraction quality API not available');
-      }
-      
-      // Fetch daily trends
-      try {
-        const trendsRes = await api.get('/metrics/daily?days=7');
-        setDailyTrends(trendsRes.data?.daily_metrics || []);
-      } catch (e) {
-        console.log('Daily trends API not available');
-      }
+      const [statsRes, intelligenceRes] = await Promise.all([
+        getDashboardStats(),
+        getWorkflowIntelligence().catch(() => ({ data: null }))
+      ]);
+      setStats(statsRes.data);
+      setIntelligence(intelligenceRes.data);
     } catch (err) {
       toast.error('Failed to load dashboard');
     } finally {
@@ -96,21 +519,16 @@ export default function DashboardPage() {
     ? Object.entries(stats.by_status).map(([name, value]) => ({ name, value }))
     : [];
 
-  // Calculate BC readiness percentage
-  const bcReadyRate = extractionQuality?.readiness_metrics?.ready_for_draft?.rate || 0;
-  const bcReadyCount = extractionQuality?.readiness_metrics?.ready_for_draft?.count || 0;
-  const draftCandidateRate = extractionQuality?.readiness_metrics?.draft_candidates?.rate || 0;
-  const draftCandidateCount = extractionQuality?.readiness_metrics?.draft_candidates?.count || 0;
-
+  // Top-level metrics
   const metricCards = [
-    { label: 'Total Documents', value: stats?.total_documents || 0, icon: FileText, color: 'text-blue-500' },
-    { label: 'Ready for BC', value: `${bcReadyRate.toFixed(0)}%`, subtext: `${bcReadyCount} docs`, icon: CheckCircle2, color: 'text-emerald-500' },
-    { label: 'Exceptions', value: stats?.by_status?.Exception || 0, icon: AlertCircle, color: 'text-red-500' },
-    { label: 'Draft Candidates', value: `${draftCandidateRate.toFixed(0)}%`, subtext: `${draftCandidateCount} docs`, icon: Zap, color: 'text-purple-500' },
+    { label: 'Total Documents', value: intelligence?.total_documents || stats?.total_documents || 0, icon: FileText, color: 'text-blue-500' },
+    { label: 'Validation Rate', value: formatPercent(intelligence?.validation_metrics?.pass_rate || 0), icon: CheckCircle2, color: 'text-green-500' },
+    { label: 'Vendor Match Rate', value: formatPercent(intelligence?.vendor_intelligence?.vendor_extraction_rate || 0), icon: Users, color: 'text-purple-500' },
+    { label: 'Exceptions', value: intelligence?.processing_metrics?.stuck || stats?.by_status?.Exception || 0, icon: AlertCircle, color: 'text-red-500' },
   ];
 
   return (
-    <div className="space-y-6 max-w-[1600px] mx-auto" data-testid="dashboard-page">
+    <div className="space-y-6 max-w-[1800px] mx-auto" data-testid="dashboard-page">
       {/* Demo mode banner */}
       {stats?.demo_mode && (
         <div className="bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-3 flex items-center gap-3" data-testid="demo-mode-banner">
@@ -121,10 +539,26 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Metric cards */}
+      {/* Header with refresh */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Workflow Intelligence Dashboard</h1>
+          <p className="text-sm text-muted-foreground">
+            Real-time insights into document processing automation
+            {intelligence?.generated_at && (
+              <span className="ml-2 text-xs">• Updated {formatDate(intelligence.generated_at)}</span>
+            )}
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={fetchStats} data-testid="refresh-dashboard-btn">
+          <RefreshCw className="w-4 h-4 mr-2" /> Refresh
+        </Button>
+      </div>
+
+      {/* Top-level Metric Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4" data-testid="stats-grid">
-        {metricCards.map(({ label, value, subtext, icon: Icon, color }, i) => (
-          <Card key={label} className={`border border-border hover:border-primary/30 transition-colors animate-fade-in-up animate-delay-${i}00`}>
+        {metricCards.map(({ label, value, icon: Icon, color }, i) => (
+          <Card key={label} className={`border border-border hover:border-primary/30 transition-colors`}>
             <CardContent className="p-5">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</span>
@@ -133,277 +567,222 @@ export default function DashboardPage() {
               <p className="text-3xl font-black tracking-tight" style={{ fontFamily: 'Chivo, sans-serif' }} data-testid={`stat-${label.toLowerCase().replace(/\s+/g, '-')}`}>
                 {value}
               </p>
-              {subtext && <p className="text-xs text-muted-foreground mt-1">{subtext}</p>}
             </CardContent>
           </Card>
         ))}
       </div>
 
-      {/* Chart + Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-        <Card className="md:col-span-8 border border-border" data-testid="status-chart-card">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Documents by Status</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {chartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={chartData} barCategoryGap="25%">
-                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} allowDecimals={false} />
-                  <Tooltip
-                    contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '0.5rem', fontSize: '12px' }}
-                    labelStyle={{ fontWeight: 600 }}
-                  />
-                  <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                    {chartData.map((entry, idx) => (
-                      <Cell key={entry.name} fill={CHART_COLORS[idx % CHART_COLORS.length]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
-                <FileText className="w-10 h-10 mb-3 opacity-40" />
-                <p className="text-sm">No documents yet</p>
-                <Button variant="ghost" className="mt-2 text-primary" onClick={() => navigate('/upload')} data-testid="upload-first-doc-btn">
-                  Upload your first document <ArrowRight className="w-4 h-4 ml-1" />
+      {/* Main Intelligence Grid */}
+      <Tabs defaultValue="overview" className="w-full">
+        <TabsList className="mb-4">
+          <TabsTrigger value="overview" data-testid="tab-overview">
+            <BarChart3 className="w-4 h-4 mr-2" /> Overview
+          </TabsTrigger>
+          <TabsTrigger value="vendor" data-testid="tab-vendor">
+            <Users className="w-4 h-4 mr-2" /> Vendor Intelligence
+          </TabsTrigger>
+          <TabsTrigger value="workflows" data-testid="tab-workflows">
+            <Activity className="w-4 h-4 mr-2" /> Workflows
+          </TabsTrigger>
+        </TabsList>
+
+        {/* Overview Tab */}
+        <TabsContent value="overview" className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+            {/* Status Chart */}
+            <Card className="md:col-span-5 border border-border" data-testid="status-chart-card">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Documents by Status</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {chartData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={chartData} barCategoryGap="25%">
+                      <XAxis dataKey="name" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                      <Tooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '0.5rem', fontSize: '11px' }} />
+                      <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                        {chartData.map((entry, idx) => (
+                          <Cell key={entry.name} fill={CHART_COLORS[idx % CHART_COLORS.length]} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-52 text-muted-foreground">
+                    <FileText className="w-10 h-10 mb-3 opacity-40" />
+                    <p className="text-sm">No documents yet</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Daily Trends */}
+            <div className="md:col-span-7">
+              <DailyTrendsChart data={intelligence?.daily_trends} />
+            </div>
+          </div>
+
+          {/* Second Row - Key Metrics */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <ValidationMetricsCard data={intelligence?.validation_metrics} />
+            <BCIntegrationCard data={intelligence?.bc_integration} />
+            <SharePointCard data={intelligence?.sharepoint_archival} />
+          </div>
+
+          {/* Quick Actions + Type Distribution */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <Card className="border border-border" data-testid="quick-actions-card">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Quick Actions</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <Button className="w-full justify-start gap-2" onClick={() => navigate('/upload')} data-testid="quick-upload-btn">
+                  <UploadCloud className="w-4 h-4" /> Upload Document
+                </Button>
+                <Button variant="secondary" className="w-full justify-start gap-2" onClick={() => navigate('/queue')} data-testid="quick-queue-btn">
+                  <Files className="w-4 h-4" /> View Queue
+                </Button>
+                <Button variant="secondary" className="w-full justify-start gap-2" onClick={fetchStats} data-testid="quick-refresh-btn">
+                  <RefreshCw className="w-4 h-4" /> Refresh Stats
+                </Button>
+              </CardContent>
+            </Card>
+
+            <IngestionSourcesChart data={intelligence?.ingestion_sources} />
+
+            {/* Type distribution */}
+            {stats?.by_type && Object.keys(stats.by_type).length > 0 && (
+              <Card className="border border-border" data-testid="type-distribution-card">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>By Document Type</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {Object.entries(stats.by_type).map(([type, count]) => (
+                    <div key={type} className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">{type}</span>
+                      <span className="font-mono font-semibold">{count}</span>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </TabsContent>
+
+        {/* Vendor Intelligence Tab */}
+        <TabsContent value="vendor" className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <VendorIntelligenceCard data={intelligence?.vendor_intelligence} />
+            <ProcessingMetricsCard data={intelligence?.processing_metrics} />
+          </div>
+          
+          {/* Square9 Stages */}
+          <Square9StageSummary />
+        </TabsContent>
+
+        {/* Workflows Tab */}
+        <TabsContent value="workflows" className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <ProcessingMetricsCard data={intelligence?.processing_metrics} />
+            <ValidationMetricsCard data={intelligence?.validation_metrics} />
+          </div>
+
+          {/* Recent Workflows */}
+          <Card className="border border-border" data-testid="recent-workflows-card">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Recent Workflow Runs</CardTitle>
+                <Button variant="ghost" size="sm" className="text-xs" onClick={fetchStats} data-testid="refresh-workflows-btn">
+                  <RefreshCw className="w-3 h-3 mr-1" /> Refresh
                 </Button>
               </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <div className="md:col-span-4 space-y-4">
-          <Card className="border border-border" data-testid="quick-actions-card">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Quick Actions</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2">
-              <Button className="w-full justify-start gap-2" onClick={() => navigate('/upload')} data-testid="quick-upload-btn">
-                <UploadCloud className="w-4 h-4" /> Upload Document
-              </Button>
-              <Button variant="secondary" className="w-full justify-start gap-2" onClick={() => navigate('/queue')} data-testid="quick-queue-btn">
-                <Files className="w-4 h-4" /> View Queue
-              </Button>
-              <Button variant="secondary" className="w-full justify-start gap-2" onClick={fetchStats} data-testid="quick-refresh-btn">
-                <RefreshCw className="w-4 h-4" /> Refresh Stats
-              </Button>
+            <CardContent className="p-0">
+              {stats?.recent_workflows?.length > 0 ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-xs uppercase tracking-wider">Workflow</TableHead>
+                      <TableHead className="text-xs uppercase tracking-wider">Status</TableHead>
+                      <TableHead className="text-xs uppercase tracking-wider">Started</TableHead>
+                      <TableHead className="text-xs uppercase tracking-wider">Steps</TableHead>
+                      <TableHead className="text-xs uppercase tracking-wider text-right">Action</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {stats.recent_workflows.map((wf) => (
+                      <TableRow key={wf.id} className="cursor-pointer" onClick={() => wf.document_id && navigate(`/documents/${wf.document_id}`)}>
+                        <TableCell className="font-mono text-xs">{wf.workflow_name}</TableCell>
+                        <TableCell>
+                          <Badge variant={wf.status === 'Completed' ? 'secondary' : wf.status === 'Failed' ? 'destructive' : 'default'}>
+                            {wf.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground font-mono">{formatDate(wf.started_utc)}</TableCell>
+                        <TableCell className="text-xs">{wf.steps?.length || 0} steps</TableCell>
+                        <TableCell className="text-right">
+                          {wf.status === 'Failed' && (
+                            <Button
+                              variant="ghost" size="sm" className="text-xs h-7"
+                              onClick={(e) => { e.stopPropagation(); handleRetry(wf.id); }}
+                              data-testid={`retry-workflow-${wf.id}`}
+                            >
+                              <RefreshCw className="w-3 h-3 mr-1" /> Retry
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <div className="py-12 text-center text-sm text-muted-foreground">
+                  No workflow runs yet. Upload a document to get started.
+                </div>
+              )}
             </CardContent>
           </Card>
 
-          {/* Type distribution */}
-          {stats?.by_type && Object.keys(stats.by_type).length > 0 && (
-            <Card className="border border-border" data-testid="type-distribution-card">
+          {/* Failed Workflows */}
+          {stats?.failed_workflows?.length > 0 && (
+            <Card className="border border-destructive/30" data-testid="failed-workflows-card">
               <CardHeader className="pb-2">
-                <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>By Document Type</CardTitle>
+                <CardTitle className="text-base font-bold text-destructive" style={{ fontFamily: 'Chivo, sans-serif' }}>
+                  <AlertCircle className="w-4 h-4 inline mr-2" />
+                  Failed Workflows
+                </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-2">
-                {Object.entries(stats.by_type).map(([type, count]) => (
-                  <div key={type} className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">{type}</span>
-                    <span className="font-mono font-semibold">{count}</span>
-                  </div>
-                ))}
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-xs uppercase tracking-wider">ID</TableHead>
+                      <TableHead className="text-xs uppercase tracking-wider">Error</TableHead>
+                      <TableHead className="text-xs uppercase tracking-wider">Time</TableHead>
+                      <TableHead className="text-xs uppercase tracking-wider text-right">Action</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {stats.failed_workflows.map((wf) => (
+                      <TableRow key={wf.id}>
+                        <TableCell className="font-mono text-xs">{wf.id.slice(0, 8)}...</TableCell>
+                        <TableCell className="text-xs text-destructive max-w-[300px] truncate">{wf.error || 'Unknown error'}</TableCell>
+                        <TableCell className="text-xs font-mono text-muted-foreground">{formatDate(wf.started_utc)}</TableCell>
+                        <TableCell className="text-right">
+                          <Button variant="ghost" size="sm" className="text-xs h-7" onClick={() => handleRetry(wf.id)} data-testid={`retry-failed-${wf.id}`}>
+                            <RefreshCw className="w-3 h-3 mr-1" /> Retry
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </CardContent>
             </Card>
           )}
-        </div>
-      </div>
-
-      {/* Square9 Workflow Stages */}
-      <Square9StageSummary />
-
-      {/* Validation Metrics Section */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Extraction Quality */}
-        <Card className="border border-border" data-testid="extraction-quality-card">
-          <CardHeader className="pb-2">
-            <div className="flex items-center gap-2">
-              <Target className="w-4 h-4 text-blue-500" />
-              <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Extraction Quality</CardTitle>
-            </div>
-            <p className="text-xs text-muted-foreground">Field extraction success rates (last 7 days)</p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {extractionQuality?.extraction_rates ? (
-              <>
-                <div className="space-y-3">
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span>Vendor</span>
-                      <span className="font-mono">{extractionQuality.extraction_rates.vendor?.toFixed(1) || 0}%</span>
-                    </div>
-                    <Progress value={extractionQuality.extraction_rates.vendor || 0} className="h-2" />
-                  </div>
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span>Invoice Number</span>
-                      <span className="font-mono">{extractionQuality.extraction_rates.invoice_number?.toFixed(1) || 0}%</span>
-                    </div>
-                    <Progress value={extractionQuality.extraction_rates.invoice_number || 0} className="h-2" />
-                  </div>
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span>Amount</span>
-                      <span className="font-mono">{extractionQuality.extraction_rates.amount?.toFixed(1) || 0}%</span>
-                    </div>
-                    <Progress value={extractionQuality.extraction_rates.amount || 0} className="h-2" />
-                  </div>
-                </div>
-                <div className="pt-2 border-t">
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>Based on {extractionQuality.total_documents || 0} documents</span>
-                    <span className="text-green-500">{extractionQuality.readiness_metrics?.ready_for_draft?.count || 0} ready for draft</span>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="text-sm text-muted-foreground text-center py-4">
-                <Zap className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                <p>No extraction data yet</p>
-                <p className="text-xs mt-1">Upload documents to see quality metrics</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Processing Trends */}
-        <Card className="border border-border" data-testid="processing-trends-card">
-          <CardHeader className="pb-2">
-            <div className="flex items-center gap-2">
-              <TrendingUp className="w-4 h-4 text-green-500" />
-              <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Processing Trends</CardTitle>
-            </div>
-            <p className="text-xs text-muted-foreground">Documents processed per day (last 7 days)</p>
-          </CardHeader>
-          <CardContent>
-            {dailyTrends.length > 0 ? (
-              <ResponsiveContainer width="100%" height={150}>
-                <LineChart data={dailyTrends}>
-                  <XAxis 
-                    dataKey="date" 
-                    tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} 
-                    axisLine={false} 
-                    tickLine={false}
-                    tickFormatter={(val) => val?.slice(5) || ''} 
-                  />
-                  <YAxis 
-                    tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} 
-                    axisLine={false} 
-                    tickLine={false}
-                    allowDecimals={false}
-                  />
-                  <Tooltip
-                    contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '0.5rem', fontSize: '12px' }}
-                  />
-                  <Line type="monotone" dataKey="total" stroke="#22c55e" strokeWidth={2} dot={{ fill: '#22c55e', r: 3 }} />
-                </LineChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="text-sm text-muted-foreground text-center py-8">
-                <Clock className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                <p>No trend data yet</p>
-                <p className="text-xs mt-1">Processing trends will appear after a few days</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Recent Workflows */}
-      <Card className="border border-border" data-testid="recent-workflows-card">
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Recent Workflow Runs</CardTitle>
-            <Button variant="ghost" size="sm" className="text-xs" onClick={fetchStats} data-testid="refresh-workflows-btn">
-              <RefreshCw className="w-3 h-3 mr-1" /> Refresh
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          {stats?.recent_workflows?.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="text-xs uppercase tracking-wider">Workflow</TableHead>
-                  <TableHead className="text-xs uppercase tracking-wider">Status</TableHead>
-                  <TableHead className="text-xs uppercase tracking-wider">Started</TableHead>
-                  <TableHead className="text-xs uppercase tracking-wider">Steps</TableHead>
-                  <TableHead className="text-xs uppercase tracking-wider text-right">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {stats.recent_workflows.map((wf) => (
-                  <TableRow key={wf.id} className="cursor-pointer" onClick={() => wf.document_id && navigate(`/documents/${wf.document_id}`)}>
-                    <TableCell className="font-mono text-xs">{wf.workflow_name}</TableCell>
-                    <TableCell>
-                      <Badge variant={wf.status === 'Completed' ? 'secondary' : wf.status === 'Failed' ? 'destructive' : 'default'}>
-                        {wf.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground font-mono">{formatDate(wf.started_utc)}</TableCell>
-                    <TableCell className="text-xs">{wf.steps?.length || 0} steps</TableCell>
-                    <TableCell className="text-right">
-                      {wf.status === 'Failed' && (
-                        <Button
-                          variant="ghost" size="sm" className="text-xs h-7"
-                          onClick={(e) => { e.stopPropagation(); handleRetry(wf.id); }}
-                          data-testid={`retry-workflow-${wf.id}`}
-                        >
-                          <RefreshCw className="w-3 h-3 mr-1" /> Retry
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <div className="py-12 text-center text-sm text-muted-foreground">
-              No workflow runs yet. Upload a document to get started.
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Failed Workflows */}
-      {stats?.failed_workflows?.length > 0 && (
-        <Card className="border border-destructive/30" data-testid="failed-workflows-card">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base font-bold text-destructive" style={{ fontFamily: 'Chivo, sans-serif' }}>
-              <AlertCircle className="w-4 h-4 inline mr-2" />
-              Failed Workflows
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="text-xs uppercase tracking-wider">ID</TableHead>
-                  <TableHead className="text-xs uppercase tracking-wider">Error</TableHead>
-                  <TableHead className="text-xs uppercase tracking-wider">Time</TableHead>
-                  <TableHead className="text-xs uppercase tracking-wider text-right">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {stats.failed_workflows.map((wf) => (
-                  <TableRow key={wf.id}>
-                    <TableCell className="font-mono text-xs">{wf.id.slice(0, 8)}...</TableCell>
-                    <TableCell className="text-xs text-destructive max-w-[300px] truncate">{wf.error || 'Unknown error'}</TableCell>
-                    <TableCell className="text-xs font-mono text-muted-foreground">{formatDate(wf.started_utc)}</TableCell>
-                    <TableCell className="text-right">
-                      <Button variant="ghost" size="sm" className="text-xs h-7" onClick={() => handleRetry(wf.id)} data-testid={`retry-failed-${wf.id}`}>
-                        <RefreshCw className="w-3 h-3 mr-1" /> Retry
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

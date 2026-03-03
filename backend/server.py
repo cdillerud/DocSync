@@ -1609,13 +1609,46 @@ async def get_workflow_intelligence_stats():
         ]
     })
     
-    # Documents needing vendor attention
-    vendor_pending = await db.hub_documents.count_documents({
+    # ============== ACTION REQUIRED QUEUES ==============
+    # 1. Needs Vendor Review - AP invoices with no vendor match
+    needs_vendor_review = await db.hub_documents.count_documents({
+        "doc_type": {"$in": ["AP_Invoice", "AP_INVOICE", "Remittance", "REMITTANCE"]},
         "$or": [
-            {"workflow_status": "vendor_pending"},
-            {"validation_results.match_method": "none"}
+            {"validation_results.match_method": "none"},
+            {"validation_results.match_method": {"$exists": False}},
+            {"vendor_canonical": {"$exists": False}},
+            {"vendor_canonical": None}
         ],
-        "status": {"$nin": ["Completed", "Archived", "Posted"]}
+        "status": {"$nin": ["Completed", "Archived", "Posted", "Deleted"]}
+    })
+    
+    # 2. Needs PO Match - Shipping docs missing PO link
+    needs_po_match = await db.hub_documents.count_documents({
+        "doc_type": {"$in": ["BOL", "Packing_List", "Shipping_Document", "SHIPPING", "Freight_Document"]},
+        "$or": [
+            {"po_number_clean": {"$exists": False}},
+            {"po_number_clean": None},
+            {"po_number_clean": ""},
+            {"bc_record_id": {"$exists": False}},
+            {"bc_record_id": None}
+        ],
+        "status": {"$nin": ["Completed", "Archived", "Posted", "Deleted"]}
+    })
+    
+    # 3. Needs Approval - Validated but awaiting human sign-off
+    needs_approval = await db.hub_documents.count_documents({
+        "validation_results.all_passed": True,
+        "status": {"$nin": ["Completed", "Archived", "Posted", "Deleted"]},
+        "$or": [
+            {"workflow_status": "ready_for_approval"},
+            {"workflow_status": "validated"},
+            {"workflow_status": "ready_for_post"},
+            # Also include docs that passed validation but haven't been posted
+            {"$and": [
+                {"bc_record_id": {"$exists": True}},
+                {"bc_posting_status": {"$nin": ["posted", "completed"]}}
+            ]}
+        ]
     })
     
     # ============== VALIDATION SUCCESS ==============
@@ -1779,10 +1812,18 @@ async def get_workflow_intelligence_stats():
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "total_documents": total_docs,
         
+        # Action Required Queues - clear, actionable counts
+        "action_required": {
+            "needs_vendor_review": needs_vendor_review,
+            "needs_po_match": needs_po_match,
+            "needs_approval": needs_approval,
+            "total_action_needed": needs_vendor_review + needs_po_match + needs_approval
+        },
+        
         "vendor_intelligence": {
             "total_with_vendor": docs_with_vendor,
             "vendor_extraction_rate": vendor_rate,
-            "vendor_pending_review": vendor_pending,
+            "needs_vendor_review": needs_vendor_review,
             "freight_carriers_detected": freight_docs,
             "match_methods": {
                 item["_id"]: {

@@ -12,7 +12,8 @@ import { toast } from 'sonner';
 import {
   FileText, AlertCircle, CheckCircle2, RefreshCw, ArrowRight, UploadCloud, Files,
   TrendingUp, Target, Zap, Clock, Users, Truck, Database, FolderArchive, 
-  BarChart3, PieChart, Activity, Layers, Network, Building2, GitBranch
+  BarChart3, PieChart, Activity, Layers, Network, Building2, GitBranch,
+  UserX, Link2Off, ClipboardCheck, Bell
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, PieChart as RechartsPieChart, Pie, Legend } from 'recharts';
 import { Square9StageSummary } from '../components/Square9WorkflowTracker';
@@ -41,6 +42,95 @@ function formatDate(iso) {
 
 function formatPercent(value) {
   return value !== undefined ? `${value.toFixed(1)}%` : '0%';
+}
+
+// Action Required Card - Shows the 3 actionable queues
+function ActionRequiredCard({ data, onNavigate }) {
+  if (!data) return null;
+  
+  const queues = [
+    {
+      key: 'needs_vendor_review',
+      label: 'Needs Vendor Review',
+      description: 'AP invoices with no vendor match',
+      count: data.needs_vendor_review || 0,
+      icon: UserX,
+      color: 'text-red-500',
+      bgColor: 'bg-red-500/10',
+      filter: 'vendor_pending'
+    },
+    {
+      key: 'needs_po_match',
+      label: 'Needs PO Match',
+      description: 'Shipping docs missing PO link',
+      count: data.needs_po_match || 0,
+      icon: Link2Off,
+      color: 'text-amber-500',
+      bgColor: 'bg-amber-500/10',
+      filter: 'po_pending'
+    },
+    {
+      key: 'needs_approval',
+      label: 'Needs Approval',
+      description: 'Validated, awaiting sign-off',
+      count: data.needs_approval || 0,
+      icon: ClipboardCheck,
+      color: 'text-blue-500',
+      bgColor: 'bg-blue-500/10',
+      filter: 'ready_for_approval'
+    }
+  ];
+
+  const totalAction = data.total_action_needed || 0;
+
+  return (
+    <Card className="border-2 border-amber-500/50 bg-gradient-to-br from-amber-500/5 to-transparent" data-testid="action-required-card">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Bell className="w-5 h-5 text-amber-500" />
+            <CardTitle className="text-lg font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Action Required</CardTitle>
+          </div>
+          {totalAction > 0 && (
+            <Badge variant="destructive" className="text-sm px-3 py-1">
+              {totalAction} items
+            </Badge>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {queues.map((queue) => (
+          <div
+            key={queue.key}
+            className={`${queue.bgColor} rounded-lg p-4 cursor-pointer hover:ring-2 hover:ring-offset-2 hover:ring-offset-background hover:ring-${queue.color.replace('text-', '')} transition-all`}
+            onClick={() => onNavigate && onNavigate(`/queue?filter=${queue.filter}`)}
+            data-testid={`action-${queue.key}`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <queue.icon className={`w-5 h-5 ${queue.color}`} />
+                <div>
+                  <div className="font-semibold text-sm">{queue.label}</div>
+                  <div className="text-xs text-muted-foreground">{queue.description}</div>
+                </div>
+              </div>
+              <div className={`text-2xl font-black ${queue.color}`} style={{ fontFamily: 'Chivo, sans-serif' }}>
+                {queue.count}
+              </div>
+            </div>
+          </div>
+        ))}
+        
+        {totalAction === 0 && (
+          <div className="text-center py-4 text-muted-foreground">
+            <CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-green-500" />
+            <p className="text-sm font-medium">All caught up!</p>
+            <p className="text-xs">No documents need attention</p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 // Vendor Intelligence Card Component
@@ -84,8 +174,8 @@ function VendorIntelligenceCard({ data }) {
             <div className="text-xs text-muted-foreground">Cached Matches</div>
           </div>
           <div className="bg-muted/50 rounded-lg p-3">
-            <div className="text-2xl font-bold text-amber-500">{data.vendor_pending_review || 0}</div>
-            <div className="text-xs text-muted-foreground">Pending Review</div>
+            <div className="text-2xl font-bold text-red-500">{data.needs_vendor_review || 0}</div>
+            <div className="text-xs text-muted-foreground">Needs Review</div>
           </div>
         </div>
 
@@ -571,6 +661,11 @@ export default function DashboardPage() {
           </Card>
         ))}
       </div>
+
+      {/* Action Required - Prominent placement */}
+      {intelligence?.action_required && (intelligence.action_required.total_action_needed > 0) && (
+        <ActionRequiredCard data={intelligence.action_required} onNavigate={navigate} />
+      )}
 
       {/* Main Intelligence Grid */}
       <Tabs defaultValue="overview" className="w-full">

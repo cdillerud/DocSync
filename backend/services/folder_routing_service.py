@@ -178,6 +178,7 @@ VENDOR_FOLDER_MAPPING = {
     "pitt ohio": "Freight",
     "tumalo creek": "Freight",
     "tumalo creek transportation": "Freight",
+    "tumaloc": "Freight",  # BC vendor code for Tumalo Creek
 }
 
 # Document type indicators for special routing

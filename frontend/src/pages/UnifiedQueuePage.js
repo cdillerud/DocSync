@@ -82,6 +82,8 @@ export default function UnifiedQueuePage() {
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("pending");
+  const [showCleared, setShowCleared] = useState(false);  // Toggle for auto-cleared docs
+  const [queueCounts, setQueueCounts] = useState({ total_all: 0, auto_cleared: 0, pending_review: 0 });
   
   // Selection for bulk actions
   const [selectedDocs, setSelectedDocs] = useState(new Set());
@@ -92,27 +94,39 @@ export default function UnifiedQueuePage() {
     try {
       // Build query params
       const params = new URLSearchParams();
-      if (docTypeFilter !== "ALL") params.append("doc_type", docTypeFilter);
-      if (statusFilter !== "ALL") params.append("status", statusFilter);
+      if (docTypeFilter !== "ALL") params.append("document_type", docTypeFilter);
       if (searchQuery) params.append("search", searchQuery);
       
-      // For pending tab, filter out completed/archived
+      // Use new queue_view and include_cleared params
       if (activeTab === "pending") {
-        params.append("exclude_status", "archived,exported,completed");
+        params.append("queue_view", "true");
+        params.append("include_cleared", showCleared ? "true" : "false");
       } else if (activeTab === "completed") {
-        params.append("status", "exported,archived,completed");
+        params.append("queue_view", "false");
+        params.append("status", "Completed");
+        params.append("include_cleared", "true");
+      } else if (activeTab === "all") {
+        params.append("queue_view", "false");
+        params.append("include_cleared", "true");
       }
+      
+      if (statusFilter !== "ALL") params.append("status", statusFilter);
       
       const response = await api.get(`/documents?${params.toString()}`);
       setDocuments(response.data.documents || []);
       setSelectedDocs(new Set()); // Clear selection on refresh
+      
+      // Update counts
+      if (response.data.counts) {
+        setQueueCounts(response.data.counts);
+      }
     } catch (err) {
       console.error("Failed to fetch documents:", err);
       toast.error("Failed to load documents");
     } finally {
       setLoading(false);
     }
-  }, [docTypeFilter, statusFilter, searchQuery, activeTab]);
+  }, [docTypeFilter, statusFilter, searchQuery, activeTab, showCleared]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -280,13 +294,13 @@ export default function UnifiedQueuePage() {
       </div>
 
       {/* Quick Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <Card>
           <CardContent className="pt-4">
             <div className="flex items-center gap-2">
               <FileText className="h-5 w-5 text-muted-foreground" />
               <div>
-                <div className="text-2xl font-bold">{stats.total}</div>
+                <div className="text-2xl font-bold">{queueCounts.total_all || stats.total}</div>
                 <div className="text-xs text-muted-foreground">Total Documents</div>
               </div>
             </div>
@@ -297,19 +311,19 @@ export default function UnifiedQueuePage() {
             <div className="flex items-center gap-2">
               <Clock className="h-5 w-5 text-yellow-500" />
               <div>
-                <div className="text-2xl font-bold">{pendingCount}</div>
+                <div className="text-2xl font-bold">{queueCounts.pending_review || pendingCount}</div>
                 <div className="text-xs text-muted-foreground">Pending Review</div>
               </div>
             </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="bg-green-500/10 border-green-500/30">
           <CardContent className="pt-4">
             <div className="flex items-center gap-2">
               <CheckCircle2 className="h-5 w-5 text-green-500" />
               <div>
-                <div className="text-2xl font-bold">{completedCount}</div>
-                <div className="text-xs text-muted-foreground">Completed</div>
+                <div className="text-2xl font-bold text-green-400">{queueCounts.auto_cleared || 0}</div>
+                <div className="text-xs text-green-400/70">Auto-Cleared</div>
               </div>
             </div>
           </CardContent>
@@ -317,7 +331,18 @@ export default function UnifiedQueuePage() {
         <Card>
           <CardContent className="pt-4">
             <div className="flex items-center gap-2">
-              <Inbox className="h-5 w-5 text-blue-500" />
+              <Archive className="h-5 w-5 text-blue-500" />
+              <div>
+                <div className="text-2xl font-bold">{completedCount}</div>
+                <div className="text-xs text-muted-foreground">Archived</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4">
+            <div className="flex items-center gap-2">
+              <Inbox className="h-5 w-5 text-purple-500" />
               <div>
                 <div className="text-2xl font-bold">{Object.keys(stats.by_type).length}</div>
                 <div className="text-xs text-muted-foreground">Document Types</div>
@@ -369,6 +394,22 @@ export default function UnifiedQueuePage() {
                   data-testid="search-input"
                 />
               </div>
+            </div>
+            
+            {/* Show Auto-Cleared Toggle */}
+            <div className="flex items-center gap-2 ml-4 px-3 py-1.5 bg-muted/50 rounded-lg">
+              <Checkbox 
+                id="show-cleared"
+                checked={showCleared}
+                onCheckedChange={setShowCleared}
+                data-testid="show-cleared-toggle"
+              />
+              <label 
+                htmlFor="show-cleared" 
+                className="text-sm text-muted-foreground cursor-pointer"
+              >
+                Show auto-cleared ({queueCounts.auto_cleared || 0})
+              </label>
             </div>
           </div>
         </CardContent>
@@ -439,8 +480,13 @@ export default function UnifiedQueuePage() {
                           <div className="flex items-center gap-2">
                             <FileText className="h-4 w-4 text-muted-foreground" />
                             <div>
-                              <div className="font-medium truncate max-w-[200px]">
+                              <div className="font-medium truncate max-w-[200px] flex items-center gap-1">
                                 {doc.file_name || "Unnamed"}
+                                {doc.auto_cleared && (
+                                  <Badge className="ml-1 bg-green-500/20 text-green-400 text-[10px] px-1 py-0">
+                                    AUTO
+                                  </Badge>
+                                )}
                               </div>
                               {doc.extracted_fields?.invoice_number && (
                                 <div className="text-xs text-muted-foreground">

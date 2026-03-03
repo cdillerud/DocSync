@@ -74,6 +74,13 @@ from services.folder_routing_service import (
     FOLDER_STRUCTURE, VENDOR_FOLDER_MAPPING
 )
 
+# Auto-Clear Service (Square9/Zetadocs aligned)
+from services.auto_clear_service import (
+    evaluate_auto_clear, get_auto_clear_update, get_auto_clear_summary,
+    AutoClearDecision, AUTO_CLEAR_CONFIG, get_threshold_for_type,
+    update_threshold, get_auto_clear_config
+)
+
 # Pilot Configuration
 from services.pilot_config import (
     PILOT_MODE_ENABLED, CURRENT_PILOT_PHASE,
@@ -1096,7 +1103,9 @@ async def upload_document(
 async def list_documents(
     status: str = Query(None), document_type: str = Query(None),
     category: str = Query(None),
-    search: str = Query(None), skip: int = Query(0), limit: int = Query(50)
+    search: str = Query(None), skip: int = Query(0), limit: int = Query(50),
+    include_cleared: bool = Query(False, description="Include auto-cleared documents in results"),
+    queue_view: bool = Query(True, description="Queue view mode - hides completed/cleared docs by default")
 ):
     fq = {}
     if status:
@@ -1107,9 +1116,35 @@ async def list_documents(
         fq["category"] = category
     if search:
         fq["file_name"] = {"$regex": search, "$options": "i"}
+    
+    # Queue view mode: Hide auto-cleared and completed documents by default
+    if queue_view and not include_cleared and not status:
+        fq["$and"] = [
+            {"$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}]},
+            {"status": {"$nin": ["Completed", "Posted", "Archived"]}}
+        ]
+    
     total = await db.hub_documents.count_documents(fq)
     docs = await db.hub_documents.find(fq, {"_id": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
-    return {"documents": docs, "total": total}
+    
+    # Also get counts for UI
+    total_all = await db.hub_documents.count_documents({})
+    cleared_count = await db.hub_documents.count_documents({"auto_cleared": True})
+    pending_count = await db.hub_documents.count_documents({
+        "$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}],
+        "status": {"$nin": ["Completed", "Posted", "Archived"]}
+    })
+    
+    return {
+        "documents": docs, 
+        "total": total,
+        "counts": {
+            "total_all": total_all,
+            "auto_cleared": cleared_count,
+            "pending_review": pending_count,
+            "showing": len(docs)
+        }
+    }
 
 @api_router.get("/documents/{doc_id}")
 async def get_document(doc_id: str):
@@ -2039,6 +2074,147 @@ async def test_folder_routing(
             "is_international": is_international,
             "description": description
         }
+    }
+
+
+# ==================== AUTO-CLEAR CONFIGURATION ====================
+
+@api_router.get("/auto-clear/config")
+async def get_auto_clear_configuration():
+    """
+    Get the current auto-clear configuration.
+    Shows thresholds and rules for each document type.
+    """
+    config = get_auto_clear_config()
+    return {
+        "enabled": config.get("enabled", True),
+        "default_threshold": config.get("default_confidence_threshold", 0.90),
+        "thresholds": config.get("thresholds", {}),
+        "require_sharepoint": config.get("require_sharepoint_upload", True),
+        "require_bc_validation": config.get("require_bc_validation", True)
+    }
+
+
+@api_router.put("/auto-clear/config/threshold/{doc_type}")
+async def update_auto_clear_threshold(doc_type: str, threshold: float = Query(..., ge=0.0, le=1.0)):
+    """
+    Update the confidence threshold for a specific document type.
+    Threshold must be between 0.0 and 1.0 (e.g., 0.90 for 90%).
+    """
+    success = update_threshold(doc_type, threshold)
+    return {
+        "success": success,
+        "doc_type": doc_type,
+        "new_threshold": threshold,
+        "message": f"Threshold for {doc_type} updated to {threshold:.1%}"
+    }
+
+
+@api_router.post("/auto-clear/evaluate/{doc_id}")
+async def evaluate_document_auto_clear(doc_id: str):
+    """
+    Manually evaluate a document for auto-clear eligibility.
+    Does not apply the result - just shows what would happen.
+    """
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    decision, reason, details = evaluate_auto_clear(doc)
+    
+    return {
+        "doc_id": doc_id,
+        "file_name": doc.get("file_name"),
+        "current_status": doc.get("status"),
+        "already_cleared": doc.get("auto_cleared", False),
+        "evaluation": {
+            "decision": decision.value,
+            "reason": reason,
+            "would_clear": decision == AutoClearDecision.CLEARED,
+            "checks": details.get("checks", []),
+            "summary": get_auto_clear_summary(details)
+        }
+    }
+
+
+@api_router.post("/auto-clear/apply/{doc_id}")
+async def apply_auto_clear(doc_id: str, force: bool = Query(False)):
+    """
+    Apply auto-clear to a document.
+    Use force=true to clear even if below threshold (manual clear).
+    """
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    if doc.get("auto_cleared") and not force:
+        return {
+            "success": False,
+            "message": "Document already auto-cleared",
+            "doc_id": doc_id
+        }
+    
+    if force:
+        # Manual clear - bypass evaluation
+        decision = AutoClearDecision.CLEARED
+        reason = "Manually cleared by user"
+        details = {"manual_clear": True, "cleared_by": "user", "checks": []}
+    else:
+        decision, reason, details = evaluate_auto_clear(doc)
+    
+    if decision == AutoClearDecision.CLEARED or force:
+        update = get_auto_clear_update(AutoClearDecision.CLEARED, details)
+        await db.hub_documents.update_one({"id": doc_id}, {"$set": update})
+        
+        return {
+            "success": True,
+            "message": f"Document cleared: {reason}",
+            "doc_id": doc_id,
+            "new_status": "Completed"
+        }
+    else:
+        return {
+            "success": False,
+            "message": f"Cannot auto-clear: {reason}",
+            "doc_id": doc_id,
+            "decision": decision.value,
+            "checks": details.get("checks", [])
+        }
+
+
+@api_router.get("/auto-clear/stats")
+async def get_auto_clear_stats():
+    """
+    Get statistics about auto-cleared documents.
+    """
+    total_docs = await db.hub_documents.count_documents({})
+    auto_cleared = await db.hub_documents.count_documents({"auto_cleared": True})
+    pending = await db.hub_documents.count_documents({
+        "$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}],
+        "status": {"$nin": ["Completed", "Posted", "Archived"]}
+    })
+    
+    # Get counts by document type
+    pipeline = [
+        {"$match": {"auto_cleared": True}},
+        {"$group": {"_id": "$document_type", "count": {"$sum": 1}}}
+    ]
+    by_type = await db.hub_documents.aggregate(pipeline).to_list(50)
+    
+    # Get counts by decision reason
+    pipeline_reasons = [
+        {"$match": {"auto_clear_decision": {"$exists": True}}},
+        {"$group": {"_id": "$auto_clear_decision", "count": {"$sum": 1}}}
+    ]
+    by_reason = await db.hub_documents.aggregate(pipeline_reasons).to_list(20)
+    
+    return {
+        "total_documents": total_docs,
+        "auto_cleared": auto_cleared,
+        "pending_review": pending,
+        "clear_rate": f"{(auto_cleared/total_docs*100):.1f}%" if total_docs > 0 else "0%",
+        "by_document_type": {item["_id"]: item["count"] for item in by_type if item["_id"]},
+        "by_decision": {item["_id"]: item["count"] for item in by_reason if item["_id"]}
     }
 
 
@@ -5520,11 +5696,44 @@ async def _internal_intake_document(
     logger.info("[Workflow:%s] Intake complete: %s → status=%s, decision=%s, score=%.2f", 
                 workflow_run_id, filename, final_status, decision, validation_results.get("match_score", 0.0))
     
+    # =================================================================
+    # AUTO-CLEAR EVALUATION (Square9/Zetadocs aligned)
+    # Evaluate if document should be auto-cleared from queue
+    # =================================================================
+    auto_clear_result = None
+    try:
+        # Refresh document to get latest state
+        doc_for_eval = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+        if doc_for_eval:
+            auto_clear_decision, auto_clear_reason, auto_clear_details = evaluate_auto_clear(
+                doc_for_eval,
+                validation_results=validation_results
+            )
+            
+            # Apply auto-clear update
+            auto_clear_update = get_auto_clear_update(auto_clear_decision, auto_clear_details)
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": auto_clear_update})
+            
+            auto_clear_result = {
+                "decision": auto_clear_decision.value,
+                "reason": auto_clear_reason,
+                "cleared": auto_clear_decision == AutoClearDecision.CLEARED
+            }
+            
+            if auto_clear_decision == AutoClearDecision.CLEARED:
+                final_status = "Completed"  # Override final status
+                logger.info("[Auto-Clear] Document %s AUTO-CLEARED: %s", doc_id, auto_clear_reason)
+            else:
+                logger.debug("[Auto-Clear] Document %s NOT cleared: %s", doc_id, auto_clear_reason)
+    except Exception as e:
+        logger.error("[Auto-Clear] Error evaluating document %s: %s", doc_id, str(e))
+    
     return {
         "document": {"id": doc_id, "status": final_status},
         "classification": classification,
         "automation_decision": decision,
-        "sharepoint": sp_result
+        "sharepoint": sp_result,
+        "auto_clear": auto_clear_result
     }
 
 

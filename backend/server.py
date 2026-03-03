@@ -81,6 +81,11 @@ from services.auto_clear_service import (
     update_threshold, get_auto_clear_config
 )
 
+# Spiro Vendor Matching
+from services.spiro_vendor_matcher import (
+    match_vendor_with_spiro, get_spiro_matcher, SpiroVendorMatcher
+)
+
 # Pilot Configuration
 from services.pilot_config import (
     PILOT_MODE_ENABLED, CURRENT_PILOT_PHASE,
@@ -2215,6 +2220,59 @@ async def get_auto_clear_stats():
         "clear_rate": f"{(auto_cleared/total_docs*100):.1f}%" if total_docs > 0 else "0%",
         "by_document_type": {item["_id"]: item["count"] for item in by_type if item["_id"]},
         "by_decision": {item["_id"]: item["count"] for item in by_reason if item["_id"]}
+    }
+
+
+# ==================== SPIRO VENDOR MATCHING ====================
+
+@api_router.post("/spiro/match-vendor")
+async def spiro_match_vendor(vendor_name: str = Form(...), min_score: float = Form(0.7)):
+    """
+    Match a vendor name against Spiro CRM companies.
+    Uses fuzzy matching to find the best match.
+    """
+    result = await match_vendor_with_spiro(db, vendor_name, min_score)
+    return result
+
+
+@api_router.get("/spiro/search-companies")
+async def spiro_search_companies(query: str = Query(...), limit: int = Query(10)):
+    """
+    Search Spiro companies by name.
+    """
+    matcher = get_spiro_matcher(db)
+    companies = await matcher.search_companies(query, limit)
+    return {
+        "query": query,
+        "count": len(companies),
+        "companies": companies
+    }
+
+
+@api_router.get("/spiro/freight-carriers")
+async def spiro_get_freight_carriers():
+    """
+    Get all freight carriers from Spiro.
+    """
+    matcher = get_spiro_matcher(db)
+    carriers = await matcher.get_freight_carriers()
+    return {
+        "count": len(carriers),
+        "carriers": carriers
+    }
+
+
+@api_router.post("/spiro/is-freight-carrier")
+async def spiro_is_freight_carrier(vendor_name: str = Form(...)):
+    """
+    Check if a vendor is a freight carrier based on Spiro data.
+    """
+    matcher = get_spiro_matcher(db)
+    is_freight, company = await matcher.is_freight_carrier(vendor_name)
+    return {
+        "vendor_name": vendor_name,
+        "is_freight_carrier": is_freight,
+        "matched_company": company
     }
 
 

@@ -68,6 +68,12 @@ from services.square9_workflow import (
     validate_required_fields, should_retry, get_workflow_summary
 )
 
+# Folder Routing Service (Accounting folder structure)
+from services.folder_routing_service import (
+    determine_folder_path, get_all_folder_paths, get_folder_structure_summary,
+    FOLDER_STRUCTURE, VENDOR_FOLDER_MAPPING
+)
+
 # Pilot Configuration
 from services.pilot_config import (
     PILOT_MODE_ENABLED, CURRENT_PILOT_PHASE,
@@ -316,6 +322,115 @@ async def upload_to_sharepoint(file_content: bytes, file_name: str, folder: str)
             error = item.get("error", {})
             raise Exception(f"Upload failed (HTTP {upload_resp.status_code}): {error.get('message', error.get('code', item))}")
         return {"drive_id": drive_id, "item_id": item["id"], "web_url": item.get("webUrl", ""), "name": file_name}
+
+
+async def ensure_sharepoint_folder_exists(folder_path: str) -> bool:
+    """
+    Ensure a folder exists in SharePoint, creating it and any parent folders if needed.
+    Returns True if folder exists or was created successfully.
+    """
+    if DEMO_MODE or not GRAPH_CLIENT_ID:
+        return True
+    
+    token = await get_graph_token()
+    async with httpx.AsyncClient(timeout=30.0) as c:
+        # Get site and drive
+        site_resp = await c.get(
+            f"https://graph.microsoft.com/v1.0/sites/{SHAREPOINT_SITE_HOSTNAME}:{SHAREPOINT_SITE_PATH}:",
+            headers={"Authorization": f"Bearer {token}"})
+        if site_resp.status_code != 200:
+            logger.warning("Could not resolve SharePoint site for folder creation")
+            return False
+        site_id = site_resp.json()["id"]
+        
+        drives_resp = await c.get(
+            f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives",
+            headers={"Authorization": f"Bearer {token}"})
+        drives = drives_resp.json().get("value", [])
+        drive = next((d for d in drives if d["name"] == SHAREPOINT_LIBRARY_NAME), drives[0] if drives else None)
+        if not drive:
+            return False
+        drive_id = drive["id"]
+        
+        # Create folder path (Graph API auto-creates parent folders)
+        # We use a folder creation endpoint
+        folder_parts = folder_path.split("/")
+        current_path = ""
+        
+        for part in folder_parts:
+            if not part:
+                continue
+            parent_path = current_path if current_path else "root"
+            current_path = f"{current_path}/{part}" if current_path else part
+            
+            # Check if folder exists
+            check_url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{current_path}"
+            check_resp = await c.get(check_url, headers={"Authorization": f"Bearer {token}"})
+            
+            if check_resp.status_code == 404:
+                # Folder doesn't exist, create it
+                if parent_path == "root":
+                    create_url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root/children"
+                else:
+                    create_url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{'/'.join(folder_parts[:folder_parts.index(part)])}:/children"
+                
+                create_resp = await c.post(
+                    create_url,
+                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                    json={"name": part, "folder": {}, "@microsoft.graph.conflictBehavior": "fail"}
+                )
+                
+                if create_resp.status_code not in (200, 201, 409):  # 409 = already exists (race condition)
+                    logger.warning("Failed to create folder %s: %s", current_path, create_resp.text[:200])
+                    # Continue anyway, might work
+                else:
+                    logger.info("Created SharePoint folder: %s", current_path)
+        
+        return True
+
+
+async def upload_to_sharepoint_with_routing(
+    file_content: bytes, 
+    file_name: str, 
+    doc: Dict[str, Any],
+    freight_direction: Optional[str] = None,
+    is_international: bool = False
+) -> Dict[str, Any]:
+    """
+    Upload a file to SharePoint using the accounting folder routing logic.
+    
+    Args:
+        file_content: The file bytes
+        file_name: Name of the file
+        doc: Document dictionary with extracted fields for routing
+        freight_direction: "inbound", "outbound", or None
+        is_international: Whether the shipment is international
+        
+    Returns:
+        Dict with drive_id, item_id, web_url, name, folder_path, routing_reason
+    """
+    # Determine the correct folder using accounting rules
+    folder_path, routing_reason, routing_details = determine_folder_path(
+        doc, 
+        freight_direction=freight_direction,
+        is_international=is_international
+    )
+    
+    logger.info("[Folder Routing] Doc %s -> %s (reason: %s)", 
+                doc.get("id", "unknown"), folder_path, routing_reason)
+    
+    # Ensure the folder exists
+    await ensure_sharepoint_folder_exists(folder_path)
+    
+    # Upload to the determined folder
+    result = await upload_to_sharepoint(file_content, file_name, folder_path)
+    
+    # Add routing info to result
+    result["folder_path"] = folder_path
+    result["routing_reason"] = routing_reason
+    result["routing_details"] = routing_details
+    
+    return result
 
 async def create_sharing_link(drive_id: str, item_id: str):
     if DEMO_MODE or not GRAPH_CLIENT_ID:
@@ -1828,6 +1943,103 @@ async def export_document_types_dashboard(
             "Content-Disposition": f'attachment; filename="{filename}"'
         }
     )
+
+
+# ==================== SHAREPOINT FOLDER STRUCTURE (Accounting) ====================
+
+@api_router.get("/sharepoint/folder-structure")
+async def get_sharepoint_folder_structure():
+    """
+    Get the accounting folder structure configuration.
+    Shows how documents will be routed to SharePoint folders.
+    """
+    return {
+        "structure": FOLDER_STRUCTURE,
+        "vendor_mapping": VENDOR_FOLDER_MAPPING,
+        "all_folders": get_all_folder_paths(),
+        "total_folders": len(get_all_folder_paths()),
+        "summary": get_folder_structure_summary()
+    }
+
+
+@api_router.post("/sharepoint/initialize-folders")
+async def initialize_sharepoint_folders(background_tasks: BackgroundTasks):
+    """
+    Initialize all SharePoint folders according to accounting structure.
+    Creates folders if they don't exist.
+    """
+    folders = get_all_folder_paths()
+    
+    results = {
+        "total": len(folders),
+        "created": [],
+        "existing": [],
+        "failed": []
+    }
+    
+    for folder in folders:
+        try:
+            success = await ensure_sharepoint_folder_exists(folder)
+            if success:
+                results["created"].append(folder)
+            else:
+                results["failed"].append({"folder": folder, "error": "Unknown error"})
+        except Exception as e:
+            results["failed"].append({"folder": folder, "error": str(e)})
+    
+    return {
+        "message": f"Initialized {len(results['created'])} folders",
+        "results": results
+    }
+
+
+@api_router.post("/sharepoint/test-routing")
+async def test_folder_routing(
+    doc_type: str = Form("AP_Invoice"),
+    vendor: str = Form(""),
+    order_number: str = Form(""),
+    freight_direction: str = Form(""),
+    is_international: bool = Form(False),
+    description: str = Form("")
+):
+    """
+    Test folder routing logic without uploading anything.
+    Returns the folder path a document would be routed to.
+    """
+    # Build a mock document
+    mock_doc = {
+        "document_type": doc_type,
+        "suggested_job_type": doc_type,
+        "vendor_canonical": vendor,
+        "po_number_extracted": order_number,
+        "bol_number_extracted": order_number,
+        "extracted_fields": {
+            "vendor": vendor,
+            "po_number": order_number,
+            "description": description
+        },
+        "file_name": f"test_{doc_type}.pdf"
+    }
+    
+    folder_path, routing_reason, routing_details = determine_folder_path(
+        mock_doc,
+        freight_direction=freight_direction if freight_direction else None,
+        is_international=is_international
+    )
+    
+    return {
+        "folder_path": folder_path,
+        "routing_reason": routing_reason,
+        "routing_details": routing_details,
+        "input": {
+            "doc_type": doc_type,
+            "vendor": vendor,
+            "order_number": order_number,
+            "freight_direction": freight_direction,
+            "is_international": is_international,
+            "description": description
+        }
+    }
 
 
 # ==================== BC PROXY ====================
@@ -5093,16 +5305,45 @@ async def _internal_intake_document(
     # Make automation decision
     decision, reasoning, decision_metadata = make_automation_decision(job_configs, confidence, validation_results)
     
-    # Upload to SharePoint
-    folder = job_configs.get("sharepoint_folder", "Incoming")
+    # Get freight direction for routing
+    freight_direction = validation_results.get("freight_direction")
+    
+    # Build doc dict for routing
+    routing_doc = {
+        "id": doc_id,
+        "document_type": suggested_type,
+        "suggested_job_type": suggested_type,
+        "vendor_canonical": doc.get("vendor_canonical") or normalized_fields.get("vendor"),
+        "po_number_extracted": normalized_fields.get("po_number") or extracted_fields.get("po_number"),
+        "bol_number_extracted": normalized_fields.get("bol_number") or extracted_fields.get("bol_number"),
+        "extracted_fields": extracted_fields,
+        "normalized_fields": normalized_fields,
+        "ai_extraction": doc.get("ai_extraction", {}),
+        "file_name": filename,
+        "status": doc.get("status"),
+        "approved": doc.get("approved", False)
+    }
+    
+    # Upload to SharePoint using accounting folder routing
     sp_result = None
     share_link = None
     sp_error = None
+    folder_path = None
+    routing_reason = None
     
     try:
-        sp_result = await upload_to_sharepoint(file_content, filename, folder)
+        sp_result = await upload_to_sharepoint_with_routing(
+            file_content, 
+            filename, 
+            routing_doc,
+            freight_direction=freight_direction,
+            is_international=False  # TODO: detect from document
+        )
         share_link = await create_sharing_link(sp_result["drive_id"], sp_result["item_id"])
-        logger.info("Document %s stored in SharePoint: %s", doc_id, sp_result.get("web_url"))
+        folder_path = sp_result.get("folder_path")
+        routing_reason = sp_result.get("routing_reason")
+        logger.info("Document %s stored in SharePoint: %s (folder: %s, reason: %s)", 
+                   doc_id, sp_result.get("web_url"), folder_path, routing_reason)
     except Exception as e:
         sp_error = str(e)
         logger.error("SharePoint upload failed for document %s: %s", doc_id, sp_error)
@@ -5184,6 +5425,11 @@ async def _internal_intake_document(
         update_data["sharepoint_item_id"] = sp_result["item_id"]
         update_data["sharepoint_web_url"] = sp_result["web_url"]
         update_data["sharepoint_share_link_url"] = share_link
+        # Folder routing info (accounting structure)
+        update_data["sharepoint_folder_path"] = sp_result.get("folder_path")
+        update_data["folder_routing_reason"] = sp_result.get("routing_reason")
+        update_data["folder_routing_details"] = sp_result.get("routing_details")
+        update_data["freight_direction"] = freight_direction
     else:
         update_data["last_error"] = f"SharePoint upload failed: {sp_error}"
     
@@ -6159,6 +6405,7 @@ async def preview_post_to_bc(doc_id: str, request: DryRunPreviewRequest = None):
         "extracted_data": {},
         "purchase_invoice_preview": None,
         "sales_order_match": None,
+        "folder_routing": None,  # Will be populated with SharePoint folder routing
         "errors": []
     }
     
@@ -6429,6 +6676,18 @@ async def preview_post_to_bc(doc_id: str, request: DryRunPreviewRequest = None):
                     }
                 ],
                 "note": "This is what WOULD be posted. No data was written."
+            }
+            
+            # Add folder routing preview
+            folder_path, routing_reason, routing_details = determine_folder_path(
+                doc,
+                freight_direction=preview_result.get("freight_direction"),
+                is_international=False
+            )
+            preview_result["folder_routing"] = {
+                "folder_path": folder_path,
+                "routing_reason": routing_reason,
+                "routing_details": routing_details
             }
             
             # Determine overall validation status

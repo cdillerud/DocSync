@@ -10,7 +10,7 @@ sys.path.insert(0, '/app/backend')
 
 
 # Test configuration
-API_BASE_URL = "https://invoice-processor-14.preview.emergentagent.com"
+API_BASE_URL = "https://warehouse-processor.preview.emergentagent.com"
 
 
 @pytest.fixture

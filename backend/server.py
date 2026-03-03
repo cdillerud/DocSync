@@ -86,6 +86,11 @@ from services.spiro_vendor_matcher import (
     match_vendor_with_spiro, get_spiro_matcher, SpiroVendorMatcher
 )
 
+# Unified Vendor Matcher (ALL sources: Spiro, BC, SharePoint, Doc History)
+from services.unified_vendor_matcher import (
+    match_vendor_unified, get_unified_vendor_matcher, UnifiedVendorMatcher
+)
+
 # Pilot Configuration
 from services.pilot_config import (
     PILOT_MODE_ENABLED, CURRENT_PILOT_PHASE,
@@ -2276,6 +2281,54 @@ async def spiro_is_freight_carrier(vendor_name: str = Form(...)):
     }
 
 
+# ==================== UNIFIED VENDOR MATCHING (ALL SOURCES) ====================
+
+@api_router.post("/vendors/match")
+async def unified_vendor_match(
+    vendor_name: str = Form(...), 
+    min_score: float = Form(0.7)
+):
+    """
+    Match vendor name using ALL available sources:
+    - Document history (previously matched)
+    - Spiro CRM (11,700+ companies)
+    - Business Central (vendor master)
+    - SharePoint patterns (historical documents)
+    
+    Returns best match with source attribution.
+    """
+    result = await match_vendor_unified(db, vendor_name, min_score)
+    return result
+
+
+@api_router.get("/vendors/match-stats")
+async def vendor_match_stats():
+    """
+    Get statistics about vendor matching sources.
+    """
+    spiro_count = await db.spiro_companies.count_documents({})
+    cached_matches = await db.vendor_matches.count_documents({})
+    docs_with_vendors = await db.hub_documents.count_documents({
+        "vendor_canonical": {"$exists": True, "$ne": None}
+    })
+    
+    # Count by source
+    pipeline = [
+        {"$match": {"source": {"$exists": True}}},
+        {"$group": {"_id": "$source", "count": {"$sum": 1}}}
+    ]
+    by_source = await db.vendor_matches.aggregate(pipeline).to_list(20)
+    
+    return {
+        "sources": {
+            "spiro_companies": spiro_count,
+            "cached_matches": cached_matches,
+            "documents_with_vendors": docs_with_vendors
+        },
+        "matches_by_source": {item["_id"]: item["count"] for item in by_source if item["_id"]}
+    }
+
+
 # ==================== BC PROXY ====================
 
 @api_router.get("/bc/companies")
@@ -4077,9 +4130,42 @@ async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: d
             if job_type in ("AP_Invoice", "Remittance"):
                 vendor_name = normalized_fields.get("vendor") or extracted_fields.get("vendor", "")
                 if vendor_name:
-                    vendor_result = await match_vendor_in_bc(
-                        vendor_name, match_strategies, match_threshold, token, company_id
-                    )
+                    # Use Unified Vendor Matcher for comprehensive matching across all sources
+                    unified_result = await match_vendor_unified(db, vendor_name, match_threshold)
+                    
+                    # Convert unified result to legacy format for compatibility
+                    vendor_result = {
+                        "matched": unified_result.get("matched", False),
+                        "match_method": unified_result.get("source") or "none",
+                        "selected_vendor": None,
+                        "vendor_candidates": [],
+                        "score": unified_result.get("score", 0.0)
+                    }
+                    
+                    # If matched, build selected_vendor from best_match
+                    if unified_result.get("matched") and unified_result.get("best_match"):
+                        best = unified_result["best_match"]
+                        vendor_result["selected_vendor"] = {
+                            "id": best.get("vendor_id") or unified_result.get("bc_vendor_id"),
+                            "displayName": best.get("name"),
+                            "number": best.get("vendor_number") or unified_result.get("bc_vendor_number")
+                        }
+                    
+                    # Build vendor_candidates from all_matches
+                    for m in unified_result.get("all_matches", []):
+                        vendor_result["vendor_candidates"].append({
+                            "display_name": m.get("name"),
+                            "vendor_id": m.get("vendor_id"),
+                            "score": m.get("score", 0),
+                            "source": m.get("source")
+                        })
+                    
+                    # Store unified match details for observability
+                    validation_results["unified_vendor_match"] = {
+                        "sources_checked": unified_result.get("sources_checked", []),
+                        "is_freight_carrier": unified_result.get("is_freight_carrier", False),
+                        "all_matches_count": len(unified_result.get("all_matches", []))
+                    }
                     
                     validation_results["vendor_candidates"] = vendor_result.get("vendor_candidates", [])
                     
@@ -4088,20 +4174,23 @@ async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: d
                         validation_results["match_method"] = vendor_result["match_method"]
                         validation_results["match_score"] = vendor_result["score"]
                         
+                        vendor_display = vendor_result["selected_vendor"].get("displayName") if vendor_result["selected_vendor"] else vendor_name
                         validation_results["checks"].append({
                             "check_name": "vendor_match",
                             "passed": True,
-                            "details": f"Found vendor via {vendor_result['match_method']}: {vendor_result['selected_vendor'].get('displayName')} (score: {vendor_result['score']:.0%})",
+                            "details": f"Found vendor via {vendor_result['match_method']}: {vendor_display} (score: {vendor_result['score']:.0%})",
                             "required": True,
                             "match_method": vendor_result["match_method"],
-                            "score": vendor_result["score"]
+                            "score": vendor_result["score"],
+                            "is_freight_carrier": unified_result.get("is_freight_carrier", False)
                         })
-                        validation_results["bc_record_id"] = vendor_result["selected_vendor"].get("id")
-                        validation_results["bc_record_info"] = vendor_result["selected_vendor"]
+                        if vendor_result["selected_vendor"]:
+                            validation_results["bc_record_id"] = vendor_result["selected_vendor"].get("id")
+                            validation_results["bc_record_info"] = vendor_result["selected_vendor"]
                     else:
                         validation_results["all_passed"] = False
                         validation_results["match_method"] = "none"
-                        details = f"No vendor found matching '{vendor_name}'"
+                        details = f"No vendor found matching '{vendor_name}' (checked: {', '.join(unified_result.get('sources_checked', []))})"
                         if vendor_result["vendor_candidates"]:
                             top_candidate = vendor_result["vendor_candidates"][0]
                             details += f". Best candidate: {top_candidate['display_name']} ({top_candidate['score']:.0%})"
@@ -6774,121 +6863,39 @@ async def preview_post_to_bc(doc_id: str, request: DryRunPreviewRequest = None):
                 "currency": doc.get("currency", "USD")
             }
             
-            # Validate vendor exists in BC - use smart matching
+            # Validate vendor using Unified Vendor Intelligence Service
+            # This checks: Document History, Spiro CRM, Business Central, SharePoint patterns
             if vendor_name:
-                matched_vendor = None
-                vendor_search_attempts = []
+                unified_result = await match_vendor_unified(db, vendor_name, min_score=0.7)
                 
-                # Known vendor aliases (AI extractions -> BC names)
-                VENDOR_ALIASES = {
-                    "tumaloc": "tumalo",
-                    "tumalo creek": "tumalo",
-                    "tumalo creek transportation": "TUMALOC",  # BC vendor number
-                    "ball": "ball",
-                    "ball corporation": "ball",
-                    "canpack": "canpack",
-                    "anchor": "anchor",
-                    "oi": "owens",
-                    "o-i": "owens",
-                    "fedex": "fedex",
-                    "ups": "ups",
-                    "xpo": "xpo",
-                }
-                
-                # Strategy 1: Check if we have a direct alias mapping to BC vendor number
-                vendor_lower = vendor_name.lower().strip()
-                if vendor_lower in VENDOR_ALIASES:
-                    alias_value = VENDOR_ALIASES[vendor_lower]
-                    # If alias is ALL CAPS, it's a vendor number
-                    if alias_value.isupper():
-                        vendor_resp = await client.get(
-                            f"https://api.businesscentral.dynamics.com/v2.0/{PROD_TENANT_ID}/{PROD_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
-                            headers={"Authorization": f"Bearer {token}"},
-                            params={"$filter": f"number eq '{alias_value}'"}
-                        )
-                        vendor_search_attempts.append(f"Search 1: alias '{vendor_lower}' -> vendor# '{alias_value}'")
-                    else:
-                        vendor_resp = await client.get(
-                            f"https://api.businesscentral.dynamics.com/v2.0/{PROD_TENANT_ID}/{PROD_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
-                            headers={"Authorization": f"Bearer {token}"},
-                            params={"$filter": f"contains(tolower(displayName), '{alias_value}')"}
-                        )
-                        vendor_search_attempts.append(f"Search 1: alias '{vendor_lower}' -> name contains '{alias_value}'")
-                    
-                    if vendor_resp.status_code == 200:
-                        vendors = vendor_resp.json().get("value", [])
-                        if vendors:
-                            matched_vendor = vendors[0]
-                
-                # Strategy 2: Try direct contains search with first word of name
-                if not matched_vendor:
-                    search_term = vendor_name.split()[0] if vendor_name else ""
-                    vendor_resp = await client.get(
-                        f"https://api.businesscentral.dynamics.com/v2.0/{PROD_TENANT_ID}/{PROD_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
-                        headers={"Authorization": f"Bearer {token}"},
-                        params={"$filter": f"contains(tolower(displayName), '{search_term.lower()}')"}
-                    )
-                    vendor_search_attempts.append(f"Search 2: displayName contains '{search_term}'")
-                    
-                    if vendor_resp.status_code == 200:
-                        vendors = vendor_resp.json().get("value", [])
-                        if vendors:
-                            matched_vendor = vendors[0]
-                
-                # Strategy 3: Try partial alias match
-                if not matched_vendor:
-                    for alias, bc_name in VENDOR_ALIASES.items():
-                        if alias in vendor_lower:
-                            if bc_name.isupper():
-                                vendor_resp = await client.get(
-                                    f"https://api.businesscentral.dynamics.com/v2.0/{PROD_TENANT_ID}/{PROD_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
-                                    headers={"Authorization": f"Bearer {token}"},
-                                    params={"$filter": f"number eq '{bc_name}'"}
-                                )
-                            else:
-                                vendor_resp = await client.get(
-                                    f"https://api.businesscentral.dynamics.com/v2.0/{PROD_TENANT_ID}/{PROD_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
-                                    headers={"Authorization": f"Bearer {token}"},
-                                    params={"$filter": f"contains(tolower(displayName), '{bc_name}')"}
-                                )
-                            vendor_search_attempts.append(f"Search 3: partial alias '{alias}' -> '{bc_name}'")
-                            
-                            if vendor_resp.status_code == 200:
-                                vendors = vendor_resp.json().get("value", [])
-                                if vendors:
-                                    matched_vendor = vendors[0]
-                                    break
-                
-                # Strategy 3: Try vendor number match (extracted value might BE the vendor code)
-                if not matched_vendor:
-                    vendor_resp = await client.get(
-                        f"https://api.businesscentral.dynamics.com/v2.0/{PROD_TENANT_ID}/{PROD_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
-                        headers={"Authorization": f"Bearer {token}"},
-                        params={"$filter": f"number eq '{vendor_name}'"}
-                    )
-                    vendor_search_attempts.append(f"Search 3: vendor number = '{vendor_name}'")
-                    
-                    if vendor_resp.status_code == 200:
-                        vendors = vendor_resp.json().get("value", [])
-                        if vendors:
-                            matched_vendor = vendors[0]
-                
-                if matched_vendor:
+                if unified_result.get("matched"):
+                    best_match = unified_result.get("best_match", {})
                     preview_result["validation"]["checks"].append({
                         "check": "vendor_match",
                         "passed": True,
-                        "details": f"Found vendor: {matched_vendor.get('displayName')} ({matched_vendor.get('number')})",
-                        "search_attempts": vendor_search_attempts
+                        "details": f"Found vendor via {unified_result.get('source')}: {best_match.get('name')} (score: {unified_result.get('score', 0):.0%})",
+                        "sources_checked": unified_result.get("sources_checked", []),
+                        "is_freight_carrier": unified_result.get("is_freight_carrier", False)
                     })
-                    preview_result["extracted_data"]["vendor_number"] = matched_vendor.get("number")
-                    preview_result["extracted_data"]["vendor_id"] = matched_vendor.get("id")
-                    preview_result["extracted_data"]["vendor_display_name"] = matched_vendor.get("displayName")
+                    preview_result["extracted_data"]["vendor_number"] = best_match.get("vendor_number") or unified_result.get("bc_vendor_number")
+                    preview_result["extracted_data"]["vendor_id"] = best_match.get("vendor_id") or unified_result.get("bc_vendor_id")
+                    preview_result["extracted_data"]["vendor_display_name"] = best_match.get("name")
+                    preview_result["extracted_data"]["is_freight_carrier"] = unified_result.get("is_freight_carrier", False)
+                    preview_result["extracted_data"]["vendor_match_source"] = unified_result.get("source")
                 else:
+                    # Show what sources were checked and any candidates found
+                    all_matches = unified_result.get("all_matches", [])
+                    candidate_info = ""
+                    if all_matches:
+                        top = all_matches[0]
+                        candidate_info = f" Best candidate: {top.get('name')} ({top.get('score', 0):.0%}) from {top.get('source')}"
+                    
                     preview_result["validation"]["checks"].append({
                         "check": "vendor_match",
                         "passed": False,
-                        "details": f"No vendor found matching '{vendor_name}' after {len(vendor_search_attempts)} attempts",
-                        "search_attempts": vendor_search_attempts
+                        "details": f"No vendor found matching '{vendor_name}' (checked: {', '.join(unified_result.get('sources_checked', []))}).{candidate_info}",
+                        "sources_checked": unified_result.get("sources_checked", []),
+                        "candidates": [{"name": m.get("name"), "score": m.get("score"), "source": m.get("source")} for m in all_matches[:3]]
                     })
             
             # =============== FREIGHT DIRECTION DETECTION ===============

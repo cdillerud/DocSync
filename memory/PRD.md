@@ -1579,3 +1579,58 @@ Added the ability to add custom document types that don't exist in the default d
 ---
 
 *Last Updated: February 27, 2026*
+
+---
+
+## Session Update: March 3, 2026 - Unified Vendor Intelligence Integration
+
+### Completed
+
+#### Unified Vendor Intelligence Service Integration (P0)
+- **Objective**: Replace scattered vendor matching logic with a unified service that queries all data sources
+- **Implementation**: 
+  1. Integrated `unified_vendor_matcher.py` into the main document processing pipeline
+  2. Updated `validate_bc_match()` function to use `match_vendor_unified()` instead of the previous `match_vendor_in_bc()`
+  3. Updated `preview-post` endpoint to use the unified matcher, removing ~100 lines of inline vendor matching strategies
+
+**Data Sources Now Unified:**
+| Source | Priority | Description |
+|--------|----------|-------------|
+| Document History | 1 (fastest) | Previously matched vendors from `hub_documents` and `vendor_matches` collections |
+| Spiro CRM | 2 | 11,700+ companies with industry classification |
+| Business Central | 3 | Authoritative vendor master data |
+| SharePoint Patterns | 4 | Historical document patterns |
+
+**Key Features:**
+- **Multi-source matching**: Checks all sources and returns best match with attribution
+- **Freight carrier detection**: Automatically identifies if vendor is a freight carrier (from name or Spiro industry)
+- **Match caching**: Results are cached in memory and persisted to `vendor_matches` collection
+- **Observability**: Returns `sources_checked`, `all_matches`, and `is_freight_carrier` for debugging
+
+**API Endpoint:**
+- `POST /api/vendors/match` - Unified vendor matching endpoint
+  - Parameters: `vendor_name` (required), `min_score` (default: 0.7)
+  - Returns: Complete match result with best match, all candidates, and source attribution
+
+### Files Modified
+- `/app/backend/server.py` - Updated `validate_bc_match()` and `preview-post` endpoint to use unified matcher
+- `/app/backend/services/unified_vendor_matcher.py` - Existing service (no changes needed)
+
+### Test Results
+- `POST /api/vendors/match` with "Tumalo Creek" → Matched via SharePoint patterns (73.7% score)
+- `POST /api/vendors/match` with "Ball Corporation" → Matched via Spiro CRM (100% score)
+
+### Benefits
+1. **Single source of truth**: All vendor matching now goes through one service
+2. **Better accuracy**: Leverages data from 4 sources instead of just BC
+3. **Maintainability**: Vendor matching rules in one place instead of scattered across endpoints
+4. **Observability**: Clear logging of which sources were checked and what was found
+
+### Known Limitations
+- BC token authentication requires production credentials (preview environment shows mock data)
+- Spiro CRM sync needs to be running for latest company data
+
+---
+
+*Last Updated: March 3, 2026*
+

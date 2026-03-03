@@ -6716,31 +6716,122 @@ async def preview_post_to_bc(doc_id: str, request: DryRunPreviewRequest = None):
                 "currency": doc.get("currency", "USD")
             }
             
-            # Validate vendor exists in BC
+            # Validate vendor exists in BC - use smart matching
             if vendor_name:
-                vendor_resp = await client.get(
-                    f"https://api.businesscentral.dynamics.com/v2.0/{PROD_TENANT_ID}/{PROD_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
-                    headers={"Authorization": f"Bearer {token}"},
-                    params={"$filter": f"contains(displayName, '{vendor_name.split()[0]}')"}
-                )
+                matched_vendor = None
+                vendor_search_attempts = []
                 
-                if vendor_resp.status_code == 200:
-                    vendors = vendor_resp.json().get("value", [])
-                    if vendors:
-                        matched_vendor = vendors[0]
-                        preview_result["validation"]["checks"].append({
-                            "check": "vendor_match",
-                            "passed": True,
-                            "details": f"Found vendor: {matched_vendor.get('displayName')} ({matched_vendor.get('number')})"
-                        })
-                        preview_result["extracted_data"]["vendor_number"] = matched_vendor.get("number")
-                        preview_result["extracted_data"]["vendor_id"] = matched_vendor.get("id")
+                # Known vendor aliases (AI extractions -> BC names)
+                VENDOR_ALIASES = {
+                    "tumaloc": "tumalo",
+                    "tumalo creek": "tumalo",
+                    "tumalo creek transportation": "TUMALOC",  # BC vendor number
+                    "ball": "ball",
+                    "ball corporation": "ball",
+                    "canpack": "canpack",
+                    "anchor": "anchor",
+                    "oi": "owens",
+                    "o-i": "owens",
+                    "fedex": "fedex",
+                    "ups": "ups",
+                    "xpo": "xpo",
+                }
+                
+                # Strategy 1: Check if we have a direct alias mapping to BC vendor number
+                vendor_lower = vendor_name.lower().strip()
+                if vendor_lower in VENDOR_ALIASES:
+                    alias_value = VENDOR_ALIASES[vendor_lower]
+                    # If alias is ALL CAPS, it's a vendor number
+                    if alias_value.isupper():
+                        vendor_resp = await client.get(
+                            f"https://api.businesscentral.dynamics.com/v2.0/{PROD_TENANT_ID}/{PROD_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
+                            headers={"Authorization": f"Bearer {token}"},
+                            params={"$filter": f"number eq '{alias_value}'"}
+                        )
+                        vendor_search_attempts.append(f"Search 1: alias '{vendor_lower}' -> vendor# '{alias_value}'")
                     else:
-                        preview_result["validation"]["checks"].append({
-                            "check": "vendor_match",
-                            "passed": False,
-                            "details": f"No vendor found matching '{vendor_name}'"
-                        })
+                        vendor_resp = await client.get(
+                            f"https://api.businesscentral.dynamics.com/v2.0/{PROD_TENANT_ID}/{PROD_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
+                            headers={"Authorization": f"Bearer {token}"},
+                            params={"$filter": f"contains(tolower(displayName), '{alias_value}')"}
+                        )
+                        vendor_search_attempts.append(f"Search 1: alias '{vendor_lower}' -> name contains '{alias_value}'")
+                    
+                    if vendor_resp.status_code == 200:
+                        vendors = vendor_resp.json().get("value", [])
+                        if vendors:
+                            matched_vendor = vendors[0]
+                
+                # Strategy 2: Try direct contains search with first word of name
+                if not matched_vendor:
+                    search_term = vendor_name.split()[0] if vendor_name else ""
+                    vendor_resp = await client.get(
+                        f"https://api.businesscentral.dynamics.com/v2.0/{PROD_TENANT_ID}/{PROD_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
+                        headers={"Authorization": f"Bearer {token}"},
+                        params={"$filter": f"contains(tolower(displayName), '{search_term.lower()}')"}
+                    )
+                    vendor_search_attempts.append(f"Search 2: displayName contains '{search_term}'")
+                    
+                    if vendor_resp.status_code == 200:
+                        vendors = vendor_resp.json().get("value", [])
+                        if vendors:
+                            matched_vendor = vendors[0]
+                
+                # Strategy 3: Try partial alias match
+                if not matched_vendor:
+                    for alias, bc_name in VENDOR_ALIASES.items():
+                        if alias in vendor_lower:
+                            if bc_name.isupper():
+                                vendor_resp = await client.get(
+                                    f"https://api.businesscentral.dynamics.com/v2.0/{PROD_TENANT_ID}/{PROD_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
+                                    headers={"Authorization": f"Bearer {token}"},
+                                    params={"$filter": f"number eq '{bc_name}'"}
+                                )
+                            else:
+                                vendor_resp = await client.get(
+                                    f"https://api.businesscentral.dynamics.com/v2.0/{PROD_TENANT_ID}/{PROD_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
+                                    headers={"Authorization": f"Bearer {token}"},
+                                    params={"$filter": f"contains(tolower(displayName), '{bc_name}')"}
+                                )
+                            vendor_search_attempts.append(f"Search 3: partial alias '{alias}' -> '{bc_name}'")
+                            
+                            if vendor_resp.status_code == 200:
+                                vendors = vendor_resp.json().get("value", [])
+                                if vendors:
+                                    matched_vendor = vendors[0]
+                                    break
+                
+                # Strategy 3: Try vendor number match (extracted value might BE the vendor code)
+                if not matched_vendor:
+                    vendor_resp = await client.get(
+                        f"https://api.businesscentral.dynamics.com/v2.0/{PROD_TENANT_ID}/{PROD_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
+                        headers={"Authorization": f"Bearer {token}"},
+                        params={"$filter": f"number eq '{vendor_name}'"}
+                    )
+                    vendor_search_attempts.append(f"Search 3: vendor number = '{vendor_name}'")
+                    
+                    if vendor_resp.status_code == 200:
+                        vendors = vendor_resp.json().get("value", [])
+                        if vendors:
+                            matched_vendor = vendors[0]
+                
+                if matched_vendor:
+                    preview_result["validation"]["checks"].append({
+                        "check": "vendor_match",
+                        "passed": True,
+                        "details": f"Found vendor: {matched_vendor.get('displayName')} ({matched_vendor.get('number')})",
+                        "search_attempts": vendor_search_attempts
+                    })
+                    preview_result["extracted_data"]["vendor_number"] = matched_vendor.get("number")
+                    preview_result["extracted_data"]["vendor_id"] = matched_vendor.get("id")
+                    preview_result["extracted_data"]["vendor_display_name"] = matched_vendor.get("displayName")
+                else:
+                    preview_result["validation"]["checks"].append({
+                        "check": "vendor_match",
+                        "passed": False,
+                        "details": f"No vendor found matching '{vendor_name}' after {len(vendor_search_attempts)} attempts",
+                        "search_attempts": vendor_search_attempts
+                    })
             
             # =============== FREIGHT DIRECTION DETECTION ===============
             # Outbound freight: BOL/Order matches a Sales Order (shipping TO customer)

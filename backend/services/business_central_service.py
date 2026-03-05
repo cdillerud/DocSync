@@ -30,13 +30,19 @@ logger = logging.getLogger(__name__)
 # CONFIGURATION
 # =============================================================================
 
-# BC Credentials - prefer BC_* then fallback to BC_SANDBOX_*
+# SANDBOX BC Credentials (for WRITES - creating invoices, posting)
 BC_CLIENT_ID = os.environ.get('BC_CLIENT_ID') or os.environ.get('BC_SANDBOX_CLIENT_ID', '')
 BC_CLIENT_SECRET = os.environ.get('BC_CLIENT_SECRET') or os.environ.get('BC_SANDBOX_CLIENT_SECRET', '')
 BC_TENANT_ID = os.environ.get('TENANT_ID') or os.environ.get('BC_TENANT_ID') or os.environ.get('BC_SANDBOX_TENANT_ID', '')
 BC_ENVIRONMENT = os.environ.get('BC_ENVIRONMENT') or os.environ.get('BC_SANDBOX_ENVIRONMENT', 'Sandbox')
 BC_COMPANY_ID = os.environ.get('BC_COMPANY_ID', '')
 BC_COMPANY_NAME = os.environ.get('BC_COMPANY_NAME') or os.environ.get('BC_SANDBOX_COMPANY_NAME', '')
+
+# PRODUCTION BC Credentials (for READS - validation, vendor lookup, PO matching)
+BC_PROD_CLIENT_ID = os.environ.get('BC_PROD_CLIENT_ID', '')
+BC_PROD_CLIENT_SECRET = os.environ.get('BC_PROD_CLIENT_SECRET', '')
+BC_PROD_TENANT_ID = os.environ.get('BC_PROD_TENANT_ID', '')
+BC_PROD_ENVIRONMENT = os.environ.get('BC_PROD_ENVIRONMENT', 'Production')
 
 # Mock mode control
 BC_MOCK_MODE = os.environ.get('BC_MOCK_MODE', 'false').lower() == 'true'
@@ -49,15 +55,27 @@ BC_WRITEBACK_LINK_ENABLED = os.environ.get('BC_WRITEBACK_LINK_ENABLED', 'true').
 # Changed: DEMO_MODE=false now means use real BC
 USE_MOCK = BC_MOCK_MODE or (not BC_CLIENT_ID) or (not BC_CLIENT_SECRET) or (not BC_TENANT_ID)
 
+# Check if Production credentials are available for read operations
+USE_PROD_FOR_READS = bool(BC_PROD_CLIENT_ID and BC_PROD_CLIENT_SECRET and BC_PROD_TENANT_ID)
+
 if USE_MOCK:
     logger.info("BusinessCentralService: MOCK MODE (BC_CLIENT_ID=%s, BC_CLIENT_SECRET=%s, BC_TENANT_ID=%s)", 
                 bool(BC_CLIENT_ID), bool(BC_CLIENT_SECRET), bool(BC_TENANT_ID))
 
+if USE_PROD_FOR_READS:
+    logger.info("BusinessCentralService: Using PRODUCTION BC for reads (tenant=%s, env=%s)", 
+                BC_PROD_TENANT_ID[:20] + "..." if BC_PROD_TENANT_ID else "N/A", BC_PROD_ENVIRONMENT)
+
 BC_API_BASE = "https://api.businesscentral.dynamics.com/v2.0"
 BC_REQUEST_TIMEOUT = 30.0
 
-# Token cache
+# Token caches - separate for sandbox and production
 _token_cache = {
+    "access_token": None,
+    "expires_at": 0
+}
+
+_prod_token_cache = {
     "access_token": None,
     "expires_at": 0
 }
@@ -126,6 +144,75 @@ async def get_bc_token() -> str:
         return _token_cache["access_token"]
 
 
+async def get_bc_prod_token() -> str:
+    """
+    Get an access token for PRODUCTION BC environment (for READ operations only).
+    Uses separate token cache from sandbox.
+    """
+    if not USE_PROD_FOR_READS:
+        logger.warning("Production BC credentials not configured, falling back to sandbox token")
+        return await get_bc_token()
+    
+    # Check cache
+    if _prod_token_cache["access_token"] and _prod_token_cache["expires_at"] > datetime.now(timezone.utc).timestamp():
+        return _prod_token_cache["access_token"]
+    
+    # Fetch new token for Production
+    token_url = f"https://login.microsoftonline.com/{BC_PROD_TENANT_ID}/oauth2/v2.0/token"
+    
+    async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+        resp = await client.post(
+            token_url,
+            data={
+                "grant_type": "client_credentials",
+                "client_id": BC_PROD_CLIENT_ID,
+                "client_secret": BC_PROD_CLIENT_SECRET,
+                "scope": "https://api.businesscentral.dynamics.com/.default"
+            }
+        )
+        
+        if resp.status_code != 200:
+            logger.error("Failed to get Production BC token: %s - %s", resp.status_code, resp.text)
+            raise Exception(f"Failed to get Production BC token: {resp.status_code}")
+        
+        data = resp.json()
+        _prod_token_cache["access_token"] = data["access_token"]
+        _prod_token_cache["expires_at"] = datetime.now(timezone.utc).timestamp() + data.get("expires_in", 3600) - 60
+        
+        return _prod_token_cache["access_token"]
+
+
+def get_bc_read_config():
+    """
+    Get the BC configuration for READ operations.
+    Returns Production config if available, otherwise Sandbox.
+    """
+    if USE_PROD_FOR_READS:
+        return {
+            "tenant_id": BC_PROD_TENANT_ID,
+            "environment": BC_PROD_ENVIRONMENT,
+            "label": f"Production ({BC_PROD_ENVIRONMENT})"
+        }
+    else:
+        return {
+            "tenant_id": BC_TENANT_ID,
+            "environment": BC_ENVIRONMENT,
+            "label": f"Sandbox ({BC_ENVIRONMENT})"
+        }
+
+
+def get_bc_write_config():
+    """
+    Get the BC configuration for WRITE operations.
+    Always returns Sandbox config.
+    """
+    return {
+        "tenant_id": BC_TENANT_ID,
+        "environment": BC_ENVIRONMENT,
+        "label": f"Sandbox ({BC_ENVIRONMENT})"
+    }
+
+
 async def get_bc_company_id() -> str:
     """Get the BC company ID. Uses configured value or auto-detects."""
     if BC_COMPANY_ID:
@@ -185,6 +272,31 @@ class BusinessCentralService:
         
         return self._company_id
     
+    async def _get_company_id_for_env(self, tenant_id: str, environment: str, token: str) -> str:
+        """Get company ID for a specific BC environment."""
+        # Use cache key based on environment
+        cache_key = f"_company_id_{tenant_id[:8]}_{environment}"
+        cached = getattr(self, cache_key, None)
+        if cached:
+            return cached
+        
+        url = f"{BC_API_BASE}/{tenant_id}/{environment}/api/v2.0/companies"
+        
+        async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+            resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+            
+            if resp.status_code != 200:
+                logger.error("Failed to get companies for %s/%s: %s", tenant_id[:8], environment, resp.text)
+                raise Exception(f"Failed to get BC companies: {resp.status_code}")
+            
+            companies = resp.json().get("value", [])
+            if not companies:
+                raise Exception(f"No BC companies found in {environment}")
+            
+            company_id = companies[0]["id"]
+            setattr(self, cache_key, company_id)
+            return company_id
+    
     # =========================================================================
     # VENDOR METHODS
     # =========================================================================
@@ -192,6 +304,7 @@ class BusinessCentralService:
     async def get_vendors(self, filter_text: Optional[str] = None, limit: int = 50) -> Dict[str, Any]:
         """
         Get vendors from BC, optionally filtered by name/number.
+        Uses PRODUCTION BC for reads if configured.
         
         Args:
             filter_text: Optional text to filter vendors by name or number
@@ -211,11 +324,12 @@ class BusinessCentralService:
                 "mock": True
             }
         
-        # Real BC API call
-        token = await get_bc_token()
-        company_id = await self._get_company_id()
+        # Use Production BC for reads if available
+        read_config = get_bc_read_config()
+        token = await get_bc_prod_token() if USE_PROD_FOR_READS else await get_bc_token()
+        company_id = await self._get_company_id_for_env(read_config["tenant_id"], read_config["environment"], token)
         
-        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors"
+        url = f"{BC_API_BASE}/{read_config['tenant_id']}/{read_config['environment']}/api/v2.0/companies({company_id})/vendors"
         params = {"$select": "id,number,displayName,email,phoneNumber", "$top": str(limit)}
         
         if filter_text:
@@ -241,7 +355,8 @@ class BusinessCentralService:
                         return {
                             "vendors": vendors[:limit],
                             "total": len(vendors),
-                            "mock": False
+                            "mock": False,
+                            "bc_environment": read_config["label"]
                         }
                 
                 logger.error("Failed to get vendors: %s", resp.text)
@@ -253,7 +368,8 @@ class BusinessCentralService:
             return {
                 "vendors": vendors,
                 "total": len(vendors),
-                "mock": False
+                "mock": False,
+                "bc_environment": read_config["label"]
             }
     
     async def get_vendor_by_id(self, vendor_id: str) -> Optional[Dict[str, Any]]:

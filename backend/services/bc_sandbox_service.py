@@ -39,13 +39,26 @@ logger = logging.getLogger(__name__)
 # CONFIGURATION
 # =============================================================================
 
-# BC Sandbox credentials - use provided app registration
+# BC Sandbox credentials - for WRITE operations
 BC_SANDBOX_CLIENT_ID = os.environ.get('BC_SANDBOX_CLIENT_ID', '22c4e601-51e8-4305-bd63-d4aa7d19defd')
 BC_SANDBOX_TENANT_ID = os.environ.get('BC_SANDBOX_TENANT_ID', '***REMOVED_TENANT_ID***')
 # Check both env var names for the secret (BC_SANDBOX_CLIENT_SECRET or BC_CLIENT_SECRET)
 BC_SANDBOX_CLIENT_SECRET = os.environ.get('BC_SANDBOX_CLIENT_SECRET') or os.environ.get('BC_CLIENT_SECRET', '')
 BC_SANDBOX_ENVIRONMENT = os.environ.get('BC_SANDBOX_ENVIRONMENT', 'Sandbox')
 BC_SANDBOX_COMPANY_NAME = os.environ.get('BC_SANDBOX_COMPANY_NAME', '')
+
+# BC Production credentials - for READ operations (validation, vendor lookup)
+BC_PROD_CLIENT_ID = os.environ.get('BC_PROD_CLIENT_ID', '')
+BC_PROD_CLIENT_SECRET = os.environ.get('BC_PROD_CLIENT_SECRET', '')
+BC_PROD_TENANT_ID = os.environ.get('BC_PROD_TENANT_ID', '')
+BC_PROD_ENVIRONMENT = os.environ.get('BC_PROD_ENVIRONMENT', 'Production')
+
+# Check if Production credentials are configured
+USE_PROD_FOR_READS = bool(BC_PROD_CLIENT_ID and BC_PROD_CLIENT_SECRET and BC_PROD_TENANT_ID)
+
+if USE_PROD_FOR_READS:
+    logger.info("BC Sandbox Service: Using PRODUCTION BC for reads (tenant=%s, env=%s)", 
+                BC_PROD_TENANT_ID[:20] + "..." if BC_PROD_TENANT_ID else "N/A", BC_PROD_ENVIRONMENT)
 
 # Demo mode for testing without real BC connection
 DEMO_MODE = os.environ.get('DEMO_MODE', 'true').lower() == 'true'
@@ -196,10 +209,15 @@ _token_cache: Dict[str, Any] = {
     "expires_at": None
 }
 
+_prod_token_cache: Dict[str, Any] = {
+    "token": None,
+    "expires_at": None
+}
+
 
 async def get_bc_sandbox_token() -> str:
     """
-    Get OAuth2 token for BC sandbox API access.
+    Get OAuth2 token for BC sandbox API access (for WRITE operations).
     Uses client credentials flow with caching.
     
     Returns:
@@ -262,6 +280,71 @@ async def get_bc_sandbox_token() -> str:
         raise BCAuthenticationError(f"BC authentication request failed: {str(e)}")
 
 
+async def get_bc_prod_token() -> str:
+    """
+    Get OAuth2 token for BC PRODUCTION API access (for READ operations).
+    Uses client credentials flow with caching.
+    
+    Returns:
+        Access token string
+        
+    Raises:
+        BCAuthenticationError: If authentication fails
+    """
+    global _prod_token_cache
+    
+    # If Production not configured, fall back to sandbox
+    if not USE_PROD_FOR_READS:
+        logger.debug("BC Production not configured, using sandbox token for reads")
+        return await get_bc_sandbox_token()
+    
+    # Check cache
+    if _prod_token_cache["token"] and _prod_token_cache["expires_at"]:
+        if datetime.now(timezone.utc).timestamp() < _prod_token_cache["expires_at"] - 60:
+            return _prod_token_cache["token"]
+    
+    # Request new token for Production
+    token_url = f"https://login.microsoftonline.com/{BC_PROD_TENANT_ID}/oauth2/v2.0/token"
+    
+    start_time = time.time()
+    try:
+        async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+            response = await client.post(
+                token_url,
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": BC_PROD_CLIENT_ID,
+                    "client_secret": BC_PROD_CLIENT_SECRET,
+                    "scope": "https://api.businesscentral.dynamics.com/.default"
+                }
+            )
+            
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            
+            if response.status_code != 200:
+                error_data = response.json() if response.content else {}
+                logger.error(
+                    "BC Production auth failed: status=%d, error=%s, timing=%dms",
+                    response.status_code, error_data.get("error_description", "Unknown"), elapsed_ms
+                )
+                raise BCAuthenticationError(
+                    f"BC Production authentication failed: {error_data.get('error_description', 'Unknown error')}",
+                    status_code=response.status_code,
+                    details=error_data
+                )
+            
+            data = response.json()
+            _prod_token_cache["token"] = data["access_token"]
+            _prod_token_cache["expires_at"] = datetime.now(timezone.utc).timestamp() + data.get("expires_in", 3600)
+            
+            logger.info("BC Production: Token acquired successfully, timing=%dms", elapsed_ms)
+            return _prod_token_cache["token"]
+            
+    except httpx.RequestError as e:
+        logger.error("BC Production auth request error: %s", str(e))
+        raise BCAuthenticationError(f"BC Production authentication request failed: {str(e)}")
+
+
 async def _get_companies() -> List[Dict]:
     """Get list of companies from BC sandbox."""
     if DEMO_MODE or not BC_SANDBOX_CLIENT_SECRET:
@@ -291,6 +374,34 @@ async def _get_company_id() -> str:
     
     # Return first company
     return companies[0]["id"]
+
+
+# Cache for production company IDs
+_prod_company_cache: Dict[str, str] = {}
+
+async def _get_company_id_for_env(tenant_id: str, environment: str, token: str) -> str:
+    """Get company ID for a specific BC environment (used for Production reads)."""
+    cache_key = f"{tenant_id[:8]}_{environment}"
+    
+    if cache_key in _prod_company_cache:
+        return _prod_company_cache[cache_key]
+    
+    url = f"{BC_API_BASE}/{tenant_id}/{environment}/api/v2.0/companies"
+    
+    async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+        response = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+        if response.status_code != 200:
+            logger.error("Failed to get companies for %s/%s: %s", tenant_id[:8], environment, response.text)
+            raise BCSandboxError(f"Failed to get BC companies: {response.status_code}")
+        
+        companies = response.json().get("value", [])
+        if not companies:
+            raise BCSandboxError(f"No companies found in {environment}")
+        
+        company_id = companies[0]["id"]
+        _prod_company_cache[cache_key] = company_id
+        logger.info("BC %s: Found company %s", environment, companies[0].get("displayName", company_id[:8]))
+        return company_id
 
 
 # =============================================================================
@@ -454,6 +565,7 @@ async def get_vendor(vendor_number: str) -> BCLookupResult:
 async def search_vendors_by_name(name_fragment: str, limit: int = 20) -> BCLookupResult:
     """
     Search vendors by name fragment (case-insensitive contains search).
+    Uses PRODUCTION BC for reads if configured.
     
     Args:
         name_fragment: Partial vendor name to search for
@@ -463,30 +575,42 @@ async def search_vendors_by_name(name_fragment: str, limit: int = 20) -> BCLooku
         BCLookupResult with list of matching vendors
     """
     start_time = time.time()
+    
+    # Determine which BC environment to use
+    if USE_PROD_FOR_READS:
+        bc_tenant = BC_PROD_TENANT_ID
+        bc_env = BC_PROD_ENVIRONMENT
+        env_label = "Production"
+    else:
+        bc_tenant = BC_SANDBOX_TENANT_ID
+        bc_env = BC_SANDBOX_ENVIRONMENT
+        env_label = "Sandbox"
+    
     endpoint = f"vendors?$filter=contains(displayName,'{name_fragment}')"
     
-    logger.info("BC Sandbox: search_vendors_by_name called, fragment=%s", name_fragment)
+    logger.info("BC %s: search_vendors_by_name called, fragment=%s", env_label, name_fragment)
     
     # Demo mode
     if DEMO_MODE or not BC_SANDBOX_CLIENT_SECRET:
         elapsed_ms = int((time.time() - start_time) * 1000)
         matches = [v for v in MOCK_VENDORS if name_fragment.lower() in v["displayName"].lower()][:limit]
         logger.info(
-            "BC Sandbox [DEMO]: search_vendors SUCCESS, fragment=%s, matches=%d, timing=%dms",
-            name_fragment, len(matches), elapsed_ms
+            "BC %s [DEMO]: search_vendors SUCCESS, fragment=%s, matches=%d, timing=%dms",
+            env_label, name_fragment, len(matches), elapsed_ms
         )
         return BCLookupResult(
             status=BCLookupStatus.DEMO_MODE,
-            data={"vendors": matches, "count": len(matches)},
+            data={"vendors": matches, "count": len(matches), "bc_environment": env_label},
             timing_ms=elapsed_ms,
             endpoint=endpoint,
             response_size=len(str(matches))
         )
     
     try:
-        token = await get_bc_sandbox_token()
-        company_id = await _get_company_id()
-        url = f"{BC_API_BASE}/{BC_SANDBOX_TENANT_ID}/{BC_SANDBOX_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors"
+        # Use Production token if configured
+        token = await get_bc_prod_token() if USE_PROD_FOR_READS else await get_bc_sandbox_token()
+        company_id = await _get_company_id_for_env(bc_tenant, bc_env, token) if USE_PROD_FOR_READS else await _get_company_id()
+        url = f"{BC_API_BASE}/{bc_tenant}/{bc_env}/api/v2.0/companies({company_id})/vendors"
         
         async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
             response = await client.get(
@@ -502,8 +626,8 @@ async def search_vendors_by_name(name_fragment: str, limit: int = 20) -> BCLooku
             response_size = len(response.content)
             
             logger.info(
-                "BC Sandbox: search_vendors response, fragment=%s, status=%d, size=%d bytes, timing=%dms",
-                name_fragment, response.status_code, response_size, elapsed_ms
+                "BC %s: search_vendors response, fragment=%s, status=%d, size=%d bytes, timing=%dms",
+                env_label, name_fragment, response.status_code, response_size, elapsed_ms
             )
             
             if response.status_code == 200:
@@ -511,7 +635,7 @@ async def search_vendors_by_name(name_fragment: str, limit: int = 20) -> BCLooku
                 vendors = data.get("value", [])
                 return BCLookupResult(
                     status=BCLookupStatus.SUCCESS,
-                    data={"vendors": vendors, "count": len(vendors)},
+                    data={"vendors": vendors, "count": len(vendors), "bc_environment": env_label},
                     timing_ms=elapsed_ms,
                     endpoint=endpoint,
                     response_size=response_size
@@ -527,7 +651,7 @@ async def search_vendors_by_name(name_fragment: str, limit: int = 20) -> BCLooku
                 
     except Exception as e:
         elapsed_ms = int((time.time() - start_time) * 1000)
-        logger.error("BC Sandbox: search_vendors error, fragment=%s, error=%s", name_fragment, str(e))
+        logger.error("BC %s: search_vendors error, fragment=%s, error=%s", env_label, name_fragment, str(e))
         return BCLookupResult(
             status=BCLookupStatus.ERROR,
             error=str(e),

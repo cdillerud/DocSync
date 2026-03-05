@@ -304,18 +304,42 @@ class UnifiedVendorMatcher:
                             "method": "bc_vendor_number"
                         }
                 
-                # Try display name search
+                # Try display name search - BC's OData is case-sensitive quirky
+                # Try multiple filter strategies
                 first_word = vendor_name.split()[0] if vendor_name else ""
                 if len(first_word) >= 3:
+                    vendors = []
+                    
+                    # Strategy 1: Try exact case contains
                     resp = await client.get(
                         f"https://api.businesscentral.dynamics.com/v2.0/{self.bc_tenant_id}/{self.bc_environment}/api/v2.0/companies({company_id})/vendors",
                         headers={"Authorization": f"Bearer {token}"},
-                        params={"$filter": f"contains(tolower(displayName), '{first_word.lower()}')"}
+                        params={"$filter": f"contains(displayName, '{first_word}')"}
                     )
-                    
                     if resp.status_code == 200:
                         vendors = resp.json().get("value", [])
-                        
+                    
+                    # Strategy 2: Try Title case if no results
+                    if not vendors:
+                        resp = await client.get(
+                            f"https://api.businesscentral.dynamics.com/v2.0/{self.bc_tenant_id}/{self.bc_environment}/api/v2.0/companies({company_id})/vendors",
+                            headers={"Authorization": f"Bearer {token}"},
+                            params={"$filter": f"contains(displayName, '{first_word.title()}')"}
+                        )
+                        if resp.status_code == 200:
+                            vendors = resp.json().get("value", [])
+                    
+                    # Strategy 3: Try lowercase with tolower
+                    if not vendors:
+                        resp = await client.get(
+                            f"https://api.businesscentral.dynamics.com/v2.0/{self.bc_tenant_id}/{self.bc_environment}/api/v2.0/companies({company_id})/vendors",
+                            headers={"Authorization": f"Bearer {token}"},
+                            params={"$filter": f"contains(tolower(displayName), '{first_word.lower()}')"}
+                        )
+                        if resp.status_code == 200:
+                            vendors = resp.json().get("value", [])
+                    
+                    if vendors:
                         best = None
                         best_score = 0.0
                         

@@ -139,7 +139,8 @@ SALES_EMAIL_POLLING_INTERVAL_MINUTES = int(os.environ.get('SALES_EMAIL_POLLING_I
 EMAIL_CLIENT_ID = os.environ.get('EMAIL_CLIENT_ID', '')
 EMAIL_CLIENT_SECRET = os.environ.get('EMAIL_CLIENT_SECRET', '')
 TENANT_ID = os.environ.get('TENANT_ID', '')
-BC_ENVIRONMENT = os.environ.get('BC_ENVIRONMENT', '')
+BC_ENVIRONMENT = os.environ.get('BC_ENVIRONMENT', '')  # For WRITES (Sandbox)
+BC_READ_ENVIRONMENT = os.environ.get('BC_PROD_ENVIRONMENT', os.environ.get('BC_ENVIRONMENT', ''))  # For READS (Production)
 BC_COMPANY_NAME = os.environ.get('BC_COMPANY_NAME', '')
 BC_CLIENT_ID = os.environ.get('BC_CLIENT_ID', '')
 BC_CLIENT_SECRET = os.environ.get('BC_CLIENT_SECRET', '')
@@ -468,13 +469,14 @@ async def get_bc_companies():
         return MOCK_COMPANIES
     token = await get_bc_token()
     async with httpx.AsyncClient(timeout=30.0) as c:
+        # Use BC_READ_ENVIRONMENT for reads (Production)
         resp = await c.get(
-            f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies",
+            f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies",
             headers={"Authorization": f"Bearer {token}"})
         if resp.status_code == 404:
             # BC returns XML for missing environments
             if "NoEnvironment" in resp.text:
-                raise Exception(f"BC environment '{BC_ENVIRONMENT}' does not exist. Check the environment name in Settings.")
+                raise Exception(f"BC environment '{BC_READ_ENVIRONMENT}' does not exist. Check the environment name in Settings.")
             raise Exception(f"BC API not found (404): {resp.text[:200]}")
         if resp.status_code in (401, 403):
             raise Exception(f"BC permission denied (HTTP {resp.status_code}). Ensure the app is registered in BC under 'Microsoft Entra Applications' with D365 AUTOMATION role.")
@@ -498,7 +500,8 @@ async def get_bc_sales_orders(order_no: str = None):
         raise Exception("No BC companies found")
     company_id = companies[0]["id"]
     async with httpx.AsyncClient(timeout=30.0) as c:
-        url = f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/salesOrders"
+        # Use BC_READ_ENVIRONMENT for reads (Production)
+        url = f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})/salesOrders"
         if order_no:
             url += f"?$filter=contains(number,'{order_no}')"
         resp = await c.get(url, headers={"Authorization": f"Bearer {token}"})
@@ -4159,23 +4162,24 @@ async def match_vendor_in_bc(
         vendors = []
         
         # Strategy 1: Try server-side search with contains() filter
+        # Use BC_READ_ENVIRONMENT for reads (Production)
         if primary_search_term and len(primary_search_term) >= 4:
             # Use OData $filter to narrow down results server-side
             filter_query = f"contains(displayName, '{primary_search_term}')"
             resp = await c.get(
-                f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
+                f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
                 headers={"Authorization": f"Bearer {token}"},
                 params={"$select": "id,number,displayName", "$filter": filter_query, "$top": "100"}
             )
             
             if resp.status_code == 200:
                 vendors = resp.json().get("value", [])
-                logger.info("BC vendor search for '%s' returned %d candidates", primary_search_term, len(vendors))
+                logger.info("BC vendor search for '%s' returned %d candidates (env=%s)", primary_search_term, len(vendors), BC_READ_ENVIRONMENT)
         
         # Strategy 2: If no results from filtered search, fall back to broader fetch
         if not vendors:
             resp = await c.get(
-                f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
+                f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
                 headers={"Authorization": f"Bearer {token}"},
                 params={"$select": "id,number,displayName", "$top": "1000"}
             )
@@ -4296,8 +4300,9 @@ async def match_customer_in_bc(
     normalized_input = normalize_vendor_name(customer_name)
     
     async with httpx.AsyncClient(timeout=30.0) as c:
+        # Use BC_READ_ENVIRONMENT for reads (Production)
         resp = await c.get(
-            f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/customers",
+            f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})/customers",
             headers={"Authorization": f"Bearer {token}"},
             params={"$select": "id,number,displayName", "$top": "500"}
         )
@@ -4561,11 +4566,11 @@ async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: d
                 
                 # else PO_NOT_REQUIRED - skip PO validation entirely
                 
-                # Duplicate invoice check
+                # Duplicate invoice check - use Production for read
                 invoice_number = normalized_fields.get("invoice_number") or extracted_fields.get("invoice_number")
                 if invoice_number:
                     resp = await c.get(
-                        f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseInvoices",
+                        f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseInvoices",
                         headers={"Authorization": f"Bearer {token}"},
                         params={"$filter": f"vendorInvoiceNumber eq '{invoice_number}'"}
                     )
@@ -4603,9 +4608,9 @@ async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: d
                     logger.info("[BC Validation] AP Invoice - validating order reference: %s", bol_str)
                     freight_direction = "unknown"
                     
-                    # Step 1: Try matching against Sales Orders (OUTBOUND freight)
+                    # Step 1: Try matching against Sales Orders (OUTBOUND freight) - use Production
                     resp = await c.get(
-                        f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/salesOrders",
+                        f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})/salesOrders",
                         headers={"Authorization": f"Bearer {token}"},
                         params={"$filter": f"number eq '{bol_str}'"}
                     )
@@ -4635,10 +4640,10 @@ async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: d
                             logger.info("[BC Validation] OUTBOUND freight - order %s -> customer %s", 
                                        bol_str, matched_order.get("customerName"))
                     
-                    # Step 2: If no Sales Order match, try Purchase Orders (INBOUND freight)
+                    # Step 2: If no Sales Order match, try Purchase Orders (INBOUND freight) - use Production
                     if freight_direction == "unknown":
                         po_resp = await c.get(
-                            f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseOrders",
+                            f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseOrders",
                             headers={"Authorization": f"Bearer {token}"},
                             params={"$filter": f"number eq '{bol_str}'"}
                         )
@@ -4734,9 +4739,9 @@ async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: d
                     order_number_str = str(order_number).strip()
                     logger.info("[BC Validation] Shipping doc - looking up Sales Order: %s", order_number_str)
                     
-                    # Look up Sales Order by number
+                    # Look up Sales Order by number - use Production for reads
                     resp = await c.get(
-                        f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/salesOrders",
+                        f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})/salesOrders",
                         headers={"Authorization": f"Bearer {token}"},
                         params={"$filter": f"number eq '{order_number_str}'"}
                     )
@@ -4810,9 +4815,9 @@ async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: d
     return validation_results
 
 async def _validate_po(c, token: str, company_id: str, po_number: str, validation_results: dict, required: bool):
-    """Helper to validate PO number in BC."""
+    """Helper to validate PO number in BC - uses Production for reads."""
     resp = await c.get(
-        f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseOrders",
+        f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseOrders",
         headers={"Authorization": f"Bearer {token}"},
         params={"$filter": f"number eq '{po_number}'"}
     )

@@ -437,10 +437,13 @@ class UnifiedVendorMatcher:
         return None
     
     async def _get_bc_company_id(self, token: str) -> Optional[str]:
-        """Get BC company ID."""
+        """Get BC company ID - finds Gamer Packaging company."""
         
         if self.bc_company_id:
             return self.bc_company_id
+        
+        # Preferred company name
+        target_company = os.environ.get("BC_COMPANY_NAME", "Gamer Packaging")
         
         try:
             async with httpx.AsyncClient(timeout=30) as client:
@@ -451,6 +454,23 @@ class UnifiedVendorMatcher:
                 
                 if resp.status_code == 200:
                     companies = resp.json().get("value", [])
+                    
+                    # Find target company by name
+                    for company in companies:
+                        if target_company.lower() in company.get("displayName", "").lower():
+                            self.bc_company_id = company.get("id")
+                            logger.info("BC Company found: %s (%s)", company.get("displayName"), self.bc_company_id[:8])
+                            return self.bc_company_id
+                    
+                    # Fallback to first non-test company
+                    for company in companies:
+                        name = company.get("displayName", "").lower()
+                        if "test" not in name and "blank" not in name and name.strip():
+                            self.bc_company_id = company.get("id")
+                            logger.info("BC Company fallback: %s (%s)", company.get("displayName"), self.bc_company_id[:8])
+                            return self.bc_company_id
+                    
+                    # Last resort - first company
                     if companies:
                         self.bc_company_id = companies[0].get("id")
                         return self.bc_company_id

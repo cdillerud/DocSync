@@ -7020,6 +7020,130 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
 
 
 # =============================================================================
+# BATCH REVALIDATION - Re-run validation on all documents using Production BC
+# =============================================================================
+
+@api_router.post("/documents/batch-revalidate")
+async def batch_revalidate_documents(
+    doc_types: List[str] = Query(default=["AP_Invoice", "AP_INVOICE", "Remittance"]),
+    limit: int = Query(default=500, le=1000),
+    skip_completed: bool = Query(default=True),
+    background_tasks: BackgroundTasks = None
+):
+    """
+    Batch re-validate all documents against Production BC.
+    
+    - Re-runs vendor matching using Production BC as source
+    - Updates validation_results and match status
+    - Does NOT create BC records or upload to SharePoint
+    
+    Args:
+        doc_types: Document types to revalidate (default: AP invoices)
+        limit: Maximum documents to process
+        skip_completed: Skip documents already in Completed/Posted status
+    """
+    
+    # Build query
+    query = {"doc_type": {"$in": doc_types}}
+    if skip_completed:
+        query["status"] = {"$nin": ["Completed", "Posted", "Archived", "LinkedToBC"]}
+    
+    # Get documents
+    cursor = db.hub_documents.find(query, {"_id": 0}).limit(limit)
+    docs = await cursor.to_list(limit)
+    
+    if not docs:
+        return {"message": "No documents to revalidate", "count": 0}
+    
+    results = {
+        "total": len(docs),
+        "success": 0,
+        "failed": 0,
+        "improved": 0,
+        "unchanged": 0,
+        "details": []
+    }
+    
+    for doc in docs:
+        doc_id = doc.get("id")
+        try:
+            # Get job config
+            job_type = doc.get("suggested_job_type", doc.get("doc_type", "AP_Invoice"))
+            job_configs = await db.hub_job_types.find_one({"job_type": job_type}, {"_id": 0})
+            if not job_configs:
+                job_configs = DEFAULT_JOB_TYPES.get(job_type, DEFAULT_JOB_TYPES.get("AP_Invoice", {}))
+            
+            # Get extracted fields
+            extracted_fields = doc.get("extracted_fields", {})
+            vendor_name = extracted_fields.get("vendor", doc.get("vendor_canonical", ""))
+            
+            # Record old state
+            old_match_method = doc.get("match_method", doc.get("validation_results", {}).get("match_method", "none"))
+            old_validation_passed = doc.get("validation_results", {}).get("all_passed", False)
+            
+            # Re-run BC validation (now uses Production)
+            validation_results = await validate_bc_match(job_type, extracted_fields, job_configs)
+            new_match_method = validation_results.get("match_method", "none")
+            new_validation_passed = validation_results.get("all_passed", False)
+            
+            # Make new automation decision
+            confidence = doc.get("ai_confidence", 0.0)
+            decision, reasoning, decision_metadata = make_automation_decision(job_configs, confidence, validation_results)
+            
+            # Update document with new validation results
+            update_data = {
+                "validation_results": validation_results,
+                "match_method": new_match_method,
+                "match_score": validation_results.get("match_score", 0.0),
+                "automation_decision": decision,
+                "vendor_candidates": decision_metadata.get("vendor_candidates", []),
+                "revalidated_utc": datetime.now(timezone.utc).isoformat(),
+                "revalidated_from": "batch_revalidate_production"
+            }
+            
+            # Update vendor canonical if we found a match
+            if validation_results.get("bc_record_info"):
+                bc_info = validation_results["bc_record_info"]
+                update_data["vendor_canonical"] = bc_info.get("displayName", vendor_name)
+                update_data["bc_vendor_number"] = bc_info.get("number")
+            
+            # Check for unified vendor match details
+            if validation_results.get("unified_vendor_match"):
+                update_data["unified_vendor_match"] = validation_results["unified_vendor_match"]
+            
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
+            
+            # Track results
+            improved = (not old_validation_passed and new_validation_passed) or \
+                       (old_match_method == "none" and new_match_method != "none")
+            
+            results["success"] += 1
+            if improved:
+                results["improved"] += 1
+            else:
+                results["unchanged"] += 1
+            
+            results["details"].append({
+                "doc_id": doc_id[:8] + "...",
+                "vendor": vendor_name[:30] if vendor_name else "N/A",
+                "old_match": old_match_method,
+                "new_match": new_match_method,
+                "improved": improved,
+                "validation_passed": new_validation_passed
+            })
+            
+        except Exception as e:
+            results["failed"] += 1
+            results["details"].append({
+                "doc_id": doc_id[:8] + "...",
+                "error": str(e)[:100]
+            })
+            logger.error("Batch revalidate error for %s: %s", doc_id, str(e))
+    
+    return results
+
+
+# =============================================================================
 # DRY-RUN PREVIEW ENDPOINT - Validates against Production BC without writing
 # =============================================================================
 

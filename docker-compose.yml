@@ -35,9 +35,11 @@ services:
       - uploads_data:/app/uploads
     networks:
       - gpi-network
-    # Bind to localhost only for security (nginx handles external)
+    # Expose internally + map to host port 8005 (avoids conflict with airdash on 8001)
     expose:
       - "8001"
+    ports:
+      - "8005:8001"
 
   # Frontend (React + Nginx)
   frontend:

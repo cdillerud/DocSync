@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getDocument, linkDocument, updateDocument, resubmitDocument } from '../lib/api';
+import { getDocument, linkDocument, updateDocument, resubmitDocument, refreshDocumentState } from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -11,7 +11,8 @@ import { toast } from 'sonner';
 import {
   ArrowLeft, ExternalLink, Link, RefreshCw, FileText,
   CheckCircle2, AlertCircle, Clock, Loader2, Copy, RotateCcw, 
-  ShieldCheck, ShieldAlert, Building2, FileSearch, Receipt
+  ShieldCheck, ShieldAlert, Building2, FileSearch, Receipt,
+  Zap, User, Cpu, Eye, Inbox, Check, XCircle, AlertTriangle
 } from 'lucide-react';
 import { Square9WorkflowTracker } from '../components/Square9WorkflowTracker';
 import APReviewPanel from '../components/APReviewPanel';
@@ -34,6 +35,35 @@ const STEP_ICONS = {
   running: <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />,
 };
 
+// State badge configurations
+const STATE_BADGE_COLORS = {
+  validation_state: {
+    pending: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
+    pass: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+    warning: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+    fail: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+  },
+  workflow_state: {
+    received: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
+    processing: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+    reviewing: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+    ready: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+    completed: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+    failed: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+  },
+  automation_state: {
+    manual: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
+    assisted: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+    autonomous: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+  }
+};
+
+const STATE_ICONS = {
+  validation_state: { pending: Clock, pass: CheckCircle2, warning: AlertTriangle, fail: XCircle },
+  workflow_state: { received: Inbox, processing: Loader2, reviewing: Eye, ready: Check, completed: CheckCircle2, failed: XCircle },
+  automation_state: { manual: User, assisted: Cpu, autonomous: Zap }
+};
+
 function formatDate(iso) {
   if (!iso) return '-';
   return new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -44,17 +74,22 @@ export default function DocumentDetailPage() {
   const navigate = useNavigate();
   const [doc, setDoc] = useState(null);
   const [workflows, setWorkflows] = useState([]);
+  const [eventTimeline, setEventTimeline] = useState([]);
+  const [derivedState, setDerivedState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [linking, setLinking] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState({});
   const [resubmitting, setResubmitting] = useState(false);
+  const [showLegacyWorkflows, setShowLegacyWorkflows] = useState(false);
 
   const fetchDoc = async () => {
     try {
       const res = await getDocument(id);
       setDoc(res.data.document);
       setWorkflows(res.data.workflows || []);
+      setEventTimeline(res.data.event_timeline || []);
+      setDerivedState(res.data.derived_state);
     } catch (err) {
       toast.error('Document not found');
       navigate('/queue');
@@ -402,8 +437,88 @@ export default function DocumentDetailPage() {
           />
         </div>
 
-        {/* Right: Document Preview + AP Review (if AP_Invoice) + Workflow Audit Trail */}
+        {/* Right: Document Preview + AP Review (if AP_Invoice) + Event Timeline */}
         <div className="lg:col-span-2 space-y-4">
+          {/* Derived State Summary Card - Always show */}
+          {derivedState && (
+            <Card className="border border-border" data-testid="derived-state-card">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>
+                  Document Status
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-3 gap-4 mb-4">
+                  {/* Validation State */}
+                  <div className="text-center">
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Validation</p>
+                    <StateBadge 
+                      type="validation_state" 
+                      value={derivedState.validation_state}
+                    />
+                  </div>
+                  {/* Workflow State */}
+                  <div className="text-center">
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Workflow</p>
+                    <StateBadge 
+                      type="workflow_state" 
+                      value={derivedState.workflow_state}
+                    />
+                  </div>
+                  {/* Automation State */}
+                  <div className="text-center">
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Automation</p>
+                    <StateBadge 
+                      type="automation_state" 
+                      value={derivedState.automation_state}
+                    />
+                  </div>
+                </div>
+                
+                {/* State Reason */}
+                {derivedState.state_reason && (
+                  <div className="bg-muted/50 rounded-md p-2.5 mb-3">
+                    <p className="text-xs text-muted-foreground">{derivedState.state_reason}</p>
+                  </div>
+                )}
+                
+                {/* Blocking Issues */}
+                {derivedState.blocking_issues?.length > 0 && (
+                  <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-md p-2.5 mb-3">
+                    <p className="text-xs font-medium text-red-700 dark:text-red-300 mb-1">Blocking Issues</p>
+                    {derivedState.blocking_issues.map((issue, idx) => (
+                      <p key={idx} className="text-xs text-red-600 dark:text-red-400">• {issue}</p>
+                    ))}
+                  </div>
+                )}
+                
+                {/* Warnings */}
+                {derivedState.warnings?.length > 0 && (
+                  <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md p-2.5 mb-3">
+                    <p className="text-xs font-medium text-amber-700 dark:text-amber-300 mb-1">Warnings</p>
+                    {derivedState.warnings.map((warn, idx) => (
+                      <p key={idx} className="text-xs text-amber-600 dark:text-amber-400">• {typeof warn === 'string' ? warn : warn.message || JSON.stringify(warn)}</p>
+                    ))}
+                  </div>
+                )}
+                
+                {/* Review Queue */}
+                {derivedState.needs_review && derivedState.review_queue && (
+                  <div className="flex items-center gap-2 text-xs">
+                    <Eye className="w-3.5 h-3.5 text-amber-500" />
+                    <span className="text-muted-foreground">In queue:</span>
+                    <Badge variant="outline" className="text-[10px]">{derivedState.review_queue}</Badge>
+                  </div>
+                )}
+                
+                {/* Derived From indicator */}
+                <p className="text-[10px] text-muted-foreground mt-3 text-right">
+                  Derived from: {derivedState.derived_from === 'events' ? 'Event history' : 'Legacy fields'}
+                </p>
+              </CardContent>
+            </Card>
+          )}
+          
           {/* PDF Preview - show for ALL documents */}
           <PDFPreviewPanel document={doc} />
           
@@ -418,14 +533,52 @@ export default function DocumentDetailPage() {
             />
           )}
           
-          <Card className="border border-border" data-testid="workflow-audit-card">
+          {/* Event Timeline - New Event-Driven UI */}
+          <Card className="border border-border" data-testid="event-timeline-card">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>
-                Workflow Audit Trail
-              </CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>
+                  Workflow Events
+                </CardTitle>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-muted-foreground">{eventTimeline.length} events</span>
+                  {workflows.length > 0 && (
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="h-6 text-[10px]"
+                      onClick={() => setShowLegacyWorkflows(!showLegacyWorkflows)}
+                    >
+                      {showLegacyWorkflows ? 'Hide' : 'Show'} Legacy
+                    </Button>
+                  )}
+                </div>
+              </div>
             </CardHeader>
             <CardContent>
-              {workflows.length > 0 ? (
+              {eventTimeline.length > 0 ? (
+                <div className="space-y-0">
+                  {eventTimeline.map((event, idx) => (
+                    <EventTimelineItem key={event.event_id || idx} event={event} />
+                  ))}
+                </div>
+              ) : (
+                <div className="py-8 text-center text-sm text-muted-foreground">
+                  No workflow events recorded yet
+                </div>
+              )}
+            </CardContent>
+          </Card>
+          
+          {/* Legacy Workflow Runs - Collapsible */}
+          {showLegacyWorkflows && workflows.length > 0 && (
+            <Card className="border border-border border-dashed opacity-75" data-testid="workflow-audit-card">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>
+                  Legacy Workflow Runs
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
                 <div className="space-y-6">
                   {workflows.map((wf) => (
                     <div key={wf.id} className="border border-border rounded-lg p-4" data-testid={`workflow-item-${wf.id}`}>
@@ -478,18 +631,97 @@ export default function DocumentDetailPage() {
                     </div>
                   ))}
                 </div>
-              ) : (
-                <div className="py-8 text-center text-sm text-muted-foreground">
-                  No workflow runs for this document
-                </div>
-              )}
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
     </div>
   );
 }
+
+// State Badge Component
+function StateBadge({ type, value }) {
+  const IconComponent = STATE_ICONS[type]?.[value] || Clock;
+  const colorClass = STATE_BADGE_COLORS[type]?.[value] || 'bg-gray-100 text-gray-700';
+  
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${colorClass}`}>
+      <IconComponent className="w-3 h-3" />
+      {value.replace(/_/g, ' ')}
+    </span>
+  );
+}
+
+// Event Timeline Item Component
+function EventTimelineItem({ event }) {
+  const getEventIcon = (eventType, status) => {
+    if (status === 'failed') return <XCircle className="w-4 h-4 text-red-500" />;
+    if (status === 'warning') return <AlertTriangle className="w-4 h-4 text-amber-500" />;
+    
+    // Map event types to icons
+    const typeIconMap = {
+      'document.received': <Inbox className="w-4 h-4 text-blue-500" />,
+      'classification.completed': <FileText className="w-4 h-4 text-emerald-500" />,
+      'classification.failed': <XCircle className="w-4 h-4 text-red-500" />,
+      'vendor.match.completed': <Building2 className="w-4 h-4 text-emerald-500" />,
+      'vendor.match.failed': <Building2 className="w-4 h-4 text-red-500" />,
+      'bc.validation.completed': <ShieldCheck className="w-4 h-4 text-emerald-500" />,
+      'bc.validation.failed': <ShieldAlert className="w-4 h-4 text-red-500" />,
+      'sharepoint.upload.succeeded': <ExternalLink className="w-4 h-4 text-emerald-500" />,
+      'automation.decision.completed': <Zap className="w-4 h-4 text-purple-500" />,
+    };
+    
+    return typeIconMap[eventType] || <CheckCircle2 className="w-4 h-4 text-emerald-500" />;
+  };
+  
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'completed': return 'bg-emerald-100 dark:bg-emerald-900/30';
+      case 'failed': return 'bg-red-100 dark:bg-red-900/30';
+      case 'warning': return 'bg-amber-100 dark:bg-amber-900/30';
+      default: return 'bg-blue-100 dark:bg-blue-900/30';
+    }
+  };
+  
+  const formatEventType = (type) => {
+    return type.split('.').map(part => 
+      part.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+    ).join(' › ');
+  };
+  
+  return (
+    <div className="workflow-step py-2.5 border-l-2 border-border pl-4 ml-2 relative" data-testid={`event-item-${event.event_id?.slice(0, 8)}`}>
+      <div className={`absolute left-0 top-3 -translate-x-1/2 w-6 h-6 rounded-full flex items-center justify-center ${getStatusColor(event.status)}`}>
+        {getEventIcon(event.event_type, event.status)}
+      </div>
+      
+      <div className="flex items-start justify-between">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium">{formatEventType(event.event_type)}</p>
+          
+          {event.payload_summary && (
+            <p className="text-xs text-muted-foreground mt-0.5">{event.payload_summary}</p>
+          )}
+          
+          <div className="flex items-center gap-3 mt-1 text-[10px] text-muted-foreground font-mono">
+            <span>{event.source_service}</span>
+            {event.actor && <span>by {event.actor}</span>}
+            {event.correlation_id && <span>#{event.correlation_id.slice(0, 6)}</span>}
+            {event.source === 'legacy_history' && (
+              <Badge variant="outline" className="text-[9px] h-4 px-1">legacy</Badge>
+            )}
+          </div>
+        </div>
+        
+        <span className="text-[10px] text-muted-foreground font-mono shrink-0 ml-4">
+          {formatDate(event.timestamp)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 
 function InfoRow({ label, value, mono, copyable, onCopy }) {
   return (

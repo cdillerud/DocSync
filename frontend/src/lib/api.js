@@ -43,11 +43,20 @@ export const exportDocumentTypesDashboard = (params) => {
 // Documents
 export const uploadDocument = (formData) => api.post('/documents/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
 export const listDocuments = (params) => api.get('/documents', { params });
-export const getDocument = (id) => api.get(`/documents/${id}`);
+export const getDocument = (id, includeEvents = true) => api.get(`/documents/${id}`, { params: { include_events: includeEvents } });
 export const updateDocument = (id, data) => api.put(`/documents/${id}`, data);
 export const linkDocument = (id) => api.post(`/documents/${id}/link`);
 export const deleteDocument = (id) => api.delete(`/documents/${id}`);
 export const resubmitDocument = (id) => api.post(`/documents/${id}/reprocess?reclassify=true`);
+
+// Event-Driven Workflow APIs
+export const getDocumentEvents = (id, params) => api.get(`/documents/${id}/events`, { params });
+export const getDocumentTimeline = (id, includeLegacy = true) => api.get(`/documents/${id}/timeline`, { params: { include_legacy: includeLegacy } });
+export const getDocumentDerivedState = (id) => api.get(`/documents/${id}/derived-state`);
+export const refreshDocumentState = (id) => api.post(`/documents/${id}/refresh-state`);
+export const getEventTypes = () => api.get('/events/types');
+export const getRecentEvents = (params) => api.get('/events/recent', { params });
+export const getEventStats = (sinceHours = 24) => api.get('/events/stats', { params: { since_hours: sinceHours } });
 
 // Square9 Workflow Retry
 export const retryDocument = (id, reason = 'Manual retry') => api.post(`/documents/${id}/retry?reason=${encodeURIComponent(reason)}`);

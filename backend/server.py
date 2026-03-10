@@ -108,6 +108,18 @@ from services.pilot_summary import (
     PILOT_SUMMARY_CRON_HOUR_UTC
 )
 
+# Event-Driven Workflow Services (Phase 1 & 2)
+from services.event_service import (
+    EventService, WorkflowEvent as WFEvent, EventStatus,
+    set_event_service, get_event_service, initialize_event_indexes,
+    emit_document_received, emit_classification_completed, emit_vendor_match,
+    emit_bc_validation, emit_sharepoint_upload, emit_automation_decision
+)
+from services.derived_state_service import (
+    DerivedStateService, ValidationState, WorkflowState, AutomationState,
+    set_derived_state_service, get_derived_state_service, format_state_for_display
+)
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -1059,6 +1071,7 @@ async def upload_document(
     sha256_hash = hashlib.sha256(file_content).hexdigest()
     doc_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
+    correlation_id = str(uuid.uuid4())  # For event correlation
 
     # Persist file to disk for potential resubmit
     file_path = UPLOAD_DIR / doc_id
@@ -1101,14 +1114,33 @@ async def upload_document(
         # Square9 workflow alignment
         **initialize_retry_state({}),
         "status": "Received", "created_utc": now, "updated_utc": now, "last_error": None,
+        # Derived state fields (Phase 2)
+        "validation_state": "pending",
+        "workflow_state": "received",
+        "automation_state": "manual",
         # Pilot metadata (added if pilot mode enabled)
         **get_pilot_metadata()
     }
     await db.hub_documents.insert_one(doc)
+    
+    # Emit document.received event (Phase 1)
+    event_service = get_event_service()
+    if event_service:
+        await emit_document_received(
+            event_service, doc_id, source,
+            file.filename, file.content_type or "application/octet-stream",
+            len(file_content), correlation_id
+        )
 
     workflow_id, final_status = await run_upload_and_link_workflow(
         doc_id, file_content, file.filename, document_type, bc_record_id, bc_document_no
     )
+    
+    # Update derived state after workflow
+    derived_state_service = get_derived_state_service()
+    if derived_state_service:
+        await derived_state_service.update_document_derived_state(doc_id)
+    
     updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     return {"document": updated_doc, "workflow_id": workflow_id}
 
@@ -1160,12 +1192,206 @@ async def list_documents(
     }
 
 @api_router.get("/documents/{doc_id}")
-async def get_document(doc_id: str):
+async def get_document(doc_id: str, include_events: bool = Query(True)):
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     workflows = await db.hub_workflow_runs.find({"document_id": doc_id}, {"_id": 0}).sort("started_utc", -1).to_list(100)
-    return {"document": doc, "workflows": workflows}
+    
+    # Get event timeline and derived state
+    event_timeline = []
+    derived_state = None
+    
+    if include_events:
+        event_service = get_event_service()
+        derived_state_service = get_derived_state_service()
+        
+        if event_service:
+            event_timeline = await event_service.get_event_timeline(doc_id, include_legacy=True)
+        
+        if derived_state_service:
+            derived_state = await derived_state_service.derive_state(doc_id, doc)
+            # Format for UI display
+            derived_state["display"] = format_state_for_display(derived_state)
+    
+    return {
+        "document": doc, 
+        "workflows": workflows,
+        "event_timeline": event_timeline,
+        "derived_state": derived_state
+    }
+
+
+# =============================================================================
+# EVENT-DRIVEN WORKFLOW ENDPOINTS
+# =============================================================================
+
+@api_router.get("/documents/{doc_id}/events")
+async def get_document_events(
+    doc_id: str,
+    event_types: Optional[str] = Query(None, description="Comma-separated event types to filter"),
+    limit: int = Query(100, le=500),
+    skip: int = Query(0)
+):
+    """
+    Get workflow events for a document.
+    
+    Returns events from the event system, with fallback to legacy workflow_history.
+    """
+    event_service = get_event_service()
+    if not event_service:
+        raise HTTPException(status_code=503, detail="Event service not initialized")
+    
+    type_filter = event_types.split(",") if event_types else None
+    events = await event_service.get_events(doc_id, event_types=type_filter, limit=limit, skip=skip)
+    
+    return {
+        "document_id": doc_id,
+        "events": [e.to_dict() for e in events],
+        "count": len(events),
+        "has_more": len(events) == limit
+    }
+
+
+@api_router.get("/documents/{doc_id}/timeline")
+async def get_document_timeline(doc_id: str, include_legacy: bool = Query(True)):
+    """
+    Get a unified event timeline for a document.
+    
+    This combines events from the new event system with legacy workflow_history
+    for backwards compatibility.
+    """
+    event_service = get_event_service()
+    if not event_service:
+        raise HTTPException(status_code=503, detail="Event service not initialized")
+    
+    timeline = await event_service.get_event_timeline(doc_id, include_legacy=include_legacy)
+    
+    return {
+        "document_id": doc_id,
+        "timeline": timeline,
+        "count": len(timeline)
+    }
+
+
+@api_router.get("/documents/{doc_id}/derived-state")
+async def get_document_derived_state(doc_id: str):
+    """
+    Get the derived state for a document.
+    
+    Returns:
+    - validation_state: pass | warning | fail | pending
+    - workflow_state: received | processing | reviewing | ready | completed | failed
+    - automation_state: manual | assisted | autonomous
+    - Plus blocking issues, warnings, and review queue info
+    """
+    derived_state_service = get_derived_state_service()
+    if not derived_state_service:
+        raise HTTPException(status_code=503, detail="Derived state service not initialized")
+    
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    derived = await derived_state_service.derive_state(doc_id, doc)
+    derived["display"] = format_state_for_display(derived)
+    
+    return {
+        "document_id": doc_id,
+        **derived
+    }
+
+
+@api_router.post("/documents/{doc_id}/refresh-state")
+async def refresh_document_state(doc_id: str):
+    """
+    Recalculate and update the derived state for a document.
+    
+    Call this after making changes to force a state refresh.
+    """
+    derived_state_service = get_derived_state_service()
+    if not derived_state_service:
+        raise HTTPException(status_code=503, detail="Derived state service not initialized")
+    
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    derived = await derived_state_service.update_document_derived_state(doc_id, doc)
+    
+    return {
+        "document_id": doc_id,
+        "state_updated": True,
+        **derived
+    }
+
+
+@api_router.get("/events/types")
+async def get_event_types():
+    """Get all supported event types and their descriptions."""
+    from services.event_service import EVENT_TYPES
+    
+    return {
+        "event_types": EVENT_TYPES,
+        "categories": [e.value for e in EventStatus]
+    }
+
+
+@api_router.get("/events/recent")
+async def get_recent_events(
+    limit: int = Query(50, le=200),
+    event_type: Optional[str] = Query(None),
+    status: Optional[str] = Query(None)
+):
+    """Get recent events across all documents."""
+    query = {}
+    if event_type:
+        query["event_type"] = event_type
+    if status:
+        query["status"] = status
+    
+    cursor = db.workflow_events.find(query, {"_id": 0}).sort("timestamp", -1).limit(limit)
+    events = await cursor.to_list(limit)
+    
+    return {
+        "events": events,
+        "count": len(events)
+    }
+
+
+@api_router.get("/events/stats")
+async def get_event_stats(since_hours: int = Query(24, le=168)):
+    """Get event statistics for the specified time period."""
+    from datetime import timedelta
+    
+    since = (datetime.now(timezone.utc) - timedelta(hours=since_hours)).isoformat()
+    
+    # Count events by type
+    pipeline = [
+        {"$match": {"timestamp": {"$gte": since}}},
+        {"$group": {
+            "_id": "$event_type",
+            "count": {"$sum": 1},
+            "completed": {"$sum": {"$cond": [{"$eq": ["$status", "completed"]}, 1, 0]}},
+            "failed": {"$sum": {"$cond": [{"$eq": ["$status", "failed"]}, 1, 0]}},
+            "warning": {"$sum": {"$cond": [{"$eq": ["$status", "warning"]}, 1, 0]}}
+        }},
+        {"$sort": {"count": -1}}
+    ]
+    
+    results = await db.workflow_events.aggregate(pipeline).to_list(100)
+    
+    total_events = sum(r["count"] for r in results)
+    total_completed = sum(r["completed"] for r in results)
+    total_failed = sum(r["failed"] for r in results)
+    
+    return {
+        "since_hours": since_hours,
+        "total_events": total_events,
+        "total_completed": total_completed,
+        "total_failed": total_failed,
+        "by_type": results
+    }
 
 @api_router.put("/documents/{doc_id}")
 async def update_document(doc_id: str, update: DocumentUpdate):
@@ -5814,6 +6040,7 @@ async def _internal_intake_document(
     computed_hash = hashlib.sha256(file_content).hexdigest()
     doc_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
+    correlation_id = str(uuid.uuid4())  # For event correlation
     
     # Store file locally
     file_path = UPLOAD_DIR / doc_id
@@ -5863,6 +6090,10 @@ async def _internal_intake_document(
             "metadata": {"source": source, "sender": sender}
         }],
         "workflow_status_updated_utc": now,
+        # Derived state fields (Phase 2)
+        "validation_state": "pending",
+        "workflow_state": "received",
+        "automation_state": "manual",
         "created_utc": now,
         "updated_utc": now,
         "last_error": None,
@@ -5870,6 +6101,15 @@ async def _internal_intake_document(
         **get_pilot_metadata()
     }
     await db.hub_documents.insert_one(doc)
+    
+    # Emit document.received event (Phase 1)
+    event_service = get_event_service()
+    if event_service:
+        await emit_document_received(
+            event_service, doc_id, source,
+            filename, content_type or "application/octet-stream",
+            len(file_content), correlation_id
+        )
     
     # Run AI extraction (for field extraction, not doc_type classification)
     logger.info("Running AI field extraction for document %s", doc_id)
@@ -6210,6 +6450,15 @@ async def _internal_intake_document(
     except Exception as e:
         logger.error("[Auto-Clear] Error evaluating document %s: %s", doc_id, str(e))
     
+    # Emit workflow events (Phase 1)
+    try:
+        await _emit_intake_events(
+            doc_id, correlation_id, classification, validation_results,
+            sp_result, decision, auto_clear_result
+        )
+    except Exception as e:
+        logger.error("[Events] Error emitting events for document %s: %s", doc_id, str(e))
+    
     return {
         "document": {"id": doc_id, "status": final_status},
         "classification": classification,
@@ -6217,6 +6466,83 @@ async def _internal_intake_document(
         "sharepoint": sp_result,
         "auto_clear": auto_clear_result
     }
+
+
+async def _emit_intake_events(
+    doc_id: str, 
+    correlation_id: str,
+    classification: dict,
+    validation_results: dict,
+    sp_result: dict,
+    decision: str,
+    auto_clear_result: dict
+):
+    """
+    Emit events for the intake pipeline.
+    This is called after the main intake processing to record events.
+    """
+    event_service = get_event_service()
+    if not event_service:
+        return
+    
+    # Classification event
+    await emit_classification_completed(
+        event_service, doc_id,
+        classification.get("suggested_job_type", "Unknown"),
+        classification.get("confidence", 0.0),
+        classification.get("classification_method", "ai"),
+        classification.get("model"),
+        correlation_id
+    )
+    
+    # Vendor match event
+    matched_vendor = validation_results.get("matched_vendor_no")
+    await emit_vendor_match(
+        event_service, doc_id,
+        matched=bool(matched_vendor),
+        vendor_name=validation_results.get("matched_vendor_name"),
+        vendor_no=matched_vendor,
+        match_method=validation_results.get("match_method", "none"),
+        match_score=validation_results.get("match_score", 0.0),
+        correlation_id=correlation_id
+    )
+    
+    # BC validation event
+    await emit_bc_validation(
+        event_service, doc_id,
+        passed=validation_results.get("all_passed", False),
+        checks=validation_results.get("checks", []),
+        warnings=validation_results.get("warnings"),
+        correlation_id=correlation_id
+    )
+    
+    # SharePoint upload event
+    if sp_result:
+        await emit_sharepoint_upload(
+            event_service, doc_id,
+            success=True,
+            folder_path=sp_result.get("folder_path", ""),
+            drive_id=sp_result.get("drive_id"),
+            item_id=sp_result.get("item_id"),
+            share_link=sp_result.get("share_link"),
+            correlation_id=correlation_id
+        )
+    
+    # Automation decision event
+    auto_cleared = auto_clear_result and auto_clear_result.get("cleared", False)
+    await emit_automation_decision(
+        event_service, doc_id,
+        decision=decision,
+        reason=auto_clear_result.get("reason") if auto_clear_result else "",
+        auto_clear=auto_cleared,
+        auto_post=False,
+        correlation_id=correlation_id
+    )
+    
+    # Update derived state
+    derived_state_service = get_derived_state_service()
+    if derived_state_service:
+        await derived_state_service.update_document_derived_state(doc_id)
 
 
 @api_router.post("/documents/intake")
@@ -14626,6 +14952,12 @@ async def startup():
     await db.migration_candidates.create_index("status")
     await db.migration_candidates.create_index("doc_type")
     logger.info("SharePoint Migration module initialized")
+    
+    # Initialize Event-Driven Workflow Services (Phase 1 & 2)
+    set_event_service(db)
+    set_derived_state_service(db)
+    await initialize_event_indexes(db)
+    logger.info("Event-driven workflow services initialized")
     
     # Start daily pilot summary scheduler if enabled
     global _pilot_summary_task

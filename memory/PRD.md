@@ -1704,3 +1704,119 @@ Added a rich, data-driven dashboard that provides real-time insights into the en
 
 *Last Updated: March 3, 2026*
 
+
+
+---
+
+## Session Update: March 10, 2026 - Event-Driven Workflow Platform (Phase 1 & 2)
+
+### Overview
+Transformed GPI Hub from a document-centric app into an event-driven workflow platform. This foundational change enables modular, scalable workflow processing where each step becomes a first-class event.
+
+### Architectural Shift
+**Before:** Sequential function calls with status fields
+**After:** Event emission + derived state model
+
+### Phase 1: Core Event Infrastructure
+
+#### New Files Created
+| File | Purpose |
+|------|---------|
+| `/app/backend/services/event_service.py` | Central event service, event types, helpers |
+| `/app/backend/services/derived_state_service.py` | State derivation logic |
+
+#### Event Model
+Events stored in `workflow_events` MongoDB collection:
+- `event_id` - Unique identifier
+- `document_id` - Document this event relates to
+- `event_type` - Dot-separated event name (e.g., `classification.completed`)
+- `status` - completed | failed | warning | skipped
+- `source_service` - Service that emitted the event
+- `timestamp` - ISO timestamp
+- `correlation_id` - For tracing related events
+- `payload` - Event-specific data
+- `actor` - User or service that triggered
+
+#### 43 Event Types Defined
+Categories: document, classification, extraction, vendor, po, bc, sharepoint, automation, review, system
+
+Sample events:
+- `document.received` - Document captured
+- `classification.completed` - AI classification done
+- `vendor.match.completed` / `vendor.match.failed` - Vendor matching result
+- `bc.validation.completed` / `bc.validation.failed` - BC validation result
+- `sharepoint.upload.succeeded` / `sharepoint.upload.failed` - SharePoint upload
+- `automation.decision.completed` - Auto-clear/auto-post decision
+
+#### Backwards Compatibility
+- Documents without events fall back to legacy `workflow_history` field
+- Timeline API converts legacy history to event format
+- `derived_from` field indicates "events" or "legacy"
+
+### Phase 2: Derived State Model
+
+#### State Taxonomy
+| State | Values | Question Answered |
+|-------|--------|-------------------|
+| `validation_state` | pending, pass, warning, fail | Is the data correct? |
+| `workflow_state` | received, processing, reviewing, ready, completed, failed | What stage is this? |
+| `automation_state` | manual, assisted, autonomous | How much human involvement? |
+
+#### Fixes "Contradictory Status" Problem
+Before: Document showing "NeedsReview" and "Valid" confusingly
+After: Clear separation of validation result, workflow stage, and automation level
+
+### New API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/documents/{id}/events` | Get workflow events for document |
+| GET | `/api/documents/{id}/timeline` | Unified timeline (events + legacy) |
+| GET | `/api/documents/{id}/derived-state` | Get derived state |
+| POST | `/api/documents/{id}/refresh-state` | Recalculate derived state |
+| GET | `/api/events/types` | List all 43 event types |
+| GET | `/api/events/recent` | Recent events across all docs |
+| GET | `/api/events/stats` | Event statistics |
+
+### Frontend Updates
+
+#### DocumentDetailPage.js
+- New **Document Status** card with three-column state display (Validation, Workflow, Automation)
+- State reason display
+- Blocking issues (red) and warnings (yellow) sections
+- Review queue indicator
+- New **Workflow Events** timeline replacing legacy audit trail
+- Each event shows: type, status, timestamp, source service, payload summary
+- "Show Legacy" toggle for old workflow runs
+
+#### api.js
+Added 7 new API functions for event endpoints
+
+### Event Emission Points
+Events are now emitted at:
+1. Document upload (`document.received`)
+2. Email intake (`document.received`)
+3. After classification, extraction, vendor matching, BC validation
+4. After SharePoint upload
+5. After automation decisions
+
+### Phase 3 Design Preparation
+- `register_subscriber()` placeholder for rule engine
+- Event patterns support glob matching (e.g., `vendor.*`)
+- Correlation IDs for tracing related events
+
+### Testing
+- Backend: All endpoints tested via curl
+- Frontend: Screenshot verified showing new state cards and timeline
+- Derived state working for both new events and legacy documents
+
+### Files Modified
+- `/app/backend/server.py` - Added imports, initialization, new endpoints, event emission
+- `/app/frontend/src/pages/DocumentDetailPage.js` - New state cards, event timeline UI
+- `/app/frontend/src/lib/api.js` - New event API functions
+- `/app/docker-compose.yml` - Port mapping fix (8005:8001)
+
+### Port Conflict Fix
+Updated `docker-compose.yml` to map backend to port 8005 to avoid conflict with `airdash-backend` on user's VM.
+
+*Last Updated: March 10, 2026*

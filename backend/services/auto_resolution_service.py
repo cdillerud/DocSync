@@ -128,6 +128,8 @@ class AutoResolutionService:
         self.event_service = event_service
         self._vendor_intel = None
         self._rules_engine = None
+        self._ap_validation_service = None
+        self._freight_gl_service = None
         self._queue = asyncio.Queue(maxsize=500)
         self._workers = []
         self._running = False
@@ -143,6 +145,14 @@ class AutoResolutionService:
     def set_rules_engine(self, rules_engine):
         """Inject automation rules engine for post-resolution evaluation."""
         self._rules_engine = rules_engine
+
+    def set_ap_validation_service(self, ap_validation_service):
+        """Inject AP validation service for post-resolution validation."""
+        self._ap_validation_service = ap_validation_service
+
+    def set_freight_gl_service(self, freight_gl_service):
+        """Inject freight GL routing service."""
+        self._freight_gl_service = freight_gl_service
 
     def start(self, num_workers: int = AUTO_RESOLVE_MAX_WORKERS):
         """Start background workers."""
@@ -290,6 +300,25 @@ class AutoResolutionService:
                 except Exception as ve:
                     logger.warning("[AutoResolve:W%d] Vendor intel update error: %s", worker_id, str(ve))
 
+            # ---------------------------------------------------------
+            # FREIGHT G/L CLASSIFICATION (async, non-blocking)
+            # ---------------------------------------------------------
+            if self._freight_gl_service:
+                try:
+                    await self._freight_gl_service.classify_and_save(doc_id)
+                except Exception as fe:
+                    logger.warning("[AutoResolve:W%d] Freight GL error: %s", worker_id, str(fe))
+
+            # ---------------------------------------------------------
+            # AP VALIDATION (authoritative validation step)
+            # Only for AP-relevant document types
+            # ---------------------------------------------------------
+            if self._ap_validation_service:
+                try:
+                    await self._run_ap_validation(doc_id, worker_id)
+                except Exception as ave:
+                    logger.warning("[AutoResolve:W%d] AP validation error: %s", worker_id, str(ave))
+
             # Evaluate automation rules (async, non-blocking)
             if self._rules_engine:
                 try:
@@ -367,6 +396,255 @@ class AutoResolutionService:
             "workers": len(self._workers),
             "running": self._running,
         }
+
+    # =================================================================
+    # AP VALIDATION STEP
+    # =================================================================
+    
+    # Document types eligible for AP validation
+    AP_VALIDATION_DOC_TYPES = {
+        "AP_Invoice", "AP Invoice",
+        "Freight_Invoice", "Freight Invoice", "Freight",
+        "Carrier_Invoice", "Carrier Invoice",
+    }
+    
+    # Document types that MAY be AP-validated conditionally
+    AP_VALIDATION_CONDITIONAL_TYPES = {
+        "Shipping_Document", "Shipping Document",
+        "BOL", "Bill_of_Lading", "Bill of Lading",
+    }
+    
+    VALIDATION_VERSION = "2.0.0"
+
+    async def _run_ap_validation(self, doc_id: str, worker_id: int):
+        """
+        Run APValidationService for a document.
+        
+        This is the authoritative validation step. It:
+        1. Checks document-type gating
+        2. Checks idempotency (skip if unchanged)
+        3. Runs validation consuming existing intelligence
+        4. Stores normalized result on document
+        5. Updates derived state
+        6. Emits validation events
+        """
+        doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+        if not doc:
+            return
+        
+        doc_type = doc.get("document_type") or doc.get("suggested_job_type") or ""
+        
+        # Document-type gating
+        eligible = doc_type in self.AP_VALIDATION_DOC_TYPES
+        if not eligible and doc_type in self.AP_VALIDATION_CONDITIONAL_TYPES:
+            # Conditional: only if document looks like an AP payable
+            has_amount = doc.get("amount_float") is not None
+            has_vendor = bool(doc.get("vendor_canonical") or doc.get("vendor_normalized"))
+            eligible = has_amount and has_vendor
+        
+        if not eligible:
+            return
+        
+        # Idempotency: skip if data unchanged and version matches
+        existing_val = doc.get("ap_validation_result") or {}
+        if existing_val.get("validation_version") == self.VALIDATION_VERSION:
+            # Check if inputs changed
+            prev_hash = existing_val.get("input_hash")
+            current_hash = self._compute_validation_hash(doc)
+            if prev_hash == current_hash:
+                logger.debug("[AutoResolve:W%d] AP validation skipped for %s (unchanged)", worker_id, doc_id[:8])
+                return
+        
+        # Emit validation.started
+        await self._emit("validation.started", doc_id, payload={
+            "document_type": doc_type,
+            "validation_version": self.VALIDATION_VERSION,
+        })
+        
+        try:
+            # Build vendor match result from existing document data
+            vendor_match_result = self._build_vendor_match(doc)
+            
+            # Build extracted fields from document
+            extracted_fields = doc.get("extracted_fields") or {}
+            # Merge in flat normalized fields
+            if doc.get("invoice_number_clean"):
+                extracted_fields.setdefault("invoice_number", doc["invoice_number_clean"])
+            if doc.get("invoice_date"):
+                extracted_fields.setdefault("invoice_date", doc["invoice_date"])
+            if doc.get("amount_float") is not None:
+                extracted_fields.setdefault("amount", doc["amount_float"])
+            if doc.get("vendor_raw"):
+                extracted_fields.setdefault("vendor", doc["vendor_raw"])
+            if doc.get("po_number_clean"):
+                extracted_fields.setdefault("po_number", doc["po_number_clean"])
+            
+            # Run AP validation
+            result = await self._ap_validation_service.validate_ap_invoice(
+                document=doc,
+                extracted_fields=extracted_fields,
+                vendor_match_result=vendor_match_result,
+            )
+            
+            result_dict = result.to_dict()
+            
+            # Add metadata
+            input_hash = self._compute_validation_hash(doc)
+            result_dict["validation_version"] = self.VALIDATION_VERSION
+            result_dict["input_hash"] = input_hash
+            result_dict["validation_source"] = "auto_resolution_pipeline"
+            
+            # Add freight GL info as a warning if direction unknown
+            freight_gl = doc.get("freight_gl_classification") or {}
+            if freight_gl.get("is_freight") and freight_gl.get("direction") == "unknown":
+                result.add_warning(
+                    "freight_direction_unknown",
+                    "Freight direction could not be determined"
+                )
+                # Recompute state with the new warning
+                result.compute_final_state()
+                result_dict = result.to_dict()
+                result_dict["validation_version"] = self.VALIDATION_VERSION
+                result_dict["input_hash"] = input_hash
+                result_dict["validation_source"] = "auto_resolution_pipeline"
+            
+            # Add reference intelligence warnings
+            ref_intel = doc.get("reference_intelligence") or {}
+            if ref_intel.get("match_outcome") == "ambiguous_match":
+                result.add_warning(
+                    "ambiguous_reference",
+                    "Reference resolution found ambiguous matches"
+                )
+                result.compute_final_state()
+                result_dict = result.to_dict()
+                result_dict["validation_version"] = self.VALIDATION_VERSION
+                result_dict["input_hash"] = input_hash
+                result_dict["validation_source"] = "auto_resolution_pipeline"
+            
+            # Determine derived states
+            v_state = result_dict["validation_state"]
+            workflow_state = "reviewing"
+            automation_state = "manual"
+            
+            if v_state == "pass":
+                workflow_state = "ready"
+                automation_state = "assisted"
+            elif v_state == "warning":
+                workflow_state = "reviewing"
+                automation_state = "assisted"
+            elif v_state == "fail":
+                workflow_state = "needs_review"
+                automation_state = "manual"
+            
+            # Store on document
+            update = {
+                "ap_validation_result": result_dict,
+                "validation_state": v_state,
+                "validation_passed": v_state in ("pass", "warning"),
+                "validation_errors": result_dict.get("blocking_issues", []),
+                "validation_warnings": [w.get("details", str(w)) if isinstance(w, dict) else str(w) for w in result_dict.get("warnings", [])],
+                "validation_summary": self._build_validation_summary(result_dict),
+                "validation_version": self.VALIDATION_VERSION,
+                "validation_last_run": datetime.now(timezone.utc).isoformat(),
+                "derived_workflow_state": workflow_state,
+                "derived_automation_state": automation_state,
+                "updated_utc": datetime.now(timezone.utc).isoformat(),
+            }
+            
+            await self.db.hub_documents.update_one({"id": doc_id}, {"$set": update})
+            
+            # Emit validation.completed
+            await self._emit("validation.completed", doc_id, payload={
+                "document_type": doc_type,
+                "validation_state": v_state,
+                "all_passed": result_dict.get("all_passed", False),
+                "blocking_issues_count": len(result_dict.get("blocking_issues", [])),
+                "warnings_count": len(result_dict.get("warnings", [])),
+                "vendor_resolved": result_dict.get("vendor_resolved", False),
+                "invoice_number_present": result_dict.get("invoice_number_present", False),
+                "invoice_date_present": result_dict.get("invoice_date_present", False),
+                "total_amount_present": result_dict.get("total_amount_present", False),
+                "is_duplicate": result_dict.get("is_duplicate", False),
+            })
+            
+            # Emit warning event if applicable
+            if v_state == "warning":
+                await self._emit("validation.warning_detected", doc_id, payload={
+                    "document_type": doc_type,
+                    "warnings": [w.get("details", str(w)) if isinstance(w, dict) else str(w) for w in result_dict.get("warnings", [])],
+                })
+            
+            logger.info(
+                "[AutoResolve:W%d] AP validated %s → %s (blocking=%d, warnings=%d)",
+                worker_id, doc_id[:8], v_state,
+                len(result_dict.get("blocking_issues", [])),
+                len(result_dict.get("warnings", []))
+            )
+            
+        except Exception as e:
+            logger.error("[AutoResolve:W%d] AP validation failed for %s: %s", worker_id, doc_id[:8], str(e))
+            await self._emit("validation.failed", doc_id, status="error", payload={
+                "document_type": doc_type,
+                "error": str(e),
+            })
+
+    def _build_vendor_match(self, doc: Dict) -> Optional[Dict]:
+        """Build a vendor match result dict from document fields."""
+        vendor_no = doc.get("matched_vendor_no") or doc.get("vendor_id")
+        vendor_name = doc.get("matched_vendor_name") or doc.get("vendor_canonical")
+        match_method = doc.get("vendor_match_method") or doc.get("match_method")
+        match_score = doc.get("match_score", 0.0)
+        
+        # Also check unified_vendor_match
+        uvm = doc.get("unified_vendor_match") or {}
+        if not vendor_no and uvm.get("bc_vendor_number"):
+            vendor_no = uvm["bc_vendor_number"]
+            vendor_name = uvm.get("best_match", {}).get("name") or vendor_name
+            match_method = uvm.get("source") or match_method
+            match_score = uvm.get("score", 0.0)
+        
+        if vendor_no:
+            return {
+                "matched": True,
+                "bc_vendor_number": vendor_no,
+                "best_match": {"vendor_number": vendor_no, "name": vendor_name},
+                "source": match_method or "cache",
+                "score": match_score,
+            }
+        elif vendor_name:
+            return {"matched": False, "vendor_raw": vendor_name}
+        return None
+
+    def _compute_validation_hash(self, doc: Dict) -> str:
+        """Compute hash of fields that affect validation."""
+        import hashlib
+        parts = [
+            doc.get("vendor_canonical") or doc.get("vendor_normalized") or "",
+            doc.get("matched_vendor_no") or "",
+            doc.get("invoice_number_clean") or "",
+            doc.get("invoice_date") or "",
+            str(doc.get("amount_float") or ""),
+            str(doc.get("possible_duplicate") or ""),
+            doc.get("document_type") or "",
+        ]
+        raw = "|".join(parts)
+        return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+    def _build_validation_summary(self, result: Dict) -> str:
+        """Build a human-readable validation summary."""
+        state = result.get("validation_state", "pending")
+        checks_passed = sum(1 for c in result.get("checks", []) if c.get("passed"))
+        checks_total = len(result.get("checks", []))
+        warnings_count = len(result.get("warnings", []))
+        
+        if state == "pass":
+            return f"Validated: {checks_passed}/{checks_total} checks passed"
+        elif state == "warning":
+            return f"Validated with {warnings_count} warning(s): {checks_passed}/{checks_total} checks passed"
+        elif state == "fail":
+            failed = [c.get("check_name", "?") for c in result.get("checks", []) if not c.get("passed")]
+            return f"Validation failed: {', '.join(failed)}"
+        return "Validation pending"
 
 
 # =============================================================================

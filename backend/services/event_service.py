@@ -254,6 +254,33 @@ EVENT_TYPES = {
         "category": EventCategory.REVIEW,
         "payload_keys": ["queue", "reason", "assigned_to"]
     },
+    
+    # AP Validation lifecycle events
+    "validation.started": {
+        "description": "AP validation started",
+        "category": EventCategory.DOCUMENT,
+        "payload_keys": ["document_type", "validation_version"]
+    },
+    "validation.completed": {
+        "description": "AP validation completed",
+        "category": EventCategory.DOCUMENT,
+        "payload_keys": [
+            "document_type", "validation_state", "all_passed",
+            "blocking_issues_count", "warnings_count",
+            "vendor_resolved", "invoice_number_present",
+            "invoice_date_present", "total_amount_present", "is_duplicate"
+        ]
+    },
+    "validation.failed": {
+        "description": "AP validation error",
+        "category": EventCategory.DOCUMENT,
+        "payload_keys": ["document_type", "error"]
+    },
+    "validation.warning_detected": {
+        "description": "AP validation passed with warnings",
+        "category": EventCategory.DOCUMENT,
+        "payload_keys": ["document_type", "warnings"]
+    },
     "review.started": {
         "description": "Review started",
         "category": EventCategory.REVIEW,

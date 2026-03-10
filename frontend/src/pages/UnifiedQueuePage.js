@@ -473,6 +473,7 @@ export default function UnifiedQueuePage() {
                       <TableHead>Status</TableHead>
                       <TableHead>Ref Intel</TableHead>
                       <TableHead>Freight GL</TableHead>
+                      <TableHead>Validation</TableHead>
                       <TableHead>Source</TableHead>
                       <TableHead>Created</TableHead>
                       <TableHead className="w-20">Actions</TableHead>
@@ -551,6 +552,22 @@ export default function UnifiedQueuePage() {
                                   <span className="font-mono text-[10px] text-muted-foreground">{fgl.gl_number}</span>
                                 )}
                               </div>
+                            );
+                          })()}
+                        </TableCell>
+                        <TableCell data-testid={`validation-state-${doc.id}`}>
+                          {(() => {
+                            const vs = doc.validation_state || doc.ap_validation_result?.validation_state;
+                            if (!vs || vs === 'pending') return <span className="text-[10px] text-muted-foreground">-</span>;
+                            const vCls = {
+                              pass: 'bg-emerald-500/20 text-emerald-400',
+                              warning: 'bg-amber-500/20 text-amber-400',
+                              fail: 'bg-red-500/20 text-red-400',
+                            }[vs] || 'bg-gray-500/20 text-gray-400';
+                            return (
+                              <Badge className={`${vCls} text-[10px] px-1.5 py-0 w-fit`}>
+                                {vs === 'pass' ? 'pass' : vs === 'warning' ? 'warn' : 'fail'}
+                              </Badge>
                             );
                           })()}
                         </TableCell>

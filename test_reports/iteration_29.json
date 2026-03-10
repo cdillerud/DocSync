@@ -1,0 +1,97 @@
+{
+  "summary": "AP Validation Integration feature fully tested. All 9 backend API tests pass. Frontend verified: APValidationPanel displays on document detail with validation state, checks summary, blocking issues, warnings, and re-validate button. Queue page has Validation column with pass/warn/fail badges. Workflow Events timeline shows validation.completed events. Freight G/L button opens batch classification dialog.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ap_validation_integration.py",
+    "/app/test_reports/pytest/ap_validation_integration_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "APValidationService correctly integrated into auto_resolution_service._process_document() after freight GL routing",
+    "Validation runs for AP_VALIDATION_DOC_TYPES: AP_Invoice, Freight_Invoice, Carrier_Invoice",
+    "BC Write Guard confirmed BLOCKED - read-only safety verified",
+    "Derived states correctly set: fail -> needs_review/manual, pass -> ready/assisted"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_ap_validation_integration.py"
+  ],
+  "success_rate": {
+    "backend": "100% (9/9 tests passed)",
+    "frontend": "100% (all UI elements verified)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "None - used existing documents including c3bf1459-e48d-4905-a813-84b02386b9c4 (AP_Invoice) and 98695c83-a7f3-495f-ac8d-bb5405c55a63 (freight carrier)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "AP Validation Integration complete. Key endpoints: POST /api/ap-validation/validate/{doc_id} (manual trigger), GET /api/ap-validation/status/{doc_id} (get status). APValidationPanel shows on document detail for AP-relevant doc types. Queue table has 'Validation' column. Validation runs automatically in auto-resolution pipeline after freight GL for AP_Invoice, Freight_Invoice, Carrier_Invoice types. Results stored as ap_validation_result on document. Events emitted: validation.started, validation.completed, validation.failed, validation.warning_detected. Most docs show 'fail' because vendor matching against BC production is strict.",
+  "verified_features": {
+    "POST /api/ap-validation/validate/{doc_id} (AP_Invoice)": {
+      "status": "VERIFIED",
+      "evidence": "Returns validation_state, checks array, blocking_issues, warnings. Doc c3bf1459-e48d-4905-a813-84b02386b9c4 returns state=fail with vendor_resolution check failing"
+    },
+    "GET /api/ap-validation/status/{doc_id}": {
+      "status": "VERIFIED",
+      "evidence": "Returns validation_state, validation_passed, validation_errors, validation_warnings, validation_summary, derived_workflow_state, derived_automation_state"
+    },
+    "POST /api/ap-validation/validate for freight carrier doc": {
+      "status": "VERIFIED",
+      "evidence": "Doc 98695c83-a7f3-495f-ac8d-bb5405c55a63 validates as AP type, returns validation result"
+    },
+    "Validation state fail -> derived states": {
+      "status": "VERIFIED",
+      "evidence": "fail sets derived_workflow_state='needs_review' and derived_automation_state='manual'"
+    },
+    "Validation state pass -> derived states": {
+      "status": "VERIFIED",
+      "evidence": "pass sets derived_workflow_state='ready' and derived_automation_state='assisted'"
+    },
+    "GET /api/bc/write-guard/status": {
+      "status": "VERIFIED",
+      "evidence": "write_enabled=false, status='blocked' - BC writes are BLOCKED (read-only safety)"
+    },
+    "Idempotency": {
+      "status": "VERIFIED",
+      "evidence": "Calling validate twice returns same validation_version and state"
+    },
+    "Backwards compatibility": {
+      "status": "VERIFIED",
+      "evidence": "Documents without ap_validation_result still display correctly in queue and detail pages"
+    },
+    "Frontend: APValidationPanel on document detail": {
+      "status": "VERIFIED",
+      "evidence": "Panel shows validation state badge (Validation Failed), 5 required checks (vendor resolved, invoice number, date, amount, duplicate), blocking issues, warnings"
+    },
+    "Frontend: APValidationPanel Re-validate button": {
+      "status": "VERIFIED",
+      "evidence": "data-testid='ap-validate-btn' triggers validation and refreshes display"
+    },
+    "Frontend: Queue page Validation column": {
+      "status": "VERIFIED",
+      "evidence": "Table header 'Validation' present, cells show pass/warn/fail badges with colored backgrounds"
+    },
+    "Frontend: Validation events in timeline": {
+      "status": "VERIFIED",
+      "evidence": "16 events including multiple 'Validation › Completed' from ap_validation_manual service"
+    },
+    "Frontend: Freight G/L button": {
+      "status": "VERIFIED",
+      "evidence": "Button visible in queue page header, opens BatchFreightClassifyDialog"
+    },
+    "Auto-resolution pipeline integration": {
+      "status": "VERIFIED",
+      "evidence": "Workflow events show Reference Resolve -> Freight GI Classified -> Validation Completed sequence confirming AP validation runs after freight GL in pipeline"
+    }
+  },
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "note": "All APIs are live - AP validation writes to MongoDB, BC write guard confirms BC writes are BLOCKED"
+  }
+}

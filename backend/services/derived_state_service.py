@@ -228,6 +228,45 @@ class DerivedStateService:
                 needs_review = False
                 review_queue = None
             
+            # AP Validation events (authoritative source)
+            elif event_type == "validation.completed":
+                has_bc_validation = True
+                v_state = payload.get("validation_state", "")
+                if v_state == "fail":
+                    validation_state = ValidationState.FAIL.value
+                    needs_review = True
+                    review_queue = "accounting_review"
+                    # Extract blocking issues
+                    bi_count = payload.get("blocking_issues_count", 0)
+                    if bi_count > 0:
+                        if not payload.get("vendor_resolved"):
+                            blocking_issues.append("Vendor not resolved to BC vendor")
+                        if not payload.get("invoice_number_present"):
+                            blocking_issues.append("Invoice number missing")
+                        if not payload.get("invoice_date_present"):
+                            blocking_issues.append("Invoice date missing")
+                        if not payload.get("total_amount_present"):
+                            blocking_issues.append("Total amount missing")
+                        if payload.get("is_duplicate"):
+                            blocking_issues.append("Duplicate invoice detected")
+                elif v_state == "warning":
+                    validation_state = ValidationState.WARNING.value
+                    needs_review = True
+                    review_queue = "assisted_review"
+                    automation_state = AutomationState.ASSISTED.value
+                    w_count = payload.get("warnings_count", 0)
+                    if w_count > 0:
+                        warnings.append(f"{w_count} warning(s) detected during AP validation")
+                elif v_state == "pass":
+                    if validation_state != ValidationState.FAIL.value:
+                        validation_state = ValidationState.PASS.value
+                        automation_state = AutomationState.ASSISTED.value
+            
+            elif event_type == "validation.failed":
+                validation_state = ValidationState.FAIL.value
+                workflow_state = WorkflowState.FAILED.value
+                blocking_issues.append(payload.get("error", "Validation error"))
+            
             # PO validation events
             elif event_type == "po.validation.failed":
                 validation_state = ValidationState.FAIL.value
@@ -353,13 +392,26 @@ class DerivedStateService:
         This provides backwards compatibility for documents processed
         before the event system was implemented.
         """
-        # Derive validation_state from validation_results
+        # Derive validation_state from ap_validation_result (new) or validation_results (legacy)
         validation_state = ValidationState.PENDING.value
         blocking_issues = []
         warnings = []
         
+        ap_val = document.get("ap_validation_result", {})
         validation_results = document.get("validation_results", {})
-        if validation_results:
+        
+        if ap_val and ap_val.get("validation_state"):
+            # New unified AP validation result
+            v_state = ap_val["validation_state"]
+            if v_state == "pass":
+                validation_state = ValidationState.PASS.value
+            elif v_state == "warning":
+                validation_state = ValidationState.WARNING.value
+            elif v_state == "fail":
+                validation_state = ValidationState.FAIL.value
+            blocking_issues = ap_val.get("blocking_issues", [])
+            warnings = [w.get("details", str(w)) if isinstance(w, dict) else str(w) for w in ap_val.get("warnings", [])]
+        elif validation_results:
             if validation_results.get("all_passed"):
                 validation_state = ValidationState.PASS.value
                 warnings = validation_results.get("warnings", [])

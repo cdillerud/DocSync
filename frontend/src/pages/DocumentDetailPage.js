@@ -19,6 +19,7 @@ import APReviewPanel from '../components/APReviewPanel';
 import PDFPreviewPanel from '../components/PDFPreviewPanel';
 import ReferenceIntelligencePanel from '../components/ReferenceIntelligencePanel';
 import FreightGLRoutingPanel from '../components/FreightGLRoutingPanel';
+import APValidationPanel from '../components/APValidationPanel';
 
 const STATUS_CLASSES = {
   Received: 'status-received',
@@ -433,6 +434,12 @@ export default function DocumentDetailPage() {
           <ReferenceIntelligencePanel 
             document={doc} 
             onUpdate={() => fetchData()} 
+          />
+
+          {/* AP Validation Panel */}
+          <APValidationPanel
+            document={doc}
+            onUpdate={() => fetchData()}
           />
 
           {/* Freight G/L Routing Panel */}

@@ -3,20 +3,24 @@
 ## March 10, 2026
 
 ### BC Reference Cache Layer (COMPLETED)
-- **NEW:** `BCReferenceCacheService` in `/app/backend/services/bc_reference_cache_service.py`
-  - Local MongoDB cache of 277,977 BC records across 5 entity types
-  - Entity types: purchase_order (1,512), posted_purchase_invoice (89,360), sales_order (1,204), posted_sales_invoice (58,657), posted_sales_shipment (127,244)
-  - Bulk sync + incremental sync (using lastModifiedDateTime)
-  - Background sync every 10 minutes
-  - Normalized document number search, vendor/customer search, multi-search
-- **Cache-First Resolver:** `BCReferenceResolver` updated to check cache FIRST, fallback to BC API
-- **NEW API Endpoints:**
-  - `GET /api/cache/status` — record counts, last sync, health
-  - `POST /api/cache/sync?mode=bulk|incremental` — trigger sync
-  - `GET /api/cache/search?reference=X` — search cache directly
-- **Events:** `bc.cache.initialized`, `bc.cache.sync.started`, `bc.cache.sync.completed`, `bc.cache.sync.failed`
-- **Frontend:** Resolver Debug panel shows "Cache (local)" vs "BC API (live)" data source
-- **TESTS:** 17 backend + full frontend (100% pass rate, report: `/app/test_reports/iteration_23.json`)
+- **NEW:** `BCReferenceCacheService` — 277K+ records, 5 entity types, bulk/incremental sync, 10-min background refresh
+- **Cache-First Resolver:** Checks cache first (<50ms), falls back to BC API
+- **Endpoints:** `GET /api/cache/status`, `POST /api/cache/sync`, `GET /api/cache/search`
+- **TESTS:** iteration_23.json (17 backend, 100% frontend)
+
+### Auto-Resolution on Document Intake (COMPLETED)
+- **NEW:** `AutoResolutionService` in `/app/backend/services/auto_resolution_service.py`
+  - 5 async background workers, rate-limited, non-blocking
+  - Document-type-aware: only AP Invoice, Freight, Shipping, BOL, Sales Order
+  - Idempotent: version + SHA256 hash tracking (skips if data unchanged)
+  - Retry: max 3 attempts with 30s/60s/120s exponential backoff
+  - Cache-first, read-only (inherits BC write guard)
+- **Endpoints:** `GET /api/auto-resolve/stats`, `POST /api/documents/{id}/auto-resolve`
+- **Document Fields:** `reference_intelligence_status` (not_run/pending/completed/ambiguous/failed/retry_scheduled), `_version`, `_hash`, `_last_run`, `_outcome`, `_best_score`
+- **Queue UI:** "Ref Intel" column in UnifiedQueuePage with status badges + score
+- **Detail UI:** ReferenceIntelligencePanel shows pending/failed/retry indicators
+- **Events:** `reference.resolve.queued/started/completed/failed/retry_scheduled/skipped`
+- **TESTS:** iteration_24.json (11 backend, 100% frontend)
 
 ### AI-Assisted Reference Intelligence Engine (COMPLETED)
 - **NEW:** `ReferenceIntelligenceService` in `/app/backend/services/reference_intelligence_service.py`

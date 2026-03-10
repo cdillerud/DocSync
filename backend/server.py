@@ -120,6 +120,20 @@ from services.derived_state_service import (
     set_derived_state_service, get_derived_state_service, format_state_for_display
 )
 
+# AP Invoice Validation + BC Reference Resolution + Write Safety Guard
+from services.ap_validation_service import (
+    APValidationService, APValidationResult, APValidationState,
+    validate_ap_invoice_sync
+)
+from services.bc_reference_resolver import (
+    BCReferenceResolver, ReferenceResolutionResult, ReferenceType,
+    get_reference_resolver
+)
+from services.bc_write_safety_guard import (
+    BCWriteSafetyGuard, BC_WRITE_ENABLED, IS_PRODUCTION_ENVIRONMENT,
+    get_write_guard, set_write_guard, check_bc_write_allowed
+)
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -1392,6 +1406,114 @@ async def get_event_stats(since_hours: int = Query(24, le=168)):
         "total_failed": total_failed,
         "by_type": results
     }
+
+
+# =============================================================================
+# BC REFERENCE RESOLUTION + WRITE SAFETY ENDPOINTS
+# =============================================================================
+
+@api_router.post("/bc/resolve-reference")
+async def resolve_bc_reference(
+    reference_number: str = Query(..., description="Reference number to resolve"),
+    tables: Optional[str] = Query(None, description="Comma-separated tables to check")
+):
+    """
+    Resolve a reference number against BC tables.
+    
+    Checks in order: Purchase Orders, Posted Purchase Invoices, 
+    Sales Orders, Posted Sales Invoices, Posted Sales Shipments.
+    """
+    resolver = get_reference_resolver()
+    
+    check_tables = tables.split(",") if tables else None
+    
+    result = await resolver.resolve_reference(reference_number, check_tables)
+    
+    # Emit event
+    event_service = get_event_service()
+    if event_service:
+        await event_service.emit(
+            event_type="reference.resolve.completed",
+            document_id="api_call",
+            status="completed" if result.status == "found" else "warning",
+            source_service="bc_reference_resolver",
+            payload=result.to_dict()
+        )
+    
+    return result.to_dict()
+
+
+@api_router.post("/documents/{doc_id}/resolve-reference")
+async def resolve_document_reference(doc_id: str):
+    """
+    Resolve PO/Order reference for a specific document.
+    
+    Looks up extracted PO number or order reference and resolves against BC.
+    """
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Get reference number from document
+    reference_number = (
+        doc.get("po_number_clean") or
+        doc.get("extracted_fields", {}).get("po_number") or
+        doc.get("bol_number") or
+        doc.get("extracted_fields", {}).get("bol_number")
+    )
+    
+    if not reference_number:
+        return {
+            "document_id": doc_id,
+            "status": "no_reference",
+            "message": "No PO or BOL reference found in document"
+        }
+    
+    resolver = get_reference_resolver()
+    result = await resolver.resolve_reference(reference_number)
+    
+    # Update document with resolution result
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "reference_resolution": result.to_dict(),
+            "updated_utc": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    # Emit event
+    event_service = get_event_service()
+    if event_service:
+        await event_service.emit(
+            event_type="reference.resolve.completed",
+            document_id=doc_id,
+            status="completed" if result.status == "found" else "warning",
+            source_service="bc_reference_resolver",
+            payload=result.to_dict()
+        )
+    
+    return {
+        "document_id": doc_id,
+        **result.to_dict()
+    }
+
+
+@api_router.get("/bc/write-guard/status")
+async def get_bc_write_guard_status():
+    """Get the current BC write safety guard status."""
+    guard = get_write_guard()
+    return guard.get_status()
+
+
+@api_router.post("/bc/write-guard/check")
+async def check_bc_write_permission(
+    document_id: str = Query(...),
+    action: str = Query(...)
+):
+    """Check if a specific BC write action is allowed."""
+    guard = get_write_guard()
+    result = await guard.check_write_permission(document_id, action)
+    return result.to_dict()
 
 @api_router.put("/documents/{doc_id}")
 async def update_document(doc_id: str, update: DocumentUpdate):
@@ -14958,6 +15080,12 @@ async def startup():
     set_derived_state_service(db)
     await initialize_event_indexes(db)
     logger.info("Event-driven workflow services initialized")
+    
+    # Initialize BC Write Safety Guard
+    event_service = get_event_service()
+    set_write_guard(event_service)
+    guard_status = get_write_guard().get_status()
+    logger.info("BC Write Safety Guard initialized: %s", guard_status["message"])
     
     # Start daily pilot summary scheduler if enabled
     global _pilot_summary_task

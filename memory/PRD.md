@@ -1805,6 +1805,151 @@ Events are now emitted at:
 - Event patterns support glob matching (e.g., `vendor.*`)
 - Correlation IDs for tracing related events
 
+
+---
+
+## Session Update: March 10, 2026 - AP Invoice Validation Enhancement
+
+### Overview
+Enhanced AP Invoice validation, added BC reference resolution across multiple tables, implemented BOL extraction, and added BC write safety guard for production environment.
+
+### 1. AP Invoice Validation Service (`ap_validation_service.py`)
+
+**New Validation Logic:**
+```
+Required checks (FAIL if missing):
+1. Vendor must resolve to BC vendor
+2. Invoice number must exist
+3. Invoice date must exist  
+4. Total amount must exist
+5. Invoice must not be duplicate for vendor
+
+Warnings (non-blocking):
+- PO reference not found
+- Currency mismatch
+- Missing line items
+- Missing tax amount
+```
+
+**Validation States:**
+- `pass` - All required fields valid
+- `warning` - Required valid but warnings present  
+- `fail` - Missing required data or duplicate detected
+
+### 2. BC Reference Resolver (`bc_reference_resolver.py`)
+
+**Resolution Order:**
+1. Purchase Orders
+2. Posted Purchase Invoices (vendorInvoiceNumber + number)
+3. Sales Orders
+4. Posted Sales Invoices
+5. Posted Sales Shipments
+
+**Returns:**
+- `reference_type`: purchase_order | posted_purchase_invoice | sales_order | posted_sales_invoice | posted_sales_shipment | not_found
+- `bc_record_id`: BC record ID
+- `bc_document_no`: BC document number
+- `status`: found | not_found | error
+- `tables_checked`: List of tables that were searched
+
+### 3. BOL Extraction
+
+**Invoice Extractor Updated:**
+- Added `bol_number` field to extraction prompt
+- Looks for patterns: "BOL: 12345", "BOL# 12345", "Bill of Lading: 12345", "B/L 12345"
+- Stored at document level: `document.bol_number`
+
+**Line Description with BOL:**
+```python
+extraction_result.get_line_description_with_bol("Freight charge")
+# Returns: "Freight charge – BOL 11668" if BOL present
+```
+
+### 4. BC Write Safety Guard (`bc_write_safety_guard.py`)
+
+**Configuration:**
+```env
+BC_WRITE_ENABLED=false  # Must be explicitly set to "true" to allow writes
+BC_PROD_ENVIRONMENT=Production  # Detected as production environment
+```
+
+**Behavior:**
+- All BC write operations must go through the guard
+- When blocked, emits `bc.write_blocked` event
+- Returns `automation_state = assisted` (not autonomous) until writes enabled
+
+**Guard Methods:**
+- `check_write_permission(doc_id, action)` - Check if write allowed
+- `guard_create_purchase_invoice(doc_id, data)` - Wrap invoice creation
+- `guard_post_invoice(doc_id, bc_invoice_id)` - Wrap posting
+
+### 5. New API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/bc/resolve-reference?reference_number=X` | Resolve reference against BC tables |
+| POST | `/api/documents/{id}/resolve-reference` | Resolve document's PO/BOL reference |
+| GET | `/api/bc/write-guard/status` | Get write guard status |
+| POST | `/api/bc/write-guard/check?document_id=X&action=Y` | Check if write allowed |
+
+### 6. New Event Types
+
+| Event | Description |
+|-------|-------------|
+| `reference.resolve.started` | Reference resolution started |
+| `reference.resolve.completed` | Reference resolution completed (with result) |
+| `bol.extracted` | BOL number extracted from document |
+| `bc.write_blocked` | BC write blocked by safety guard |
+
+### 7. Frontend Updates
+
+**DocumentDetailPage.js:**
+- New **References** card showing:
+  - PO Reference (if extracted)
+  - BOL Number (if extracted)
+  - BC Lookup Result (found/not found, type, document number, tables checked)
+
+### Files Created/Modified
+
+| File | Action |
+|------|--------|
+| `/app/backend/services/ap_validation_service.py` | **NEW** |
+| `/app/backend/services/bc_reference_resolver.py` | **NEW** |
+| `/app/backend/services/bc_write_safety_guard.py` | **NEW** |
+| `/app/backend/services/invoice_extractor.py` | Modified - added BOL extraction |
+| `/app/backend/services/event_service.py` | Modified - added new event types |
+| `/app/backend/server.py` | Modified - imports, init, new endpoints |
+| `/app/backend/.env` | Modified - added BC_WRITE_ENABLED=false |
+| `/app/frontend/src/pages/DocumentDetailPage.js` | Modified - References card |
+| `/app/frontend/src/lib/api.js` | Modified - new API functions |
+
+### Testing Results
+
+```bash
+# Write guard status
+GET /api/bc/write-guard/status
+{
+    "write_enabled": false,
+    "environment": "Production",
+    "is_production": true,
+    "status": "blocked",
+    "message": "BC writes are BLOCKED (production safety)"
+}
+
+# Write check
+POST /api/bc/write-guard/check?document_id=test&action=create_purchase_invoice
+{
+    "allowed": false,
+    "reason": "production_writes_disabled",
+    ...
+}
+
+# Event emitted on write attempt
+bc.write_blocked event recorded in workflow_events collection
+```
+
+*Last Updated: March 10, 2026*
+
 ### Testing
 - Backend: All endpoints tested via curl
 - Frontend: Screenshot verified showing new state cards and timeline

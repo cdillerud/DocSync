@@ -48,6 +48,7 @@ class InvoiceExtractionResult:
         vendor_name: str = None,
         vendor_number: str = None,
         po_number: str = None,
+        bol_number: str = None,  # NEW: Bill of Lading number
         total_amount: float = None,
         tax_amount: float = None,
         currency: str = "USD",
@@ -63,6 +64,7 @@ class InvoiceExtractionResult:
         self.vendor_name = vendor_name
         self.vendor_number = vendor_number
         self.po_number = po_number
+        self.bol_number = bol_number  # NEW
         self.total_amount = total_amount
         self.tax_amount = tax_amount
         self.currency = currency
@@ -81,6 +83,7 @@ class InvoiceExtractionResult:
             "vendor_name": self.vendor_name,
             "vendor_number": self.vendor_number,
             "po_number": self.po_number,
+            "bol_number": self.bol_number,  # NEW
             "total_amount": self.total_amount,
             "tax_amount": self.tax_amount,
             "currency": self.currency,
@@ -99,6 +102,16 @@ class InvoiceExtractionResult:
             self.vendor_name and
             self.total_amount is not None
         )
+    
+    def get_line_description_with_bol(self, base_description: str = "Freight charge") -> str:
+        """
+        Generate line description including BOL if present.
+        
+        Example: "Freight charge – BOL 11668"
+        """
+        if self.bol_number:
+            return f"{base_description} – BOL {self.bol_number}"
+        return base_description
 
 
 EXTRACTION_PROMPT = """You are an expert invoice data extraction system. Analyze this invoice document and extract all relevant data.
@@ -113,20 +126,27 @@ Extract the following fields from the invoice:
 4. **vendor_name**: The vendor/supplier company name
 5. **vendor_number**: The vendor's account number (if shown)
 6. **po_number**: Purchase order number reference (if shown)
-7. **total_amount**: Total invoice amount as a number (no currency symbol)
-8. **tax_amount**: Tax/VAT amount as a number (if shown, otherwise null)
-9. **currency**: Currency code (USD, CAD, EUR, etc.) - default to USD if not shown
-10. **line_items**: Array of line items, each with:
+7. **bol_number**: Bill of Lading (BOL) number (if shown - common on freight invoices)
+8. **total_amount**: Total invoice amount as a number (no currency symbol)
+9. **tax_amount**: Tax/VAT amount as a number (if shown, otherwise null)
+10. **currency**: Currency code (USD, CAD, EUR, etc.) - default to USD if not shown
+11. **line_items**: Array of line items, each with:
     - description: Item/service description
     - quantity: Quantity as a number
     - unit_price: Price per unit as a number
     - total: Line total as a number
-11. **confidence**: Your confidence in the extraction accuracy (0.0 to 1.0)
+12. **confidence**: Your confidence in the extraction accuracy (0.0 to 1.0)
 
 For freight/transportation invoices, common line item fields may include:
 - Weight, distance, rate, charges
 - Fuel surcharges, accessorial charges
+- BOL references in line descriptions
 - Treat these as line items with appropriate descriptions
+
+Look for BOL numbers in these formats:
+- "BOL: 12345" or "BOL# 12345" or "BOL Number: 12345"
+- "Bill of Lading: 12345"
+- References like "B/L 12345"
 
 JSON Response format:
 {
@@ -136,6 +156,7 @@ JSON Response format:
     "vendor_name": "string",
     "vendor_number": "string or null",
     "po_number": "string or null",
+    "bol_number": "string or null",
     "total_amount": number,
     "tax_amount": number or null,
     "currency": "USD",
@@ -298,6 +319,7 @@ async def extract_invoice_data(file_path: str) -> InvoiceExtractionResult:
             vendor_name=data.get("vendor_name"),
             vendor_number=data.get("vendor_number"),
             po_number=data.get("po_number"),
+            bol_number=data.get("bol_number"),  # NEW: Extract BOL
             total_amount=float(data.get("total_amount")) if data.get("total_amount") is not None else None,
             tax_amount=float(data.get("tax_amount")) if data.get("tax_amount") is not None else None,
             currency=data.get("currency", "USD"),
@@ -371,6 +393,9 @@ async def extract_and_update_document(doc_id: str, file_path: str, db) -> Dict[s
     if result.po_number:
         extracted_fields["po_number"] = result.po_number
         update_fields["po_number_clean"] = result.po_number
+    if result.bol_number:
+        extracted_fields["bol_number"] = result.bol_number
+        update_fields["bol_number"] = result.bol_number  # Store BOL at document level
     if result.total_amount is not None:
         extracted_fields["amount"] = str(result.total_amount)
         update_fields["amount_float"] = result.total_amount

@@ -286,6 +286,32 @@ EVENT_TYPES = {
         "category": EventCategory.SYSTEM,
         "payload_keys": ["error", "component", "recoverable"]
     },
+    
+    # Reference Resolution events (NEW)
+    "reference.resolve.started": {
+        "description": "Reference resolution started",
+        "category": EventCategory.PO,
+        "payload_keys": ["reference_number", "tables_to_check"]
+    },
+    "reference.resolve.completed": {
+        "description": "Reference resolution completed",
+        "category": EventCategory.PO,
+        "payload_keys": ["reference_number", "reference_type", "bc_record_id", "status", "tables_checked"]
+    },
+    
+    # BOL Extraction events (NEW)
+    "bol.extracted": {
+        "description": "BOL number extracted from document",
+        "category": EventCategory.EXTRACTION,
+        "payload_keys": ["bol_number", "source_field"]
+    },
+    
+    # BC Write events (NEW)
+    "bc.write_blocked": {
+        "description": "BC write operation blocked by safety guard",
+        "category": EventCategory.BC,
+        "payload_keys": ["reason", "document_id", "attempted_action", "bc_environment"]
+    },
 }
 
 

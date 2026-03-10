@@ -2067,3 +2067,73 @@ One-click batch freight classification on the Document Queue page. Classificatio
 - Test report: `/app/test_reports/iteration_28.json`
 
 *Last Updated: March 10, 2026*
+
+---
+
+## APValidationService Integration into Main Processing Flow (Completed - March 10, 2026)
+
+### Overview
+APValidationService is now the single authoritative validation layer for AP-relevant documents. It runs automatically in the auto-resolution pipeline after reference resolution, vendor intelligence, and freight GL routing. Results drive validation_state, workflow_state, automation_state, and queue routing.
+
+### Processing Pipeline Order
+1. Ingestion → 2. Extraction → 3. Reference Intelligence → 4. Vendor Intelligence → 5. Freight GL Routing → **6. AP Validation** → 7. Derived State Update → 8. Automation Rules → 9. Queue Routing
+
+### Validation Rules (Required Checks)
+| Check | Fail Condition |
+|-------|---------------|
+| vendor_resolution | Vendor not resolved to BC vendor |
+| invoice_number | Invoice number missing |
+| invoice_date | Invoice date missing |
+| total_amount | Total amount missing |
+| duplicate_invoice | Duplicate detected |
+
+### Derived States
+| Validation State | Workflow State | Automation State |
+|-----------------|---------------|-----------------|
+| pass | ready | assisted |
+| warning | reviewing | assisted |
+| fail | needs_review | manual |
+
+### Document-Type Gating
+- **Auto-validated**: AP_Invoice, Freight_Invoice, Carrier_Invoice
+- **Conditional**: Shipping_Document, BOL (only when AP-relevant with vendor+amount)
+- **Skipped**: All other types
+
+### Events Emitted
+- `validation.started`, `validation.completed`, `validation.failed`, `validation.warning_detected`
+
+### Normalized Payload Stored on Document
+`ap_validation_result`, `validation_state`, `validation_passed`, `validation_errors[]`, `validation_warnings[]`, `validation_summary`, `validation_version`, `validation_last_run`, `derived_workflow_state`, `derived_automation_state`
+
+### API Endpoints
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | /api/ap-validation/validate/{doc_id} | Manual validation trigger |
+| GET | /api/ap-validation/status/{doc_id} | Get validation status |
+
+### Frontend
+- **APValidationPanel**: Shows on document detail for AP-relevant docs. Displays validation state badge, 5 required checks with pass/fail icons, blocking issues, expandable warnings and detailed checks, metadata footer.
+- **Queue page**: Validation column with pass/warn/fail badges
+- **Workflow Events**: Validation events shown in timeline
+
+### Idempotency & Backwards Compatibility
+- `validation_version` + `input_hash` mechanism prevents unnecessary re-runs
+- Old documents without `ap_validation_result` fall back to legacy `validation_results` field
+- No destructive migration required
+
+### Files Modified/Created
+- `/app/backend/services/auto_resolution_service.py` — Added `_run_ap_validation`, `_build_vendor_match`, `_compute_validation_hash`, `_build_validation_summary`, `set_ap_validation_service`, `set_freight_gl_service`
+- `/app/backend/services/derived_state_service.py` — Added `validation.completed`/`validation.failed` event handling, `ap_validation_result` legacy fallback
+- `/app/backend/services/event_service.py` — Added 4 validation event types
+- `/app/backend/server.py` — Wired APValidationService into startup, added validation endpoints
+- `/app/frontend/src/components/APValidationPanel.js` — New component
+- `/app/frontend/src/pages/DocumentDetailPage.js` — Integrated APValidationPanel
+- `/app/frontend/src/pages/UnifiedQueuePage.js` — Added Validation column
+
+### Test Results
+- Backend: 9/9 tests passed (100%)
+- Frontend: All UI elements verified (100%)
+- Test report: `/app/test_reports/iteration_29.json`
+
+*Last Updated: March 10, 2026*
+

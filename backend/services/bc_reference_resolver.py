@@ -16,14 +16,19 @@ Returns:
 - bc_record_id: BC record ID
 - bc_document_no: BC document number
 - status: found | not_found | error
+
+Uses the same BC credentials as sandbox but targets PRODUCTION environment for reads.
 """
 
 import os
 import logging
 import httpx
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List
 from enum import Enum
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -83,30 +88,52 @@ class ReferenceResolutionResult:
         }
 
 
+# =============================================================================
+# CONFIGURATION - Use same creds as sandbox, target Production environment
+# =============================================================================
+
+# Use existing BC credentials (same for sandbox and production)
+BC_TENANT_ID = os.environ.get('TENANT_ID', '')
+BC_CLIENT_ID = os.environ.get('BC_CLIENT_ID') or os.environ.get('BC_SANDBOX_CLIENT_ID', '')
+BC_CLIENT_SECRET = os.environ.get('BC_CLIENT_SECRET') or os.environ.get('BC_SANDBOX_CLIENT_SECRET', '')
+
+# Target PRODUCTION environment for reference resolution (read-only)
+BC_PROD_ENVIRONMENT = os.environ.get('BC_PROD_ENVIRONMENT', 'Production')
+
+BC_API_BASE = "https://api.businesscentral.dynamics.com/v2.0"
+
+logger.info(
+    "[BC Reference Resolver] Config: tenant=%s, client=%s, env=%s",
+    BC_TENANT_ID[:8] + "..." if BC_TENANT_ID else "NOT SET",
+    BC_CLIENT_ID[:8] + "..." if BC_CLIENT_ID else "NOT SET",
+    BC_PROD_ENVIRONMENT
+)
+
+
 class BCReferenceResolver:
     """
-    BC Reference Resolver - resolves reference numbers against BC tables.
+    BC Reference Resolver - resolves reference numbers against BC Production tables.
     
-    Uses Production BC for read-only lookups.
+    Uses same credentials as sandbox but targets Production environment.
     """
     
     def __init__(self):
-        # BC Production credentials for READ operations
-        self.tenant_id = os.environ.get("BC_PROD_TENANT_ID") or os.environ.get("BC_TENANT_ID", "")
-        self.client_id = os.environ.get("BC_PROD_CLIENT_ID") or os.environ.get("BC_CLIENT_ID", "")
-        self.client_secret = os.environ.get("BC_PROD_CLIENT_SECRET") or os.environ.get("BC_CLIENT_SECRET", "")
-        self.environment = os.environ.get("BC_PROD_ENVIRONMENT") or os.environ.get("BC_ENVIRONMENT", "Production")
+        self.tenant_id = BC_TENANT_ID
+        self.client_id = BC_CLIENT_ID
+        self.client_secret = BC_CLIENT_SECRET
+        self.environment = BC_PROD_ENVIRONMENT
         
         self._token = None
         self._token_expires = None
         self._company_id = None
-        
-        self.bc_api_base = "https://api.businesscentral.dynamics.com/v2.0"
     
     async def _get_token(self) -> Optional[str]:
         """Get BC access token."""
-        if not self.client_id or not self.client_secret:
-            logger.warning("[BC Reference Resolver] No BC credentials configured")
+        if not self.client_id or not self.client_secret or not self.tenant_id:
+            logger.error(
+                "[BC Reference Resolver] Missing credentials: tenant=%s, client=%s, secret=%s",
+                bool(self.tenant_id), bool(self.client_id), bool(self.client_secret)
+            )
             return None
         
         # Check if token is still valid
@@ -128,34 +155,59 @@ class BCReferenceResolver:
                 if resp.status_code == 200:
                     data = resp.json()
                     self._token = data["access_token"]
-                    # Token expires in ~1 hour, refresh at 50 minutes
-                    from datetime import timedelta
                     self._token_expires = datetime.now(timezone.utc) + timedelta(minutes=50)
+                    logger.info("[BC Reference Resolver] Token obtained successfully")
                     return self._token
                 else:
-                    logger.error("[BC Reference Resolver] Token error: %d", resp.status_code)
+                    logger.error(
+                        "[BC Reference Resolver] Token error: %d - %s",
+                        resp.status_code, resp.text[:200]
+                    )
                     return None
         except Exception as e:
             logger.error("[BC Reference Resolver] Token error: %s", str(e))
             return None
     
     async def _get_company_id(self, token: str) -> Optional[str]:
-        """Get BC company ID."""
+        """Get BC company ID for Gamer Packaging."""
         if self._company_id:
             return self._company_id
         
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
+                url = f"{BC_API_BASE}/{self.tenant_id}/{self.environment}/api/v2.0/companies"
                 resp = await client.get(
-                    f"{self.bc_api_base}/{self.tenant_id}/{self.environment}/api/v2.0/companies",
+                    url,
                     headers={"Authorization": f"Bearer {token}"}
                 )
                 
                 if resp.status_code == 200:
                     companies = resp.json().get("value", [])
+                    logger.info("[BC Reference Resolver] Found %d companies", len(companies))
+                    
+                    # Look for Gamer Packaging
+                    for company in companies:
+                        if "gamer" in company.get("name", "").lower():
+                            self._company_id = company["id"]
+                            logger.info(
+                                "[BC Reference Resolver] Using company: %s (%s)",
+                                company.get("name"), self._company_id
+                            )
+                            return self._company_id
+                    
+                    # Fall back to first company
                     if companies:
                         self._company_id = companies[0]["id"]
+                        logger.info(
+                            "[BC Reference Resolver] Using first company: %s (%s)",
+                            companies[0].get("name"), self._company_id
+                        )
                         return self._company_id
+                else:
+                    logger.error(
+                        "[BC Reference Resolver] Company lookup error: %d - %s",
+                        resp.status_code, resp.text[:200]
+                    )
         except Exception as e:
             logger.error("[BC Reference Resolver] Company lookup error: %s", str(e))
         
@@ -167,14 +219,7 @@ class BCReferenceResolver:
         check_tables: List[str] = None
     ) -> ReferenceResolutionResult:
         """
-        Resolve a reference number against BC tables.
-        
-        Args:
-            reference_number: The reference number to look up
-            check_tables: Optional list of tables to check (defaults to all)
-            
-        Returns:
-            ReferenceResolutionResult with match details
+        Resolve a reference number against BC Production tables.
         """
         if not reference_number:
             return ReferenceResolutionResult(
@@ -190,10 +235,10 @@ class BCReferenceResolver:
         if check_tables is None:
             check_tables = [
                 "purchaseOrders",
-                "purchaseInvoices",  # Posted purchase invoices
+                "purchaseInvoices",
                 "salesOrders",
-                "salesInvoices",     # Posted sales invoices
-                "salesShipments"     # Posted sales shipments
+                "salesInvoices",
+                "salesShipments"
             ]
         
         token = await self._get_token()
@@ -201,7 +246,7 @@ class BCReferenceResolver:
             return ReferenceResolutionResult(
                 reference_number=ref_clean,
                 status=ReferenceResolutionStatus.ERROR.value,
-                error="Could not obtain BC token"
+                error="Could not obtain BC token - check credentials"
             )
         
         company_id = await self._get_company_id(token)
@@ -230,7 +275,7 @@ class BCReferenceResolver:
                 # 2. Check Posted Purchase Invoices
                 if "purchaseInvoices" in check_tables:
                     tables_checked.append("purchaseInvoices")
-                    # Try vendorInvoiceNumber first (external invoice number)
+                    # Try vendorInvoiceNumber first
                     result = await self._check_table(
                         client, token, company_id,
                         "purchaseInvoices", "vendorInvoiceNumber", ref_clean,
@@ -318,13 +363,9 @@ class BCReferenceResolver:
         value: str,
         ref_type: str
     ) -> Optional[ReferenceResolutionResult]:
-        """
-        Check a single BC table for a matching reference.
-        
-        Returns ReferenceResolutionResult if found, None if not found.
-        """
+        """Check a single BC table for a matching reference."""
         try:
-            url = f"{self.bc_api_base}/{self.tenant_id}/{self.environment}/api/v2.0/companies({company_id})/{table}"
+            url = f"{BC_API_BASE}/{self.tenant_id}/{self.environment}/api/v2.0/companies({company_id})/{table}"
             
             resp = await client.get(
                 url,
@@ -338,8 +379,8 @@ class BCReferenceResolver:
                     record = records[0]
                     
                     logger.info(
-                        "[BC Reference Resolver] Found '%s' in %s as %s",
-                        value, table, ref_type
+                        "[BC Reference Resolver] FOUND '%s' in %s (Production)",
+                        value, table
                     )
                     
                     return ReferenceResolutionResult(
@@ -361,11 +402,12 @@ class BCReferenceResolver:
         return None
     
     def _extract_record_info(self, record: Dict, table: str) -> Dict[str, Any]:
-        """Extract relevant info from a BC record based on table type."""
+        """Extract relevant info from a BC record."""
         info = {
             "id": record.get("id"),
             "number": record.get("number"),
-            "table": table
+            "table": table,
+            "environment": self.environment
         }
         
         if table == "purchaseOrders":
@@ -418,4 +460,11 @@ def get_reference_resolver() -> BCReferenceResolver:
     global _reference_resolver
     if _reference_resolver is None:
         _reference_resolver = BCReferenceResolver()
+    return _reference_resolver
+
+
+def set_reference_resolver(resolver: BCReferenceResolver = None) -> BCReferenceResolver:
+    """Set custom reference resolver."""
+    global _reference_resolver
+    _reference_resolver = resolver or BCReferenceResolver()
     return _reference_resolver

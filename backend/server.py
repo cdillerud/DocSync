@@ -152,6 +152,9 @@ from services.vendor_intelligence_service import (
 from services.automation_rules_service import (
     AutomationRulesService, get_automation_rules_service, set_automation_rules_service
 )
+from services.freight_gl_routing_service import (
+    FreightGLRoutingService, get_freight_gl_service, set_freight_gl_service
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -1857,6 +1860,113 @@ async def evaluate_rules_for_document(doc_id: str):
         raise HTTPException(status_code=503, detail="Rules engine not initialized")
     result = await svc.evaluate(doc)
     return result or {"matched": False, "message": "No matching rule found"}
+
+
+
+# =============================================================================
+# FREIGHT G/L ACCOUNT ROUTING ENDPOINTS
+# =============================================================================
+
+@api_router.get("/freight-routing/accounts")
+async def list_freight_gl_accounts():
+    """List all configured freight G/L accounts."""
+    svc = get_freight_gl_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Freight G/L routing not initialized")
+    accounts = await svc.list_accounts()
+    return {"accounts": accounts, "total": len(accounts)}
+
+
+@api_router.get("/freight-routing/accounts/{account_id}")
+async def get_freight_gl_account(account_id: str):
+    """Get a single freight G/L account."""
+    svc = get_freight_gl_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Freight G/L routing not initialized")
+    account = await svc.get_account(account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="G/L account not found")
+    return account
+
+
+@api_router.post("/freight-routing/accounts")
+async def create_freight_gl_account(account: Dict = Body(...)):
+    """Create a new freight G/L account."""
+    svc = get_freight_gl_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Freight G/L routing not initialized")
+    return await svc.create_account(account)
+
+
+@api_router.put("/freight-routing/accounts/{account_id}")
+async def update_freight_gl_account(account_id: str, updates: Dict = Body(...)):
+    """Update a freight G/L account."""
+    svc = get_freight_gl_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Freight G/L routing not initialized")
+    result = await svc.update_account(account_id, updates)
+    if not result:
+        raise HTTPException(status_code=404, detail="G/L account not found")
+    return result
+
+
+@api_router.delete("/freight-routing/accounts/{account_id}")
+async def delete_freight_gl_account(account_id: str):
+    """Delete a freight G/L account."""
+    svc = get_freight_gl_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Freight G/L routing not initialized")
+    deleted = await svc.delete_account(account_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="G/L account not found")
+    return {"status": "deleted", "account_id": account_id}
+
+
+@api_router.post("/freight-routing/classify/{doc_id}")
+async def classify_freight_gl(doc_id: str):
+    """Classify a document's freight G/L account."""
+    svc = get_freight_gl_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Freight G/L routing not initialized")
+    result = await svc.classify_and_save(doc_id)
+    if result.get("error"):
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@api_router.post("/freight-routing/override/{doc_id}")
+async def override_freight_gl(doc_id: str, body: Dict = Body(...)):
+    """Override freight G/L classification for a document."""
+    svc = get_freight_gl_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Freight G/L routing not initialized")
+    gl_account_id = body.get("gl_account_id")
+    reason = body.get("reason", "")
+    if not gl_account_id:
+        raise HTTPException(status_code=400, detail="gl_account_id is required")
+    result = await svc.override_classification(doc_id, gl_account_id, reason)
+    if result.get("error"):
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@api_router.get("/freight-routing/stats")
+async def get_freight_routing_stats():
+    """Get freight G/L routing statistics."""
+    svc = get_freight_gl_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Freight G/L routing not initialized")
+    return await svc.get_stats()
+
+
+@api_router.get("/freight-routing/recent")
+async def get_recent_freight_classifications(limit: int = Query(20, le=100)):
+    """Get recent freight classifications."""
+    svc = get_freight_gl_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Freight G/L routing not initialized")
+    return await svc.get_recent_classifications(limit=limit)
+
 
 
 @api_router.put("/documents/{doc_id}")
@@ -15471,6 +15581,11 @@ async def startup():
     await rules_engine.initialize()
     auto_resolve.set_rules_engine(rules_engine)
     logger.info("Automation Rules Engine initialized")
+    
+    # Initialize Freight G/L Routing Service
+    freight_gl = set_freight_gl_service(db, event_service, vendor_intel)
+    await freight_gl.initialize()
+    logger.info("Freight G/L Routing Service initialized")
     
     # Start daily pilot summary scheduler if enabled
     global _pilot_summary_task

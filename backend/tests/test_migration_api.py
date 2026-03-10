@@ -10,7 +10,7 @@ sys.path.insert(0, '/app/backend')
 
 
 # Test configuration
-API_BASE_URL = "https://bc-workflow.preview.emergentagent.com"
+API_BASE_URL = "https://freight-routing.preview.emergentagent.com"
 
 
 @pytest.fixture

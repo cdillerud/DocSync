@@ -18,6 +18,7 @@ import { Square9WorkflowTracker } from '../components/Square9WorkflowTracker';
 import APReviewPanel from '../components/APReviewPanel';
 import PDFPreviewPanel from '../components/PDFPreviewPanel';
 import ReferenceIntelligencePanel from '../components/ReferenceIntelligencePanel';
+import FreightGLRoutingPanel from '../components/FreightGLRoutingPanel';
 
 const STATUS_CLASSES = {
   Received: 'status-received',
@@ -432,6 +433,12 @@ export default function DocumentDetailPage() {
           <ReferenceIntelligencePanel 
             document={doc} 
             onUpdate={() => fetchData()} 
+          />
+
+          {/* Freight G/L Routing Panel */}
+          <FreightGLRoutingPanel
+            document={doc}
+            onUpdate={() => fetchData()}
           />
 
           {/* Square9 Workflow Tracker */}

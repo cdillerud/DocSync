@@ -2034,3 +2034,36 @@ An engine that determines the correct General Ledger (G/L) account classificatio
 - Test report: `/app/test_reports/iteration_27.json`
 
 *Last Updated: March 10, 2026*
+
+
+---
+
+## Batch Freight G/L Classification (Completed - March 10, 2026)
+
+### Overview
+One-click batch freight classification on the Document Queue page. Classification-only, read-only (no BC writes). Processes selected or all filtered documents, runs freight detection + G/L routing, saves recommendations, respects confidence thresholds, skips manually overridden items.
+
+### Backend
+- `POST /api/freight-routing/batch-classify` — accepts `document_ids` (optional), `confidence_threshold` (default 0.5), `skip_overrides` (default true)
+- Returns summary: `total_processed`, `freight_detected`, `non_freight`, `skipped_override`, `by_direction`, `by_gl_account`, `needs_manual_review[]`, `high_confidence[]`
+
+### Frontend
+- **"Freight G/L" button** in Document Queue header opens `BatchFreightClassifyDialog`
+- Pre-run config: target count, confidence threshold slider, skip overrides checkbox, read-only safety notice
+- Post-run results: summary cards, direction breakdown (inbound/outbound/transfer/unknown), G/L distribution with progress bars, expandable manual review and high-confidence tables
+- **Freight GL column** added to queue table showing direction badge + G/L number per document
+
+### Files
+- `/app/backend/services/freight_gl_routing_service.py` — `batch_classify()` method
+- `/app/frontend/src/components/BatchFreightClassifyDialog.js` — Dialog component
+- `/app/frontend/src/pages/UnifiedQueuePage.js` — Button, column, dialog integration
+
+### Also Fixed
+- BC status indicator in sidebar now shows actual environment: "BC PRODUCTION (R/O)" instead of hardcoded "BC SANDBOX"
+
+### Test Results
+- Backend: 7/8 tests passed, 1 skipped (100%)
+- Frontend: All UI elements verified (100%)
+- Test report: `/app/test_reports/iteration_28.json`
+
+*Last Updated: March 10, 2026*

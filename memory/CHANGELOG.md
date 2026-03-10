@@ -22,6 +22,20 @@
 - **Events:** `reference.resolve.queued/started/completed/failed/retry_scheduled/skipped`
 - **TESTS:** iteration_24.json (11 backend, 100% frontend)
 
+### Vendor Intelligence Engine (COMPLETED)
+- **NEW:** `VendorIntelligenceService` in `/app/backend/services/vendor_intelligence_service.py`
+  - `vendor_intelligence_profiles` collection — 16 vendors, 25 docs processed from historical rebuild
+  - Behavioral metrics: PO/BOL/shipment frequencies, resolution/automation success rates
+  - Stable vendor detection (50+ invoices, 90%+ automation)
+  - Vendor-aware resolver hints (search order boost, domain priority, behavior scoring)
+  - Async profile updates after auto-resolution (non-blocking)
+- **Endpoints:** `GET /api/vendor-intelligence/stats`, `.../profiles`, `.../profiles/{id}`, `POST .../rebuild`, `GET .../resolver-hints/{name}`
+- **Dashboard:** New `/vendor-intelligence` page — stats cards, sortable vendor table, search, detail side panel
+- **Resolver Integration:** `score_bc_match` now accepts `vendor_hints` for behavior-based scoring boost (0.15 weight)
+- **Events:** `vendor.profile.created/updated`, `vendor.stable.detected`
+- **TESTS:** iteration_25.json (18 backend, 100% frontend)
+
+
 ### AI-Assisted Reference Intelligence Engine (COMPLETED)
 - **NEW:** `ReferenceIntelligenceService` in `/app/backend/services/reference_intelligence_service.py`
   - Extracts multiple candidate references (PO, BOL, Order, Shipment, Load, PRO, Invoice) from documents

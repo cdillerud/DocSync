@@ -6,7 +6,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator
 } from '../components/ui/dropdown-menu';
 import {
-  LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, Brain, FileSpreadsheet, ChevronRight, FolderSync, Users
+  LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, Brain, FileSpreadsheet, ChevronRight, FolderSync, Users, Zap
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
@@ -20,6 +20,7 @@ const navItems = [
   { to: '/file-import', icon: FileSpreadsheet, label: 'File Import' },
   { to: '/email-parser', icon: Brain, label: 'Email Config' },
   { to: '/vendor-intelligence', icon: Users, label: 'Vendor Intel' },
+  { to: '/automation-rules', icon: Zap, label: 'Automation Rules' },
   { to: '/migration/onegamer-poc', icon: FolderSync, label: 'SP Migration POC' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];

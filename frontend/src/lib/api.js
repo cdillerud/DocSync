@@ -81,6 +81,15 @@ export const resetDocumentRetries = (id, reason = 'Manual reset') => api.post(`/
 export const getSquare9Status = (id) => api.get(`/documents/${id}/square9-status`);
 export const getSquare9StageCounts = () => api.get('/square9/stage-counts');
 
+// Automation Rules APIs
+export const listAutomationRules = () => api.get('/automation-rules');
+export const createAutomationRule = (rule) => api.post('/automation-rules', rule);
+export const updateAutomationRule = (ruleId, updates) => api.put(`/automation-rules/${ruleId}`, updates);
+export const deleteAutomationRule = (ruleId) => api.delete(`/automation-rules/${ruleId}`);
+export const toggleAutomationRule = (ruleId) => api.post(`/automation-rules/${ruleId}/toggle`);
+export const getRuleSuggestions = () => api.get('/automation-rules/suggestions');
+export const evaluateRulesForDoc = (docId) => api.post(`/automation-rules/evaluate/${docId}`);
+
 // Bulk operations
 export const bulkRetryDocuments = async (docIds, reason = 'Bulk retry') => {
   const results = { success: [], failed: [] };

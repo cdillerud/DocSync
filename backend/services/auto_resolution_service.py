@@ -127,6 +127,7 @@ class AutoResolutionService:
         self.ref_service = ref_intelligence_service
         self.event_service = event_service
         self._vendor_intel = None
+        self._rules_engine = None
         self._queue = asyncio.Queue(maxsize=500)
         self._workers = []
         self._running = False
@@ -138,6 +139,10 @@ class AutoResolutionService:
     def set_vendor_intelligence(self, vendor_intel):
         """Inject vendor intelligence service for post-resolution updates."""
         self._vendor_intel = vendor_intel
+
+    def set_rules_engine(self, rules_engine):
+        """Inject automation rules engine for post-resolution evaluation."""
+        self._rules_engine = rules_engine
 
     def start(self, num_workers: int = AUTO_RESOLVE_MAX_WORKERS):
         """Start background workers."""
@@ -284,6 +289,20 @@ class AutoResolutionService:
                         await self._vendor_intel.update_from_document(updated_doc)
                 except Exception as ve:
                     logger.warning("[AutoResolve:W%d] Vendor intel update error: %s", worker_id, str(ve))
+
+            # Evaluate automation rules (async, non-blocking)
+            if self._rules_engine:
+                try:
+                    rules_doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+                    if rules_doc:
+                        rule_result = await self._rules_engine.evaluate(rules_doc)
+                        if rule_result and rule_result.get("matched"):
+                            logger.info(
+                                "[AutoResolve:W%d] Rule '%s' applied to %s",
+                                worker_id, rule_result.get("rule_name"), doc_id[:8]
+                            )
+                except Exception as re:
+                    logger.warning("[AutoResolve:W%d] Rules eval error: %s", worker_id, str(re))
 
         except Exception as e:
             logger.error("[AutoResolve:W%d] Failed %s: %s", worker_id, doc_id[:8], str(e))

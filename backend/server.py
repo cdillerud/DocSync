@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, UploadFile, File, Form, HTTPException, Query, Request, BackgroundTasks
+from fastapi import FastAPI, APIRouter, UploadFile, File, Form, HTTPException, Query, Request, BackgroundTasks, Body
 from fastapi.responses import Response
 from dotenv import load_dotenv
 load_dotenv()  # Load .env file before any os.environ calls
@@ -148,6 +148,9 @@ from services.auto_resolution_service import (
 )
 from services.vendor_intelligence_service import (
     VendorIntelligenceService, get_vendor_intelligence_service, set_vendor_intelligence_service
+)
+from services.automation_rules_service import (
+    AutomationRulesService, get_automation_rules_service, set_automation_rules_service
 )
 
 ROOT_DIR = Path(__file__).parent
@@ -1760,6 +1763,100 @@ async def get_vendor_resolver_hints(vendor_name: str):
     if not svc:
         raise HTTPException(status_code=503, detail="Vendor Intelligence not initialized")
     return await svc.get_resolver_hints(vendor_name)
+
+
+# =============================================================================
+# AUTOMATION RULES ENDPOINTS
+# =============================================================================
+
+@api_router.get("/automation-rules")
+async def list_automation_rules():
+    """List all automation rules."""
+    svc = get_automation_rules_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Rules engine not initialized")
+    rules = await svc.list_rules()
+    return {"rules": rules, "total": len(rules)}
+
+
+@api_router.post("/automation-rules")
+async def create_automation_rule(rule: Dict = Body(...)):
+    """Create a new automation rule."""
+    svc = get_automation_rules_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Rules engine not initialized")
+    return await svc.create_rule(rule)
+
+
+@api_router.get("/automation-rules/suggestions")
+async def get_rule_suggestions():
+    """Get AI-generated rule suggestions based on vendor intelligence."""
+    svc = get_automation_rules_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Rules engine not initialized")
+    suggestions = await svc.generate_suggestions()
+    return {"suggestions": suggestions, "total": len(suggestions)}
+
+
+@api_router.get("/automation-rules/{rule_id}")
+async def get_automation_rule(rule_id: str):
+    """Get a single automation rule."""
+    svc = get_automation_rules_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Rules engine not initialized")
+    rule = await svc.get_rule(rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    return rule
+
+
+@api_router.put("/automation-rules/{rule_id}")
+async def update_automation_rule(rule_id: str, updates: Dict = Body(...)):
+    """Update an automation rule."""
+    svc = get_automation_rules_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Rules engine not initialized")
+    result = await svc.update_rule(rule_id, updates)
+    if not result:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    return result
+
+
+@api_router.delete("/automation-rules/{rule_id}")
+async def delete_automation_rule(rule_id: str):
+    """Delete an automation rule."""
+    svc = get_automation_rules_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Rules engine not initialized")
+    deleted = await svc.delete_rule(rule_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    return {"status": "deleted", "rule_id": rule_id}
+
+
+@api_router.post("/automation-rules/{rule_id}/toggle")
+async def toggle_automation_rule(rule_id: str):
+    """Toggle a rule's enabled/disabled state."""
+    svc = get_automation_rules_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Rules engine not initialized")
+    result = await svc.toggle_rule(rule_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    return result
+
+
+@api_router.post("/automation-rules/evaluate/{doc_id}")
+async def evaluate_rules_for_document(doc_id: str):
+    """Manually evaluate automation rules for a document."""
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    svc = get_automation_rules_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Rules engine not initialized")
+    result = await svc.evaluate(doc)
+    return result or {"matched": False, "message": "No matching rule found"}
 
 
 @api_router.put("/documents/{doc_id}")
@@ -15368,6 +15465,12 @@ async def startup():
     await vendor_intel.initialize()
     auto_resolve.set_vendor_intelligence(vendor_intel)
     logger.info("Vendor Intelligence Service initialized")
+    
+    # Initialize Automation Rules Engine
+    rules_engine = set_automation_rules_service(db, event_service, vendor_intel)
+    await rules_engine.initialize()
+    auto_resolve.set_rules_engine(rules_engine)
+    logger.info("Automation Rules Engine initialized")
     
     # Start daily pilot summary scheduler if enabled
     global _pilot_summary_task

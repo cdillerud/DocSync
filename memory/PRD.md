@@ -1191,7 +1191,7 @@ Created `/app/memory/SQUARE9_COMPARISON.md` documenting alignment status.
 - [ ] Integrate `APValidationService` into main processing flow (async replacement for sync validation)
 - [ ] Continue backend refactoring (move endpoints from server.py to routers)
 - [ ] Package & Publish BC (AL) Extension to Sandbox
-- [ ] G/L Account Routing for Freight (inbound vs outbound)
+- [x] G/L Account Routing for Freight (inbound vs outbound) - Completed March 10, 2026
 - [ ] Add "Create BC Sales Order" Button to UI
 
 ### P2 - Upcoming
@@ -1974,5 +1974,63 @@ bc.write_blocked event recorded in workflow_events collection
 
 ### Port Conflict Fix
 Updated `docker-compose.yml` to map backend to port 8005 to avoid conflict with `airdash-backend` on user's VM.
+
+*Last Updated: March 10, 2026*
+
+
+---
+
+## Freight G/L Account Routing (Completed - March 10, 2026)
+
+### Overview
+An engine that determines the correct General Ledger (G/L) account classification for freight-related invoices based on document context, resolver results, and vendor behavior.
+
+### Classification Flow
+1. **Freight Detection**: Checks document type, vendor name (against known carriers), unified vendor match, and text keywords
+2. **Direction Detection**: Scores inbound/outbound/transfer using BC reference resolver results, vendor intelligence profiles, extracted keywords, and folder routing hints
+3. **Sub-type Classification**: Identifies international, drop-ship, dunnage/return, transfer, or default
+4. **G/L Account Mapping**: Matches to configured G/L account by direction + sub-type
+
+### G/L Account Configuration (9 defaults)
+| G/L Number | Name | Direction | Sub-type |
+|------------|------|-----------|----------|
+| 5200-00 | Inbound Freight - Raw Materials | inbound | raw_materials |
+| 5210-00 | Inbound Freight - Supplies | inbound | supplies |
+| 5220-00 | Inbound Freight - International | inbound | international |
+| 5250-00 | Dunnage / Return Freight | inbound | dunnage_return |
+| 6100-00 | Outbound Freight - Customer Orders | outbound | customer_orders |
+| 6110-00 | Outbound Freight - Drop Ship | outbound | drop_ship |
+| 6120-00 | Outbound Freight - International | outbound | international |
+| 6200-00 | Transfer Freight | transfer | warehouse_transfer |
+| 5900-00 | Freight - Unclassified | unknown | unclassified |
+
+### API Endpoints
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/freight-routing/accounts | List all G/L accounts |
+| GET | /api/freight-routing/accounts/{id} | Get single account |
+| POST | /api/freight-routing/accounts | Create new account |
+| PUT | /api/freight-routing/accounts/{id} | Update account |
+| DELETE | /api/freight-routing/accounts/{id} | Delete account |
+| POST | /api/freight-routing/classify/{doc_id} | Classify document |
+| POST | /api/freight-routing/override/{doc_id} | Override G/L |
+| GET | /api/freight-routing/stats | Routing statistics |
+| GET | /api/freight-routing/recent | Recent classifications |
+
+### Frontend
+- **FreightGLRoutingPanel**: Shows on document detail page for freight-related documents
+- Displays direction badge, confidence, recommended G/L account, reasoning
+- Manual G/L override with account selector
+- data-testid: freight-gl-panel, freight-classify-btn, freight-gl-account, freight-override-toggle
+
+### Files
+- `/app/backend/services/freight_gl_routing_service.py` - Core service
+- `/app/frontend/src/components/FreightGLRoutingPanel.js` - UI panel
+- `/app/backend/tests/test_freight_gl_routing.py` - 19 automated tests
+
+### Test Results
+- Backend: 19/19 tests passed (100%)
+- Frontend: All UI elements verified
+- Test report: `/app/test_reports/iteration_27.json`
 
 *Last Updated: March 10, 2026*

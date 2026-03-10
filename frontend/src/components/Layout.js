@@ -32,31 +32,30 @@ export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [bcStatus, setBcStatus] = useState({ loading: true, connected: false, demoMode: false, environment: '' });
 
-  // Fetch BC sandbox status on mount
+  // Fetch BC status on mount
   useEffect(() => {
     const fetchBCStatus = async () => {
       try {
-        // Try the BC status endpoint first
-        const res = await fetch(`${API}/api/bc-sandbox/status`);
+        // Fetch both sandbox status and write guard in parallel
+        const [res, guardRes] = await Promise.all([
+          fetch(`${API}/api/bc-sandbox/status`),
+          fetch(`${API}/api/bc/write-guard/status`).catch(() => null),
+        ]);
         if (res.ok) {
           const data = await res.json();
-          // Determine connection status based on config
+          const guard = guardRes?.ok ? await guardRes.json() : null;
           const hasCredentials = data.config?.has_secret === true;
           const isNotDemoMode = data.demo_mode === false;
           const isConnected = isNotDemoMode && hasCredentials;
-          
-          console.log('[BC Status]', { 
-            demo_mode: data.demo_mode, 
-            has_secret: data.config?.has_secret,
-            environment: data.config?.environment,
-            computed_connected: isConnected 
-          });
+          const readEnv = guard?.environment || data.config?.environment || 'Unknown';
+          const writeBlocked = guard?.write_enabled === false;
           
           setBcStatus({
             loading: false,
             connected: isConnected,
             demoMode: data.demo_mode === true,
-            environment: data.config?.environment || 'Unknown'
+            environment: readEnv,
+            writeBlocked,
           });
         } else {
           // If BC status fails, try settings endpoint as fallback
@@ -161,7 +160,10 @@ export default function Layout() {
             ) : bcStatus.connected ? (
               <>
                 <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="font-mono text-emerald-600 dark:text-emerald-400">BC SANDBOX</span>
+                <span className="font-mono text-emerald-600 dark:text-emerald-400">
+                  BC {bcStatus.environment?.toUpperCase() || 'CONNECTED'}
+                  {bcStatus.writeBlocked ? ' (R/O)' : ''}
+                </span>
               </>
             ) : (
               <>

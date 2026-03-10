@@ -1180,14 +1180,21 @@ Created `/app/memory/SQUARE9_COMPARISON.md` documenting alignment status.
 
 ## Remaining Tasks
 
+### P0 - Completed
+- [x] AI-Assisted Reference Resolution Engine (March 10, 2026)
+
 ### P1 - In Progress
+- [ ] Integrate `APValidationService` into main processing flow (async replacement for sync validation)
 - [ ] Continue backend refactoring (move endpoints from server.py to routers)
-- [ ] Add missing schema fields to documents: `bcDocumentId`, `bcPostingStatus`, `bcPostingErrors`, `reviewStatus`
+- [ ] Package & Publish BC (AL) Extension to Sandbox
+- [ ] G/L Account Routing for Freight (inbound vs outbound)
+- [ ] Add "Create BC Sales Order" Button to UI
 
 ### P2 - Upcoming
 - [ ] Outbound Document Delivery module (email posted sales invoices)
 - [ ] "Stable Vendor" metric implementation
 - [ ] Fuzzy matching improvements
+- [ ] Migration UI Detail Drawer for SharePoint
 
 ### Future/Backlog
 - [ ] Replace mock email service with real provider
@@ -1197,7 +1204,7 @@ Created `/app/memory/SQUARE9_COMPARISON.md` documenting alignment status.
 
 ---
 
-*Last Updated: February 25, 2026*
+*Last Updated: March 10, 2026*
 
 ---
 

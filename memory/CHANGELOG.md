@@ -1,5 +1,28 @@
 # GPI Document Hub - Changelog
 
+## March 10, 2026
+
+### AI-Assisted Reference Intelligence Engine (COMPLETED)
+- **NEW:** `ReferenceIntelligenceService` in `/app/backend/services/reference_intelligence_service.py`
+  - Extracts multiple candidate references (PO, BOL, Order, Shipment, Load, PRO, Invoice) from documents
+  - Reference normalization layer (strips prefixes, standardizes for BC lookup)
+  - AI reference classification (predicts domain: purchase/sales/shipping and entity types)
+  - Document-type-aware resolver strategy (AP Invoice → PO first; BOL → Sales Orders first)
+  - BC match scoring: exact match (0.4), entity alignment (0.2), domain alignment (0.15), vendor alignment (0.15), confidence (0.1)
+- **NEW:** API Endpoints:
+  - `POST /api/documents/{id}/resolve-intelligence` - Full AI-assisted resolution
+  - `GET /api/documents/{id}/reference-intelligence` - Get stored intelligence data
+- **NEW:** Frontend `ReferenceIntelligencePanel` component with:
+  - Match outcome banner (Exact Match / Likely Match / Ambiguous / No Match with score)
+  - Best match details (BC doc no, entity type, vendor/customer, date, status)
+  - Alternate matches list with scores
+  - Extracted references list with label badges, domain classification, confidence
+  - Collapsible "Resolver Debug" panel (strategy, BC queries, processing time, search order)
+- **UPDATED:** Credentials fixed in `/app/backend/.env` (correct TENANT_ID, BC_CLIENT_ID, etc.)
+- **EVENTS:** `reference.extraction.completed`, `reference.resolve.completed`, `reference.resolve.ambiguous` emitted
+- **TESTS:** 13 backend tests + full frontend verification (100% pass rate)
+- **Test Report:** `/app/test_reports/iteration_22.json`
+
 ## February 22, 2026
 
 ### Multi-Document Type Workflow Engine

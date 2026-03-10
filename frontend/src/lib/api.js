@@ -66,6 +66,15 @@ export const getDocumentReferenceIntelligence = (docId) => api.get(`/documents/$
 export const getBCWriteGuardStatus = () => api.get('/bc/write-guard/status');
 export const checkBCWritePermission = (documentId, action) => api.post('/bc/write-guard/check', null, { params: { document_id: documentId, action } });
 
+// BC Reference Cache APIs
+export const getCacheStatus = () => api.get('/cache/status');
+export const triggerCacheSync = (mode = 'incremental') => api.post('/cache/sync', null, { params: { mode } });
+export const searchCache = (reference, entityType = null) => {
+  const params = { reference };
+  if (entityType) params.entity_type = entityType;
+  return api.get('/cache/search', { params });
+};
+
 // Square9 Workflow Retry
 export const retryDocument = (id, reason = 'Manual retry') => api.post(`/documents/${id}/retry?reason=${encodeURIComponent(reason)}`);
 export const resetDocumentRetries = (id, reason = 'Manual reset') => api.post(`/documents/${id}/reset-retries?reason=${encodeURIComponent(reason)}`);

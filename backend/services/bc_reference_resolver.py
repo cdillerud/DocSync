@@ -115,6 +115,7 @@ class BCReferenceResolver:
     BC Reference Resolver - resolves reference numbers against BC Production tables.
     
     Uses same credentials as sandbox but targets Production environment.
+    Checks local cache first, falls back to direct BC API.
     """
     
     def __init__(self):
@@ -126,6 +127,12 @@ class BCReferenceResolver:
         self._token = None
         self._token_expires = None
         self._company_id = None
+        self._cache_service = None
+    
+    def set_cache_service(self, cache_service):
+        """Inject the cache service for cache-first resolution."""
+        self._cache_service = cache_service
+        logger.info("[BC Reference Resolver] Cache service attached")
     
     async def _get_token(self) -> Optional[str]:
         """Get BC access token."""
@@ -220,6 +227,10 @@ class BCReferenceResolver:
     ) -> ReferenceResolutionResult:
         """
         Resolve a reference number against BC Production tables.
+        
+        Flow:
+        1. Check local cache first (fast, <50ms)
+        2. If cache miss, query BC API directly (slower)
         """
         if not reference_number:
             return ReferenceResolutionResult(
@@ -229,7 +240,6 @@ class BCReferenceResolver:
             )
         
         ref_clean = str(reference_number).strip()
-        tables_checked = []
         
         # Default order of tables to check
         if check_tables is None:
@@ -240,6 +250,75 @@ class BCReferenceResolver:
                 "salesInvoices",
                 "salesShipments"
             ]
+        
+        # --- CACHE-FIRST: Try local cache ---
+        if self._cache_service:
+            try:
+                cache_result = await self._resolve_from_cache(ref_clean, check_tables)
+                if cache_result and cache_result.status == ReferenceResolutionStatus.FOUND.value:
+                    logger.info(
+                        "[BC Reference Resolver] CACHE HIT: '%s' → %s (%s)",
+                        ref_clean, cache_result.bc_document_no, cache_result.reference_type
+                    )
+                    return cache_result
+            except Exception as e:
+                logger.warning("[BC Reference Resolver] Cache lookup error: %s", str(e))
+        
+        # --- FALLBACK: Direct BC API ---
+        return await self._resolve_from_api(ref_clean, check_tables)
+    
+    async def _resolve_from_cache(
+        self, ref_clean: str, check_tables: List[str]
+    ) -> Optional[ReferenceResolutionResult]:
+        """Try to resolve from local cache."""
+        # Map table names to entity types for filtering
+        table_to_entity = {
+            "purchaseOrders": "purchase_order",
+            "purchaseInvoices": "posted_purchase_invoice",
+            "salesOrders": "sales_order",
+            "salesInvoices": "posted_sales_invoice",
+            "salesShipments": "posted_sales_shipment",
+        }
+        entity_types = [table_to_entity[t] for t in check_tables if t in table_to_entity]
+        
+        results = await self._cache_service.search_multi(ref_clean, entity_types=entity_types)
+        if not results:
+            return None
+        
+        # Take best match (search_multi returns sorted by relevance)
+        best = results[0]
+        entity_type = best.get("bc_entity_type", "unknown")
+        table = {v: k for k, v in table_to_entity.items()}.get(entity_type, "unknown")
+        
+        return ReferenceResolutionResult(
+            reference_number=ref_clean,
+            status=ReferenceResolutionStatus.FOUND.value,
+            reference_type=entity_type,
+            bc_record_id=best.get("bc_record_id"),
+            bc_document_no=best.get("bc_document_no"),
+            bc_record_info={
+                "id": best.get("bc_record_id"),
+                "number": best.get("bc_document_no"),
+                "table": table,
+                "environment": self.environment,
+                "vendor_name": best.get("bc_vendor_name"),
+                "vendor_number": best.get("bc_vendor_no"),
+                "customer_name": best.get("bc_customer_name"),
+                "customer_number": best.get("bc_customer_no"),
+                "posting_date": best.get("bc_posting_date"),
+                "order_date": best.get("bc_posting_date"),
+                "status": best.get("bc_status"),
+                "total_amount": best.get("bc_amount"),
+                "source": "cache",
+            },
+            tables_checked=["cache"]
+        )
+    
+    async def _resolve_from_api(
+        self, ref_clean: str, check_tables: List[str]
+    ) -> ReferenceResolutionResult:
+        """Resolve via direct BC API calls (original logic)."""
+        tables_checked = []
         
         token = await self._get_token()
         if not token:

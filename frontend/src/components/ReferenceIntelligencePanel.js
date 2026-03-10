@@ -262,6 +262,10 @@ export default function ReferenceIntelligencePanel({ document, onUpdate }) {
                     <span className="font-mono">{intelligence.resolver_strategy}</span>
                     <span className="text-muted-foreground">BC Queries:</span>
                     <span>{intelligence.total_bc_queries}</span>
+                    <span className="text-muted-foreground">Data Source:</span>
+                    <span className={bestMatch?.bc_record_info?.source === 'cache' ? 'text-emerald-600 dark:text-emerald-400 font-medium' : ''}>
+                      {bestMatch?.bc_record_info?.source === 'cache' ? 'Cache (local)' : 'BC API (live)'}
+                    </span>
                     <span className="text-muted-foreground">Processing Time:</span>
                     <span>{intelligence.processing_time_ms}ms</span>
                     <span className="text-muted-foreground">Resolved At:</span>

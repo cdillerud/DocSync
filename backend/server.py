@@ -139,6 +139,9 @@ from services.reference_intelligence_service import (
     extract_references_from_extracted_fields, extract_references_from_text,
     normalize_reference, get_search_strategy
 )
+from services.bc_reference_cache_service import (
+    BCReferenceCacheService, get_cache_service, set_cache_service
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -1590,6 +1593,67 @@ async def check_bc_write_permission(
     guard = get_write_guard()
     result = await guard.check_write_permission(document_id, action)
     return result.to_dict()
+
+
+# =============================================================================
+# BC REFERENCE CACHE ENDPOINTS
+# =============================================================================
+
+@api_router.get("/cache/status")
+async def get_cache_status():
+    """Get BC reference cache status: record counts, last sync, health."""
+    cache = get_cache_service()
+    if not cache:
+        raise HTTPException(status_code=503, detail="Cache service not initialized")
+    return await cache.get_status()
+
+
+@api_router.post("/cache/sync")
+async def trigger_cache_sync(
+    mode: str = Query(default="incremental", description="'bulk' or 'incremental'")
+):
+    """Trigger a BC reference cache sync. Runs in background."""
+    cache = get_cache_service()
+    if not cache:
+        raise HTTPException(status_code=503, detail="Cache service not initialized")
+    
+    incremental = mode != "bulk"
+    
+    # Run sync in background to avoid timeout
+    async def _run_sync():
+        try:
+            await cache.sync_all(incremental=incremental)
+        except Exception as e:
+            logger.error("[Cache Sync] Background sync error: %s", str(e))
+    
+    asyncio.create_task(_run_sync())
+    
+    return {
+        "status": "sync_started",
+        "mode": mode,
+        "message": f"{'Incremental' if incremental else 'Bulk'} cache sync started in background. Check /api/cache/status for progress."
+    }
+
+
+@api_router.get("/cache/search")
+async def search_cache(
+    reference: str = Query(..., description="Reference number to search"),
+    entity_type: str = Query(default=None, description="Filter by entity type")
+):
+    """Search the BC reference cache for a reference number."""
+    cache = get_cache_service()
+    if not cache:
+        raise HTTPException(status_code=503, detail="Cache service not initialized")
+    
+    entity_types = [entity_type] if entity_type else None
+    results = await cache.search_multi(reference, entity_types=entity_types)
+    
+    return {
+        "reference": reference,
+        "match_count": len(results),
+        "matches": results
+    }
+
 
 @api_router.put("/documents/{doc_id}")
 async def update_document(doc_id: str, update: DocumentUpdate):
@@ -15168,6 +15232,13 @@ async def startup():
     set_reference_intelligence_service(db, bc_resolver=bc_resolver, event_service=event_service)
     logger.info("Reference Intelligence Service initialized")
     
+    # Initialize BC Reference Cache Service
+    cache_service = set_cache_service(db, event_service=event_service)
+    await cache_service.initialize()
+    bc_resolver.set_cache_service(cache_service)
+    cache_service.start_background_sync()
+    logger.info("BC Reference Cache Service initialized (background sync enabled)")
+    
     # Start daily pilot summary scheduler if enabled
     global _pilot_summary_task
     if PILOT_MODE_ENABLED and DAILY_PILOT_EMAIL_ENABLED:
@@ -15207,4 +15278,8 @@ async def shutdown_db_client():
             await _pilot_summary_task
         except asyncio.CancelledError:
             logger.info("Pilot summary scheduler stopped")
+    # Stop BC cache background sync
+    cache = get_cache_service()
+    if cache:
+        cache.stop_background_sync()
     client.close()

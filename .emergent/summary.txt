@@ -1,158 +1,255 @@
 <analysis>**original_problem_statement:**
-The user wants to build a GPI Document Hub to automate document processing workflows. The core requirements are:
-1.  **Accounts Payable Invoice Automation:** Ingest AP invoices, use AI to extract data, automatically create Purchase Invoices in Business Central (BC), and archive documents in SharePoint. This includes an auto-post feature and linking freight invoices to sales orders.
-2.  **Sales Order Automation:** Ingest customer Sales Orders, use AI to extract data, and create draft Sales Orders in Business Central.
-3.  **Warehouse Document Workflow:** Process related shipping documents (BOLs, Packing Lists) by extracting key data (PO#, BOL#), matching them to existing BC records, and archiving them in SharePoint according to a specific legacy workflow.
-4.  **SharePoint Flat Migration POC:** A tool to migrate files from a source SharePoint folder to a new flat library with AI-inferred metadata.
-5.  **Spiro CRM Integration:** Integrate Spiro CRM to sync companies, contacts, and opportunities to enrich the document validation pipeline, particularly for vendor matching and freight carrier identification.
+The user wants to build GPI Document Hub, an event-driven workflow platform to automate document processing.
+
+**Latest Requirements (Enhance GPI Hub Document Intelligence):**
+The primary goal is to enhance the existing system to use AI-assisted reference resolution and adaptive search strategies for AP invoices, freight documents, and Bills of Lading (BOLs). The system must remain **read-only** against the Production Business Central (BC) environment.
+
+**PRODUCT REQUIREMENTS:**
+1.  **AI-Assisted Reference Extraction:** Extract multiple candidate references (PO, BOL, Order, Shipment, Load numbers) from documents, not just a single PO.
+2.  **Reference Normalization:** Create a normalization layer to strip prefixes (e.g., BOL-) and standardize reference numbers before lookup.
+3.  **AI Reference Classification:** Use AI to predict the domain (purchase, sales, shipping) and entity type (purchase_order, sales_order) for each extracted reference.
+4.  **Document-Type-Aware Resolver Strategy:** The BC search order must adapt based on the document type (e.g., for a BOL, search Sales Orders first; for an AP Invoice, search Purchase Orders first).
+5.  **BC Match Scoring:** Score potential BC matches based on multiple factors (exact match, vendor alignment, date proximity) to find the best match.
+6.  **BOL Handling:** Extract the  and store it. The logic should be prepared to eventually add this to the BC Purchase Invoice line description (e.g., Freight charge – BOL 111668).
+7.  **BC Production Safety Guard:** Implement and maintain a  flag. Any attempt to write to BC should be blocked and emit a  event.
+8.  **AP Invoice Validation Rules:** Validation should pass if vendor, invoice number, date, and total exist and it's not a duplicate. Warnings (like a reference not found) should not cause a validation failure.
+9.  **UI Enhancements:** Create a Reference Intelligence section and a Resolver Debug Panel on the document detail page to show extracted candidates, normalized values, predictions, and match results.
+10. **Event Emission:** Emit new events like , , , and .
 
 **User's preferred language**: English
 
 **what currently exists?**
-The application is a full-stack document processing hub (FastAPI/React/MongoDB). Key features include:
--   **Core Workflows:** AP Invoices, Sales Orders, and Warehouse/Shipping document processing are implemented.
--   **Integrations:** The app is connected to Business Central (BC), Spiro CRM, and SharePoint.
--   **Dual BC Environment:** The system is now configured to perform **read** operations (validation, vendor lookups) against the **Production BC environment** and **write** operations (creating invoices) against the **Sandbox BC environment**.
--   **Unified Vendor Intelligence:** A single service () consolidates vendor data from BC, Spiro, and document history for robust matching. This service has been integrated into the main validation pipeline.
--   **Workflow Intelligence Dashboard:** A new, comprehensive dashboard has been built. It displays key metrics like Validation Rate, Vendor Match Rate, and Processing Success. It also features three clear, actionable queues: Needs Vendor Review, Needs PO Match, and Needs Approval.
--   **Batch Revalidation:** A new endpoint () allows for re-running the validation process on a large number of documents to apply new logic or configuration changes (like the switch to Production BC for reads).
+The application is a full-stack document hub (FastAPI/React/MongoDB) that has been refactored to be event-driven.
+-   **Event-Driven Core:** A foundational event-driven architecture has been implemented. This includes an  for recording all workflow actions into a new  collection in MongoDB, and a  to compute the document's current status (, , ) from the event history.
+-   **Enhanced Validation & Resolution:** New services have been created to support the latest requirements: , , and . The  has been updated to extract BOL numbers.
+-   **Frontend Updates:** The document detail page () has been significantly updated to display the new three-part derived state and has placeholders for the new Reference Intelligence card and BOL number.
+-   **BC Connectivity:** The  is now successfully connecting to the user's **Production BC environment** for read-only lookups, after a lengthy debugging session to figure out the correct credential source (environment variables).
+-   **Environment Fixes:** The  file was updated to map the backend service from container port 8001 to host port 8005 to resolve a port conflict on the user's VM.
 
 **Last working item**:
--   **Last item agent was working:** The agent guided the user to run a batch revalidation process on their production VM. This was complicated by a port conflict on the user's machine, where another application () was occupying port 8001. The agent diagnosed this and instructed the user to use  to successfully run the  command, which processed 418 documents and improved the matching for 25 of them.
+-   **Last item agent was working:** The agent was debugging the newly created . The initial implementation failed because it was looking for credentials in the wrong place ( file or a  collection in MongoDB). After extensive debugging with the user, it was discovered that the credentials were set as environment variables inside the Docker container. The agent corrected the service to use these environment variables and target the Production environment.
 -   **Status:** USER VERIFICATION PENDING
 -   **Agent Testing Done:** Y
--   **Which testing method agent to use?** Manual testing by user by checking the new dashboard metrics to confirm the vendor match rate has improved as expected.
--   **User Testing Done:** N
+-   **Which testing method agent to use?** Manual testing by curl. The user has successfully tested the  endpoint on their VM and confirmed it can find existing references and correctly reports when references are not found.
+-   **User Testing Done:** Y
 
 **All Pending/In progress Issue list**:
--   **Issue 1: Port Conflict on Production VM (P0 - CRITICAL)**
-    -   **Description:** The user's production VM is running another application () that has claimed port 8001. This prevents the user from accessing the  via , causing  commands to fail with Not Found errors because they hit the wrong application. The workaround is to use .
-    -   **Status:** IN PROGRESS
-    -   **Is recurring issue?** Y (This is a new manifestation of ongoing deployment/environment frustrations.)
-    -   **Next debug checklist:**
-        1.  Guide the user to edit .
-        2.  In the  service definition, add a  section to map the container's port 8001 to an unused host port, like 8005.
-            
-        3.  Instruct the user to run  to apply the change.
-        4.  Confirm the user can now access the backend at  and update them on how to structure future  commands.
-    -   **Why fix this issue and what will be achieved with the fix?** This will resolve a major source of user frustration and confusion, making it possible to test the application in a standard way without complex  commands.
--   **Issue 2: GitHub Branch/Deployment Confusion (P0 - CRITICAL)**
-    -   **Description:** The user is working off the  branch, while the agent's work was committed to  in the preview environment and then pushed to the remote  branch. The user experienced multiple merge conflicts when trying to reconcile the branches. This convoluted setup is unsustainable and a major source of deployment friction.
+-   **Issue 1: GitHub Branch/Deployment Confusion (P0 - CRITICAL)**
+    -   **Description:** The user is working on a  branch. This non-standard workflow is a major source of friction and merge conflicts. The project needs to be unified onto the  branch.
     -   **Status:** BLOCKED
     -   **Is recurring issue?** Y
     -   **Next debug checklist:**
-        1.  Once the port conflict is resolved, guide the user to get their  branch up to date with all the latest changes from . A safe way is a HEAD is now at 700f457 auto-commit for 0cea443d-9a47-4178-a498-b65fe89a40fe.
-            
-        2.  Instruct the user to push this newly updated  branch to the remote to unify the codebase.
-            
-        3.  Confirm with the user that  is now the single source of truth and they can delete the  branch.
-    -   **Why fix this issue and what will be achieved with the fix?** This is a critical deployment blocker. Fixing it will create a clean, standard git workflow, allowing for reliable deployments and eliminating a major source of user frustration.
-    -   **Blocked on other issue:** Issue 1: Port Conflict on Production VM. It's best to fix the local environment before attempting complex git operations.
+        1.  Guide the user to get their  branch up to date with .
+        2.  Instruct the user to push the updated  branch to the remote.
+        3.  Establish  as the single source of truth for all future work.
+    -   **Why fix this issue and what will be achieved with the fix?** To create a clean, standard git workflow, eliminate merge conflicts, and enable reliable deployments.
+    -   **Blocked on other issue:** This should be addressed after the user verifies the current changes.
 
 **In progress Task List**:
--   **Task 1: Fully Integrate Unified Vendor Intelligence Service (P1)**
-    -   **Where to resume:** The  has its own  function. This should be updated to use the centralized  to determine if a vendor is a freight carrier. This is a minor cleanup as the main integration work is complete.
-    -   **What will be achieved with this?** Consolidates all vendor-related logic into a single service, improving maintainability.
+-   **Task 1: Complete AI-Assisted Reference Resolution Engine (P0)**
+    -   **Where to resume:** The foundational  is working. The next step is to integrate it into the main document processing pipeline and build out the remaining features from the PRD.
+    -   **What's next:**
+        1.  Implement the AI-based reference extraction and classification logic.
+        2.  Implement the document-type-aware resolver strategies (AP Invoice, Shipping/BOL, Freight).
+        3.  Implement the BC match scoring logic.
+        4.  Integrate the new services into the main processing flow in  (e.g., inside ).
+        5.  Fully implement the Reference Intelligence and Resolver Debug Panel UI components in .
+        6.  Emit all the new required events (, etc.).
+    -   **What will be achieved with this?** This will complete the core requirement of the user's latest request, making reference resolution significantly more accurate and intelligent.
     -   **Status:** IN PROGRESS
-    -   **Should Test backend/both after fix?** Backend
-    -   **Blocked on something:** Issues 1 & 2. All new development is blocked until the deployment/environment issues are resolved.
+    -   **Should Test frontend/backend/both after fix?** Both
+    -   **Blocked on something:** None.
 
 **Upcoming and Future Tasks**
 **Upcoming Tasks:**
--   **Task 1 (P0): Package and Publish the Business Central (AL) Extension.** The updated  file in  needs to be compiled and published to the user's BC Sandbox to make the Factbox UI changes visible.
--   **Task 2 (P1): Implement G/L Account Routing for Freight.** Based on the detected inbound vs. outbound freight direction, modify the  to use different G/L accounts when creating the Purchase Invoice line in BC.
--   **Task 3 (P1): Add Create BC Sales Order Button to UI.** For sales documents that are validated but not auto-created, add a button on the Document Detail page to manually trigger Sales Order creation.
--   **Task 4 (P2): Implement Migration UI Detail Drawer.** Enhance the SharePoint migration UI with a detail view for editing AI-inferred fields before migration.
--   **Task 5 (P3): Backend Refactor.** Continue breaking down the monolithic  into smaller route and service files.
+-   **Task 1 (P0):** Package and Publish the Business Central (AL) Extension. The updated  file in  needs to be published to the user's BC Sandbox.
+-   **Task 2 (P1):** Implement G/L Account Routing for Freight based on inbound vs. outbound direction.
+-   **Task 3 (P1):** Add Create BC Sales Order Button to UI.
+-   **Task 4 (P2):** Implement Migration UI Detail Drawer for SharePoint migration.
+-   **Task 5 (P3):** Continue backend refactor of .
 
 **Future Tasks:**
--   Implement the Outbound Document Delivery module.
--   Implement Stable Vendor rules for more granular auto-posting.
--   Replace the mock email service with a production-ready provider.
--   Add multi-step approval routing for invoices.
+-   Implement Outbound Document Delivery module.
+-   Implement Stable Vendor rules for auto-posting.
+-   Replace mock email service.
+-   Add multi-step approval routing.
 -   Decommission the legacy Zetadocs system.
 -   Replace mock JWT auth with Entra ID SSO.
 
 **Completed work in this session**
--   **Integrated Unified Vendor Matcher:** Replaced disparate vendor matching logic in  and  with the centralized  service.
--   **Built Workflow Intelligence Dashboard:** Created a new backend endpoint () and a rich frontend dashboard () to display key performance indicators, charts, and workflow metrics.
--   **Created Actionable Queues:** Refined the Pending Review metric on the dashboard into three clear, actionable queues: Needs Vendor Review, Needs PO Match, and Needs Approval.
--   **Configured Dual BC Environments:** Modified the application to use the **Production BC environment for read-only validation** while ensuring all **write operations continue to go to the Sandbox BC environment**.
--   **Added Batch Revalidation Endpoint:** Implemented a  endpoint to re-run validation on hundreds of documents at once.
--   **Resolved Critical Production Bugs:**
-    -   Updated and corrected Production BC credentials in the  file.
-    -   Fixed case-sensitive search queries against the BC API.
-    -   Diagnosed and provided a workaround for a **critical port conflict** on the user's production VM where another application was blocking port 8001.
+-   **Phase 1 & 2 of Event-Driven Architecture:**
+    -   Created  to handle event creation and persistence to a new  collection.
+    -   Created  to calculate , , and .
+    -   Updated  to integrate these services, emit events on document intake, and serve the derived state and event timeline via the  endpoint.
+    -   Updated  to display the new Document Status card with the derived state.
+-   **Initial Implementation of Enhanced Intelligence:**
+    -   Created  for new validation rules.
+    -   Created  and successfully debugged its connection to the Production BC environment.
+    -   Created  to prevent writes to production.
+    -   Updated  to extract .
+    -   Added  to  file.
+    -   Updated UI with placeholders for Reference Resolution and BOL number.
+-   **Environment Fixes:**
+    -   Resolved the critical port conflict on the user's VM by updating  to map the backend to host port .
 
 **Earlier issues found/mentioned but not fixed**
 -   **Issue 1: Backend Refactor is Incomplete**
-    -   **Debug checklist:** The main  file is still a large monolith.
+    -   **Debug checklist:** The main  file remains a large monolith, despite new logic being added to separate service files.
     -   **Why to solve this issue and what will be achieved with this?** Improves code maintainability, testability, and aligns with standard FastAPI project structure.
     -   **Should Test frontend/backend/both after fix:** Backend
     -   **Is recurring issue?** Y
 
 **Known issue recurrence from previous fork**
--   **Issue recurrence in previous fork:** Git history/secret scanning has evolved into a broader Deployment and Environment Hell. The user is consistently blocked by issues related to git branches, merge conflicts, and now port conflicts on their production VM.
--   **Recurrence count:** 2+
--   **Status:** BLOCKED
+-   **Issue recurrence in previous fork:** Deployment and Environment Hell. The user is consistently blocked or frustrated by issues related to git branches, merge conflicts, and local environment configuration (e.g., the port conflict, confusion over credential storage).
+-   **Recurrence count:** 3+
+-   **Status:** BLOCKED (on user action/next session priority)
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
--   **Port Conflict Debugging:** The agent identified that an unrelated Docker container () was occupying port 8001 on the host, preventing the  from being accessible. The workaround is to use .
--   **Dual Environment Configuration:** The application is configured to read from a Production environment (for data accuracy) while writing to a Sandbox environment (for safety). This is managed via different sets of environment variables ( vs ).
--   **Batch Revalidation Endpoint:** An API endpoint was created to re-process documents in bulk, which is useful for applying new logic or configurations to the existing dataset.
--   **Git Branch Management:** The session involved significant struggles with reconciling  and  branches, highlighting the need for a simplified, single-branch workflow.
--   **Docker Build vs. Volume Mounts:** The agent discovered that the user's  does not mount the source code as a volume, meaning a  is required to apply code changes, not just a restart.
+-   **Event-Driven Architecture:** The core logic is moving from a monolithic function call to emitting and subscribing to events. A new  collection is the source of truth for workflow history.
+-   **Derived State:** The document's status is no longer a simple field but is computed () from the sequence of events. This separates validation, workflow, and automation states.
+-   **BC Write Safety Guard:** A crucial feature to allow read-only operations against a production environment while strictly blocking any write attempts.
+-   **Environment-Dependent Configuration:** The application's BC connection logic is highly dependent on environment variables. The debugging process revealed that there are no  variables, and the correct approach is to use the existing , etc., but explicitly target the Production environment API endpoint.
 
 **key DB schema**
--   No schema changes were made. The focus was on application logic, configuration, and debugging.
+-   **events**:  (NEW)
+-   **documents**: The schema was implicitly updated to include .
 
 **All files of reference**
--   : Heavily modified to add the workflow intelligence and batch revalidation endpoints, and to integrate the dual BC environment logic.
--   : Overhauled to display the new workflow intelligence dashboard and actionable queues.
--   : Updated to include the new  API endpoint.
--   : Modified to support reading from the Production BC environment.
--   : Modified to fix case-sensitive search issues with the BC API.
--   : Updated with the correct Production BC credentials.
--   : Needs to be modified to resolve the port conflict.
+-   : Created to manage event lifecycle.
+-   : Created to compute document status.
+-   : Created and debugged to resolve references against BC.
+-   : Created to block production writes.
+-   : Heavily modified to integrate all new services and endpoints.
+-   : Heavily modified for the new derived state UI.
+-   : Modified to add new API call functions.
+-   : Modified to fix the port conflict.
+-   : Modified to add .
 
 **Areas that need refactoring**:
--    is still a monolith and needs to be broken down.
--   The  file needs to be updated to resolve the port conflict for the backend service permanently.
+-   : Still a monolith that needs to be broken down into dedicated route files.
+-   : The BC environment (Production) is hardcoded. It should ideally get this from a configuration setting, similar to how the  determines its environment.
 
 **key api endpoints**
--   : **(NEW)** Fetches all the data for the new intelligence dashboard.
--   : **(NEW)** Triggers a batch re-validation process for all documents, applying the latest matching and validation logic.
+-   : Now returns an  and .
+-   : **(NEW)** Resolves a reference number against multiple BC tables.
+-   : **(NEW)** Checks if writes to BC are enabled.
+-   : **(NEW)** Lists all registered event types.
+-   : **(NEW)** Gets recent events.
 
 **Critical Info for New Agent**
--   **PORT 8001 IS BLOCKED ON USER'S VM:** The  is not accessible on . Another application, , is using it. You **MUST** instruct the user to run all  commands through  until you guide them to fix the port mapping in  (e.g., to 8005:8001). This is the highest priority usability fix.
--   **GIT IS A MESS:** The user is frustrated with git. There is a  branch and a  branch. Your second-highest priority is to help the user merge everything into  and establish a clean, single-branch workflow. Do not start new feature work until this is resolved.
--   **DUAL BC ENVIRONMENT IS WORKING:** The system correctly reads from the Production BC environment for validation and writes to the Sandbox BC environment. The correct credentials are now in .
--   **USER IS FRUSTRATED:** The user is extremely frustrated with deployment and environment issues. Be direct, accurate, and prioritize fixing the environment blockers (port conflict, git mess) before anything else.
+-   **USER IS FRUSTRATED WITH ENVIRONMENT ISSUES:** Be extremely direct, accurate, and prioritize fixing any remaining environment blockers (usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
+           [--exec-path[=<path>]] [--html-path] [--man-path] [--info-path]
+           [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--bare]
+           [--git-dir=<path>] [--work-tree=<path>] [--namespace=<name>]
+           [--super-prefix=<path>] [--config-env=<name>=<envvar>]
+           <command> [<args>]
+
+These are common Git commands used in various situations:
+
+start a working area (see also: git help tutorial)
+   clone     Clone a repository into a new directory
+   init      Create an empty Git repository or reinitialize an existing one
+
+work on the current change (see also: git help everyday)
+   add       Add file contents to the index
+   mv        Move or rename a file, a directory, or a symlink
+   restore   Restore working tree files
+   rm        Remove files from the working tree and from the index
+
+examine the history and state (see also: git help revisions)
+   bisect    Use binary search to find the commit that introduced a bug
+   diff      Show changes between commits, commit and working tree, etc
+   grep      Print lines matching a pattern
+   log       Show commit logs
+   show      Show various types of objects
+   status    Show the working tree status
+
+grow, mark and tweak your common history
+   branch    List, create, or delete branches
+   commit    Record changes to the repository
+   merge     Join two or more development histories together
+   rebase    Reapply commits on top of another base tip
+   reset     Reset current HEAD to the specified state
+   switch    Switch branches
+   tag       Create, list, delete or verify a tag object signed with GPG
+
+collaborate (see also: git help workflows)
+   fetch     Download objects and refs from another repository
+   pull      Fetch from and integrate with another repository or a local branch
+   push      Update remote refs along with associated objects
+
+'git help -a' and 'git help -g' list available subcommands and some
+concept guides. See 'git help <command>' or 'git help <concept>'
+to read about a specific subcommand or concept.
+See 'git help git' for an overview of the system. mess). The user has low tolerance for debugging environmental problems.
+-   **PORT 8001 is fixed, use 8005:** The backend now runs on  on the user's VM to avoid conflicts. All  commands should target port 8005. The  change has been committed.
+-   **BC CREDENTIALS ARE ENV VARS, NOT IN DB:** The user's production VM has the BC credentials configured as environment variables in the Docker container (, , etc.). They are NOT in the  file on the host, nor are they in the MongoDB  or  collections. When building BC-related features, you must read credentials from .
+-   **THE BC RESOLVER IS WORKING:** The user has confirmed the  can successfully query their Production BC environment. The next steps are integration and adding the AI/strategy layers.
 
 **documents and test reports created in this job**
--   None.
+-    was updated with details about the new event-driven architecture.
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **user**: Asks if the revalidation ran on all 1000+ documents. (ANSWERED - No, only on a subset).
-2.  **agent**: Provides the correct  command to run on all document types.
-3.  **user**: Runs the more comprehensive revalidation command. (COMPLETED).
-4.  **agent**: Confirms the command worked and advises the user to fix the port conflict permanently.
-5.  **user**: Asks why the port conflict happened. (ANSWERED - Another app started first and claimed the port).
-6.  **agent**: Recommends the  workaround and the permanent  fix.
-7.  **user**: Successfully runs the revalidation via . (COMPLETED).
-8.  **agent**: Confirms the batch revalidation worked and improved 34 documents.
-9.  **user**: Reports that the  endpoint is Not Found. This leads to a long debugging chain.
-10. **user**: Provides credentials and expresses frustration over them being lost.
+1.  **user**:  fails to find reference . Agent realizes credentials are the issue.
+2.  **user**: Confirms they are connected to production on the VM, but the command still fails.
+3.  **agent**: Explains the code on the VM is old and needs to be pulled. Asks user to check  env vars.
+4.  **user**: Expresses confusion/frustration.  command fails to find  file in the container.
+5.  **agent**: Realizes  isn't being copied. Asks user to check for credentials in MongoDB.
+6.  **user**: Runs python script to check  collection; result is .
+7.  **agent**: Asks to check other collections and KUBERNETES_SERVICE_PORT_HTTPS=443
+PYTHON_SHA256=8d3ed8ec5c88c1c95f5e558612a725450d2452813ddad5e58fdb1a53b1209b78
+KUBERNETES_SERVICE_PORT=443
+PYTHONUNBUFFERED=1
+PIP_NO_INPUT=1
+STRIPE_API_KEY=sk_test_emergent
+HOSTNAME=agent-env-0c5fa298-916d-4b4d-8ddb-46abc51ea1bc
+PYTHON_VERSION=3.11.14
+base_url=https://demobackend.emergentagent.com
+run_id=bc-workflow
+UV_COMPILE_BYTECODE=1
+PLUGIN_VENV_PATH=/opt/plugins-venv
+PWD=/app
+code_server_password=1ced53d2
+HOME=/root
+LANG=C.UTF-8
+KUBERNETES_PORT_443_TCP=tcp://34.118.224.1:443
+VIRTUAL_ENV=/root/.venv
+GPG_KEY=A035C8C19219BA821ECEA86B64E628F8D684696D
+PLAYWRIGHT_BROWSERS_PATH=/pw-browsers
+integration_proxy_url=https://integrations.emergentagent.com
+preview_endpoint=https://bc-workflow.preview.emergentagent.com
+ENABLE_RELOAD=true
+SHLVL=0
+KUBERNETES_PORT_443_TCP_PROTO=tcp
+KUBERNETES_PORT_443_TCP_ADDR=34.118.224.1
+KUBERNETES_SERVICE_HOST=34.118.224.1
+KUBERNETES_PORT=tcp://34.118.224.1:443
+KUBERNETES_PORT_443_TCP_PORT=443
+PATH=/root/.venv/bin:/opt/plugins-venv/bin:/opt/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+monitor_polling_interval=1
+NEXT_TELEMETRY_DISABLED=1
+NODE_VERSION=20
+DEBIAN_FRONTEND=noninteractive
+_=/usr/bin/env vars in the container.
+8.  **user**: Provides output of HOSTNAME=agent-env-0c5fa298-916d-4b4d-8ddb-46abc51ea1bc
+run_id=bc-workflow
+preview_endpoint=https://bc-workflow.preview.emergentagent.com, revealing that only Sandbox variables are present, and there are NO  variables.
+9.  **user**: they should be all the same creds as sandbox, just using the production environment.
+10. **agent**: Understands the fix. Updates the code to use the existing env vars but target the Production environment URL. Guides user to pull, rebuild, and re-test.
+11. **user**: Successfully runs the command. The resolver finds PO  in Production BC.
+12. **user**: Provides another reference  to test.
+13. **user**: Runs the command. The resolver correctly reports  after searching all 5 tables.
+14. **user**: Provides a detailed new PRD for an AI-Assisted Reference Resolution Engine.
 
 **Project Health Check:**
--   **Broken:** The local development and deployment workflow is severely broken due to the port conflict and git branch confusion. The application code itself is functional but difficult for the user to run and test.
+-   **Broken:** The git workflow is messy and causing user frustration. This is a critical blocker for smooth development.
 -   **Mocked:** None.
 
 **3rd Party Integrations**
--   **Dynamics 365 Business Central API:** ✅ Live and connected. Now configured for Read-Prod/Write-Sandbox.
+-   **Dynamics 365 Business Central API:** ✅ Live and connected for read-only validation against Production. Writes are blocked by a safety guard.
 -   **Microsoft Graph API / SharePoint:** ✅ Live and connected.
 -   **Gemini (via Emergent LLM Key):** ✅ Used for document classification.
 -   **Spiro CRM API:** ✅ Live and connected.
@@ -162,13 +259,56 @@ The application is a full-stack document processing hub (FastAPI/React/MongoDB).
 -   **Testing agent used after significant changes:** NO
 -   **Troubleshoot agent used after agent stuck in loop:** NO
 -   **Test files created:** None.
--   **Known regressions:** The user's ability to easily test the application via  is broken due to the port conflict.
+-   **Known regressions:** None.
 
 **Credentials to test flow:**
 -   Web UI:  / 
--   Business Central Sandbox & Production credentials are in .
+-   Business Central credentials are provided as environment variables in the user's production VM.
 
 **What agent forgot to execute**
--   The agent did not guide the user to implement the permanent fix for the port conflict (editing ).
--   The agent did not resolve the underlying git branch confusion, leaving the user with a messy and error-prone deployment process.
--   The final cleanup of the  to use the unified vendor service was not completed.</analysis>
+-   The agent did not prioritize resolving the usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
+           [--exec-path[=<path>]] [--html-path] [--man-path] [--info-path]
+           [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--bare]
+           [--git-dir=<path>] [--work-tree=<path>] [--namespace=<name>]
+           [--super-prefix=<path>] [--config-env=<name>=<envvar>]
+           <command> [<args>]
+
+These are common Git commands used in various situations:
+
+start a working area (see also: git help tutorial)
+   clone     Clone a repository into a new directory
+   init      Create an empty Git repository or reinitialize an existing one
+
+work on the current change (see also: git help everyday)
+   add       Add file contents to the index
+   mv        Move or rename a file, a directory, or a symlink
+   restore   Restore working tree files
+   rm        Remove files from the working tree and from the index
+
+examine the history and state (see also: git help revisions)
+   bisect    Use binary search to find the commit that introduced a bug
+   diff      Show changes between commits, commit and working tree, etc
+   grep      Print lines matching a pattern
+   log       Show commit logs
+   show      Show various types of objects
+   status    Show the working tree status
+
+grow, mark and tweak your common history
+   branch    List, create, or delete branches
+   commit    Record changes to the repository
+   merge     Join two or more development histories together
+   rebase    Reapply commits on top of another base tip
+   reset     Reset current HEAD to the specified state
+   switch    Switch branches
+   tag       Create, list, delete or verify a tag object signed with GPG
+
+collaborate (see also: git help workflows)
+   fetch     Download objects and refs from another repository
+   pull      Fetch from and integrate with another repository or a local branch
+   push      Update remote refs along with associated objects
+
+'git help -a' and 'git help -g' list available subcommands and some
+concept guides. See 'git help <command>' or 'git help <concept>'
+to read about a specific subcommand or concept.
+See 'git help git' for an overview of the system. branch confusion, which remains a major source of user frustration.
+-   The agent initially went down the wrong path for debugging the BC connection, assuming credentials were in  or the database, which consumed significant time and frustrated the user before the correct source (container env vars) was identified.</analysis>

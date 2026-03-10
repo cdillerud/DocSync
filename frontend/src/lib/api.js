@@ -61,6 +61,8 @@ export const getEventStats = (sinceHours = 24) => api.get('/events/stats', { par
 // BC Reference Resolution + Write Safety APIs
 export const resolveBCReference = (referenceNumber) => api.post('/bc/resolve-reference', null, { params: { reference_number: referenceNumber } });
 export const resolveDocumentReference = (docId) => api.post(`/documents/${docId}/resolve-reference`);
+export const resolveDocumentIntelligence = (docId) => api.post(`/documents/${docId}/resolve-intelligence`);
+export const getDocumentReferenceIntelligence = (docId) => api.get(`/documents/${docId}/reference-intelligence`);
 export const getBCWriteGuardStatus = () => api.get('/bc/write-guard/status');
 export const checkBCWritePermission = (documentId, action) => api.post('/bc/write-guard/check', null, { params: { document_id: documentId, action } });
 

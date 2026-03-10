@@ -133,6 +133,12 @@ from services.bc_write_safety_guard import (
     BCWriteSafetyGuard, BC_WRITE_ENABLED, IS_PRODUCTION_ENVIRONMENT,
     get_write_guard, set_write_guard, check_bc_write_allowed
 )
+from services.reference_intelligence_service import (
+    ReferenceIntelligenceService,
+    get_reference_intelligence_service, set_reference_intelligence_service,
+    extract_references_from_extracted_fields, extract_references_from_text,
+    normalize_reference, get_search_strategy
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -1496,6 +1502,76 @@ async def resolve_document_reference(doc_id: str):
         "document_id": doc_id,
         **result.to_dict()
     }
+
+
+# =============================================================================
+# REFERENCE INTELLIGENCE ENDPOINTS
+# =============================================================================
+
+@api_router.post("/documents/{doc_id}/resolve-intelligence")
+async def resolve_document_intelligence(doc_id: str):
+    """
+    Full AI-Assisted Reference Intelligence resolution for a document.
+    
+    Extracts all candidate references, classifies them, resolves against BC 
+    with document-type-aware strategy, and scores matches.
+    """
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    ref_service = get_reference_intelligence_service()
+    if not ref_service:
+        raise HTTPException(status_code=503, detail="Reference Intelligence Service not initialized")
+    
+    # Build extracted fields from document
+    extracted_fields = doc.get("extracted_fields", {})
+    if not extracted_fields:
+        extracted_fields = {}
+    # Merge top-level extracted fields into extracted_fields dict
+    for fld in ["po_number", "bol_number", "invoice_number", "order_number", "shipment_number"]:
+        if doc.get(fld) and not extracted_fields.get(fld):
+            extracted_fields[fld] = doc[fld]
+    if doc.get("po_number_clean") and not extracted_fields.get("po_number"):
+        extracted_fields["po_number"] = doc["po_number_clean"]
+    if doc.get("invoice_number_clean") and not extracted_fields.get("invoice_number"):
+        extracted_fields["invoice_number"] = doc["invoice_number_clean"]
+    
+    # Get document text if available
+    document_text = doc.get("extracted_text") or doc.get("raw_text") or ""
+    
+    # Run full reference intelligence resolution
+    resolution = await ref_service.resolve_document_references(
+        document=doc,
+        extracted_fields=extracted_fields,
+        document_text=document_text
+    )
+    
+    # Update document with results
+    await ref_service.update_document_references(doc_id, resolution)
+    
+    return resolution.to_dict()
+
+
+@api_router.get("/documents/{doc_id}/reference-intelligence")
+async def get_document_reference_intelligence(doc_id: str):
+    """
+    Get stored reference intelligence data for a document.
+    Returns the last resolution result without re-running.
+    """
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    ref_intel = doc.get("reference_intelligence")
+    if not ref_intel:
+        return {
+            "document_id": doc_id,
+            "status": "not_resolved",
+            "message": "Reference intelligence has not been run for this document. POST to /resolve-intelligence to trigger."
+        }
+    
+    return ref_intel
 
 
 @api_router.get("/bc/write-guard/status")
@@ -15086,6 +15162,11 @@ async def startup():
     set_write_guard(event_service)
     guard_status = get_write_guard().get_status()
     logger.info("BC Write Safety Guard initialized: %s", guard_status["message"])
+    
+    # Initialize Reference Intelligence Service
+    bc_resolver = get_reference_resolver()
+    set_reference_intelligence_service(db, bc_resolver=bc_resolver, event_service=event_service)
+    logger.info("Reference Intelligence Service initialized")
     
     # Start daily pilot summary scheduler if enabled
     global _pilot_summary_task

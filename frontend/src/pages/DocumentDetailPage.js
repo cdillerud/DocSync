@@ -17,6 +17,7 @@ import {
 import { Square9WorkflowTracker } from '../components/Square9WorkflowTracker';
 import APReviewPanel from '../components/APReviewPanel';
 import PDFPreviewPanel from '../components/PDFPreviewPanel';
+import ReferenceIntelligencePanel from '../components/ReferenceIntelligencePanel';
 
 const STATUS_CLASSES = {
   Received: 'status-received',
@@ -427,80 +428,11 @@ export default function DocumentDetailPage() {
             </Card>
           )}
 
-          {/* Reference Resolution Card */}
-          {(doc.po_number_clean || doc.bol_number || doc.reference_resolution) && (
-            <Card className="border border-border" data-testid="doc-reference-resolution-card">
-              <CardHeader className="pb-3">
-                <div className="flex items-center gap-2">
-                  <FileSearch className="w-4 h-4 text-blue-500" />
-                  <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>
-                    References
-                  </CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                {/* PO Number */}
-                {doc.po_number_clean && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">PO Reference</span>
-                    <code className="text-xs font-mono bg-muted px-2 py-0.5 rounded">{doc.po_number_clean}</code>
-                  </div>
-                )}
-                
-                {/* BOL Number */}
-                {doc.bol_number && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">BOL Number</span>
-                    <code className="text-xs font-mono bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded">{doc.bol_number}</code>
-                  </div>
-                )}
-                
-                {/* Reference Resolution Result */}
-                {doc.reference_resolution && (
-                  <div className="border-t border-border pt-3 mt-2">
-                    <p className="text-xs font-medium mb-2">BC Lookup Result</p>
-                    <div className="bg-muted/50 rounded p-2 text-[11px] space-y-1.5">
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Reference:</span>
-                        <span className="font-mono">{doc.reference_resolution.reference_number}</span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-muted-foreground">Status:</span>
-                        {doc.reference_resolution.status === 'found' ? (
-                          <Badge variant="secondary" className="text-[10px] bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
-                            Found
-                          </Badge>
-                        ) : (
-                          <Badge variant="secondary" className="text-[10px] bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
-                            Not Found
-                          </Badge>
-                        )}
-                      </div>
-                      {doc.reference_resolution.reference_type && doc.reference_resolution.reference_type !== 'not_found' && (
-                        <>
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Type:</span>
-                            <span className="font-mono">{doc.reference_resolution.reference_type.replace(/_/g, ' ')}</span>
-                          </div>
-                          {doc.reference_resolution.bc_document_no && (
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">BC Doc No:</span>
-                              <span className="font-mono">{doc.reference_resolution.bc_document_no}</span>
-                            </div>
-                          )}
-                        </>
-                      )}
-                      {doc.reference_resolution.tables_checked?.length > 0 && (
-                        <div className="text-[10px] text-muted-foreground mt-1">
-                          Checked: {doc.reference_resolution.tables_checked.join(', ')}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
+          {/* Reference Intelligence Panel */}
+          <ReferenceIntelligencePanel 
+            document={doc} 
+            onUpdate={() => fetchData()} 
+          />
 
           {/* Square9 Workflow Tracker */}
           <Square9WorkflowTracker 

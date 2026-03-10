@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { 
   Search, Filter, RefreshCw, FileText, Clock, CheckCircle2, 
-  AlertCircle, Archive, ChevronRight, Inbox, FileCheck, Play, Trash2, Brain
+  AlertCircle, Archive, ChevronRight, Inbox, FileCheck, Play, Trash2, Brain, Truck
 } from "lucide-react";
 
 const INTEL_STATUS_CONFIG = {
@@ -23,6 +23,7 @@ const INTEL_STATUS_CONFIG = {
   not_run: { label: 'Not Run', cls: 'bg-gray-100 text-gray-500 border-gray-200 dark:bg-gray-800 dark:text-gray-400' },
 };
 import api, { bulkResubmitDocuments, bulkDeleteDocuments, deleteDocument } from "@/lib/api";
+import BatchFreightClassifyDialog from "@/components/BatchFreightClassifyDialog";
 
 // Document types and their display names
 const DOC_TYPES = {
@@ -97,6 +98,7 @@ export default function UnifiedQueuePage() {
   // Selection for bulk actions
   const [selectedDocs, setSelectedDocs] = useState(new Set());
   const [bulkProcessing, setBulkProcessing] = useState(false);
+  const [freightDialogOpen, setFreightDialogOpen] = useState(false);
 
   const fetchDocuments = useCallback(async () => {
     setLoading(true);
@@ -295,6 +297,10 @@ export default function UnifiedQueuePage() {
               </Button>
             </div>
           )}
+          <Button onClick={() => setFreightDialogOpen(true)} variant="outline" size="sm" data-testid="batch-freight-btn">
+            <Truck className="h-4 w-4 mr-2" />
+            Freight G/L
+          </Button>
           <Button onClick={handleRefresh} variant="outline" size="sm">
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
@@ -466,6 +472,7 @@ export default function UnifiedQueuePage() {
                       <TableHead>Type</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Ref Intel</TableHead>
+                      <TableHead>Freight GL</TableHead>
                       <TableHead>Source</TableHead>
                       <TableHead>Created</TableHead>
                       <TableHead className="w-20">Actions</TableHead>
@@ -526,6 +533,27 @@ export default function UnifiedQueuePage() {
                             );
                           })()}
                         </TableCell>
+                        <TableCell data-testid={`freight-gl-${doc.id}`}>
+                          {(() => {
+                            const fgl = doc.freight_gl_classification;
+                            if (!fgl || !fgl.is_freight) return <span className="text-[10px] text-muted-foreground">-</span>;
+                            const dirCls = {
+                              inbound: 'bg-blue-500/20 text-blue-400',
+                              outbound: 'bg-emerald-500/20 text-emerald-400',
+                              transfer: 'bg-purple-500/20 text-purple-400',
+                            }[fgl.direction] || 'bg-gray-500/20 text-gray-400';
+                            return (
+                              <div className="flex flex-col gap-0.5">
+                                <Badge className={`${dirCls} text-[10px] px-1.5 py-0 w-fit`}>
+                                  {fgl.direction || '?'}
+                                </Badge>
+                                {fgl.gl_number && (
+                                  <span className="font-mono text-[10px] text-muted-foreground">{fgl.gl_number}</span>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </TableCell>
                         <TableCell>
                           <span className="text-sm text-muted-foreground">
                             {doc.source || "unknown"}
@@ -559,6 +587,15 @@ export default function UnifiedQueuePage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Batch Freight Classification Dialog */}
+      <BatchFreightClassifyDialog
+        open={freightDialogOpen}
+        onOpenChange={setFreightDialogOpen}
+        selectedIds={selectedDocs.size > 0 ? [...selectedDocs] : null}
+        totalInQueue={documents.length}
+        onComplete={() => { fetchDocuments(); fetchStats(); }}
+      />
     </div>
   );
 }

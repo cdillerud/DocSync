@@ -518,6 +518,133 @@ class FreightGLRoutingService:
         }
 
     # =========================================================================
+    # BATCH CLASSIFICATION
+    # =========================================================================
+
+    async def batch_classify(
+        self,
+        document_ids: Optional[List[str]] = None,
+        confidence_threshold: float = 0.5,
+        skip_overrides: bool = True,
+    ) -> Dict:
+        """
+        Batch-classify freight documents. Read-only with respect to BC.
+
+        Args:
+            document_ids: Specific doc IDs to process. If None, processes all freight-eligible docs.
+            confidence_threshold: Flag items below this confidence for manual review.
+            skip_overrides: If True, skip docs with existing manual overrides.
+
+        Returns summary with direction counts, GL breakdown, and items needing review.
+        """
+        # Build query
+        query: Dict[str, Any] = {}
+        if document_ids:
+            query["id"] = {"$in": document_ids}
+
+        docs = await self.db.hub_documents.find(query, {"_id": 0}).to_list(1000)
+
+        results = {
+            "total_processed": 0,
+            "freight_detected": 0,
+            "non_freight": 0,
+            "skipped_override": 0,
+            "skipped_error": 0,
+            "by_direction": {"inbound": 0, "outbound": 0, "transfer": 0, "unknown": 0},
+            "by_gl_account": {},
+            "needs_manual_review": [],
+            "high_confidence": [],
+            "classified_docs": [],
+        }
+
+        for doc in docs:
+            doc_id = doc.get("id")
+            if not doc_id:
+                results["skipped_error"] += 1
+                continue
+
+            # Skip manually overridden
+            existing = doc.get("freight_gl_classification") or {}
+            if skip_overrides and existing.get("override"):
+                results["skipped_override"] += 1
+                continue
+
+            try:
+                classification = await self.classify_document(doc)
+                results["total_processed"] += 1
+
+                if not classification.get("is_freight"):
+                    results["non_freight"] += 1
+                    continue
+
+                results["freight_detected"] += 1
+                direction = classification.get("direction", "unknown")
+                results["by_direction"][direction] = results["by_direction"].get(direction, 0) + 1
+
+                gl = classification.get("recommended_gl") or {}
+                gl_num = gl.get("gl_number", "unassigned")
+                gl_name = gl.get("gl_name", "")
+                if gl_num not in results["by_gl_account"]:
+                    results["by_gl_account"][gl_num] = {"gl_name": gl_name, "count": 0}
+                results["by_gl_account"][gl_num]["count"] += 1
+
+                conf = classification.get("confidence", 0)
+                doc_summary = {
+                    "document_id": doc_id,
+                    "file_name": doc.get("file_name", ""),
+                    "vendor": self._get_vendor_name(doc),
+                    "direction": direction,
+                    "sub_type": classification.get("sub_type"),
+                    "gl_number": gl_num,
+                    "gl_name": gl_name,
+                    "confidence": conf,
+                }
+
+                if conf < confidence_threshold:
+                    doc_summary["review_reason"] = "Below confidence threshold"
+                    results["needs_manual_review"].append(doc_summary)
+                else:
+                    results["high_confidence"].append(doc_summary)
+
+                results["classified_docs"].append(doc_summary)
+
+                # Save the classification (read-only: only writes to our own MongoDB, not BC)
+                log_entry = {
+                    "id": str(uuid.uuid4()),
+                    "document_id": doc_id,
+                    **classification,
+                }
+                await self.log_collection.replace_one(
+                    {"document_id": doc_id}, log_entry, upsert=True
+                )
+
+                update_fields = {
+                    "freight_gl_classification": {
+                        "is_freight": True,
+                        "direction": direction,
+                        "sub_type": classification.get("sub_type"),
+                        "confidence": conf,
+                        "classified_at": classification.get("classified_at"),
+                    },
+                    "updated_utc": datetime.now(timezone.utc).isoformat(),
+                }
+                if gl.get("gl_number"):
+                    update_fields["freight_gl_classification"]["gl_number"] = gl["gl_number"]
+                    update_fields["freight_gl_classification"]["gl_name"] = gl["gl_name"]
+                    update_fields["freight_gl_classification"]["account_id"] = gl.get("account_id")
+
+                await self.db.hub_documents.update_one(
+                    {"id": doc_id}, {"$set": update_fields}
+                )
+
+            except Exception as e:
+                logger.error("[FreightGL] Batch error for doc %s: %s", doc_id, str(e))
+                results["skipped_error"] += 1
+
+        results["batch_completed_at"] = datetime.now(timezone.utc).isoformat()
+        return results
+
+    # =========================================================================
     # STATISTICS
     # =========================================================================
 

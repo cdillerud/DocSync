@@ -1968,6 +1968,33 @@ async def get_recent_freight_classifications(limit: int = Query(20, le=100)):
     return await svc.get_recent_classifications(limit=limit)
 
 
+@api_router.post("/freight-routing/batch-classify")
+async def batch_classify_freight(body: Dict = Body(...)):
+    """
+    Batch-classify freight documents. Read-only: only writes to local MongoDB, never to BC.
+    
+    Body params:
+    - document_ids: optional list of specific doc IDs
+    - confidence_threshold: float (default 0.5) - flag items below this for manual review
+    - skip_overrides: bool (default true) - skip docs with manual overrides
+    """
+    svc = get_freight_gl_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Freight G/L routing not initialized")
+    
+    document_ids = body.get("document_ids")
+    confidence_threshold = body.get("confidence_threshold", 0.5)
+    skip_overrides = body.get("skip_overrides", True)
+    
+    result = await svc.batch_classify(
+        document_ids=document_ids,
+        confidence_threshold=confidence_threshold,
+        skip_overrides=skip_overrides,
+    )
+    return result
+
+
+
 
 @api_router.put("/documents/{doc_id}")
 async def update_document(doc_id: str, update: DocumentUpdate):

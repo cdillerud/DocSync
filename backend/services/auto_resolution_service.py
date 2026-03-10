@@ -126,6 +126,7 @@ class AutoResolutionService:
         self.db = db
         self.ref_service = ref_intelligence_service
         self.event_service = event_service
+        self._vendor_intel = None
         self._queue = asyncio.Queue(maxsize=500)
         self._workers = []
         self._running = False
@@ -133,6 +134,10 @@ class AutoResolutionService:
             "queued": 0, "completed": 0, "failed": 0,
             "skipped": 0, "retried": 0
         }
+
+    def set_vendor_intelligence(self, vendor_intel):
+        """Inject vendor intelligence service for post-resolution updates."""
+        self._vendor_intel = vendor_intel
 
     def start(self, num_workers: int = AUTO_RESOLVE_MAX_WORKERS):
         """Start background workers."""
@@ -270,6 +275,15 @@ class AutoResolutionService:
                 resolution.best_match.match_score if resolution.best_match else 0,
                 resolution.processing_time_ms or 0
             )
+
+            # Update vendor intelligence profile (async, non-blocking)
+            if self._vendor_intel:
+                try:
+                    updated_doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+                    if updated_doc:
+                        await self._vendor_intel.update_from_document(updated_doc)
+                except Exception as ve:
+                    logger.warning("[AutoResolve:W%d] Vendor intel update error: %s", worker_id, str(ve))
 
         except Exception as e:
             logger.error("[AutoResolve:W%d] Failed %s: %s", worker_id, doc_id[:8], str(e))

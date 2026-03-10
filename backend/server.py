@@ -146,6 +146,9 @@ from services.auto_resolution_service import (
     AutoResolutionService, get_auto_resolve_service, set_auto_resolve_service,
     is_eligible_for_auto_resolution, needs_resolution
 )
+from services.vendor_intelligence_service import (
+    VendorIntelligenceService, get_vendor_intelligence_service, set_vendor_intelligence_service
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -1691,6 +1694,72 @@ async def trigger_auto_resolve(doc_id: str):
     await svc.enqueue(doc_id)
     
     return {"status": "queued", "document_id": doc_id}
+
+
+# =============================================================================
+# VENDOR INTELLIGENCE ENDPOINTS
+# =============================================================================
+
+@api_router.get("/vendor-intelligence/stats")
+async def get_vendor_intelligence_stats():
+    """Get aggregate vendor intelligence statistics."""
+    svc = get_vendor_intelligence_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Vendor Intelligence not initialized")
+    return await svc.get_stats()
+
+
+@api_router.get("/vendor-intelligence/profiles")
+async def list_vendor_profiles(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    sort_by: str = Query("invoice_count", description="Sort field")
+):
+    """List all vendor intelligence profiles."""
+    svc = get_vendor_intelligence_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Vendor Intelligence not initialized")
+    profiles = await svc.get_all_profiles(skip=skip, limit=limit, sort_by=sort_by)
+    total = await svc.get_profile_count()
+    return {"profiles": profiles, "total": total}
+
+
+@api_router.get("/vendor-intelligence/profiles/{vendor_id}")
+async def get_vendor_profile(vendor_id: str):
+    """Get a single vendor intelligence profile."""
+    svc = get_vendor_intelligence_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Vendor Intelligence not initialized")
+    profile = await svc.get_profile(vendor_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Vendor profile not found")
+    return profile
+
+
+@api_router.post("/vendor-intelligence/rebuild")
+async def rebuild_vendor_profiles():
+    """Rebuild all vendor profiles from historical document data. Runs in background."""
+    svc = get_vendor_intelligence_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Vendor Intelligence not initialized")
+    
+    async def _run_rebuild():
+        try:
+            await svc.rebuild_all_profiles()
+        except Exception as e:
+            logger.error("[VendorIntel] Rebuild error: %s", str(e))
+    
+    asyncio.create_task(_run_rebuild())
+    return {"status": "rebuild_started", "message": "Vendor profiles are being rebuilt from historical data."}
+
+
+@api_router.get("/vendor-intelligence/resolver-hints/{vendor_name}")
+async def get_vendor_resolver_hints(vendor_name: str):
+    """Get vendor-aware resolver hints for scoring and search order."""
+    svc = get_vendor_intelligence_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Vendor Intelligence not initialized")
+    return await svc.get_resolver_hints(vendor_name)
 
 
 @api_router.put("/documents/{doc_id}")
@@ -15293,6 +15362,12 @@ async def startup():
     auto_resolve = set_auto_resolve_service(db, ref_intel_service, event_service)
     auto_resolve.start()
     logger.info("Auto-Resolution Service initialized (5 workers)")
+    
+    # Initialize Vendor Intelligence Service
+    vendor_intel = set_vendor_intelligence_service(db, event_service)
+    await vendor_intel.initialize()
+    auto_resolve.set_vendor_intelligence(vendor_intel)
+    logger.info("Vendor Intelligence Service initialized")
     
     # Start daily pilot summary scheduler if enabled
     global _pilot_summary_task

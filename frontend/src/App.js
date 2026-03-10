@@ -14,6 +14,7 @@ import SettingsPage from "@/pages/SettingsPage";
 import EmailParserPage from "@/pages/EmailParserPage";
 import FileImportPage from "@/pages/FileImportPage";
 import SharePointMigrationPage from "@/pages/SharePointMigrationPage";
+import VendorIntelligencePage from "@/pages/VendorIntelligencePage";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -34,6 +35,7 @@ function AppRoutes() {
         <Route path="email-parser" element={<EmailParserPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="migration/onegamer-poc" element={<SharePointMigrationPage />} />
+        <Route path="vendor-intelligence" element={<VendorIntelligencePage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

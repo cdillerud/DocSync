@@ -503,7 +503,8 @@ def score_bc_match(
     candidate: ReferenceCandidate,
     bc_record: Dict[str, Any],
     entity_type: str,
-    document: Dict[str, Any] = None
+    document: Dict[str, Any] = None,
+    vendor_hints: Dict[str, Any] = None
 ) -> Tuple[float, str]:
     """
     Score a BC match based on multiple factors.
@@ -560,6 +561,14 @@ def score_bc_match(
     # 5. Candidate confidence (0.1)
     score += candidate.confidence * 0.1
     reasoning_parts.append(f"Candidate confidence: {candidate.confidence:.2f}")
+    
+    # 6. Vendor behavior boost (up to 0.15) - from vendor intelligence
+    if vendor_hints and vendor_hints.get("has_hints"):
+        typical_types = vendor_hints.get("typical_match_types", [])
+        if entity_type in typical_types:
+            boost = vendor_hints.get("behavior_score_boost", 0.15)
+            score += boost
+            reasoning_parts.append(f"Vendor behavior: typical match type (+{boost:.0%})")
     
     reasoning = "; ".join(reasoning_parts)
     

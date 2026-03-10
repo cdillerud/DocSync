@@ -142,6 +142,10 @@ from services.reference_intelligence_service import (
 from services.bc_reference_cache_service import (
     BCReferenceCacheService, get_cache_service, set_cache_service
 )
+from services.auto_resolution_service import (
+    AutoResolutionService, get_auto_resolve_service, set_auto_resolve_service,
+    is_eligible_for_auto_resolution, needs_resolution
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -1653,6 +1657,40 @@ async def search_cache(
         "match_count": len(results),
         "matches": results
     }
+
+
+# =============================================================================
+# AUTO-RESOLUTION ENDPOINTS
+# =============================================================================
+
+@api_router.get("/auto-resolve/stats")
+async def get_auto_resolve_stats():
+    """Get auto-resolution worker stats: queue size, completed, failed, etc."""
+    svc = get_auto_resolve_service()
+    if not svc:
+        return {"status": "not_initialized"}
+    return svc.get_stats()
+
+
+@api_router.post("/documents/{doc_id}/auto-resolve")
+async def trigger_auto_resolve(doc_id: str):
+    """Manually enqueue a document for auto-resolution (re-run)."""
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    svc = get_auto_resolve_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Auto-resolution service not initialized")
+    
+    # Force re-run by setting status to not_run
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {"reference_intelligence_status": "not_run"}}
+    )
+    await svc.enqueue(doc_id)
+    
+    return {"status": "queued", "document_id": doc_id}
 
 
 @api_router.put("/documents/{doc_id}")
@@ -6720,6 +6758,17 @@ async def _internal_intake_document(
         )
     except Exception as e:
         logger.error("[Events] Error emitting events for document %s: %s", doc_id, str(e))
+    
+    # =================================================================
+    # AUTO-RESOLUTION: Queue background reference intelligence
+    # Non-blocking — enqueue and return immediately
+    # =================================================================
+    try:
+        auto_resolve = get_auto_resolve_service()
+        if auto_resolve:
+            await auto_resolve.enqueue(doc_id)
+    except Exception as e:
+        logger.error("[AutoResolve] Error queueing document %s: %s", doc_id, str(e))
     
     return {
         "document": {"id": doc_id, "status": final_status},
@@ -15239,6 +15288,12 @@ async def startup():
     cache_service.start_background_sync()
     logger.info("BC Reference Cache Service initialized (background sync enabled)")
     
+    # Initialize Auto-Resolution Service
+    ref_intel_service = get_reference_intelligence_service()
+    auto_resolve = set_auto_resolve_service(db, ref_intel_service, event_service)
+    auto_resolve.start()
+    logger.info("Auto-Resolution Service initialized (5 workers)")
+    
     # Start daily pilot summary scheduler if enabled
     global _pilot_summary_task
     if PILOT_MODE_ENABLED and DAILY_PILOT_EMAIL_ENABLED:
@@ -15282,4 +15337,8 @@ async def shutdown_db_client():
     cache = get_cache_service()
     if cache:
         cache.stop_background_sync()
+    # Stop auto-resolution workers
+    auto_resolve = get_auto_resolve_service()
+    if auto_resolve:
+        auto_resolve.stop()
     client.close()

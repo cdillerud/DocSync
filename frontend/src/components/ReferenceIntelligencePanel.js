@@ -116,6 +116,26 @@ export default function ReferenceIntelligencePanel({ document, onUpdate }) {
       </CardHeader>
 
       <CardContent className="space-y-4 text-sm">
+        {/* Auto-resolution status */}
+        {document?.reference_intelligence_status === 'pending' && !intelligence && (
+          <div className="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 rounded px-3 py-2" data-testid="ref-intel-pending">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            Auto-resolving references in background...
+          </div>
+        )}
+        {document?.reference_intelligence_status === 'failed' && !intelligence && (
+          <div className="flex items-center gap-2 text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 rounded px-3 py-2" data-testid="ref-intel-failed">
+            <XCircle className="w-3 h-3" />
+            Auto-resolution failed. Click <strong className="mx-0.5">Resolve</strong> to retry manually.
+          </div>
+        )}
+        {document?.reference_intelligence_status === 'retry_scheduled' && !intelligence && (
+          <div className="flex items-center gap-2 text-xs text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-950/30 rounded px-3 py-2" data-testid="ref-intel-retrying">
+            <Clock className="w-3 h-3" />
+            Resolution failed — retry scheduled...
+          </div>
+        )}
+
         {loading && !intelligence && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
             <Loader2 className="w-3 h-3 animate-spin" />

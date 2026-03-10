@@ -11,8 +11,17 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { 
   Search, Filter, RefreshCw, FileText, Clock, CheckCircle2, 
-  AlertCircle, Archive, ChevronRight, Inbox, FileCheck, Play, Trash2
+  AlertCircle, Archive, ChevronRight, Inbox, FileCheck, Play, Trash2, Brain
 } from "lucide-react";
+
+const INTEL_STATUS_CONFIG = {
+  completed: { label: 'Resolved', cls: 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300' },
+  ambiguous: { label: 'Ambiguous', cls: 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300' },
+  pending: { label: 'Pending', cls: 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300' },
+  failed: { label: 'Failed', cls: 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-300' },
+  retry_scheduled: { label: 'Retry', cls: 'bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/30 dark:text-orange-300' },
+  not_run: { label: 'Not Run', cls: 'bg-gray-100 text-gray-500 border-gray-200 dark:bg-gray-800 dark:text-gray-400' },
+};
 import api, { bulkResubmitDocuments, bulkDeleteDocuments, deleteDocument } from "@/lib/api";
 
 // Document types and their display names
@@ -456,6 +465,7 @@ export default function UnifiedQueuePage() {
                       <TableHead>Document</TableHead>
                       <TableHead>Type</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead>Ref Intel</TableHead>
                       <TableHead>Source</TableHead>
                       <TableHead>Created</TableHead>
                       <TableHead className="w-20">Actions</TableHead>
@@ -498,6 +508,24 @@ export default function UnifiedQueuePage() {
                         </TableCell>
                         <TableCell>{getTypeBadge(doc.doc_type)}</TableCell>
                         <TableCell>{getStatusBadge(doc.workflow_status || doc.status)}</TableCell>
+                        <TableCell data-testid={`ref-intel-${doc.id}`}>
+                          {(() => {
+                            const st = doc.reference_intelligence_status || 'not_run';
+                            const cfg = INTEL_STATUS_CONFIG[st] || INTEL_STATUS_CONFIG.not_run;
+                            const score = doc.reference_intelligence_best_score;
+                            return (
+                              <div className="flex items-center gap-1.5">
+                                <Badge variant="outline" className={`text-[10px] border ${cfg.cls}`}>
+                                  {st === 'pending' && <RefreshCw className="w-2.5 h-2.5 mr-0.5 animate-spin" />}
+                                  {cfg.label}
+                                </Badge>
+                                {score != null && (
+                                  <span className="text-[10px] text-muted-foreground font-mono">{(score * 100).toFixed(0)}%</span>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </TableCell>
                         <TableCell>
                           <span className="text-sm text-muted-foreground">
                             {doc.source || "unknown"}

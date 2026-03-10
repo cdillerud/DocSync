@@ -1185,6 +1185,7 @@ Created `/app/memory/SQUARE9_COMPARISON.md` documenting alignment status.
 - [x] BC Reference Cache Layer — 277K records, cache-first resolution (March 10, 2026)
 - [x] Auto-Resolution on Document Intake — async, idempotent, rate-limited, cache-first (March 10, 2026)
 - [x] Vendor Intelligence Engine — behavioral profiles, stable vendor detection, resolver integration (March 10, 2026)
+- [x] Vendor Automation Rules Engine — configurable routing rules, first-match-wins, admin UI (March 10, 2026)
 
 ### P1 - In Progress
 - [ ] Integrate `APValidationService` into main processing flow (async replacement for sync validation)

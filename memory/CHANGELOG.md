@@ -35,6 +35,18 @@
 - **Events:** `vendor.profile.created/updated`, `vendor.stable.detected`
 - **TESTS:** iteration_25.json (18 backend, 100% frontend)
 
+### Vendor Automation Rules Engine (COMPLETED)
+- **NEW:** `AutomationRulesService` in `/app/backend/services/automation_rules_service.py`
+  - `automation_rules` MongoDB collection with in-memory cache for <5ms evaluation
+  - Configurable conditions: vendor, document type, validation, resolver results, vendor intelligence metrics
+  - Actions: route_to_queue, assign_review_priority, flag_for_manual_review, auto_mark_ready, auto_route_to_accounting_queue
+  - First-match-wins priority evaluation, integrated into auto-resolution pipeline
+  - AI-powered rule suggestions from vendor intelligence profiles
+- **Admin UI:** `/automation-rules` page with rule table, condition/action badges, rule editor, enable/disable toggles, suggestions panel
+- **Endpoints:** Full CRUD + `POST .../evaluate/{doc_id}` + `GET .../suggestions`
+- **Events:** `automation.rule.triggered`, `.skipped`, `.created`
+- **TESTS:** iteration_26.json (13 backend, 100% frontend)
+
 
 ### AI-Assisted Reference Intelligence Engine (COMPLETED)
 - **NEW:** `ReferenceIntelligenceService` in `/app/backend/services/reference_intelligence_service.py`

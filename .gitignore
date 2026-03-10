@@ -446,3 +446,7 @@ frontend/node_modules/.cache/default-development/4.pack_
 # Environment files
 *.env
 *.env.*
+-e 
+# Environment files
+*.env
+*.env.*

@@ -8,7 +8,8 @@ import { toast } from 'sonner';
 import {
   ArrowRight, RefreshCw, Loader2, Target, TrendingUp, Users,
   AlertTriangle, Lightbulb, ChevronDown, ChevronUp, Search,
-  BarChart3, ArrowUpRight, ExternalLink, Filter
+  BarChart3, ArrowUpRight, ExternalLink, Filter, Bell, BellOff,
+  TrendingDown, Minus, ShieldAlert, CheckCircle2, XCircle, Eye
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
@@ -56,27 +57,36 @@ export default function LabelCorrectionInsightsPage() {
   const [expandedRec, setExpandedRec] = useState(null);
   const [expandedVendor, setExpandedVendor] = useState(null);
   const [vendorDetail, setVendorDetail] = useState(null);
+  const [alerts, setAlerts] = useState([]);
+  const [alertSummary, setAlertSummary] = useState(null);
+  const [alertFilter, setAlertFilter] = useState(null); // severity filter
+  const [showDismissed, setShowDismissed] = useState(false);
 
   // Part 7: filter from matching debug link
   const filterVendor = searchParams.get('vendor');
   const filterLabel = searchParams.get('label');
   const filterRef = searchParams.get('ref');
+  const filterPattern = searchParams.get('pattern');
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [sumRes, patRes, venRes, timeRes, recRes] = await Promise.all([
+      const [sumRes, patRes, venRes, timeRes, recRes, alertRes, alertSumRes] = await Promise.all([
         fetch(`${API}/api/label-corrections/summary`),
         fetch(`${API}/api/label-corrections/top-patterns`),
         fetch(`${API}/api/label-corrections/vendors`),
         fetch(`${API}/api/label-corrections/over-time`),
         fetch(`${API}/api/label-corrections/recommendations`),
+        fetch(`${API}/api/alerts/active`),
+        fetch(`${API}/api/alerts/summary`),
       ]);
       if (sumRes.ok) setSummary(await sumRes.json());
       if (patRes.ok) setPatterns((await patRes.json()).patterns || []);
       if (venRes.ok) setVendors(await venRes.json());
       if (timeRes.ok) setTimeline(await timeRes.json());
       if (recRes.ok) setRecommendations(await recRes.json());
+      if (alertRes.ok) setAlerts(await alertRes.json());
+      if (alertSumRes.ok) setAlertSummary(await alertSumRes.json());
     } catch { toast.error('Failed to load insights'); }
     finally { setLoading(false); }
   }, []);
@@ -92,14 +102,55 @@ export default function LabelCorrectionInsightsPage() {
     } catch { /* silent */ }
   };
 
+  const handleDismissAlert = async (patternKey) => {
+    try {
+      const res = await fetch(`${API}/api/alerts/${encodeURIComponent(patternKey)}/dismiss`, { method: 'POST' });
+      if (res.ok) {
+        toast.success('Alert dismissed');
+        setAlerts(prev => prev.filter(a => a.pattern_key !== patternKey));
+      }
+    } catch { toast.error('Failed to dismiss'); }
+  };
+
+  const handleResolveAlert = async (patternKey) => {
+    try {
+      const res = await fetch(`${API}/api/alerts/${encodeURIComponent(patternKey)}/resolve`, { method: 'POST' });
+      if (res.ok) {
+        toast.success('Alert resolved');
+        setAlerts(prev => prev.filter(a => a.pattern_key !== patternKey));
+      }
+    } catch { toast.error('Failed to resolve'); }
+  };
+
+  const handleTriggerEval = async () => {
+    try {
+      const res = await fetch(`${API}/api/alerts/evaluate`, { method: 'POST' });
+      if (res.ok) {
+        const result = await res.json();
+        toast.success(`Evaluation complete: ${result.alerts_created} new, ${result.alerts_updated} updated`);
+        await fetchData();
+      }
+    } catch { toast.error('Evaluation failed'); }
+  };
+
   // Apply filters
   const filteredPatterns = patterns.filter(p => {
     if (filterLabel && p.predicted_label !== filterLabel) return false;
     if (filterVendor && !p.vendor_names?.some(v => v.toLowerCase().includes(filterVendor.toLowerCase()))) return false;
+    if (filterPattern) {
+      const pk = `${p.predicted_label}→${p.actual_entity_type}`;
+      if (pk !== filterPattern && `${p.predicted_label}→${p.correct_label}` !== filterPattern) return false;
+    }
     return true;
   });
   const filteredVendors = vendors.filter(v => {
     if (filterVendor && !v.vendor.toLowerCase().includes(filterVendor.toLowerCase())) return false;
+    return true;
+  });
+  const filteredAlerts = alerts.filter(a => {
+    if (alertFilter && a.severity_level !== alertFilter) return false;
+    if (filterVendor && !a.affected_vendors?.some(v => v.toLowerCase().includes(filterVendor.toLowerCase()))) return false;
+    if (filterPattern && a.pattern_key !== filterPattern) return false;
     return true;
   });
 
@@ -140,16 +191,130 @@ export default function LabelCorrectionInsightsPage() {
       </div>
 
       {/* Active Filters */}
-      {(filterVendor || filterLabel || filterRef) && (
+      {(filterVendor || filterLabel || filterRef || filterPattern) && (
         <div className="flex items-center gap-2 text-xs" data-testid="insights-active-filters">
           <Filter className="w-3.5 h-3.5 text-muted-foreground" />
           <span className="text-muted-foreground">Filters:</span>
           {filterVendor && <Badge variant="outline">{filterVendor}</Badge>}
           {filterLabel && <Badge variant="outline">{filterLabel}</Badge>}
           {filterRef && <Badge variant="outline" className="font-mono">{filterRef}</Badge>}
+          {filterPattern && <Badge variant="outline" className="font-mono">{filterPattern}</Badge>}
           <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px]"
             onClick={() => navigate('/label-correction-insights')}>Clear</Button>
         </div>
+      )}
+
+      {/* Extraction Alert Panel (Part 4) */}
+      {filteredAlerts.length > 0 && (
+        <Card className="border-l-4 border-l-red-500/60" data-testid="extraction-alert-panel">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-bold uppercase tracking-wider flex items-center gap-2"
+                style={{ fontFamily: 'Chivo, sans-serif' }}>
+                <ShieldAlert className="w-4 h-4 text-red-400" />
+                Extraction Alerts
+                {alertSummary?.total_active > 0 && (
+                  <Badge className="bg-red-500/20 text-red-400 text-[10px]">{alertSummary.total_active} active</Badge>
+                )}
+              </CardTitle>
+              <div className="flex items-center gap-1.5">
+                {['critical', 'warning', 'info'].map(sev => (
+                  <Button key={sev} variant={alertFilter === sev ? 'default' : 'ghost'} size="sm"
+                    className={`h-6 px-2 text-[10px] ${alertFilter === sev ? '' : 'text-muted-foreground'}`}
+                    onClick={() => setAlertFilter(alertFilter === sev ? null : sev)}
+                    data-testid={`alert-filter-${sev}`}>
+                    {sev}
+                    {alertSummary?.[sev] > 0 && <span className="ml-1">({alertSummary[sev]})</span>}
+                  </Button>
+                ))}
+                <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px]" onClick={handleTriggerEval}
+                  data-testid="alert-trigger-eval">
+                  <RefreshCw className="w-3 h-3" />
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {filteredAlerts.map((alert, i) => {
+              const sevConf = SEVERITY_CONFIG[alert.severity_level] || SEVERITY_CONFIG.low;
+              const SevIcon = sevConf.icon;
+              const TrendIcon = alert.trend === 'increasing' ? TrendingUp
+                : alert.trend === 'decreasing' ? TrendingDown : Minus;
+              const trendColor = alert.trend === 'increasing' ? 'text-red-400'
+                : alert.trend === 'decreasing' ? 'text-emerald-400' : 'text-muted-foreground';
+              return (
+                <div key={alert.pattern_key} className="border border-border/50 rounded-md p-3 space-y-2"
+                  data-testid={`alert-card-${i}`}>
+                  <div className="flex items-center gap-3">
+                    <SevIcon className="w-4 h-4 shrink-0" />
+                    <Badge className={`${sevConf.color} text-[10px] shrink-0`}>{alert.severity_level}</Badge>
+                    <span className="font-mono text-xs font-semibold">{alert.pattern_key}</span>
+                    <div className="flex-1" />
+                    <div className="flex items-center gap-1 text-[10px]">
+                      <TrendIcon className={`w-3 h-3 ${trendColor}`} />
+                      <span className={trendColor}>
+                        {alert.trend} {alert.trend_pct !== 0 && `(${alert.trend_pct > 0 ? '+' : ''}${alert.trend_pct}%)`}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                    <div>
+                      <span className="text-muted-foreground text-[10px]">30-day count</span>
+                      <div className="font-mono font-bold">{alert.occurrence_count_30d}</div>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground text-[10px]">7-day count</span>
+                      <div className="font-mono font-bold">{alert.occurrence_count_7d}</div>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground text-[10px]">Vendors affected</span>
+                      <div className="font-bold">{alert.affected_vendor_count}</div>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground text-[10px]">
+                        {alert.vendor_scope !== 'global' ? 'Vendor mislabel rate' : 'Avg score'}
+                      </span>
+                      <div className="font-mono font-bold">
+                        {alert.vendor_mislabel_rate != null
+                          ? `${(alert.vendor_mislabel_rate * 100).toFixed(0)}%`
+                          : `${(alert.avg_match_score * 100).toFixed(0)}%`}
+                      </div>
+                    </div>
+                  </div>
+                  {alert.affected_vendors?.length > 0 && (
+                    <div className="text-[10px] text-muted-foreground">
+                      Vendors: {alert.affected_vendors.slice(0, 4).join(', ')}
+                      {alert.affected_vendors.length > 4 && ` +${alert.affected_vendors.length - 4} more`}
+                    </div>
+                  )}
+                  {alert.suggested_action && (
+                    <div className="bg-amber-500/10 border border-amber-500/20 rounded p-2 text-xs text-muted-foreground">
+                      <Lightbulb className="w-3 h-3 inline mr-1 text-amber-400" />
+                      {alert.suggested_action}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2 pt-1">
+                    <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px]"
+                      onClick={() => navigate(`/label-correction-insights?pattern=${encodeURIComponent(alert.pattern_key)}`)}
+                      data-testid={`alert-view-${i}`}>
+                      <Eye className="w-3 h-3 mr-1" /> View Pattern
+                    </Button>
+                    <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-muted-foreground"
+                      onClick={() => handleDismissAlert(alert.pattern_key)}
+                      data-testid={`alert-dismiss-${i}`}>
+                      <BellOff className="w-3 h-3 mr-1" /> Dismiss
+                    </Button>
+                    <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-emerald-400"
+                      onClick={() => handleResolveAlert(alert.pattern_key)}
+                      data-testid={`alert-resolve-${i}`}>
+                      <CheckCircle2 className="w-3 h-3 mr-1" /> Resolve
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
       )}
 
       {/* Summary Cards */}

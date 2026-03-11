@@ -158,6 +158,9 @@ from services.freight_gl_routing_service import (
 from services.label_correction_service import (
     LabelCorrectionService, get_label_correction_service, set_label_correction_service
 )
+from services.alert_pattern_service import (
+    AlertPatternService, get_alert_pattern_service, set_alert_pattern_service
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -2360,6 +2363,78 @@ async def get_document_corrections(doc_id: str):
     if not svc:
         raise HTTPException(status_code=503, detail="Label correction service not initialized")
     return await svc.get_corrections_for_document(doc_id)
+
+
+# =============================================================================
+# ALERT PATTERN ENDPOINTS
+# =============================================================================
+
+@api_router.get("/alerts/active")
+async def get_active_alerts(
+    severity: str = None,
+    vendor: str = None,
+    predicted_label: str = None,
+    actual_entity_type: str = None,
+):
+    """Get active alerts with optional filtering."""
+    svc = get_alert_pattern_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Alert service not initialized")
+    return await svc.get_active_alerts(
+        severity=severity, vendor=vendor,
+        predicted_label=predicted_label, actual_entity_type=actual_entity_type
+    )
+
+
+@api_router.get("/alerts/summary")
+async def get_alert_summary():
+    """Get alert count summary for dashboard header."""
+    svc = get_alert_pattern_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Alert service not initialized")
+    return await svc.get_alert_summary()
+
+
+@api_router.get("/alerts/all")
+async def get_all_alerts(include_resolved: bool = False):
+    """Get all alerts, optionally including resolved/dismissed."""
+    svc = get_alert_pattern_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Alert service not initialized")
+    return await svc.get_all_alerts(include_resolved=include_resolved)
+
+
+@api_router.post("/alerts/evaluate")
+async def trigger_alert_evaluation():
+    """Manually trigger alert pattern evaluation."""
+    svc = get_alert_pattern_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Alert service not initialized")
+    return await svc.trigger_evaluation()
+
+
+@api_router.post("/alerts/{pattern_key}/dismiss")
+async def dismiss_alert(pattern_key: str):
+    """Dismiss an alert."""
+    svc = get_alert_pattern_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Alert service not initialized")
+    ok = await svc.dismiss_alert(pattern_key)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return {"status": "dismissed", "pattern_key": pattern_key}
+
+
+@api_router.post("/alerts/{pattern_key}/resolve")
+async def resolve_alert(pattern_key: str):
+    """Mark an alert as resolved."""
+    svc = get_alert_pattern_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Alert service not initialized")
+    ok = await svc.resolve_alert(pattern_key)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return {"status": "resolved", "pattern_key": pattern_key}
 
 
 @api_router.put("/documents/{doc_id}")
@@ -15994,6 +16069,13 @@ async def startup():
     ref_intel_service.set_label_correction_service(label_correction_svc)
     ref_intel_service.set_vendor_intelligence_service(vendor_intel)
     logger.info("Label Correction Feedback Loop initialized")
+    
+    # Initialize Alert Pattern Service (threshold alerts)
+    alert_svc = set_alert_pattern_service(db, event_service)
+    await alert_svc.initialize()
+    await alert_svc.evaluate_patterns()  # Initial evaluation
+    alert_svc.start_background_eval()
+    logger.info("Alert Pattern Service initialized with background evaluation")
     
     # Start daily pilot summary scheduler if enabled
     global _pilot_summary_task

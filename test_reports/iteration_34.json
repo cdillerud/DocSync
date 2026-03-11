@@ -1,0 +1,106 @@
+{
+  "summary": "Automated Threshold Alerts feature (11-part spec) fully tested. All 21 backend API tests passed (100%). All frontend features verified: Extraction Alert Panel with red left border, severity filter buttons (critical/warning/info), alert cards with all required fields, View Pattern/Dismiss/Resolve buttons, pattern filter URL support, toast notifications, and background evaluation trigger.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "LabelCorrectionInsightsPage",
+        "issues": ["React console warning: 'Each child in a list should have a unique key prop' in TableBody - non-critical"]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_alert_pattern_service.py",
+    "/app/test_reports/pytest/alert_pattern_service_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "All 7 alert endpoints working correctly with proper response structures",
+    "Alert data model includes all required fields: pattern_key, predicted_label, actual_entity_type, severity_level, occurrence_count_7d/30d, trend, trend_pct, affected_vendors, suggested_action, status",
+    "Three severity levels (info/warning/critical) computed correctly based on thresholds",
+    "Background evaluation runs on startup and creates/updates alerts automatically",
+    "Dismiss/Resolve endpoints properly update status and remove from active list",
+    "Filter by pattern URL param filters both alerts and patterns tables",
+    "Suggested action generated from context-aware templates based on label→entity type combinations",
+    "Minor: React key prop warning in vendor table needs fix in LabelCorrectionInsightsPage.js (non-blocking)"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_alert_pattern_service.py"
+  ],
+  "success_rate": {
+    "backend": "100% (21/21 tests passed)",
+    "frontend": "100% (all UI elements verified)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "Used existing data: 4 corrections for Cargo Modules LLC (PO→SHIPMENT) from iteration_32/33. 1 active alert: PO→posted_sales_shipment with severity='info' (4 occurrences, below warning threshold of 20).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Alert Pattern Service is fully functional. Current active alert: PO→posted_sales_shipment (severity=info, 4 occurrences). Thresholds: warning >= 20 in 7d, critical >= 50 in 30d, vendor critical >= 40% mislabel rate. Pattern key uses Unicode arrow (→ U+2192) - must be URL-encoded for API calls. Background evaluation runs every 600 seconds. Dismiss/resolve endpoints work correctly - dismissed alerts reappear after re-evaluation if pattern still meets threshold criteria.",
+  "verified_features": {
+    "GET /api/alerts/summary": {
+      "status": "VERIFIED",
+      "evidence": "Returns total_active=1, critical=0, warning=0, info=1 - all counts correct"
+    },
+    "GET /api/alerts/active": {
+      "status": "VERIFIED",
+      "evidence": "Returns array with alert object containing all required fields: pattern_key, predicted_label, actual_entity_type, severity_level, occurrence_count_7d/30d, trend, trend_pct, affected_vendors, suggested_action, status"
+    },
+    "GET /api/alerts/all": {
+      "status": "VERIFIED",
+      "evidence": "Returns all alerts without include_resolved param"
+    },
+    "GET /api/alerts/all?include_resolved=true": {
+      "status": "VERIFIED",
+      "evidence": "Returns alerts with status='dismissed' or 'resolved'"
+    },
+    "GET /api/alerts/active?severity=info": {
+      "status": "VERIFIED",
+      "evidence": "Filters correctly by severity level"
+    },
+    "GET /api/alerts/active?vendor=Cargo%20Modules": {
+      "status": "VERIFIED",
+      "evidence": "Filters by vendor in affected_vendors or vendor_scope"
+    },
+    "POST /api/alerts/evaluate": {
+      "status": "VERIFIED",
+      "evidence": "Returns alerts_created, alerts_updated, alerts_resolved - re-evaluates patterns and updates alert states"
+    },
+    "POST /api/alerts/{pattern_key}/dismiss": {
+      "status": "VERIFIED",
+      "evidence": "Returns {status: 'dismissed'}, removes from active list, appears in all with include_resolved"
+    },
+    "POST /api/alerts/{pattern_key}/resolve": {
+      "status": "VERIFIED",
+      "evidence": "Returns {status: 'resolved'}, removes from active list"
+    },
+    "Frontend Extraction Alert Panel": {
+      "status": "VERIFIED",
+      "evidence": "Shows at top of /label-correction-insights with red left border, severity badge (info), pattern_key, 30d/7d counts, trend with icon, vendors, suggested action in amber box"
+    },
+    "Frontend severity filter buttons": {
+      "status": "VERIFIED",
+      "evidence": "critical/warning/info buttons with counts (1) visible, evaluation refresh button functional"
+    },
+    "Frontend dismiss/resolve actions": {
+      "status": "VERIFIED",
+      "evidence": "Dismiss removes alert from list with toast, resolve removes with toast - both verified working"
+    },
+    "Frontend filter by pattern": {
+      "status": "VERIFIED",
+      "evidence": "?pattern= URL param displays 'Filters:' badge with pattern key and Clear button, filters both alerts and patterns tables"
+    },
+    "Background evaluation": {
+      "status": "VERIFIED",
+      "evidence": "Alert was auto-created during startup evaluation - first_detected timestamp shows automatic creation"
+    }
+  },
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "note": "All APIs are live. No mocked integrations."
+  }
+}

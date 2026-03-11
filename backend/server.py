@@ -10211,6 +10211,16 @@ async def startup():
     auto_resolve.set_layout_fingerprint_service(layout_fp_svc)
     logger.info("Layout Fingerprint Service initialized")
     
+    # Initialize Stable Vendor Auto-Ready Service
+    from services.stable_vendor_service import set_stable_vendor_service
+    stable_vendor_svc = set_stable_vendor_service(
+        db, event_service=event_service, vendor_intel_service=vendor_intel,
+        layout_fp_service=layout_fp_svc, alert_service=alert_svc,
+    )
+    await stable_vendor_svc.initialize()
+    auto_resolve.set_stable_vendor_service(stable_vendor_svc)
+    logger.info("Stable Vendor Auto-Ready Service initialized")
+    
     # Start daily pilot summary scheduler if enabled
     global _pilot_summary_task
     if PILOT_MODE_ENABLED and DAILY_PILOT_EMAIL_ENABLED:

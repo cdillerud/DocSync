@@ -132,6 +132,7 @@ class AutoResolutionService:
         self._freight_gl_service = None
         self._label_correction_service = None
         self._layout_fingerprint_service = None
+        self._stable_vendor_service = None
         self._queue = asyncio.Queue(maxsize=500)
         self._workers = []
         self._running = False
@@ -163,6 +164,10 @@ class AutoResolutionService:
     def set_layout_fingerprint_service(self, layout_fingerprint_service):
         """Inject layout fingerprint service for structural analysis."""
         self._layout_fingerprint_service = layout_fingerprint_service
+
+    def set_stable_vendor_service(self, stable_vendor_service):
+        """Inject stable vendor service for auto-ready evaluation."""
+        self._stable_vendor_service = stable_vendor_service
 
     def start(self, num_workers: int = AUTO_RESOLVE_MAX_WORKERS):
         """Start background workers."""
@@ -400,6 +405,43 @@ class AutoResolutionService:
                             )
                 except Exception as re:
                     logger.warning("[AutoResolve:W%d] Rules eval error: %s", worker_id, str(re))
+
+            # ---------------------------------------------------------
+            # STABLE VENDOR AUTO-READY EVALUATION
+            # Runs after all other steps; produces routing signals
+            # ---------------------------------------------------------
+            if self._stable_vendor_service:
+                try:
+                    sv_doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+                    if sv_doc:
+                        sv_result = await self._stable_vendor_service.evaluate_document(sv_doc)
+                        routing = sv_result.get("routing", "manual_review")
+                        # Persist decision on document
+                        sv_update = {
+                            "stable_vendor_routing": {
+                                "routing": routing,
+                                "reasons": sv_result.get("reasons", []),
+                                "evaluated_at": sv_result.get("evaluated_at", ""),
+                                "vendor_stable": sv_result.get("vendor_stability", {}).get("stable_vendor_flag", False),
+                                "vendor_score": sv_result.get("vendor_stability", {}).get("stable_vendor_score", 0),
+                                "checks": sv_result.get("checks", []),
+                            },
+                            "updated_utc": datetime.now(timezone.utc).isoformat(),
+                        }
+                        # If auto_ready, update workflow signals
+                        if routing == "auto_ready":
+                            sv_update["review_priority"] = "auto_ready"
+                            sv_update["queue_visible"] = True
+                        elif routing == "low_priority_review":
+                            sv_update["review_priority"] = "low"
+                        await self.db.hub_documents.update_one({"id": doc_id}, {"$set": sv_update})
+                        if routing != "manual_review":
+                            logger.info(
+                                "[AutoResolve:W%d] Stable vendor routing: %s for %s",
+                                worker_id, routing, doc_id[:8]
+                            )
+                except Exception as sve:
+                    logger.warning("[AutoResolve:W%d] Stable vendor eval error: %s", worker_id, str(sve))
 
         except Exception as e:
             logger.error("[AutoResolve:W%d] Failed %s: %s", worker_id, doc_id[:8], str(e))

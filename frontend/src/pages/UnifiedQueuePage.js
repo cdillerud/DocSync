@@ -474,6 +474,7 @@ export default function UnifiedQueuePage() {
                       <TableHead>Ref Intel</TableHead>
                       <TableHead>Freight GL</TableHead>
                       <TableHead>Validation</TableHead>
+                      <TableHead>Routing</TableHead>
                       <TableHead>Source</TableHead>
                       <TableHead>Created</TableHead>
                       <TableHead className="w-20">Actions</TableHead>
@@ -567,6 +568,27 @@ export default function UnifiedQueuePage() {
                             return (
                               <Badge className={`${vCls} text-[10px] px-1.5 py-0 w-fit`}>
                                 {vs === 'pass' ? 'pass' : vs === 'warning' ? 'warn' : 'fail'}
+                              </Badge>
+                            );
+                          })()}
+                        </TableCell>
+                        <TableCell data-testid={`routing-${doc.id}`}>
+                          {(() => {
+                            const svr = doc.stable_vendor_routing;
+                            if (!svr || !svr.routing) return <span className="text-[10px] text-muted-foreground">-</span>;
+                            const rCls = {
+                              auto_ready: 'bg-emerald-500/20 text-emerald-400',
+                              low_priority_review: 'bg-sky-500/20 text-sky-400',
+                              manual_review: 'bg-gray-500/20 text-gray-400',
+                            }[svr.routing] || 'bg-gray-500/20 text-gray-400';
+                            const rLabel = {
+                              auto_ready: 'Auto',
+                              low_priority_review: 'Low',
+                              manual_review: 'Manual',
+                            }[svr.routing] || svr.routing;
+                            return (
+                              <Badge className={`${rCls} text-[10px] px-1.5 py-0 w-fit`}>
+                                {rLabel}
                               </Badge>
                             );
                           })()}

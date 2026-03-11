@@ -73,6 +73,21 @@ function formatDate(iso) {
   return new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+const ROUTING_STYLES = {
+  auto_ready: { label: 'Auto Ready', classes: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700' },
+  low_priority_review: { label: 'Low Priority', classes: 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300 border-sky-300 dark:border-sky-700' },
+  manual_review: { label: 'Manual Review', classes: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border-gray-300 dark:border-gray-600' },
+};
+
+function RoutingBadge({ routing, className = '' }) {
+  const style = ROUTING_STYLES[routing] || ROUTING_STYLES.manual_review;
+  return (
+    <Badge data-testid={`routing-badge-${routing}`} className={`text-[10px] font-semibold border ${style.classes} ${className}`}>
+      {style.label}
+    </Badge>
+  );
+}
+
 export default function DocumentDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -546,6 +561,45 @@ export default function DocumentDetailPage() {
             </Card>
           )}
           
+          {/* Stable Vendor Routing Decision */}
+          {doc.stable_vendor_routing && (
+            <Card className="border border-border" data-testid="stable-vendor-routing-card">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>
+                    Auto-Ready Routing
+                  </CardTitle>
+                  <RoutingBadge routing={doc.stable_vendor_routing.routing} />
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-2 mb-3 text-xs">
+                  <div className="flex items-center gap-2" data-testid="sv-vendor-stable">
+                    {doc.stable_vendor_routing.vendor_stable 
+                      ? <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+                      : <ShieldAlert className="w-3.5 h-3.5 text-muted-foreground" />}
+                    <span className="text-muted-foreground">Stable Vendor:</span>
+                    <span className="font-medium">{doc.stable_vendor_routing.vendor_stable ? 'Yes' : 'No'}</span>
+                  </div>
+                  <div className="flex items-center gap-2" data-testid="sv-vendor-score">
+                    <Zap className="w-3.5 h-3.5 text-amber-500" />
+                    <span className="text-muted-foreground">Score:</span>
+                    <span className="font-medium font-mono">{(doc.stable_vendor_routing.vendor_score || 0).toFixed(3)}</span>
+                  </div>
+                </div>
+                {/* Decision Reasoning */}
+                <div className="bg-muted/50 rounded-md p-2.5" data-testid="sv-reasons">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">Decision Reasoning</p>
+                  {(doc.stable_vendor_routing.reasons || []).map((reason, idx) => (
+                    <p key={idx} className="text-xs text-muted-foreground leading-relaxed">
+                      {reason.includes('Final routing') ? <span className="font-semibold text-foreground">{reason}</span> : `• ${reason}`}
+                    </p>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* PDF Preview - show for ALL documents */}
           <PDFPreviewPanel document={doc} />
           

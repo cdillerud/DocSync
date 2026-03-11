@@ -90,6 +90,12 @@ export const toggleAutomationRule = (ruleId) => api.post(`/automation-rules/${ru
 export const getRuleSuggestions = () => api.get('/automation-rules/suggestions');
 export const evaluateRulesForDoc = (docId) => api.post(`/automation-rules/evaluate/${docId}`);
 
+// Stable Vendor APIs
+export const getStableVendorMetrics = () => api.get('/stable-vendor/dashboard-metrics');
+export const evaluateDocumentRouting = (docId) => api.post(`/stable-vendor/evaluate-document/${docId}`);
+export const evaluateVendorStability = (vendorId) => api.get(`/stable-vendor/evaluate/${vendorId}`);
+export const reevaluateAllVendors = () => api.post('/stable-vendor/reevaluate-all');
+
 // Bulk operations
 export const bulkRetryDocuments = async (docIds, reason = 'Bulk retry') => {
   const results = { success: [], failed: [] };

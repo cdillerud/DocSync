@@ -1,67 +1,73 @@
 # CHANGELOG - GPI Document Hub
 
-## 2026-03-11: Stable Vendor Auto-Ready Rules (New Feature)
+## 2026-03-11: Stable Vendor Admin Page (New Feature)
 
 ### What Was Built
-Complete implementation of a rule-driven mechanism that evaluates vendor stability and automatically routes documents to `auto_ready`, `low_priority_review`, or `manual_review` based on vendor intelligence and document quality signals.
+Complete admin page for vendor stability oversight, explainability, and manual controls.
 
 **Backend:**
-- **Service**: `/app/backend/services/stable_vendor_service.py` — Core decision engine
-  - Vendor stability evaluation (5 checks: volume, automation rate, resolution rate, correction rate, validation pass rate)
-  - Document auto-ready eligibility (10 safety checks: vendor stability, validation, duplicates, vendor match, resolver confidence, freight GL, blocking issues, layout families, alerts, amount anomaly)
-  - Configurable thresholds stored in MongoDB (`stable_vendor_config` collection)
-  - Drift detection and vendor demotion
-  - Dashboard KPI metrics
-- **Router**: `/app/backend/routers/stable_vendor.py` — 6 API endpoints
-- **Pipeline Integration**: Wired into `auto_resolution_service.py` (runs after automation rules)
-- **Events**: Emits `stable_vendor.auto_ready`, `.low_priority_review`, `.promoted`, `.demoted`
+- Extended `stable_vendor_service.py` with:
+  - `get_vendor_list()` — filterable/sortable/searchable vendor list with effective status
+  - `get_vendor_detail()` — full vendor detail with checks, reasons, routing impact, quality signals, history
+  - `apply_override()` / `clear_override()` — manual promote/demote/watch with audit trail
+  - `get_override_history()` — full audit log
+  - `_effective_status()` — computes system + override = effective status
+- New collection: `stable_vendor_override_history`
+- 5 new API endpoints: `/api/stable-vendor/vendors`, `/vendors/{id}`, `/vendors/{id}/override`, `/vendors/{id}/clear-override`, `/vendors/{id}/history`
 
 **Frontend:**
-- Dashboard: Stable Vendor Auto-Ready KPI widget (5 headline metrics)
-- Document Queue: Routing column with Auto/Low/Manual badges
-- Document Detail: Auto-Ready Routing card with vendor stability, score, and decision reasoning
+- New page: `/stable-vendors` with sortable table, search, status filters (All/Stable/Watch/Unstable/Overridden)
+- Detail drawer: Summary, Stability Reasoning, Check Details, Routing Impact, Quality Signals, Admin Actions, Override History
+- Override actions: Promote Stable / Set Watch / Demote / Clear Override with reason/note
+- Cross-links from Dashboard KPI widget ("View All") and Document Detail routing card
+- Added to sidebar navigation
 
-**Safety:** NEVER bypasses validation failures, duplicate detection, or unresolved freight classification
+**Safety:** Manual overrides affect vendor trust/routing eligibility but NEVER bypass hard document blockers (validation, duplicates, freight GL, alerts)
 
 ### Test Results
-- Backend: 11/11 tests passed (100%)
-- Frontend: Dashboard, Queue, Document Detail all verified (100%)
+- Backend: 20/20 (100%)
+- Frontend: All UI flows verified (100%)
+- Safety constraint validated: force_stable override does NOT bypass document validation failures
+- Test report: `/app/test_reports/iteration_39.json`
+
+---
+
+## 2026-03-11: SharePoint Migration Module Removed
+
+- Deleted backend routes, service, and test file
+- Removed frontend page, route, and sidebar nav item
+- All references cleaned from main.py, server.py
+
+---
+
+## 2026-03-11: Stable Vendor Auto-Ready Rules
+
+### What Was Built
+- Stable vendor service with configurable thresholds (volume, rates, correction, validation)
+- Document auto-ready evaluation (10 safety checks including amount anomaly, layout family guards)
+- 3 routing outcomes: auto_ready, low_priority_review, manual_review
+- Dashboard KPI widget, Queue routing badges, Document Detail routing card
 - Test report: `/app/test_reports/iteration_38.json`
-- Test file: `/app/backend/tests/test_stable_vendor.py`
 
 ---
 
 ## 2026-03-11: Backend Refactor (server.py Monolith -> Modular Architecture)
 
-### What Changed
-- Created `/app/backend/main.py` as the new application entry point
-- Supervisor config updated: `main:app` instead of `server:app`
-- `server.py` is now imported as a library module (not served directly)
-- Fixed 7 broken router files from the incomplete prior extraction
-- Fixed Re-process button 500 error (missing EMERGENT_LLM_KEY)
-
-### Test Results
-- Backend: 22/22 endpoints pass (100%)
-- Frontend: All verified (100%)
+- Created `/app/backend/main.py` as new entry point (supervisor runs main:app)
+- Fixed 7 broken router files, Re-process button 500 error
 - Test report: `/app/test_reports/iteration_37.json`
 
 ---
 
 ## 2026-03-10: Document Layout Fingerprinting
 
-### What Was Built
-- Complete structural document fingerprinting system
-- Backend service, resolver integration, auto-resolution integration
-- Database collections, API endpoints, frontend admin page
+- Structural document fingerprinting and layout families
 - Test report: `/app/test_reports/iteration_3.json`
 
 ---
 
 ## Earlier Work (Pre-March 2026)
-- Core platform: Document ingestion, classification, BC linking
-- Vendor Intelligence, Automation Rules, Freight GL Routing
-- AP Validation, Label Corrections, Alert Patterns
-- Email polling, SharePoint migration, Spiro CRM integration
-- Sales module, File import, Square9 workflow alignment
-- BC Reference Cache, Auto-Resolution Service
-- Vendor Extraction Profiles (adaptive interpretation)
+- Core platform, Vendor Intelligence, Automation Rules, Freight GL Routing
+- AP Validation, Label Corrections, Alert Patterns, Email polling
+- Spiro CRM, Sales module, Square9 workflow, BC Reference Cache
+- Auto-Resolution Service, Vendor Extraction Profiles

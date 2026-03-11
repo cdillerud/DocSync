@@ -6,6 +6,8 @@
 - ~~Refactor server.py monolith~~ (2026-03-11)
 - ~~Document Layout Fingerprinting~~ (2026-03-10)
 - ~~Stable Vendor Auto-Ready Rules~~ (2026-03-11)
+- ~~Stable Vendor Admin Page~~ (2026-03-11)
+- ~~Remove SharePoint Migration Module~~ (2026-03-11)
 
 ### P1 — Next Up
 - **Package and Publish BC (AL) Extension** — Updated `.app` file in `/app/BC_extension/` needs publishing to BC Sandbox
@@ -13,7 +15,6 @@
 
 ### P2 — Medium Priority
 - **Git Branch/Deployment Cleanup** — Standardize on main branch, resolve `conflict_020326_1424` branch issues
-- **Implement Migration UI Detail Drawer** — SharePoint migration detail view
 - **Continue server.py Route Extraction** — Incrementally extract remaining routes from legacy api_router into new modular routers (documents, workflows, aliases, sales-file-import, etc.)
 
 ### P3 — Future/Backlog

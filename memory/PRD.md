@@ -2502,6 +2502,50 @@ BC_WRITE_ENABLED=false
 - **Startup validation:** Config fingerprint logged, warnings for misconfiguration
 - **Settings UI:** Split Read Source / Write Target cards, BC Environment Mode banner, Sandbox read warning banner
 
+
+---
+
+## Reference Intelligence v2 (March 11, 2026) — COMPLETED
+
+### Overview
+Enhanced document matching with fuzzy reference matching, contextual inference, cross-document correlation, and vendor behavioral models.
+
+### New Modules
+- **`/app/backend/services/fuzzy_matching.py`**: OCR error tolerance (1↔I, 0↔O, 8↔B, 5↔S, 2↔Z, 6↔G), numeric core normalization, Levenshtein similarity, partial match scoring
+- **`/app/backend/services/cross_document_correlation.py`**: Document reference clusters (`document_reference_clusters` collection), cluster creation/update, cluster match bonus for scoring
+- **`/app/backend/routers/reference_intelligence_v2.py`**: Enhanced diagnostics, cluster management, learning feedback, fuzzy test utility
+
+### Scoring Model v2 (15 signals)
+Original 13 signals + 2 new:
+- **Signal 14**: `fuzzy_reference_similarity` (up to 0.15) — when exact match fails
+- **Signal 15**: `contextual_similarity` (up to 0.10) — vendor/customer/date/amount matching
+- Plus `cluster_membership` bonus (up to 0.08) — injected from cross-document correlation
+
+### New API Endpoints
+- `GET /api/reference-intelligence/v2/fuzzy-test?ref1=X&ref2=Y` — test fuzzy matching
+- `GET /api/reference-intelligence/v2/diagnostics/{doc_id}` — enhanced resolution diagnostics
+- `GET /api/reference-intelligence/v2/clusters` — list reference clusters
+- `GET /api/reference-intelligence/v2/clusters/{doc_id}` — document's cluster
+- `GET /api/reference-intelligence/v2/cluster-stats` — aggregate cluster statistics
+- `POST /api/reference-intelligence/v2/feedback` — submit correction feedback
+
+### Vendor Behavioral Model Enhancements
+- `preferred_search_order` derived from historical match type counts
+- `common_match_targets` for UI display
+- `reference_patterns` (PO/shipment/BOL frequency tracking)
+- Dynamic search strategy reordering based on vendor history
+
+### Frontend Updates
+- MatchingDebugPanel: v2 signal badges (Vendor Strategy, Cluster Bonus, Cluster ID)
+- Score bar color coding: pink=fuzzy, indigo=contextual, blue=cluster
+
+### Test Results
+- Backend: 17/17 pass (100%)
+- Frontend: all UI elements verified
+- Test report: /app/test_reports/iteration_42.json
+
+*Last Updated: March 11, 2026*
+
 ### Test Results
 - Backend: 15/15 pass (100%)
 - Frontend: 10/10 pass (100%)

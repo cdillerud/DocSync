@@ -132,9 +132,13 @@ def compute_fuzzy_match(
     ext_core = _numeric_core(ext)
     cand_core = _numeric_core(cand)
 
-    if ext_core == cand_core and ext_core != "0":
+    # Only compare numeric cores if both strings actually contain digits
+    ext_has_digits = bool(re.search(r"\d", ext))
+    cand_has_digits = bool(re.search(r"\d", cand))
+
+    if ext_has_digits and cand_has_digits and ext_core == cand_core and ext_core != "0":
         breakdown["numeric_core_match"] = 0.90
-    elif ext_core and cand_core:
+    elif ext_has_digits and cand_has_digits and ext_core and cand_core:
         # Partial numeric overlap: one is suffix/prefix of the other
         if ext_core.endswith(cand_core) or cand_core.endswith(ext_core):
             overlap_len = min(len(ext_core), len(cand_core))
@@ -162,7 +166,7 @@ def compute_fuzzy_match(
         breakdown["levenshtein_sim"] = round(sim * 0.75, 4)
 
     # 5. Levenshtein on numeric cores
-    if ext_core and cand_core and "numeric_core_match" not in breakdown:
+    if ext_has_digits and cand_has_digits and ext_core and cand_core and "numeric_core_match" not in breakdown:
         core_sim = string_similarity(ext_core, cand_core)
         if core_sim >= 0.75:
             breakdown["numeric_core_sim"] = round(core_sim * 0.65, 4)

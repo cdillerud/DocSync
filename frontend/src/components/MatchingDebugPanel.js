@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { Card, CardContent, CardHeader } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { toast } from 'sonner';
 import {
   Bug, RefreshCw, Loader2, ChevronDown, ChevronUp,
-  Search, Database, ArrowRight, CheckCircle2, XCircle, AlertTriangle
+  Search, Database, ArrowRight, XCircle, Repeat, Zap
 } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -26,6 +26,7 @@ export default function MatchingDebugPanel({ document: doc }) {
   const [showNorm, setShowNorm] = useState(false);
   const [showScores, setShowScores] = useState(false);
   const [showCache, setShowCache] = useState(false);
+  const [showCorrections, setShowCorrections] = useState(false);
 
   const fetchDebug = async () => {
     setLoading(true);
@@ -51,6 +52,11 @@ export default function MatchingDebugPanel({ document: doc }) {
   const diag = debug?.diagnostics;
   const outcome = debug?.match_outcome;
   const outcomeConfig = OUTCOME_CONFIG[outcome] || { label: outcome || 'N/A', bg: 'bg-gray-500/20 text-gray-400' };
+  const corrections = debug?.label_corrections || [];
+  const vendorPatterns = debug?.vendor_correction_patterns;
+  const lcHints = diag?.label_correction_hints || {};
+  const vendorHints = diag?.vendor_hints || {};
+  const hasLearningSignals = corrections.length > 0 || vendorPatterns?.has_patterns || Object.keys(lcHints).length > 0;
 
   return (
     <Card className="border border-border" data-testid="matching-debug-panel">
@@ -64,6 +70,11 @@ export default function MatchingDebugPanel({ document: doc }) {
           >
             <Bug className="w-4 h-4" />
             Matching Debug
+            {hasLearningSignals && expanded && (
+              <Badge className="bg-violet-500/20 text-violet-400 text-[10px] ml-1">
+                <Zap className="w-2.5 h-2.5 mr-0.5" />Learning
+              </Badge>
+            )}
             {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
           </button>
           {expanded && (
@@ -132,7 +143,12 @@ export default function MatchingDebugPanel({ document: doc }) {
                         <TableRow key={i}>
                           <TableCell className="font-mono text-[10px]">{c.raw}</TableCell>
                           <TableCell className="font-mono text-[10px] font-semibold">{c.normalized}</TableCell>
-                          <TableCell><Badge variant="outline" className="text-[10px]">{c.label}</Badge></TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="text-[10px]">{c.label}</Badge>
+                            {lcHints[c.label]?.has_hints && (
+                              <Badge className="bg-violet-500/20 text-violet-400 text-[10px] ml-1">learned</Badge>
+                            )}
+                          </TableCell>
                           <TableCell className="text-[10px]">{c.domain}</TableCell>
                           <TableCell className="text-[10px]">{(c.confidence * 100).toFixed(0)}%</TableCell>
                         </TableRow>
@@ -225,15 +241,97 @@ export default function MatchingDebugPanel({ document: doc }) {
                               {Object.entries(s.score_breakdown).filter(([, v]) => v > 0).map(([k, v]) => (
                                 <div key={k} className="flex items-center gap-1 text-muted-foreground">
                                   <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
-                                    <div className="h-full bg-emerald-500/60 rounded-full" style={{ width: `${Math.min(v * 200, 100)}%` }} />
+                                    <div
+                                      className={`h-full rounded-full ${k === 'label_correction_boost' ? 'bg-violet-500/60' : 'bg-emerald-500/60'}`}
+                                      style={{ width: `${Math.min(v * 200, 100)}%` }}
+                                    />
                                   </div>
-                                  <span>{k.replace(/_/g, ' ')}: {(v * 100).toFixed(0)}%</span>
+                                  <span className={k === 'label_correction_boost' ? 'text-violet-400' : ''}>
+                                    {k.replace(/_/g, ' ')}: {(v * 100).toFixed(0)}%
+                                  </span>
                                 </div>
                               ))}
                             </div>
                           )}
                         </div>
                       ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Label Correction Feedback Loop Section */}
+              {(corrections.length > 0 || vendorPatterns?.has_patterns) && (
+                <div data-testid="matching-debug-feedback-loop">
+                  <button
+                    onClick={() => setShowCorrections(!showCorrections)}
+                    className="flex items-center gap-1 font-semibold text-muted-foreground hover:text-foreground"
+                    data-testid="matching-debug-corrections-toggle"
+                  >
+                    <Repeat className="w-3 h-3" />
+                    Feedback Loop
+                    {corrections.length > 0 && (
+                      <Badge className="bg-violet-500/20 text-violet-400 text-[10px] ml-1">
+                        {corrections.length} correction{corrections.length > 1 ? 's' : ''}
+                      </Badge>
+                    )}
+                    {showCorrections ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                  </button>
+                  {showCorrections && (
+                    <div className="mt-2 space-y-3 pl-2">
+                      {/* Document-Level Corrections */}
+                      {corrections.length > 0 && (
+                        <div>
+                          <p className="text-muted-foreground font-semibold mb-1">Corrections from this Document</p>
+                          {corrections.map((c, i) => (
+                            <div key={i} className="flex items-center gap-2 py-0.5">
+                              <Badge variant="outline" className="text-[10px] text-red-400 border-red-400/30">{c.predicted_label}</Badge>
+                              <ArrowRight className="w-3 h-3 text-muted-foreground" />
+                              <Badge className="bg-emerald-500/20 text-emerald-400 text-[10px]">{c.correct_label}</Badge>
+                              <span className="text-muted-foreground font-mono text-[10px]">{c.reference_value}</span>
+                              <span className="text-muted-foreground text-[10px]">({c.actual_entity_type})</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Vendor Patterns */}
+                      {vendorPatterns?.has_patterns && (
+                        <div>
+                          <p className="text-muted-foreground font-semibold mb-1">
+                            Vendor Learned Patterns ({vendorPatterns.total_corrections} total)
+                          </p>
+                          {vendorPatterns.patterns?.slice(0, 5).map((p, i) => (
+                            <div key={i} className="flex items-center gap-2 py-0.5">
+                              <Badge variant="outline" className="text-[10px]">{p.predicted_label}</Badge>
+                              <ArrowRight className="w-3 h-3 text-muted-foreground" />
+                              <Badge className="bg-violet-500/20 text-violet-400 text-[10px]">{p.correct_label}</Badge>
+                              <span className="text-muted-foreground text-[10px]">
+                                {p.count}x ({(p.frequency * 100).toFixed(0)}%)
+                              </span>
+                              <span className="text-muted-foreground text-[10px]">avg score: {(p.avg_score * 100).toFixed(0)}%</span>
+                            </div>
+                          ))}
+
+                          {/* Label Remaps */}
+                          {vendorPatterns.label_remaps && Object.keys(vendorPatterns.label_remaps).length > 0 && (
+                            <div className="mt-1 p-2 bg-violet-500/10 rounded">
+                              <p className="text-violet-400 font-semibold text-[10px] mb-1">Active Label Remaps</p>
+                              {Object.entries(vendorPatterns.label_remaps).map(([from, info]) => (
+                                <div key={from} className="flex items-center gap-2 text-[10px]">
+                                  <Zap className="w-3 h-3 text-violet-400" />
+                                  <span className="font-mono">{from}</span>
+                                  <ArrowRight className="w-3 h-3" />
+                                  <span className="font-mono text-violet-400">{info.remap_to}</span>
+                                  <span className="text-muted-foreground">
+                                    ({info.count}x, conf: {(info.confidence * 100).toFixed(0)}%)
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

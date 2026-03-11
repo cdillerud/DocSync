@@ -109,7 +109,7 @@ def needs_resolution(doc: Dict[str, Any]) -> tuple:
     prev_hash = doc.get("reference_intelligence_hash")
     current_hash = compute_resolution_hash(doc)
     if prev_hash != current_hash:
-        return True, f"document data changed (hash mismatch)"
+        return True, "document data changed (hash mismatch)"
 
     return False, "document data is current"
 
@@ -130,6 +130,7 @@ class AutoResolutionService:
         self._rules_engine = None
         self._ap_validation_service = None
         self._freight_gl_service = None
+        self._label_correction_service = None
         self._queue = asyncio.Queue(maxsize=500)
         self._workers = []
         self._running = False
@@ -153,6 +154,10 @@ class AutoResolutionService:
     def set_freight_gl_service(self, freight_gl_service):
         """Inject freight GL routing service."""
         self._freight_gl_service = freight_gl_service
+
+    def set_label_correction_service(self, label_correction_service):
+        """Inject label correction service for post-resolution learning."""
+        self._label_correction_service = label_correction_service
 
     def start(self, num_workers: int = AUTO_RESOLVE_MAX_WORKERS):
         """Start background workers."""
@@ -299,6 +304,37 @@ class AutoResolutionService:
                         await self._vendor_intel.update_from_document(updated_doc)
                 except Exception as ve:
                     logger.warning("[AutoResolve:W%d] Vendor intel update error: %s", worker_id, str(ve))
+
+            # ---------------------------------------------------------
+            # LABEL CORRECTION FEEDBACK LOOP (async, non-blocking)
+            # Detect mislabeled references from successful resolutions
+            # ---------------------------------------------------------
+            if self._label_correction_service and resolution.best_match:
+                try:
+                    doc_for_correction = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+                    if doc_for_correction:
+                        corrections = await self._label_correction_service.detect_and_record(
+                            document_id=doc_id,
+                            resolution_result=resolution.to_dict(),
+                            document=doc_for_correction,
+                        )
+                        if corrections:
+                            logger.info(
+                                "[AutoResolve:W%d] Label corrections recorded for %s: %d",
+                                worker_id, doc_id[:8], len(corrections)
+                            )
+                            # Update vendor profiles with correction patterns
+                            if self._vendor_intel:
+                                uvm = doc_for_correction.get("unified_vendor_match") or {}
+                                vendor_id = uvm.get("bc_vendor_no") or doc_for_correction.get("vendor_raw") or ""
+                                if vendor_id:
+                                    for c in corrections:
+                                        try:
+                                            await self._vendor_intel.update_label_correction_patterns(vendor_id, c)
+                                        except Exception:
+                                            pass
+                except Exception as lce:
+                    logger.warning("[AutoResolve:W%d] Label correction error: %s", worker_id, str(lce))
 
             # ---------------------------------------------------------
             # FREIGHT G/L CLASSIFICATION (async, non-blocking)

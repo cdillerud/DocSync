@@ -155,6 +155,9 @@ from services.automation_rules_service import (
 from services.freight_gl_routing_service import (
     FreightGLRoutingService, get_freight_gl_service, set_freight_gl_service
 )
+from services.label_correction_service import (
+    LabelCorrectionService, get_label_correction_service, set_label_correction_service
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -2151,15 +2154,29 @@ async def get_matching_debug(doc_id: str):
     
     ref_intel = doc.get("reference_intelligence", {})
     
+    # Fetch label corrections for this document
+    label_corrections = []
+    lc_svc = get_label_correction_service()
+    if lc_svc:
+        label_corrections = await lc_svc.get_corrections_for_document(doc_id)
+    
+    # Fetch vendor correction patterns
+    vendor_patterns = None
+    vendor_id = doc.get("vendor_canonical") or doc.get("vendor_raw") or ""
+    if lc_svc and vendor_id:
+        vendor_patterns = await lc_svc.get_vendor_patterns(vendor_id)
+    
     return {
         "document_id": doc_id,
         "document_type": doc.get("document_type"),
-        "vendor": doc.get("vendor_canonical") or doc.get("vendor_raw"),
+        "vendor": vendor_id,
         "is_freight_carrier": (doc.get("unified_vendor_match") or {}).get("is_freight_carrier", False),
         "match_outcome": doc.get("reference_match_outcome") or ref_intel.get("match_outcome"),
         "diagnostics": diag,
         "reference_intelligence": ref_intel,
         "freight_gl": doc.get("freight_gl_classification"),
+        "label_corrections": label_corrections,
+        "vendor_correction_patterns": vendor_patterns,
     }
 
 
@@ -2235,6 +2252,46 @@ async def get_cache_metrics():
         },
     }
 
+
+
+# =============================================================================
+# LABEL CORRECTION FEEDBACK LOOP ENDPOINTS
+# =============================================================================
+
+@api_router.get("/label-corrections/stats")
+async def get_label_correction_stats():
+    """Get overall label correction statistics."""
+    svc = get_label_correction_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Label correction service not initialized")
+    return await svc.get_stats()
+
+
+@api_router.get("/label-corrections/recent")
+async def get_recent_corrections(limit: int = 20):
+    """Get most recent label corrections."""
+    svc = get_label_correction_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Label correction service not initialized")
+    return await svc.get_recent_corrections(limit=min(limit, 100))
+
+
+@api_router.get("/label-corrections/vendor/{vendor_id}")
+async def get_vendor_correction_patterns(vendor_id: str):
+    """Get label correction patterns for a specific vendor."""
+    svc = get_label_correction_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Label correction service not initialized")
+    return await svc.get_vendor_patterns(vendor_id)
+
+
+@api_router.get("/label-corrections/document/{doc_id}")
+async def get_document_corrections(doc_id: str):
+    """Get all label corrections associated with a document."""
+    svc = get_label_correction_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Label correction service not initialized")
+    return await svc.get_corrections_for_document(doc_id)
 
 
 @api_router.put("/documents/{doc_id}")
@@ -15861,6 +15918,14 @@ async def startup():
     ap_validation_svc = APValidationService(db, bc_service=bc_service, event_service=event_service)
     auto_resolve.set_ap_validation_service(ap_validation_svc)
     logger.info("AP Validation Service initialized and wired into auto-resolution pipeline")
+    
+    # Initialize Label Correction Service (feedback loop)
+    label_correction_svc = set_label_correction_service(db, event_service)
+    await label_correction_svc.initialize()
+    auto_resolve.set_label_correction_service(label_correction_svc)
+    ref_intel_service.set_label_correction_service(label_correction_svc)
+    ref_intel_service.set_vendor_intelligence_service(vendor_intel)
+    logger.info("Label Correction Feedback Loop initialized")
     
     # Start daily pilot summary scheduler if enabled
     global _pilot_summary_task

@@ -403,7 +403,65 @@ class VendorIntelligenceService:
         hints["stable_vendor"] = profile.get("stable_vendor_flag", False)
         hints["automation_rate"] = profile.get("automation_success_rate", 0)
 
+        # Label correction patterns
+        hints["label_correction_patterns"] = profile.get("label_correction_patterns", {})
+
         return hints
+
+    # =========================================================================
+    # LABEL CORRECTION PATTERN LEARNING
+    # =========================================================================
+
+    async def update_label_correction_patterns(self, vendor_id: str, correction: Dict[str, Any]):
+        """
+        Update vendor profile with a new label correction pattern.
+        Tracks which labels are consistently mislabeled for this vendor.
+        """
+        predicted = correction.get("predicted_label", "")
+        correct = correction.get("correct_label", "")
+        entity = correction.get("actual_entity_type", "")
+        if not predicted or not correct:
+            return
+
+        profile = await self.get_profile(vendor_id)
+        if not profile:
+            return
+
+        patterns = profile.get("label_correction_patterns", {})
+        key = f"{predicted}->{correct}"
+        if key in patterns:
+            patterns[key]["count"] = patterns[key].get("count", 0) + 1
+            patterns[key]["last_seen"] = datetime.now(timezone.utc).isoformat()
+        else:
+            patterns[key] = {
+                "predicted_label": predicted,
+                "correct_label": correct,
+                "actual_entity_type": entity,
+                "count": 1,
+                "first_seen": datetime.now(timezone.utc).isoformat(),
+                "last_seen": datetime.now(timezone.utc).isoformat(),
+            }
+
+        filter_q = {"$or": [
+            {"vendor_no": profile.get("vendor_no", "")},
+            {"vendor_name": profile.get("vendor_name", "")}
+        ]}
+        await self.collection.update_one(
+            filter_q,
+            {"$set": {
+                "label_correction_patterns": patterns,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }}
+        )
+
+        # Invalidate cache
+        self._cache.pop(vendor_id, None)
+        self._cache.pop(profile.get("vendor_name", ""), None)
+
+        logger.info(
+            "[VendorIntel] Label pattern updated for %s: %s→%s (count=%d)",
+            vendor_id[:20], predicted, correct, patterns[key]["count"]
+        )
 
     # =========================================================================
     # REBUILD FROM HISTORY

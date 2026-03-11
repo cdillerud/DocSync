@@ -576,6 +576,74 @@ class BCReferenceCacheService:
         results.sort(key=sort_key)
         return results
 
+    async def search_shipment_cluster(
+        self, reference_value: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Shipment reference clustering: given a reference, find all shipment-related
+        entities (sales shipments, sales orders) that share the same document number
+        or order number. This helps the resolver when a BOL/shipment number matches
+        across related entities.
+        
+        Returns clustered results: primary matches + related shipments/orders.
+        """
+        normalized = normalize_document_no(reference_value)
+        raw = reference_value.strip()
+        if not normalized:
+            return []
+
+        shipment_entity_types = ["salesShipments", "salesOrders"]
+
+        # Primary search: find shipments/orders matching the reference
+        primary_query = {
+            "$or": [
+                {"normalized_document_no": normalized},
+                {"normalized_external_ref": normalized},
+                {"bc_document_no": raw},
+                {"bc_external_document_no": raw},
+                {"bc_order_number": raw},
+            ],
+            "bc_entity_type": {"$in": shipment_entity_types}
+        }
+        primary = await self.collection.find(primary_query, {"_id": 0}).limit(10).to_list(10)
+
+        if not primary:
+            return []
+
+        # Cluster expansion: for each primary match, find related entities
+        seen_ids = {r.get("bc_record_id") for r in primary}
+        related = []
+
+        for record in primary:
+            order_no = record.get("bc_order_number", "")
+            doc_no = record.get("bc_document_no", "")
+
+            # Find shipments linked to the same order
+            if order_no:
+                cluster_query = {
+                    "$or": [
+                        {"bc_order_number": order_no},
+                        {"bc_document_no": order_no},
+                        {"normalized_document_no": normalize_document_no(order_no)},
+                    ],
+                    "bc_entity_type": {"$in": shipment_entity_types}
+                }
+                cluster_results = await self.collection.find(
+                    cluster_query, {"_id": 0}
+                ).limit(10).to_list(10)
+
+                for cr in cluster_results:
+                    if cr.get("bc_record_id") not in seen_ids:
+                        cr["_cluster_reason"] = f"linked_via_order:{order_no}"
+                        related.append(cr)
+                        seen_ids.add(cr.get("bc_record_id"))
+
+        # Mark primary results
+        for r in primary:
+            r["_cluster_reason"] = "primary_match"
+
+        return primary + related
+
     # =========================================================================
     # STATUS
     # =========================================================================

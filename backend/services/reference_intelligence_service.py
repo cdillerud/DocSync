@@ -550,7 +550,8 @@ def score_bc_match(
     bc_record: Dict[str, Any],
     entity_type: str,
     document: Dict[str, Any] = None,
-    vendor_hints: Dict[str, Any] = None
+    vendor_hints: Dict[str, Any] = None,
+    label_correction_hints: Dict[str, Any] = None
 ) -> Tuple[float, str, Dict[str, float]]:
     """
     Score a BC match based on multiple factors.
@@ -657,6 +658,16 @@ def score_bc_match(
             breakdown["shipment_relationship"] = 0.05
             reasoning_parts.append(f"Shipment linked to order: {order_no}")
     
+    # 9. Label correction boost — learned from past mislabels
+    breakdown["label_correction_boost"] = 0.0
+    if label_correction_hints and label_correction_hints.get("has_hints"):
+        entity_boosts = label_correction_hints.get("entity_boosts", {})
+        if entity_type in entity_boosts:
+            boost = entity_boosts[entity_type].get("boost", 0)
+            breakdown["label_correction_boost"] = boost
+            count = entity_boosts[entity_type].get("count", 0)
+            reasoning_parts.append(f"Label correction: {candidate.detected_label}→{entity_type} learned ({count}x, +{boost:.0%})")
+    
     score = sum(breakdown.values())
     reasoning = "; ".join(reasoning_parts)
     
@@ -712,6 +723,14 @@ class ReferenceIntelligenceService:
         self.db = db
         self.bc_resolver = bc_resolver
         self.event_service = event_service
+        self._label_correction_service = None
+        self._vendor_intel_service = None
+    
+    def set_label_correction_service(self, svc):
+        self._label_correction_service = svc
+    
+    def set_vendor_intelligence_service(self, svc):
+        self._vendor_intel_service = svc
     
     async def resolve_document_references(
         self,
@@ -894,9 +913,40 @@ class ReferenceIntelligenceService:
             result.matching_diagnostics = diag
             return result
         
+        # Fetch vendor-aware hints and label correction hints
+        vendor_hints = None
+        if self._vendor_intel_service and vendor_name:
+            try:
+                vendor_hints = await self._vendor_intel_service.get_resolver_hints(vendor_name)
+            except Exception:
+                pass
+        
+        diag["vendor_hints"] = {
+            "has_hints": vendor_hints.get("has_hints", False) if vendor_hints else False,
+            "preferred_domain": vendor_hints.get("preferred_domain") if vendor_hints else None,
+            "typical_match_types": vendor_hints.get("typical_match_types", []) if vendor_hints else [],
+            "label_correction_patterns": vendor_hints.get("label_correction_patterns", {}) if vendor_hints else {},
+        }
+        
         all_matches = []
         search_tables = get_search_tables(effective_strategy)
         bc_query_count = 0
+        
+        # Pre-fetch label correction hints for each candidate's label
+        label_correction_cache = {}
+        if self._label_correction_service and vendor_name:
+            for candidate in unique_candidates:
+                label = candidate.detected_label
+                if label not in label_correction_cache:
+                    try:
+                        hints = await self._label_correction_service.get_scoring_hints(vendor_name, label)
+                        label_correction_cache[label] = hints
+                    except Exception:
+                        label_correction_cache[label] = {"has_hints": False}
+        
+        diag["label_correction_hints"] = {
+            k: v for k, v in label_correction_cache.items() if v.get("has_hints")
+        }
         
         for candidate in unique_candidates:
             # Use the adaptive resolver
@@ -924,12 +974,14 @@ class ReferenceIntelligenceService:
                 })
             
             if bc_result.status == "found":
+                lc_hints = label_correction_cache.get(candidate.detected_label, {"has_hints": False})
                 score, reasoning, breakdown = score_bc_match(
                     candidate,
                     bc_result.bc_record_info,
                     bc_result.reference_type,
                     document,
-                    vendor_hints=None  # TODO: pass vendor hints when available
+                    vendor_hints=vendor_hints,
+                    label_correction_hints=lc_hints
                 )
                 
                 match = BCMatch(

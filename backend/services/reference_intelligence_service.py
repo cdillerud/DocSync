@@ -69,31 +69,34 @@ class MatchOutcome(str, Enum):
     NO_MATCH = "no_match"
 
 
-# Reference extraction patterns
+# Reference extraction patterns — with improved BOL/Shipment detection
 REFERENCE_PATTERNS = {
-    ReferenceLabel.PO: [
-        r'P\.?O\.?\s*#?\s*[:.]?\s*(\d{4,10})',
-        r'Purchase\s+Order\s*#?\s*[:.]?\s*(\d{4,10})',
-        r'PO\s+Number\s*[:.]?\s*(\d{4,10})',
-    ],
     ReferenceLabel.BOL: [
         r'B\.?O\.?L\.?\s*#?\s*[:.]?\s*(\d{4,10})',
         r'Bill\s+of\s+Lading\s*#?\s*[:.]?\s*(\d{4,10})',
         r'BOL\s+Number\s*[:.]?\s*(\d{4,10})',
         r'B/L\s*#?\s*[:.]?\s*(\d{4,10})',
     ],
-    ReferenceLabel.ORDER: [
-        r'Order\s*#?\s*[:.]?\s*([A-Z]?\d{4,10})',
-        r'Sales\s+Order\s*#?\s*[:.]?\s*(\d{4,10})',
-        r'SO\s*#?\s*[:.]?\s*(\d{4,10})',
-    ],
     ReferenceLabel.SHIPMENT: [
         r'Shipment\s*#?\s*[:.]?\s*(\d{4,10})',
         r'Ship\s*#?\s*[:.]?\s*(\d{4,10})',
+        r'PU\s*#?\s*[:.]?\s*(\d{4,15})',
+        r'Pickup\s*#?\s*[:.]?\s*(\d{4,15})',
+        r'Delivery\s*#?\s*[:.]?\s*(\d{4,15})',
     ],
     ReferenceLabel.LOAD: [
         r'Load\s*#?\s*[:.]?\s*(\d{4,10})',
         r'Load\s+Number\s*[:.]?\s*(\d{4,10})',
+    ],
+    ReferenceLabel.PO: [
+        r'P\.?O\.?\s*#?\s*[:.]?\s*(\d{4,10})',
+        r'Purchase\s+Order\s*#?\s*[:.]?\s*(\d{4,10})',
+        r'PO\s+Number\s*[:.]?\s*(\d{4,10})',
+    ],
+    ReferenceLabel.ORDER: [
+        r'Order\s*#?\s*[:.]?\s*([A-Z]?\d{4,10})',
+        r'Sales\s+Order\s*#?\s*[:.]?\s*(\d{4,10})',
+        r'SO\s*#?\s*[:.]?\s*(\d{4,10})',
     ],
     ReferenceLabel.PRO: [
         r'PRO\s*#?\s*[:.]?\s*(\d{4,15})',
@@ -109,6 +112,13 @@ REFERENCE_PATTERNS = {
     ],
 }
 
+# Keywords that indicate shipping/BOL context — should NOT be classified as PO
+SHIPPING_CONTEXT_KEYWORDS = {
+    "bill of lading", "bol", "b/l", "shipment", "ship", "pickup", "pu",
+    "delivery", "load", "freight", "carrier", "trucking", "consignee",
+    "shipper", "pro number", "tracking",
+}
+
 # Document type to search strategy mapping
 SEARCH_STRATEGIES = {
     "AP_Invoice": [
@@ -120,22 +130,36 @@ SEARCH_STRATEGIES = {
         BCEntityType.POSTED_SALES_SHIPMENT,
     ],
     "Freight_Invoice": [
-        BCEntityType.PURCHASE_ORDER,
-        BCEntityType.SALES_ORDER,
         BCEntityType.POSTED_SALES_SHIPMENT,
+        BCEntityType.SALES_ORDER,
+        BCEntityType.PURCHASE_ORDER,
+        BCEntityType.POSTED_SALES_INVOICE,
+        BCEntityType.POSTED_PURCHASE_INVOICE,
+    ],
+    "Freight": [
+        BCEntityType.POSTED_SALES_SHIPMENT,
+        BCEntityType.SALES_ORDER,
+        BCEntityType.PURCHASE_ORDER,
+        BCEntityType.POSTED_SALES_INVOICE,
+        BCEntityType.POSTED_PURCHASE_INVOICE,
+    ],
+    "Carrier_Invoice": [
+        BCEntityType.POSTED_SALES_SHIPMENT,
+        BCEntityType.SALES_ORDER,
+        BCEntityType.PURCHASE_ORDER,
         BCEntityType.POSTED_SALES_INVOICE,
         BCEntityType.POSTED_PURCHASE_INVOICE,
     ],
     "BOL": [
-        BCEntityType.SALES_ORDER,
         BCEntityType.POSTED_SALES_SHIPMENT,
+        BCEntityType.SALES_ORDER,
         BCEntityType.POSTED_SALES_INVOICE,
         BCEntityType.PURCHASE_ORDER,
         BCEntityType.POSTED_PURCHASE_INVOICE,
     ],
     "Shipping_Document": [
-        BCEntityType.SALES_ORDER,
         BCEntityType.POSTED_SALES_SHIPMENT,
+        BCEntityType.SALES_ORDER,
         BCEntityType.POSTED_SALES_INVOICE,
         BCEntityType.PURCHASE_ORDER,
         BCEntityType.POSTED_PURCHASE_INVOICE,
@@ -158,6 +182,10 @@ SEARCH_STRATEGIES = {
         BCEntityType.POSTED_SALES_SHIPMENT,
     ],
 }
+
+# Freight resolver trigger conditions
+FREIGHT_DOC_TYPES = {"Freight_Invoice", "Freight", "Carrier_Invoice", "Freight_Document"}
+FREIGHT_STRATEGY_KEY = "Freight_Invoice"
 
 # BC entity to API table mapping
 ENTITY_TO_TABLE = {
@@ -230,6 +258,7 @@ class ReferenceResolutionResult:
     resolved_at: str = None
     total_bc_queries: int = 0
     processing_time_ms: int = 0
+    matching_diagnostics: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
         result = {
@@ -246,6 +275,8 @@ class ReferenceResolutionResult:
         }
         if self.best_match:
             result["best_match"] = self.best_match.to_dict()
+        if self.matching_diagnostics:
+            result["matching_diagnostics"] = self.matching_diagnostics
         return result
 
 
@@ -253,46 +284,61 @@ class ReferenceResolutionResult:
 # REFERENCE EXTRACTION
 # =============================================================================
 
-def normalize_reference(raw_value: str) -> str:
+def normalize_reference(raw_value: str, return_trace: bool = False):
     """
     Normalize a reference value for BC lookup.
     
-    Rules:
-    - Remove prefixes (BOL, REF, ORDER, PO, etc.)
-    - Strip leading zeros
-    - Remove spaces and punctuation
-    - Convert to uppercase
+    If return_trace=True, returns (normalized, trace_steps[]).
     """
     if not raw_value:
-        return ""
+        return ("", []) if return_trace else ""
+    
+    trace = []
+    normalized = raw_value.strip()
+    trace.append({"step": "input", "value": normalized})
     
     # Convert to uppercase
-    normalized = raw_value.upper().strip()
+    upper = normalized.upper()
+    if upper != normalized:
+        trace.append({"step": "uppercase", "value": upper})
+    normalized = upper
     
     # Remove common prefixes
     prefixes = [
-        r'^BOL[\s\-#:\.]*',
-        r'^B/L[\s\-#:\.]*',
-        r'^P\.?O\.?[\s\-#:\.]*',
-        r'^REF[\s\-#:\.]*',
-        r'^ORDER[\s\-#:\.]*',
-        r'^SO[\s\-#:\.]*',
-        r'^SHIP[\s\-#:\.]*',
-        r'^LOAD[\s\-#:\.]*',
-        r'^PRO[\s\-#:\.]*',
-        r'^INV[\s\-#:\.]*',
-        r'^#',
+        (r'^BOL[\s\-#:\.]*', 'strip_bol_prefix'),
+        (r'^B/L[\s\-#:\.]*', 'strip_bl_prefix'),
+        (r'^P\.?O\.?[\s\-#:\.]*', 'strip_po_prefix'),
+        (r'^REF[\s\-#:\.]*', 'strip_ref_prefix'),
+        (r'^ORDER[\s\-#:\.]*', 'strip_order_prefix'),
+        (r'^SO[\s\-#:\.]*', 'strip_so_prefix'),
+        (r'^SHIP[\s\-#:\.]*', 'strip_ship_prefix'),
+        (r'^LOAD[\s\-#:\.]*', 'strip_load_prefix'),
+        (r'^PRO[\s\-#:\.]*', 'strip_pro_prefix'),
+        (r'^INV[\s\-#:\.]*', 'strip_inv_prefix'),
+        (r'^PU[\s\-#:\.]*', 'strip_pu_prefix'),
+        (r'^#', 'strip_hash_prefix'),
     ]
     
-    for prefix in prefixes:
-        normalized = re.sub(prefix, '', normalized, flags=re.IGNORECASE)
+    for prefix_re, step_name in prefixes:
+        before = normalized
+        normalized = re.sub(prefix_re, '', normalized, flags=re.IGNORECASE)
+        if normalized != before:
+            trace.append({"step": step_name, "value": normalized})
     
     # Remove remaining punctuation and spaces
-    normalized = re.sub(r'[\s\-\.\#\:\,]+', '', normalized)
+    clean = re.sub(r'[\s\-\.\#\:\,]+', '', normalized)
+    if clean != normalized:
+        trace.append({"step": "strip_punctuation", "value": clean})
+    normalized = clean
     
     # Strip leading zeros (but keep at least one digit)
-    normalized = normalized.lstrip('0') or '0'
+    stripped = normalized.lstrip('0') or '0'
+    if stripped != normalized:
+        trace.append({"step": "strip_leading_zeros", "value": stripped})
+    normalized = stripped
     
+    if return_trace:
+        return normalized, trace
     return normalized
 
 
@@ -505,86 +551,148 @@ def score_bc_match(
     entity_type: str,
     document: Dict[str, Any] = None,
     vendor_hints: Dict[str, Any] = None
-) -> Tuple[float, str]:
+) -> Tuple[float, str, Dict[str, float]]:
     """
     Score a BC match based on multiple factors.
     
-    Returns: (score, reasoning)
+    Returns: (score, reasoning, score_breakdown)
     """
-    score = 0.0
+    breakdown = {}
     reasoning_parts = []
     
     bc_number = bc_record.get("number", "")
     normalized_ref = candidate.reference_value_normalized
     
-    # 1. Exact reference match (0.4)
+    # 1. Exact reference match (0.40)
     if bc_number == normalized_ref:
-        score += 0.4
+        breakdown["exact_reference_match"] = 0.40
         reasoning_parts.append("Exact number match")
     elif normalize_reference(bc_number) == normalized_ref:
-        score += 0.35
+        breakdown["exact_reference_match"] = 0.35
         reasoning_parts.append("Normalized number match")
+    else:
+        breakdown["exact_reference_match"] = 0.0
     
-    # 2. Predicted entity type alignment (0.2)
+    # 2. Entity type alignment (0.20)
     if entity_type in candidate.predicted_entity_types:
-        score += 0.2
+        breakdown["entity_type_alignment"] = 0.20
         reasoning_parts.append(f"Entity type matches prediction: {entity_type}")
     else:
-        score += 0.1
+        breakdown["entity_type_alignment"] = 0.10
         reasoning_parts.append(f"Entity type: {entity_type}")
     
     # 3. Domain alignment (0.15)
+    breakdown["domain_alignment"] = 0.0
     if candidate.predicted_domain:
         if candidate.predicted_domain == ReferenceDomain.PURCHASE.value and "purchase" in entity_type.lower():
-            score += 0.15
+            breakdown["domain_alignment"] = 0.15
             reasoning_parts.append("Domain alignment: purchase")
         elif candidate.predicted_domain == ReferenceDomain.SALES.value and "sales" in entity_type.lower():
-            score += 0.15
+            breakdown["domain_alignment"] = 0.15
             reasoning_parts.append("Domain alignment: sales")
         elif candidate.predicted_domain == ReferenceDomain.SHIPPING.value and ("shipment" in entity_type.lower() or "sales" in entity_type.lower()):
-            score += 0.15
+            breakdown["domain_alignment"] = 0.15
             reasoning_parts.append("Domain alignment: shipping")
     
-    # 4. Vendor alignment (0.15) - if document has vendor
+    # 4. Vendor alignment (0.15)
+    breakdown["vendor_alignment"] = 0.0
     if document:
         doc_vendor = document.get("vendor_raw", "") or document.get("matched_vendor_name", "")
         bc_vendor = bc_record.get("vendorName") or bc_record.get("vendor_name", "")
+        bc_customer = bc_record.get("customerName") or bc_record.get("customer_name", "")
         
-        if doc_vendor and bc_vendor:
+        if doc_vendor:
             doc_vendor_norm = doc_vendor.lower().replace(" ", "")
-            bc_vendor_norm = bc_vendor.lower().replace(" ", "")
-            
-            if doc_vendor_norm in bc_vendor_norm or bc_vendor_norm in doc_vendor_norm:
-                score += 0.15
-                reasoning_parts.append(f"Vendor alignment: {bc_vendor[:20]}")
+            # Check vendor match
+            if bc_vendor:
+                bc_vendor_norm = bc_vendor.lower().replace(" ", "")
+                if doc_vendor_norm in bc_vendor_norm or bc_vendor_norm in doc_vendor_norm:
+                    breakdown["vendor_alignment"] = 0.15
+                    reasoning_parts.append(f"Vendor alignment: {bc_vendor[:20]}")
+            # For freight docs, vendor is carrier — customer match is still relevant
+            if breakdown["vendor_alignment"] == 0 and bc_customer:
+                bc_customer_norm = bc_customer.lower().replace(" ", "")
+                if doc_vendor_norm in bc_customer_norm or bc_customer_norm in doc_vendor_norm:
+                    breakdown["vendor_alignment"] = 0.10
+                    reasoning_parts.append(f"Customer alignment: {bc_customer[:20]}")
     
-    # 5. Candidate confidence (0.1)
-    score += candidate.confidence * 0.1
+    # 5. Candidate confidence (0.10)
+    breakdown["candidate_confidence"] = candidate.confidence * 0.10
     reasoning_parts.append(f"Candidate confidence: {candidate.confidence:.2f}")
     
-    # 6. Vendor behavior boost (up to 0.15) - from vendor intelligence
+    # 6. Vendor behavior boost (up to 0.15)
+    breakdown["vendor_behavior_bonus"] = 0.0
     if vendor_hints and vendor_hints.get("has_hints"):
         typical_types = vendor_hints.get("typical_match_types", [])
         if entity_type in typical_types:
             boost = vendor_hints.get("behavior_score_boost", 0.15)
-            score += boost
+            breakdown["vendor_behavior_bonus"] = boost
             reasoning_parts.append(f"Vendor behavior: typical match type (+{boost:.0%})")
     
+    # 7. Freight vendor boost (0.15) — shipment score boost for freight carriers
+    breakdown["freight_vendor_boost"] = 0.0
+    if document:
+        doc_type = document.get("document_type") or document.get("suggested_job_type") or ""
+        is_freight_doc = doc_type in FREIGHT_DOC_TYPES
+        uvm = document.get("unified_vendor_match") or {}
+        is_freight_carrier = uvm.get("is_freight_carrier", False)
+        
+        # Also check vendor name against known freight keywords
+        if not is_freight_carrier:
+            doc_vendor_lower = (document.get("vendor_raw") or document.get("matched_vendor_name") or "").lower()
+            freight_kws = ["freight", "trucking", "logistics", "transport", "carrier",
+                          "shipping", "ltl", "truckload", "drayage", "express"]
+            is_freight_carrier = any(kw in doc_vendor_lower for kw in freight_kws)
+        
+        if (is_freight_doc or is_freight_carrier) and "shipment" in entity_type.lower():
+            breakdown["freight_vendor_boost"] = 0.15
+            reasoning_parts.append("Freight vendor: shipment entity boost +0.15")
+    
+    # 8. Shipment relationship bonus
+    breakdown["shipment_relationship"] = 0.0
+    if "shipment" in entity_type.lower():
+        order_no = bc_record.get("orderNumber") or bc_record.get("order_number", "")
+        if order_no and normalized_ref != normalize_reference(order_no):
+            # The shipment has a linked sales order — bonus for relationship
+            breakdown["shipment_relationship"] = 0.05
+            reasoning_parts.append(f"Shipment linked to order: {order_no}")
+    
+    score = sum(breakdown.values())
     reasoning = "; ".join(reasoning_parts)
     
-    return min(score, 1.0), reasoning
+    return min(score, 1.0), reasoning, breakdown
 
 
-def determine_match_outcome(best_score: float, alternate_count: int) -> str:
-    """Determine the match outcome based on score and alternatives."""
-    if best_score >= 0.85:
+def determine_match_outcome(
+    best_score: float, 
+    alternate_count: int,
+    all_scores: List[float] = None
+) -> str:
+    """
+    Determine the match outcome based on score and alternatives.
+    
+    Fixed ambiguity threshold:
+    - best >= 0.90 AND second_best < 0.70 → auto_resolve (exact_match)
+    - best >= 0.70 AND no strong competitors → likely_match  
+    - Multiple candidates > 0.70 → ambiguous
+    """
+    if not all_scores:
+        all_scores = []
+    
+    second_best = all_scores[1] if len(all_scores) > 1 else 0.0
+    
+    if best_score >= 0.90 and second_best < 0.70:
         return MatchOutcome.EXACT_MATCH.value
-    elif best_score >= 0.65:
+    elif best_score >= 0.70:
+        # Check for strong competing candidates
+        strong_competitors = sum(1 for s in all_scores[1:] if s >= 0.70)
+        if strong_competitors > 0:
+            return MatchOutcome.AMBIGUOUS_MATCH.value
+        return MatchOutcome.LIKELY_MATCH.value
+    elif best_score >= 0.40:
         if alternate_count > 1:
             return MatchOutcome.AMBIGUOUS_MATCH.value
         return MatchOutcome.LIKELY_MATCH.value
-    elif best_score >= 0.4:
-        return MatchOutcome.AMBIGUOUS_MATCH.value
     else:
         return MatchOutcome.NO_MATCH.value
 
@@ -610,10 +718,13 @@ class ReferenceIntelligenceService:
         document: Dict[str, Any],
         extracted_fields: Dict[str, Any] = None,
         document_text: str = None,
-        correlation_id: str = None
+        correlation_id: str = None,
+        capture_diagnostics: bool = False
     ) -> ReferenceResolutionResult:
         """
         Main entry point: resolve all references for a document.
+        
+        If capture_diagnostics=True, attach full diagnostic trace to result.
         """
         import time
         start_time = time.time()
@@ -622,35 +733,90 @@ class ReferenceIntelligenceService:
         doc_type = document.get("document_type") or document.get("suggested_job_type") or "default"
         vendor_name = document.get("vendor_raw") or document.get("matched_vendor_name")
         
+        # Determine effective strategy — use freight strategy when appropriate
+        effective_strategy = doc_type
+        uvm = document.get("unified_vendor_match") or {}
+        is_freight_carrier = uvm.get("is_freight_carrier", False)
+        has_bol = bool(document.get("bol_number") or (extracted_fields or {}).get("bol_number"))
+        
+        # Also check vendor name for freight indicators
+        if not is_freight_carrier:
+            vendor_lower = (vendor_name or "").lower()
+            freight_kws = ["freight", "trucking", "logistics", "transport", "carrier",
+                          "shipping", "ltl", "truckload", "drayage", "express"]
+            is_freight_carrier = any(kw in vendor_lower for kw in freight_kws)
+        
+        if doc_type in FREIGHT_DOC_TYPES or is_freight_carrier or has_bol:
+            effective_strategy = FREIGHT_STRATEGY_KEY
+        
         # Initialize result
         result = ReferenceResolutionResult(
             document_id=doc_id,
             document_type=doc_type,
-            resolver_strategy=doc_type,
-            search_order=get_search_strategy(doc_type),
+            resolver_strategy=effective_strategy,
+            search_order=get_search_strategy(effective_strategy),
             resolved_at=datetime.now(timezone.utc).isoformat()
         )
         
-        logger.info("[Reference Intelligence] Starting resolution for doc %s (type: %s)", doc_id[:8], doc_type)
+        # Diagnostics collector
+        diag = {
+            "document_id": doc_id,
+            "document_type": doc_type,
+            "effective_strategy": effective_strategy,
+            "strategy_reason": [],
+            "vendor_name": vendor_name,
+            "is_freight_carrier": is_freight_carrier,
+            "has_bol": has_bol,
+            "extraction": {},
+            "normalization": {},
+            "candidates": [],
+            "cache_results": [],
+            "bc_fallback_results": [],
+            "candidate_scores": [],
+            "decision": {},
+        }
+        
+        if doc_type in FREIGHT_DOC_TYPES:
+            diag["strategy_reason"].append(f"Freight doc type: {doc_type}")
+        if is_freight_carrier:
+            diag["strategy_reason"].append(f"Freight carrier: {vendor_name}")
+        if has_bol:
+            diag["strategy_reason"].append("BOL reference extracted")
+        if not diag["strategy_reason"]:
+            diag["strategy_reason"].append(f"Default for doc type: {doc_type}")
+        
+        logger.info(
+            "[Reference Intelligence] Starting resolution for doc %s (type: %s, strategy: %s)",
+            doc_id[:8], doc_type, effective_strategy
+        )
         
         # 1. Extract reference candidates
         candidates = []
         
         # From extracted fields
         if extracted_fields:
-            candidates.extend(extract_references_from_extracted_fields(extracted_fields))
+            field_candidates = extract_references_from_extracted_fields(extracted_fields)
+            candidates.extend(field_candidates)
+            diag["extraction"]["from_fields"] = len(field_candidates)
         
         # From document fields
         doc_fields = {
             "po_number": document.get("po_number_clean"),
             "bol_number": document.get("bol_number"),
             "invoice_number": document.get("invoice_number_clean"),
+            "shipment_number": document.get("shipment_number"),
         }
-        candidates.extend(extract_references_from_extracted_fields(doc_fields))
+        doc_candidates = extract_references_from_extracted_fields(doc_fields)
+        candidates.extend(doc_candidates)
+        diag["extraction"]["from_document"] = len(doc_candidates)
         
         # From raw text
         if document_text:
-            candidates.extend(extract_references_from_text(document_text))
+            text_candidates = extract_references_from_text(document_text)
+            candidates.extend(text_candidates)
+            diag["extraction"]["from_text"] = len(text_candidates)
+        
+        diag["extraction"]["total_raw"] = len(candidates)
         
         # Deduplicate by normalized value
         seen = set()
@@ -664,14 +830,47 @@ class ReferenceIntelligenceService:
         unique_candidates.sort(key=lambda x: x.confidence, reverse=True)
         unique_candidates = unique_candidates[:10]
         
-        # 2. Classify each candidate
+        diag["extraction"]["unique_count"] = len(unique_candidates)
+        
+        # Build normalization trace for each candidate
+        for c in unique_candidates:
+            _, trace = normalize_reference(c.reference_value_raw, return_trace=True)
+            diag["normalization"][c.reference_value_raw] = {
+                "raw": c.reference_value_raw,
+                "normalized": c.reference_value_normalized,
+                "steps": trace,
+                "label": c.detected_label,
+            }
+        
+        # 2. Classify each candidate with context-aware classification
         for candidate in unique_candidates:
+            # Apply shipping context fix: if source text contains BOL/shipment keywords,
+            # don't force classification to PO
+            source_lower = (candidate.source_text or "").lower()
+            if candidate.detected_label == ReferenceLabel.PO.value:
+                for kw in SHIPPING_CONTEXT_KEYWORDS:
+                    if kw in source_lower:
+                        candidate.detected_label = ReferenceLabel.SHIPMENT.value
+                        candidate.classification_reasoning = f"Reclassified: '{kw}' in context → shipment"
+                        break
+            
             domain, entity_types, reasoning = classify_reference_domain(
                 candidate, doc_type, vendor_name
             )
             candidate.predicted_domain = domain
             candidate.predicted_entity_types = entity_types
-            candidate.classification_reasoning = reasoning
+            if not candidate.classification_reasoning:
+                candidate.classification_reasoning = reasoning
+            
+            diag["candidates"].append({
+                "raw": candidate.reference_value_raw,
+                "normalized": candidate.reference_value_normalized,
+                "label": candidate.detected_label,
+                "domain": candidate.predicted_domain,
+                "entity_types": candidate.predicted_entity_types,
+                "confidence": candidate.confidence,
+                "reasoning": candidate.classification_reasoning,
+            })
         
         result.reference_candidates = unique_candidates
         
@@ -691,10 +890,12 @@ class ReferenceIntelligenceService:
         # 3. Resolve against BC
         if not self.bc_resolver:
             logger.warning("[Reference Intelligence] No BC resolver configured")
+            diag["decision"] = {"outcome": "no_resolver", "reason": "BC resolver not configured"}
+            result.matching_diagnostics = diag
             return result
         
         all_matches = []
-        search_tables = get_search_tables(doc_type)
+        search_tables = get_search_tables(effective_strategy)
         bc_query_count = 0
         
         for candidate in unique_candidates:
@@ -705,12 +906,30 @@ class ReferenceIntelligenceService:
             )
             bc_query_count += len(bc_result.tables_checked) if hasattr(bc_result, 'tables_checked') else 1
             
+            # Track cache vs API results
+            source = bc_result.bc_record_info.get("source", "api") if bc_result.bc_record_info else "miss"
+            if source == "cache":
+                diag["cache_results"].append({
+                    "reference": candidate.reference_value_normalized,
+                    "entity": bc_result.reference_type,
+                    "doc_no": bc_result.bc_document_no,
+                    "status": bc_result.status,
+                })
+            elif bc_result.status == "found":
+                diag["bc_fallback_results"].append({
+                    "reference": candidate.reference_value_normalized,
+                    "entity": bc_result.reference_type,
+                    "doc_no": bc_result.bc_document_no,
+                    "tables_checked": bc_result.tables_checked,
+                })
+            
             if bc_result.status == "found":
-                score, reasoning = score_bc_match(
+                score, reasoning, breakdown = score_bc_match(
                     candidate,
                     bc_result.bc_record_info,
                     bc_result.reference_type,
-                    document
+                    document,
+                    vendor_hints=None  # TODO: pass vendor hints when available
                 )
                 
                 match = BCMatch(
@@ -722,33 +941,66 @@ class ReferenceIntelligenceService:
                     match_reasoning=reasoning
                 )
                 all_matches.append((candidate, match))
+                
+                diag["candidate_scores"].append({
+                    "reference": candidate.reference_value_normalized,
+                    "entity_type": bc_result.reference_type,
+                    "bc_document_no": bc_result.bc_document_no,
+                    "final_score": round(score, 4),
+                    "score_breakdown": {k: round(v, 4) for k, v in breakdown.items()},
+                    "reasoning": reasoning,
+                })
         
         result.total_bc_queries = bc_query_count
         
-        # 4. Select best match
+        # 4. Select best match with corrected ambiguity logic
         if all_matches:
             all_matches.sort(key=lambda x: x[1].match_score, reverse=True)
+            all_scores = [m.match_score for _, m in all_matches]
             
             best_candidate, best_match = all_matches[0]
             result.best_match = best_match
             result.match_outcome = determine_match_outcome(
                 best_match.match_score,
-                len(all_matches)
+                len(all_matches),
+                all_scores=all_scores
             )
             
             # Add alternates (excluding best)
-            for _, match in all_matches[1:3]:  # Top 3 alternates
+            for _, match in all_matches[1:3]:
                 result.alternate_matches.append(match)
             
+            diag["decision"] = {
+                "outcome": result.match_outcome,
+                "best_score": round(best_match.match_score, 4),
+                "second_best_score": round(all_scores[1], 4) if len(all_scores) > 1 else 0,
+                "best_entity": best_match.entity_type,
+                "best_doc_no": best_match.bc_document_no,
+                "total_candidates": len(all_matches),
+            }
+            
             logger.info(
-                "[Reference Intelligence] Best match for doc %s: %s (%s) score=%.2f",
-                doc_id[:8], best_match.bc_document_no, best_match.entity_type, best_match.match_score
+                "[Reference Intelligence] Best match for doc %s: %s (%s) score=%.2f outcome=%s",
+                doc_id[:8], best_match.bc_document_no, best_match.entity_type,
+                best_match.match_score, result.match_outcome
             )
         else:
-            logger.info("[Reference Intelligence] No BC matches for doc %s", doc_id[:8])
+            # Determine failure reason
+            failure_reason = "no_reference_extracted" if not unique_candidates else "reference_not_found"
+            diag["decision"] = {
+                "outcome": MatchOutcome.NO_MATCH.value,
+                "failure_reason": failure_reason,
+                "candidates_searched": len(unique_candidates),
+                "tables_checked": search_tables,
+            }
+            logger.info("[Reference Intelligence] No BC matches for doc %s (%s)", doc_id[:8], failure_reason)
         
         # Calculate processing time
         result.processing_time_ms = int((time.time() - start_time) * 1000)
+        diag["processing_time_ms"] = result.processing_time_ms
+        
+        # Attach diagnostics to result
+        result.matching_diagnostics = diag
         
         # Emit resolution event
         if self.event_service:
@@ -768,7 +1020,8 @@ class ReferenceIntelligenceService:
                     "best_match_score": result.best_match.match_score if result.best_match else None,
                     "candidate_count": len(result.reference_candidates),
                     "bc_queries": result.total_bc_queries,
-                    "processing_time_ms": result.processing_time_ms
+                    "processing_time_ms": result.processing_time_ms,
+                    "strategy": effective_strategy,
                 }
             )
         
@@ -779,7 +1032,7 @@ class ReferenceIntelligenceService:
         document_id: str,
         resolution_result: ReferenceResolutionResult
     ):
-        """Update document with reference resolution results."""
+        """Update document with reference resolution results and persist diagnostics."""
         update_data = {
             "reference_intelligence": resolution_result.to_dict(),
             "reference_candidates": [c.to_dict() for c in resolution_result.reference_candidates],
@@ -797,6 +1050,17 @@ class ReferenceIntelligenceService:
             {"id": document_id},
             {"$set": update_data}
         )
+        
+        # Persist matching diagnostics for ambiguous/no_match/all results
+        diag = resolution_result.matching_diagnostics
+        if diag:
+            diag["document_id"] = document_id
+            diag["resolved_at"] = resolution_result.resolved_at
+            await self.db.matching_diagnostics.replace_one(
+                {"document_id": document_id},
+                diag,
+                upsert=True
+            )
 
 
 # =============================================================================

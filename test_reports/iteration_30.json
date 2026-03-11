@@ -1,0 +1,126 @@
+{
+  "summary": "Production Matching Diagnostics & Freight/BOL Resolver feature fully tested. All 13 backend tests pass. Frontend Matching Debug Panel verified on Document Detail page with all sections: strategy, outcome badges, freight carrier badge, processing time, extraction table, normalization trace, cache/API results, score breakdown with 8 components, and decision section. Cache metrics show 278K records across 5 entity types. BC write guard confirmed BLOCKED (read-only).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_matching_diagnostics.py",
+    "/app/test_reports/pytest/matching_diagnostics_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Freight strategy detection working - Tumalo Creek Transportation triggers Freight_Invoice strategy",
+    "Score breakdown includes all 8 components: exact_reference_match, entity_type_alignment, domain_alignment, vendor_alignment, candidate_confidence, vendor_behavior_bonus, freight_vendor_boost, shipment_relationship",
+    "Ambiguity threshold correctly implemented: best>=0.90 AND second<0.70=exact_match; best>=0.70=likely_match",
+    "Normalization trace shows step-by-step: input → strip_punctuation → strip_leading_zeros",
+    "Cache hit rate at 100% for tested resolutions - cache performing well"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_matching_diagnostics.py"
+  ],
+  "success_rate": {
+    "backend": "100% (13/13 tests passed)",
+    "frontend": "100% (all UI elements verified)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "None - used existing documents: 98695c83-a7f3-495f-ac8d-bb5405c55a63 and 359c4112-ff06-4f1a-ba07-f761a2b26f8a (Tumalo Creek freight invoice)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Matching Diagnostics feature complete. Key endpoints: GET /api/documents/{id}/matching-debug (returns diagnostics), POST /api/documents/{id}/matching-debug/rerun (reruns with full capture), GET /api/cache/metrics (278K records, 5 entity types). Frontend MatchingDebugPanel is collapsible on Document Detail page with toggle button. Shows: Strategy (Freight_Invoice for freight carriers), outcome badge (Likely/Exact/Ambiguous), Freight Carrier badge, processing time, extraction table (Raw/Normalized/Label/Domain/Conf), normalization trace, cache/API results, score breakdown with visual bars, decision section. Tumalo Creek doc 359c4112 scores 0.745 as 'likely_match' for Posted Sales Shipment 111428.",
+  "verified_features": {
+    "GET /api/documents/{id}/matching-debug": {
+      "status": "VERIFIED",
+      "evidence": "Returns document_id, document_type, vendor, is_freight_carrier, match_outcome, diagnostics object with extraction, normalization, candidates, candidate_scores, decision"
+    },
+    "POST /api/documents/{id}/matching-debug/rerun": {
+      "status": "VERIFIED",
+      "evidence": "Reruns resolution with full diagnostics capture. Doc 359c4112 returns resolver_strategy=Freight_Invoice, match_outcome=likely_match, matching_diagnostics with all fields"
+    },
+    "Diagnostics: extraction info": {
+      "status": "VERIFIED",
+      "evidence": "Shows from_fields, from_document, from_text counts, unique_count. Tumalo Creek shows 3 candidates extracted"
+    },
+    "Diagnostics: normalization trace": {
+      "status": "VERIFIED",
+      "evidence": "Shows step-by-step: input=0303853 → strip_leading_zeros=303853. Also shows strip_punctuation for compound refs"
+    },
+    "Diagnostics: cache_results & bc_fallback_results": {
+      "status": "VERIFIED",
+      "evidence": "cache_results shows reference=111428 → entity=posted_sales_shipment, doc_no=111428. bc_fallback_results empty (cache hit)"
+    },
+    "Diagnostics: candidate_scores with score_breakdown": {
+      "status": "VERIFIED",
+      "evidence": "Score breakdown shows: exact_reference_match=0.40, entity_type_alignment=0.10, candidate_confidence=0.10, freight_vendor_boost=0.15 = final_score=0.745"
+    },
+    "Diagnostics: decision section": {
+      "status": "VERIFIED",
+      "evidence": "Shows outcome=likely_match, best_score=0.745, second_best_score=0, best_entity=posted_sales_shipment, best_doc_no=111428"
+    },
+    "GET /api/cache/metrics": {
+      "status": "VERIFIED",
+      "evidence": "Returns total_records=278092, records_by_entity_type (127K shipments, 89K purchase invoices, 58K sales invoices, 1.5K POs, 1.2K SOs), resolution_metrics with cache_hit_rate=1.0"
+    },
+    "Freight strategy detection": {
+      "status": "VERIFIED",
+      "evidence": "Tumalo Creek Transportation triggers Freight_Invoice strategy (not default AP_Invoice). Strategy reason includes 'Freight carrier: TUMALOC'"
+    },
+    "Freight vendor boost scoring": {
+      "status": "VERIFIED",
+      "evidence": "Score breakdown shows freight_vendor_boost=0.15 for shipment entities when vendor is freight carrier"
+    },
+    "GET /api/bc/write-guard/status": {
+      "status": "VERIFIED",
+      "evidence": "Returns write_enabled=false, status=blocked, message='BC writes are BLOCKED (production safety)'"
+    },
+    "Frontend: Matching Debug Panel toggle": {
+      "status": "VERIFIED",
+      "evidence": "data-testid='matching-debug-toggle' expands/collapses panel. Shows Bug icon + 'Matching Debug' text"
+    },
+    "Frontend: Strategy and outcome badges": {
+      "status": "VERIFIED",
+      "evidence": "Shows 'Strategy: Freight_Invoice → Likely' with blue Likely badge and purple 'Freight Carrier' badge"
+    },
+    "Frontend: Processing time display": {
+      "status": "VERIFIED",
+      "evidence": "Shows '2722ms' / '2796ms' in summary row"
+    },
+    "Frontend: Extraction table": {
+      "status": "VERIFIED",
+      "evidence": "Table with Raw/Normalized/Label/Domain/Conf columns. Shows candidates like 111428 (PO, purchase, 95%), 111428PU089268460 (BOL, shipping, 95%), 0303853 (INVOICE, purchase, 90%)"
+    },
+    "Frontend: Normalization Trace expandable": {
+      "status": "VERIFIED",
+      "evidence": "data-testid='matching-debug-norm-toggle' shows trace steps: input → strip_punctuation → strip_leading_zeros"
+    },
+    "Frontend: Cache/API Results section": {
+      "status": "VERIFIED",
+      "evidence": "data-testid='matching-debug-cache-toggle' shows Cache badge with 111428 → posted_sales_shipment: 111428"
+    },
+    "Frontend: Score Breakdown section": {
+      "status": "VERIFIED",
+      "evidence": "data-testid='matching-debug-scores-toggle' shows visual bars for each score component with percentages"
+    },
+    "Frontend: Decision section": {
+      "status": "VERIFIED",
+      "evidence": "data-testid='matching-debug-decision' shows Outcome: likely_match badge, Best: 74.5% posted_sales_shipment: 111428"
+    },
+    "Frontend: Re-run button": {
+      "status": "VERIFIED",
+      "evidence": "data-testid='matching-debug-rerun' triggers resolution rerun. Toast confirms 'Resolution re-run with diagnostics'"
+    },
+    "Ambiguity threshold logic": {
+      "status": "VERIFIED",
+      "evidence": "Doc 359c4112 with best_score=0.745 and second_best_score=0 correctly returns likely_match (meets >=0.70 with no strong competitors)"
+    }
+  },
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "note": "All APIs are live - cache reads from MongoDB bc_reference_cache collection, BC write guard confirms production read-only mode"
+  }
+}

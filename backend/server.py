@@ -2122,6 +2122,121 @@ async def get_ap_validation_status(doc_id: str):
 
 
 
+# =============================================================================
+# MATCHING DIAGNOSTICS ENDPOINTS
+# =============================================================================
+
+@api_router.get("/documents/{doc_id}/matching-debug")
+async def get_matching_debug(doc_id: str):
+    """
+    Get full matching diagnostics for a document.
+    Shows: extraction, normalization, resolver strategy, cache/API results,
+    candidate scores with breakdown, decision and failure reasons.
+    """
+    # Check persisted diagnostics first
+    diag = await db.matching_diagnostics.find_one(
+        {"document_id": doc_id}, {"_id": 0}
+    )
+    
+    # Also get doc-level reference intelligence
+    doc = await db.hub_documents.find_one(
+        {"id": doc_id},
+        {"_id": 0, "reference_intelligence": 1, "reference_candidates": 1,
+         "reference_match_outcome": 1, "reference_best_match": 1,
+         "document_type": 1, "vendor_canonical": 1, "vendor_raw": 1,
+         "unified_vendor_match": 1, "freight_gl_classification": 1}
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    ref_intel = doc.get("reference_intelligence", {})
+    
+    return {
+        "document_id": doc_id,
+        "document_type": doc.get("document_type"),
+        "vendor": doc.get("vendor_canonical") or doc.get("vendor_raw"),
+        "is_freight_carrier": (doc.get("unified_vendor_match") or {}).get("is_freight_carrier", False),
+        "match_outcome": doc.get("reference_match_outcome") or ref_intel.get("match_outcome"),
+        "diagnostics": diag,
+        "reference_intelligence": ref_intel,
+        "freight_gl": doc.get("freight_gl_classification"),
+    }
+
+
+@api_router.post("/documents/{doc_id}/matching-debug/rerun")
+async def rerun_matching_with_diagnostics(doc_id: str):
+    """
+    Rerun reference resolution with full diagnostics capture.
+    """
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    svc = get_reference_intelligence_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Reference intelligence not initialized")
+    
+    result = await svc.resolve_document_references(
+        document=doc,
+        extracted_fields=doc.get("extracted_fields"),
+        capture_diagnostics=True
+    )
+    
+    # Save result and diagnostics
+    await svc.update_document_references(doc_id, result)
+    
+    return result.to_dict()
+
+
+@api_router.get("/cache/metrics")
+async def get_cache_metrics():
+    """
+    Get BC reference cache metrics: hit/miss rates by entity type,
+    last sync, record counts.
+    """
+    from services.bc_reference_cache_service import get_cache_service
+    cache_svc = get_cache_service()
+    if not cache_svc:
+        raise HTTPException(status_code=503, detail="Cache service not initialized")
+    
+    status = await cache_svc.get_status()
+    
+    # Get counts by entity type
+    pipeline = [
+        {"$group": {
+            "_id": "$bc_entity_type",
+            "count": {"$sum": 1},
+        }},
+        {"$sort": {"count": -1}},
+    ]
+    by_type = await db.bc_reference_cache.aggregate(pipeline).to_list(20)
+    
+    # Get matching diagnostics stats
+    total_resolutions = await db.matching_diagnostics.count_documents({})
+    cache_hit_count = await db.matching_diagnostics.count_documents(
+        {"cache_results": {"$ne": []}}
+    )
+    bc_fallback_count = await db.matching_diagnostics.count_documents(
+        {"bc_fallback_results": {"$ne": []}}
+    )
+    
+    return {
+        "cache_status": status,
+        "records_by_entity_type": [
+            {"entity_type": r["_id"], "count": r["count"]}
+            for r in by_type
+        ],
+        "total_records": sum(r["count"] for r in by_type),
+        "resolution_metrics": {
+            "total_resolutions": total_resolutions,
+            "cache_hit_count": cache_hit_count,
+            "bc_fallback_count": bc_fallback_count,
+            "cache_hit_rate": round(cache_hit_count / max(total_resolutions, 1), 3),
+        },
+    }
+
+
+
 @api_router.put("/documents/{doc_id}")
 async def update_document(doc_id: str, update: DocumentUpdate):
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}

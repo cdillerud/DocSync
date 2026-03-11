@@ -20,6 +20,7 @@ import PDFPreviewPanel from '../components/PDFPreviewPanel';
 import ReferenceIntelligencePanel from '../components/ReferenceIntelligencePanel';
 import FreightGLRoutingPanel from '../components/FreightGLRoutingPanel';
 import APValidationPanel from '../components/APValidationPanel';
+import MatchingDebugPanel from '../components/MatchingDebugPanel';
 
 const STATUS_CLASSES = {
   Received: 'status-received',
@@ -446,6 +447,11 @@ export default function DocumentDetailPage() {
           <FreightGLRoutingPanel
             document={doc}
             onUpdate={() => fetchData()}
+          />
+
+          {/* Matching Debug Panel */}
+          <MatchingDebugPanel
+            document={doc}
           />
 
           {/* Square9 Workflow Tracker */}

@@ -2198,66 +2198,47 @@ Step-by-step: input → uppercase → strip_prefix → strip_punctuation → str
 
 ---
 
-## Reference Label Correction Feedback Loop (Completed - March 11, 2026)
+## Reference Label Correction Feedback Loop — Full 10-Part Implementation (Completed - March 11, 2026)
 
 ### Overview
-Self-learning mechanism where the resolver learns from successful matches to correct mislabeled references. When a reference labeled "PO" resolves to a "Shipment", the system records that correction and uses it to improve future scoring.
+Self-learning mechanism where the resolver learns from successful matches to correct mislabeled references. When a reference labeled "PO" resolves to a "Shipment", the system records that correction and uses it to improve future scoring. Implements all 10 parts of the specification.
 
 ### Architecture
-1. **Storage Layer**: `reference_label_corrections` MongoDB collection stores every detected mismatch
-2. **Detection**: After each successful resolution in `auto_resolution_service.py`, the system checks if the detected label is compatible with the matched entity type
-3. **Vendor Learning**: Correction patterns are aggregated per vendor in `vendor_intelligence_profiles`
-4. **Scoring Boost**: New scoring component `label_correction_boost` (up to +15%) applied when a vendor has learned patterns
-5. **Shipment Clustering**: `search_shipment_cluster()` in cache service groups related shipments/orders
+1. **Part 1 — Storage Layer**: `reference_label_corrections` collection. Only records corrections when `match_confidence ≥ 0.70` and `predicted_label ≠ actual_entity`. Never learns from ambiguous matches.
+2. **Part 2 — Vendor Pattern Learning**: Correction patterns aggregated per vendor in `vendor_intelligence_profiles`. Tracks `label_correction_patterns`, `shipment_reference_frequency`, `po_reference_frequency`.
+3. **Part 3 — Scoring Model**: 11 scoring components including `reference_context_match` and `date_proximity`.
+4. **Part 4 — Shipment Clustering**: `search_shipment_cluster()` groups related shipments/orders via order_no linkage.
+5. **Part 5 — Dynamic Search Strategy**: Resolver reorders search tables when vendor correction patterns indicate shipment bias.
+6. **Part 6 — Debug UI**: MatchingDebugPanel shows Feedback Loop section, Learning badge, Dynamic Strategy badge.
+7. **Part 7 — Vendor Influence Cap**: Total vendor influence (vendor_behavior_bonus + label_correction_boost) capped at 0.20. Unstable pattern detection when conflicting corrections ≥ 40%.
+8. **Part 8 — Diagnostics**: `label_correction_applied`, `vendor_pattern_weight`, `cluster_match_bonus` in decision.
+9. **Part 9 — Safety**: BC_WRITE_ENABLED=false, no BC writes or record modifications.
+10. **Part 10 — Success**: Resolver learns from matches, corrects mislabels, adapts search order, matches freight more reliably.
 
-### Compatible Labels (No Correction Needed)
-| Entity Type | Compatible Labels |
-|---|---|
-| purchase_order | PO, ORDER, REF |
-| sales_order | ORDER, PO, REF, CUSTOMER_REF |
-| posted_sales_shipment | SHIPMENT, BOL, LOAD, PRO, REF |
-| purchase_invoice | INVOICE, REF |
-
-### Scoring Model (9 Components)
-| Component | Max Weight |
-|---|---|
-| exact_reference_match | 0.40 |
-| entity_type_alignment | 0.20 |
-| domain_alignment | 0.15 |
-| vendor_alignment | 0.15 |
-| candidate_confidence | 0.10 |
-| vendor_behavior_bonus | 0.15 |
-| freight_vendor_boost | 0.15 |
-| shipment_relationship | 0.05 |
-| **label_correction_boost** | **0.15** (NEW) |
-
-### API Endpoints
-| Method | Endpoint | Description |
+### Scoring Model (11 Components)
+| Component | Max Weight | Description |
 |---|---|---|
-| GET | /api/label-corrections/stats | Overall correction statistics |
-| GET | /api/label-corrections/recent | Recent corrections list |
-| GET | /api/label-corrections/vendor/{id} | Vendor correction patterns with label remaps |
-| GET | /api/label-corrections/document/{id} | Corrections for a specific document |
+| exact_reference_match | 0.40 | Number match |
+| entity_type_alignment | 0.20 | Label→entity alignment |
+| domain_alignment | 0.15 | Purchase/Sales/Shipping domain |
+| vendor_alignment | 0.15 | Vendor/customer name match |
+| candidate_confidence | 0.10 | Extraction confidence |
+| vendor_behavior_bonus | 0.15 | Typical match type for vendor |
+| freight_vendor_boost | 0.15 | Shipment boost for freight carriers |
+| shipment_relationship | 0.05 | Linked order relationship |
+| label_correction_boost | 0.15 | Learned from past mislabels |
+| reference_context_match | 0.05 | Surrounding text keyword alignment |
+| date_proximity | 0.05 | Document date vs BC record date |
+| **Vendor Influence Cap** | **0.20** | vendor_behavior + label_correction capped |
 
-### Frontend (MatchingDebugPanel)
-- **Learning badge**: Purple "Learning" badge appears when correction signals are present
-- **Feedback Loop section**: Expandable section showing document corrections and vendor patterns
-- **Label remaps**: Visual display of active label→entity remappings for the vendor
-- **Score highlighting**: label_correction_boost shown in purple in score breakdown
-- **Candidate labels**: "learned" badge on labels that have correction hints
-
-### Files Created/Modified
-- `/app/backend/services/label_correction_service.py` — NEW: Full correction service
-- `/app/backend/services/reference_intelligence_service.py` — MODIFIED: Component #9, vendor/label hints
-- `/app/backend/services/vendor_intelligence_service.py` — MODIFIED: update_label_correction_patterns
-- `/app/backend/services/auto_resolution_service.py` — MODIFIED: Post-resolution correction detection
-- `/app/backend/services/bc_reference_cache_service.py` — MODIFIED: search_shipment_cluster
-- `/app/backend/server.py` — MODIFIED: Service init, 4 new endpoints, matching-debug enrichment
-- `/app/frontend/src/components/MatchingDebugPanel.js` — MODIFIED: Feedback Loop UI
+### Proven End-to-End Learning
+- **Cargo Modules LLC**: PO 107346 → posted_sales_shipment 110463 (mislabel detected)
+- First run score: 0.745 → Second run score: 0.795 (+0.05 from label_correction_boost)
+- Dynamic strategy activated: search tables reordered to prioritize shipments
 
 ### Test Results
-- Backend: 12/13 tests passed, 1 skipped (92%)
+- Backend: 22/22 tests passed (100%)
 - Frontend: All UI elements verified (100%)
-- Test report: `/app/test_reports/iteration_31.json`
+- Test reports: `/app/test_reports/iteration_31.json`, `/app/test_reports/iteration_32.json`
 
 *Last Updated: March 11, 2026*

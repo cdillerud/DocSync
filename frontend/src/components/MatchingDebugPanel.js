@@ -30,6 +30,7 @@ export default function MatchingDebugPanel({ document: doc }) {
   const [showCache, setShowCache] = useState(false);
   const [showCorrections, setShowCorrections] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [showLayout, setShowLayout] = useState(false);
 
   const fetchDebug = async () => {
     setLoading(true);
@@ -500,6 +501,80 @@ export default function MatchingDebugPanel({ document: doc }) {
                       </div>
                     )}
                   </div>
+                </div>
+              )}
+
+              {/* Layout Fingerprint Section (Part 8 — Debug & Diagnostics) */}
+              {debug?.layout_fingerprint && (
+                <div data-testid="layout-fingerprint-debug" className="mt-3">
+                  <button
+                    onClick={() => setShowLayout(!showLayout)}
+                    className="flex items-center gap-1.5 text-xs font-medium text-blue-300 hover:text-blue-200 transition-colors"
+                  >
+                    {showLayout ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                    Layout Fingerprint
+                    {debug.layout_fingerprint.has_fingerprint && (
+                      <Badge className="bg-blue-500/20 text-blue-400 text-[10px] ml-1">
+                        {debug.layout_fingerprint.layout_family_id || 'no family'}
+                      </Badge>
+                    )}
+                    {debug.layout_fingerprint.new_layout_detected && (
+                      <Badge className="bg-amber-500/20 text-amber-400 text-[10px] ml-1">NEW</Badge>
+                    )}
+                  </button>
+                  {showLayout && debug.layout_fingerprint.has_fingerprint && (
+                    <div className="mt-2 bg-slate-900/50 rounded p-3 space-y-2 border border-slate-700/50">
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
+                        <div>
+                          <span className="text-muted-foreground">Family:</span>{' '}
+                          <span className="font-mono text-blue-300">{debug.layout_fingerprint.layout_family_id}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Fingerprint:</span>{' '}
+                          <span className="font-mono text-slate-300">{debug.layout_fingerprint.layout_fingerprint}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Similarity:</span>{' '}
+                          <span className={`font-mono ${(debug.layout_fingerprint.layout_similarity_score || 0) >= 0.9 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                            {debug.layout_fingerprint.layout_similarity_score ? `${(debug.layout_fingerprint.layout_similarity_score * 100).toFixed(1)}%` : 'N/A'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">New Layout:</span>{' '}
+                          <span className={debug.layout_fingerprint.new_layout_detected ? 'text-amber-400' : 'text-slate-400'}>
+                            {debug.layout_fingerprint.new_layout_detected ? 'Yes' : 'No'}
+                          </span>
+                        </div>
+                      </div>
+                      {debug.layout_fingerprint.family_detail && (
+                        <div className="border-t border-slate-700/50 pt-2 mt-2">
+                          <p className="text-[10px] text-muted-foreground mb-1">Family Performance:</p>
+                          <div className="flex gap-4 text-[10px]">
+                            <span>Docs: <strong className="text-white">{debug.layout_fingerprint.family_detail.documents_count}</strong></span>
+                            <span>Resolution: <strong className="text-emerald-400">
+                              {((debug.layout_fingerprint.family_detail.performance_metrics?.resolution_success_rate || 0) * 100).toFixed(0)}%
+                            </strong></span>
+                            <span>Automation: <strong className="text-blue-400">
+                              {((debug.layout_fingerprint.family_detail.performance_metrics?.automation_success_rate || 0) * 100).toFixed(0)}%
+                            </strong></span>
+                          </div>
+                        </div>
+                      )}
+                      {/* Diagnostics from resolver */}
+                      {diag?.layout_family && diag.layout_family.has_bias && (
+                        <div className="border-t border-slate-700/50 pt-2 mt-2">
+                          <p className="text-[10px] text-amber-300">Layout Bias Applied in Scoring:</p>
+                          <div className="flex flex-wrap gap-2 mt-1">
+                            {Object.entries(diag.layout_family.entity_biases || {}).map(([entity, bias]) => (
+                              <span key={entity} className="text-[10px] font-mono bg-blue-500/10 text-blue-300 px-1.5 rounded">
+                                {entity} +{(bias * 100).toFixed(0)}%
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </>

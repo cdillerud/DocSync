@@ -17,6 +17,7 @@ import SharePointMigrationPage from "@/pages/SharePointMigrationPage";
 import VendorIntelligencePage from "@/pages/VendorIntelligencePage";
 import AutomationRulesPage from "@/pages/AutomationRulesPage";
 import LabelCorrectionInsightsPage from "@/pages/LabelCorrectionInsightsPage";
+import LayoutFingerprintsPage from "@/pages/LayoutFingerprintsPage";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -40,6 +41,7 @@ function AppRoutes() {
         <Route path="vendor-intelligence" element={<VendorIntelligencePage />} />
         <Route path="automation-rules" element={<AutomationRulesPage />} />
         <Route path="label-correction-insights" element={<LabelCorrectionInsightsPage />} />
+        <Route path="layout-fingerprints" element={<LayoutFingerprintsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

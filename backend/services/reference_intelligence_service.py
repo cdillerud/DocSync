@@ -552,7 +552,8 @@ def score_bc_match(
     document: Dict[str, Any] = None,
     vendor_hints: Dict[str, Any] = None,
     label_correction_hints: Dict[str, Any] = None,
-    extraction_profile: Dict[str, Any] = None
+    extraction_profile: Dict[str, Any] = None,
+    layout_family_bias: Dict[str, Any] = None
 ) -> Tuple[float, str, Dict[str, float]]:
     """
     Score a BC match based on multiple factors.
@@ -756,12 +757,28 @@ def score_bc_match(
             breakdown["extraction_profile_bias"] = round(max(min(profile_adj, 0.15), -0.10), 4)
             reasoning_parts.append(f"Profile entity adjustment: {entity_type} {profile_adj:+.0%}")
     
+    # 13. Layout family bias (Part 6 — soft structural signal, NOT a template)
+    breakdown["layout_family_bias"] = 0.0
+    if layout_family_bias and layout_family_bias.get("has_layout_bias"):
+        entity_biases = layout_family_bias.get("entity_biases", {})
+        if entity_type in entity_biases:
+            bias_val = entity_biases[entity_type]
+            breakdown["layout_family_bias"] = round(min(bias_val, 0.15), 4)
+            reasoning_parts.append(
+                f"Layout family bias: {entity_type} +{bias_val:.0%} "
+                f"(family: {layout_family_bias.get('layout_family_id', '?')[:15]})"
+            )
+        family_id = layout_family_bias.get("layout_family_id", "")
+        if layout_family_bias.get("new_layout_detected"):
+            reasoning_parts.append(f"New layout detected (family: {family_id[:15]})")
+    
     # --- VENDOR INFLUENCE CAP: max total vendor-related boost = 0.20 ---
     vendor_components = (
         breakdown.get("vendor_behavior_bonus", 0)
         + breakdown.get("label_correction_boost", 0)
         + max(breakdown.get("extraction_profile_bias", 0), 0)  # only cap positive bias
     )
+    # Layout family bias is capped separately at 0.15 — not part of vendor influence cap
     if vendor_components > 0.20:
         # Scale down proportionally
         scale = 0.20 / vendor_components
@@ -831,6 +848,7 @@ class ReferenceIntelligenceService:
         self._label_correction_service = None
         self._vendor_intel_service = None
         self._vep_service = None
+        self._layout_fingerprint_service = None
     
     def set_label_correction_service(self, svc):
         self._label_correction_service = svc
@@ -840,6 +858,9 @@ class ReferenceIntelligenceService:
     
     def set_vep_service(self, svc):
         self._vep_service = svc
+    
+    def set_layout_fingerprint_service(self, svc):
+        self._layout_fingerprint_service = svc
     
     async def resolve_document_references(
         self,
@@ -1104,6 +1125,24 @@ class ReferenceIntelligenceService:
             "learning_source": extraction_profile.get("learning_source", []) if extraction_profile else [],
         }
         
+        # Fetch Layout Family Bias (structural signal, NOT a template)
+        layout_family_bias = None
+        if self._layout_fingerprint_service:
+            try:
+                layout_family_bias = await self._layout_fingerprint_service.get_resolver_bias(doc_id)
+            except Exception:
+                layout_family_bias = {"has_layout_bias": False}
+        
+        diag["layout_family"] = {
+            "has_bias": layout_family_bias.get("has_layout_bias", False) if layout_family_bias else False,
+            "family_id": layout_family_bias.get("layout_family_id") if layout_family_bias else None,
+            "fingerprint": layout_family_bias.get("layout_fingerprint") if layout_family_bias else None,
+            "similarity_score": layout_family_bias.get("layout_similarity_score") if layout_family_bias else None,
+            "new_layout_detected": layout_family_bias.get("new_layout_detected", False) if layout_family_bias else False,
+            "entity_biases": layout_family_bias.get("entity_biases", {}) if layout_family_bias else {},
+            "documents_count": layout_family_bias.get("documents_count", 0) if layout_family_bias else 0,
+        }
+        
         for candidate in unique_candidates:
             # Use the adaptive resolver
             bc_result = await self.bc_resolver.resolve_reference(
@@ -1138,7 +1177,8 @@ class ReferenceIntelligenceService:
                     document,
                     vendor_hints=vendor_hints,
                     label_correction_hints=lc_hints,
-                    extraction_profile=extraction_profile
+                    extraction_profile=extraction_profile,
+                    layout_family_bias=layout_family_bias
                 )
                 
                 match = BCMatch(
@@ -1203,7 +1243,8 @@ class ReferenceIntelligenceService:
                             candidate, cluster_info, cluster_entity_type,
                             document, vendor_hints=vendor_hints,
                             label_correction_hints=lc_hints,
-                            extraction_profile=extraction_profile
+                            extraction_profile=extraction_profile,
+                            layout_family_bias=layout_family_bias
                         )
                         # Add cluster bonus (0.03) for relationship-based discovery
                         cluster_bonus = 0.03 if cr.get("_cluster_reason", "").startswith("linked_via") else 0
@@ -1285,6 +1326,12 @@ class ReferenceIntelligenceService:
                     s.get("score_breakdown", {}).get("extraction_profile_bias", 0) != 0
                     for s in diag.get("candidate_scores", [])
                 ),
+                "layout_family_bias_applied": any(
+                    s.get("score_breakdown", {}).get("layout_family_bias", 0) != 0
+                    for s in diag.get("candidate_scores", [])
+                ),
+                "layout_family_id": (layout_family_bias or {}).get("layout_family_id"),
+                "new_layout_detected": (layout_family_bias or {}).get("new_layout_detected", False),
             }
             
             logger.info(

@@ -131,6 +131,7 @@ class AutoResolutionService:
         self._ap_validation_service = None
         self._freight_gl_service = None
         self._label_correction_service = None
+        self._layout_fingerprint_service = None
         self._queue = asyncio.Queue(maxsize=500)
         self._workers = []
         self._running = False
@@ -158,6 +159,10 @@ class AutoResolutionService:
     def set_label_correction_service(self, label_correction_service):
         """Inject label correction service for post-resolution learning."""
         self._label_correction_service = label_correction_service
+
+    def set_layout_fingerprint_service(self, layout_fingerprint_service):
+        """Inject layout fingerprint service for structural analysis."""
+        self._layout_fingerprint_service = layout_fingerprint_service
 
     def start(self, num_workers: int = AUTO_RESOLVE_MAX_WORKERS):
         """Start background workers."""
@@ -304,6 +309,33 @@ class AutoResolutionService:
                         await self._vendor_intel.update_from_document(updated_doc)
                 except Exception as ve:
                     logger.warning("[AutoResolve:W%d] Vendor intel update error: %s", worker_id, str(ve))
+
+            # ---------------------------------------------------------
+            # LAYOUT FINGERPRINTING (structural signal, async, non-blocking)
+            # Generate structural fingerprint and assign to family
+            # ---------------------------------------------------------
+            if self._layout_fingerprint_service:
+                try:
+                    fp_result = await self._layout_fingerprint_service.generate_fingerprint(
+                        doc_id, document_text, doc
+                    )
+                    if fp_result:
+                        # Update family metrics with resolution outcome
+                        resolution_success = outcome in ("exact_match", "likely_match")
+                        best_label = None
+                        best_entity = None
+                        if resolution.reference_candidates:
+                            best_label = resolution.reference_candidates[0].detected_label
+                        if resolution.best_match:
+                            best_entity = resolution.best_match.entity_type
+                        await self._layout_fingerprint_service.update_family_metrics(
+                            doc_id,
+                            resolution_success=resolution_success,
+                            reference_label=best_label,
+                            bc_entity_type=best_entity,
+                        )
+                except Exception as lfe:
+                    logger.warning("[AutoResolve:W%d] Layout fingerprint error: %s", worker_id, str(lfe))
 
             # ---------------------------------------------------------
             # LABEL CORRECTION FEEDBACK LOOP (async, non-blocking)

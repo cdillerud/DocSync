@@ -164,6 +164,9 @@ from services.alert_pattern_service import (
 from services.vendor_extraction_profile_service import (
     VendorExtractionProfileService, get_vep_service, set_vep_service
 )
+from services.layout_fingerprint_service import (
+    LayoutFingerprintService, get_layout_fingerprint_service, set_layout_fingerprint_service
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -2183,6 +2186,22 @@ async def get_matching_debug(doc_id: str):
             if alt_vendor and alt_vendor != vendor_id:
                 vep_data = await vep_svc.get_resolver_adjustments(alt_vendor)
     
+    # Fetch layout fingerprint for this document
+    layout_fp_data = None
+    layout_svc = get_layout_fingerprint_service()
+    if layout_svc:
+        layout_fp_data = await layout_svc.get_fingerprint_for_document(doc_id)
+        # If we have a family, get family details
+        if layout_fp_data and layout_fp_data.get("layout_family_id"):
+            family_detail = await layout_svc.get_family_detail(layout_fp_data["layout_family_id"])
+            if family_detail:
+                layout_fp_data["family_detail"] = {
+                    "documents_count": family_detail.get("documents_count", 0),
+                    "first_seen": family_detail.get("first_seen"),
+                    "last_seen": family_detail.get("last_seen"),
+                    "performance_metrics": family_detail.get("performance_metrics", {}),
+                }
+    
     return {
         "document_id": doc_id,
         "document_type": doc.get("document_type"),
@@ -2195,6 +2214,7 @@ async def get_matching_debug(doc_id: str):
         "label_corrections": label_corrections,
         "vendor_correction_patterns": vendor_patterns,
         "vendor_extraction_profile": vep_data,
+        "layout_fingerprint": layout_fp_data,
     }
 
 
@@ -2529,6 +2549,89 @@ async def reset_vendor_profile(vendor_id: str):
     if not ok:
         raise HTTPException(status_code=404, detail="Profile not found")
     return {"vendor_id": vendor_id, "status": "reset"}
+
+
+# =============================================================================
+# LAYOUT FINGERPRINT ENDPOINTS (Part 9 — Admin UI)
+# =============================================================================
+
+@api_router.get("/layout-fingerprints/stats")
+async def get_layout_fingerprint_stats():
+    """Get aggregate stats for layout families."""
+    svc = get_layout_fingerprint_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Layout Fingerprint service not initialized")
+    return await svc.get_family_stats()
+
+
+@api_router.get("/layout-fingerprints/families")
+async def get_layout_families(
+    vendor_no: str = None,
+    doc_type: str = None,
+    status: str = "active",
+    skip: int = 0,
+    limit: int = 100
+):
+    """List all layout families with optional filters."""
+    svc = get_layout_fingerprint_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Layout Fingerprint service not initialized")
+    families = await svc.get_all_families(vendor_no=vendor_no, doc_type=doc_type, status=status, skip=skip, limit=limit)
+    return {"families": families, "total": len(families)}
+
+
+@api_router.get("/layout-fingerprints/families/{family_id}")
+async def get_layout_family_detail(family_id: str):
+    """Get detailed info about a layout family including recent documents."""
+    svc = get_layout_fingerprint_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Layout Fingerprint service not initialized")
+    family = await svc.get_family_detail(family_id)
+    if not family:
+        raise HTTPException(status_code=404, detail="Layout family not found")
+    return family
+
+
+@api_router.get("/layout-fingerprints/vendor/{vendor_no}")
+async def get_layout_families_by_vendor(vendor_no: str):
+    """Get all layout families for a specific vendor."""
+    svc = get_layout_fingerprint_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Layout Fingerprint service not initialized")
+    families = await svc.get_families_by_vendor(vendor_no)
+    return {"vendor_no": vendor_no, "families": families, "total": len(families)}
+
+
+@api_router.get("/layout-fingerprints/document/{doc_id}")
+async def get_document_fingerprint(doc_id: str):
+    """Get the layout fingerprint for a specific document."""
+    svc = get_layout_fingerprint_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Layout Fingerprint service not initialized")
+    fp = await svc.get_fingerprint_for_document(doc_id)
+    if not fp:
+        return {"document_id": doc_id, "has_fingerprint": False}
+    return {**fp, "has_fingerprint": True}
+
+
+@api_router.post("/layout-fingerprints/backfill")
+async def backfill_layout_fingerprints(limit: int = 100):
+    """Generate fingerprints for documents that don't have one yet."""
+    svc = get_layout_fingerprint_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Layout Fingerprint service not initialized")
+    result = await svc.backfill_fingerprints(limit=limit)
+    return result
+
+
+@api_router.get("/layout-fingerprints/alerts")
+async def get_layout_family_alerts():
+    """Get layout families needing attention."""
+    svc = get_layout_fingerprint_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Layout Fingerprint service not initialized")
+    alerts = await svc.get_families_needing_attention()
+    return {"alerts": alerts, "total": len(alerts)}
 
 
 @api_router.put("/documents/{doc_id}")
@@ -16178,6 +16281,13 @@ async def startup():
     await vep_svc.generate_all_profiles()  # Initial profile generation
     vep_svc.start_background_learning()
     logger.info("Vendor Extraction Profile Service initialized with background learning")
+    
+    # Initialize Layout Fingerprint Service (structural document analysis)
+    layout_fp_svc = set_layout_fingerprint_service(db, event_service)
+    await layout_fp_svc.initialize()
+    ref_intel_service.set_layout_fingerprint_service(layout_fp_svc)
+    auto_resolve.set_layout_fingerprint_service(layout_fp_svc)
+    logger.info("Layout Fingerprint Service initialized")
     
     # Start daily pilot summary scheduler if enabled
     global _pilot_summary_task

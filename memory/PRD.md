@@ -2316,3 +2316,98 @@ Threshold-based alert system that flags systemic extraction problems. Runs backg
 
 *Last Updated: March 11, 2026*
 
+
+---
+
+## Document Layout Fingerprinting (Completed - March 11, 2026)
+
+### Overview
+A structural document analysis system that detects when documents share overall structural patterns and groups them into **layout families**. This is NOT a template engine — it uses relative zones (top/middle/bottom), keyword signatures, table patterns, and token density to create a soft structural signal. Layout families improve interpretation accuracy and resolver confidence while remaining fully AI-first and layout-independent.
+
+### Key Principles (Safety Rules)
+- NEVER stores absolute extraction coordinates (no x/y pixel values)
+- NEVER creates rigid templates or vendor-specific field maps
+- NEVER replaces OCR/AI extraction
+- Uses relative zones only
+- Purely probabilistic, structural, additive
+- Layout families are interpretation hints and confidence modifiers only
+
+### Data Model
+| Collection | Key Fields |
+|---|---|
+| document_layout_fingerprints | document_id, vendor_no, vendor_name, document_type, layout_fingerprint, layout_family_id, structural_signature, keyword_signature, table_signature, token_density_signature, layout_similarity_score, new_layout_detected, layout_hash (idempotency) |
+| layout_families | layout_family_id, vendor_no, document_type, fingerprint_centroid, documents_count, first_seen, last_seen, status, performance_metrics (resolution/automation rates, mislabel count, entity/label distributions) |
+
+### Structural Signature Signals
+- Page count, line count
+- Token density per zone (top/middle/bottom)
+- Keyword categories per zone (invoice, BOL, PO, shipment, etc.)
+- Table structure (count, zones, row patterns)
+- Whitespace distribution
+- Header/footer density ratios
+- Label cluster counts (invoice_labels, po_labels, bol_labels, etc.)
+
+### Configuration
+| Parameter | Value |
+|---|---|
+| FAMILY_SIMILARITY_THRESHOLD | 0.90 |
+| MIN_DOCS_FOR_FAMILY_STATS | 3 |
+| MAX_LAYOUT_FAMILY_BIAS | 0.15 |
+| FINGERPRINT_VERSION | 1.0 |
+
+### Similarity Scoring (Weighted)
+| Component | Weight |
+|---|---|
+| Page count | 0.10 |
+| Token density pattern | 0.20 |
+| Keyword signature (Jaccard) | 0.25 |
+| Table structure | 0.20 |
+| Label clusters | 0.15 |
+| Header/footer density | 0.10 |
+
+### Backend (8 new endpoints)
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | /api/layout-fingerprints/stats | Aggregate stats (total families, fingerprints, vendors, new layouts, type distribution) |
+| GET | /api/layout-fingerprints/families | List all families with vendor/doc_type/status filters |
+| GET | /api/layout-fingerprints/families/{id} | Family detail with recent documents |
+| GET | /api/layout-fingerprints/vendor/{vendor_no} | Families for specific vendor |
+| GET | /api/layout-fingerprints/document/{doc_id} | Fingerprint for specific document |
+| POST | /api/layout-fingerprints/backfill | Generate fingerprints for existing docs without one |
+| GET | /api/layout-fingerprints/alerts | Families needing attention (low automation, high mislabel) |
+
+### Services
+- `layout_fingerprint_service.py` — Core service: fingerprint generation, family assignment, similarity scoring, resolver bias computation, admin queries, alert detection, backfill enrichment
+
+### Resolver Integration
+- Layout family bias added as **13th scoring component** in `score_bc_match()` (reference_intelligence_service.py)
+- Bias capped at MAX_LAYOUT_FAMILY_BIAS = 0.15
+- Uses entity distribution from family history to bias scoring
+- Diagnostics include layout_family data: family_id, fingerprint, similarity, entity_biases, new_layout_detected
+
+### Auto-Resolution Integration
+- Fingerprint generated after successful resolution in auto_resolution_service.py
+- Family metrics updated with resolution/automation outcomes
+- Reference label and BC entity type tracked per family
+
+### Frontend
+- **Admin Page** at `/layout-fingerprints`: stat cards, families table with performance metrics, detail drawer, doc type/vendor filters, backfill button
+- **MatchingDebugPanel**: Layout Fingerprint section showing family ID, fingerprint hash, similarity score, new layout detection, family performance, and applied biases
+- **Navigation**: "Layout Families" link with Fingerprint icon in sidebar
+
+### Alerting Integration
+- Detects families with low automation success (<50%)
+- Detects families with high mislabel count (>=5)
+- Alerts surfaced via /api/layout-fingerprints/alerts
+
+### Backwards Compatibility
+- Existing documents without fingerprints continue to work
+- Fingerprints generated lazily via backfill or during new document processing
+- UI and diagnostics degrade gracefully when no layout data exists
+
+### Test Results
+- Backend: 13/13 tests passed (100%)
+- Frontend: All UI elements verified (100%)
+- Test report: `/app/test_reports/iteration_36.json`
+
+*Last Updated: March 11, 2026*

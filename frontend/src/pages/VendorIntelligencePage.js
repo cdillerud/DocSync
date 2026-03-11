@@ -9,7 +9,8 @@ import { toast } from 'sonner';
 import {
   Brain, Users, TrendingUp, Shield, Search, RefreshCw, Loader2,
   ChevronRight, ChevronLeft, ArrowUpDown, Activity, Target,
-  Truck, Package, FileText, CheckCircle2, AlertTriangle
+  Truck, Package, FileText, CheckCircle2, AlertTriangle, ArrowRight,
+  ToggleLeft, ToggleRight, RotateCcw, Zap
 } from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -57,6 +58,144 @@ function RateBar({ label, value, color = 'bg-emerald-500' }) {
       </div>
       <Progress value={pct} className="h-1.5" />
     </div>
+  );
+}
+
+function VendorExtractionProfileSection({ vendorId }) {
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [generating, setGenerating] = useState(false);
+
+  useEffect(() => {
+    if (!vendorId) return;
+    setLoading(true);
+    api(`/vendor-extraction-profiles/${encodeURIComponent(vendorId)}`)
+      .then(p => setProfile(p))
+      .catch(() => setProfile(null))
+      .finally(() => setLoading(false));
+  }, [vendorId]);
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    try {
+      const p = await apiPost(`/vendor-extraction-profiles/${encodeURIComponent(vendorId)}/generate`);
+      setProfile(p);
+      toast.success('Profile generated');
+    } catch { toast.error('Generation failed'); }
+    finally { setGenerating(false); }
+  };
+
+  const handleToggle = async () => {
+    try {
+      await apiPost(`/vendor-extraction-profiles/${encodeURIComponent(vendorId)}/toggle?enabled=${!profile.enabled}`);
+      setProfile(prev => ({ ...prev, enabled: !prev.enabled }));
+      toast.success(profile.enabled ? 'Profile disabled' : 'Profile enabled');
+    } catch { toast.error('Toggle failed'); }
+  };
+
+  const handleReset = async () => {
+    try {
+      await apiPost(`/vendor-extraction-profiles/${encodeURIComponent(vendorId)}/reset`);
+      setProfile(null);
+      toast.success('Profile reset');
+    } catch { toast.error('Reset failed'); }
+  };
+
+  if (loading) return <div className="text-xs text-muted-foreground py-2"><Loader2 className="w-3 h-3 animate-spin inline mr-1" />Loading profile...</div>;
+
+  return (
+    <Card className="border border-border" data-testid="vendor-extraction-profile-section">
+      <CardHeader className="pb-2 pt-3 px-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+            <Zap className="w-3 h-3" /> Extraction Profile
+          </CardTitle>
+          <div className="flex items-center gap-1">
+            {profile ? (
+              <>
+                <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px]" onClick={handleToggle}
+                  data-testid="vep-toggle-btn">
+                  {profile.enabled ? <ToggleRight className="w-3 h-3 text-emerald-400" /> : <ToggleLeft className="w-3 h-3 text-muted-foreground" />}
+                </Button>
+                <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px]" onClick={handleReset}
+                  data-testid="vep-reset-btn">
+                  <RotateCcw className="w-3 h-3" />
+                </Button>
+              </>
+            ) : (
+              <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px]" onClick={handleGenerate}
+                disabled={generating} data-testid="vep-generate-btn">
+                {generating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                <span className="ml-0.5">Generate</span>
+              </Button>
+            )}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="px-3 pb-3">
+        {!profile ? (
+          <p className="text-[10px] text-muted-foreground">No profile yet. Click Generate to create one from existing data.</p>
+        ) : (
+          <div className="space-y-2 text-xs">
+            <div className="flex items-center gap-2">
+              <Badge className={profile.enabled ? 'bg-emerald-500/20 text-emerald-400 text-[10px]' : 'bg-gray-500/20 text-gray-400 text-[10px]'}>
+                {profile.enabled ? 'Active' : 'Disabled'}
+              </Badge>
+              <span className="text-[10px] text-muted-foreground">Type: {profile.document_type_bias || 'unknown'}</span>
+              <span className="text-[10px] text-muted-foreground">Source: {(profile.learning_source || []).join(', ')}</span>
+            </div>
+
+            {profile.reference_priority_order?.length > 0 && (
+              <div>
+                <span className="text-[10px] text-muted-foreground">Reference Priority</span>
+                <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                  {profile.reference_priority_order.map((p, i, arr) => (
+                    <span key={p} className="flex items-center gap-0.5">
+                      <Badge variant="outline" className="text-[10px] font-mono">{p.replace('posted_', '').replace('_', ' ')}</Badge>
+                      {i < arr.length - 1 && <ArrowRight className="w-2.5 h-2.5 text-muted-foreground" />}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {profile.reference_label_bias && Object.keys(profile.reference_label_bias).length > 0 && (
+              <div>
+                <span className="text-[10px] text-muted-foreground">Label Bias</span>
+                {Object.entries(profile.reference_label_bias).map(([label, info]) => (
+                  <div key={label} className="flex items-center gap-1.5 text-[10px] mt-0.5">
+                    <Badge variant="outline" className="text-[10px]">{label}</Badge>
+                    <ArrowRight className="w-2.5 h-2.5 text-muted-foreground" />
+                    <span className="font-mono text-teal-400">{info.target_label}</span>
+                    <span className="text-emerald-400">+{((info.boost || 0) * 100).toFixed(0)}%</span>
+                    <span className="text-muted-foreground">({info.count}x)</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {profile.confidence_adjustments && Object.keys(profile.confidence_adjustments).length > 0 && (
+              <div>
+                <span className="text-[10px] text-muted-foreground">Confidence Adjustments</span>
+                <div className="flex flex-wrap gap-1 mt-0.5">
+                  {Object.entries(profile.confidence_adjustments).map(([k, v]) => (
+                    <Badge key={k} variant="outline" className={`text-[10px] font-mono ${v > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {k.replace('posted_', '').replace('_', ' ')}: {v > 0 ? '+' : ''}{(v * 100).toFixed(0)}%
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="text-[10px] text-muted-foreground pt-1 flex items-center gap-3">
+              <span>Docs: {profile.source_invoice_count || 0}</span>
+              <span>Corrections: {profile.source_correction_count || 0}</span>
+              <span>Updated: {profile.last_updated ? new Date(profile.last_updated).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}</span>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -157,6 +296,9 @@ function VendorDetailPanel({ profile, onClose }) {
             </CardContent>
           </Card>
         )}
+
+        {/* Vendor Extraction Profile (Part 6) */}
+        <VendorExtractionProfileSection vendorId={profile.vendor_no || profile.vendor_name} />
 
         {/* Timeline */}
         <div className="text-[10px] text-muted-foreground space-y-1">

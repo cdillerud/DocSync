@@ -29,6 +29,7 @@ export default function MatchingDebugPanel({ document: doc }) {
   const [showScores, setShowScores] = useState(false);
   const [showCache, setShowCache] = useState(false);
   const [showCorrections, setShowCorrections] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
 
   const fetchDebug = async () => {
     setLoading(true);
@@ -58,7 +59,8 @@ export default function MatchingDebugPanel({ document: doc }) {
   const vendorPatterns = debug?.vendor_correction_patterns;
   const lcHints = diag?.label_correction_hints || {};
   const vendorHints = diag?.vendor_hints || {};
-  const hasLearningSignals = corrections.length > 0 || vendorPatterns?.has_patterns || Object.keys(lcHints).length > 0;
+  const vep = debug?.vendor_extraction_profile;
+  const hasLearningSignals = corrections.length > 0 || vendorPatterns?.has_patterns || Object.keys(lcHints).length > 0 || vep?.has_profile;
 
   return (
     <Card className="border border-border" data-testid="matching-debug-panel">
@@ -257,6 +259,7 @@ export default function MatchingDebugPanel({ document: doc }) {
                                         k === 'cluster_match_bonus' ? 'bg-blue-500/60' :
                                         k === 'reference_context_match' ? 'bg-cyan-500/60' :
                                         k === 'date_proximity' ? 'bg-orange-500/60' :
+                                        k === 'extraction_profile_bias' ? 'bg-teal-500/60' :
                                         'bg-emerald-500/60'
                                       }`}
                                       style={{ width: `${Math.min(v * 200, 100)}%` }}
@@ -264,7 +267,8 @@ export default function MatchingDebugPanel({ document: doc }) {
                                   </div>
                                   <span className={
                                     k === 'label_correction_boost' ? 'text-violet-400' :
-                                    k === 'cluster_match_bonus' ? 'text-blue-400' : ''
+                                    k === 'cluster_match_bonus' ? 'text-blue-400' :
+                                    k === 'extraction_profile_bias' ? 'text-teal-400' : ''
                                   }>
                                     {k.replace(/_/g, ' ')}: {(v * 100).toFixed(0)}%
                                   </span>
@@ -356,6 +360,74 @@ export default function MatchingDebugPanel({ document: doc }) {
                 </div>
               )}
 
+              {/* Vendor Extraction Profile (Part 9) */}
+              {(vep?.has_profile || diag?.extraction_profile?.has_profile) && (
+                <div data-testid="matching-debug-extraction-profile">
+                  <button
+                    onClick={() => setShowProfile(!showProfile)}
+                    className="flex items-center gap-1 font-semibold text-muted-foreground hover:text-foreground"
+                    data-testid="matching-debug-profile-toggle"
+                  >
+                    <Zap className="w-3 h-3" />
+                    Vendor Extraction Profile
+                    <Badge className="bg-cyan-500/20 text-cyan-400 text-[10px] ml-1">active</Badge>
+                    {showProfile ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                  </button>
+                  {showProfile && (
+                    <div className="mt-2 space-y-2 pl-2 text-xs">
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                        <div>
+                          <span className="text-[10px] text-muted-foreground">Vendor</span>
+                          <div className="font-semibold">{vep?.vendor_name || debug?.vendor || 'N/A'}</div>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-muted-foreground">Doc Type Bias</span>
+                          <div className="font-mono">{vep?.document_type_bias || diag?.extraction_profile?.document_type_bias || 'none'}</div>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-muted-foreground">Learning Source</span>
+                          <div>{(vep?.learning_source || diag?.extraction_profile?.learning_source || []).join(', ') || 'N/A'}</div>
+                        </div>
+                      </div>
+                      {(vep?.reference_priority_order || diag?.extraction_profile?.reference_priority_order || []).length > 0 && (
+                        <div>
+                          <span className="text-[10px] text-muted-foreground">Reference Priority</span>
+                          <div className="flex items-center gap-1 mt-0.5">
+                            {(vep?.reference_priority_order || diag?.extraction_profile?.reference_priority_order).map((p, i, arr) => (
+                              <span key={p} className="flex items-center gap-1">
+                                <Badge variant="outline" className="text-[10px] font-mono">
+                                  {p.replace('posted_', '').replace('_', ' ')}
+                                </Badge>
+                                {i < arr.length - 1 && <ArrowRight className="w-2.5 h-2.5 text-muted-foreground" />}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {vep?.reference_label_bias && Object.keys(vep.reference_label_bias).length > 0 && (
+                        <div>
+                          <span className="text-[10px] text-muted-foreground">Label Bias</span>
+                          {Object.entries(vep.reference_label_bias).map(([label, info]) => (
+                            <div key={label} className="flex items-center gap-2 mt-0.5">
+                              <Badge variant="outline" className="text-[10px]">{label}</Badge>
+                              <ArrowRight className="w-2.5 h-2.5 text-muted-foreground" />
+                              <span className="font-mono text-cyan-400 text-[10px]">
+                                {info.target_entity?.replace('posted_', '').replace('_', ' ')}
+                              </span>
+                              <span className="text-emerald-400 text-[10px]">+{((info.boost || 0) * 100).toFixed(0)}%</span>
+                              {info.penalty < 0 && (
+                                <span className="text-red-400 text-[10px]">{((info.penalty || 0) * 100).toFixed(0)}%</span>
+                              )}
+                              <span className="text-muted-foreground text-[10px]">({info.count}x, {info.source})</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Part 7: Link to Correction Insights Dashboard */}
               <div className="pt-1">
                 <Button
@@ -412,6 +484,11 @@ export default function MatchingDebugPanel({ document: doc }) {
                       {diag.decision.cluster_match_bonus > 0 && (
                         <span className="text-muted-foreground">
                           Cluster bonus: <span className="font-mono text-blue-400">+{(diag.decision.cluster_match_bonus * 100).toFixed(1)}%</span>
+                        </span>
+                      )}
+                      {diag.decision.extraction_profile_applied && (
+                        <span className="text-muted-foreground">
+                          Profile: <Badge className="bg-cyan-500/20 text-cyan-400 text-[10px]">applied</Badge>
                         </span>
                       )}
                     </div>

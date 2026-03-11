@@ -551,7 +551,8 @@ def score_bc_match(
     entity_type: str,
     document: Dict[str, Any] = None,
     vendor_hints: Dict[str, Any] = None,
-    label_correction_hints: Dict[str, Any] = None
+    label_correction_hints: Dict[str, Any] = None,
+    extraction_profile: Dict[str, Any] = None
 ) -> Tuple[float, str, Dict[str, float]]:
     """
     Score a BC match based on multiple factors.
@@ -716,22 +717,60 @@ def score_bc_match(
             except (ValueError, TypeError):
                 pass
     
-    # --- VENDOR INFLUENCE CAP (Part 7): max total vendor-related boost = 0.20 ---
+    # 12. Vendor Extraction Profile bias (Part 4 — interpretation hints, NOT templates)
+    breakdown["extraction_profile_bias"] = 0.0
+    if extraction_profile and extraction_profile.get("has_profile"):
+        label_bias = extraction_profile.get("reference_label_bias", {})
+        conf_adj = extraction_profile.get("confidence_adjustments", {})
+        
+        # Apply label bias: if candidate's label has a known bias toward this entity
+        if candidate.detected_label in label_bias:
+            bias_info = label_bias[candidate.detected_label]
+            target_entity = bias_info.get("target_entity", "")
+            if entity_type == target_entity:
+                boost = bias_info.get("boost", 0)
+                breakdown["extraction_profile_bias"] = round(min(boost, 0.15), 4)
+                reasoning_parts.append(
+                    f"Profile bias: {candidate.detected_label}→{entity_type} +{boost:.0%} "
+                    f"(from {bias_info.get('source', 'learned')})"
+                )
+            else:
+                penalty = bias_info.get("penalty", 0)
+                if penalty < 0:
+                    breakdown["extraction_profile_bias"] = round(max(penalty, -0.10), 4)
+                    reasoning_parts.append(
+                        f"Profile penalty: {candidate.detected_label}≠{target_entity} {penalty:.0%}"
+                    )
+        
+        # Apply entity-specific confidence adjustments
+        entity_boost_key = f"{entity_type}_boost"
+        entity_penalty_key = f"{entity_type}_penalty"
+        entity_corr_key = f"{entity_type}_correction_boost"
+        
+        profile_adj = 0
+        for adj_key in (entity_boost_key, entity_penalty_key, entity_corr_key):
+            if adj_key in conf_adj:
+                profile_adj += conf_adj[adj_key]
+        
+        if profile_adj != 0 and breakdown["extraction_profile_bias"] == 0:
+            breakdown["extraction_profile_bias"] = round(max(min(profile_adj, 0.15), -0.10), 4)
+            reasoning_parts.append(f"Profile entity adjustment: {entity_type} {profile_adj:+.0%}")
+    
+    # --- VENDOR INFLUENCE CAP: max total vendor-related boost = 0.20 ---
     vendor_components = (
         breakdown.get("vendor_behavior_bonus", 0)
         + breakdown.get("label_correction_boost", 0)
+        + max(breakdown.get("extraction_profile_bias", 0), 0)  # only cap positive bias
     )
     if vendor_components > 0.20:
         # Scale down proportionally
-        if breakdown.get("vendor_behavior_bonus", 0) > 0 and breakdown.get("label_correction_boost", 0) > 0:
-            ratio_vb = breakdown["vendor_behavior_bonus"] / vendor_components
-            ratio_lc = breakdown["label_correction_boost"] / vendor_components
-            breakdown["vendor_behavior_bonus"] = round(0.20 * ratio_vb, 4)
-            breakdown["label_correction_boost"] = round(0.20 * ratio_lc, 4)
-        elif breakdown.get("vendor_behavior_bonus", 0) > 0.20:
-            breakdown["vendor_behavior_bonus"] = 0.20
-        elif breakdown.get("label_correction_boost", 0) > 0.20:
-            breakdown["label_correction_boost"] = 0.20
+        scale = 0.20 / vendor_components
+        if breakdown.get("vendor_behavior_bonus", 0) > 0:
+            breakdown["vendor_behavior_bonus"] = round(breakdown["vendor_behavior_bonus"] * scale, 4)
+        if breakdown.get("label_correction_boost", 0) > 0:
+            breakdown["label_correction_boost"] = round(breakdown["label_correction_boost"] * scale, 4)
+        if breakdown.get("extraction_profile_bias", 0) > 0:
+            breakdown["extraction_profile_bias"] = round(breakdown["extraction_profile_bias"] * scale, 4)
         reasoning_parts.append(f"Vendor influence capped at 20% (was {vendor_components:.0%})")
     
     score = sum(breakdown.values())
@@ -791,12 +830,16 @@ class ReferenceIntelligenceService:
         self.event_service = event_service
         self._label_correction_service = None
         self._vendor_intel_service = None
+        self._vep_service = None
     
     def set_label_correction_service(self, svc):
         self._label_correction_service = svc
     
     def set_vendor_intelligence_service(self, svc):
         self._vendor_intel_service = svc
+    
+    def set_vep_service(self, svc):
+        self._vep_service = svc
     
     async def resolve_document_references(
         self,
@@ -1045,6 +1088,22 @@ class ReferenceIntelligenceService:
             k: v for k, v in label_correction_cache.items() if v.get("has_hints")
         }
         
+        # Fetch Vendor Extraction Profile (adaptive interpretation layer)
+        extraction_profile = None
+        if self._vep_service and vendor_name:
+            try:
+                extraction_profile = await self._vep_service.get_resolver_adjustments(vendor_name)
+            except Exception:
+                extraction_profile = {"has_profile": False}
+        
+        diag["extraction_profile"] = {
+            "has_profile": extraction_profile.get("has_profile", False) if extraction_profile else False,
+            "document_type_bias": extraction_profile.get("document_type_bias") if extraction_profile else None,
+            "reference_priority_order": extraction_profile.get("reference_priority_order", []) if extraction_profile else [],
+            "label_bias_count": len(extraction_profile.get("reference_label_bias", {})) if extraction_profile else 0,
+            "learning_source": extraction_profile.get("learning_source", []) if extraction_profile else [],
+        }
+        
         for candidate in unique_candidates:
             # Use the adaptive resolver
             bc_result = await self.bc_resolver.resolve_reference(
@@ -1078,7 +1137,8 @@ class ReferenceIntelligenceService:
                     bc_result.reference_type,
                     document,
                     vendor_hints=vendor_hints,
-                    label_correction_hints=lc_hints
+                    label_correction_hints=lc_hints,
+                    extraction_profile=extraction_profile
                 )
                 
                 match = BCMatch(
@@ -1142,7 +1202,8 @@ class ReferenceIntelligenceService:
                         score, reasoning, breakdown = score_bc_match(
                             candidate, cluster_info, cluster_entity_type,
                             document, vendor_hints=vendor_hints,
-                            label_correction_hints=lc_hints
+                            label_correction_hints=lc_hints,
+                            extraction_profile=extraction_profile
                         )
                         # Add cluster bonus (0.03) for relationship-based discovery
                         cluster_bonus = 0.03 if cr.get("_cluster_reason", "").startswith("linked_via") else 0
@@ -1220,6 +1281,10 @@ class ReferenceIntelligenceService:
                     for s in diag.get("candidate_scores", [])
                     if s.get("bc_document_no") == best_match.bc_document_no
                 ), 4),
+                "extraction_profile_applied": any(
+                    s.get("score_breakdown", {}).get("extraction_profile_bias", 0) != 0
+                    for s in diag.get("candidate_scores", [])
+                ),
             }
             
             logger.info(

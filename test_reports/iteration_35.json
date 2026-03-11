@@ -1,0 +1,99 @@
+{
+  "summary": "Vendor Extraction Profiles (10-part spec) fully tested. All 16 backend API tests passed (100%). Frontend verified: VEP section in Vendor Intelligence detail panel shows Active badge, Reference Priority, Label Bias, Confidence Adjustments, Generate/Toggle/Reset buttons. Matching Debug panel shows Vendor Extraction Profile section with 'active' badge, Reference Priority, Label Bias display, extraction_profile_bias in score breakdown (teal coloring). All scoring model integration working: extraction_profile_bias component (max 0.15 boost, -0.10 penalty), vendor influence cap includes profile bias.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_vendor_extraction_profiles.py",
+    "/app/test_reports/pytest/vendor_extraction_profiles_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "All 7 VEP endpoints working correctly with proper response structures",
+    "Profile model includes all required fields: vendor_no, vendor_name, document_type_bias, reference_priority_order, reference_label_bias, confidence_adjustments, enabled, learning_source",
+    "Scoring model component #12 (extraction_profile_bias) integrates correctly with max 0.15 boost / -0.10 penalty caps",
+    "Vendor influence cap (0.20 max) correctly includes vendor_behavior_bonus + label_correction_boost + extraction_profile_bias (positive only)",
+    "GET /api/documents/{doc_id}/matching-debug correctly includes vendor_extraction_profile field with has_profile, reference_priority_order, reference_label_bias",
+    "POST /api/documents/{doc_id}/matching-debug/rerun includes extraction_profile_bias in score breakdown and extraction_profile_applied in decision diagnostics",
+    "Frontend VEP section in VendorDetailPanel displays Active/Disabled badge, Reference Priority arrows, Label Bias with boost percentages, Confidence Adjustments",
+    "Frontend MatchingDebugPanel shows Vendor Extraction Profile section with teal score bar coloring for extraction_profile_bias",
+    "Admin controls (toggle/reset) work correctly - toggle updates enabled status, reset deletes profile which regenerates on next learning cycle",
+    "Profile auto-generation from vendor_intelligence + correction_feedback data works correctly (3 profiles auto-generated at startup)"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_vendor_extraction_profiles.py"
+  ],
+  "success_rate": {
+    "backend": "100% (16/16 tests passed)",
+    "frontend": "100% (all UI elements verified)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "Used existing data: 3 profiles auto-generated at startup for Cargo Modules LLC (has label_bias PO→SHIPMENT, confidence_adjustments posted_sales_shipment_boost:+12%), Tumalo Creek Transportation, TUMALO CREEK Transportation",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Vendor Extraction Profiles feature fully functional. 3 profiles exist: Cargo Modules LLC (freight_invoice bias, has label_bias), Tumalo Creek Transportation (freight_invoice), TUMALO CREEK Transportation (purchase_invoice). Key test document: 80c7ab51-0cdb-48cc-b39c-b5d8a9c27c85 (Cargo Modules). Safety caps enforced: MAX_MATCH_BOOST=0.15, MAX_MATCH_PENALTY=-0.10, MAX_LABEL_BIAS=0.15. Vendor influence cap 0.20 includes profile bias. Background learning runs every 3600 seconds. MIN_DOCS_FOR_PROFILE=5 (vendors with < 5 docs cannot have profiles generated).",
+  "verified_features": {
+    "GET /api/vendor-extraction-profiles": {
+      "status": "VERIFIED",
+      "evidence": "Returns array with 3 profiles, each containing vendor_no, vendor_name, document_type_bias, reference_priority_order, reference_label_bias, confidence_adjustments, enabled, learning_source"
+    },
+    "GET /api/vendor-extraction-profiles/stats": {
+      "status": "VERIFIED",
+      "evidence": "Returns total_profiles=3, enabled=3, disabled=0, with_label_bias=0"
+    },
+    "GET /api/vendor-extraction-profiles/{vendor_id}": {
+      "status": "VERIFIED",
+      "evidence": "Returns Cargo Modules LLC profile with document_type_bias=freight_invoice, reference_priority_order=[purchase_order, posted_purchase_invoice, posted_sales_shipment, sales_order]"
+    },
+    "POST /api/vendor-extraction-profiles/{vendor_id}/generate": {
+      "status": "VERIFIED",
+      "evidence": "Successfully regenerates profile for Cargo Modules LLC"
+    },
+    "POST /api/vendor-extraction-profiles/generate-all": {
+      "status": "VERIFIED", 
+      "evidence": "Returns vendors_evaluated, profiles_created, profiles_updated, skipped counts"
+    },
+    "POST /api/vendor-extraction-profiles/{vendor_id}/toggle?enabled=false": {
+      "status": "VERIFIED",
+      "evidence": "Successfully toggles profile enabled status, verified via GET endpoint"
+    },
+    "POST /api/vendor-extraction-profiles/{vendor_id}/reset": {
+      "status": "VERIFIED",
+      "evidence": "Returns {status: 'reset'}, profile is deleted (regenerated on next cycle)"
+    },
+    "GET /api/documents/{doc_id}/matching-debug vendor_extraction_profile": {
+      "status": "VERIFIED",
+      "evidence": "Returns vendor_extraction_profile with has_profile=true, reference_priority_order, reference_label_bias, confidence_adjustments for doc 80c7ab51"
+    },
+    "POST /api/documents/{doc_id}/matching-debug/rerun extraction_profile_bias": {
+      "status": "VERIFIED",
+      "evidence": "Score breakdown includes extraction_profile_bias component (0.0571 for test doc), decision.extraction_profile_applied present"
+    },
+    "Frontend VendorIntelligencePage VEP section": {
+      "status": "VERIFIED",
+      "evidence": "VendorExtractionProfileSection visible in vendor detail panel with Active badge, Reference Priority arrows, Label Bias (PO→SHIPMENT +6%), Confidence Adjustments (+12%, +5%), Generate/Toggle/Reset buttons"
+    },
+    "Frontend MatchingDebugPanel VEP section": {
+      "status": "VERIFIED",
+      "evidence": "Vendor Extraction Profile section with 'active' badge, Reference Priority, Label Bias display, teal coloring for extraction_profile_bias in score breakdown"
+    },
+    "Scoring model extraction_profile_bias component": {
+      "status": "VERIFIED",
+      "evidence": "Component #12 in scoring model, max 0.15 boost / -0.10 penalty, vendor influence cap includes profile bias"
+    },
+    "Profile auto-generation from existing data": {
+      "status": "VERIFIED",
+      "evidence": "3 profiles auto-generated at startup from vendor_intelligence_profiles + reference_label_corrections data"
+    }
+  },
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "note": "All APIs are live. No mocked integrations."
+  }
+}

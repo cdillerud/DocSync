@@ -161,6 +161,9 @@ from services.label_correction_service import (
 from services.alert_pattern_service import (
     AlertPatternService, get_alert_pattern_service, set_alert_pattern_service
 )
+from services.vendor_extraction_profile_service import (
+    VendorExtractionProfileService, get_vep_service, set_vep_service
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -2169,6 +2172,17 @@ async def get_matching_debug(doc_id: str):
     if lc_svc and vendor_id:
         vendor_patterns = await lc_svc.get_vendor_patterns(vendor_id)
     
+    # Fetch vendor extraction profile
+    vep_data = None
+    vep_svc = get_vep_service()
+    if vep_svc and vendor_id:
+        vep_data = await vep_svc.get_resolver_adjustments(vendor_id)
+        # Fallback: try the raw vendor name if vendor_no didn't match
+        if not vep_data or not vep_data.get("has_profile"):
+            alt_vendor = doc.get("vendor_raw") or doc.get("matched_vendor_name") or ""
+            if alt_vendor and alt_vendor != vendor_id:
+                vep_data = await vep_svc.get_resolver_adjustments(alt_vendor)
+    
     return {
         "document_id": doc_id,
         "document_type": doc.get("document_type"),
@@ -2180,6 +2194,7 @@ async def get_matching_debug(doc_id: str):
         "freight_gl": doc.get("freight_gl_classification"),
         "label_corrections": label_corrections,
         "vendor_correction_patterns": vendor_patterns,
+        "vendor_extraction_profile": vep_data,
     }
 
 
@@ -2435,6 +2450,85 @@ async def resolve_alert(pattern_key: str):
     if not ok:
         raise HTTPException(status_code=404, detail="Alert not found")
     return {"status": "resolved", "pattern_key": pattern_key}
+
+
+# =============================================================================
+# VENDOR EXTRACTION PROFILE ENDPOINTS
+# =============================================================================
+
+@api_router.get("/vendor-extraction-profiles")
+async def get_all_extraction_profiles():
+    """Get all vendor extraction profiles."""
+    svc = get_vep_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="VEP service not initialized")
+    return await svc.get_all_profiles()
+
+
+@api_router.get("/vendor-extraction-profiles/stats")
+async def get_extraction_profile_stats():
+    """Get aggregate stats about extraction profiles."""
+    svc = get_vep_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="VEP service not initialized")
+    return await svc.get_profile_stats()
+
+
+@api_router.get("/vendor-extraction-profiles/{vendor_id}")
+async def get_vendor_extraction_profile(vendor_id: str):
+    """Get a specific vendor's extraction profile."""
+    svc = get_vep_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="VEP service not initialized")
+    profile = await svc.get_profile(vendor_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return profile
+
+
+@api_router.post("/vendor-extraction-profiles/{vendor_id}/generate")
+async def generate_vendor_profile(vendor_id: str):
+    """Generate or regenerate a vendor extraction profile."""
+    svc = get_vep_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="VEP service not initialized")
+    profile = await svc.generate_profile(vendor_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Insufficient data to generate profile")
+    return profile
+
+
+@api_router.post("/vendor-extraction-profiles/generate-all")
+async def generate_all_profiles():
+    """Generate profiles for all eligible vendors."""
+    svc = get_vep_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="VEP service not initialized")
+    return await svc.generate_all_profiles()
+
+
+@api_router.post("/vendor-extraction-profiles/{vendor_id}/toggle")
+async def toggle_vendor_profile(vendor_id: str, enabled: bool = True):
+    """Enable or disable a vendor extraction profile."""
+    svc = get_vep_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="VEP service not initialized")
+    ok = await svc.toggle_profile(vendor_id, enabled)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return {"vendor_id": vendor_id, "enabled": enabled}
+
+
+@api_router.post("/vendor-extraction-profiles/{vendor_id}/reset")
+async def reset_vendor_profile(vendor_id: str):
+    """Delete a vendor profile (regenerated on next learning cycle)."""
+    svc = get_vep_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="VEP service not initialized")
+    ok = await svc.reset_profile(vendor_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return {"vendor_id": vendor_id, "status": "reset"}
 
 
 @api_router.put("/documents/{doc_id}")
@@ -16076,6 +16170,14 @@ async def startup():
     await alert_svc.evaluate_patterns()  # Initial evaluation
     alert_svc.start_background_eval()
     logger.info("Alert Pattern Service initialized with background evaluation")
+    
+    # Initialize Vendor Extraction Profile Service (adaptive interpretation layer)
+    vep_svc = set_vep_service(db, event_service)
+    await vep_svc.initialize()
+    ref_intel_service.set_vep_service(vep_svc)
+    await vep_svc.generate_all_profiles()  # Initial profile generation
+    vep_svc.start_background_learning()
+    logger.info("Vendor Extraction Profile Service initialized with background learning")
     
     # Start daily pilot summary scheduler if enabled
     global _pilot_summary_task

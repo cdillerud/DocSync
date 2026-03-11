@@ -63,6 +63,18 @@ from routers.vendors import router as vendors_router
 from routers.migration_routes import router as migration_routes_router
 from routers.stable_vendor import router as stable_vendor_router
 
+# ---------------------------------------------------------------------------
+# NEW: Thin-wrapper routers extracted from server.py (Phase 2 refactor)
+# ---------------------------------------------------------------------------
+from routers.auth_routes import router as auth_routes_router
+from routers.documents_routes import router as documents_routes_router
+from routers.workflows_routes import router as workflows_routes_router
+from routers.bc_routes import router as bc_routes_router
+from routers.mailbox_routes import router as mailbox_routes_router
+from routers.aliases_routes import router as aliases_routes_router
+from routers.spiro_routes import router as spiro_routes_router
+from routers.file_import_routes import router as file_import_routes_router
+
 # ==================== APP ====================
 app = FastAPI(title="GPI Document Hub API")
 
@@ -98,6 +110,16 @@ app.include_router(email_polling_router, prefix="/api")
 app.include_router(vendors_router, prefix="/api")
 app.include_router(migration_routes_router, prefix="/api")
 app.include_router(stable_vendor_router, prefix="/api")
+
+# NEW: Thin-wrapper routers from server.py extraction (loaded before legacy)
+app.include_router(auth_routes_router, prefix="/api")
+app.include_router(documents_routes_router, prefix="/api")
+app.include_router(workflows_routes_router, prefix="/api")
+app.include_router(bc_routes_router, prefix="/api")
+app.include_router(mailbox_routes_router, prefix="/api")
+app.include_router(aliases_routes_router, prefix="/api")
+app.include_router(spiro_routes_router, prefix="/api")
+app.include_router(file_import_routes_router, prefix="/api")
 
 # ==================== LEGACY ROUTERS ====================
 # api_router has prefix="/api" — document, workflow, alias, BC, sales-file-import routes

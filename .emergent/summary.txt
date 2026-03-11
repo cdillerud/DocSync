@@ -1,48 +1,34 @@
 <analysis>**original_problem_statement:**
-The user wants to build GPI Document Hub, an event-driven workflow platform to automate document processing. The project has evolved through several phases, focusing on AI-assisted document intelligence, automation, and deep integration with Business Central (BC).
+The user wants to build GPI Document Hub, an event-driven workflow platform. The project has evolved to include AI-assisted document intelligence and deep integration with Business Central (BC).
 
-The user has requested two major new features:
-1.  **Implement Document Layout Fingerprinting (COMPLETED):** Create a system to detect when documents share the same overall structural pattern and group them into layout families. This is intended to be a soft structural signal to improve extraction interpretation and resolver confidence while remaining fully layout-independent and AI-first. It explicitly should NOT be a rigid, coordinate-based template engine.
-2.  **Refactor  Monolith (IN PROGRESS):** The main backend file, , has become a 16,000+ line monolith. The user requested a structural refactor to break it down into modular  files organized by domain (e.g., documents, reference intelligence, vendor intelligence, etc.). This is a critical technical debt task to improve maintainability, testability, and developer velocity. The refactor must preserve all existing functionality and endpoint URLs.
+The current high-priority task is to continue the architectural refactor of the backend, which was previously a 16,000+ line monolith in . The goal is to fully modularize the backend by extracting all remaining business logic and API routes into a clean structure of services and routers. This is a technical debt task aimed at improving maintainability, testability, and developer velocity.
+
+Previous completed tasks in this session include:
+1.  **Initial Refactor Pass:** Creating a new  entry point to unblock the refactor.
+2.  **Stable Vendor Auto-Ready Rules:** Implementing a system to automatically route documents from trusted vendors.
+3.  **SharePoint Module Removal:** Deleting an obsolete feature from the codebase.
+4.  **Stable Vendor Admin Page:** Building a UI for admins to oversee and manage the stable vendor system.
 
 **User's preferred language**: English
 
 **what currently exists?**
-The application is a mature, full-stack document intelligence platform (FastAPI/React/MongoDB).
--   **Core Platform:** All previously existing features, including the self-learning resolver, vendor extraction profiles, and analytics dashboards, are in place and functional.
--   **Document Layout Fingerprinting (New):** A complete Document Layout Fingerprinting system has been successfully implemented and tested. This includes a new backend service (), integration into the resolver and auto-resolution pipeline, new database collections (, ), API endpoints, and a new frontend admin page ().
--   **Backend Refactor (In Progress):** The refactoring of  has begun. Numerous modular router files have been created in , and a dependency injection pattern has been established in . However, the process of removing the old code from the monolithic  file has proven extremely difficult and has been unsuccessful so far, leaving the refactor incomplete.
+The application is a mature, full-stack document intelligence platform using FastAPI, React, and MongoDB.
+-   **Modular Backend (In Progress):** The backend now runs via a new  entry point. This file initializes services and includes all modular routers from . It also includes the remaining legacy routes from  as a fallback, but  still contains approximately 88 routes that need to be extracted.
+-   **Stable Vendor Automation:** A complete Stable Vendor feature is live. This includes a backend service (), APIs for evaluation and metrics, and frontend UI elements on the Dashboard, Document Queue, and Document Detail pages.
+-   **Stable Vendor Admin Page:** A new admin page exists at  allowing for manual oversight, vendor status overrides, and review of stability reasoning and history.
 
 **Last working item**:
--   **Last item agent was working:** The agent was attempting to complete the refactor of the monolithic  file. After successfully creating numerous modular router files and extracting the route logic, the agent got stuck in a complex and error-prone loop trying to remove the now-redundant code from the original  file. This process repeatedly led to syntax errors, orphaned code blocks, and a non-functional backend, requiring multiple restorations of the file from version control.
--   **Status:** BLOCKED
+-   **Last item agent was working:** The agent was in the planning phase for the next and final stage of the backend refactoring. The goal is to extract the remaining 88 API routes from the monolithic  and move them into domain-specific router files.
+-   **Status:** NOT STARTED
 -   **Agent Testing Done:** N
 -   **Which testing method agent to use?** backend testing agent
 -   **User Testing Done:** N
 
 **All Pending/In progress Issue list**:
--   **Issue 1: Refactor of  is blocked and incomplete (P0 - CRITICAL)**
-    -   **Description:** The refactoring of  is in a fragile, incomplete state. While the new router modules exist in , the attempts to strip the corresponding code from the original 16,000+ line  file have repeatedly failed.
-    -   **Attempted fixes:**
-        1.  **Manual Line-Range Removal:** Led to syntax errors and was not scalable.
-        2.  **Automated Orphan-Cleaning Scripts:** These were too aggressive and removed legitimate code, corrupting the file.
-        3.  **Precise Block-Extraction Scripts:** Failed due to the complexity of multi-line function signatures and interleaved code blocks, leaving behind orphaned function bodies or fragments of dictionaries.
-    -   **Next debug checklist:**
-        1.  **DO NOT** attempt to further remove code from . This approach has proven to be a dead end.
-        2.  **Adopt a safer strategy:** Create a new bootstrap file (e.g.,  or a refactored ).
-        3.  In this new file, initialize the FastAPI app and services.
-        4.  Import and include all the **new modular routers** from .
-        5.  For the routes **still remaining** in the old , import the  object from that file and include it *last*. This isolates the legacy code without modifying the giant file further.
-        6.  Update  to run the new bootstrap file.
-        7.  Once the application is stable, the old  can be incrementally dismantled further or its remaining routes can be extracted.
-    -   **Why fix this issue and what will be achieved with the fix?** Completing the refactor is critical for the long-term health, maintainability, and scalability of the backend. It will make future development faster and safer.
-    -   **Status:** BLOCKED
-    -   **Is recurring issue?** Y
-    -   **Should Test frontend/backend/both after fix?** Backend (extensive regression testing is required).
-    -   **Blocked on other issue:** None. This is the primary blocker.
-
--   **Issue 2: GitHub Branch/Deployment Confusion (P2 - Medium)**
-    -   **Description:** The user is working on a non-standard  branch, which is a recurring source of friction and deployment problems.
+-   **Issue 1: GitHub Branch/Deployment Confusion (P2 - Medium)**
+    -   **Description:** The user is working on a non-standard  branch, a recurring source of friction and deployment problems.
+    -   **Attempted fixes:** None. This is a user workflow issue.
+    -   **Next debug checklist:** The primary focus is the P0 refactoring task. This issue can be revisited later.
     -   **Why fix this issue and what will be achieved with the fix?** To establish a standard git workflow, eliminate merge conflicts, and enable reliable, predictable deployments.
     -   **Status:** NOT STARTED
     -   **Is recurring issue?** Y
@@ -50,38 +36,34 @@ The application is a mature, full-stack document intelligence platform (FastAPI/
     -   **Blocked on other issue:** Blocked on the P0 refactoring task.
 
 **In progress Task List**:
--   **Task 1: Complete the  refactor (P0)**
-    -   **Where to resume:** The new router files are created in . The immediate next step is to stop modifying  and instead create a new main application entry point that includes both the new routers and the remaining routes from the old file. See Next debug checklist above for the recommended strategy.
-    -   **What will be achieved with this?** A stable, modular backend architecture.
+-   **Task 1: Complete the  modular refactor (P0)**
+    -   **Where to resume:** The agent has a user-approved plan. The next step is to begin the domain-by-domain extraction. Start by creating the new router files (e.g., , ) in . For each route, use  to import and re-register the existing handler function directly from . This avoids modifying  initially and reduces risk. Create a route inventory map to track progress.
+    -   **What will be achieved with this?** A fully modularized backend where  is a lightweight bootstrap file. This will significantly improve maintainability and make future development safer and faster.
     -   **Status:** IN PROGRESS
-    -   **Should Test frontend/backend/both after fix?** Backend
-    -   **Blocked on something:** Blocked on the complexity of the task itself.
+    -   **Should Test frontend/backend/both after fix?** Backend (extensive regression testing is required after each domain is extracted).
+    -   **Blocked on something:** None.
 
 **Upcoming and Future Tasks**
 **Upcoming Tasks:**
--   **Task 1 (P1): Package and Publish the Business Central (AL) Extension.** The updated  file in  needs to be published to the user's BC Sandbox.
--   **Task 2 (P1): Add Create BC Sales Order Button to UI.**
--   **Task 3 (P2): Implement Migration UI Detail Drawer for SharePoint migration.**
+-   **Task 1 (P1):** Package and Publish the Business Central (AL) Extension. The updated  file is in .
+-   **Task 2 (P1):** Add Create BC Sales Order Button to UI.
 
 **Future Tasks:**
 -   Implement Outbound Document Delivery module.
--   Implement Stable Vendor rules for auto-posting.
 -   Replace mock email service with a production-ready solution.
 -   Add multi-step approval routing for documents.
 -   Decommission the legacy Zetadocs system.
 -   Replace mock JWT auth with Entra ID SSO.
 
 **Completed work in this session**
--   **Document Layout Fingerprinting (DONE):** A comprehensive system for generating structural document fingerprints and grouping them into layout families has been fully implemented. This includes:
-    -   Backend: , integration into  and .
-    -   API: New endpoints in  for managing and viewing layout families.
-    -   Database: New collections  and .
-    -   Frontend: A new admin page at  () and integration into the .
-    -   This entire feature passed comprehensive testing via the testing agent.
+-   **Backend Refactor - Phase 1 (DONE):** Unblocked the  refactor by creating a  entry point that correctly loads all new and legacy routers, fixing a critical architectural issue.
+-   **Re-process Button Bug Fix (DONE):** Fixed a  for  in  that caused a 500 error.
+-   **Stable Vendor Auto-Ready Rules (DONE):** Implemented the full backend service, API, and frontend UI for automatically routing documents from trusted vendors.
+-   **SharePoint Migration Module Removal (DONE):** Successfully removed the obsolete feature and all its related files, routes, and UI components from the codebase.
+-   **Stable Vendor Admin Page (DONE):** Implemented a comprehensive admin page at  for vendor oversight, manual overrides, and audit history.
 
 **Earlier issues found/mentioned but not fixed**
--   The  monolith issue is now the primary active task.
--   The non-standard Git branch issue remains pending.
+-   The non-standard Git branch issue remains pending and is a lower priority than the active refactoring task.
 
 **Known issue recurrence from previous fork**
 -   **Issue recurrence in previous fork:** Deployment and Environment Hell, tied to the non-standard git branching.
@@ -92,70 +74,68 @@ The application is a mature, full-stack document intelligence platform (FastAPI/
 
 
 **Key Technical Concepts**
--   **Document Layout Fingerprinting:** Generating a structural hash of a document based on relative positioning of elements (keywords, tables, density) rather than fixed coordinates. This allows for grouping documents into layout families.
--   **Layout Families:** Clusters of documents from the same vendor that share a similar structural fingerprint. Used as a soft scoring signal in the resolver to improve accuracy without rigid templates.
--   **Incremental Refactoring:** The ongoing (and currently stalled) process of migrating a monolithic application to a modular architecture piece-by-piece.
+-   **Incremental Refactoring:** The core strategy for safely dismantling the monolith. A new  entry point acts as a bootstrap, loading new modular routers first, then falling back to the legacy routes still in . This avoids modifying the large legacy file directly.
+-   **Stable Vendor Logic:** A rule-based system () that evaluates vendors based on historical performance to determine if their documents can be fast-tracked through the review process.
+-   **Manual Overrides with Safety Rails:** The admin page allows users to manually set a vendor's status (e.g., ), but this override does *not* bypass core safety checks like validation failures or duplicate detection.
 
 **key DB schema**
--   **document_layout_fingerprints:** 
--   **layout_families:** 
-
-**changes in tech stack**
-- None.
+-   **vendor_profiles:** (extended with) 
+-   **vendor_override_history:** (new collection) 
 
 **All files of reference**
--   **/app/backend/server.py**: The monolithic file currently undergoing a difficult refactor.
--   **/app/backend/routers/**: Directory containing all the newly created modular router files.
--   **/app/backend/deps.py**: New file for handling dependency injection for the new routers.
--   **/app/backend/services/layout_fingerprint_service.py**: New service for the layout fingerprinting feature.
--   **/app/backend/services/reference_intelligence_service.py**: Modified to incorporate the layout family bias.
--   **/app/backend/services/auto_resolution_service.py**: Modified to trigger fingerprint generation.
--   **/app/frontend/src/pages/LayoutFingerprintsPage.js**: New admin page to view layout families.
--   **/app/frontend/src/components/document/MatchingDebugPanel.js**: Modified to display layout fingerprint diagnostics.
+-   **/app/backend/server.py**: The legacy monolith, containing ~88 routes that are the target of the current refactoring task.
+-   **/app/backend/main.py**: The new application entry point that orchestrates loading all routers.
+-   **/app/backend/routers/**: The directory where new, domain-specific router files will be created.
 
 **Areas that need refactoring**:
--   The refactor of  is the highest priority task and is currently in a blocked, partially-completed state.
-
-**key api endpoints**
--   : Gets stats for the layout fingerprints dashboard.
--   : Gets a list of all detected layout families.
--   : Triggers a backfill job to generate fingerprints for old documents.
+-   The primary task is to continue and complete the refactoring of  by extracting all remaining routes.
 
 **Critical Info for New Agent**
--   **The  refactor is the only priority.** The Document Layout Fingerprinting feature is complete and tested. You must now focus on unblocking and completing the backend refactor.
--   **Previous refactoring attempts have failed.** Do not repeat the pattern of trying to programmatically remove code blocks from the 16,000+ line  file. This approach has consistently led to a corrupted, non-functional state.
--   **A new, safer strategy is required.** The recommended path is to create a new, clean application entry point () that imports and includes the newly created routers from the  directory. This new file should also import the  from the old  to include the routes that have *not yet* been extracted. This avoids further risky modifications to the monolithic file.
+-   **Your sole focus is the backend refactor.** All other features are complete and tested.
+-   **Follow the user-approved strategy:** Create new, thin router files in  for each logical domain (Documents, Workflows, etc.).
+-   **Do not copy-paste code.** Inside the new routers, import the handler functions directly from  and re-register them using . This is a low-risk way to move route ownership without changing logic.
+-   Include the new routers in . The new routers are loaded before the legacy router, so they will automatically override the old definitions.
+-   **Create a route inventory map** (e.g., in a markdown file) as you proceed, mapping the original function to its new router module. This is a user requirement.
+-   **Verify functionality incrementally.** After extracting each domain, ensure the application starts and the affected endpoints/UI still work correctly.
 
 **documents and test reports created in this job**
--   : Updated with the new user requests and completion status of the Layout Fingerprinting task.
--   : Test report from the successful validation of the Document Layout Fingerprinting feature.
+-   : Updated with completion status of recent features.
+-   : Final test report from the successful validation of the Stable Vendor Admin Page feature.
+-   : Test report for Stable Vendor Auto-Ready Rules.
+-   : Test report for the initial  refactor.
 
 **Last 10 User Messages and any pending HUMAN messages**
--   User provided a detailed 15-part specification for Document Layout Fingerprinting. (Completed)
--   User provided a detailed 12-part specification for the Refactor Monolith task. (In Progress)
+1.  User provided the prompt for building the Stable Vendor Admin page.
+2.  Agent provided a detailed plan for the admin page.
+3.  User: yes, please proceed
+4.  User provided the prompt to continue the backend refactor.
+5.  Agent listed all 88 routes remaining in .
+6.  Agent proposed a plan to extract the routes domain-by-domain.
+7.  User: Yes, proceed.
+8.  User provided detailed adjustments and guardrails for the refactor plan.
+9.  User emphasized preserving endpoint paths and using thin wrappers first.
+10. User requested the creation of a route inventory map to track progress.
 
 **Project Health Check:**
--   **Broken:**
-    -   The  refactoring process is critically broken and has left the backend in a non-runnable state multiple times during the session. The file is currently restored to a working state, but the refactor task itself is incomplete.
-    -   The git branching strategy ( branch) remains an unresolved issue causing user friction and deployment risk.
+-   **Broken:** None. The application is stable. The  file represents significant technical debt but is functioning correctly via the new  entry point.
 -   **Mocked:** None.
 
 **3rd Party Integrations**
--   **Dynamics 365 Business Central API:** ✅ Live and connected (Production for Reads, writes blocked).
--   **Microsoft Graph API / SharePoint:** ✅ Live and connected for email/file operations.
--   **Gemini (via Emergent LLM Key):** ✅ Used for document classification.
--   **Spiro CRM API:** ✅ Live and connected.
+-   **Dynamics 365 Business Central API:** Live and connected.
+-   **Microsoft Graph API / SharePoint:** Live and connected.
+-   **Gemini (via Emergent LLM Key):** Used for document classification.
+-   **Spiro CRM API:** Live and connected.
 -   **APScheduler:** Used for background tasks.
 
 **Testing status**
--   **Testing agent used after significant changes:** YES. Used successfully for the Document Layout Fingerprinting feature.
+-   **Testing agent used after significant changes:** YES. Used successfully for all three major features implemented in this session.
 -   **Troubleshoot agent used after agent stuck in loop:** NO.
--   **Test files created:** Yes, by the testing agent for the layout fingerprinting feature.
--   **Known regressions:** None from the completed feature. The refactor task has not been tested as it is incomplete.
+-   **Test files created:** Yes, by the testing agent.
+-   **Known regressions:** None.
 
 **Credentials to test flow:**
 -   **Web UI:**  / 
 -   **Business Central / Graph API:** Credentials are correctly configured in .
 
 **What agent forgot to execute**
--   The agent did not forget any tasks but failed to complete the  refactor due to its extreme complexity and a flawed removal strategy. It correctly prioritized this technical debt item as requested by the user.</analysis>
+-   Nothing was forgotten. The agent successfully completed three major features and one critical bug fix, and is now correctly teeing up the next phase of the user's highest-priority architectural task.</analysis>

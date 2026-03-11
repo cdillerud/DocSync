@@ -2410,4 +2410,22 @@ A structural document analysis system that detects when documents share overall 
 - Frontend: All UI elements verified (100%)
 - Test report: `/app/test_reports/iteration_36.json`
 
+---
+
+## Backend Refactor Status (March 11, 2026) — COMPLETED
+
+The server.py monolith refactor has been completed using a safe bootstrapping strategy:
+
+### Architecture
+- Entry point: /app/backend/main.py (supervisor runs main:app)
+- Legacy module: /app/backend/server.py imported as library (not served)
+- Modular routers: 22 routers in /app/backend/routers/ included with prefix=/api
+- Legacy routes: api_router from server.py included for un-extracted document/workflow routes
+- Dependency injection: /app/backend/deps.py provides get_db() for modular routers
+
+### Test Results
+- Backend: 22/22 endpoints pass (100%)
+- Frontend: All verified (100%)
+- Test report: /app/test_reports/iteration_37.json
+
 *Last Updated: March 11, 2026*

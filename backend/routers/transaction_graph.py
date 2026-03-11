@@ -110,7 +110,7 @@ async def manually_ingest_document(doc_id: str):
 
 
 @router.post("/bulk-ingest")
-async def bulk_ingest(limit: int = Query(100, ge=1, le=1000)):
+async def bulk_ingest(limit: int = Query(500, ge=1, le=5000)):
     """Bulk-ingest existing documents into the graph (admin/backfill)."""
     svc = _svc()
     cursor = svc.db.hub_documents.find({}, {"_id": 0}).limit(limit)

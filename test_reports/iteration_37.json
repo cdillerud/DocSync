@@ -1,0 +1,68 @@
+{
+  "summary": "Backend refactor from server:app to main:app fully tested. All 22 API endpoints pass regression tests (100%). Fixed missing imports in settings router that caused /api/settings/status to fail with 500. Frontend verified: Login works, Dashboard shows 60 documents with correct stats, all navigation pages load correctly (Document Queue, Vendor Intelligence, Layout Families, Settings).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/bc/companies", "issue": "Returns 500 due to BC tenant auth config issue ('freight-resolver-lab' is not a valid tenant ID). This is expected per test request notes - NOT a refactoring bug.", "priority": "INFO"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Layout Families page", "issues": ["Minor React hydration warning in console about <tr> inside <span> - does not affect functionality"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_refactor_regression.py",
+    "/app/test_reports/pytest/refactor_regression_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "FIXED: /app/backend/routers/settings.py was missing imports for GRAPH_CLIENT_ID, BC_CLIENT_ID, TENANT_ID, SHAREPOINT vars, FOLDER_MAP, ENABLE_CREATE_DRAFT_HEADER, DRAFT_CREATION_CONFIG, SECRET_KEYS, _mask, _current_config, get_graph_token, get_bc_token, get_email_watcher_config, subscribe_to_mailbox_notifications",
+    "All 22 refactored API endpoints return 200 with correct response structures",
+    "The refactor successfully splits the 10,000+ line server.py monolith into modular routers while maintaining full backward compatibility",
+    "BC companies endpoint 500 error is due to invalid tenant ID config in preview environment, not refactoring"
+  ],
+  "updated_files": [
+    "/app/backend/routers/settings.py",
+    "/app/backend/tests/test_refactor_regression.py"
+  ],
+  "success_rate": {
+    "backend": "100% (22/22 tests passed)",
+    "frontend": "100% (Login, Dashboard, Document Queue, Vendor Intel, Layout Families, Settings all verified)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "No seed data created - used existing 60 documents in database",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend refactor complete and tested. main.py is the new entry point, server.py is used as a library module. All modular routers in /app/backend/routers/ are working. The settings.py router was fixed to import missing variables from server.py. BC Companies endpoint returns 500 due to invalid TENANT_ID='freight-resolver-lab' in .env - this is expected in preview environment.",
+  "verified_endpoints": {
+    "/api/health": "PASS - returns {status: 'healthy', service: 'gpi-document-hub'}",
+    "/api/auth/login": "PASS - returns token and user info",
+    "/api/auth/me": "PASS - returns authenticated user info",
+    "/api/documents": "PASS - returns documents list with total count (60 documents)",
+    "/api/dashboard/stats": "PASS - returns total_documents, by_status, by_type breakdown",
+    "/api/dashboard/workflow-intelligence": "PASS - returns comprehensive workflow metrics",
+    "/api/workflows/ap_invoice/status-counts": "PASS - returns AP workflow status breakdown",
+    "/api/layout-fingerprints/stats": "PASS - returns family stats (0 families, 0 fingerprints)",
+    "/api/aliases/vendors": "PASS - returns vendor aliases list",
+    "/api/automation-rules": "PASS - returns rules array",
+    "/api/vendor-intelligence/stats": "PASS - returns vendor intelligence stats",
+    "/api/label-corrections/stats": "PASS - returns correction stats",
+    "/api/alerts/active": "PASS - returns active alerts list",
+    "/api/pilot/status": "PASS - returns pilot status",
+    "/api/migration/stats": "PASS - returns migration statistics",
+    "/api/settings/mailbox-sources": "PASS - returns mailbox configuration",
+    "/api/settings/status": "PASS - returns connection status (FIXED - was 500 before)",
+    "/api/vendors/match-stats": "PASS - returns vendor match statistics",
+    "/api/square9/config": "PASS - returns config with 17 stages",
+    "/api/freight-routing/accounts": "PASS - returns freight routing accounts",
+    "/api/events/recent": "PASS - returns recent events list",
+    "/api/cache/status": "PASS - returns cache status"
+  },
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "note": "All APIs are live. No mocked integrations."
+  }
+}

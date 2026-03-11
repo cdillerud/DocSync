@@ -18,6 +18,7 @@ import AutomationRulesPage from "@/pages/AutomationRulesPage";
 import LabelCorrectionInsightsPage from "@/pages/LabelCorrectionInsightsPage";
 import LayoutFingerprintsPage from "@/pages/LayoutFingerprintsPage";
 import StableVendorsPage from "@/pages/StableVendorsPage";
+import ProcessorSpecsPage from "@/pages/ProcessorSpecsPage";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -42,6 +43,7 @@ function AppRoutes() {
         <Route path="label-correction-insights" element={<LabelCorrectionInsightsPage />} />
         <Route path="layout-fingerprints" element={<LayoutFingerprintsPage />} />
         <Route path="stable-vendors" element={<StableVendorsPage />} />
+        <Route path="processor-specs" element={<ProcessorSpecsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

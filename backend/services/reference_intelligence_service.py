@@ -895,6 +895,7 @@ class ReferenceIntelligenceService:
         self._vep_service = None
         self._layout_fingerprint_service = None
         self._correlation_service = None
+        self._transaction_graph_service = None
     
     def set_label_correction_service(self, svc):
         self._label_correction_service = svc
@@ -911,6 +912,10 @@ class ReferenceIntelligenceService:
     def set_correlation_service(self, svc):
         """v2: Inject cross-document correlation service."""
         self._correlation_service = svc
+    
+    def set_transaction_graph_service(self, svc):
+        """v2: Inject transaction graph service for graph-assisted scoring."""
+        self._transaction_graph_service = svc
     
     async def resolve_document_references(
         self,
@@ -1281,6 +1286,23 @@ class ReferenceIntelligenceService:
                     except Exception:
                         pass
                 
+                # v2: Transaction graph linkage bonus
+                if self._transaction_graph_service:
+                    try:
+                        graph_info = await self._transaction_graph_service.get_linkage_bonus(
+                            document, bc_result.bc_record_info
+                        )
+                        if graph_info.get("has_graph_bonus"):
+                            graph_bonus = graph_info["graph_bonus"]
+                            breakdown["graph_linkage"] = graph_bonus
+                            score = min(sum(breakdown.values()), 1.0)
+                            match.match_score = score
+                            match.match_reasoning += f"; Graph bonus +{graph_bonus:.2f}"
+                            diag["v2_signals"]["graph_bonus_applied"] = True
+                            diag["v2_signals"]["graph_evidence"] = graph_info.get("graph_evidence", [])
+                    except Exception:
+                        pass
+                
                 all_matches.append((candidate, match))
                 
                 diag["candidate_scores"].append({
@@ -1480,6 +1502,16 @@ class ReferenceIntelligenceService:
                     diag["v2_signals"]["cluster_id"] = cluster_id
             except Exception as ce:
                 logger.warning("[Reference Intelligence] Cluster update error: %s", str(ce))
+        
+        # v2: Ingest document into transaction graph (additive, non-blocking)
+        if self._transaction_graph_service:
+            try:
+                graph_summary = await self._transaction_graph_service.ingest_document(document)
+                diag["v2_signals"]["graph_ingested"] = True
+                diag["v2_signals"]["graph_nodes"] = graph_summary.get("nodes_created", 0)
+                diag["v2_signals"]["graph_edges"] = graph_summary.get("edges_created", 0)
+            except Exception as ge:
+                logger.warning("[Reference Intelligence] Graph ingestion error: %s", str(ge))
         
         return result
     

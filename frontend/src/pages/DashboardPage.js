@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, PieChart as RechartsPieChart, Pie, Legend } from 'recharts';
 import { Square9StageSummary } from '../components/Square9WorkflowTracker';
+import { TransactionGraphWidget } from '../components/TransactionGraph';
 
 const STATUS_COLORS = {
   Received: 'status-received',
@@ -826,6 +827,9 @@ export default function DashboardPage() {
           
           {/* Square9 Stages */}
           <Square9StageSummary />
+          
+          {/* Transaction Graph */}
+          <TransactionGraphWidget />
         </TabsContent>
 
         {/* Workflows Tab */}

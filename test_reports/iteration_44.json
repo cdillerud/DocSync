@@ -1,0 +1,112 @@
+{
+  "summary": "Transaction Graph Layer and Processor Spec Workflow testing completed successfully. All 30/30 backend tests passed. All frontend flows working: Processor Specs page (table, filter, search, create/edit/delete, detail panel with Brief/JSON/Prompt tabs), Dashboard Transaction Graph widget (179 nodes, 151 edges, 60 docs), Document Detail Transaction Graph panel (nodes, edges, connections displayed).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/processor-specs/generate-from-candidate",
+        "issue": "Response spec_status was 'draft' instead of 'ready' even though DB was updated correctly - FIXED by re-fetching status after generation",
+        "priority": "LOW"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_transaction_graph_processor_specs.py",
+    "/app/test_reports/pytest/transaction_graph_processor_specs_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "TransactionGraphService properly implements ADDITIVE graph building - failures never block the pipeline",
+    "Edge deduplication works correctly (from_node, to_node, edge_type) - updates confidence if higher",
+    "ProcessorSpecService generate_outputs correctly sets status to 'ready' after generation",
+    "All routers properly use service singletons with initialization checks",
+    "Frontend components properly use data-testid attributes for testing",
+    "TransactionGraphPanel handles 'not found' state gracefully"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_transaction_graph_processor_specs.py",
+    "/app/backend/services/processor_spec_service.py"
+  ],
+  "success_rate": {
+    "backend": "100% (30/30 tests passed)",
+    "frontend": "100% (all flows verified via Playwright)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "Test specs created and cleaned up during testing. Existing PackingSlipProcessor spec (spec_985cf54b9267) verified.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Transaction Graph has 179 nodes and 150+ edges from 60 ingested documents. Graph stats, nodes, edges, document connections, search, bulk-ingest, manual-ingest, and linkage-bonus endpoints all working. Processor Specs has full CRUD + generation workflow working. Frontend ProcessorSpecsPage at /processor-specs, TransactionGraphWidget in Dashboard Vendor Intelligence tab, TransactionGraphPanel in Document Detail page.",
+  "verified_endpoints": {
+    "Transaction Graph APIs": {
+      "GET /api/graph/stats": "PASS - Returns total_nodes, total_edges, nodes_by_type, edges_by_type, edges_by_provenance, avg_edge_confidence, documents_in_graph",
+      "GET /api/graph/nodes": "PASS - Lists nodes with optional type filter",
+      "GET /api/graph/edges": "PASS - Lists edges with optional type/provenance filter",
+      "GET /api/graph/document/{doc_id}/connections": "PASS - Returns nodes, edges, connected_documents for a document",
+      "GET /api/graph/search?reference=VALUE": "PASS - Searches by reference value (rejects <2 chars)",
+      "POST /api/graph/bulk-ingest": "PASS - Bulk ingests documents (tested with limit=5)",
+      "POST /api/graph/document/{doc_id}/ingest": "PASS - Manual ingest (404 for missing doc)",
+      "GET /api/graph/document/{doc_id}/linkage-bonus": "PASS - Returns has_graph_bonus, graph_bonus, graph_evidence, connected_document_count"
+    },
+    "Processor Specs APIs": {
+      "GET /api/processor-specs/stats": "PASS - Returns total, by_status",
+      "GET /api/processor-specs/list": "PASS - Lists specs with optional status filter",
+      "POST /api/processor-specs/create": "PASS - Creates draft spec",
+      "GET /api/processor-specs/{spec_id}": "PASS - Gets single spec (404 for missing)",
+      "PUT /api/processor-specs/{spec_id}": "PASS - Updates spec fields",
+      "DELETE /api/processor-specs/{spec_id}": "PASS - Deletes spec (verified via subsequent GET)",
+      "POST /api/processor-specs/{spec_id}/generate": "PASS - Generates brief, json_spec, prompt; sets status to 'ready'",
+      "POST /api/processor-specs/{spec_id}/set-status": "PASS - Sets approved/implemented/rejected (400 for invalid)",
+      "POST /api/processor-specs/generate-from-candidate": "PASS - Creates and generates from candidate data"
+    }
+  },
+  "verified_ui_elements": {
+    "ProcessorSpecsPage (/processor-specs)": {
+      "Page title": "PASS",
+      "Status summary cards (5)": "PASS - draft, ready, approved, implemented, rejected",
+      "Search input": "PASS",
+      "Status filter dropdown": "PASS",
+      "Create Spec button": "PASS",
+      "Refresh button": "PASS",
+      "Specs table": "PASS - Name, Doc Type, Status, Fields, Created, Actions columns",
+      "Delete buttons": "PASS",
+      "Spec detail panel": "PASS - Opens on row click",
+      "Detail tabs (Brief/JSON/Prompt)": "PASS - All three tabs switch content",
+      "Generate Outputs button": "PASS",
+      "Approve/Reject buttons": "PASS",
+      "Edit spec form": "PASS - All fields editable",
+      "Create spec form": "PASS - All fields present, validation works"
+    },
+    "Dashboard TransactionGraphWidget": {
+      "Graph widget card": "PASS - Visible in Vendor Intelligence tab",
+      "Total nodes display": "PASS - Shows 179",
+      "Total edges display": "PASS - Shows 151",
+      "Documents in graph": "PASS - Shows 60",
+      "Node type badges": "PASS",
+      "Provenance badges": "PASS"
+    },
+    "DocumentDetailPage TransactionGraphPanel": {
+      "Transaction Graph card": "PASS",
+      "Node count": "PASS",
+      "Edge count": "PASS",
+      "Reference nodes list": "PASS - Shows bill_of_lading, invoice with values",
+      "Connections with confidence bars": "PASS - Shows extraction provenance, 85% confidence",
+      "Connected documents list": "PASS when available"
+    }
+  },
+  "bug_fixes_applied": {
+    "generate_from_candidate status fix": {
+      "file": "/app/backend/services/processor_spec_service.py",
+      "issue": "generate_from_candidate returned draft status in response even though DB was updated to ready",
+      "fix": "Added re-fetch of spec after generate_outputs to get updated spec_status"
+    }
+  },
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "note": "All APIs are real, no mocking"
+  }
+}

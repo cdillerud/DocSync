@@ -21,6 +21,7 @@ import ReferenceIntelligencePanel from '../components/ReferenceIntelligencePanel
 import FreightGLRoutingPanel from '../components/FreightGLRoutingPanel';
 import APValidationPanel from '../components/APValidationPanel';
 import MatchingDebugPanel from '../components/MatchingDebugPanel';
+import { TransactionGraphPanel } from '../components/TransactionGraph';
 
 const STATUS_CLASSES = {
   Received: 'status-received',
@@ -468,6 +469,18 @@ export default function DocumentDetailPage() {
           <MatchingDebugPanel
             document={doc}
           />
+
+          {/* Transaction Graph Panel */}
+          <Card className="border border-border" data-testid="transaction-graph-card">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>
+                Transaction Graph
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <TransactionGraphPanel docId={id} />
+            </CardContent>
+          </Card>
 
           {/* Square9 Workflow Tracker */}
           <Square9WorkflowTracker 

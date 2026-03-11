@@ -4456,6 +4456,17 @@ async def on_document_ingested(doc_id: str, source: str = "unknown"):
         logger.info("[Workflow:%s] Complete: %s → %s (decision: %s, score: %.2f)", 
                     run_id, old_status, new_status, decision, validation_results.get("match_score", 0.0))
         
+        # Additive: ingest into transaction graph (non-blocking)
+        try:
+            from services.transaction_graph_service import get_transaction_graph_service
+            graph_svc = get_transaction_graph_service()
+            if graph_svc:
+                updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+                if updated_doc:
+                    await graph_svc.ingest_document(updated_doc)
+        except Exception as ge:
+            logger.warning("[Workflow:%s] Graph ingestion error (non-blocking): %s", run_id, str(ge))
+        
     except Exception as e:
         # Log error but don't fail silently - create an error audit entry
         logger.error("[Workflow:%s] Error processing doc %s: %s", run_id, doc_id, str(e))
@@ -10270,6 +10281,19 @@ async def startup():
     ref_intel_service.set_correlation_service(correlation_svc)
     logger.info("Cross-Document Correlation Service initialized")
     
+    # Initialize Transaction Graph Service
+    from services.transaction_graph_service import set_transaction_graph_service
+    graph_svc = set_transaction_graph_service(db, event_service=event_service)
+    await graph_svc.initialize()
+    ref_intel_service.set_transaction_graph_service(graph_svc)
+    logger.info("Transaction Graph Service initialized")
+
+    # Initialize Processor Spec Service
+    from services.processor_spec_service import set_processor_spec_service
+    spec_svc = set_processor_spec_service(db, event_service=event_service)
+    await spec_svc.initialize()
+    logger.info("Processor Spec Service initialized")
+
     # Initialize Document Processor Registry
     from processors.processor_registry import initialize_default_processors
     initialize_default_processors()

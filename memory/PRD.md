@@ -2241,4 +2241,35 @@ Self-learning mechanism where the resolver learns from successful matches to cor
 - Frontend: All UI elements verified (100%)
 - Test reports: `/app/test_reports/iteration_31.json`, `/app/test_reports/iteration_32.json`
 
+---
+
+## Label Correction Insights Dashboard (Completed - March 11, 2026)
+
+### Overview
+Analytics dashboard that reveals patterns in mislabeled references across vendors and document types. Strictly read-only — moves from reactive corrections to proactive extraction improvements.
+
+### Backend Endpoints (6 new)
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | /api/label-corrections/summary | Full dashboard summary: total_corrections, label_accuracy_rate, corrections over 7d/30d |
+| GET | /api/label-corrections/top-patterns | Top mislabel patterns with vendor breakdown and examples |
+| GET | /api/label-corrections/vendors | Per-vendor correction aggregation for vendor table |
+| GET | /api/label-corrections/over-time | Corrections by day for time series chart |
+| GET | /api/label-corrections/recommendations | Automated improvement suggestions with extraction adjustments |
+| GET | /api/label-corrections/vendor/{id} | Extended vendor insights with correction_rate, frequencies |
+
+### Dashboard UI (/label-correction-insights)
+- **Summary Cards**: Total Corrections, Label Accuracy %, Vendors Impacted, Top Mislabel
+- **Resolver Improvement Suggestions**: Expandable recommendations with severity badges and extraction adjustment hints
+- **Charts**: Mislabel by Label Type (Pie), Actual Entity Distribution (Bar), Corrections Over Time (Line)
+- **Top Mislabel Patterns Table**: Predicted Label → Actual Entity with count, %, vendors, examples
+- **Vendor Corrections Table**: Expandable rows with correction_rate, stability, label_remaps
+- **Filters**: URL param support (?vendor=, ?label=, ?ref=) for deep-linking from Matching Debug
+- **Matching Debug Integration**: "View Correction Insights" link in MatchingDebugPanel
+
+### Test Results
+- Backend: 21/21 tests passed (100%)
+- Frontend: All UI elements verified (100%)
+- Test report: `/app/test_reports/iteration_33.json`
+
 *Last Updated: March 11, 2026*

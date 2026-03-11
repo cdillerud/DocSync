@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -6,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { toast } from 'sonner';
 import {
   Bug, RefreshCw, Loader2, ChevronDown, ChevronUp,
-  Search, Database, ArrowRight, XCircle, Repeat, Zap
+  Search, Database, ArrowRight, XCircle, Repeat, Zap, ExternalLink
 } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -19,6 +20,7 @@ const OUTCOME_CONFIG = {
 };
 
 export default function MatchingDebugPanel({ document: doc }) {
+  const navigate = useNavigate();
   const [debug, setDebug] = useState(null);
   const [loading, setLoading] = useState(false);
   const [rerunning, setRerunning] = useState(false);
@@ -353,6 +355,25 @@ export default function MatchingDebugPanel({ document: doc }) {
                   )}
                 </div>
               )}
+
+              {/* Part 7: Link to Correction Insights Dashboard */}
+              <div className="pt-1">
+                <Button
+                  variant="ghost" size="sm"
+                  className="text-xs text-violet-400 hover:text-violet-300 px-0"
+                  onClick={() => {
+                    const params = new URLSearchParams();
+                    if (debug?.vendor) params.set('vendor', debug.vendor);
+                    const firstCandidate = diag?.candidates?.[0];
+                    if (firstCandidate?.label) params.set('label', firstCandidate.label);
+                    navigate(`/label-correction-insights${params.toString() ? '?' + params.toString() : ''}`);
+                  }}
+                  data-testid="matching-debug-insights-link"
+                >
+                  <ExternalLink className="w-3 h-3 mr-1" />
+                  View Correction Insights
+                </Button>
+              </div>
 
               {/* Decision */}
               {diag?.decision && (

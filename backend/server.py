@@ -2290,6 +2290,51 @@ async def get_label_correction_stats():
     return await svc.get_stats()
 
 
+@api_router.get("/label-corrections/summary")
+async def get_label_correction_summary():
+    """Part 1 — Full dashboard summary with accuracy rate and time-based metrics."""
+    svc = get_label_correction_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Label correction service not initialized")
+    return await svc.get_summary()
+
+
+@api_router.get("/label-corrections/top-patterns")
+async def get_label_correction_top_patterns():
+    """Part 1 — Top mislabel patterns with vendor breakdown and examples."""
+    svc = get_label_correction_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Label correction service not initialized")
+    return await svc.get_top_patterns()
+
+
+@api_router.get("/label-corrections/vendors")
+async def get_all_vendor_corrections():
+    """Part 2 — Aggregated correction data per vendor for the vendor table."""
+    svc = get_label_correction_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Label correction service not initialized")
+    return await svc.get_all_vendor_corrections()
+
+
+@api_router.get("/label-corrections/over-time")
+async def get_corrections_over_time():
+    """Part 3 — Corrections grouped by day for time series chart."""
+    svc = get_label_correction_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Label correction service not initialized")
+    return await svc.get_corrections_over_time()
+
+
+@api_router.get("/label-corrections/recommendations")
+async def get_label_correction_recommendations():
+    """Part 5+6 — Automated recommendations and extraction adjustment suggestions."""
+    svc = get_label_correction_service()
+    if not svc:
+        raise HTTPException(status_code=503, detail="Label correction service not initialized")
+    return await svc.get_recommendations()
+
+
 @api_router.get("/label-corrections/recent")
 async def get_recent_corrections(limit: int = 20):
     """Get most recent label corrections."""
@@ -2301,11 +2346,11 @@ async def get_recent_corrections(limit: int = 20):
 
 @api_router.get("/label-corrections/vendor/{vendor_id}")
 async def get_vendor_correction_patterns(vendor_id: str):
-    """Get label correction patterns for a specific vendor."""
+    """Part 2 — Extended vendor insights with correction rate and frequency breakdowns."""
     svc = get_label_correction_service()
     if not svc:
         raise HTTPException(status_code=503, detail="Label correction service not initialized")
-    return await svc.get_vendor_patterns(vendor_id)
+    return await svc.get_vendor_insights(vendor_id)
 
 
 @api_router.get("/label-corrections/document/{doc_id}")

@@ -59,10 +59,12 @@ class LabelCorrectionService:
         self.collection = db.reference_label_corrections
 
     async def initialize(self):
-        """Create indexes for efficient queries."""
+        """Create indexes for efficient queries (Part 9)."""
         await self.collection.create_index("vendor_no")
         await self.collection.create_index("vendor_name")
         await self.collection.create_index([("vendor_no", 1), ("predicted_label", 1)])
+        await self.collection.create_index("predicted_label")
+        await self.collection.create_index("actual_entity_type")
         await self.collection.create_index("document_id")
         await self.collection.create_index("created_at")
         logger.info("[LabelCorrection] Indexes created")
@@ -334,6 +336,336 @@ class LabelCorrectionService:
             "entity_boosts": entity_boosts,
             "is_unstable": is_unstable,
         }
+
+    # =========================================================================
+    # DASHBOARD ANALYTICS (Parts 1, 2, 3, 5, 6)
+    # =========================================================================
+
+    async def get_summary(self) -> Dict[str, Any]:
+        """
+        Part 1 — Full summary for the insights dashboard.
+        Returns total_corrections, unique_reference_values, vendors_impacted,
+        most_common_predicted_labels, most_common_actual_entities, time-based metrics.
+        """
+        total = await self.collection.count_documents({})
+        if total == 0:
+            return {
+                "total_corrections": 0,
+                "unique_reference_values": 0,
+                "vendors_impacted": 0,
+                "most_common_predicted_labels": [],
+                "most_common_actual_entities": [],
+                "label_accuracy_rate": 100.0,
+                "corrections_last_7_days": 0,
+                "corrections_last_30_days": 0,
+            }
+
+        # Unique reference values
+        ref_values = await self.collection.distinct("reference_value")
+
+        # Unique vendors
+        vendors_pipeline = [
+            {"$group": {"_id": {"$ifNull": ["$vendor_name", "$vendor_no"]}}},
+            {"$match": {"_id": {"$ne": ""}}},
+            {"$count": "count"},
+        ]
+        vendor_result = await self.collection.aggregate(vendors_pipeline).to_list(1)
+        vendors_impacted = vendor_result[0]["count"] if vendor_result else 0
+
+        # Most common predicted labels
+        predicted_pipeline = [
+            {"$group": {"_id": "$predicted_label", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+            {"$limit": 10},
+        ]
+        predicted = await self.collection.aggregate(predicted_pipeline).to_list(10)
+
+        # Most common actual entity types
+        entity_pipeline = [
+            {"$group": {"_id": "$actual_entity_type", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+            {"$limit": 10},
+        ]
+        entities = await self.collection.aggregate(entity_pipeline).to_list(10)
+
+        # Time-based metrics (Part 3)
+        now = datetime.now(timezone.utc)
+        seven_days_ago = (now - __import__("datetime").timedelta(days=7)).isoformat()
+        thirty_days_ago = (now - __import__("datetime").timedelta(days=30)).isoformat()
+
+        corrections_7d = await self.collection.count_documents({"created_at": {"$gte": seven_days_ago}})
+        corrections_30d = await self.collection.count_documents({"created_at": {"$gte": thirty_days_ago}})
+
+        # Label accuracy rate estimation (Part 3)
+        # Ratio of correct labels to total resolutions
+        total_resolutions = await self.db.hub_documents.count_documents(
+            {"reference_intelligence": {"$exists": True}}
+        )
+        accuracy_rate = round(
+            ((max(total_resolutions, 1) - total) / max(total_resolutions, 1)) * 100, 1
+        ) if total_resolutions > 0 else 100.0
+
+        return {
+            "total_corrections": total,
+            "unique_reference_values": len(ref_values),
+            "vendors_impacted": vendors_impacted,
+            "most_common_predicted_labels": [
+                {"label": r["_id"], "count": r["count"]} for r in predicted
+            ],
+            "most_common_actual_entities": [
+                {"entity": r["_id"], "count": r["count"]} for r in entities
+            ],
+            "label_accuracy_rate": accuracy_rate,
+            "corrections_last_7_days": corrections_7d,
+            "corrections_last_30_days": corrections_30d,
+        }
+
+    async def get_top_patterns(self) -> Dict[str, Any]:
+        """
+        Part 1 — Top mislabel patterns aggregation.
+        Groups by predicted_label → actual_entity_type with counts,
+        affected vendors, and example reference values.
+        """
+        pipeline = [
+            {"$group": {
+                "_id": {
+                    "predicted_label": "$predicted_label",
+                    "actual_entity_type": "$actual_entity_type",
+                    "correct_label": "$correct_label",
+                },
+                "count": {"$sum": 1},
+                "vendors": {"$addToSet": "$vendor_name"},
+                "example_references": {"$addToSet": "$reference_value"},
+                "avg_score": {"$avg": "$match_score"},
+                "latest": {"$max": "$created_at"},
+            }},
+            {"$sort": {"count": -1}},
+            {"$limit": 20},
+        ]
+
+        results = await self.collection.aggregate(pipeline).to_list(20)
+        total = await self.collection.count_documents({})
+
+        patterns = []
+        for r in results:
+            vendors_list = [v for v in r.get("vendors", []) if v]
+            examples = list(set(r.get("example_references", [])))[:5]
+            patterns.append({
+                "predicted_label": r["_id"]["predicted_label"],
+                "actual_entity_type": r["_id"]["actual_entity_type"],
+                "correct_label": r["_id"]["correct_label"],
+                "count": r["count"],
+                "percentage": round(r["count"] / max(total, 1) * 100, 1),
+                "vendors_impacted": len(vendors_list),
+                "vendor_names": vendors_list[:5],
+                "example_references": examples,
+                "avg_score": round(r.get("avg_score", 0), 3),
+                "latest": r.get("latest"),
+            })
+
+        return {"patterns": patterns, "total_corrections": total}
+
+    async def get_vendor_insights(self, vendor_id: str) -> Dict[str, Any]:
+        """
+        Part 2 — Extended vendor-level insights for the dashboard.
+        Includes correction_rate, label frequency breakdowns, and pattern details.
+        """
+        base = await self.get_vendor_patterns(vendor_id)
+        if not base.get("has_patterns"):
+            return base
+
+        # Count total resolutions for this vendor
+        total_resolutions = await self.db.hub_documents.count_documents({
+            "$or": [
+                {"vendor_raw": vendor_id},
+                {"matched_vendor_name": vendor_id},
+                {"vendor_canonical": vendor_id},
+            ],
+            "reference_intelligence.match_outcome": {"$in": ["exact_match", "likely_match"]}
+        })
+
+        total_corrections = base.get("total_corrections", 0)
+        correction_rate = round(
+            total_corrections / max(total_resolutions, 1) * 100, 1
+        )
+
+        # Label frequency breakdowns
+        label_pipeline = [
+            {"$match": {"$or": [
+                {"vendor_no": vendor_id},
+                {"vendor_name": vendor_id},
+            ]}},
+            {"$group": {
+                "_id": "$predicted_label",
+                "count": {"$sum": 1},
+            }},
+            {"$sort": {"count": -1}},
+        ]
+        label_freq = await self.collection.aggregate(label_pipeline).to_list(20)
+
+        entity_pipeline = [
+            {"$match": {"$or": [
+                {"vendor_no": vendor_id},
+                {"vendor_name": vendor_id},
+            ]}},
+            {"$group": {
+                "_id": "$actual_entity_type",
+                "count": {"$sum": 1},
+            }},
+            {"$sort": {"count": -1}},
+        ]
+        entity_freq = await self.collection.aggregate(entity_pipeline).to_list(20)
+
+        base["correction_rate"] = correction_rate
+        base["total_resolutions"] = total_resolutions
+        base["label_frequency"] = [
+            {"label": r["_id"], "count": r["count"]} for r in label_freq
+        ]
+        base["entity_frequency"] = [
+            {"entity": r["_id"], "count": r["count"]} for r in entity_freq
+        ]
+
+        return base
+
+    async def get_all_vendor_corrections(self) -> List[Dict]:
+        """
+        Part 2 — Aggregate correction data per vendor for the vendor table.
+        """
+        pipeline = [
+            {"$group": {
+                "_id": {"$ifNull": ["$vendor_name", "$vendor_no"]},
+                "total_corrections": {"$sum": 1},
+                "top_predicted": {"$first": "$predicted_label"},
+                "top_entity": {"$first": "$actual_entity_type"},
+                "avg_score": {"$avg": "$match_score"},
+                "latest": {"$max": "$created_at"},
+                "unique_refs": {"$addToSet": "$reference_value"},
+            }},
+            {"$match": {"_id": {"$ne": ""}}},
+            {"$sort": {"total_corrections": -1}},
+            {"$limit": 50},
+        ]
+
+        results = await self.collection.aggregate(pipeline).to_list(50)
+
+        vendors = []
+        for r in results:
+            vendor_id = r["_id"]
+            # Get top pattern for this vendor
+            pattern_pipeline = [
+                {"$match": {"$or": [
+                    {"vendor_name": vendor_id},
+                    {"vendor_no": vendor_id},
+                ]}},
+                {"$group": {
+                    "_id": {"predicted": "$predicted_label", "correct": "$correct_label"},
+                    "count": {"$sum": 1},
+                }},
+                {"$sort": {"count": -1}},
+                {"$limit": 1},
+            ]
+            top_pattern = await self.collection.aggregate(pattern_pipeline).to_list(1)
+
+            top_pattern_str = ""
+            if top_pattern:
+                tp = top_pattern[0]["_id"]
+                top_pattern_str = f"{tp['predicted']} → {tp['correct']}"
+
+            vendors.append({
+                "vendor": vendor_id,
+                "total_corrections": r["total_corrections"],
+                "unique_references": len(r.get("unique_refs", [])),
+                "top_pattern": top_pattern_str,
+                "avg_score": round(r.get("avg_score", 0), 3),
+                "latest": r.get("latest"),
+            })
+
+        return vendors
+
+    async def get_corrections_over_time(self) -> List[Dict]:
+        """
+        Part 3 — Corrections grouped by day for time series chart.
+        """
+        pipeline = [
+            {"$addFields": {
+                "date_str": {"$substr": ["$created_at", 0, 10]}
+            }},
+            {"$group": {
+                "_id": "$date_str",
+                "count": {"$sum": 1},
+            }},
+            {"$sort": {"_id": 1}},
+            {"$limit": 90},
+        ]
+        results = await self.collection.aggregate(pipeline).to_list(90)
+        return [{"date": r["_id"], "count": r["count"]} for r in results]
+
+    async def get_recommendations(self) -> List[Dict]:
+        """
+        Part 5 — Generate automated recommendations when patterns exceed thresholds.
+        Part 6 — Include suggested extraction adjustments.
+        """
+        patterns_result = await self.get_top_patterns()
+        patterns = patterns_result.get("patterns", [])
+
+        recommendations = []
+        for p in patterns:
+            count = p["count"]
+            predicted = p["predicted_label"]
+            actual = p["actual_entity_type"]
+            correct = p["correct_label"]
+            vendors = p.get("vendor_names", [])
+
+            if count < 3:
+                continue
+
+            # Generate recommendation text
+            vendor_text = f" (vendors: {', '.join(vendors[:3])})" if vendors else ""
+            rec = {
+                "severity": "high" if count >= 20 else "medium" if count >= 5 else "low",
+                "pattern": f"{predicted} → {correct}",
+                "count": count,
+                "predicted_label": predicted,
+                "actual_entity_type": actual,
+                "recommendation": "",
+                "extraction_adjustment": "",
+            }
+
+            # Part 5: context-aware recommendations
+            if "shipment" in actual.lower() and predicted in ("PO", "INVOICE"):
+                rec["recommendation"] = (
+                    f"Freight vendors frequently label shipment numbers as {predicted}. "
+                    f"{count} occurrences across {p['vendors_impacted']} vendor(s){vendor_text}. "
+                    f"Consider adjusting extraction prompt to prefer BOL/shipment classification "
+                    f"when document type is freight invoice."
+                )
+                rec["extraction_adjustment"] = (
+                    f"Prefer classifying numeric references as BOL or SHIPMENT when "
+                    f"vendor category = freight carrier. Affected labels: {predicted}."
+                )
+            elif "purchase" in actual.lower() and predicted == "ORDER":
+                rec["recommendation"] = (
+                    f"References labeled as ORDER are actually purchase orders in {count} cases. "
+                    f"Consider adding PO-specific patterns to extraction logic."
+                )
+                rec["extraction_adjustment"] = (
+                    "When document context contains 'purchase' or 'vendor', prefer "
+                    "classifying ORDER references as PO."
+                )
+            else:
+                rec["recommendation"] = (
+                    f"Label '{predicted}' is being corrected to '{correct}' ({actual}) "
+                    f"in {count} cases across {p['vendors_impacted']} vendor(s){vendor_text}. "
+                    f"Review extraction prompt for this label type."
+                )
+                rec["extraction_adjustment"] = (
+                    f"Consider adding context-based reclassification rule: "
+                    f"{predicted} → {correct} for affected vendor profiles."
+                )
+
+            recommendations.append(rec)
+
+        return recommendations
 
     async def get_stats(self) -> Dict[str, Any]:
         """Get overall label correction statistics."""

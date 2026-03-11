@@ -2137,3 +2137,59 @@ APValidationService is now the single authoritative validation layer for AP-rele
 
 *Last Updated: March 10, 2026*
 
+
+---
+
+## Production Matching Diagnostics + Freight/BOL Resolver Improvements (Completed - March 11, 2026)
+
+### Overview
+Full matching diagnostics layer, freight/BOL resolver strategy improvements, reference classification fixes, ambiguity threshold corrections, score transparency, cache metrics, and a debug UI panel.
+
+### Diagnostics Layer (Phases 1-4)
+- **GET /api/documents/{id}/matching-debug** — Full diagnostic trace for any document
+- **POST /api/documents/{id}/matching-debug/rerun** — Re-runs resolution with diagnostics capture
+- **GET /api/cache/metrics** — Cache status (278K records), records by entity type, hit/miss rates
+- Captures: extraction → normalization → strategy → cache/API results → candidate scores → decision
+- Persisted in `matching_diagnostics` MongoDB collection
+
+### Resolver Improvements (Phases 5-8)
+- **Freight/BOL Search Strategy**: BOL → Shipment → Sales Order → PO → Invoice (was PO-first)
+- **Freight Strategy Triggers**: doc_type in FREIGHT_DOC_TYPES OR vendor is freight carrier OR BOL extracted
+- **Freight Carrier Detection**: Checks unified_vendor_match + vendor name keywords (freight, trucking, logistics, transport, etc.)
+- **Reference Classification Fix**: Added SHIPPING_CONTEXT_KEYWORDS — "pu", "pickup", "delivery", "load" etc. prevent BOL refs from being classified as PO
+- **Shipment Relationship Matching**: Bonus for shipments with linked orders
+- **Freight Vendor Boost**: +0.15 for shipment entities when vendor is freight carrier
+- **Ambiguity Fix**: best ≥ 0.90 + second < 0.70 = exact_match; ≥ 0.70 with no strong competitors = likely_match
+
+### Scoring Breakdown (8 Components)
+| Component | Max Weight |
+|-----------|-----------|
+| exact_reference_match | 0.40 |
+| entity_type_alignment | 0.20 |
+| domain_alignment | 0.15 |
+| vendor_alignment | 0.15 |
+| candidate_confidence | 0.10 |
+| vendor_behavior_bonus | 0.15 |
+| freight_vendor_boost | 0.15 |
+| shipment_relationship | 0.05 |
+
+### Normalization Trace
+Step-by-step: input → uppercase → strip_prefix → strip_punctuation → strip_leading_zeros
+
+### Debug UI
+- Collapsible **Matching Debug** panel on Document Detail page
+- Shows strategy, outcome badge, freight carrier badge, processing time
+- Expandable: Extraction table, Normalization trace, Cache/API results, Score breakdown with visual bars, Decision section
+
+### Test Results
+- Backend: 13/13 tests passed (100%)
+- Frontend: All 16 UI elements verified (100%)
+- Test report: `/app/test_reports/iteration_30.json`
+
+### Example: Tumalo Creek Invoice 0303853
+- Strategy: `Freight_Invoice` (freight carrier detected)
+- Found: Posted Sales Shipment 111428 → score 0.745 (likely_match)
+- Score: exact_match=0.40 + entity=0.10 + confidence=0.10 + freight_boost=0.15
+
+*Last Updated: March 11, 2026*
+

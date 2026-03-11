@@ -1188,10 +1188,11 @@ Created `/app/memory/SQUARE9_COMPARISON.md` documenting alignment status.
 - [x] Vendor Automation Rules Engine — configurable routing rules, first-match-wins, admin UI (March 10, 2026)
 
 ### P1 - In Progress
-- [ ] Integrate `APValidationService` into main processing flow (async replacement for sync validation)
+- [x] Integrate `APValidationService` into main processing flow - Completed March 10, 2026
 - [ ] Continue backend refactoring (move endpoints from server.py to routers)
 - [ ] Package & Publish BC (AL) Extension to Sandbox
 - [x] G/L Account Routing for Freight (inbound vs outbound) - Completed March 10, 2026
+- [x] Reference Label Correction Feedback Loop — Completed March 11, 2026
 - [ ] Add "Create BC Sales Order" Button to UI
 
 ### P2 - Upcoming
@@ -1208,7 +1209,7 @@ Created `/app/memory/SQUARE9_COMPARISON.md` documenting alignment status.
 
 ---
 
-*Last Updated: March 10, 2026*
+*Last Updated: March 11, 2026*
 
 ---
 
@@ -1959,7 +1960,7 @@ POST /api/bc/write-guard/check?document_id=test&action=create_purchase_invoice
 bc.write_blocked event recorded in workflow_events collection
 ```
 
-*Last Updated: March 10, 2026*
+*Last Updated: March 11, 2026*
 
 ### Testing
 - Backend: All endpoints tested via curl
@@ -1975,7 +1976,7 @@ bc.write_blocked event recorded in workflow_events collection
 ### Port Conflict Fix
 Updated `docker-compose.yml` to map backend to port 8005 to avoid conflict with `airdash-backend` on user's VM.
 
-*Last Updated: March 10, 2026*
+*Last Updated: March 11, 2026*
 
 
 ---
@@ -2033,7 +2034,7 @@ An engine that determines the correct General Ledger (G/L) account classificatio
 - Frontend: All UI elements verified
 - Test report: `/app/test_reports/iteration_27.json`
 
-*Last Updated: March 10, 2026*
+*Last Updated: March 11, 2026*
 
 
 ---
@@ -2066,7 +2067,7 @@ One-click batch freight classification on the Document Queue page. Classificatio
 - Frontend: All UI elements verified (100%)
 - Test report: `/app/test_reports/iteration_28.json`
 
-*Last Updated: March 10, 2026*
+*Last Updated: March 11, 2026*
 
 ---
 
@@ -2135,7 +2136,7 @@ APValidationService is now the single authoritative validation layer for AP-rele
 - Frontend: All UI elements verified (100%)
 - Test report: `/app/test_reports/iteration_29.json`
 
-*Last Updated: March 10, 2026*
+*Last Updated: March 11, 2026*
 
 
 ---
@@ -2193,3 +2194,70 @@ Step-by-step: input → uppercase → strip_prefix → strip_punctuation → str
 
 *Last Updated: March 11, 2026*
 
+
+
+---
+
+## Reference Label Correction Feedback Loop (Completed - March 11, 2026)
+
+### Overview
+Self-learning mechanism where the resolver learns from successful matches to correct mislabeled references. When a reference labeled "PO" resolves to a "Shipment", the system records that correction and uses it to improve future scoring.
+
+### Architecture
+1. **Storage Layer**: `reference_label_corrections` MongoDB collection stores every detected mismatch
+2. **Detection**: After each successful resolution in `auto_resolution_service.py`, the system checks if the detected label is compatible with the matched entity type
+3. **Vendor Learning**: Correction patterns are aggregated per vendor in `vendor_intelligence_profiles`
+4. **Scoring Boost**: New scoring component `label_correction_boost` (up to +15%) applied when a vendor has learned patterns
+5. **Shipment Clustering**: `search_shipment_cluster()` in cache service groups related shipments/orders
+
+### Compatible Labels (No Correction Needed)
+| Entity Type | Compatible Labels |
+|---|---|
+| purchase_order | PO, ORDER, REF |
+| sales_order | ORDER, PO, REF, CUSTOMER_REF |
+| posted_sales_shipment | SHIPMENT, BOL, LOAD, PRO, REF |
+| purchase_invoice | INVOICE, REF |
+
+### Scoring Model (9 Components)
+| Component | Max Weight |
+|---|---|
+| exact_reference_match | 0.40 |
+| entity_type_alignment | 0.20 |
+| domain_alignment | 0.15 |
+| vendor_alignment | 0.15 |
+| candidate_confidence | 0.10 |
+| vendor_behavior_bonus | 0.15 |
+| freight_vendor_boost | 0.15 |
+| shipment_relationship | 0.05 |
+| **label_correction_boost** | **0.15** (NEW) |
+
+### API Endpoints
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | /api/label-corrections/stats | Overall correction statistics |
+| GET | /api/label-corrections/recent | Recent corrections list |
+| GET | /api/label-corrections/vendor/{id} | Vendor correction patterns with label remaps |
+| GET | /api/label-corrections/document/{id} | Corrections for a specific document |
+
+### Frontend (MatchingDebugPanel)
+- **Learning badge**: Purple "Learning" badge appears when correction signals are present
+- **Feedback Loop section**: Expandable section showing document corrections and vendor patterns
+- **Label remaps**: Visual display of active label→entity remappings for the vendor
+- **Score highlighting**: label_correction_boost shown in purple in score breakdown
+- **Candidate labels**: "learned" badge on labels that have correction hints
+
+### Files Created/Modified
+- `/app/backend/services/label_correction_service.py` — NEW: Full correction service
+- `/app/backend/services/reference_intelligence_service.py` — MODIFIED: Component #9, vendor/label hints
+- `/app/backend/services/vendor_intelligence_service.py` — MODIFIED: update_label_correction_patterns
+- `/app/backend/services/auto_resolution_service.py` — MODIFIED: Post-resolution correction detection
+- `/app/backend/services/bc_reference_cache_service.py` — MODIFIED: search_shipment_cluster
+- `/app/backend/server.py` — MODIFIED: Service init, 4 new endpoints, matching-debug enrichment
+- `/app/frontend/src/components/MatchingDebugPanel.js` — MODIFIED: Feedback Loop UI
+
+### Test Results
+- Backend: 12/13 tests passed, 1 skipped (92%)
+- Frontend: All UI elements verified (100%)
+- Test report: `/app/test_reports/iteration_31.json`
+
+*Last Updated: March 11, 2026*

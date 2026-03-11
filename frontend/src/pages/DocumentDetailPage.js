@@ -596,6 +596,12 @@ export default function DocumentDetailPage() {
                     </p>
                   ))}
                 </div>
+                {doc.vendor_canonical && (
+                  <p className="text-xs text-muted-foreground mt-2 underline underline-offset-2 cursor-pointer hover:text-foreground"
+                    onClick={() => navigate('/stable-vendors')} data-testid="sv-view-vendor-link">
+                    View Stable Vendor Details
+                  </p>
+                )}
               </CardContent>
             </Card>
           )}

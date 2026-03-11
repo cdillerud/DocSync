@@ -17,6 +17,7 @@ import VendorIntelligencePage from "@/pages/VendorIntelligencePage";
 import AutomationRulesPage from "@/pages/AutomationRulesPage";
 import LabelCorrectionInsightsPage from "@/pages/LabelCorrectionInsightsPage";
 import LayoutFingerprintsPage from "@/pages/LayoutFingerprintsPage";
+import StableVendorsPage from "@/pages/StableVendorsPage";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -40,6 +41,7 @@ function AppRoutes() {
         <Route path="automation-rules" element={<AutomationRulesPage />} />
         <Route path="label-correction-insights" element={<LabelCorrectionInsightsPage />} />
         <Route path="layout-fingerprints" element={<LayoutFingerprintsPage />} />
+        <Route path="stable-vendors" element={<StableVendorsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

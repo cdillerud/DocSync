@@ -6,7 +6,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator
 } from '../components/ui/dropdown-menu';
 import {
-  LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, Brain, FileSpreadsheet, ChevronRight, Users, Zap, Target, Fingerprint
+  LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, Brain, FileSpreadsheet, ChevronRight, Users, Zap, Target, Fingerprint, ShieldCheck
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
@@ -23,6 +23,7 @@ const navItems = [
   { to: '/automation-rules', icon: Zap, label: 'Automation Rules' },
   { to: '/label-correction-insights', icon: Target, label: 'Label Insights' },
   { to: '/layout-fingerprints', icon: Fingerprint, label: 'Layout Families' },
+  { to: '/stable-vendors', icon: ShieldCheck, label: 'Stable Vendors' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 

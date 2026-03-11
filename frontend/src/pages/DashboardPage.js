@@ -677,6 +677,8 @@ export default function DashboardPage() {
             <div className="flex items-center gap-2">
               <ShieldCheck className="w-5 h-5 text-emerald-500" />
               <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Stable Vendor Auto-Ready</CardTitle>
+              <span className="ml-auto text-xs text-muted-foreground hover:text-foreground cursor-pointer underline underline-offset-2"
+                onClick={() => navigate('/stable-vendors')} data-testid="sv-view-all-link">View All</span>
             </div>
           </CardHeader>
           <CardContent>

@@ -265,19 +265,31 @@ class StableVendorService:
 
         vendor_eval = await self.evaluate_vendor_stability(vendor_name)
         is_stable = vendor_eval["stable_vendor_flag"]
+
+        # Check effective status (considers manual overrides)
+        profile = None
+        if self.vendor_intel:
+            profile = await self.vendor_intel.get_profile(vendor_name)
+        effective = self._effective_status(profile) if profile else ("stable" if is_stable else "unstable")
+
         checks.append({
             "check": "vendor_stability",
-            "passed": is_stable,
+            "passed": effective in ("stable", "watch"),
             "value": vendor_eval["stable_vendor_score"],
-            "detail": f"Vendor '{vendor_name}' stable={is_stable}",
+            "detail": f"Vendor '{vendor_name}' system={is_stable} effective={effective}",
         })
 
-        if not is_stable:
-            reasons.append(f"Vendor not stable: {', '.join(r for r in vendor_eval['reasons'] if 'Low' in r or 'Insufficient' in r or 'High corr' in r)}")
+        if effective == "unstable":
+            reasons.append(f"Vendor not stable (effective={effective}): {', '.join(r for r in vendor_eval['reasons'] if 'Low' in r or 'Insufficient' in r or 'High corr' in r)}")
             return self._doc_decision(
                 doc_id, "manual_review", reasons or ["Vendor not stable"], now,
                 vendor_eval=vendor_eval, checks=checks,
             )
+
+        # Watch status forces low-priority at most
+        force_low_priority = effective == "watch"
+        if force_low_priority:
+            reasons.append("Vendor on watch status — capped at low-priority review")
 
         reasons.append("Vendor meets stability thresholds")
 
@@ -466,7 +478,7 @@ class StableVendorService:
         # -------------------------------------------------------------------
         # Final decision
         # -------------------------------------------------------------------
-        if downgrade_to_low_priority:
+        if force_low_priority or downgrade_to_low_priority:
             reasons.extend(downgrade_reasons)
             routing = "low_priority_review"
         else:
@@ -510,7 +522,6 @@ class StableVendorService:
         if not self.vendor_intel:
             return {"status": "error", "message": "Vendor intelligence not available"}
 
-        cfg = await self.get_config()
         profiles = await self.vendor_intel.get_all_profiles(limit=5000)
 
         results = {"evaluated": 0, "promoted": 0, "demoted": 0, "stable": 0, "not_stable": 0}
@@ -622,6 +633,296 @@ class StableVendorService:
             "stable_vendor_automation_rate": auto_rate,
             "feature_enabled": cfg.get("enabled", True),
         }
+
+    # =========================================================================
+    # ADMIN: VENDOR LIST / DETAIL / OVERRIDE / HISTORY
+    # =========================================================================
+
+    VALID_OVERRIDE_STATUSES = {"none", "force_stable", "force_watch", "force_unstable"}
+
+    def _effective_status(self, profile: Dict) -> str:
+        """
+        Compute effective status from system-derived stability + manual override.
+        Priority: active manual override > system evaluation.
+        """
+        override = profile.get("manual_override_status", "none") or "none"
+        expires = profile.get("manual_override_expires_at")
+        if expires:
+            try:
+                exp_dt = datetime.fromisoformat(expires)
+                if exp_dt < datetime.now(timezone.utc):
+                    override = "none"
+            except (ValueError, TypeError):
+                pass
+
+        if override == "force_stable":
+            return "stable"
+        if override == "force_watch":
+            return "watch"
+        if override == "force_unstable":
+            return "unstable"
+
+        # System-derived
+        if profile.get("stable_vendor_flag", False):
+            return "stable"
+        return "unstable"
+
+    async def get_vendor_list(
+        self, search: str = "", status_filter: str = "",
+        sort_by: str = "stable_vendor_score", sort_dir: int = -1,
+        skip: int = 0, limit: int = 100,
+    ) -> Dict[str, Any]:
+        """Get enriched vendor list for admin table."""
+        query: Dict[str, Any] = {}
+        if search:
+            query["$or"] = [
+                {"vendor_name": {"$regex": search, "$options": "i"}},
+                {"vendor_no": {"$regex": search, "$options": "i"}},
+            ]
+
+        # Fetch all matching, apply status filter post-query (effective status is computed)
+        cursor = self.db.vendor_intelligence_profiles.find(
+            query, {"_id": 0}
+        ).sort(sort_by, sort_dir)
+        all_profiles = await cursor.to_list(5000)
+
+        # Compute effective status and apply filter
+        enriched = []
+        for p in all_profiles:
+            eff = self._effective_status(p)
+            p["effective_status"] = eff
+            p["system_status"] = "stable" if p.get("stable_vendor_flag") else "unstable"
+            p["correction_rate"] = self._calc_correction_rate(p)
+            has_override = (p.get("manual_override_status") or "none") != "none"
+            p["has_manual_override"] = has_override
+
+            if status_filter:
+                if status_filter == "stable" and eff != "stable":
+                    continue
+                if status_filter == "watch" and eff != "watch":
+                    continue
+                if status_filter == "unstable" and eff != "unstable":
+                    continue
+                if status_filter == "overridden" and not has_override:
+                    continue
+
+            enriched.append(p)
+
+        total = len(enriched)
+        page = enriched[skip:skip + limit]
+
+        return {"vendors": page, "total": total, "skip": skip, "limit": limit}
+
+    async def get_vendor_detail(self, vendor_no: str) -> Dict[str, Any]:
+        """Get full vendor detail for the admin drawer."""
+        profile = await self.db.vendor_intelligence_profiles.find_one(
+            {"$or": [{"vendor_no": vendor_no}, {"vendor_name": vendor_no}]},
+            {"_id": 0},
+        )
+        if not profile:
+            return None
+
+        # Enrich with computed fields
+        profile["effective_status"] = self._effective_status(profile)
+        profile["system_status"] = "stable" if profile.get("stable_vendor_flag") else "unstable"
+        profile["correction_rate"] = self._calc_correction_rate(profile)
+        profile["has_manual_override"] = (profile.get("manual_override_status") or "none") != "none"
+
+        # Stability checks (live evaluation)
+        eval_result = await self.evaluate_vendor_stability(vendor_no)
+        profile["stability_checks"] = eval_result.get("checks", [])
+        profile["stability_reasons"] = eval_result.get("reasons", [])
+
+        # Routing impact
+        is_eff_stable = profile["effective_status"] == "stable"
+        profile["routing_impact"] = {
+            "auto_ready_eligible": is_eff_stable,
+            "low_priority_eligible": is_eff_stable or profile["effective_status"] == "watch",
+            "blocked_by": self._get_blocking_conditions(profile, eval_result),
+        }
+
+        # Quality signals
+        profile["quality_signals"] = {
+            "top_correction_patterns": list(
+                (profile.get("label_correction_patterns") or {}).items()
+            )[:5],
+            "top_match_types": profile.get("match_method_distribution", {}),
+            "layout_families_count": await self.db.layout_families.count_documents(
+                {"vendor_no": vendor_no}
+            ) if self.layout_fp else 0,
+            "active_alerts": await self._count_active_alerts(vendor_no),
+        }
+
+        # Override history
+        history = await self.db.stable_vendor_override_history.find(
+            {"vendor_no": vendor_no}, {"_id": 0}
+        ).sort("timestamp", -1).limit(20).to_list(20)
+        profile["override_history"] = history
+
+        return profile
+
+    async def apply_override(
+        self, vendor_no: str, override_status: str, reason: str = "",
+        actor: str = "admin", expires_at: str = None, note: str = "",
+    ) -> Dict[str, Any]:
+        """Apply a manual override to a vendor's stable status."""
+        if override_status not in self.VALID_OVERRIDE_STATUSES:
+            return {"error": f"Invalid override status: {override_status}"}
+
+        profile = await self.db.vendor_intelligence_profiles.find_one(
+            {"$or": [{"vendor_no": vendor_no}, {"vendor_name": vendor_no}]},
+            {"_id": 0},
+        )
+        if not profile:
+            return {"error": "Vendor not found"}
+
+        old_effective = self._effective_status(profile)
+        now = datetime.now(timezone.utc).isoformat()
+
+        update = {
+            "manual_override_status": override_status,
+            "manual_override_reason": reason,
+            "manual_override_by": actor,
+            "manual_override_at": now,
+            "manual_override_note": note,
+        }
+        if expires_at:
+            update["manual_override_expires_at"] = expires_at
+
+        await self.db.vendor_intelligence_profiles.update_one(
+            {"$or": [{"vendor_no": vendor_no}, {"vendor_name": vendor_no}]},
+            {"$set": update},
+        )
+
+        # Compute new effective status
+        profile.update(update)
+        new_effective = self._effective_status(profile)
+
+        # Log to history
+        history_entry = {
+            "vendor_no": vendor_no,
+            "vendor_name": profile.get("vendor_name", ""),
+            "action": "override_applied",
+            "old_status": old_effective,
+            "new_status": new_effective,
+            "override_status": override_status,
+            "reason": reason,
+            "note": note,
+            "actor": actor,
+            "timestamp": now,
+            "expires_at": expires_at,
+        }
+        await self.db.stable_vendor_override_history.insert_one({**history_entry})
+
+        # Emit audit event
+        if self.event_service:
+            await self.event_service.emit(
+                event_type="stable_vendor.override_applied",
+                document_id="system",
+                source_service="stable_vendor",
+                payload=history_entry,
+            )
+
+        # Invalidate cache
+        if self.vendor_intel:
+            self.vendor_intel._cache.pop(vendor_no, None)
+
+        logger.info(
+            "[StableVendor] Override applied: %s -> %s for %s by %s",
+            old_effective, new_effective, vendor_no, actor,
+        )
+        return {
+            "vendor_no": vendor_no,
+            "old_status": old_effective,
+            "new_status": new_effective,
+            "override_status": override_status,
+        }
+
+    async def clear_override(self, vendor_no: str, actor: str = "admin", reason: str = "") -> Dict:
+        """Clear manual override, reverting to system-derived status."""
+        profile = await self.db.vendor_intelligence_profiles.find_one(
+            {"$or": [{"vendor_no": vendor_no}, {"vendor_name": vendor_no}]},
+            {"_id": 0},
+        )
+        if not profile:
+            return {"error": "Vendor not found"}
+
+        old_effective = self._effective_status(profile)
+        now = datetime.now(timezone.utc).isoformat()
+
+        await self.db.vendor_intelligence_profiles.update_one(
+            {"$or": [{"vendor_no": vendor_no}, {"vendor_name": vendor_no}]},
+            {"$set": {
+                "manual_override_status": "none",
+                "manual_override_reason": "",
+                "manual_override_by": "",
+                "manual_override_at": now,
+                "manual_override_note": "",
+                "manual_override_expires_at": None,
+            }},
+        )
+
+        # New status reverts to system
+        system_stable = profile.get("stable_vendor_flag", False)
+        new_effective = "stable" if system_stable else "unstable"
+
+        history_entry = {
+            "vendor_no": vendor_no,
+            "vendor_name": profile.get("vendor_name", ""),
+            "action": "override_cleared",
+            "old_status": old_effective,
+            "new_status": new_effective,
+            "override_status": "none",
+            "reason": reason,
+            "note": "",
+            "actor": actor,
+            "timestamp": now,
+        }
+        await self.db.stable_vendor_override_history.insert_one({**history_entry})
+
+        if self.event_service:
+            await self.event_service.emit(
+                event_type="stable_vendor.override_cleared",
+                document_id="system",
+                source_service="stable_vendor",
+                payload=history_entry,
+            )
+
+        if self.vendor_intel:
+            self.vendor_intel._cache.pop(vendor_no, None)
+
+        return {
+            "vendor_no": vendor_no,
+            "old_status": old_effective,
+            "new_status": new_effective,
+        }
+
+    async def get_override_history(self, vendor_no: str, limit: int = 50) -> List[Dict]:
+        """Get override audit history for a vendor."""
+        return await self.db.stable_vendor_override_history.find(
+            {"vendor_no": vendor_no}, {"_id": 0}
+        ).sort("timestamp", -1).limit(limit).to_list(limit)
+
+    def _get_blocking_conditions(self, profile: Dict, eval_result: Dict) -> List[str]:
+        """Identify conditions that would block auto-ready for this vendor."""
+        blockers = []
+        for check in eval_result.get("checks", []):
+            if not check.get("passed", True):
+                blockers.append(f"{check['check']}: {check.get('value', 'failed')}")
+        if profile.get("effective_status") == "watch":
+            blockers.append("Vendor on watch status")
+        if profile.get("effective_status") == "unstable":
+            blockers.append("Vendor is unstable")
+        return blockers
+
+    async def _count_active_alerts(self, vendor_no: str) -> int:
+        try:
+            return await self.db.threshold_alerts.count_documents({
+                "status": "active",
+                "$or": [{"vendor_name": vendor_no}, {"vendor_no": vendor_no}],
+            })
+        except Exception:
+            return 0
 
     # =========================================================================
     # INTERNAL HELPERS

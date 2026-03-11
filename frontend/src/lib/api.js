@@ -96,6 +96,13 @@ export const evaluateDocumentRouting = (docId) => api.post(`/stable-vendor/evalu
 export const evaluateVendorStability = (vendorId) => api.get(`/stable-vendor/evaluate/${vendorId}`);
 export const reevaluateAllVendors = () => api.post('/stable-vendor/reevaluate-all');
 
+// Stable Vendor Admin APIs
+export const getStableVendors = (params) => api.get('/stable-vendor/vendors', { params });
+export const getStableVendorDetail = (vendorNo) => api.get(`/stable-vendor/vendors/${encodeURIComponent(vendorNo)}`);
+export const applyVendorOverride = (vendorNo, data) => api.post(`/stable-vendor/vendors/${encodeURIComponent(vendorNo)}/override`, data);
+export const clearVendorOverride = (vendorNo, data) => api.post(`/stable-vendor/vendors/${encodeURIComponent(vendorNo)}/clear-override`, data);
+export const getVendorOverrideHistory = (vendorNo) => api.get(`/stable-vendor/vendors/${encodeURIComponent(vendorNo)}/history`);
+
 // Bulk operations
 export const bulkRetryDocuments = async (docIds, reason = 'Bulk retry') => {
   const results = { success: [], failed: [] };

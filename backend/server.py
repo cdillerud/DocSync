@@ -210,6 +210,7 @@ GRAPH_CLIENT_SECRET = os.environ.get('GRAPH_CLIENT_SECRET', '')
 SHAREPOINT_SITE_HOSTNAME = os.environ.get('SHAREPOINT_SITE_HOSTNAME', 'gamerpackaging.sharepoint.com')
 SHAREPOINT_SITE_PATH = os.environ.get('SHAREPOINT_SITE_PATH', '/sites/GPI-DocumentHub-Test')
 SHAREPOINT_LIBRARY_NAME = os.environ.get('SHAREPOINT_LIBRARY_NAME', 'Documents')
+EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 
 app = FastAPI(title="GPI Document Hub API")
 api_router = APIRouter(prefix="/api")

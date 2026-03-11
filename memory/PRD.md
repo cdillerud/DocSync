@@ -2544,6 +2544,46 @@ Original 13 signals + 2 new:
 - Frontend: all UI elements verified
 - Test report: /app/test_reports/iteration_42.json
 
+---
+
+## Document Processor Plugin Architecture (March 11, 2026) — COMPLETED
+
+### Overview
+Modular processor framework for specialized document family handling. Processors detect document types and extract structured fields that the generic AI pipeline misses.
+
+### Architecture
+```
+/app/backend/processors/
+    document_processor.py    — Base class (detect, extract, suggest_vendor, suggest_references)
+    processor_registry.py    — Registry, detection, execution, merge with AI extraction
+    freight_invoice_processor.py  — BOL, shipment, carrier, freight amount
+    customs_entry_processor.py    — Entry number, broker file, customer ref, invoice ref
+    bill_of_lading_processor.py   — BOL, shipper, consignee, carrier, seal number
+```
+
+### Pipeline Integration
+Document intake → AI classification → **Processor detection → Processor extraction → Merge** → Normalization → Resolver
+
+### Key Points
+- Processors AUGMENT, never replace AI extraction
+- Processor references feed into resolver as high-confidence candidates (confidence=0.85)
+- Suggested vendors passed to vendor intelligence for fuzzy matching
+- Results stored on `processor_result` field of document
+- System continues normally when no processor matches
+
+### API Endpoints
+- `GET /api/processors/registry` — list registered processors
+- `POST /api/processors/test-detect` — test processor detection with sample text
+- `GET /api/processors/document/{doc_id}/processor-result` — get stored processor result
+
+### Test Results
+- Backend: 22/22 pass (100%)
+- Frontend: all processor badges verified
+- Test report: /app/test_reports/iteration_43.json
+
+*Last Updated: March 11, 2026*
+
+
 *Last Updated: March 11, 2026*
 
 ### Test Results

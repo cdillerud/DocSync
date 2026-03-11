@@ -1055,32 +1055,58 @@ Replaced static "BC CONNECTED" indicator in the sidebar with a dynamic status th
 
 ---
 
-## Backend Modular Router Structure (In Progress - February 24, 2026)
+## Backend Modular Router Structure (COMPLETED - March 11, 2026)
 
 ### Overview
-Refactoring the monolithic `server.py` (~12,000 lines) into modular router files under `/app/backend/routes/`.
+Fully refactored the monolithic `server.py` (~10,000 lines, 85 routes) into domain-specific thin-wrapper routers under `/app/backend/routers/`.
 
-### Router Files Created
-| File | Prefix | Purpose | Wired |
-|------|--------|---------|-------|
-| `auth.py` | /auth | Authentication endpoints | YES |
-| `documents.py` | /documents | Document CRUD operations | Pending |
-| `workflows.py` | /workflows | Workflow state transitions | Pending |
-| `config.py` | /config | System settings, mailboxes | Pending |
-| `dashboard.py` | /dashboard | Statistics and metrics | Pending |
-| `ingestion.py` | /ingestion | File import endpoints | Pending |
+### Phase 1 Routers (Previously Extracted — Standalone Logic)
+| File | Prefix | Purpose |
+|------|--------|---------|
+| `automation_rules.py` | /automation-rules | Automation rules engine |
+| `freight_routing.py` | /freight-routing | Freight G/L routing |
+| `label_corrections.py` | /label-corrections | Label correction feedback |
+| `alerts.py` | /alerts | Alert patterns |
+| `vendor_extraction_profiles.py` | /vendor-extraction-profiles | Vendor extraction profiles |
+| `layout_fingerprints.py` | /layout-fingerprints | Layout fingerprinting |
+| `vendor_intelligence.py` | /vendor-intelligence | Vendor intelligence |
+| `cache.py` | /cache | BC reference cache |
+| `metrics.py` | /metrics | Extraction metrics |
+| `bc_sandbox.py` | /bc-sandbox | BC sandbox integration |
+| `ap_validation.py` | /ap-validation | AP validation |
+| `pilot.py` | /pilot | Shadow pilot |
+| `events.py` | /events | Event service |
+| `settings.py` | /settings | System settings |
+| `admin.py` | /admin | Admin operations |
+| `auto_clear.py` | /auto-clear | Auto-clear rules |
+| `dashboard.py` | /dashboard | Dashboard stats |
+| `square9.py` | /square9 | Square9 workflow |
+| `email_polling.py` | /email | Email polling |
+| `vendors.py` | /vendors | Vendor matching |
+| `migration_routes.py` | /migration | Data migration |
+| `stable_vendor.py` | /stable-vendor | Stable vendor auto-ready |
 
-### Migration Strategy
-1. Create router file with endpoint definitions
-2. Import router in server.py 
-3. Keep original endpoints for backward compatibility during migration
-4. Test new router endpoints
-5. Remove original endpoints after verification
+### Phase 2 Routers (NEW — Thin Wrappers Extracting server.py Routes)
+| File | Prefix | Routes | Purpose |
+|------|--------|--------|---------|
+| `auth_routes.py` | /auth | 2 | Login, user info |
+| `documents_routes.py` | /documents | 28 | CRUD, metadata, processing, BC resolution |
+| `workflows_routes.py` | /workflows | 28 | AP invoice queues, generic workflows, mutations |
+| `bc_routes.py` | /bc | 3 | BC companies, sales orders, reference resolution |
+| `mailbox_routes.py` | /settings | 8 | Mailbox source CRUD, test, poll |
+| `aliases_routes.py` | /aliases | 4 | Vendor alias CRUD |
+| `spiro_routes.py` | /spiro | 4 | Spiro CRM integration |
+| `file_import_routes.py` | /sales/file-import | 6 | Excel/CSV file import |
 
-### Current Status
-- Auth router created and imported (backward-compatible mode)
-- Other routers exist but are not yet wired to main app
-- Full migration planned in phases to minimize risk
+### Route Inventory
+Full mapping: `/app/backend/ROUTE_INVENTORY.md` (85 routes cataloged)
+
+### Migration Strategy (Completed)
+1. Created thin-wrapper routers that import handler functions from server.py
+2. Used `router.add_api_route()` to re-register handlers on new routers
+3. New routers loaded BEFORE legacy router in main.py (take precedence)
+4. Legacy api_router kept as fallback (all 85 routes now served by new routers)
+5. Regression tested with 24/25 endpoints passing (1 pre-existing bug fixed)
 
 ---
 
@@ -1189,7 +1215,7 @@ Created `/app/memory/SQUARE9_COMPARISON.md` documenting alignment status.
 
 ### P1 - In Progress
 - [x] Integrate `APValidationService` into main processing flow - Completed March 10, 2026
-- [ ] Continue backend refactoring (move endpoints from server.py to routers)
+- [x] Continue backend refactoring (move endpoints from server.py to routers) - Completed March 11, 2026
 - [ ] Package & Publish BC (AL) Extension to Sandbox
 - [x] G/L Account Routing for Freight (inbound vs outbound) - Completed March 10, 2026
 - [x] Reference Label Correction Feedback Loop — Completed March 11, 2026

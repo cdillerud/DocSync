@@ -8965,8 +8965,9 @@ async def get_ap_workflow_metrics(days: int = Query(30)):
     # Group by date
     daily_by_date = {}
     for r in daily_results:
-        date = r["_id"]["date"]
-        status = r["_id"]["to_status"]
+        _id = r.get("_id") or {}
+        date = _id.get("date")
+        status = _id.get("to_status")
         if date and status:
             if date not in daily_by_date:
                 daily_by_date[date] = {}

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { RefreshCw, GitBranch, FileText, Link2, ArrowRight } from 'lucide-react';
+import { RefreshCw, GitBranch, FileText, Link2, ArrowRight, Search } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -105,6 +105,14 @@ export function TransactionGraphPanel({ docId }) {
                 </Badge>
                 <span className="font-mono">{n.reference_value}</span>
                 {n.vendor_name && <span className="text-muted-foreground">({n.vendor_name})</span>}
+                <button
+                  className="ml-auto text-muted-foreground hover:text-primary transition-colors"
+                  onClick={() => navigate(`/transaction-search?q=${encodeURIComponent(n.reference_value)}`)}
+                  title="Search transaction chain"
+                  data-testid={`search-ref-${n.node_id}`}
+                >
+                  <Search className="w-3 h-3" />
+                </button>
               </div>
             ))}
           </div>
@@ -159,6 +167,7 @@ export function TransactionGraphPanel({ docId }) {
 export function TransactionGraphWidget() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
   const load = () => {
     setLoading(true);
@@ -222,8 +231,19 @@ export function TransactionGraphWidget() {
           </div>
         </div>
 
-        <div className="text-[10px] text-muted-foreground">
-          Avg. confidence: <span className="font-mono">{((stats.avg_edge_confidence || 0) * 100).toFixed(0)}%</span>
+        <div className="flex items-center justify-between">
+          <div className="text-[10px] text-muted-foreground">
+            Avg. confidence: <span className="font-mono">{((stats.avg_edge_confidence || 0) * 100).toFixed(0)}%</span>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-[10px] h-6"
+            onClick={() => navigate('/transaction-search')}
+            data-testid="open-transaction-search"
+          >
+            <Search className="w-3 h-3 mr-1" />Search
+          </Button>
         </div>
       </CardContent>
     </Card>

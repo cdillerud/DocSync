@@ -6,7 +6,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator
 } from '../components/ui/dropdown-menu';
 import {
-  LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, Brain, FileSpreadsheet, ChevronRight, Users, Zap, Target, Fingerprint, ShieldCheck, Cpu
+  LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, Brain, FileSpreadsheet, ChevronRight, Users, Zap, Target, Fingerprint, ShieldCheck, Cpu, Search
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
@@ -17,6 +17,7 @@ const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', exact: true },
   { to: '/upload', icon: UploadCloud, label: 'Upload' },
   { to: '/queue', icon: Files, label: 'Document Queue' },
+  { to: '/transaction-search', icon: Search, label: 'Transaction Search' },
   { to: '/file-import', icon: FileSpreadsheet, label: 'File Import' },
   { to: '/email-parser', icon: Brain, label: 'Email Config' },
   { to: '/vendor-intelligence', icon: Users, label: 'Vendor Intel' },

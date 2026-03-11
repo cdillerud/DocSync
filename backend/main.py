@@ -78,6 +78,7 @@ from routers.reference_intelligence_v2 import router as ref_intel_v2_router
 from routers.processors import router as processors_router
 from routers.transaction_graph import router as transaction_graph_router
 from routers.processor_specs import router as processor_specs_router
+from routers.transaction_search import router as transaction_search_router
 
 # ==================== APP ====================
 app = FastAPI(title="GPI Document Hub API")
@@ -128,6 +129,7 @@ app.include_router(ref_intel_v2_router, prefix="/api")
 app.include_router(processors_router, prefix="/api")
 app.include_router(transaction_graph_router, prefix="/api")
 app.include_router(processor_specs_router, prefix="/api")
+app.include_router(transaction_search_router, prefix="/api")
 
 # ==================== LEGACY ROUTERS ====================
 # api_router has prefix="/api" — document, workflow, alias, BC, sales-file-import routes

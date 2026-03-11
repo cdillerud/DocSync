@@ -20,6 +20,8 @@ from typing import Dict, Any, Optional, List, Tuple
 from enum import Enum
 from dataclasses import dataclass, field, asdict
 
+from services.fuzzy_matching import compute_fuzzy_match, compute_contextual_similarity
+
 logger = logging.getLogger(__name__)
 
 
@@ -516,13 +518,25 @@ def classify_reference_domain(
 # SEARCH STRATEGY
 # =============================================================================
 
-def get_search_strategy(document_type: str) -> List[str]:
+def get_search_strategy(document_type: str, vendor_behavior: Dict = None) -> List[str]:
     """
     Get the BC entity search order based on document type.
+    
+    v2: If vendor_behavior provides a preferred search order,
+    use it to reorder (while keeping all entity types in play).
     """
     strategy_key = document_type if document_type in SEARCH_STRATEGIES else "default"
     strategy = SEARCH_STRATEGIES[strategy_key]
-    return [e.value for e in strategy]
+    base_order = [e.value for e in strategy]
+    
+    if vendor_behavior and vendor_behavior.get("preferred_search_order"):
+        preferred = vendor_behavior["preferred_search_order"]
+        # Put preferred types first, then append any remaining from base
+        reordered = [t for t in preferred if t in base_order]
+        reordered += [t for t in base_order if t not in reordered]
+        return reordered
+    
+    return base_order
 
 
 def get_search_tables(document_type: str) -> List[str]:
@@ -575,6 +589,23 @@ def score_bc_match(
         reasoning_parts.append("Normalized number match")
     else:
         breakdown["exact_reference_match"] = 0.0
+        # 1b. Fuzzy reference similarity (up to 0.15) — v2 signal
+        fuzzy_result = compute_fuzzy_match(normalized_ref, normalize_reference(bc_number))
+        fuzzy_score = fuzzy_result.get("fuzzy_score", 0.0)
+        if fuzzy_score >= 0.50:
+            capped = round(min(fuzzy_score * 0.15, 0.15), 4)
+            breakdown["fuzzy_reference_similarity"] = capped
+            # Determine which fuzzy signal contributed most
+            fuzzy_reason = []
+            if fuzzy_result.get("numeric_core_match", 0) > 0:
+                fuzzy_reason.append("numeric core match")
+            if fuzzy_result.get("partial_overlap", 0) > 0:
+                fuzzy_reason.append("partial overlap")
+            if fuzzy_result.get("ocr_corrected", 0) > 0:
+                fuzzy_reason.append("OCR corrected")
+            if fuzzy_result.get("levenshtein_sim", 0) > 0:
+                fuzzy_reason.append(f"similarity {fuzzy_score:.0%}")
+            reasoning_parts.append(f"Fuzzy match: {', '.join(fuzzy_reason)} (+{capped:.2f})")
     
     # 2. Entity type alignment (0.20)
     if entity_type in candidate.predicted_entity_types:
@@ -772,6 +803,20 @@ def score_bc_match(
         if layout_family_bias.get("new_layout_detected"):
             reasoning_parts.append(f"New layout detected (family: {family_id[:15]})")
     
+    # 14. Contextual similarity (v2 signal — up to 0.10)
+    breakdown["contextual_similarity"] = 0.0
+    if document and breakdown.get("exact_reference_match", 0) == 0:
+        # Only apply contextual signals when there's no exact/normalized match
+        ctx_score, ctx_breakdown, ctx_reasoning = compute_contextual_similarity(document, bc_record)
+        if ctx_score > 0:
+            capped_ctx = round(min(ctx_score * 0.20, 0.10), 4)
+            breakdown["contextual_similarity"] = capped_ctx
+            reasoning_parts.append(f"Context: {ctx_reasoning} (+{capped_ctx:.2f})")
+    
+    # 15. Cluster membership bonus (v2 signal — up to 0.08)
+    # This is injected by the caller when cluster data is available
+    # breakdown["cluster_membership"] will be set externally if applicable
+    
     # --- VENDOR INFLUENCE CAP: max total vendor-related boost = 0.20 ---
     vendor_components = (
         breakdown.get("vendor_behavior_bonus", 0)
@@ -849,6 +894,7 @@ class ReferenceIntelligenceService:
         self._vendor_intel_service = None
         self._vep_service = None
         self._layout_fingerprint_service = None
+        self._correlation_service = None
     
     def set_label_correction_service(self, svc):
         self._label_correction_service = svc
@@ -861,6 +907,10 @@ class ReferenceIntelligenceService:
     
     def set_layout_fingerprint_service(self, svc):
         self._layout_fingerprint_service = svc
+    
+    def set_correlation_service(self, svc):
+        """v2: Inject cross-document correlation service."""
+        self._correlation_service = svc
     
     async def resolve_document_references(
         self,
@@ -923,6 +973,7 @@ class ReferenceIntelligenceService:
             "bc_fallback_results": [],
             "candidate_scores": [],
             "decision": {},
+            "v2_signals": {},
         }
         
         if doc_type in FREIGHT_DOC_TYPES:
@@ -1056,7 +1107,15 @@ class ReferenceIntelligenceService:
             "preferred_domain": vendor_hints.get("preferred_domain") if vendor_hints else None,
             "typical_match_types": vendor_hints.get("typical_match_types", []) if vendor_hints else [],
             "label_correction_patterns": vendor_hints.get("label_correction_patterns", {}) if vendor_hints else {},
+            "preferred_search_order": vendor_hints.get("preferred_search_order", []) if vendor_hints else [],
+            "common_match_targets": vendor_hints.get("common_match_targets", []) if vendor_hints else [],
         }
+        
+        # v2: Apply vendor behavioral dynamic search strategy
+        if vendor_hints and vendor_hints.get("preferred_search_order"):
+            result.search_order = get_search_strategy(effective_strategy, vendor_hints)
+            diag["v2_signals"]["vendor_dynamic_strategy"] = True
+            diag["v2_signals"]["vendor_search_order"] = result.search_order
         
         all_matches = []
         search_tables = get_search_tables(effective_strategy)
@@ -1189,6 +1248,23 @@ class ReferenceIntelligenceService:
                     match_score=score,
                     match_reasoning=reasoning
                 )
+                
+                # v2: Cluster membership bonus
+                if self._correlation_service:
+                    try:
+                        cluster_info = await self._correlation_service.get_cluster_match_bonus(
+                            document, bc_result.bc_record_info
+                        )
+                        if cluster_info.get("has_cluster_bonus"):
+                            cluster_bonus = cluster_info["cluster_bonus"]
+                            breakdown["cluster_membership"] = cluster_bonus
+                            score = min(sum(breakdown.values()), 1.0)
+                            match.match_score = score
+                            match.match_reasoning += f"; Cluster bonus +{cluster_bonus:.2f}"
+                            diag["v2_signals"]["cluster_bonus_applied"] = True
+                    except Exception:
+                        pass
+                
                 all_matches.append((candidate, match))
                 
                 diag["candidate_scores"].append({
@@ -1379,6 +1455,15 @@ class ReferenceIntelligenceService:
                     "strategy": effective_strategy,
                 }
             )
+        
+        # v2: Update cross-document correlation cluster
+        if self._correlation_service:
+            try:
+                cluster_id = await self._correlation_service.update_cluster_from_document(document)
+                if cluster_id:
+                    diag["v2_signals"]["cluster_id"] = cluster_id
+            except Exception as ce:
+                logger.warning("[Reference Intelligence] Cluster update error: %s", str(ce))
         
         return result
     

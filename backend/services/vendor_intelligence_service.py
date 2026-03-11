@@ -373,6 +373,8 @@ class VendorIntelligenceService:
         """
         Get vendor-aware hints for the reference resolver.
         Returns search order priority adjustments and scoring signals.
+        
+        v2: Now includes preferred_search_order for dynamic strategy.
         """
         profile = await self.get_profile(vendor_name)
         if not profile or profile.get("invoice_count", 0) < 3:
@@ -394,6 +396,26 @@ class VendorIntelligenceService:
         elif po_freq > 0.7:
             hints["prioritize_entity"] = "purchase_order"
             hints["search_order_boost"] = ["purchase_order", "posted_purchase_invoice"]
+
+        # v2: Build preferred_search_order from match type counts
+        match_counts = profile.get("bc_match_type_counts", {})
+        if match_counts:
+            sorted_types = sorted(match_counts.items(), key=lambda x: x[1], reverse=True)
+            hints["preferred_search_order"] = [t for t, _ in sorted_types if t]
+
+        # v2: Reference formatting patterns
+        hints["reference_patterns"] = {
+            "po_frequency": po_freq,
+            "shipment_frequency": ship_freq,
+            "bol_rate": profile.get("bol_presence_rate", 0),
+            "invoice_ref_count": profile.get("invoice_reference_count", 0),
+        }
+
+        # v2: Common match targets
+        hints["common_match_targets"] = [
+            t for t, c in sorted(match_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+            if c >= 2
+        ]
 
         # Scoring signals
         typical_types = profile.get("typical_bc_match_types", [])

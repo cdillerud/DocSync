@@ -10221,6 +10221,13 @@ async def startup():
     auto_resolve.set_layout_fingerprint_service(layout_fp_svc)
     logger.info("Layout Fingerprint Service initialized")
     
+    # Initialize Cross-Document Correlation Service (v2)
+    from services.cross_document_correlation import CrossDocumentCorrelationService
+    correlation_svc = CrossDocumentCorrelationService(db, event_service=event_service)
+    await correlation_svc.initialize()
+    ref_intel_service.set_correlation_service(correlation_svc)
+    logger.info("Cross-Document Correlation Service initialized")
+    
     # Initialize Stable Vendor Auto-Ready Service
     from services.stable_vendor_service import set_stable_vendor_service
     stable_vendor_svc = set_stable_vendor_service(

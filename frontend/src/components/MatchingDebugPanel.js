@@ -122,6 +122,17 @@ export default function MatchingDebugPanel({ document: doc }) {
                     +{diag.shipment_clustering.cluster_matches_added} cluster
                   </Badge>
                 )}
+                {diag?.v2_signals?.vendor_dynamic_strategy && (
+                  <Badge className="bg-pink-500/20 text-pink-400 text-[10px]">v2 Vendor Strategy</Badge>
+                )}
+                {diag?.v2_signals?.cluster_bonus_applied && (
+                  <Badge className="bg-indigo-500/20 text-indigo-400 text-[10px]">v2 Cluster Bonus</Badge>
+                )}
+                {diag?.v2_signals?.cluster_id && (
+                  <Badge className="bg-blue-500/20 text-blue-400 text-[10px]">
+                    Cluster: {diag.v2_signals.cluster_id.substring(0, 15)}
+                  </Badge>
+                )}
                 {diag?.processing_time_ms != null && (
                   <span className="text-muted-foreground">{diag.processing_time_ms}ms</span>
                 )}
@@ -257,10 +268,12 @@ export default function MatchingDebugPanel({ document: doc }) {
                                     <div
                                       className={`h-full rounded-full ${
                                         k === 'label_correction_boost' ? 'bg-violet-500/60' :
-                                        k === 'cluster_match_bonus' ? 'bg-blue-500/60' :
+                                        k === 'cluster_match_bonus' || k === 'cluster_membership' ? 'bg-blue-500/60' :
                                         k === 'reference_context_match' ? 'bg-cyan-500/60' :
                                         k === 'date_proximity' ? 'bg-orange-500/60' :
                                         k === 'extraction_profile_bias' ? 'bg-teal-500/60' :
+                                        k === 'fuzzy_reference_similarity' ? 'bg-pink-500/60' :
+                                        k === 'contextual_similarity' ? 'bg-indigo-500/60' :
                                         'bg-emerald-500/60'
                                       }`}
                                       style={{ width: `${Math.min(v * 200, 100)}%` }}
@@ -268,8 +281,10 @@ export default function MatchingDebugPanel({ document: doc }) {
                                   </div>
                                   <span className={
                                     k === 'label_correction_boost' ? 'text-violet-400' :
-                                    k === 'cluster_match_bonus' ? 'text-blue-400' :
-                                    k === 'extraction_profile_bias' ? 'text-teal-400' : ''
+                                    k === 'cluster_match_bonus' || k === 'cluster_membership' ? 'text-blue-400' :
+                                    k === 'extraction_profile_bias' ? 'text-teal-400' :
+                                    k === 'fuzzy_reference_similarity' ? 'text-pink-400' :
+                                    k === 'contextual_similarity' ? 'text-indigo-400' : ''
                                   }>
                                     {k.replace(/_/g, ' ')}: {(v * 100).toFixed(0)}%
                                   </span>

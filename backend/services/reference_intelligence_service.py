@@ -668,6 +668,72 @@ def score_bc_match(
             count = entity_boosts[entity_type].get("count", 0)
             reasoning_parts.append(f"Label correction: {candidate.detected_label}→{entity_type} learned ({count}x, +{boost:.0%})")
     
+    # 10. Reference context match (0.05) — context clues align with entity type
+    breakdown["reference_context_match"] = 0.0
+    source_lower = (candidate.source_text or "").lower()
+    if source_lower:
+        if "shipment" in entity_type.lower() or "sales" in entity_type.lower():
+            ship_context = ["ship", "shipment", "bol", "freight", "deliver", "pickup", "carrier", "tracking"]
+            if any(kw in source_lower for kw in ship_context):
+                breakdown["reference_context_match"] = 0.05
+                reasoning_parts.append("Reference context: shipping keywords match entity")
+        elif "purchase" in entity_type.lower():
+            purchase_context = ["purchase", "vendor", "supplier", "po ", "p.o."]
+            if any(kw in source_lower for kw in purchase_context):
+                breakdown["reference_context_match"] = 0.05
+                reasoning_parts.append("Reference context: purchase keywords match entity")
+    
+    # 11. Date proximity (0.05) — document date close to BC record date
+    breakdown["date_proximity"] = 0.0
+    if document:
+        doc_date_str = (
+            document.get("invoice_date")
+            or document.get("document_date")
+            or document.get("received_at")
+        )
+        bc_date_str = (
+            bc_record.get("postingDate")
+            or bc_record.get("orderDate")
+            or bc_record.get("documentDate")
+            or bc_record.get("posting_date")
+        )
+        if doc_date_str and bc_date_str:
+            try:
+                from datetime import datetime as dt
+                # Parse dates (handle both ISO format and date-only)
+                doc_date = dt.fromisoformat(str(doc_date_str).replace("Z", "+00:00").split("T")[0])
+                bc_date = dt.fromisoformat(str(bc_date_str).replace("Z", "+00:00").split("T")[0])
+                days_diff = abs((doc_date - bc_date).days)
+                if days_diff <= 7:
+                    breakdown["date_proximity"] = 0.05
+                    reasoning_parts.append(f"Date proximity: {days_diff}d apart")
+                elif days_diff <= 30:
+                    breakdown["date_proximity"] = 0.03
+                    reasoning_parts.append(f"Date proximity: {days_diff}d apart (moderate)")
+                elif days_diff <= 90:
+                    breakdown["date_proximity"] = 0.01
+                    reasoning_parts.append(f"Date proximity: {days_diff}d apart (weak)")
+            except (ValueError, TypeError):
+                pass
+    
+    # --- VENDOR INFLUENCE CAP (Part 7): max total vendor-related boost = 0.20 ---
+    vendor_components = (
+        breakdown.get("vendor_behavior_bonus", 0)
+        + breakdown.get("label_correction_boost", 0)
+    )
+    if vendor_components > 0.20:
+        # Scale down proportionally
+        if breakdown.get("vendor_behavior_bonus", 0) > 0 and breakdown.get("label_correction_boost", 0) > 0:
+            ratio_vb = breakdown["vendor_behavior_bonus"] / vendor_components
+            ratio_lc = breakdown["label_correction_boost"] / vendor_components
+            breakdown["vendor_behavior_bonus"] = round(0.20 * ratio_vb, 4)
+            breakdown["label_correction_boost"] = round(0.20 * ratio_lc, 4)
+        elif breakdown.get("vendor_behavior_bonus", 0) > 0.20:
+            breakdown["vendor_behavior_bonus"] = 0.20
+        elif breakdown.get("label_correction_boost", 0) > 0.20:
+            breakdown["label_correction_boost"] = 0.20
+        reasoning_parts.append(f"Vendor influence capped at 20% (was {vendor_components:.0%})")
+    
     score = sum(breakdown.values())
     reasoning = "; ".join(reasoning_parts)
     
@@ -932,6 +998,37 @@ class ReferenceIntelligenceService:
         search_tables = get_search_tables(effective_strategy)
         bc_query_count = 0
         
+        # --- Part 5: Dynamic search strategy based on vendor correction patterns ---
+        # If vendor patterns indicate label→entity bias, reorder search tables
+        vendor_correction_patterns = {}
+        if vendor_hints and vendor_hints.get("has_hints"):
+            vendor_correction_patterns = vendor_hints.get("label_correction_patterns", {})
+        
+        dynamic_strategy_applied = False
+        if vendor_correction_patterns:
+            # Check if the dominant correction is toward shipments
+            shipment_count = 0
+            total_count = 0
+            for key, pattern in vendor_correction_patterns.items():
+                count = pattern.get("count", 0)
+                total_count += count
+                if pattern.get("actual_entity_type", "") in ("posted_sales_shipment", "sales_shipment"):
+                    shipment_count += count
+            
+            if total_count >= 2 and shipment_count / max(total_count, 1) > 0.5:
+                # Vendor has strong shipment bias — reorder to prioritize shipments
+                shipment_first = ["salesShipments", "salesOrders", "purchaseOrders", "purchaseInvoices", "salesInvoices"]
+                search_tables = [t for t in shipment_first if t in search_tables] + [t for t in search_tables if t not in shipment_first]
+                dynamic_strategy_applied = True
+                diag["dynamic_strategy"] = {
+                    "applied": True,
+                    "reason": f"Vendor shipment correction rate: {shipment_count}/{total_count}",
+                    "reordered_tables": search_tables,
+                }
+        
+        if not dynamic_strategy_applied:
+            diag["dynamic_strategy"] = {"applied": False}
+        
         # Pre-fetch label correction hints for each candidate's label
         label_correction_cache = {}
         if self._label_correction_service and vendor_name:
@@ -1005,6 +1102,84 @@ class ReferenceIntelligenceService:
         
         result.total_bc_queries = bc_query_count
         
+        # --- Part 4: Shipment Reference Clustering ---
+        # For freight/BOL docs, try cluster search for additional shipment-related matches
+        cluster_matches_added = 0
+        if (effective_strategy == FREIGHT_STRATEGY_KEY and
+                self.bc_resolver and hasattr(self.bc_resolver, '_cache_service') and
+                self.bc_resolver._cache_service and
+                hasattr(self.bc_resolver._cache_service, 'search_shipment_cluster')):
+            try:
+                for candidate in unique_candidates:
+                    # Only cluster-search if primary didn't find a shipment match
+                    primary_has_shipment = any(
+                        "shipment" in m.entity_type.lower()
+                        for _, m in all_matches
+                        if m.bc_document_no
+                    )
+                    if primary_has_shipment:
+                        break
+                    
+                    cluster_results = await self.bc_resolver._cache_service.search_shipment_cluster(
+                        candidate.reference_value_normalized
+                    )
+                    for cr in cluster_results:
+                        # Score clustered results with a cluster bonus
+                        cluster_entity_type = cr.get("bc_entity_type", "unknown")
+                        cluster_info = {
+                            "number": cr.get("bc_document_no", ""),
+                            "id": cr.get("bc_record_id"),
+                            "table": "cache",
+                            "source": "cluster",
+                            "vendor_name": cr.get("bc_vendor_name", ""),
+                            "customer_name": cr.get("bc_customer_name", ""),
+                            "posting_date": cr.get("bc_posting_date"),
+                            "orderNumber": cr.get("bc_order_number", ""),
+                            "order_number": cr.get("bc_order_number", ""),
+                            "_cluster_reason": cr.get("_cluster_reason", ""),
+                        }
+                        lc_hints = label_correction_cache.get(candidate.detected_label, {"has_hints": False})
+                        score, reasoning, breakdown = score_bc_match(
+                            candidate, cluster_info, cluster_entity_type,
+                            document, vendor_hints=vendor_hints,
+                            label_correction_hints=lc_hints
+                        )
+                        # Add cluster bonus (0.03) for relationship-based discovery
+                        cluster_bonus = 0.03 if cr.get("_cluster_reason", "").startswith("linked_via") else 0
+                        breakdown["cluster_match_bonus"] = cluster_bonus
+                        score = min(sum(breakdown.values()), 1.0)
+                        
+                        match = BCMatch(
+                            entity_type=cluster_entity_type,
+                            bc_record_id=cr.get("bc_record_id"),
+                            bc_document_no=cr.get("bc_document_no", ""),
+                            bc_record_info=cluster_info,
+                            match_score=score,
+                            match_reasoning=reasoning + "; Cluster: " + cr.get("_cluster_reason", "")
+                        )
+                        # Avoid duplicates
+                        existing_doc_nos = {m.bc_document_no for _, m in all_matches}
+                        if match.bc_document_no not in existing_doc_nos:
+                            all_matches.append((candidate, match))
+                            cluster_matches_added += 1
+                            diag["candidate_scores"].append({
+                                "reference": candidate.reference_value_normalized,
+                                "entity_type": cluster_entity_type,
+                                "bc_document_no": cr.get("bc_document_no", ""),
+                                "final_score": round(score, 4),
+                                "score_breakdown": {k: round(v, 4) for k, v in breakdown.items()},
+                                "reasoning": reasoning,
+                                "source": "shipment_cluster",
+                                "cluster_reason": cr.get("_cluster_reason", ""),
+                            })
+            except Exception as ce:
+                logger.warning("[Reference Intelligence] Shipment clustering error: %s", str(ce))
+        
+        diag["shipment_clustering"] = {
+            "attempted": effective_strategy == FREIGHT_STRATEGY_KEY,
+            "cluster_matches_added": cluster_matches_added,
+        }
+        
         # 4. Select best match with corrected ambiguity logic
         if all_matches:
             all_matches.sort(key=lambda x: x[1].match_score, reverse=True)
@@ -1029,6 +1204,22 @@ class ReferenceIntelligenceService:
                 "best_entity": best_match.entity_type,
                 "best_doc_no": best_match.bc_document_no,
                 "total_candidates": len(all_matches),
+                # Part 8: feedback loop diagnostics
+                "label_correction_applied": any(
+                    s.get("score_breakdown", {}).get("label_correction_boost", 0) > 0
+                    for s in diag.get("candidate_scores", [])
+                ),
+                "vendor_pattern_weight": round(sum(
+                    s.get("score_breakdown", {}).get("vendor_behavior_bonus", 0)
+                    + s.get("score_breakdown", {}).get("label_correction_boost", 0)
+                    for s in diag.get("candidate_scores", [])
+                    if s.get("bc_document_no") == best_match.bc_document_no
+                ), 4),
+                "cluster_match_bonus": round(sum(
+                    s.get("score_breakdown", {}).get("cluster_match_bonus", 0)
+                    for s in diag.get("candidate_scores", [])
+                    if s.get("bc_document_no") == best_match.bc_document_no
+                ), 4),
             }
             
             logger.info(

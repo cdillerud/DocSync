@@ -149,6 +149,10 @@ class LabelCorrectionService:
 
         entity_type = best_match.get("entity_type", "")
         match_score = best_match.get("match_score", 0)
+
+        # Part 1 learning rule: only learn from high-confidence matches (≥ 0.70)
+        if match_score < 0.70:
+            return []
         bc_doc_no = best_match.get("bc_document_no", "")
 
         # Get vendor info
@@ -248,12 +252,34 @@ class LabelCorrectionService:
                         "confidence": round(count / max(total, 1), 3),
                     }
 
+        # Detect unstable patterns — conflicting corrections for the same label
+        unstable_labels = set()
+        label_entity_map = {}
+        for r in results:
+            predicted = r["_id"]["predicted_label"]
+            entity = r["_id"]["actual_entity_type"]
+            count = r["count"]
+            if predicted not in label_entity_map:
+                label_entity_map[predicted] = []
+            label_entity_map[predicted].append({"entity": entity, "count": count})
+        
+        for label, entities in label_entity_map.items():
+            if len(entities) > 1:
+                # Multiple different entity types for the same label correction
+                top_count = max(e["count"] for e in entities)
+                second_count = sorted([e["count"] for e in entities], reverse=True)[1] if len(entities) > 1 else 0
+                # If the second entity has at least 40% of the top count, mark as unstable
+                if second_count >= top_count * 0.4:
+                    unstable_labels.add(label)
+
         return {
             "has_patterns": True,
             "vendor_id": vendor_id,
             "total_corrections": total,
             "patterns": patterns,
             "label_remaps": label_remaps,
+            "unstable_labels": list(unstable_labels),
+            "pattern_stability": "unstable" if unstable_labels else "stable",
         }
 
     async def get_scoring_hints(self, vendor_id: str, predicted_label: str) -> Dict[str, Any]:
@@ -280,12 +306,21 @@ class LabelCorrectionService:
 
         total = sum(r["count"] for r in results)
         entity_boosts = {}
+        
+        # Check if this label has conflicting corrections (unstable pattern)
+        is_unstable = len(results) > 1
+        if is_unstable:
+            top_count = results[0]["count"]
+            second_count = results[1]["count"] if len(results) > 1 else 0
+            is_unstable = second_count >= top_count * 0.4
 
         for r in results:
             entity = r["_id"]
             freq = r["count"] / max(total, 1)
             # Boost proportional to frequency: max 0.15 for labels that always mismatch
-            boost = min(freq * 0.15, 0.15)
+            # Cap at 0.08 for unstable patterns to prevent runaway bias
+            max_boost = 0.08 if is_unstable else 0.15
+            boost = min(freq * 0.15, max_boost)
             entity_boosts[entity] = {
                 "boost": round(boost, 4),
                 "count": r["count"],
@@ -297,6 +332,7 @@ class LabelCorrectionService:
             "predicted_label": predicted_label,
             "total_corrections": total,
             "entity_boosts": entity_boosts,
+            "is_unstable": is_unstable,
         }
 
     async def get_stats(self) -> Dict[str, Any]:

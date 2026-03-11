@@ -2202,6 +2202,29 @@ async def rerun_matching_with_diagnostics(doc_id: str):
     # Save result and diagnostics
     await svc.update_document_references(doc_id, result)
     
+    # Trigger label correction feedback loop (learn from this resolution)
+    lc_svc = get_label_correction_service()
+    if lc_svc and result.best_match:
+        try:
+            corrections = await lc_svc.detect_and_record(
+                document_id=doc_id,
+                resolution_result=result.to_dict(),
+                document=doc,
+            )
+            if corrections:
+                # Update vendor profiles with correction patterns
+                vendor_intel = get_vendor_intelligence_service()
+                uvm = doc.get("unified_vendor_match") or {}
+                vid = uvm.get("bc_vendor_no") or doc.get("vendor_raw") or ""
+                if vendor_intel and vid:
+                    for c in corrections:
+                        try:
+                            await vendor_intel.update_label_correction_patterns(vid, c)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+    
     return result.to_dict()
 
 

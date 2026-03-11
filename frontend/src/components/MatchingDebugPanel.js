@@ -109,6 +109,14 @@ export default function MatchingDebugPanel({ document: doc }) {
                 {diag?.is_freight_carrier && (
                   <Badge className="bg-purple-500/20 text-purple-400 text-[10px]">Freight Carrier</Badge>
                 )}
+                {diag?.dynamic_strategy?.applied && (
+                  <Badge className="bg-violet-500/20 text-violet-400 text-[10px]">Dynamic Strategy</Badge>
+                )}
+                {diag?.shipment_clustering?.cluster_matches_added > 0 && (
+                  <Badge className="bg-blue-500/20 text-blue-400 text-[10px]">
+                    +{diag.shipment_clustering.cluster_matches_added} cluster
+                  </Badge>
+                )}
                 {diag?.processing_time_ms != null && (
                   <span className="text-muted-foreground">{diag.processing_time_ms}ms</span>
                 )}
@@ -242,11 +250,20 @@ export default function MatchingDebugPanel({ document: doc }) {
                                 <div key={k} className="flex items-center gap-1 text-muted-foreground">
                                   <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
                                     <div
-                                      className={`h-full rounded-full ${k === 'label_correction_boost' ? 'bg-violet-500/60' : 'bg-emerald-500/60'}`}
+                                      className={`h-full rounded-full ${
+                                        k === 'label_correction_boost' ? 'bg-violet-500/60' :
+                                        k === 'cluster_match_bonus' ? 'bg-blue-500/60' :
+                                        k === 'reference_context_match' ? 'bg-cyan-500/60' :
+                                        k === 'date_proximity' ? 'bg-orange-500/60' :
+                                        'bg-emerald-500/60'
+                                      }`}
                                       style={{ width: `${Math.min(v * 200, 100)}%` }}
                                     />
                                   </div>
-                                  <span className={k === 'label_correction_boost' ? 'text-violet-400' : ''}>
+                                  <span className={
+                                    k === 'label_correction_boost' ? 'text-violet-400' :
+                                    k === 'cluster_match_bonus' ? 'text-blue-400' : ''
+                                  }>
                                     {k.replace(/_/g, ' ')}: {(v * 100).toFixed(0)}%
                                   </span>
                                 </div>
@@ -357,6 +374,31 @@ export default function MatchingDebugPanel({ document: doc }) {
                       <div className="text-red-400">
                         <XCircle className="w-3 h-3 inline mr-1" />
                         Failure: {diag.decision.failure_reason}
+                      </div>
+                    )}
+                    {/* Part 8: Feedback loop diagnostics */}
+                    <div className="flex flex-wrap gap-3 mt-1 pt-1 border-t border-border/50">
+                      <span className="text-muted-foreground">
+                        Label correction: {diag.decision.label_correction_applied ?
+                          <Badge className="bg-violet-500/20 text-violet-400 text-[10px]">applied</Badge> :
+                          <span className="text-[10px]">none</span>}
+                      </span>
+                      {diag.decision.vendor_pattern_weight > 0 && (
+                        <span className="text-muted-foreground">
+                          Vendor weight: <span className="font-mono text-violet-400">{(diag.decision.vendor_pattern_weight * 100).toFixed(1)}%</span>
+                        </span>
+                      )}
+                      {diag.decision.cluster_match_bonus > 0 && (
+                        <span className="text-muted-foreground">
+                          Cluster bonus: <span className="font-mono text-blue-400">+{(diag.decision.cluster_match_bonus * 100).toFixed(1)}%</span>
+                        </span>
+                      )}
+                    </div>
+                    {/* Dynamic strategy */}
+                    {diag.dynamic_strategy?.applied && (
+                      <div className="mt-1 text-violet-400 text-[10px]">
+                        <Zap className="w-3 h-3 inline mr-1" />
+                        Dynamic strategy: {diag.dynamic_strategy.reason}
                       </div>
                     )}
                   </div>

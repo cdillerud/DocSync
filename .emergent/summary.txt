@@ -1,46 +1,45 @@
 <analysis>**original_problem_statement:**
 The user wants to build GPI Document Hub, an event-driven workflow platform. The project has evolved to include AI-assisted document intelligence and deep integration with Business Central (BC).
 
-The current high-priority task is to continue the architectural refactor of the backend, which was previously a 16,000+ line monolith in . The goal is to fully modularize the backend by extracting all remaining business logic and API routes into a clean structure of services and routers. This is a technical debt task aimed at improving maintainability, testability, and developer velocity.
+The current high-priority task is to implement two new integrated systems:
+1.  **Processor Spec → Implementation Workflow:** A system to generate structured implementation specifications from discovered processor candidates, including a dashboard and a prompt generator for AI-assisted development.
+2.  **Transaction Graph Layer:** A data layer to model and connect related documents (POs, Invoices, Shipments, etc.) as a graph. This graph will be used to enhance the reference resolver's accuracy through linkage bonuses and contextual inference.
 
-Previous completed tasks in this session include:
-1.  **Initial Refactor Pass:** Creating a new  entry point to unblock the refactor.
-2.  **Stable Vendor Auto-Ready Rules:** Implementing a system to automatically route documents from trusted vendors.
-3.  **SharePoint Module Removal:** Deleting an obsolete feature from the codebase.
-4.  **Stable Vendor Admin Page:** Building a UI for admins to oversee and manage the stable vendor system.
+This builds upon the recently completed Document Processor Plugin Architecture.
 
 **User's preferred language**: English
 
 **what currently exists?**
 The application is a mature, full-stack document intelligence platform using FastAPI, React, and MongoDB.
--   **Modular Backend (In Progress):** The backend now runs via a new  entry point. This file initializes services and includes all modular routers from . It also includes the remaining legacy routes from  as a fallback, but  still contains approximately 88 routes that need to be extracted.
--   **Stable Vendor Automation:** A complete Stable Vendor feature is live. This includes a backend service (), APIs for evaluation and metrics, and frontend UI elements on the Dashboard, Document Queue, and Document Detail pages.
--   **Stable Vendor Admin Page:** A new admin page exists at  allowing for manual oversight, vendor status overrides, and review of stability reasoning and history.
+-   **Fully Modular Backend:** The  monolith has been successfully refactored. All API routes now reside in domain-specific files within , loaded by the  entry point.
+-   **Hardened BC Environments:** A strict separation between Business Central (BC) Production for read operations and a Sandbox for write operations is enforced via configuration (). The UI reflects this separation.
+-   **Reference Intelligence v2:** The resolver engine has been upgraded with advanced fuzzy matching, OCR error tolerance, contextual inference, and vendor behavioral models to improve matching accuracy. Key logic is in .
+-   **Document Processor Plugin Architecture:** A framework for handling specific document families (e.g., Freight Invoices, Customs Entries) is in place. Processors reside in  and are managed by a registry. This improves data extraction for non-standard documents.
 
 **Last working item**:
--   **Last item agent was working:** The agent was in the planning phase for the next and final stage of the backend refactoring. The goal is to extract the remaining 88 API routes from the monolithic  and move them into domain-specific router files.
+-   **Last item agent was working:** The agent was starting the new Processor Spec - Workflow and Transaction Graph Layer task. It performed an initial exploration of the existing codebase to gather context before formulating an implementation plan.
 -   **Status:** NOT STARTED
 -   **Agent Testing Done:** N
--   **Which testing method agent to use?** backend testing agent
+-   **Which testing method agent to use?** both
 -   **User Testing Done:** N
 
 **All Pending/In progress Issue list**:
 -   **Issue 1: GitHub Branch/Deployment Confusion (P2 - Medium)**
     -   **Description:** The user is working on a non-standard  branch, a recurring source of friction and deployment problems.
     -   **Attempted fixes:** None. This is a user workflow issue.
-    -   **Next debug checklist:** The primary focus is the P0 refactoring task. This issue can be revisited later.
+    -   **Next debug checklist:** This is a lower-priority issue. The primary focus should be on the P0 feature task.
     -   **Why fix this issue and what will be achieved with the fix?** To establish a standard git workflow, eliminate merge conflicts, and enable reliable, predictable deployments.
     -   **Status:** NOT STARTED
     -   **Is recurring issue?** Y
     -   **Should Test frontend/backend/both after fix?** Backend.
-    -   **Blocked on other issue:** Blocked on the P0 refactoring task.
+    -   **Blocked on other issue:** None.
 
 **In progress Task List**:
--   **Task 1: Complete the  modular refactor (P0)**
-    -   **Where to resume:** The agent has a user-approved plan. The next step is to begin the domain-by-domain extraction. Start by creating the new router files (e.g., , ) in . For each route, use  to import and re-register the existing handler function directly from . This avoids modifying  initially and reduces risk. Create a route inventory map to track progress.
-    -   **What will be achieved with this?** A fully modularized backend where  is a lightweight bootstrap file. This will significantly improve maintainability and make future development safer and faster.
-    -   **Status:** IN PROGRESS
-    -   **Should Test frontend/backend/both after fix?** Backend (extensive regression testing is required after each domain is extracted).
+-   **Task 1: Implement Processor Spec Workflow and Transaction Graph Layer (P0)**
+    -   **Where to resume:** The agent has explored the code. The next step is to create a detailed implementation plan based on the user's 12-part prompt, present it to the user for approval, and then begin implementation. The plan should cover creating the new DB collections, the graph construction service, integrating it with the resolver, and building the new Processor Specs dashboard.
+    -   **What will be achieved with this?** The platform will become transaction-aware, significantly improving reference matching by correlating related documents. It will also streamline the creation of new document processors through an automated spec generation workflow.
+    -   **Status:** NOT STARTED
+    -   **Should Test frontend/backend/both after fix?** Both.
     -   **Blocked on something:** None.
 
 **Upcoming and Future Tasks**
@@ -54,16 +53,16 @@ The application is a mature, full-stack document intelligence platform using Fas
 -   Add multi-step approval routing for documents.
 -   Decommission the legacy Zetadocs system.
 -   Replace mock JWT auth with Entra ID SSO.
+-   Add more processors (carrier confirmation, packing slip, vendor-specific layouts).
 
 **Completed work in this session**
--   **Backend Refactor - Phase 1 (DONE):** Unblocked the  refactor by creating a  entry point that correctly loads all new and legacy routers, fixing a critical architectural issue.
--   **Re-process Button Bug Fix (DONE):** Fixed a  for  in  that caused a 500 error.
--   **Stable Vendor Auto-Ready Rules (DONE):** Implemented the full backend service, API, and frontend UI for automatically routing documents from trusted vendors.
--   **SharePoint Migration Module Removal (DONE):** Successfully removed the obsolete feature and all its related files, routes, and UI components from the codebase.
--   **Stable Vendor Admin Page (DONE):** Implemented a comprehensive admin page at  for vendor oversight, manual overrides, and audit history.
+-   **Backend Refactor Completion (DONE):** Successfully extracted the final 88 routes from  into 8 new domain-specific routers in , fully modularizing the backend.
+-   **Harden Business Central Environment Handling (DONE):** Implemented separate  and  configurations to ensure all validation uses production data while testing writes occur in a sandbox. Updated services and the frontend settings page accordingly.
+-   **Reference Intelligence v2 (DONE):** Enhanced the document resolver with advanced fuzzy matching, contextual inference, vendor behavioral modeling, and cross-document correlation. Created new services like  and .
+-   **Document Processor Plugin Architecture (DONE):** Built a framework to run specialized processors for specific document families (e.g., freight invoices, customs forms). Implemented the registry, base processor class, and three initial processors.
 
 **Earlier issues found/mentioned but not fixed**
--   The non-standard Git branch issue remains pending and is a lower priority than the active refactoring task.
+-   The non-standard Git branch issue remains pending.
 
 **Known issue recurrence from previous fork**
 -   **Issue recurrence in previous fork:** Deployment and Environment Hell, tied to the non-standard git branching.
@@ -74,50 +73,67 @@ The application is a mature, full-stack document intelligence platform using Fas
 
 
 **Key Technical Concepts**
--   **Incremental Refactoring:** The core strategy for safely dismantling the monolith. A new  entry point acts as a bootstrap, loading new modular routers first, then falling back to the legacy routes still in . This avoids modifying the large legacy file directly.
--   **Stable Vendor Logic:** A rule-based system () that evaluates vendors based on historical performance to determine if their documents can be fast-tracked through the review process.
--   **Manual Overrides with Safety Rails:** The admin page allows users to manually set a vendor's status (e.g., ), but this override does *not* bypass core safety checks like validation failures or duplicate detection.
+-   **Transaction Graph:** The upcoming task to connect related documents (invoices, BOLs, etc.) into a graph structure to improve contextual reasoning and reference matching.
+-   **Processor Spec Generation:** The upcoming task to automatically create structured specifications for new document processors based on system observability.
+-   **Document Processor Plugins:** A modular architecture where specialized, stateless processors () are run for specific document families to improve data extraction and reference suggestion.
+-g   **Reference Intelligence v2:** An upgrade to the resolver that adds advanced fuzzy matching (numeric normalization, OCR tolerance), contextual inference, and vendor behavioral models to improve match accuracy.
+-   **Hardened BC Environments:** A strict configuration-driven separation of BC Production (for reads) and BC Sandbox (for writes) to ensure data integrity and reliable testing. Managed via .
 
 **key DB schema**
+-   **hub_documents:** (extended with) 
 -   **vendor_profiles:** (extended with) 
--   **vendor_override_history:** (new collection) 
+-   **vendor_override_history:** 
+-   **(Upcoming)** **transaction_graph_nodes:** 
+-   **(Upcoming)** **transaction_graph_edges:** 
+-   **(Upcoming)** **processor_specs:** 
 
 **All files of reference**
--   **/app/backend/server.py**: The legacy monolith, containing ~88 routes that are the target of the current refactoring task.
--   **/app/backend/main.py**: The new application entry point that orchestrates loading all routers.
--   **/app/backend/routers/**: The directory where new, domain-specific router files will be created.
+-   **/app/backend/services/reference_intelligence_service.py**: The core resolver logic, heavily modified for Ref-Int V2 and processor integration.
+-   **/app/backend/processors/**: The directory containing the new processor framework and initial processors.
+-   **/app/backend/main.py**: The main application entry point that initializes services and registers all routers.
+-   **/app/backend/server.py**: The former monolith, now a slimmed-down startup script that delegates to .
+-   **/app/frontend/src/pages/SettingsPage.js**: The UI for system settings, updated to show the new BC read/write environment separation.
+-   **/app/frontend/src/components/MatchingDebugPanel.js**: The diagnostics panel, updated to show scoring signals from Ref-Int v2 and the processor plugins.
+-   **/app/memory/PRD.md**: The Product Requirements Document, updated with the status of all completed and upcoming tasks.
 
 **Areas that need refactoring**:
--   The primary task is to continue and complete the refactoring of  by extracting all remaining routes.
+-   None. The major  refactor is complete. The codebase is now in a modular state.
+
+**key api endpoints**
+-   : Lists all registered document processors.
+-   : Tests which processor matches a given document text.
+-   : Gets detailed v2 resolver diagnostics for a document.
+-   : Tests the new fuzzy matching service.
+-   : Returns the current BC read/write configuration.
 
 **Critical Info for New Agent**
--   **Your sole focus is the backend refactor.** All other features are complete and tested.
--   **Follow the user-approved strategy:** Create new, thin router files in  for each logical domain (Documents, Workflows, etc.).
--   **Do not copy-paste code.** Inside the new routers, import the handler functions directly from  and re-register them using . This is a low-risk way to move route ownership without changing logic.
--   Include the new routers in . The new routers are loaded before the legacy router, so they will automatically override the old definitions.
--   **Create a route inventory map** (e.g., in a markdown file) as you proceed, mapping the original function to its new router module. This is a user requirement.
--   **Verify functionality incrementally.** After extracting each domain, ensure the application starts and the affected endpoints/UI still work correctly.
+-   Your primary task is to implement the **Transaction Graph Layer** and **Processor Spec Workflow** as detailed in the user's latest request.
+-   First, create and present a detailed plan for approval based on the user's 12-part requirements.
+-   The backend is now fully modular.  is no longer the main place for business logic. Look in the  and  directories.
+-   The new graph layer should integrate with the existing  to provide a Graph linkage bonus to the scoring model.
+-   The processor spec generation should build on the processor discovery candidates feature that was previously implemented.
+-   The new frontend dashboard  will need a new route and component.
 
 **documents and test reports created in this job**
--   : Updated with completion status of recent features.
--   : Final test report from the successful validation of the Stable Vendor Admin Page feature.
--   : Test report for Stable Vendor Auto-Ready Rules.
--   : Test report for the initial  refactor.
+-   
+-   
+-   
+-   
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  User provided the prompt for building the Stable Vendor Admin page.
-2.  Agent provided a detailed plan for the admin page.
-3.  User: yes, please proceed
-4.  User provided the prompt to continue the backend refactor.
-5.  Agent listed all 88 routes remaining in .
-6.  Agent proposed a plan to extract the routes domain-by-domain.
-7.  User: Yes, proceed.
-8.  User provided detailed adjustments and guardrails for the refactor plan.
-9.  User emphasized preserving endpoint paths and using thin wrappers first.
-10. User requested the creation of a route inventory map to track progress.
+1.  User provided the prompt to implement the Document Processor Plugin Architecture. (Completed)
+2.  Agent asked for permission to proceed.
+3.  User: please proceed
+4.  Agent provided a  summary for the Document Processor task.
+5.  Agent explored the codebase to start the next task.
+6.  Agent viewed the  to see what's next.
+7.  Agent confirmed the plan to tackle the two P1 tasks (BC extension and Sales Order button).
+8.  User provided a new, higher-priority prompt: Implement Processor Spec - Workflow and Transaction Graph Layer.
+9.  Agent acknowledged the new task and began exploring the codebase for context.
+10. Agent provided a plan to implement the Transaction Graph and Processor Spec workflow. (This was the last action before this summary).
 
 **Project Health Check:**
--   **Broken:** None. The application is stable. The  file represents significant technical debt but is functioning correctly via the new  entry point.
+-   **Broken:** None. The application is stable and all recent features have passed comprehensive testing.
 -   **Mocked:** None.
 
 **3rd Party Integrations**
@@ -128,9 +144,9 @@ The application is a mature, full-stack document intelligence platform using Fas
 -   **APScheduler:** Used for background tasks.
 
 **Testing status**
--   **Testing agent used after significant changes:** YES. Used successfully for all three major features implemented in this session.
+-   **Testing agent used after significant changes:** YES. Used successfully for all four major features implemented in this session.
 -   **Troubleshoot agent used after agent stuck in loop:** NO.
--   **Test files created:** Yes, by the testing agent.
+-   **Test files created:** Yes, by the testing agent during its runs.
 -   **Known regressions:** None.
 
 **Credentials to test flow:**
@@ -138,4 +154,4 @@ The application is a mature, full-stack document intelligence platform using Fas
 -   **Business Central / Graph API:** Credentials are correctly configured in .
 
 **What agent forgot to execute**
--   Nothing was forgotten. The agent successfully completed three major features and one critical bug fix, and is now correctly teeing up the next phase of the user's highest-priority architectural task.</analysis>
+-   Nothing was forgotten. The agent successfully completed a series of large, complex features as requested by the user and is correctly positioned to start the next high-priority task.</analysis>

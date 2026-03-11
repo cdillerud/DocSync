@@ -12,7 +12,7 @@ import requests
 import os
 import time
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://monolith-break-5.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://graph-layer-hub.preview.emergentagent.com').rstrip('/')
 
 # Test document IDs from the context
 DOC_WITH_PO = "a1dec76a-17a2-46d4-a9f9-a0f6fb818208"  # Has PO 110463, type AP_Invoice

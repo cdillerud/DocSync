@@ -10,7 +10,7 @@ sys.path.insert(0, '/app/backend')
 
 
 # Test configuration
-API_BASE_URL = "https://monolith-break-5.preview.emergentagent.com"
+API_BASE_URL = "https://graph-layer-hub.preview.emergentagent.com"
 
 
 @pytest.fixture

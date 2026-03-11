@@ -27,22 +27,31 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# CONFIGURATION
+# CONFIGURATION — sourced from centralized bc_config module
 # =============================================================================
 
-# SANDBOX BC Credentials (for WRITES - creating invoices, posting)
-BC_CLIENT_ID = os.environ.get('BC_CLIENT_ID') or os.environ.get('BC_SANDBOX_CLIENT_ID', '')
-BC_CLIENT_SECRET = os.environ.get('BC_CLIENT_SECRET') or os.environ.get('BC_SANDBOX_CLIENT_SECRET', '')
-BC_TENANT_ID = os.environ.get('TENANT_ID') or os.environ.get('BC_TENANT_ID') or os.environ.get('BC_SANDBOX_TENANT_ID', '')
-BC_ENVIRONMENT = os.environ.get('BC_ENVIRONMENT') or os.environ.get('BC_SANDBOX_ENVIRONMENT', 'Sandbox')
-BC_COMPANY_ID = os.environ.get('BC_COMPANY_ID', '')
-BC_COMPANY_NAME = os.environ.get('BC_COMPANY_NAME') or os.environ.get('BC_SANDBOX_COMPANY_NAME', '')
+from services.bc_config import (
+    BC_READ_ENVIRONMENT, BC_WRITE_ENVIRONMENT, BC_WRITE_ENABLED,
+    BC_READ_TENANT_ID, BC_READ_CLIENT_ID, BC_READ_CLIENT_SECRET,
+    BC_WRITE_TENANT_ID, BC_WRITE_CLIENT_ID, BC_WRITE_CLIENT_SECRET,
+    BC_COMPANY_NAME as _BC_COMPANY_NAME,
+    BC_API_BASE, BC_REQUEST_TIMEOUT,
+    HAS_READ_CREDENTIALS, HAS_WRITE_CREDENTIALS,
+    check_write_allowed,
+)
 
-# PRODUCTION BC Credentials (for READS - validation, vendor lookup, PO matching)
-BC_PROD_CLIENT_ID = os.environ.get('BC_PROD_CLIENT_ID', '')
-BC_PROD_CLIENT_SECRET = os.environ.get('BC_PROD_CLIENT_SECRET', '')
-BC_PROD_TENANT_ID = os.environ.get('BC_PROD_TENANT_ID', '')
-BC_PROD_ENVIRONMENT = os.environ.get('BC_PROD_ENVIRONMENT', 'Production')
+# Backward-compatible aliases used throughout this file
+BC_CLIENT_ID = BC_WRITE_CLIENT_ID
+BC_CLIENT_SECRET = BC_WRITE_CLIENT_SECRET
+BC_TENANT_ID = BC_WRITE_TENANT_ID
+BC_ENVIRONMENT = BC_WRITE_ENVIRONMENT
+BC_COMPANY_ID = os.environ.get('BC_COMPANY_ID', '')
+BC_COMPANY_NAME = _BC_COMPANY_NAME
+
+BC_PROD_CLIENT_ID = BC_READ_CLIENT_ID
+BC_PROD_CLIENT_SECRET = BC_READ_CLIENT_SECRET
+BC_PROD_TENANT_ID = BC_READ_TENANT_ID
+BC_PROD_ENVIRONMENT = BC_READ_ENVIRONMENT
 
 # Mock mode control
 BC_MOCK_MODE = os.environ.get('BC_MOCK_MODE', 'false').lower() == 'true'
@@ -52,22 +61,18 @@ DEMO_MODE = os.environ.get('DEMO_MODE', 'false').lower() == 'true'
 BC_WRITEBACK_LINK_ENABLED = os.environ.get('BC_WRITEBACK_LINK_ENABLED', 'true').lower() == 'true'
 
 # Auto-enable mock mode ONLY if explicitly set or credentials are missing
-# Changed: DEMO_MODE=false now means use real BC
 USE_MOCK = BC_MOCK_MODE or (not BC_CLIENT_ID) or (not BC_CLIENT_SECRET) or (not BC_TENANT_ID)
 
 # Check if Production credentials are available for read operations
-USE_PROD_FOR_READS = bool(BC_PROD_CLIENT_ID and BC_PROD_CLIENT_SECRET and BC_PROD_TENANT_ID)
+USE_PROD_FOR_READS = HAS_READ_CREDENTIALS
 
 if USE_MOCK:
     logger.info("BusinessCentralService: MOCK MODE (BC_CLIENT_ID=%s, BC_CLIENT_SECRET=%s, BC_TENANT_ID=%s)", 
                 bool(BC_CLIENT_ID), bool(BC_CLIENT_SECRET), bool(BC_TENANT_ID))
 
 if USE_PROD_FOR_READS:
-    logger.info("BusinessCentralService: Using PRODUCTION BC for reads (tenant=%s, env=%s)", 
-                BC_PROD_TENANT_ID[:20] + "..." if BC_PROD_TENANT_ID else "N/A", BC_PROD_ENVIRONMENT)
-
-BC_API_BASE = "https://api.businesscentral.dynamics.com/v2.0"
-BC_REQUEST_TIMEOUT = 30.0
+    logger.info("BusinessCentralService: READ=%s  WRITE=%s  writes_enabled=%s",
+                BC_READ_ENVIRONMENT, BC_WRITE_ENVIRONMENT, BC_WRITE_ENABLED)
 
 # Token caches - separate for sandbox and production
 _token_cache = {

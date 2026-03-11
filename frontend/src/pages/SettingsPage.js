@@ -41,14 +41,24 @@ const CONFIG_SECTIONS = [
     ],
   },
   {
-    title: 'Business Central',
+    title: 'Business Central (Read)',
     icon: Building2,
-    description: 'Entra App registration with BC API permissions',
+    description: 'Production credentials for validation & reference intelligence',
     fields: [
-      { key: 'BC_ENVIRONMENT', label: 'Environment', placeholder: 'e.g. Sandbox', secret: false },
-      { key: 'BC_COMPANY_NAME', label: 'Company Name', placeholder: 'e.g. CRONUS USA, Inc.', secret: false },
-      { key: 'BC_CLIENT_ID', label: 'Client ID', placeholder: 'App registration client ID', secret: false },
-      { key: 'BC_CLIENT_SECRET', label: 'Client Secret', placeholder: 'App registration secret', secret: true },
+      { key: 'BC_READ_ENVIRONMENT', label: 'Read Environment', placeholder: 'e.g. Production', secret: false },
+      { key: 'BC_COMPANY_NAME', label: 'Company Name', placeholder: 'e.g. Gamer Packaging', secret: false },
+      { key: 'BC_PROD_CLIENT_ID', label: 'Production Client ID', placeholder: 'App registration client ID', secret: false },
+      { key: 'BC_PROD_CLIENT_SECRET', label: 'Production Client Secret', placeholder: 'App registration secret', secret: true },
+    ],
+  },
+  {
+    title: 'Business Central (Write)',
+    icon: Building2,
+    description: 'Sandbox credentials for testing & draft creation',
+    fields: [
+      { key: 'BC_WRITE_ENVIRONMENT', label: 'Write Environment', placeholder: 'e.g. Sandbox_11_3_2025', secret: false },
+      { key: 'BC_CLIENT_ID', label: 'Sandbox Client ID', placeholder: 'App registration client ID', secret: false },
+      { key: 'BC_CLIENT_SECRET', label: 'Sandbox Client Secret', placeholder: 'App registration secret', secret: true },
     ],
   },
   {
@@ -149,6 +159,8 @@ export default function SettingsPage() {
     );
   }
 
+  const bcEnv = status?.bc_environment;
+
   const connections = [
     {
       key: 'mongodb', icon: Database, title: 'MongoDB',
@@ -169,14 +181,26 @@ export default function SettingsPage() {
       testKey: 'graph',
     },
     {
-      key: 'business_central', icon: Building2, title: 'Business Central',
-      description: 'ERP record linking via BC API v2.0',
-      data: status?.connections?.business_central,
+      key: 'business_central_read', icon: Building2, title: 'Business Central (Read Source)',
+      description: 'Validation, matching, reference intelligence',
+      data: status?.connections?.business_central_read,
       details: [
-        { label: 'Environment', value: status?.connections?.business_central?.environment },
-        { label: 'Company', value: status?.connections?.business_central?.company },
+        { label: 'Environment', value: status?.connections?.business_central_read?.environment },
+        { label: 'Company', value: status?.connections?.business_central_read?.company },
+        { label: 'Purpose', value: 'Production reads' },
       ],
       testKey: 'bc',
+    },
+    {
+      key: 'business_central_write', icon: Building2, title: 'Business Central (Write Target)',
+      description: 'Testing and draft creation',
+      data: status?.connections?.business_central_write,
+      details: [
+        { label: 'Environment', value: status?.connections?.business_central_write?.environment },
+        { label: 'Company', value: status?.connections?.business_central_write?.company },
+        { label: 'Writes Enabled', value: status?.connections?.business_central_write?.writes_enabled ? 'Yes' : 'No' },
+      ],
+      testKey: null,
     },
     {
       key: 'entra_id', icon: Shield, title: 'Entra ID (Azure AD)',
@@ -222,6 +246,61 @@ export default function SettingsPage() {
               <Button size="sm" variant="outline" className="shrink-0 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900" onClick={openConfigDialog} data-testid="demo-configure-btn">
                 <Settings className="w-3.5 h-3.5 mr-1.5" /> Configure
               </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* BC Sandbox Read Warning */}
+      {bcEnv?.is_read_sandbox_warning && !status?.demo_mode && (
+        <Card className="border border-red-300 dark:border-red-800 bg-red-50/50 dark:bg-red-950/30" data-testid="bc-sandbox-warning">
+          <CardContent className="p-4">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-red-500 mt-0.5 shrink-0" />
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-red-800 dark:text-red-200">WARNING: Sandbox Read Environment</p>
+                <p className="text-xs text-red-700 dark:text-red-300 mt-1">
+                  Reference intelligence is using a Sandbox environment (<strong>{bcEnv?.read_environment}</strong>).
+                  Validation accuracy may be severely reduced. Set <code className="font-mono bg-red-100 dark:bg-red-900 px-1 rounded">BC_READ_ENVIRONMENT=Production</code> for reliable document processing.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* BC Environment Mode */}
+      {bcEnv && !status?.demo_mode && (
+        <Card className="border border-border" data-testid="bc-environment-mode">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center">
+                  <Building2 className="w-4 h-4 text-primary" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold" style={{ fontFamily: 'Chivo, sans-serif' }}>BC Environment Mode</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{bcEnv.mode}</p>
+                </div>
+              </div>
+              <div className="flex gap-4 text-xs">
+                <div className="text-right">
+                  <span className="text-muted-foreground">Read: </span>
+                  <span className={`font-mono font-semibold ${bcEnv.is_read_production ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {bcEnv.read_environment}
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="text-muted-foreground">Write: </span>
+                  <span className="font-mono font-semibold text-amber-600">{bcEnv.write_environment}</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-muted-foreground">Writes: </span>
+                  <span className={`font-mono font-semibold ${bcEnv.writes_enabled ? 'text-amber-600' : 'text-muted-foreground'}`}>
+                    {bcEnv.writes_enabled ? 'Enabled' : 'Disabled'}
+                  </span>
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>

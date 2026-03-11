@@ -20,6 +20,12 @@ from server import (
     subscribe_to_mailbox_notifications
 )
 
+# Import centralized BC config for environment separation display
+from services.bc_config import (
+    BC_READ_ENVIRONMENT, BC_WRITE_ENVIRONMENT, BC_WRITE_ENABLED,
+    IS_READ_SANDBOX, IS_READ_PRODUCTION, get_mode_label,
+)
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
@@ -82,18 +88,41 @@ async def get_settings_status():
                 "path": SHAREPOINT_SITE_PATH or "Not set",
                 "library": SHAREPOINT_LIBRARY_NAME
             },
+            "business_central_read": {
+                "status": "configured" if (BC_CLIENT_ID and not DEMO_MODE) else ("demo" if DEMO_MODE else "not_configured"),
+                "environment": BC_READ_ENVIRONMENT or "Not set",
+                "company": BC_COMPANY_NAME or "Not set",
+                "purpose": "Validation, matching, reference intelligence",
+                "is_production": IS_READ_PRODUCTION,
+                "is_sandbox_warning": IS_READ_SANDBOX,
+            },
+            "business_central_write": {
+                "status": "configured" if (BC_CLIENT_ID and not DEMO_MODE) else ("demo" if DEMO_MODE else "not_configured"),
+                "environment": BC_WRITE_ENVIRONMENT or "Not set",
+                "company": BC_COMPANY_NAME or "Not set",
+                "purpose": "Testing and draft creation",
+                "writes_enabled": BC_WRITE_ENABLED,
+            },
             "business_central": {
                 "status": "configured" if (BC_CLIENT_ID and not DEMO_MODE) else ("demo" if DEMO_MODE else "not_configured"),
-                "environment": BC_ENVIRONMENT or "Not set",
-                "company": BC_COMPANY_NAME or "Not set"
+                "environment": BC_READ_ENVIRONMENT or "Not set",
+                "company": BC_COMPANY_NAME or "Not set",
+                "mode": get_mode_label(),
             },
             "entra_id": {
                 "status": "configured" if (TENANT_ID and not DEMO_MODE) else ("demo" if DEMO_MODE else "not_configured"),
                 "tenant_id": (TENANT_ID[:8] + "...") if TENANT_ID else "Not set"
             }
         },
+        "bc_environment": {
+            "read_environment": BC_READ_ENVIRONMENT,
+            "write_environment": BC_WRITE_ENVIRONMENT,
+            "writes_enabled": BC_WRITE_ENABLED,
+            "mode": get_mode_label(),
+            "is_read_production": IS_READ_PRODUCTION,
+            "is_read_sandbox_warning": IS_READ_SANDBOX,
+        },
         "sharepoint_folders": list(set(FOLDER_MAP.values())),
-        # Phase 4: Draft creation feature flag
         "features": {
             "create_draft_header": {
                 "enabled": ENABLE_CREATE_DRAFT_HEADER,

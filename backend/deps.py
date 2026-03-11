@@ -52,9 +52,12 @@ SALES_EMAIL_POLLING_INTERVAL_MINUTES = int(os.environ.get('SALES_EMAIL_POLLING_I
 EMAIL_CLIENT_ID = os.environ.get('EMAIL_CLIENT_ID', '')
 EMAIL_CLIENT_SECRET = os.environ.get('EMAIL_CLIENT_SECRET', '')
 TENANT_ID = os.environ.get('TENANT_ID', '')
-BC_ENVIRONMENT = os.environ.get('BC_ENVIRONMENT', '')
-BC_READ_ENVIRONMENT = os.environ.get('BC_PROD_ENVIRONMENT', os.environ.get('BC_ENVIRONMENT', ''))
-BC_COMPANY_NAME = os.environ.get('BC_COMPANY_NAME', '')
+# BC environment config — sourced from centralized bc_config module
+from services.bc_config import (
+    BC_READ_ENVIRONMENT, BC_WRITE_ENVIRONMENT, BC_WRITE_ENABLED,
+    BC_COMPANY_NAME, BC_API_BASE, IS_READ_PRODUCTION, IS_READ_SANDBOX,
+)
+BC_ENVIRONMENT = BC_WRITE_ENVIRONMENT  # backward compat alias
 BC_CLIENT_ID = os.environ.get('BC_CLIENT_ID', '')
 BC_CLIENT_SECRET = os.environ.get('BC_CLIENT_SECRET', '')
 GRAPH_CLIENT_ID = os.environ.get('GRAPH_CLIENT_ID', '')

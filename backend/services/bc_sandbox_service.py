@@ -36,38 +36,40 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# CONFIGURATION
+# CONFIGURATION — sourced from centralized bc_config
 # =============================================================================
 
-# BC Sandbox credentials - for WRITE operations
-BC_SANDBOX_CLIENT_ID = os.environ.get('BC_SANDBOX_CLIENT_ID', '22c4e601-51e8-4305-bd63-d4aa7d19defd')
-BC_SANDBOX_TENANT_ID = os.environ.get('BC_SANDBOX_TENANT_ID', '***REMOVED_TENANT_ID***')
-# Check both env var names for the secret (BC_SANDBOX_CLIENT_SECRET or BC_CLIENT_SECRET)
-BC_SANDBOX_CLIENT_SECRET = os.environ.get('BC_SANDBOX_CLIENT_SECRET') or os.environ.get('BC_CLIENT_SECRET', '')
-BC_SANDBOX_ENVIRONMENT = os.environ.get('BC_SANDBOX_ENVIRONMENT', 'Sandbox')
-BC_SANDBOX_COMPANY_NAME = os.environ.get('BC_SANDBOX_COMPANY_NAME', '')
+from services.bc_config import (
+    BC_READ_TENANT_ID, BC_READ_CLIENT_ID, BC_READ_CLIENT_SECRET,
+    BC_READ_ENVIRONMENT,
+    BC_WRITE_TENANT_ID, BC_WRITE_CLIENT_ID, BC_WRITE_CLIENT_SECRET,
+    BC_WRITE_ENVIRONMENT, BC_WRITE_ENABLED,
+    BC_COMPANY_NAME as _BC_COMPANY_NAME,
+    BC_API_BASE, BC_REQUEST_TIMEOUT,
+    HAS_READ_CREDENTIALS, HAS_WRITE_CREDENTIALS,
+)
 
-# BC Production credentials - for READ operations (validation, vendor lookup)
-BC_PROD_CLIENT_ID = os.environ.get('BC_PROD_CLIENT_ID', '')
-BC_PROD_CLIENT_SECRET = os.environ.get('BC_PROD_CLIENT_SECRET', '')
-BC_PROD_TENANT_ID = os.environ.get('BC_PROD_TENANT_ID', '')
-BC_PROD_ENVIRONMENT = os.environ.get('BC_PROD_ENVIRONMENT', 'Production')
+# Write-side aliases (sandbox)
+BC_SANDBOX_CLIENT_ID = BC_WRITE_CLIENT_ID
+BC_SANDBOX_TENANT_ID = BC_WRITE_TENANT_ID
+BC_SANDBOX_CLIENT_SECRET = BC_WRITE_CLIENT_SECRET
+BC_SANDBOX_ENVIRONMENT = BC_WRITE_ENVIRONMENT
+BC_SANDBOX_COMPANY_NAME = _BC_COMPANY_NAME
 
-# Check if Production credentials are configured
-USE_PROD_FOR_READS = bool(BC_PROD_CLIENT_ID and BC_PROD_CLIENT_SECRET and BC_PROD_TENANT_ID)
+# Read-side aliases (production)
+BC_PROD_CLIENT_ID = BC_READ_CLIENT_ID
+BC_PROD_CLIENT_SECRET = BC_READ_CLIENT_SECRET
+BC_PROD_TENANT_ID = BC_READ_TENANT_ID
+BC_PROD_ENVIRONMENT = BC_READ_ENVIRONMENT
+
+USE_PROD_FOR_READS = HAS_READ_CREDENTIALS
 
 if USE_PROD_FOR_READS:
-    logger.info("BC Sandbox Service: Using PRODUCTION BC for reads (tenant=%s, env=%s)", 
-                BC_PROD_TENANT_ID[:20] + "..." if BC_PROD_TENANT_ID else "N/A", BC_PROD_ENVIRONMENT)
+    logger.info("BC Sandbox Service: READ=%s  WRITE=%s  writes_enabled=%s (via bc_config)",
+                BC_READ_ENVIRONMENT, BC_WRITE_ENVIRONMENT, BC_WRITE_ENABLED)
 
 # Demo mode for testing without real BC connection
 DEMO_MODE = os.environ.get('DEMO_MODE', 'true').lower() == 'true'
-
-# API base URL
-BC_API_BASE = "https://api.businesscentral.dynamics.com/v2.0"
-
-# Request timeout
-BC_REQUEST_TIMEOUT = 30.0
 
 
 # =============================================================================

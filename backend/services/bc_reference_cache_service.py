@@ -32,14 +32,16 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# BC API CONFIG (reuse same creds as resolver)
+# BC API CONFIG — sourced from centralized bc_config (always reads Production)
 # =============================================================================
 
-BC_TENANT_ID = os.environ.get('TENANT_ID', '')
-BC_CLIENT_ID = os.environ.get('BC_CLIENT_ID') or os.environ.get('BC_SANDBOX_CLIENT_ID', '')
-BC_CLIENT_SECRET = os.environ.get('BC_CLIENT_SECRET') or os.environ.get('BC_SANDBOX_CLIENT_SECRET', '')
-BC_PROD_ENVIRONMENT = os.environ.get('BC_PROD_ENVIRONMENT', 'Production')
-BC_API_BASE = "https://api.businesscentral.dynamics.com/v2.0"
+from services.bc_config import (
+    BC_READ_TENANT_ID as BC_TENANT_ID,
+    BC_READ_CLIENT_ID as BC_CLIENT_ID,
+    BC_READ_CLIENT_SECRET as BC_CLIENT_SECRET,
+    BC_READ_ENVIRONMENT as BC_PROD_ENVIRONMENT,
+    BC_API_BASE,
+)
 
 # Sync interval in minutes (default 10)
 CACHE_SYNC_INTERVAL = int(os.environ.get('BC_CACHE_SYNC_INTERVAL', '10'))

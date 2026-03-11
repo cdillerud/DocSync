@@ -200,8 +200,14 @@ SALES_EMAIL_POLLING_INTERVAL_MINUTES = int(os.environ.get('SALES_EMAIL_POLLING_I
 EMAIL_CLIENT_ID = os.environ.get('EMAIL_CLIENT_ID', '')
 EMAIL_CLIENT_SECRET = os.environ.get('EMAIL_CLIENT_SECRET', '')
 TENANT_ID = os.environ.get('TENANT_ID', '')
-BC_ENVIRONMENT = os.environ.get('BC_ENVIRONMENT', '')  # For WRITES (Sandbox)
-BC_READ_ENVIRONMENT = os.environ.get('BC_PROD_ENVIRONMENT', os.environ.get('BC_ENVIRONMENT', ''))  # For READS (Production)
+# BC environment config — now sourced from centralized bc_config
+from services.bc_config import (
+    BC_READ_ENVIRONMENT as _BC_READ_ENV,
+    BC_WRITE_ENVIRONMENT as _BC_WRITE_ENV,
+    BC_WRITE_ENABLED as _BC_WRITE_ENABLED,
+)
+BC_ENVIRONMENT = _BC_WRITE_ENV  # For WRITES (Sandbox)
+BC_READ_ENVIRONMENT = _BC_READ_ENV  # For READS (Production)
 BC_COMPANY_NAME = os.environ.get('BC_COMPANY_NAME', '')
 BC_CLIENT_ID = os.environ.get('BC_CLIENT_ID', '')
 BC_CLIENT_SECRET = os.environ.get('BC_CLIENT_SECRET', '')

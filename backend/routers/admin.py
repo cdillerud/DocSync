@@ -10,6 +10,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
 
+# =========================================================================
+# BC CONFIG DIAGNOSTICS (Part 8)
+# =========================================================================
+
+@router.get("/bc-config")
+async def get_bc_config_diagnostics():
+    """
+    Return safe BC configuration diagnostics.
+    Never exposes secrets — only environment names, flags, and mode label.
+    """
+    from services.bc_config import get_diagnostics
+    return get_diagnostics()
+
+
 @router.post("/backfill-ap-mailbox")
 async def backfill_ap_mailbox(
     background_tasks: BackgroundTasks,

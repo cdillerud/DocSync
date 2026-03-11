@@ -89,23 +89,20 @@ class ReferenceResolutionResult:
 
 
 # =============================================================================
-# CONFIGURATION - Use same creds as sandbox, target Production environment
+# CONFIGURATION — sourced from centralized bc_config (always reads Production)
 # =============================================================================
 
-# Use existing BC credentials (same for sandbox and production)
-BC_TENANT_ID = os.environ.get('TENANT_ID', '')
-BC_CLIENT_ID = os.environ.get('BC_CLIENT_ID') or os.environ.get('BC_SANDBOX_CLIENT_ID', '')
-BC_CLIENT_SECRET = os.environ.get('BC_CLIENT_SECRET') or os.environ.get('BC_SANDBOX_CLIENT_SECRET', '')
-
-# Target PRODUCTION environment for reference resolution (read-only)
-BC_PROD_ENVIRONMENT = os.environ.get('BC_PROD_ENVIRONMENT', 'Production')
-
-BC_API_BASE = "https://api.businesscentral.dynamics.com/v2.0"
+from services.bc_config import (
+    BC_READ_TENANT_ID as BC_TENANT_ID,
+    BC_READ_CLIENT_ID as BC_CLIENT_ID,
+    BC_READ_CLIENT_SECRET as BC_CLIENT_SECRET,
+    BC_READ_ENVIRONMENT as BC_PROD_ENVIRONMENT,
+    BC_API_BASE,
+)
 
 logger.info(
-    "[BC Reference Resolver] Config: tenant=%s, client=%s, env=%s",
+    "[BC Reference Resolver] Config: tenant=%s, env=%s (via bc_config)",
     BC_TENANT_ID[:8] + "..." if BC_TENANT_ID else "NOT SET",
-    BC_CLIENT_ID[:8] + "..." if BC_CLIENT_ID else "NOT SET",
     BC_PROD_ENVIRONMENT
 )
 

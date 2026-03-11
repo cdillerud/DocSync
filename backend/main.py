@@ -144,6 +144,9 @@ async def startup():
     """Delegate to server.py's comprehensive startup initialization."""
     logger.info("main.py startup — delegating to server.startup()")
     await server.startup()
+    # Part 6: BC environment startup validation + fingerprint
+    from services.bc_config import validate_and_log
+    validate_and_log()
     logger.info("main.py startup complete")
 
 

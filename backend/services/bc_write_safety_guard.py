@@ -31,16 +31,22 @@ class WriteBlockReason(str, Enum):
     MANUAL_BLOCK = "manual_block"
 
 
-# Configuration from environment
-BC_WRITE_ENABLED = os.environ.get("BC_WRITE_ENABLED", "false").lower() == "true"
-BC_ENVIRONMENT = os.environ.get("BC_PROD_ENVIRONMENT") or os.environ.get("BC_ENVIRONMENT", "Sandbox")
+# Configuration from centralized bc_config
+from services.bc_config import (
+    BC_WRITE_ENABLED,
+    BC_WRITE_ENVIRONMENT,
+    BC_READ_ENVIRONMENT,
+    check_write_allowed as _check_write,
+)
 
-# Check if we're targeting production
-IS_PRODUCTION_ENVIRONMENT = "production" in BC_ENVIRONMENT.lower()
+BC_ENVIRONMENT = BC_WRITE_ENVIRONMENT
+
+# Check if we're targeting production for writes
+IS_PRODUCTION_ENVIRONMENT = "production" in BC_WRITE_ENVIRONMENT.lower()
 
 logger.info(
-    "[BC Write Guard] BC_WRITE_ENABLED=%s, BC_ENVIRONMENT=%s, IS_PRODUCTION=%s",
-    BC_WRITE_ENABLED, BC_ENVIRONMENT, IS_PRODUCTION_ENVIRONMENT
+    "[BC Write Guard] BC_WRITE_ENABLED=%s, WRITE_ENV=%s, READ_ENV=%s, WRITE_IS_PROD=%s",
+    BC_WRITE_ENABLED, BC_WRITE_ENVIRONMENT, BC_READ_ENVIRONMENT, IS_PRODUCTION_ENVIRONMENT
 )
 
 

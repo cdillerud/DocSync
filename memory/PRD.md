@@ -2419,13 +2419,32 @@ The server.py monolith refactor has been completed using a safe bootstrapping st
 ### Architecture
 - Entry point: /app/backend/main.py (supervisor runs main:app)
 - Legacy module: /app/backend/server.py imported as library (not served)
-- Modular routers: 22 routers in /app/backend/routers/ included with prefix=/api
+- Modular routers: 23 routers in /app/backend/routers/ included with prefix=/api
 - Legacy routes: api_router from server.py included for un-extracted document/workflow routes
 - Dependency injection: /app/backend/deps.py provides get_db() for modular routers
 
+---
+
+## Stable Vendor Auto-Ready Rules (March 11, 2026) — COMPLETED
+
+### Architecture
+- Service: /app/backend/services/stable_vendor_service.py
+- Router: /app/backend/routers/stable_vendor.py (6 endpoints)
+- Config collection: stable_vendor_config
+- Routing decisions stored on docs: stable_vendor_routing field
+- Pipeline: Wired into auto_resolution_service.py after automation rules step
+
+### Endpoints
+- GET /api/stable-vendor/config
+- PUT /api/stable-vendor/config
+- GET /api/stable-vendor/evaluate/{vendor_id}
+- POST /api/stable-vendor/evaluate-document/{doc_id}
+- GET /api/stable-vendor/dashboard-metrics
+- POST /api/stable-vendor/reevaluate-all
+
 ### Test Results
-- Backend: 22/22 endpoints pass (100%)
-- Frontend: All verified (100%)
-- Test report: /app/test_reports/iteration_37.json
+- Backend: 11/11 pass (100%)
+- Frontend: 100%
+- Test report: /app/test_reports/iteration_38.json
 
 *Last Updated: March 11, 2026*

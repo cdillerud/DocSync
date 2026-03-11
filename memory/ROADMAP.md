@@ -3,8 +3,9 @@
 ## Prioritized Backlog
 
 ### P0 — Completed
-- ~~Refactor server.py monolith~~ ✅ (2026-03-11)
-- ~~Document Layout Fingerprinting~~ ✅ (2026-03-10)
+- ~~Refactor server.py monolith~~ (2026-03-11)
+- ~~Document Layout Fingerprinting~~ (2026-03-10)
+- ~~Stable Vendor Auto-Ready Rules~~ (2026-03-11)
 
 ### P1 — Next Up
 - **Package and Publish BC (AL) Extension** — Updated `.app` file in `/app/BC_extension/` needs publishing to BC Sandbox

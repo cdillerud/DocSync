@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -590,8 +590,8 @@ export default function LabelCorrectionInsightsPage() {
               </TableHeader>
               <TableBody>
                 {filteredVendors.map((v, i) => (
-                  <>
-                    <TableRow key={v.vendor} data-testid={`vendor-row-${i}`}
+                  <React.Fragment key={v.vendor}>
+                    <TableRow data-testid={`vendor-row-${i}`}
                       className="cursor-pointer hover:bg-muted/30"
                       onClick={() => fetchVendorDetail(v.vendor)}>
                       <TableCell className="font-semibold text-xs">{v.vendor}</TableCell>
@@ -674,7 +674,7 @@ export default function LabelCorrectionInsightsPage() {
                         </TableCell>
                       </TableRow>
                     )}
-                  </>
+                  </React.Fragment>
                 ))}
               </TableBody>
             </Table>

@@ -2273,3 +2273,46 @@ Analytics dashboard that reveals patterns in mislabeled references across vendor
 - Test report: `/app/test_reports/iteration_33.json`
 
 *Last Updated: March 11, 2026*
+
+---
+
+## Automated Threshold Alerts for Label Correction Insights (Completed - March 11, 2026)
+
+### Overview
+Threshold-based alert system that flags systemic extraction problems. Runs background evaluation every 10 minutes, computes severity dynamically, and surfaces alerts in the Insights dashboard with actionable suggestions.
+
+### Alert Severity Thresholds
+| Level | Condition |
+|---|---|
+| Info | Pattern ≥ 3 in 30 days |
+| Warning | Pattern ≥ 20 in 7 days OR trend increasing >30% WoW |
+| Critical | Pattern ≥ 50 in 30 days OR vendor mislabel rate ≥ 40% |
+
+### Backend (7 new endpoints)
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | /api/alerts/summary | Count by severity (total_active, critical, warning, info) |
+| GET | /api/alerts/active | Active alerts with optional severity/vendor/label filters |
+| GET | /api/alerts/all | All alerts including resolved/dismissed |
+| POST | /api/alerts/evaluate | Manual evaluation trigger |
+| POST | /api/alerts/{key}/dismiss | Dismiss alert |
+| POST | /api/alerts/{key}/resolve | Mark as resolved |
+
+### Services
+- `alert_pattern_service.py` — Full alert lifecycle: evaluation, severity computation, trend analysis, vendor-specific alerts, background loop, event emission on escalation
+
+### Frontend (Extraction Alert Panel)
+- Red left-border alert panel at top of /label-correction-insights
+- Severity filter buttons with counts
+- Alert cards: severity badge, pattern key, 30d/7d counts, trend indicator, vendors, suggested action
+- Action buttons: View Pattern, Dismiss, Resolve
+- Pattern filter URL support (?pattern=)
+- Background eval refresh button
+
+### Test Results
+- Backend: 21/21 tests passed (100%)
+- Frontend: All UI elements verified (100%)
+- Test report: `/app/test_reports/iteration_34.json`
+
+*Last Updated: March 11, 2026*
+

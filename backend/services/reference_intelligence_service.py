@@ -1016,6 +1016,22 @@ class ReferenceIntelligenceService:
             candidates.extend(text_candidates)
             diag["extraction"]["from_text"] = len(text_candidates)
         
+        # From processor plugin (high-confidence, structured extraction)
+        proc_refs = (extracted_fields or {}).get("_processor_references", [])
+        if proc_refs:
+            for pr in proc_refs:
+                ref_val = pr.get("value", "")
+                if ref_val:
+                    candidates.append(ReferenceCandidate(
+                        reference_value_raw=ref_val,
+                        reference_value_normalized=normalize_reference(ref_val),
+                        detected_label=pr.get("label", "Processor"),
+                        source="processor",
+                        confidence=0.85,
+                    ))
+            diag["extraction"]["from_processor"] = len(proc_refs)
+            diag["v2_signals"]["processor_name"] = (extracted_fields or {}).get("_processor_name")
+        
         diag["extraction"]["total_raw"] = len(candidates)
         
         # Deduplicate by normalized value

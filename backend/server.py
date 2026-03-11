@@ -5702,6 +5702,38 @@ async def intake_document(
         doc_id, doc_type_value, category, classification_method
     )
     
+    # -------------------------------------------------------------------
+    # Document Processor Plugin: detect + extract + merge
+    # -------------------------------------------------------------------
+    processor_result = None
+    try:
+        from processors.processor_registry import detect_processor, run_processor, merge_processor_output
+        doc_text = extracted_fields.get("raw_text") or ""
+        layout_fp = None
+        try:
+            layout_svc = get_layout_fingerprint_service()
+            if layout_svc and doc_text:
+                layout_fp = await layout_svc.generate_fingerprint(doc_text)
+        except Exception:
+            pass
+
+        proc = detect_processor(
+            document_text=doc_text,
+            layout_fingerprint=layout_fp,
+            ai_classification=classification,
+        )
+        if proc:
+            processor_result = run_processor(proc, doc_text, layout_fp)
+            extracted_fields = merge_processor_output(extracted_fields, processor_result)
+            logger.info(
+                "Document %s: processor '%s' extracted %d fields, %d references",
+                doc_id, processor_result["processor_name"],
+                len(processor_result.get("extracted_fields", {})),
+                len(processor_result.get("suggested_references", [])),
+            )
+    except Exception as proc_err:
+        logger.warning("Document %s: processor error (non-fatal): %s", doc_id, str(proc_err))
+    
     # Phase 7: Compute normalized fields (flat, stored on document)
     normalized_fields = compute_ap_normalized_fields(extracted_fields)
     
@@ -5828,6 +5860,16 @@ async def intake_document(
     # Add AI classification audit trail if AI was invoked
     if ai_classification_audit:
         update_data["ai_classification"] = ai_classification_audit
+    
+    # Add processor result if a processor ran
+    if processor_result:
+        update_data["processor_result"] = {
+            "processor_name": processor_result.get("processor_name"),
+            "extracted_fields": processor_result.get("extracted_fields", {}),
+            "suggested_references": processor_result.get("suggested_references", []),
+            "suggested_vendor": processor_result.get("suggested_vendor"),
+            "diagnostics": processor_result.get("diagnostics", {}),
+        }
     
     await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
     
@@ -10227,6 +10269,11 @@ async def startup():
     await correlation_svc.initialize()
     ref_intel_service.set_correlation_service(correlation_svc)
     logger.info("Cross-Document Correlation Service initialized")
+    
+    # Initialize Document Processor Registry
+    from processors.processor_registry import initialize_default_processors
+    initialize_default_processors()
+    logger.info("Document Processor Registry initialized")
     
     # Initialize Stable Vendor Auto-Ready Service
     from services.stable_vendor_service import set_stable_vendor_service

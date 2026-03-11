@@ -133,6 +133,16 @@ export default function MatchingDebugPanel({ document: doc }) {
                     Cluster: {diag.v2_signals.cluster_id.substring(0, 15)}
                   </Badge>
                 )}
+                {diag?.v2_signals?.processor_name && (
+                  <Badge className="bg-teal-500/20 text-teal-400 text-[10px]" data-testid="processor-badge">
+                    Processor: {diag.v2_signals.processor_name}
+                  </Badge>
+                )}
+                {diag?.extraction?.from_processor > 0 && (
+                  <Badge className="bg-teal-500/20 text-teal-400 text-[10px]" data-testid="processor-refs-badge">
+                    +{diag.extraction.from_processor} processor refs
+                  </Badge>
+                )}
                 {diag?.processing_time_ms != null && (
                   <span className="text-muted-foreground">{diag.processing_time_ms}ms</span>
                 )}

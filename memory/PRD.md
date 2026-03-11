@@ -2474,3 +2474,37 @@ The server.py monolith refactor has been completed using a safe bootstrapping st
 - Test report: /app/test_reports/iteration_38.json
 
 *Last Updated: March 11, 2026*
+
+
+---
+
+## BC Environment Hardening (March 11, 2026) — COMPLETED
+
+### Problem
+Application sometimes ran against Sandbox BC for reads, causing false validation failures, poor reference matching, and incorrect resolver scoring.
+
+### Solution: Strict Read/Write Separation
+- **All reads** (validation, matching, cache sync, reference intelligence) → Production BC
+- **All writes** (draft creation, posting, testing) → Sandbox BC
+- Master kill-switch: `BC_WRITE_ENABLED=false` blocks all writes
+
+### New Configuration Variables (.env)
+```
+BC_READ_ENVIRONMENT=Production
+BC_WRITE_ENVIRONMENT=Sandbox_11_3_2025
+BC_WRITE_ENABLED=false
+```
+
+### Architecture
+- **Centralized config:** `/app/backend/services/bc_config.py` — single source of truth
+- **Updated services:** business_central_service.py, bc_reference_cache_service.py, bc_reference_resolver.py, bc_write_safety_guard.py, bc_sandbox_service.py, deps.py, server.py
+- **Diagnostics endpoint:** `GET /api/admin/bc-config` (no secrets exposed)
+- **Startup validation:** Config fingerprint logged, warnings for misconfiguration
+- **Settings UI:** Split Read Source / Write Target cards, BC Environment Mode banner, Sandbox read warning banner
+
+### Test Results
+- Backend: 15/15 pass (100%)
+- Frontend: 10/10 pass (100%)
+- Test report: /app/test_reports/iteration_41.json
+
+*Last Updated: March 11, 2026*

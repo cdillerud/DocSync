@@ -13,7 +13,6 @@ import DocumentDetailPage from "@/pages/DocumentDetailPage";
 import SettingsPage from "@/pages/SettingsPage";
 import EmailParserPage from "@/pages/EmailParserPage";
 import FileImportPage from "@/pages/FileImportPage";
-import SharePointMigrationPage from "@/pages/SharePointMigrationPage";
 import VendorIntelligencePage from "@/pages/VendorIntelligencePage";
 import AutomationRulesPage from "@/pages/AutomationRulesPage";
 import LabelCorrectionInsightsPage from "@/pages/LabelCorrectionInsightsPage";
@@ -37,7 +36,6 @@ function AppRoutes() {
         <Route path="documents/:id" element={<DocumentDetailPage />} />
         <Route path="email-parser" element={<EmailParserPage />} />
         <Route path="settings" element={<SettingsPage />} />
-        <Route path="migration/onegamer-poc" element={<SharePointMigrationPage />} />
         <Route path="vendor-intelligence" element={<VendorIntelligencePage />} />
         <Route path="automation-rules" element={<AutomationRulesPage />} />
         <Route path="label-correction-insights" element={<LabelCorrectionInsightsPage />} />

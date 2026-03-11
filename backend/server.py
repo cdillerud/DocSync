@@ -240,8 +240,12 @@ from services.auto_post_service import (
 )
 
 # ==================== SHAREPOINT MIGRATION ====================
-from routes.sharepoint_migration import router as sharepoint_migration_router
-import routes.sharepoint_migration as sharepoint_migration_module
+try:
+    from routes.sharepoint_migration import router as sharepoint_migration_router
+    import routes.sharepoint_migration as sharepoint_migration_module
+except ImportError:
+    sharepoint_migration_router = None
+    sharepoint_migration_module = None
 
 # ==================== SPIRO INTEGRATION ====================
 from routes.spiro import spiro_router, set_spiro_routes_db
@@ -9921,8 +9925,6 @@ app.include_router(api_router)
 app.include_router(sales_router)
 # AP Review Module
 app.include_router(ap_review_router)
-# SharePoint Migration Module
-app.include_router(sharepoint_migration_router, prefix="/api")
 # Spiro Integration Module
 app.include_router(spiro_router)
 
@@ -10121,7 +10123,8 @@ async def startup():
     logger.info("Email service initialized (provider: mock)")
     
     # Initialize SharePoint Migration module
-    sharepoint_migration_module.db = db
+    if sharepoint_migration_module:
+        sharepoint_migration_module.db = db
     await db.migration_candidates.create_index("source_item_id", unique=True)
     await db.migration_candidates.create_index("status")
     await db.migration_candidates.create_index("doc_type")

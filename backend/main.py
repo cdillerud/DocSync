@@ -5,7 +5,7 @@ This is the clean, modular entry point for the application.
 It composes the app from:
   1. Modular routers in /routers/  (cleanly extracted domain modules)
   2. Legacy api_router from server.py  (routes not yet extracted)
-  3. Additional module routers (sales, ap_review, spiro, sharepoint_migration)
+  3. Additional module routers (sales, ap_review, spiro)
 
 server.py is imported as a library — its startup/shutdown functions
 handle all service initialization and teardown.
@@ -34,7 +34,6 @@ from server import api_router as legacy_api_router
 # Additional routers defined outside of /routers/
 from sales_module import sales_router
 from routes.ap_review import ap_review_router, set_dependencies as set_ap_review_deps
-from routes.sharepoint_migration import router as sharepoint_migration_router
 from routes.spiro import spiro_router
 
 # ---------------------------------------------------------------------------
@@ -107,8 +106,6 @@ app.include_router(legacy_api_router)
 app.include_router(sales_router)
 # AP Review Module
 app.include_router(ap_review_router)
-# SharePoint Migration Module
-app.include_router(sharepoint_migration_router, prefix="/api")
 # Spiro Integration Module
 app.include_router(spiro_router)
 

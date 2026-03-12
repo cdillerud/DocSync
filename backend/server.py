@@ -269,17 +269,9 @@ def create_token(username: str) -> str:
     payload = {"sub": username, "exp": datetime.now(timezone.utc).timestamp() + 86400}
     return pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
-# Auth endpoints are now in routes/auth.py - keeping these for backward compatibility during migration
-@api_router.post("/auth/login")
-async def login(req: LoginRequest):
-    if req.username == TEST_USER["username"] and req.password == TEST_USER["password"]:
-        token = create_token(req.username)
-        return {"token": token, "user": {"username": TEST_USER["username"], "display_name": TEST_USER["display_name"], "role": TEST_USER["role"]}}
-    raise HTTPException(status_code=401, detail="Invalid credentials")
-
-@api_router.get("/auth/me")
-async def get_me():
-    return {"username": TEST_USER["username"], "display_name": TEST_USER["display_name"], "role": TEST_USER["role"]}
+# Auth endpoints moved to routes/auth.py — registered in main.py
+# @api_router.post("/auth/login") — REMOVED (Domain 1)
+# @api_router.get("/auth/me") — REMOVED (Domain 1)
 
 # ==================== MICROSOFT SERVICES (MOCK/REAL) ====================
 
@@ -1112,7 +1104,12 @@ async def run_upload_and_link_workflow(doc_id: str, file_content: bytes, file_na
 UPLOAD_DIR = ROOT_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-@api_router.post("/documents/upload")
+# Document routes moved to routers/documents.py — REMOVED (Domain 7)
+# Simple routes (list, get, update, delete, events, timeline, derived-state, refresh-state,
+# file, square9-status, reset-retries) are implemented directly in routers/documents.py.
+# Complex routes below remain as functions (no decorator) for thin-wrapper import.
+
+# upload_document — registered via add_api_route in routers/documents.py
 async def upload_document(
     file: UploadFile = File(...),
     document_type: str = Form("Other"),
@@ -1198,191 +1195,29 @@ async def upload_document(
     updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     return {"document": updated_doc, "workflow_id": workflow_id}
 
-@api_router.get("/documents")
-async def list_documents(
-    status: str = Query(None), document_type: str = Query(None),
-    category: str = Query(None),
-    search: str = Query(None), skip: int = Query(0), limit: int = Query(50),
-    include_cleared: bool = Query(False, description="Include auto-cleared documents in results"),
-    queue_view: bool = Query(True, description="Queue view mode - hides completed/cleared docs by default")
-):
-    fq = {}
-    if status:
-        fq["status"] = status
-    if document_type:
-        fq["document_type"] = document_type
-    if category:
-        fq["category"] = category
-    if search:
-        fq["file_name"] = {"$regex": search, "$options": "i"}
-    
-    # Queue view mode: Hide auto-cleared and completed documents by default
-    if queue_view and not include_cleared and not status:
-        fq["$and"] = [
-            {"$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}]},
-            {"status": {"$nin": ["Completed", "Posted", "Archived"]}}
-        ]
-    
-    total = await db.hub_documents.count_documents(fq)
-    docs = await db.hub_documents.find(fq, {"_id": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
-    
-    # Also get counts for UI
-    total_all = await db.hub_documents.count_documents({})
-    cleared_count = await db.hub_documents.count_documents({"auto_cleared": True})
-    pending_count = await db.hub_documents.count_documents({
-        "$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}],
-        "status": {"$nin": ["Completed", "Posted", "Archived"]}
-    })
-    
-    return {
-        "documents": docs, 
-        "total": total,
-        "counts": {
-            "total_all": total_all,
-            "auto_cleared": cleared_count,
-            "pending_review": pending_count,
-            "showing": len(docs)
-        }
-    }
+# list_documents — moved to routers/documents.py (Domain 7)
 
-@api_router.get("/documents/{doc_id}")
-async def get_document(doc_id: str, include_events: bool = Query(True)):
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-    workflows = await db.hub_workflow_runs.find({"document_id": doc_id}, {"_id": 0}).sort("started_utc", -1).to_list(100)
-    
-    # Get event timeline and derived state
-    event_timeline = []
-    derived_state = None
-    
-    if include_events:
-        event_service = get_event_service()
-        derived_state_service = get_derived_state_service()
-        
-        if event_service:
-            event_timeline = await event_service.get_event_timeline(doc_id, include_legacy=True)
-        
-        if derived_state_service:
-            derived_state = await derived_state_service.derive_state(doc_id, doc)
-            # Format for UI display
-            derived_state["display"] = format_state_for_display(derived_state)
-    
-    return {
-        "document": doc, 
-        "workflows": workflows,
-        "event_timeline": event_timeline,
-        "derived_state": derived_state
-    }
+
+# get_document — moved to routers/documents.py (Domain 7)
 
 
 # =============================================================================
-# EVENT-DRIVEN WORKFLOW ENDPOINTS
+# EVENT-DRIVEN WORKFLOW ENDPOINTS — moved to routers/documents.py (Domain 7)
 # =============================================================================
 
-@api_router.get("/documents/{doc_id}/events")
-async def get_document_events(
-    doc_id: str,
-    event_types: Optional[str] = Query(None, description="Comma-separated event types to filter"),
-    limit: int = Query(100, le=500),
-    skip: int = Query(0)
-):
-    """
-    Get workflow events for a document.
-    
-    Returns events from the event system, with fallback to legacy workflow_history.
-    """
-    event_service = get_event_service()
-    if not event_service:
-        raise HTTPException(status_code=503, detail="Event service not initialized")
-    
-    type_filter = event_types.split(",") if event_types else None
-    events = await event_service.get_events(doc_id, event_types=type_filter, limit=limit, skip=skip)
-    
-    return {
-        "document_id": doc_id,
-        "events": [e.to_dict() for e in events],
-        "count": len(events),
-        "has_more": len(events) == limit
-    }
+# get_document_events — moved to routers/documents.py
 
+# get_document_timeline — moved to routers/documents.py
 
-@api_router.get("/documents/{doc_id}/timeline")
-async def get_document_timeline(doc_id: str, include_legacy: bool = Query(True)):
-    """
-    Get a unified event timeline for a document.
-    
-    This combines events from the new event system with legacy workflow_history
-    for backwards compatibility.
-    """
-    event_service = get_event_service()
-    if not event_service:
-        raise HTTPException(status_code=503, detail="Event service not initialized")
-    
-    timeline = await event_service.get_event_timeline(doc_id, include_legacy=include_legacy)
-    
-    return {
-        "document_id": doc_id,
-        "timeline": timeline,
-        "count": len(timeline)
-    }
+# get_document_derived_state — moved to routers/documents.py
 
-
-@api_router.get("/documents/{doc_id}/derived-state")
-async def get_document_derived_state(doc_id: str):
-    """
-    Get the derived state for a document.
-    
-    Returns:
-    - validation_state: pass | warning | fail | pending
-    - workflow_state: received | processing | reviewing | ready | completed | failed
-    - automation_state: manual | assisted | autonomous
-    - Plus blocking issues, warnings, and review queue info
-    """
-    derived_state_service = get_derived_state_service()
-    if not derived_state_service:
-        raise HTTPException(status_code=503, detail="Derived state service not initialized")
-    
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    derived = await derived_state_service.derive_state(doc_id, doc)
-    derived["display"] = format_state_for_display(derived)
-    
-    return {
-        "document_id": doc_id,
-        **derived
-    }
-
-
-@api_router.post("/documents/{doc_id}/refresh-state")
-async def refresh_document_state(doc_id: str):
-    """
-    Recalculate and update the derived state for a document.
-    
-    Call this after making changes to force a state refresh.
-    """
-    derived_state_service = get_derived_state_service()
-    if not derived_state_service:
-        raise HTTPException(status_code=503, detail="Derived state service not initialized")
-    
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    derived = await derived_state_service.update_document_derived_state(doc_id, doc)
-    
-    return {
-        "document_id": doc_id,
-        "state_updated": True,
-        **derived
-    }
+# refresh_document_state — moved to routers/documents.py
 
 
 
 
-@api_router.post("/bc/resolve-reference")
+# Moved to routers/reference_intelligence.py (Domain 9)
+# @api_router.post("/bc/resolve-reference")
 async def resolve_bc_reference(
     reference_number: str = Query(..., description="Reference number to resolve"),
     tables: Optional[str] = Query(None, description="Comma-separated tables to check")
@@ -1413,7 +1248,8 @@ async def resolve_bc_reference(
     return result.to_dict()
 
 
-@api_router.post("/documents/{doc_id}/resolve-reference")
+# Moved to routers/reference_intelligence.py (Domain 9)
+# @api_router.post("/documents/{doc_id}/resolve-reference")
 async def resolve_document_reference(doc_id: str):
     """
     Resolve PO/Order reference for a specific document.
@@ -1472,7 +1308,8 @@ async def resolve_document_reference(doc_id: str):
 # REFERENCE INTELLIGENCE ENDPOINTS
 # =============================================================================
 
-@api_router.post("/documents/{doc_id}/resolve-intelligence")
+# Moved to routers/reference_intelligence.py (Domain 9)
+# @api_router.post("/documents/{doc_id}/resolve-intelligence")
 async def resolve_document_intelligence(doc_id: str):
     """
     Full AI-Assisted Reference Intelligence resolution for a document.
@@ -1517,7 +1354,8 @@ async def resolve_document_intelligence(doc_id: str):
     return resolution.to_dict()
 
 
-@api_router.get("/documents/{doc_id}/reference-intelligence")
+# Moved to routers/reference_intelligence.py (Domain 9)
+# @api_router.get("/documents/{doc_id}/reference-intelligence")
 async def get_document_reference_intelligence(doc_id: str):
     """
     Get stored reference intelligence data for a document.
@@ -1542,7 +1380,8 @@ async def get_document_reference_intelligence(doc_id: str):
 
 
 
-@api_router.post("/documents/{doc_id}/auto-resolve")
+# Moved to routers/reference_intelligence.py (Domain 9)
+# @api_router.post("/documents/{doc_id}/auto-resolve")
 async def trigger_auto_resolve(doc_id: str):
     """Manually enqueue a document for auto-resolution (re-run)."""
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
@@ -1571,23 +1410,7 @@ async def trigger_auto_resolve(doc_id: str):
 
 
 
-@api_router.get("/automation-rules")
-async def list_automation_rules():
-    """List all automation rules."""
-    svc = get_automation_rules_service()
-    if not svc:
-        raise HTTPException(status_code=503, detail="Rules engine not initialized")
-    rules = await svc.list_rules()
-    return {"rules": rules, "total": len(rules)}
-
-
-@api_router.post("/automation-rules")
-async def create_automation_rule(rule: Dict = Body(...)):
-    """Create a new automation rule."""
-    svc = get_automation_rules_service()
-    if not svc:
-        raise HTTPException(status_code=503, detail="Rules engine not initialized")
-    return await svc.create_rule(rule)
+# automation-rules routes moved to routers/automation_rules.py — REMOVED (duplicate)
 
 
 
@@ -1605,7 +1428,8 @@ async def create_automation_rule(rule: Dict = Body(...)):
 
 
 
-@api_router.get("/documents/{doc_id}/matching-debug")
+# Moved to routers/reference_intelligence.py (Domain 9)
+# @api_router.get("/documents/{doc_id}/matching-debug")
 async def get_matching_debug(doc_id: str):
     """
     Get full matching diagnostics for a document.
@@ -1685,7 +1509,8 @@ async def get_matching_debug(doc_id: str):
     }
 
 
-@api_router.post("/documents/{doc_id}/matching-debug/rerun")
+# Moved to routers/reference_intelligence.py (Domain 9)
+# @api_router.post("/documents/{doc_id}/matching-debug/rerun")
 async def rerun_matching_with_diagnostics(doc_id: str):
     """
     Rerun reference resolution with full diagnostics capture.
@@ -1746,13 +1571,7 @@ async def rerun_matching_with_diagnostics(doc_id: str):
 
 
 
-@api_router.get("/vendor-extraction-profiles")
-async def get_all_extraction_profiles():
-    """Get all vendor extraction profiles."""
-    svc = get_vep_service()
-    if not svc:
-        raise HTTPException(status_code=503, detail="VEP service not initialized")
-    return await svc.get_all_profiles()
+# vendor-extraction-profiles route moved to routers/vendor_extraction_profiles.py — REMOVED (duplicate)
 
 
 
@@ -1767,79 +1586,22 @@ async def get_all_extraction_profiles():
 
 
 
-@api_router.put("/documents/{doc_id}")
-async def update_document(doc_id: str, update: DocumentUpdate):
-    update_data = {k: v for k, v in update.model_dump().items() if v is not None}
-    update_data["updated_utc"] = datetime.now(timezone.utc).isoformat()
-    result = await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Document not found")
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-    return doc
+# update_document — moved to routers/documents.py (Domain 7)
 
-@api_router.delete("/documents/{doc_id}")
-async def delete_document(doc_id: str):
-    """Delete a document, its workflows, and stored file."""
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-    await db.hub_documents.delete_one({"id": doc_id})
-    await db.hub_workflow_runs.delete_many({"document_id": doc_id})
-    file_path = UPLOAD_DIR / doc_id
-    if file_path.exists():
-        file_path.unlink()
-    return {"message": "Document deleted", "id": doc_id}
+# delete_document — moved to routers/documents.py (Domain 7)
 
 
-@api_router.get("/documents/{doc_id}/file")
-async def get_document_file(doc_id: str):
-    """
-    Serve the document file for preview/download.
-    Returns the raw file with appropriate content type.
-    """
-    from fastapi.responses import FileResponse
-    
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    file_path = UPLOAD_DIR / doc_id
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="File not found on disk")
-    
-    content_type = doc.get("content_type", "application/octet-stream")
-    filename = doc.get("file_name", f"{doc_id}.bin")
-    
-    return FileResponse(
-        path=file_path,
-        media_type=content_type,
-        filename=filename,
-        headers={
-            "Content-Disposition": f'inline; filename="{filename}"'
-        }
-    )
+# get_document_file — moved to routers/documents.py (Domain 7)
 
 
 # =============================================================================
-# SQUARE9 WORKFLOW ENDPOINTS
+# SQUARE9 WORKFLOW ENDPOINTS — status/reset moved to routers/documents.py (Domain 7)
 # =============================================================================
 
-@api_router.get("/documents/{doc_id}/square9-status")
-async def get_square9_status(doc_id: str):
-    """Get Square9-style workflow status for a document."""
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    summary = get_workflow_summary(doc)
-    return {
-        "document_id": doc_id,
-        **summary,
-        "retry_history": doc.get("retry_history", []),
-    }
+# get_square9_status — moved to routers/documents.py (Domain 7)
 
 
-@api_router.post("/documents/{doc_id}/retry")
+# retry_document — registered via add_api_route in routers/documents.py
 async def retry_document(doc_id: str, reason: str = "Manual retry"):
     """
     Retry a document's workflow processing.
@@ -1916,7 +1678,7 @@ async def retry_document(doc_id: str, reason: str = "Manual retry"):
     }
 
 
-@api_router.post("/documents/{doc_id}/reset-retries")
+# @api_router.post("/documents/{doc_id}/reset-retries")  # Moved to routers/documents.py
 async def reset_document_retries(doc_id: str, reason: str = "Manual reset"):
     """Reset retry counter for a document (after manual intervention)."""
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
@@ -1939,7 +1701,8 @@ async def reset_document_retries(doc_id: str, reason: str = "Manual reset"):
 
 
 
-@api_router.post("/documents/{doc_id}/resubmit")
+# Moved to routers/documents.py — resubmit_document
+# @api_router.post("/documents/{doc_id}/resubmit")
 async def resubmit_document(doc_id: str):
     """Re-submit a failed document: re-run the full workflow using the stored file."""
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
@@ -1975,7 +1738,8 @@ async def resubmit_document(doc_id: str):
     updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     return {"document": updated_doc, "workflow_id": workflow_id}
 
-@api_router.post("/documents/{doc_id}/link")
+# Moved to routers/documents.py — link_document
+# @api_router.post("/documents/{doc_id}/link")
 async def link_document(doc_id: str):
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
@@ -2070,7 +1834,8 @@ async def link_document(doc_id: str):
 
 # ==================== WORKFLOW ENDPOINTS ====================
 
-@api_router.get("/workflows")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.get("/workflows")
 async def list_workflows(skip: int = Query(0), limit: int = Query(50), status: str = Query(None)):
     fq = {}
     if status:
@@ -2079,14 +1844,16 @@ async def list_workflows(skip: int = Query(0), limit: int = Query(50), status: s
     total = await db.hub_workflow_runs.count_documents(fq)
     return {"workflows": workflows, "total": total}
 
-@api_router.get("/workflows/{wf_id}")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.get("/workflows/{wf_id}")
 async def get_workflow(wf_id: str):
     wf = await db.hub_workflow_runs.find_one({"id": wf_id}, {"_id": 0})
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
     return wf
 
-@api_router.post("/workflows/{wf_id}/retry")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.post("/workflows/{wf_id}/retry")
 async def retry_workflow(wf_id: str):
     wf = await db.hub_workflow_runs.find_one({"id": wf_id}, {"_id": 0})
     if not wf:
@@ -2374,73 +2141,9 @@ async def _aggregate_document_types_data(
 
 
 
-@api_router.post("/spiro/match-vendor")
-async def spiro_match_vendor(vendor_name: str = Form(...), min_score: float = Form(0.7)):
-    """
-    Match a vendor name against Spiro CRM companies.
-    Uses fuzzy matching to find the best match.
-    """
-    result = await match_vendor_with_spiro(db, vendor_name, min_score)
-    return result
+# Spiro vendor matching routes moved to routes/spiro.py — REMOVED (Domain 6)
 
-
-@api_router.get("/spiro/search-companies")
-async def spiro_search_companies(query: str = Query(...), limit: int = Query(10)):
-    """
-    Search Spiro companies by name.
-    """
-    matcher = get_spiro_matcher(db)
-    companies = await matcher.search_companies(query, limit)
-    return {
-        "query": query,
-        "count": len(companies),
-        "companies": companies
-    }
-
-
-@api_router.get("/spiro/freight-carriers")
-async def spiro_get_freight_carriers():
-    """
-    Get all freight carriers from Spiro.
-    """
-    matcher = get_spiro_matcher(db)
-    carriers = await matcher.get_freight_carriers()
-    return {
-        "count": len(carriers),
-        "carriers": carriers
-    }
-
-
-@api_router.post("/spiro/is-freight-carrier")
-async def spiro_is_freight_carrier(vendor_name: str = Form(...)):
-    """
-    Check if a vendor is a freight carrier based on Spiro data.
-    """
-    matcher = get_spiro_matcher(db)
-    is_freight, company = await matcher.is_freight_carrier(vendor_name)
-    return {
-        "vendor_name": vendor_name,
-        "is_freight_carrier": is_freight,
-        "matched_company": company
-    }
-
-
-# ==================== UNIFIED VENDOR MATCHING (ALL SOURCES) ====================
-
-
-@api_router.get("/bc/companies")
-async def list_bc_companies():
-    companies = await get_bc_companies()
-    return {"companies": companies}
-
-@api_router.get("/bc/sales-orders")
-async def list_bc_sales_orders(search: str = Query(None)):
-    try:
-        orders = await get_bc_sales_orders(order_no=search)
-        return {"orders": orders}
-    except Exception as e:
-        logger.warning("BC sales orders search failed: %s", str(e))
-        return {"orders": [], "warning": str(e)}
+# BC company/sales-order routes moved to routers/bc_integration.py — REMOVED (Domain 5)
 
 # ==================== SETTINGS ====================
 
@@ -5584,7 +5287,8 @@ async def _emit_intake_events(
         await derived_state_service.update_document_derived_state(doc_id)
 
 
-@api_router.post("/documents/intake")
+# Moved to routers/documents.py (Domain 7)
+# @api_router.post("/documents/intake")
 async def intake_document(
     file: UploadFile = File(...),
     source: str = Form("email"),
@@ -6019,7 +5723,8 @@ async def intake_document(
         "transaction_action": transaction_action
     }
 
-@api_router.post("/documents/{doc_id}/classify")
+# Moved to routers/documents.py (Domain 7)
+# @api_router.post("/documents/{doc_id}/classify")
 async def classify_document(doc_id: str):
     """Re-run AI classification on an existing document."""
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
@@ -6084,7 +5789,8 @@ class ResolveRequest(BaseModel):
     mark_no_po: bool = False  # Mark as non-PO invoice
     notes: Optional[str] = None
 
-@api_router.post("/documents/{doc_id}/resolve")
+# Moved to routers/documents.py (Domain 7)
+# @api_router.post("/documents/{doc_id}/resolve")
 async def resolve_and_link_document(doc_id: str, resolve: ResolveRequest):
     """
     Resolve a NeedsReview document by selecting vendor/customer from candidates.
@@ -6207,7 +5913,8 @@ async def resolve_and_link_document(doc_id: str, resolve: ResolveRequest):
 
 # ==================== SAFE REPROCESS ENDPOINT ====================
 
-@api_router.post("/documents/{doc_id}/reprocess")
+# Moved to routers/documents.py (Domain 7)
+# @api_router.post("/documents/{doc_id}/reprocess")
 async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
     """
     Safe reprocess endpoint - re-runs validation + vendor match only.
@@ -6393,7 +6100,8 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
 # BATCH REVALIDATION - Re-run validation on all documents using Production BC
 # =============================================================================
 
-@api_router.post("/documents/batch-revalidate")
+# Moved to routers/documents.py (Domain 7)
+# @api_router.post("/documents/batch-revalidate")
 async def batch_revalidate_documents(
     doc_types: List[str] = Query(default=["AP_Invoice", "AP_INVOICE", "Remittance"]),
     limit: int = Query(default=500, le=1000),
@@ -6524,7 +6232,8 @@ class DryRunPreviewRequest(BaseModel):
     bc_environment: Optional[str] = None  # Override environment if needed
 
 
-@api_router.post("/documents/{doc_id}/preview-post")
+# Moved to routers/documents.py (Domain 7)
+# @api_router.post("/documents/{doc_id}/preview-post")
 async def preview_post_to_bc(doc_id: str, request: DryRunPreviewRequest = None):
     """
     DRY-RUN PREVIEW: Shows exactly what would be posted to BC without actually posting.
@@ -7628,7 +7337,8 @@ class ApprovalActionRequest(BaseModel):
     approver: Optional[str] = None
 
 
-@api_router.get("/workflows/ap_invoice/status-counts")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.get("/workflows/ap_invoice/status-counts")
 async def get_ap_workflow_status_counts():
     """Get counts of AP_INVOICE documents by workflow status."""
     pipeline = [
@@ -7653,7 +7363,8 @@ async def get_ap_workflow_status_counts():
     }
 
 
-@api_router.get("/workflows/ap_invoice/vendor-pending")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.get("/workflows/ap_invoice/vendor-pending")
 async def get_vendor_pending_queue(
     skip: int = Query(0),
     limit: int = Query(50),
@@ -7692,7 +7403,8 @@ async def get_vendor_pending_queue(
     return {"documents": docs, "total": total, "queue": "vendor_pending"}
 
 
-@api_router.get("/workflows/ap_invoice/bc-validation-pending")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.get("/workflows/ap_invoice/bc-validation-pending")
 async def get_bc_validation_pending_queue(
     skip: int = Query(0),
     limit: int = Query(50),
@@ -7725,7 +7437,8 @@ async def get_bc_validation_pending_queue(
     return {"documents": docs, "total": total, "queue": "bc_validation_pending"}
 
 
-@api_router.get("/workflows/ap_invoice/bc-validation-failed")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.get("/workflows/ap_invoice/bc-validation-failed")
 async def get_bc_validation_failed_queue(
     skip: int = Query(0),
     limit: int = Query(50),
@@ -7755,7 +7468,8 @@ async def get_bc_validation_failed_queue(
     return {"documents": docs, "total": total, "queue": "bc_validation_failed"}
 
 
-@api_router.get("/workflows/ap_invoice/data-correction-pending")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.get("/workflows/ap_invoice/data-correction-pending")
 async def get_data_correction_pending_queue(
     skip: int = Query(0),
     limit: int = Query(50)
@@ -7778,7 +7492,8 @@ async def get_data_correction_pending_queue(
     return {"documents": docs, "total": total, "queue": "data_correction_pending"}
 
 
-@api_router.get("/workflows/ap_invoice/ready-for-approval")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.get("/workflows/ap_invoice/ready-for-approval")
 async def get_ready_for_approval_queue(
     skip: int = Query(0),
     limit: int = Query(50),
@@ -7813,7 +7528,8 @@ async def get_ready_for_approval_queue(
 
 # ==================== GENERIC WORKFLOW QUEUE API ====================
 
-@api_router.get("/workflows/generic/queue")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.get("/workflows/generic/queue")
 async def get_workflow_queue(
     doc_type: str = Query(..., description="Document type (required): AP_INVOICE, SALES_INVOICE, PURCHASE_ORDER, etc."),
     status: Optional[str] = Query(None, description="Workflow status filter"),
@@ -7863,7 +7579,8 @@ async def get_workflow_queue(
     }
 
 
-@api_router.get("/workflows/generic/status-counts-by-type")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.get("/workflows/generic/status-counts-by-type")
 async def get_status_counts_by_doc_type():
     """
     Get document counts grouped by doc_type and workflow_status.
@@ -7901,7 +7618,8 @@ async def get_status_counts_by_doc_type():
     }
 
 
-@api_router.get("/workflows/generic/metrics-by-type")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.get("/workflows/generic/metrics-by-type")
 async def get_workflow_metrics_by_doc_type(
     days: int = Query(30, description="Number of days for metrics"),
     doc_type: Optional[str] = Query(None, description="Filter by specific doc_type")
@@ -7982,7 +7700,8 @@ async def get_workflow_metrics_by_doc_type(
 
 # ==================== AP INVOICE WORKFLOW MUTATIONS ====================
 
-@api_router.post("/workflows/ap_invoice/{doc_id}/set-vendor")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.post("/workflows/ap_invoice/{doc_id}/set-vendor")
 async def set_vendor_for_document(doc_id: str, request: SetVendorRequest):
     """
     Manually set/resolve vendor for a document in vendor_pending status.
@@ -8063,7 +7782,8 @@ async def set_vendor_for_document(doc_id: str, request: SetVendorRequest):
     }
 
 
-@api_router.post("/workflows/ap_invoice/{doc_id}/update-fields")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.post("/workflows/ap_invoice/{doc_id}/update-fields")
 async def update_document_fields(doc_id: str, request: UpdateFieldsRequest):
     """
     Manually update/correct fields on a document.
@@ -8153,7 +7873,8 @@ async def update_document_fields(doc_id: str, request: UpdateFieldsRequest):
     }
 
 
-@api_router.post("/workflows/ap_invoice/{doc_id}/override-bc-validation")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.post("/workflows/ap_invoice/{doc_id}/override-bc-validation")
 async def override_bc_validation(doc_id: str, request: BCValidationOverrideRequest):
     """
     Override a failed BC validation and move document to ready_for_approval.
@@ -8215,7 +7936,8 @@ async def override_bc_validation(doc_id: str, request: BCValidationOverrideReque
 
 # ==================== AP INVOICE APPROVAL WORKFLOW ====================
 
-@api_router.post("/workflows/ap_invoice/{doc_id}/start-approval")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.post("/workflows/ap_invoice/{doc_id}/start-approval")
 async def start_approval(doc_id: str, request: ApprovalActionRequest):
     """
     Start the approval process for a document.
@@ -8265,7 +7987,8 @@ async def start_approval(doc_id: str, request: ApprovalActionRequest):
     }
 
 
-@api_router.post("/workflows/ap_invoice/{doc_id}/approve")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.post("/workflows/ap_invoice/{doc_id}/approve")
 async def approve_document(doc_id: str, request: ApprovalActionRequest):
     """
     Approve a document. Moves to 'approved' status.
@@ -8321,7 +8044,8 @@ async def approve_document(doc_id: str, request: ApprovalActionRequest):
     }
 
 
-@api_router.post("/workflows/ap_invoice/{doc_id}/reject")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.post("/workflows/ap_invoice/{doc_id}/reject")
 async def reject_document(doc_id: str, request: ApprovalActionRequest):
     """
     Reject a document. Moves to 'rejected' status.
@@ -8382,7 +8106,8 @@ async def reject_document(doc_id: str, request: ApprovalActionRequest):
 
 # ==================== GENERIC WORKFLOW MUTATION ENDPOINTS ====================
 
-@api_router.post("/workflows/{doc_id}/mark-ready-for-review")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.post("/workflows/{doc_id}/mark-ready-for-review")
 async def mark_ready_for_review(
     doc_id: str,
     reason: Optional[str] = None,
@@ -8433,7 +8158,8 @@ async def mark_ready_for_review(
     }
 
 
-@api_router.post("/workflows/{doc_id}/mark-reviewed")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.post("/workflows/{doc_id}/mark-reviewed")
 async def mark_reviewed(
     doc_id: str,
     reason: Optional[str] = None,
@@ -8484,7 +8210,8 @@ async def mark_reviewed(
     }
 
 
-@api_router.post("/workflows/{doc_id}/start-approval")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.post("/workflows/{doc_id}/start-approval")
 async def start_approval_generic(
     doc_id: str,
     reason: Optional[str] = None,
@@ -8542,7 +8269,8 @@ async def start_approval_generic(
     }
 
 
-@api_router.post("/workflows/{doc_id}/approve")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.post("/workflows/{doc_id}/approve")
 async def approve_generic(
     doc_id: str,
     reason: Optional[str] = None,
@@ -8600,7 +8328,8 @@ async def approve_generic(
     }
 
 
-@api_router.post("/workflows/{doc_id}/reject")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.post("/workflows/{doc_id}/reject")
 async def reject_generic(
     doc_id: str,
     reason: str = Query(..., description="Reason for rejection (required)"),
@@ -8658,7 +8387,8 @@ async def reject_generic(
     }
 
 
-@api_router.post("/workflows/{doc_id}/complete-triage")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.post("/workflows/{doc_id}/complete-triage")
 async def complete_triage(
     doc_id: str,
     reason: Optional[str] = None,
@@ -8715,7 +8445,8 @@ async def complete_triage(
     }
 
 
-@api_router.post("/workflows/{doc_id}/link-credit-to-invoice")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.post("/workflows/{doc_id}/link-credit-to-invoice")
 async def link_credit_to_invoice(
     doc_id: str,
     invoice_id: str = Query(..., description="ID of the original invoice"),
@@ -8780,7 +8511,8 @@ async def link_credit_to_invoice(
     }
 
 
-@api_router.post("/workflows/{doc_id}/tag-quality")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.post("/workflows/{doc_id}/tag-quality")
 async def tag_quality_doc(
     doc_id: str,
     tags: List[str] = Query(..., description="Quality tags to apply"),
@@ -8844,7 +8576,8 @@ async def tag_quality_doc(
     }
 
 
-@api_router.post("/workflows/{doc_id}/export")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.post("/workflows/{doc_id}/export")
 async def export_document(
     doc_id: str,
     export_destination: Optional[str] = None,
@@ -8930,7 +8663,8 @@ class MigrationRequest(BaseModel):
 
 # ==================== WORKFLOW METRICS ====================
 
-@api_router.get("/workflows/ap_invoice/metrics")
+# Moved to routers/workflows.py (Domain 8)
+# @api_router.get("/workflows/ap_invoice/metrics")
 async def get_ap_workflow_metrics(days: int = Query(30)):
     """
     Get workflow metrics for AP_Invoice documents.
@@ -8986,173 +8720,8 @@ async def get_ap_workflow_metrics(days: int = Query(30)):
 
 # ==================== MAILBOX SOURCES CRUD ====================
 
-@api_router.get("/settings/mailbox-sources")
-async def list_mailbox_sources():
-    """Get all configured mailbox sources."""
-    sources = await db.mailbox_sources.find({}, {"_id": 0}).to_list(100)
-    return {"mailbox_sources": sources, "total": len(sources)}
-
-@api_router.get("/settings/mailbox-sources/polling-status")
-async def get_mailbox_polling_status():
-    """Get the status of the dynamic mailbox polling worker."""
-    global _dynamic_mailbox_polling_task, _mailbox_last_poll_times
-    
-    worker_running = _dynamic_mailbox_polling_task is not None and not _dynamic_mailbox_polling_task.done()
-    
-    # Get all mailbox sources with their last poll times
-    sources = await db.mailbox_sources.find({}, {"_id": 0}).to_list(100)
-    
-    mailbox_statuses = []
-    for source in sources:
-        mailbox_id = source.get("mailbox_id")
-        last_poll = _mailbox_last_poll_times.get(mailbox_id)
-        
-        mailbox_statuses.append({
-            "mailbox_id": mailbox_id,
-            "name": source.get("name"),
-            "email_address": source.get("email_address"),
-            "enabled": source.get("enabled", True),
-            "polling_interval_minutes": source.get("polling_interval_minutes", 5),
-            "last_poll_utc": last_poll.isoformat() if last_poll else None,
-            "next_poll_in_seconds": max(0, (source.get("polling_interval_minutes", 5) * 60) - 
-                                        ((datetime.now(timezone.utc) - last_poll).total_seconds() if last_poll else 0))
-                                   if last_poll else None
-        })
-    
-    return {
-        "worker_running": worker_running,
-        "mailboxes": mailbox_statuses,
-        "legacy_ap_polling_enabled": EMAIL_POLLING_ENABLED,
-        "legacy_sales_polling_enabled": SALES_EMAIL_POLLING_ENABLED
-    }
-
-@api_router.get("/settings/mailbox-sources/{mailbox_id}")
-async def get_mailbox_source(mailbox_id: str):
-    """Get a specific mailbox source by ID."""
-    source = await db.mailbox_sources.find_one({"mailbox_id": mailbox_id}, {"_id": 0})
-    if not source:
-        raise HTTPException(status_code=404, detail=f"Mailbox source {mailbox_id} not found")
-    return source
-
-@api_router.post("/settings/mailbox-sources")
-async def create_mailbox_source(source: MailboxSource):
-    """Create a new mailbox source."""
-    now = datetime.now(timezone.utc).isoformat()
-    
-    # Generate ID if not provided
-    mailbox_id = source.mailbox_id or f"mailbox_{uuid.uuid4().hex[:8]}"
-    
-    # Check for duplicate email address
-    existing = await db.mailbox_sources.find_one({"email_address": source.email_address})
-    if existing:
-        raise HTTPException(status_code=400, detail=f"Mailbox {source.email_address} already exists")
-    
-    doc = source.model_dump()
-    doc["mailbox_id"] = mailbox_id
-    doc["created_utc"] = now
-    doc["updated_utc"] = now
-    
-    await db.mailbox_sources.insert_one(doc)
-    
-    logger.info("Created mailbox source: %s (%s)", source.name, source.email_address)
-    
-    # Return without _id
-    return await get_mailbox_source(mailbox_id)
-
-@api_router.put("/settings/mailbox-sources/{mailbox_id}")
-async def update_mailbox_source(mailbox_id: str, source: MailboxSource):
-    """Update an existing mailbox source."""
-    existing = await db.mailbox_sources.find_one({"mailbox_id": mailbox_id})
-    if not existing:
-        raise HTTPException(status_code=404, detail=f"Mailbox source {mailbox_id} not found")
-    
-    now = datetime.now(timezone.utc).isoformat()
-    update_data = source.model_dump()
-    update_data["mailbox_id"] = mailbox_id  # Preserve original ID
-    update_data["created_utc"] = existing.get("created_utc")  # Preserve creation date
-    update_data["updated_utc"] = now
-    
-    await db.mailbox_sources.update_one(
-        {"mailbox_id": mailbox_id},
-        {"$set": update_data}
-    )
-    
-    logger.info("Updated mailbox source: %s", mailbox_id)
-    
-    return await get_mailbox_source(mailbox_id)
-
-@api_router.delete("/settings/mailbox-sources/{mailbox_id}")
-async def delete_mailbox_source(mailbox_id: str):
-    """Delete a mailbox source."""
-    existing = await db.mailbox_sources.find_one({"mailbox_id": mailbox_id})
-    if not existing:
-        raise HTTPException(status_code=404, detail=f"Mailbox source {mailbox_id} not found")
-    
-    await db.mailbox_sources.delete_one({"mailbox_id": mailbox_id})
-    
-    logger.info("Deleted mailbox source: %s (%s)", existing.get("name"), existing.get("email_address"))
-    
-    return {"status": "deleted", "mailbox_id": mailbox_id}
-
-@api_router.post("/settings/mailbox-sources/{mailbox_id}/test-connection")
-async def test_mailbox_connection(mailbox_id: str):
-    """Test connection to a mailbox source."""
-    source = await db.mailbox_sources.find_one({"mailbox_id": mailbox_id}, {"_id": 0})
-    if not source:
-        raise HTTPException(status_code=404, detail=f"Mailbox source {mailbox_id} not found")
-    
-    email_address = source.get("email_address")
-    
-    try:
-        token = await get_email_token()
-        if not token:
-            return {"status": "error", "message": "Failed to get email token - check Graph API credentials"}
-        
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            # Try to access the mailbox
-            resp = await client.get(
-                f"https://graph.microsoft.com/v1.0/users/{email_address}/mailFolders/Inbox",
-                headers={"Authorization": f"Bearer {token}"}
-            )
-            
-            if resp.status_code == 200:
-                folder_info = resp.json()
-                return {
-                    "status": "success",
-                    "message": f"Connected successfully to {email_address}",
-                    "folder_name": folder_info.get("displayName"),
-                    "unread_count": folder_info.get("unreadItemCount"),
-                    "total_count": folder_info.get("totalItemCount")
-                }
-            elif resp.status_code == 404:
-                return {"status": "error", "message": f"Mailbox {email_address} not found or no access"}
-            else:
-                return {"status": "error", "message": f"Graph API error: {resp.status_code} - {resp.text[:200]}"}
-    
-    except Exception as e:
-        return {"status": "error", "message": f"Connection test failed: {str(e)}"}
-
-@api_router.post("/settings/mailbox-sources/{mailbox_id}/poll-now")
-async def poll_mailbox_now(mailbox_id: str):
-    """Manually trigger polling for a specific mailbox."""
-    source = await db.mailbox_sources.find_one({"mailbox_id": mailbox_id}, {"_id": 0})
-    if not source:
-        raise HTTPException(status_code=404, detail=f"Mailbox source {mailbox_id} not found")
-    
-    email_address = source.get("email_address")
-    category = source.get("category", "AP")
-    
-    # Use the unified email polling function
-    try:
-        stats = await poll_mailbox_for_documents(
-            mailbox_address=email_address,
-            default_category=category,
-            source_id=mailbox_id
-        )
-        return stats
-    except Exception as e:
-        logger.error("Manual poll failed for %s: %s", mailbox_id, str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+# Mailbox source routes moved to routers/mailbox_sources.py — REMOVED (Domain 3)
+# poll_mailbox_for_documents stays here (used by background worker)
 
 
 async def poll_mailbox_for_documents(mailbox_address: str, default_category: str = "AP", source_id: str = None):
@@ -9305,114 +8874,16 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
 
 
 # ==================== VENDOR ALIAS ENGINE ====================
+# Routes moved to routers/aliases.py — REMOVED (Domain 2)
+# Helper record_alias_usage also moved to routers/aliases.py
 
+# Keep VendorAlias model for backward compatibility (may be referenced elsewhere)
 class VendorAlias(BaseModel):
     alias_string: str
     vendor_no: str
     vendor_name: Optional[str] = None
-    confidence_override: Optional[float] = None  # If set, use this instead of calculated
+    confidence_override: Optional[float] = None
     notes: Optional[str] = None
-
-@api_router.get("/aliases/vendors")
-async def get_vendor_aliases():
-    """Get all vendor aliases."""
-    aliases = await db.vendor_aliases.find({}, {"_id": 0}).to_list(500)
-    return {"aliases": aliases, "count": len(aliases)}
-
-@api_router.post("/aliases/vendors")
-async def create_vendor_alias(alias: VendorAlias):
-    """Create a new vendor alias mapping."""
-    alias_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
-    
-    # Normalize the alias string for matching
-    normalized = normalize_vendor_name(alias.alias_string)
-    
-    # Check for existing alias
-    existing = await db.vendor_aliases.find_one({
-        "$or": [
-            {"alias_string": alias.alias_string},
-            {"normalized_alias": normalized}
-        ]
-    })
-    
-    if existing:
-        raise HTTPException(status_code=400, detail=f"Alias already exists for '{alias.alias_string}'")
-    
-    alias_doc = {
-        "alias_id": alias_id,
-        "alias_string": alias.alias_string,
-        "normalized_alias": normalized,
-        "vendor_no": alias.vendor_no,
-        "vendor_name": alias.vendor_name,
-        "confidence_override": alias.confidence_override,
-        "notes": alias.notes,
-        "created_by": "system",  # Could be user ID in future
-        "created_at": now,
-        "usage_count": 0,
-        "last_used_at": None
-    }
-    
-    await db.vendor_aliases.insert_one(alias_doc)
-    
-    # Update global alias map
-    VENDOR_ALIAS_MAP[alias.alias_string] = alias.vendor_name or alias.vendor_no
-    VENDOR_ALIAS_MAP[normalized] = alias.vendor_name or alias.vendor_no
-    
-    return {"alias_id": alias_id, "message": "Alias created successfully"}
-
-@api_router.delete("/aliases/vendors/{alias_id}")
-async def delete_vendor_alias(alias_id: str):
-    """Delete a vendor alias."""
-    result = await db.vendor_aliases.delete_one({"alias_id": alias_id})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Alias not found")
-    return {"message": "Alias deleted"}
-
-@api_router.get("/aliases/vendors/suggest")
-async def suggest_alias_creation(vendor_name: str, resolved_vendor_no: str, resolved_vendor_name: str):
-    """
-    Called when user manually resolves a vendor match.
-    Returns suggestion to save as alias.
-    """
-    normalized = normalize_vendor_name(vendor_name)
-    
-    # Check if alias already exists
-    existing = await db.vendor_aliases.find_one({
-        "$or": [
-            {"alias_string": vendor_name},
-            {"normalized_alias": normalized}
-        ]
-    }, {"_id": 0})
-    
-    if existing:
-        return {
-            "suggest_alias": False,
-            "reason": "Alias already exists",
-            "existing_alias": existing
-        }
-    
-    return {
-        "suggest_alias": True,
-        "suggested_alias": {
-            "alias_string": vendor_name,
-            "normalized_alias": normalized,
-            "vendor_no": resolved_vendor_no,
-            "vendor_name": resolved_vendor_name
-        },
-        "message": f"Would you like to save '{vendor_name}' as an alias for '{resolved_vendor_name}'?"
-    }
-
-# Update resolve endpoint to increment alias usage
-async def record_alias_usage(alias_string: str):
-    """Record when an alias is used for matching."""
-    await db.vendor_aliases.update_one(
-        {"alias_string": alias_string},
-        {
-            "$inc": {"usage_count": 1},
-            "$set": {"last_used_at": datetime.now(timezone.utc).isoformat()}
-        }
-    )
 
 # ==================== AUTOMATION METRICS ENGINE ====================
 
@@ -9669,205 +9140,7 @@ async def reingest_single_document(doc_id: str):
     )
 
 
-@api_router.post("/sales/file-import/parse")
-async def parse_sales_file(
-    file: UploadFile = File(...),
-    ingestion_type: str = Form("sales_order"),
-    sheet_name: Optional[str] = Form(None)
-):
-    """
-    Parse an Excel/CSV file and return preview data with validation.
-    
-    Supported ingestion types:
-    - sales_order: Parse customer POs into order headers and lines
-    - inventory_position: Parse inventory snapshot data
-    - customer_item: Parse customer SKU mappings
-    
-    Returns parsed data preview and validation results.
-    """
-    content = await file.read()
-    
-    if len(content) > 10 * 1024 * 1024:  # 10MB limit
-        raise HTTPException(status_code=400, detail="File too large. Maximum size is 10MB.")
-    
-    try:
-        result = file_ingestion_service.parse_file(
-            content=content,
-            file_name=file.filename,
-            ingestion_type=ingestion_type,
-            sheet_name=sheet_name
-        )
-        return result.model_dump()
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.exception("Error parsing file: %s", file.filename)
-        raise HTTPException(status_code=500, detail=f"Error parsing file: {str(e)}")
-
-
-@api_router.post("/sales/file-import/import-orders")
-async def import_sales_orders_from_file(
-    file: UploadFile = File(...),
-    customer_id: Optional[str] = Form(None),
-    sheet_name: Optional[str] = Form(None),
-    dry_run: bool = Form(True)
-):
-    """
-    Import sales orders from an Excel/CSV file.
-    
-    Groups order lines by customer_po into order headers and lines.
-    Use dry_run=True to preview without saving to database.
-    """
-    content = await file.read()
-    
-    if len(content) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File too large. Maximum size is 10MB.")
-    
-    try:
-        # First parse the file
-        parsed = file_ingestion_service.parse_file(
-            content=content,
-            file_name=file.filename,
-            ingestion_type="sales_order",
-            sheet_name=sheet_name
-        )
-        
-        if not parsed.success:
-            return {
-                "success": False,
-                "error": parsed.error,
-                "validation_errors": parsed.validation_errors,
-                "warnings": parsed.warnings
-            }
-        
-        # Then import
-        result = await file_ingestion_service.import_sales_orders(
-            parsed_result=parsed,
-            customer_id=customer_id,
-            source="file_import",
-            dry_run=dry_run
-        )
-        
-        result["file_name"] = file.filename
-        result["ingestion_id"] = parsed.ingestion_id
-        result["rows_parsed"] = parsed.rows_parsed
-        result["rows_valid"] = parsed.rows_valid
-        result["rows_invalid"] = parsed.rows_invalid
-        result["validation_errors"] = parsed.validation_errors
-        
-        return result
-        
-    except Exception as e:
-        logger.exception("Error importing sales orders from file")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@api_router.post("/sales/file-import/import-inventory")
-async def import_inventory_from_file(
-    file: UploadFile = File(...),
-    customer_id: Optional[str] = Form(None),
-    warehouse_id: Optional[str] = Form(None),
-    sheet_name: Optional[str] = Form(None),
-    dry_run: bool = Form(True)
-):
-    """
-    Import inventory positions from an Excel/CSV file.
-    
-    Use dry_run=True to preview without saving to database.
-    """
-    content = await file.read()
-    
-    if len(content) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File too large. Maximum size is 10MB.")
-    
-    try:
-        # First parse the file
-        parsed = file_ingestion_service.parse_file(
-            content=content,
-            file_name=file.filename,
-            ingestion_type="inventory_position",
-            sheet_name=sheet_name
-        )
-        
-        if not parsed.success:
-            return {
-                "success": False,
-                "error": parsed.error,
-                "validation_errors": parsed.validation_errors,
-                "warnings": parsed.warnings
-            }
-        
-        # Then import
-        result = await file_ingestion_service.import_inventory_positions(
-            parsed_result=parsed,
-            customer_id=customer_id,
-            warehouse_id=warehouse_id,
-            dry_run=dry_run
-        )
-        
-        result["file_name"] = file.filename
-        result["ingestion_id"] = parsed.ingestion_id
-        result["rows_parsed"] = parsed.rows_parsed
-        result["rows_valid"] = parsed.rows_valid
-        result["rows_invalid"] = parsed.rows_invalid
-        result["validation_errors"] = parsed.validation_errors
-        
-        return result
-        
-    except Exception as e:
-        logger.exception("Error importing inventory from file")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@api_router.get("/sales/file-import/excel-sheets")
-async def get_excel_sheets(file: UploadFile = File(...)):
-    """Get list of sheet names from an Excel file."""
-    content = await file.read()
-    
-    try:
-        sheets = file_ingestion_service.get_excel_sheets(content)
-        return {"sheets": sheets, "file_name": file.filename}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@api_router.get("/sales/file-import/column-mappings")
-async def get_column_mappings(ingestion_type: str = Query("sales_order")):
-    """Get the expected column mappings for a given ingestion type."""
-    from services.file_ingestion_service import COLUMN_MAPPINGS
-    
-    if ingestion_type not in COLUMN_MAPPINGS:
-        raise HTTPException(status_code=400, detail=f"Unknown ingestion type: {ingestion_type}")
-    
-    config = COLUMN_MAPPINGS[ingestion_type]
-    return {
-        "ingestion_type": ingestion_type,
-        "required_columns": config.get("required_columns", []),
-        "optional_columns": config.get("optional_columns", []),
-        "known_column_aliases": config.get("known_columns", {})
-    }
-
-
-@api_router.get("/sales/file-import/history")
-async def get_import_history(
-    ingestion_type: Optional[str] = Query(None),
-    customer_id: Optional[str] = Query(None),
-    skip: int = Query(0),
-    limit: int = Query(50)
-):
-    """Get history of file imports."""
-    query = {}
-    if ingestion_type:
-        query["ingestion_type"] = ingestion_type
-    if customer_id:
-        query["customer_id"] = customer_id
-    
-    total = await db.file_ingestion_log.count_documents(query)
-    history = await db.file_ingestion_log.find(
-        query, {"_id": 0}
-    ).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
-    
-    return {"history": history, "total": total}
+# Sales file import routes moved to routers/file_import.py — REMOVED (Domain 4)
 
 
 # ==================== APP SETUP ====================

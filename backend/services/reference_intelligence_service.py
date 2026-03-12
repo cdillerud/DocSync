@@ -45,7 +45,52 @@ class ReferenceDomain(str, Enum):
     """Predicted reference domain."""
     PURCHASE = "purchase"
     SALES = "sales"
+    VENDOR = "vendor"
+    CUSTOMER = "customer"
+    FINANCE = "finance"
     SHIPPING = "shipping"
+    UNKNOWN = "unknown"
+
+
+class SourceDocumentType(str, Enum):
+    """Source document type — drives context gate and scoring bias."""
+    AP_INVOICE = "ap_invoice"
+    AR_INVOICE = "ar_invoice"
+    PURCHASE_ORDER = "purchase_order"
+    SALES_ORDER = "sales_order"
+    PACKING_SLIP = "packing_slip"
+    SHIPMENT = "shipment"
+    BOL = "bol"
+    ORDER_CONFIRMATION = "order_confirmation"
+    FREIGHT = "freight"
+    CUSTOMS = "customs"
+    GENERIC_DOCUMENT = "generic_document"
+
+
+class ReferenceSemanticType(str, Enum):
+    """Semantic type of the extracted reference value."""
+    PO_NUMBER = "po_number"
+    INVOICE_NUMBER = "invoice_number"
+    SHIPMENT_NUMBER = "shipment_number"
+    CUSTOMER_PO = "customer_po"
+    ORDER_NUMBER = "order_number"
+    GENERIC_REFERENCE = "generic_reference"
+
+
+class CandidateState(str, Enum):
+    """Evaluation state of a BC match candidate."""
+    SURFACED = "surfaced"
+    SUPPRESSED = "suppressed"
+    REJECTED = "rejected"
+
+
+class CandidateDomain(str, Enum):
+    """Domain classification for a BC candidate record."""
+    PURCHASE = "purchase"
+    SALES = "sales"
+    VENDOR = "vendor"
+    CUSTOMER = "customer"
+    FINANCE = "finance"
     UNKNOWN = "unknown"
 
 
@@ -62,11 +107,88 @@ class BCEntityType(str, Enum):
 
 
 class MatchOutcome(str, Enum):
-    """Reference match outcome."""
-    EXACT_MATCH = "exact_match"
+    """Reference match outcome labels — safe interpretation."""
+    STRONG_MATCH = "strong_match"
     LIKELY_MATCH = "likely_match"
-    AMBIGUOUS_MATCH = "ambiguous_match"
+    NEEDS_REVIEW = "needs_review"
+    SUPPRESSED_CROSS_DOMAIN = "suppressed_cross_domain"
+    COUNTERPARTY_MISMATCH = "counterparty_mismatch"
+    REJECTED = "rejected"
     NO_MATCH = "no_match"
+    # Legacy compat
+    EXACT_MATCH = "exact_match"
+    AMBIGUOUS_MATCH = "ambiguous_match"
+
+
+# =============================================================================
+# CONTEXT GATE — domain pool rules per source doc type
+# =============================================================================
+
+# For AP_INVOICE: purchase/vendor/finance primary, sales/customer excluded unless override
+CONTEXT_GATE = {
+    SourceDocumentType.AP_INVOICE: {
+        "primary": {CandidateDomain.PURCHASE, CandidateDomain.VENDOR, CandidateDomain.FINANCE},
+        "secondary": {CandidateDomain.UNKNOWN},
+        "excluded": {CandidateDomain.SALES, CandidateDomain.CUSTOMER},
+    },
+    SourceDocumentType.AR_INVOICE: {
+        "primary": {CandidateDomain.SALES, CandidateDomain.CUSTOMER, CandidateDomain.FINANCE},
+        "secondary": {CandidateDomain.UNKNOWN},
+        "excluded": {CandidateDomain.PURCHASE, CandidateDomain.VENDOR},
+    },
+    SourceDocumentType.PURCHASE_ORDER: {
+        "primary": {CandidateDomain.PURCHASE, CandidateDomain.VENDOR},
+        "secondary": {CandidateDomain.FINANCE, CandidateDomain.UNKNOWN},
+        "excluded": {CandidateDomain.SALES, CandidateDomain.CUSTOMER},
+    },
+    SourceDocumentType.SALES_ORDER: {
+        "primary": {CandidateDomain.SALES, CandidateDomain.CUSTOMER},
+        "secondary": {CandidateDomain.FINANCE, CandidateDomain.UNKNOWN},
+        "excluded": {CandidateDomain.PURCHASE, CandidateDomain.VENDOR},
+    },
+}
+
+# Map raw doc_type strings to SourceDocumentType
+DOC_TYPE_TO_SOURCE_TYPE = {
+    "AP_Invoice": SourceDocumentType.AP_INVOICE,
+    "ap_invoice": SourceDocumentType.AP_INVOICE,
+    "AR_Invoice": SourceDocumentType.AR_INVOICE,
+    "ar_invoice": SourceDocumentType.AR_INVOICE,
+    "Freight_Invoice": SourceDocumentType.FREIGHT,
+    "Freight": SourceDocumentType.FREIGHT,
+    "Carrier_Invoice": SourceDocumentType.FREIGHT,
+    "BOL": SourceDocumentType.BOL,
+    "Shipping_Document": SourceDocumentType.SHIPMENT,
+    "Packing_List": SourceDocumentType.PACKING_SLIP,
+    "Sales_Order": SourceDocumentType.SALES_ORDER,
+    "Purchase_Order": SourceDocumentType.PURCHASE_ORDER,
+}
+
+# Map ReferenceLabel to ReferenceSemanticType
+LABEL_TO_SEMANTIC_TYPE = {
+    ReferenceLabel.PO: ReferenceSemanticType.PO_NUMBER,
+    ReferenceLabel.ORDER: ReferenceSemanticType.ORDER_NUMBER,
+    ReferenceLabel.INVOICE: ReferenceSemanticType.INVOICE_NUMBER,
+    ReferenceLabel.SHIPMENT: ReferenceSemanticType.SHIPMENT_NUMBER,
+    ReferenceLabel.CUSTOMER_REF: ReferenceSemanticType.CUSTOMER_PO,
+    ReferenceLabel.BOL: ReferenceSemanticType.SHIPMENT_NUMBER,
+    ReferenceLabel.LOAD: ReferenceSemanticType.SHIPMENT_NUMBER,
+    ReferenceLabel.PRO: ReferenceSemanticType.SHIPMENT_NUMBER,
+    ReferenceLabel.REF: ReferenceSemanticType.GENERIC_REFERENCE,
+    ReferenceLabel.UNKNOWN: ReferenceSemanticType.GENERIC_REFERENCE,
+}
+
+# Map BCEntityType to CandidateDomain
+ENTITY_TO_CANDIDATE_DOMAIN = {
+    BCEntityType.PURCHASE_ORDER: CandidateDomain.PURCHASE,
+    BCEntityType.PURCHASE_INVOICE: CandidateDomain.PURCHASE,
+    BCEntityType.POSTED_PURCHASE_INVOICE: CandidateDomain.PURCHASE,
+    BCEntityType.SALES_ORDER: CandidateDomain.SALES,
+    BCEntityType.SALES_INVOICE: CandidateDomain.SALES,
+    BCEntityType.POSTED_SALES_INVOICE: CandidateDomain.SALES,
+    BCEntityType.SALES_SHIPMENT: CandidateDomain.SALES,
+    BCEntityType.POSTED_SALES_SHIPMENT: CandidateDomain.SALES,
+}
 
 
 # Reference extraction patterns — with improved BOL/Shipment detection
@@ -217,6 +339,8 @@ class ReferenceCandidate:
     predicted_domain: str = None
     predicted_entity_types: List[str] = field(default_factory=list)
     classification_reasoning: str = None
+    # Semantic type (Requirement 4)
+    semantic_type: str = ReferenceSemanticType.GENERIC_REFERENCE.value
     
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -231,6 +355,13 @@ class BCMatch:
     bc_record_info: Dict[str, Any]
     match_score: float
     match_reasoning: str
+    # New fields (Requirements 1, 6, 8, 9)
+    candidate_domain: str = CandidateDomain.UNKNOWN.value
+    counterparty_name: str = ""
+    candidate_state: str = CandidateState.SURFACED.value
+    score_breakdown: Dict[str, float] = field(default_factory=dict)
+    positive_signals: List[str] = field(default_factory=list)
+    negative_signals: List[str] = field(default_factory=list)
     
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -553,139 +684,145 @@ def score_bc_match(
     vendor_hints: Dict[str, Any] = None,
     label_correction_hints: Dict[str, Any] = None,
     extraction_profile: Dict[str, Any] = None,
-    layout_family_bias: Dict[str, Any] = None
-) -> Tuple[float, str, Dict[str, float]]:
+    layout_family_bias: Dict[str, Any] = None,
+    source_doc_type: SourceDocumentType = None
+) -> Tuple[float, str, Dict[str, float], str, str, List[str], List[str]]:
     """
-    Score a BC match based on multiple factors.
+    Score a BC match with domain-aware, multi-signal scoring.
     
-    Returns: (score, reasoning, score_breakdown)
+    Returns: (score, reasoning, score_breakdown, candidate_domain, counterparty_name,
+              positive_signals, negative_signals)
     """
     breakdown = {}
     reasoning_parts = []
+    positive_signals = []
+    negative_signals = []
     
     bc_number = bc_record.get("number", "")
     normalized_ref = candidate.reference_value_normalized
     
-    # 1. Exact reference match (0.40)
+    # --- Classify candidate domain (Requirement 1) ---
+    candidate_domain = ENTITY_TO_CANDIDATE_DOMAIN.get(
+        entity_type, CandidateDomain.UNKNOWN
+    ).value if isinstance(entity_type, str) else CandidateDomain.UNKNOWN.value
+    # Try enum lookup by value
+    for et in BCEntityType:
+        if et.value == entity_type:
+            candidate_domain = ENTITY_TO_CANDIDATE_DOMAIN.get(et, CandidateDomain.UNKNOWN).value
+            break
+    
+    # --- Get counterparty name ---
+    bc_vendor = bc_record.get("vendorName") or bc_record.get("vendor_name", "")
+    bc_customer = bc_record.get("customerName") or bc_record.get("customer_name", "")
+    counterparty_name = bc_vendor if candidate_domain == CandidateDomain.PURCHASE.value else bc_customer
+    if not counterparty_name:
+        counterparty_name = bc_vendor or bc_customer or ""
+    
+    # --- 1. Exact document number match (0.35 max — reduced from 0.40, Requirement 5) ---
     if bc_number == normalized_ref:
-        breakdown["exact_reference_match"] = 0.40
+        breakdown["exact_doc_no_match"] = 0.35
         reasoning_parts.append("Exact number match")
+        positive_signals.append("exact_doc_no_match")
     elif normalize_reference(bc_number) == normalized_ref:
-        breakdown["exact_reference_match"] = 0.35
+        breakdown["exact_doc_no_match"] = 0.30
         reasoning_parts.append("Normalized number match")
+        positive_signals.append("exact_doc_no_match")
     else:
-        breakdown["exact_reference_match"] = 0.0
+        breakdown["exact_doc_no_match"] = 0.0
     
-    # 2. Entity type alignment (0.20)
-    if entity_type in candidate.predicted_entity_types:
-        breakdown["entity_type_alignment"] = 0.20
-        reasoning_parts.append(f"Entity type matches prediction: {entity_type}")
-    else:
-        breakdown["entity_type_alignment"] = 0.10
-        reasoning_parts.append(f"Entity type: {entity_type}")
-    
-    # 3. Domain alignment (0.15)
+    # --- 2. Domain alignment (Requirement 2, 3) ---
     breakdown["domain_alignment"] = 0.0
-    if candidate.predicted_domain:
+    if source_doc_type and candidate_domain != CandidateDomain.UNKNOWN.value:
+        gate = CONTEXT_GATE.get(source_doc_type)
+        if gate:
+            cd_enum = CandidateDomain(candidate_domain)
+            if cd_enum in gate.get("primary", set()):
+                breakdown["domain_alignment"] = 0.20
+                reasoning_parts.append(f"Domain alignment: {candidate_domain} matches {source_doc_type.value} primary pool")
+                positive_signals.append("domain_alignment")
+            elif cd_enum in gate.get("secondary", set()):
+                breakdown["domain_alignment"] = 0.05
+                reasoning_parts.append(f"Domain: {candidate_domain} in secondary pool")
+            elif cd_enum in gate.get("excluded", set()):
+                breakdown["domain_alignment"] = -0.40
+                reasoning_parts.append(f"Domain MISMATCH: {candidate_domain} excluded for {source_doc_type.value}")
+                negative_signals.append(f"domain_mismatch_{candidate_domain}_vs_{source_doc_type.value}")
+        else:
+            # No gate defined — use heuristic
+            if candidate.predicted_domain:
+                if candidate.predicted_domain == ReferenceDomain.PURCHASE.value and "purchase" in entity_type.lower():
+                    breakdown["domain_alignment"] = 0.15
+                    positive_signals.append("domain_alignment")
+                elif candidate.predicted_domain == ReferenceDomain.SALES.value and "sales" in entity_type.lower():
+                    breakdown["domain_alignment"] = 0.15
+                    positive_signals.append("domain_alignment")
+                elif candidate.predicted_domain == ReferenceDomain.SHIPPING.value and ("shipment" in entity_type.lower() or "sales" in entity_type.lower()):
+                    breakdown["domain_alignment"] = 0.15
+                    positive_signals.append("domain_alignment")
+    elif candidate.predicted_domain:
         if candidate.predicted_domain == ReferenceDomain.PURCHASE.value and "purchase" in entity_type.lower():
             breakdown["domain_alignment"] = 0.15
-            reasoning_parts.append("Domain alignment: purchase")
+            positive_signals.append("domain_alignment")
         elif candidate.predicted_domain == ReferenceDomain.SALES.value and "sales" in entity_type.lower():
             breakdown["domain_alignment"] = 0.15
-            reasoning_parts.append("Domain alignment: sales")
-        elif candidate.predicted_domain == ReferenceDomain.SHIPPING.value and ("shipment" in entity_type.lower() or "sales" in entity_type.lower()):
-            breakdown["domain_alignment"] = 0.15
-            reasoning_parts.append("Domain alignment: shipping")
+            positive_signals.append("domain_alignment")
     
-    # 4. Vendor alignment (0.15)
-    breakdown["vendor_alignment"] = 0.0
+    # --- 3. Counterparty alignment (Requirement 6) ---
+    breakdown["counterparty_alignment"] = 0.0
     if document:
         doc_vendor = document.get("vendor_raw", "") or document.get("matched_vendor_name", "")
-        bc_vendor = bc_record.get("vendorName") or bc_record.get("vendor_name", "")
-        bc_customer = bc_record.get("customerName") or bc_record.get("customer_name", "")
         
         if doc_vendor:
-            doc_vendor_norm = doc_vendor.lower().replace(" ", "")
+            doc_vendor_norm = doc_vendor.lower().replace(" ", "").replace(",", "").replace(".", "")
+            
             # Check vendor match
             if bc_vendor:
-                bc_vendor_norm = bc_vendor.lower().replace(" ", "")
+                bc_vendor_norm = bc_vendor.lower().replace(" ", "").replace(",", "").replace(".", "")
                 if doc_vendor_norm in bc_vendor_norm or bc_vendor_norm in doc_vendor_norm:
-                    breakdown["vendor_alignment"] = 0.15
-                    reasoning_parts.append(f"Vendor alignment: {bc_vendor[:20]}")
-            # For freight docs, vendor is carrier — customer match is still relevant
-            if breakdown["vendor_alignment"] == 0 and bc_customer:
-                bc_customer_norm = bc_customer.lower().replace(" ", "")
-                if doc_vendor_norm in bc_customer_norm or bc_customer_norm in doc_vendor_norm:
-                    breakdown["vendor_alignment"] = 0.10
-                    reasoning_parts.append(f"Customer alignment: {bc_customer[:20]}")
+                    breakdown["counterparty_alignment"] = 0.20
+                    reasoning_parts.append(f"Counterparty alignment: vendor '{bc_vendor[:25]}' matches doc vendor")
+                    positive_signals.append("counterparty_alignment")
+                elif _fuzzy_vendor_match(doc_vendor_norm, bc_vendor_norm):
+                    breakdown["counterparty_alignment"] = 0.15
+                    reasoning_parts.append(f"Counterparty alignment: fuzzy vendor match '{bc_vendor[:25]}'")
+                    positive_signals.append("counterparty_alignment")
+            
+            # Customer mismatch penalty — if candidate belongs to a different entity
+            if breakdown["counterparty_alignment"] == 0 and bc_customer:
+                bc_customer_norm = bc_customer.lower().replace(" ", "").replace(",", "").replace(".", "")
+                if candidate_domain in (CandidateDomain.SALES.value, CandidateDomain.CUSTOMER.value):
+                    # Sales/customer record but vendor doesn't match — penalty
+                    if doc_vendor_norm not in bc_customer_norm and bc_customer_norm not in doc_vendor_norm:
+                        breakdown["counterparty_alignment"] = -0.30
+                        reasoning_parts.append(f"Counterparty MISMATCH: sales record for '{bc_customer[:25]}' vs doc vendor '{doc_vendor[:25]}'")
+                        negative_signals.append("counterparty_mismatch")
+                    else:
+                        # Vendor appears as customer — weak signal
+                        breakdown["counterparty_alignment"] = 0.05
+                        reasoning_parts.append(f"Weak: doc vendor in customer field '{bc_customer[:25]}'")
     
-    # 5. Candidate confidence (0.10)
-    breakdown["candidate_confidence"] = candidate.confidence * 0.10
-    reasoning_parts.append(f"Candidate confidence: {candidate.confidence:.2f}")
+    # --- 4. Reference semantic alignment (Requirement 4) ---
+    breakdown["semantic_alignment"] = 0.0
+    semantic_type = candidate.semantic_type
+    if semantic_type == ReferenceSemanticType.PO_NUMBER.value:
+        if "purchase" in entity_type.lower():
+            breakdown["semantic_alignment"] = 0.10
+            reasoning_parts.append("Semantic: PO number → purchase entity (boost)")
+            positive_signals.append("semantic_po_alignment")
+        elif "sales" in entity_type.lower() or "shipment" in entity_type.lower():
+            breakdown["semantic_alignment"] = -0.15
+            reasoning_parts.append("Semantic MISMATCH: PO number → sales/shipment entity")
+            negative_signals.append("semantic_mismatch")
+    elif semantic_type == ReferenceSemanticType.INVOICE_NUMBER.value:
+        if "invoice" in entity_type.lower():
+            breakdown["semantic_alignment"] = 0.10
+            positive_signals.append("semantic_invoice_alignment")
+    elif semantic_type == ReferenceSemanticType.SHIPMENT_NUMBER.value:
+        if "shipment" in entity_type.lower():
+            breakdown["semantic_alignment"] = 0.10
+            positive_signals.append("semantic_shipment_alignment")
     
-    # 6. Vendor behavior boost (up to 0.15)
-    breakdown["vendor_behavior_bonus"] = 0.0
-    if vendor_hints and vendor_hints.get("has_hints"):
-        typical_types = vendor_hints.get("typical_match_types", [])
-        if entity_type in typical_types:
-            boost = vendor_hints.get("behavior_score_boost", 0.15)
-            breakdown["vendor_behavior_bonus"] = boost
-            reasoning_parts.append(f"Vendor behavior: typical match type (+{boost:.0%})")
-    
-    # 7. Freight vendor boost (0.15) — shipment score boost for freight carriers
-    breakdown["freight_vendor_boost"] = 0.0
-    if document:
-        doc_type = document.get("document_type") or document.get("suggested_job_type") or ""
-        is_freight_doc = doc_type in FREIGHT_DOC_TYPES
-        uvm = document.get("unified_vendor_match") or {}
-        is_freight_carrier = uvm.get("is_freight_carrier", False)
-        
-        # Also check vendor name against known freight keywords
-        if not is_freight_carrier:
-            doc_vendor_lower = (document.get("vendor_raw") or document.get("matched_vendor_name") or "").lower()
-            freight_kws = ["freight", "trucking", "logistics", "transport", "carrier",
-                          "shipping", "ltl", "truckload", "drayage", "express"]
-            is_freight_carrier = any(kw in doc_vendor_lower for kw in freight_kws)
-        
-        if (is_freight_doc or is_freight_carrier) and "shipment" in entity_type.lower():
-            breakdown["freight_vendor_boost"] = 0.15
-            reasoning_parts.append("Freight vendor: shipment entity boost +0.15")
-    
-    # 8. Shipment relationship bonus
-    breakdown["shipment_relationship"] = 0.0
-    if "shipment" in entity_type.lower():
-        order_no = bc_record.get("orderNumber") or bc_record.get("order_number", "")
-        if order_no and normalized_ref != normalize_reference(order_no):
-            # The shipment has a linked sales order — bonus for relationship
-            breakdown["shipment_relationship"] = 0.05
-            reasoning_parts.append(f"Shipment linked to order: {order_no}")
-    
-    # 9. Label correction boost — learned from past mislabels
-    breakdown["label_correction_boost"] = 0.0
-    if label_correction_hints and label_correction_hints.get("has_hints"):
-        entity_boosts = label_correction_hints.get("entity_boosts", {})
-        if entity_type in entity_boosts:
-            boost = entity_boosts[entity_type].get("boost", 0)
-            breakdown["label_correction_boost"] = boost
-            count = entity_boosts[entity_type].get("count", 0)
-            reasoning_parts.append(f"Label correction: {candidate.detected_label}→{entity_type} learned ({count}x, +{boost:.0%})")
-    
-    # 10. Reference context match (0.05) — context clues align with entity type
-    breakdown["reference_context_match"] = 0.0
-    source_lower = (candidate.source_text or "").lower()
-    if source_lower:
-        if "shipment" in entity_type.lower() or "sales" in entity_type.lower():
-            ship_context = ["ship", "shipment", "bol", "freight", "deliver", "pickup", "carrier", "tracking"]
-            if any(kw in source_lower for kw in ship_context):
-                breakdown["reference_context_match"] = 0.05
-                reasoning_parts.append("Reference context: shipping keywords match entity")
-        elif "purchase" in entity_type.lower():
-            purchase_context = ["purchase", "vendor", "supplier", "po ", "p.o."]
-            if any(kw in source_lower for kw in purchase_context):
-                breakdown["reference_context_match"] = 0.05
-                reasoning_parts.append("Reference context: purchase keywords match entity")
-    
-    # 11. Date proximity (0.05) — document date close to BC record date
+    # --- 5. Date proximity (0.05) ---
     breakdown["date_proximity"] = 0.0
     if document:
         doc_date_str = (
@@ -702,132 +839,234 @@ def score_bc_match(
         if doc_date_str and bc_date_str:
             try:
                 from datetime import datetime as dt
-                # Parse dates (handle both ISO format and date-only)
                 doc_date = dt.fromisoformat(str(doc_date_str).replace("Z", "+00:00").split("T")[0])
                 bc_date = dt.fromisoformat(str(bc_date_str).replace("Z", "+00:00").split("T")[0])
                 days_diff = abs((doc_date - bc_date).days)
                 if days_diff <= 7:
                     breakdown["date_proximity"] = 0.05
+                    positive_signals.append("date_proximity")
                     reasoning_parts.append(f"Date proximity: {days_diff}d apart")
                 elif days_diff <= 30:
                     breakdown["date_proximity"] = 0.03
                     reasoning_parts.append(f"Date proximity: {days_diff}d apart (moderate)")
                 elif days_diff <= 90:
                     breakdown["date_proximity"] = 0.01
-                    reasoning_parts.append(f"Date proximity: {days_diff}d apart (weak)")
             except (ValueError, TypeError):
                 pass
     
-    # 12. Vendor Extraction Profile bias (Part 4 — interpretation hints, NOT templates)
+    # --- 6. Amount plausibility (0.05) ---
+    breakdown["amount_plausibility"] = 0.0
+    if document:
+        doc_amount = document.get("amount_float") or document.get("extracted_fields", {}).get("total_amount")
+        bc_amount = bc_record.get("totalAmountIncludingVAT") or bc_record.get("amount") or bc_record.get("totalAmount")
+        if doc_amount and bc_amount:
+            try:
+                ratio = float(doc_amount) / float(bc_amount) if float(bc_amount) != 0 else 0
+                if 0.9 <= ratio <= 1.1:
+                    breakdown["amount_plausibility"] = 0.05
+                    positive_signals.append("amount_plausibility")
+                    reasoning_parts.append(f"Amount match: doc={doc_amount}, bc={bc_amount}")
+            except (ValueError, TypeError):
+                pass
+    
+    # --- 7. Entity type alignment (reduced) ---
+    if entity_type in candidate.predicted_entity_types:
+        breakdown["entity_type_alignment"] = 0.05
+    else:
+        breakdown["entity_type_alignment"] = 0.0
+    
+    # --- 8. Candidate confidence ---
+    breakdown["candidate_confidence"] = candidate.confidence * 0.05
+    
+    # --- 9. Vendor behavior / label correction / profile / layout boosts ---
+    breakdown["vendor_behavior_bonus"] = 0.0
+    if vendor_hints and vendor_hints.get("has_hints"):
+        typical_types = vendor_hints.get("typical_match_types", [])
+        if entity_type in typical_types:
+            boost = vendor_hints.get("behavior_score_boost", 0.10)
+            breakdown["vendor_behavior_bonus"] = boost
+    
+    breakdown["freight_vendor_boost"] = 0.0
+    if document:
+        doc_type = document.get("document_type") or document.get("suggested_job_type") or ""
+        is_freight_doc = doc_type in FREIGHT_DOC_TYPES
+        uvm = document.get("unified_vendor_match") or {}
+        is_freight_carrier = uvm.get("is_freight_carrier", False)
+        if not is_freight_carrier:
+            doc_vendor_lower = (document.get("vendor_raw") or "").lower()
+            freight_kws = ["freight", "trucking", "logistics", "transport", "carrier", "shipping", "ltl"]
+            is_freight_carrier = any(kw in doc_vendor_lower for kw in freight_kws)
+        if (is_freight_doc or is_freight_carrier) and "shipment" in entity_type.lower():
+            breakdown["freight_vendor_boost"] = 0.10
+    
+    breakdown["label_correction_boost"] = 0.0
+    if label_correction_hints and label_correction_hints.get("has_hints"):
+        entity_boosts = label_correction_hints.get("entity_boosts", {})
+        if entity_type in entity_boosts:
+            breakdown["label_correction_boost"] = entity_boosts[entity_type].get("boost", 0)
+    
     breakdown["extraction_profile_bias"] = 0.0
     if extraction_profile and extraction_profile.get("has_profile"):
         label_bias = extraction_profile.get("reference_label_bias", {})
-        conf_adj = extraction_profile.get("confidence_adjustments", {})
-        
-        # Apply label bias: if candidate's label has a known bias toward this entity
         if candidate.detected_label in label_bias:
             bias_info = label_bias[candidate.detected_label]
-            target_entity = bias_info.get("target_entity", "")
-            if entity_type == target_entity:
-                boost = bias_info.get("boost", 0)
-                breakdown["extraction_profile_bias"] = round(min(boost, 0.15), 4)
-                reasoning_parts.append(
-                    f"Profile bias: {candidate.detected_label}→{entity_type} +{boost:.0%} "
-                    f"(from {bias_info.get('source', 'learned')})"
-                )
-            else:
-                penalty = bias_info.get("penalty", 0)
-                if penalty < 0:
-                    breakdown["extraction_profile_bias"] = round(max(penalty, -0.10), 4)
-                    reasoning_parts.append(
-                        f"Profile penalty: {candidate.detected_label}≠{target_entity} {penalty:.0%}"
-                    )
-        
-        # Apply entity-specific confidence adjustments
-        entity_boost_key = f"{entity_type}_boost"
-        entity_penalty_key = f"{entity_type}_penalty"
-        entity_corr_key = f"{entity_type}_correction_boost"
-        
-        profile_adj = 0
-        for adj_key in (entity_boost_key, entity_penalty_key, entity_corr_key):
-            if adj_key in conf_adj:
-                profile_adj += conf_adj[adj_key]
-        
-        if profile_adj != 0 and breakdown["extraction_profile_bias"] == 0:
-            breakdown["extraction_profile_bias"] = round(max(min(profile_adj, 0.15), -0.10), 4)
-            reasoning_parts.append(f"Profile entity adjustment: {entity_type} {profile_adj:+.0%}")
+            if entity_type == bias_info.get("target_entity", ""):
+                breakdown["extraction_profile_bias"] = round(min(bias_info.get("boost", 0), 0.10), 4)
     
-    # 13. Layout family bias (Part 6 — soft structural signal, NOT a template)
     breakdown["layout_family_bias"] = 0.0
     if layout_family_bias and layout_family_bias.get("has_layout_bias"):
         entity_biases = layout_family_bias.get("entity_biases", {})
         if entity_type in entity_biases:
-            bias_val = entity_biases[entity_type]
-            breakdown["layout_family_bias"] = round(min(bias_val, 0.15), 4)
-            reasoning_parts.append(
-                f"Layout family bias: {entity_type} +{bias_val:.0%} "
-                f"(family: {layout_family_bias.get('layout_family_id', '?')[:15]})"
-            )
-        family_id = layout_family_bias.get("layout_family_id", "")
-        if layout_family_bias.get("new_layout_detected"):
-            reasoning_parts.append(f"New layout detected (family: {family_id[:15]})")
+            breakdown["layout_family_bias"] = round(min(entity_biases[entity_type], 0.10), 4)
     
-    # --- VENDOR INFLUENCE CAP: max total vendor-related boost = 0.20 ---
+    # --- Vendor influence cap: max 0.20 ---
     vendor_components = (
         breakdown.get("vendor_behavior_bonus", 0)
         + breakdown.get("label_correction_boost", 0)
-        + max(breakdown.get("extraction_profile_bias", 0), 0)  # only cap positive bias
+        + max(breakdown.get("extraction_profile_bias", 0), 0)
     )
-    # Layout family bias is capped separately at 0.15 — not part of vendor influence cap
     if vendor_components > 0.20:
-        # Scale down proportionally
         scale = 0.20 / vendor_components
-        if breakdown.get("vendor_behavior_bonus", 0) > 0:
-            breakdown["vendor_behavior_bonus"] = round(breakdown["vendor_behavior_bonus"] * scale, 4)
-        if breakdown.get("label_correction_boost", 0) > 0:
-            breakdown["label_correction_boost"] = round(breakdown["label_correction_boost"] * scale, 4)
-        if breakdown.get("extraction_profile_bias", 0) > 0:
-            breakdown["extraction_profile_bias"] = round(breakdown["extraction_profile_bias"] * scale, 4)
-        reasoning_parts.append(f"Vendor influence capped at 20% (was {vendor_components:.0%})")
+        for k in ["vendor_behavior_bonus", "label_correction_boost", "extraction_profile_bias"]:
+            if breakdown.get(k, 0) > 0:
+                breakdown[k] = round(breakdown[k] * scale, 4)
     
     score = sum(breakdown.values())
     reasoning = "; ".join(reasoning_parts)
     
-    return min(score, 1.0), reasoning, breakdown
+    return (
+        min(max(score, 0.0), 1.0),
+        reasoning,
+        breakdown,
+        candidate_domain,
+        counterparty_name,
+        positive_signals,
+        negative_signals
+    )
+
+
+def _fuzzy_vendor_match(a: str, b: str) -> bool:
+    """Simple fuzzy vendor match — checks if significant portions overlap."""
+    if not a or not b:
+        return False
+    # Check if first N chars match (handles abbreviations)
+    min_len = min(len(a), len(b))
+    if min_len >= 6 and a[:6] == b[:6]:
+        return True
+    # Check token overlap
+    tokens_a = set(a.replace(",", " ").split())
+    tokens_b = set(b.replace(",", " ").split())
+    if tokens_a and tokens_b:
+        overlap = len(tokens_a & tokens_b)
+        if overlap >= 2 or (overlap >= 1 and min(len(tokens_a), len(tokens_b)) <= 2):
+            return True
+    return False
 
 
 def determine_match_outcome(
     best_score: float, 
     alternate_count: int,
-    all_scores: List[float] = None
+    all_scores: List[float] = None,
+    best_match: BCMatch = None,
+    source_doc_type: SourceDocumentType = None
 ) -> str:
     """
-    Determine the match outcome based on score and alternatives.
+    Determine the match outcome using domain-aware, multi-signal logic.
     
-    Fixed ambiguity threshold:
-    - best >= 0.90 AND second_best < 0.70 → auto_resolve (exact_match)
-    - best >= 0.70 AND no strong competitors → likely_match  
-    - Multiple candidates > 0.70 → ambiguous
+    Requirements 7, 8, 10:
+    - At least two positive signals for "Likely Match"
+    - At least one must be contextual (domain, counterparty, semantic, date)
+    - Cross-domain numeric-only matches → suppressed
+    - Updated labels for safe interpretation
     """
     if not all_scores:
         all_scores = []
     
     second_best = all_scores[1] if len(all_scores) > 1 else 0.0
     
-    if best_score >= 0.90 and second_best < 0.70:
-        return MatchOutcome.EXACT_MATCH.value
-    elif best_score >= 0.70:
-        # Check for strong competing candidates
-        strong_competitors = sum(1 for s in all_scores[1:] if s >= 0.70)
-        if strong_competitors > 0:
-            return MatchOutcome.AMBIGUOUS_MATCH.value
-        return MatchOutcome.LIKELY_MATCH.value
-    elif best_score >= 0.40:
-        if alternate_count > 1:
-            return MatchOutcome.AMBIGUOUS_MATCH.value
-        return MatchOutcome.LIKELY_MATCH.value
-    else:
+    if not best_match:
         return MatchOutcome.NO_MATCH.value
+    
+    positive_signals = best_match.positive_signals or []
+    negative_signals = best_match.negative_signals or []
+    candidate_domain = best_match.candidate_domain
+    
+    # Contextual signals (not just numeric equality)
+    contextual_signals = {"domain_alignment", "counterparty_alignment", "semantic_po_alignment",
+                          "semantic_invoice_alignment", "semantic_shipment_alignment",
+                          "date_proximity", "amount_plausibility"}
+    positive_contextual = [s for s in positive_signals if s in contextual_signals]
+    
+    # Check for domain mismatch (cross-domain)
+    has_domain_mismatch = any("domain_mismatch" in s for s in negative_signals)
+    has_counterparty_mismatch = any("counterparty_mismatch" in s for s in negative_signals)
+    has_semantic_mismatch = any("semantic_mismatch" in s for s in negative_signals)
+    
+    # Rejected: major negative signals
+    if has_domain_mismatch and has_counterparty_mismatch:
+        return MatchOutcome.REJECTED.value
+    
+    # Suppressed: cross-domain with only numeric match
+    if has_domain_mismatch and len(positive_signals) <= 1:
+        return MatchOutcome.SUPPRESSED_CROSS_DOMAIN.value
+    
+    # Counterparty mismatch label
+    if has_counterparty_mismatch and not positive_contextual:
+        return MatchOutcome.COUNTERPARTY_MISMATCH.value
+    
+    # Strong Match: high score + two signals + at least one contextual
+    if best_score >= 0.80 and len(positive_signals) >= 2 and len(positive_contextual) >= 1:
+        if second_best < 0.60:
+            return MatchOutcome.STRONG_MATCH.value
+    
+    # Likely Match (Requirement 7): at least two positive signals, at least one contextual
+    if best_score >= 0.50 and len(positive_signals) >= 2 and len(positive_contextual) >= 1:
+        strong_competitors = sum(1 for s in all_scores[1:] if s >= 0.50)
+        if strong_competitors == 0:
+            return MatchOutcome.LIKELY_MATCH.value
+        return MatchOutcome.NEEDS_REVIEW.value
+    
+    # Single signal only → Needs Review (never Likely Match from one signal)
+    if len(positive_signals) <= 1:
+        if has_domain_mismatch:
+            return MatchOutcome.SUPPRESSED_CROSS_DOMAIN.value
+        return MatchOutcome.NEEDS_REVIEW.value
+    
+    # Multiple candidates competing
+    if alternate_count > 1 and second_best >= 0.50:
+        return MatchOutcome.NEEDS_REVIEW.value
+    
+    return MatchOutcome.NEEDS_REVIEW.value
+
+
+def determine_candidate_state(
+    match: BCMatch,
+    source_doc_type: SourceDocumentType = None,
+    match_outcome: str = None
+) -> str:
+    """
+    Determine if a candidate should be surfaced, suppressed, or rejected.
+    (Requirement 8)
+    """
+    if match_outcome in (MatchOutcome.REJECTED.value,):
+        return CandidateState.REJECTED.value
+    
+    if match_outcome in (MatchOutcome.SUPPRESSED_CROSS_DOMAIN.value,):
+        return CandidateState.SUPPRESSED.value
+    
+    # Cross-domain numeric-only matches should be suppressed
+    has_domain_mismatch = any("domain_mismatch" in s for s in (match.negative_signals or []))
+    has_only_numeric = (
+        len(match.positive_signals or []) == 1 and
+        "exact_doc_no_match" in (match.positive_signals or [])
+    )
+    if has_domain_mismatch and has_only_numeric:
+        return CandidateState.SUPPRESSED.value
+    
+    if has_domain_mismatch and match.match_score < 0.30:
+        return CandidateState.REJECTED.value
+    
+    return CandidateState.SURFACED.value
 
 
 # =============================================================================
@@ -882,6 +1121,16 @@ class ReferenceIntelligenceService:
         doc_type = document.get("document_type") or document.get("suggested_job_type") or "default"
         vendor_name = document.get("vendor_raw") or document.get("matched_vendor_name")
         
+        # Derive source document type for context gate (Requirement 2)
+        source_doc_type = DOC_TYPE_TO_SOURCE_TYPE.get(doc_type)
+        if not source_doc_type:
+            # Try category fallback
+            category = document.get("category", "").upper()
+            if category == "AP":
+                source_doc_type = SourceDocumentType.AP_INVOICE
+            elif category == "AR":
+                source_doc_type = SourceDocumentType.AR_INVOICE
+        
         # Determine effective strategy — use freight strategy when appropriate
         effective_strategy = doc_type
         uvm = document.get("unified_vendor_match") or {}
@@ -911,6 +1160,7 @@ class ReferenceIntelligenceService:
         diag = {
             "document_id": doc_id,
             "document_type": doc_type,
+            "source_doc_type": source_doc_type.value if source_doc_type else None,
             "effective_strategy": effective_strategy,
             "strategy_reason": [],
             "vendor_name": vendor_name,
@@ -1010,6 +1260,16 @@ class ReferenceIntelligenceService:
             candidate.predicted_entity_types = entity_types
             if not candidate.classification_reasoning:
                 candidate.classification_reasoning = reasoning
+            
+            # Set semantic type (Requirement 4)
+            label_enum = None
+            for rl in ReferenceLabel:
+                if rl.value == candidate.detected_label:
+                    label_enum = rl
+                    break
+            candidate.semantic_type = LABEL_TO_SEMANTIC_TYPE.get(
+                label_enum, ReferenceSemanticType.GENERIC_REFERENCE
+            ).value
             
             diag["candidates"].append({
                 "raw": candidate.reference_value_raw,
@@ -1170,7 +1430,7 @@ class ReferenceIntelligenceService:
             
             if bc_result.status == "found":
                 lc_hints = label_correction_cache.get(candidate.detected_label, {"has_hints": False})
-                score, reasoning, breakdown = score_bc_match(
+                score, reasoning, breakdown, cand_domain, counterparty, pos_signals, neg_signals = score_bc_match(
                     candidate,
                     bc_result.bc_record_info,
                     bc_result.reference_type,
@@ -1178,7 +1438,8 @@ class ReferenceIntelligenceService:
                     vendor_hints=vendor_hints,
                     label_correction_hints=lc_hints,
                     extraction_profile=extraction_profile,
-                    layout_family_bias=layout_family_bias
+                    layout_family_bias=layout_family_bias,
+                    source_doc_type=source_doc_type
                 )
                 
                 match = BCMatch(
@@ -1187,7 +1448,12 @@ class ReferenceIntelligenceService:
                     bc_document_no=bc_result.bc_document_no,
                     bc_record_info=bc_result.bc_record_info,
                     match_score=score,
-                    match_reasoning=reasoning
+                    match_reasoning=reasoning,
+                    candidate_domain=cand_domain,
+                    counterparty_name=counterparty,
+                    score_breakdown=breakdown,
+                    positive_signals=pos_signals,
+                    negative_signals=neg_signals
                 )
                 all_matches.append((candidate, match))
                 
@@ -1198,6 +1464,11 @@ class ReferenceIntelligenceService:
                     "final_score": round(score, 4),
                     "score_breakdown": {k: round(v, 4) for k, v in breakdown.items()},
                     "reasoning": reasoning,
+                    "candidate_domain": cand_domain,
+                    "counterparty": counterparty,
+                    "positive_signals": pos_signals,
+                    "negative_signals": neg_signals,
+                    "semantic_type": candidate.semantic_type,
                 })
         
         result.total_bc_queries = bc_query_count
@@ -1239,12 +1510,13 @@ class ReferenceIntelligenceService:
                             "_cluster_reason": cr.get("_cluster_reason", ""),
                         }
                         lc_hints = label_correction_cache.get(candidate.detected_label, {"has_hints": False})
-                        score, reasoning, breakdown = score_bc_match(
+                        score, reasoning, breakdown, cand_domain, counterparty, pos_signals, neg_signals = score_bc_match(
                             candidate, cluster_info, cluster_entity_type,
                             document, vendor_hints=vendor_hints,
                             label_correction_hints=lc_hints,
                             extraction_profile=extraction_profile,
-                            layout_family_bias=layout_family_bias
+                            layout_family_bias=layout_family_bias,
+                            source_doc_type=source_doc_type
                         )
                         # Add cluster bonus (0.03) for relationship-based discovery
                         cluster_bonus = 0.03 if cr.get("_cluster_reason", "").startswith("linked_via") else 0
@@ -1257,7 +1529,12 @@ class ReferenceIntelligenceService:
                             bc_document_no=cr.get("bc_document_no", ""),
                             bc_record_info=cluster_info,
                             match_score=score,
-                            match_reasoning=reasoning + "; Cluster: " + cr.get("_cluster_reason", "")
+                            match_reasoning=reasoning + "; Cluster: " + cr.get("_cluster_reason", ""),
+                            candidate_domain=cand_domain,
+                            counterparty_name=counterparty,
+                            score_breakdown=breakdown,
+                            positive_signals=pos_signals,
+                            negative_signals=neg_signals
                         )
                         # Avoid duplicates
                         existing_doc_nos = {m.bc_document_no for _, m in all_matches}
@@ -1282,7 +1559,7 @@ class ReferenceIntelligenceService:
             "cluster_matches_added": cluster_matches_added,
         }
         
-        # 4. Select best match with corrected ambiguity logic
+        # 4. Select best match with domain-aware, multi-signal logic
         if all_matches:
             all_matches.sort(key=lambda x: x[1].match_score, reverse=True)
             all_scores = [m.match_score for _, m in all_matches]
@@ -1292,11 +1569,25 @@ class ReferenceIntelligenceService:
             result.match_outcome = determine_match_outcome(
                 best_match.match_score,
                 len(all_matches),
-                all_scores=all_scores
+                all_scores=all_scores,
+                best_match=best_match,
+                source_doc_type=source_doc_type
             )
             
-            # Add alternates (excluding best)
+            # Apply candidate state to best match
+            best_match.candidate_state = determine_candidate_state(
+                best_match, source_doc_type, result.match_outcome
+            )
+            
+            # Add alternates (excluding best) with their states
             for _, match in all_matches[1:3]:
+                alt_outcome = determine_match_outcome(
+                    match.match_score, 1, [match.match_score],
+                    best_match=match, source_doc_type=source_doc_type
+                )
+                match.candidate_state = determine_candidate_state(
+                    match, source_doc_type, alt_outcome
+                )
                 result.alternate_matches.append(match)
             
             diag["decision"] = {

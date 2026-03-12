@@ -1,0 +1,93 @@
+{
+  "summary": "Comprehensive testing of GPI Document Hub after router refactoring (85 routes extracted from server.py to 9 domain-specific routers) and Reference Intelligence scoring redesign. All 43 backend tests pass (100%). Frontend UI fully functional: Dashboard, Document Queue, Stable Vendors pages all load correctly with data.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/bc/companies",
+        "issue": "Returns 500 due to tenant config - PRE-EXISTING issue, not a regression",
+        "priority": "LOW"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_router_refactor_endpoints.py",
+    "/app/backend/tests/test_reference_intelligence.py",
+    "/app/test_reports/pytest/router_refactor_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Router refactoring successful: All 85 routes from server.py now in modular router files",
+    "Reference Intelligence scoring redesign validated: domain-aware multi-signal scoring works correctly",
+    "All 9 domain routers functioning: Auth, Aliases, Mailbox Sources, File Import, BC Integration, Spiro, Documents, Workflows, Reference Intelligence",
+    "Dynamic routes (upload, classify, resolve, workflow mutations) registered via app.add_api_route() during startup - working",
+    "Legacy api_router still included for backward compatibility",
+    "Frontend successfully authenticates and displays: Dashboard KPIs, Document Queue (60 docs), Stable Vendors (17 vendors)"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_router_refactor_endpoints.py"
+  ],
+  "success_rate": {
+    "backend": "100% (43/43 tests - 27 router tests + 16 reference intelligence tests)",
+    "frontend": "100% - All UI pages verified"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "No seed data created - used existing 60 documents and 17 vendors",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Router refactoring complete and tested. 9 domain routers extracted from monolith server.py. Reference Intelligence scoring redesigned with domain-aware multi-signal scoring (16 unit tests all pass). Frontend working: Dashboard shows KPIs (60 docs, 73.3% validation rate, 48.3% vendor match rate), Document Queue shows pending/completed/cleared docs, Stable Vendors shows 17 vendors with override controls.",
+  "verified_endpoints": {
+    "GET /api/health": "PASS - Returns healthy status",
+    "POST /api/auth/login": "PASS - Admin/admin credentials work, returns JWT token",
+    "GET /api/auth/me": "PASS - Returns current user info",
+    "GET /api/aliases/vendors": "PASS - Returns vendor alias list",
+    "POST /api/aliases/vendors": "PASS - Creates new alias",
+    "DELETE /api/aliases/vendors/{alias_id}": "PASS - Deletes alias",
+    "GET /api/settings/mailbox-sources": "PASS - Returns mailbox list",
+    "GET /api/settings/mailbox-sources/polling-status": "PASS - Returns worker status",
+    "GET /api/sales/file-import/column-mappings": "PASS - Returns column mapping config",
+    "GET /api/sales/file-import/history": "PASS - Returns import history",
+    "GET /api/bc/companies": "500 - Pre-existing tenant config issue (not regression)",
+    "GET /api/spiro/freight-carriers": "PASS - Returns freight carriers list",
+    "GET /api/spiro/status": "PASS - Returns integration status",
+    "GET /api/documents": "PASS - Returns 60 documents with counts",
+    "GET /api/documents/{doc_id}": "PASS - Returns document with workflows",
+    "GET /api/documents/{doc_id}/events": "PASS - Returns document events",
+    "PUT /api/documents/{doc_id}": "PASS - Updates document",
+    "GET /api/documents/{doc_id}/reference-intelligence": "PASS - Returns stored ref intel data",
+    "GET /api/documents/{doc_id}/matching-debug": "PASS - Returns matching diagnostics",
+    "GET /api/workflows": "PASS - Returns workflow list",
+    "GET /api/workflows/ap_invoice/status-counts": "PASS - Returns AP status counts",
+    "GET /api/workflows/ap_invoice/metrics": "PASS - Returns metrics with automation_rate",
+    "GET /api/workflows/generic/status-counts-by-type": "PASS - Returns generic workflow stats",
+    "GET /api/workflows/generic/queue": "PASS - Returns generic queue",
+    "GET /api/stable-vendor/dashboard-metrics": "PASS - Returns stable vendor KPIs",
+    "GET /api/stable-vendor/vendors": "PASS - Returns 17 vendors"
+  },
+  "verified_ui_pages": {
+    "Login Page": "PASS - Form renders, admin/admin login works",
+    "Dashboard": "PASS - KPIs displayed (60 docs, 73.3% validation, 48.3% vendor match, 0 exceptions)",
+    "Document Queue": "PASS - Shows 60 total docs, 37 pending, 18 auto-cleared with document table",
+    "Stable Vendors": "PASS - Shows 17 vendors with status/score/metrics table",
+    "Navigation Sidebar": "PASS - All 11 nav links present and working"
+  },
+  "reference_intelligence_tests": {
+    "domain_classification": "PASS - Purchase orders classified as purchase domain",
+    "source_doc_awareness": "PASS - AP Invoice routes to purchase pool",
+    "context_gate": "PASS - Sales excluded from AP Invoice primary pool",
+    "semantic_typing": "PASS - PO number boosts purchase, penalizes sales",
+    "two_signal_minimum": "PASS - Single signal never gets 'Likely Match'",
+    "counterparty_scoring": "PASS - Vendor match boosts, mismatch penalizes",
+    "candidate_states": "PASS - Surfaced/suppressed/rejected states work",
+    "match_outcomes": "PASS - Strong/Likely/Needs Review/Suppressed/Rejected labels"
+  },
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "note": "All APIs are live. No mocked integrations."
+  }
+}

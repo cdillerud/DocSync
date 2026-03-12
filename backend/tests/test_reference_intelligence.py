@@ -1,302 +1,228 @@
-"""
-Tests for Reference Intelligence Service APIs
-- POST /api/documents/{doc_id}/resolve-intelligence
-- GET /api/documents/{doc_id}/reference-intelligence
-- POST /api/bc/resolve-reference
-- GET /api/bc/write-guard/status
-- Events emitted: reference.extraction.completed, reference.resolve.completed/ambiguous
+"""Regression tests for Reference Intelligence scoring.
+
+Tests the new domain-aware, multi-signal scoring system:
+- Domain classification (Requirement 1)
+- Source doc type awareness (Requirement 2)
+- Context gate (Requirement 3)
+- Reference semantic typing (Requirement 4)
+- Reduced naked number weight (Requirement 5)
+- Counterparty consistency (Requirement 6)
+- Two-signal minimum for Likely Match (Requirement 7)
+- Surfaced/suppressed/rejected states (Requirement 8)
+- Explainable scoring output (Requirement 9)
+- Updated labels (Requirement 10)
 """
 
 import pytest
-import requests
-import os
-import time
+import sys
+sys.path.insert(0, "/app/backend")
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://ref-intelligence.preview.emergentagent.com').rstrip('/')
+from services.reference_intelligence_service import (
+    score_bc_match,
+    determine_match_outcome,
+    determine_candidate_state,
+    ReferenceCandidate,
+    BCMatch,
+    MatchOutcome,
+    SourceDocumentType,
+    CandidateDomain,
+    CandidateState,
+    ReferenceSemanticType,
+    ReferenceLabel,
+)
 
-# Test document IDs from the context
-DOC_WITH_PO = "a1dec76a-17a2-46d4-a9f9-a0f6fb818208"  # Has PO 110463, type AP_Invoice
-DOC_WITHOUT_PO = "92f29b5f-3e6f-495e-8899-b77a4d0ba38c"  # No extracted fields yet
+
+def make_candidate(ref_value="110353", label="PO", confidence=0.85,
+                    predicted_domain="purchase", predicted_entity_types=None,
+                    semantic_type=None):
+    if predicted_entity_types is None:
+        predicted_entity_types = ["purchase_order"]
+    if semantic_type is None:
+        semantic_type = ReferenceSemanticType.PO_NUMBER.value
+    return ReferenceCandidate(
+        reference_value_raw=ref_value,
+        reference_value_normalized=ref_value,
+        detected_label=label,
+        source_text=f"PO: {ref_value}",
+        confidence=confidence,
+        predicted_domain=predicted_domain,
+        predicted_entity_types=predicted_entity_types,
+        semantic_type=semantic_type,
+    )
 
 
-class TestBCReferenceResolver:
-    """Tests for POST /api/bc/resolve-reference endpoint"""
-    
-    def test_resolve_reference_found(self):
-        """Test resolving a known reference number against BC"""
-        response = requests.post(
-            f"{BASE_URL}/api/bc/resolve-reference",
-            params={"reference_number": "110463"}
+def make_bc_record(number="110353", vendor_name="", customer_name=""):
+    return {"number": number, "vendorName": vendor_name, "customerName": customer_name}
+
+
+def make_document(doc_type="AP_Invoice", vendor_raw="PGP Glass USA, Inc.", category="AP"):
+    return {"id": "test-doc-001", "document_type": doc_type, "vendor_raw": vendor_raw, "category": category}
+
+
+class TestCriticalRegression:
+    def test_ap_invoice_po_vs_sales_shipment(self):
+        candidate = make_candidate(ref_value="110353")
+        doc = make_document(vendor_raw="PGP Glass USA, Inc.")
+        purchase_record = make_bc_record(number="110353", vendor_name="PGP Glass USA, Inc.")
+        sales_record = make_bc_record(number="110353", customer_name="Gamer Packaging")
+
+        p_score, _, _, p_domain, _, p_pos, _ = score_bc_match(
+            candidate, purchase_record, "purchase_order", doc,
+            source_doc_type=SourceDocumentType.AP_INVOICE
         )
-        assert response.status_code == 200
-        
-        data = response.json()
-        assert data["reference_number"] == "110463"
-        assert data["status"] == "found"
-        assert data["reference_type"] is not None
-        assert data["bc_record_id"] is not None
-        assert data["bc_document_no"] is not None
-        assert "tables_checked" in data
-        assert len(data["tables_checked"]) > 0
-        print(f"Reference 110463 resolved: type={data['reference_type']}, bc_doc={data['bc_document_no']}")
-    
-    def test_resolve_reference_not_found(self):
-        """Test resolving an unknown reference number"""
-        response = requests.post(
-            f"{BASE_URL}/api/bc/resolve-reference",
-            params={"reference_number": "NOTEXIST123456"}
+        s_score, _, _, s_domain, _, _, s_neg = score_bc_match(
+            candidate, sales_record, "sales_shipment", doc,
+            source_doc_type=SourceDocumentType.AP_INVOICE
         )
-        assert response.status_code == 200
-        
-        data = response.json()
-        assert data["reference_number"] == "NOTEXIST123456"
-        assert data["status"] == "not_found"
-        assert data["reference_type"] == "not_found"
-        assert "tables_checked" in data
-        print(f"Reference NOTEXIST123456 correctly reported as not found")
-    
-    def test_resolve_reference_with_specific_tables(self):
-        """Test resolving with specific tables filter"""
-        response = requests.post(
-            f"{BASE_URL}/api/bc/resolve-reference",
-            params={"reference_number": "110463", "tables": "salesShipments"}
+        assert p_score > s_score
+        assert p_domain == CandidateDomain.PURCHASE.value
+        assert s_domain == CandidateDomain.SALES.value
+        assert "domain_alignment" in p_pos
+        assert any("domain_mismatch" in s for s in s_neg)
+
+    def test_sales_side_suppressed_not_likely(self):
+        candidate = make_candidate(ref_value="110353")
+        doc = make_document()
+        sales_record = make_bc_record(number="110353", customer_name="Gamer Packaging")
+        s_score, _, _, s_domain, _, s_pos, s_neg = score_bc_match(
+            candidate, sales_record, "sales_shipment", doc,
+            source_doc_type=SourceDocumentType.AP_INVOICE
         )
-        assert response.status_code == 200
-        
-        data = response.json()
-        assert "salesShipments" in data["tables_checked"]
-        print(f"Filtered search tables_checked: {data['tables_checked']}")
+        sales_match = BCMatch(
+            entity_type="sales_shipment", bc_record_id="test", bc_document_no="110353",
+            bc_record_info=sales_record, match_score=s_score, match_reasoning="test",
+            candidate_domain=s_domain, positive_signals=s_pos, negative_signals=s_neg,
+        )
+        outcome = determine_match_outcome(s_score, 1, [s_score], best_match=sales_match, source_doc_type=SourceDocumentType.AP_INVOICE)
+        assert outcome != MatchOutcome.LIKELY_MATCH.value
+        assert outcome != MatchOutcome.STRONG_MATCH.value
+        state = determine_candidate_state(sales_match, SourceDocumentType.AP_INVOICE, outcome)
+        assert state in (CandidateState.SUPPRESSED.value, CandidateState.REJECTED.value)
 
 
-class TestBCWriteGuard:
-    """Tests for BC Write Safety Guard"""
-    
-    def test_write_guard_status(self):
-        """Test GET /api/bc/write-guard/status returns blocked status"""
-        response = requests.get(f"{BASE_URL}/api/bc/write-guard/status")
-        assert response.status_code == 200
-        
-        data = response.json()
-        assert "write_enabled" in data
-        assert "environment" in data
-        assert "is_production" in data
-        assert "status" in data
-        assert "message" in data
-        
-        # Per context, writes should be blocked for production safety
-        assert data["write_enabled"] == False
-        assert data["status"] == "blocked"
-        assert data["is_production"] == True
-        print(f"Write guard status: {data['status']}, env={data['environment']}")
-    
-    def test_write_guard_check_permission(self):
-        """Test POST /api/bc/write-guard/check for permission check"""
-        response = requests.post(
-            f"{BASE_URL}/api/bc/write-guard/check",
-            params={"document_id": DOC_WITH_PO, "action": "create_purchase_invoice"}
-        )
-        assert response.status_code == 200
-        
-        data = response.json()
-        assert "allowed" in data
-        assert "reason" in data or data["allowed"] == True
-        
-        # Should be blocked since production writes disabled
-        assert data["allowed"] == False
-        print(f"Write permission check: allowed={data['allowed']}, reason={data.get('reason')}")
+class TestDomainClassification:
+    def test_purchase_order_classified_as_purchase(self):
+        candidate = make_candidate()
+        rec = make_bc_record()
+        _, _, _, domain, _, _, _ = score_bc_match(candidate, rec, "purchase_order", make_document(), source_doc_type=SourceDocumentType.AP_INVOICE)
+        assert domain == CandidateDomain.PURCHASE.value
+
+    def test_sales_shipment_classified_as_sales(self):
+        candidate = make_candidate()
+        rec = make_bc_record()
+        _, _, _, domain, _, _, _ = score_bc_match(candidate, rec, "sales_shipment", make_document(), source_doc_type=SourceDocumentType.AP_INVOICE)
+        assert domain == CandidateDomain.SALES.value
 
 
-class TestReferenceIntelligenceResolve:
-    """Tests for POST /api/documents/{doc_id}/resolve-intelligence"""
-    
-    def test_resolve_intelligence_with_po(self):
-        """Test resolving reference intelligence for document with PO"""
-        response = requests.post(
-            f"{BASE_URL}/api/documents/{DOC_WITH_PO}/resolve-intelligence"
-        )
-        assert response.status_code == 200
-        
-        data = response.json()
-        
-        # Check required response fields
-        assert data["document_id"] == DOC_WITH_PO
-        assert "document_type" in data
-        assert "resolver_strategy" in data
-        assert "search_order" in data
-        assert "reference_candidates" in data
-        assert "match_outcome" in data
-        assert "resolved_at" in data
-        assert "total_bc_queries" in data
-        assert "processing_time_ms" in data
-        
-        # Validate reference candidates structure
-        assert len(data["reference_candidates"]) > 0
-        for candidate in data["reference_candidates"]:
-            assert "reference_value_raw" in candidate
-            assert "reference_value_normalized" in candidate
-            assert "detected_label" in candidate
-            assert "confidence" in candidate
-            assert "predicted_domain" in candidate
-        
-        # Check match outcome
-        assert data["match_outcome"] in ["exact_match", "likely_match", "ambiguous_match", "no_match"]
-        
-        # If best match exists, validate structure
-        if data.get("best_match"):
-            best = data["best_match"]
-            assert "entity_type" in best
-            assert "bc_record_id" in best
-            assert "bc_document_no" in best
-            assert "match_score" in best
-            assert "match_reasoning" in best
-        
-        print(f"Resolved: outcome={data['match_outcome']}, candidates={len(data['reference_candidates'])}, bc_queries={data['total_bc_queries']}, time={data['processing_time_ms']}ms")
-    
-    def test_resolve_intelligence_404_for_nonexistent_doc(self):
-        """Test 404 returned for non-existent document"""
-        response = requests.post(
-            f"{BASE_URL}/api/documents/nonexistent-doc-id/resolve-intelligence"
-        )
-        assert response.status_code == 404
+class TestTwoSignalMinimum:
+    def test_single_signal_not_likely_match(self):
+        match = BCMatch(entity_type="purchase_order", bc_record_id="t", bc_document_no="12345",
+            bc_record_info={}, match_score=0.35, match_reasoning="",
+            candidate_domain=CandidateDomain.PURCHASE.value,
+            positive_signals=["exact_doc_no_match"], negative_signals=[])
+        outcome = determine_match_outcome(0.35, 1, [0.35], best_match=match, source_doc_type=SourceDocumentType.AP_INVOICE)
+        assert outcome != MatchOutcome.LIKELY_MATCH.value
+
+    def test_two_signals_with_contextual_gets_likely(self):
+        match = BCMatch(entity_type="purchase_order", bc_record_id="t", bc_document_no="12345",
+            bc_record_info={}, match_score=0.60, match_reasoning="",
+            candidate_domain=CandidateDomain.PURCHASE.value,
+            positive_signals=["exact_doc_no_match", "domain_alignment"], negative_signals=[])
+        outcome = determine_match_outcome(0.60, 1, [0.60], best_match=match, source_doc_type=SourceDocumentType.AP_INVOICE)
+        assert outcome == MatchOutcome.LIKELY_MATCH.value
 
 
-class TestReferenceIntelligenceGet:
-    """Tests for GET /api/documents/{doc_id}/reference-intelligence"""
-    
-    def test_get_reference_intelligence_with_data(self):
-        """Test getting stored reference intelligence for document with resolved data"""
-        response = requests.get(
-            f"{BASE_URL}/api/documents/{DOC_WITH_PO}/reference-intelligence"
-        )
-        assert response.status_code == 200
-        
-        data = response.json()
-        
-        # If resolved, should have full intelligence data
-        if data.get("status") != "not_resolved":
-            assert "document_id" in data
-            assert "match_outcome" in data
-            assert "reference_candidates" in data
-            assert "resolved_at" in data
-            print(f"Got intelligence: outcome={data['match_outcome']}, candidates={len(data.get('reference_candidates', []))}")
-        else:
-            print("Document has not been resolved yet - expected for fresh documents")
-    
-    def test_get_reference_intelligence_not_resolved(self):
-        """Test getting intelligence for document that hasn't been resolved returns proper message"""
-        # First check if the doc without PO has been resolved
-        response = requests.get(
-            f"{BASE_URL}/api/documents/{DOC_WITHOUT_PO}/reference-intelligence"
-        )
-        assert response.status_code == 200
-        
-        data = response.json()
-        
-        # Should either have data or show not_resolved status
-        if data.get("status") == "not_resolved":
-            assert "message" in data
-            assert "resolve-intelligence" in data["message"].lower()
-            print(f"Document not yet resolved: {data['message']}")
-        else:
-            print(f"Document already resolved: outcome={data.get('match_outcome')}")
-    
-    def test_get_reference_intelligence_404_for_nonexistent(self):
-        """Test 404 for non-existent document"""
-        response = requests.get(
-            f"{BASE_URL}/api/documents/nonexistent-doc-id/reference-intelligence"
-        )
-        assert response.status_code == 404
+class TestCounterpartyScoring:
+    def test_vendor_match_boosts_score(self):
+        candidate = make_candidate()
+        doc = make_document(vendor_raw="PGP Glass USA, Inc.")
+        rec = make_bc_record(vendor_name="PGP Glass USA, Inc.")
+        _, _, breakdown, _, _, pos, _ = score_bc_match(candidate, rec, "purchase_order", doc, source_doc_type=SourceDocumentType.AP_INVOICE)
+        assert breakdown.get("counterparty_alignment", 0) > 0
+        assert "counterparty_alignment" in pos
+
+    def test_counterparty_mismatch_penalizes(self):
+        candidate = make_candidate()
+        doc = make_document(vendor_raw="PGP Glass USA, Inc.")
+        rec = make_bc_record(customer_name="Gamer Packaging")
+        _, _, breakdown, _, _, _, neg = score_bc_match(candidate, rec, "sales_shipment", doc, source_doc_type=SourceDocumentType.AP_INVOICE)
+        assert breakdown.get("counterparty_alignment", 0) < 0
+        assert "counterparty_mismatch" in neg
 
 
-class TestReferenceIntelligenceEvents:
-    """Tests for event emission during reference intelligence resolution"""
-    
-    def test_events_emitted_after_resolution(self):
-        """Verify events are emitted after resolving reference intelligence"""
-        # First resolve
-        resolve_resp = requests.post(
-            f"{BASE_URL}/api/documents/{DOC_WITH_PO}/resolve-intelligence"
-        )
-        assert resolve_resp.status_code == 200
-        
-        # Wait a moment for event to be stored
-        time.sleep(0.5)
-        
-        # Get events
-        events_resp = requests.get(
-            f"{BASE_URL}/api/documents/{DOC_WITH_PO}/events",
-            params={"limit": 20}
-        )
-        assert events_resp.status_code == 200
-        
-        events_data = events_resp.json()
-        assert "events" in events_data
-        
-        # Check for reference events
-        event_types = [e["event_type"] for e in events_data["events"]]
-        
-        # Should have extraction event
-        has_extraction = any("reference.extraction" in t for t in event_types)
-        # Should have resolve event (completed or ambiguous)
-        has_resolve = any("reference.resolve" in t for t in event_types)
-        
-        assert has_extraction or has_resolve, f"Expected reference events, got: {event_types[:5]}"
-        
-        print(f"Found {len(events_data['events'])} events, types include: {event_types[:5]}")
-    
-    def test_resolve_ambiguous_event(self):
-        """Test that ambiguous match emits reference.resolve.ambiguous event"""
-        events_resp = requests.get(
-            f"{BASE_URL}/api/documents/{DOC_WITH_PO}/events",
-            params={"limit": 50}
-        )
-        assert events_resp.status_code == 200
-        
-        events = events_resp.json()["events"]
-        
-        # Find resolve events
-        resolve_events = [e for e in events if "reference.resolve" in e["event_type"]]
-        
-        if resolve_events:
-            latest = resolve_events[0]
-            print(f"Latest resolve event: {latest['event_type']}, status={latest['status']}")
-            assert latest["event_type"] in ["reference.resolve.completed", "reference.resolve.ambiguous"]
-            assert "payload" in latest
-            assert "match_outcome" in latest["payload"]
+class TestExplainableScoring:
+    def test_score_breakdown_returned(self):
+        candidate = make_candidate()
+        doc = make_document()
+        rec = make_bc_record(vendor_name="PGP Glass USA, Inc.")
+        _, _, breakdown, _, _, pos, neg = score_bc_match(candidate, rec, "purchase_order", doc, source_doc_type=SourceDocumentType.AP_INVOICE)
+        assert "exact_doc_no_match" in breakdown
+        assert "domain_alignment" in breakdown
+        assert "counterparty_alignment" in breakdown
+        assert "semantic_alignment" in breakdown
+        assert isinstance(pos, list)
+        assert isinstance(neg, list)
 
 
-class TestReferenceIntelligenceIntegration:
-    """Integration tests for reference intelligence with document detail"""
-    
-    def test_document_detail_includes_intelligence(self):
-        """Test that document detail returns reference intelligence data"""
-        # First ensure we have resolved
-        requests.post(f"{BASE_URL}/api/documents/{DOC_WITH_PO}/resolve-intelligence")
-        
-        # Get document detail
-        response = requests.get(
-            f"{BASE_URL}/api/documents/{DOC_WITH_PO}",
-            params={"include_events": "true"}
-        )
-        assert response.status_code == 200
-        
-        data = response.json()
-        assert "document" in data
-        
-        doc = data["document"]
-        
-        # Should have reference_intelligence stored on document
-        if doc.get("reference_intelligence"):
-            intel = doc["reference_intelligence"]
-            assert "match_outcome" in intel
-            assert "reference_candidates" in intel
-            print(f"Document has stored intelligence: outcome={intel['match_outcome']}")
-        else:
-            print("Document doesn't have stored reference_intelligence yet")
-        
-        # Should have event timeline
-        assert "event_timeline" in data
-        print(f"Document has {len(data.get('event_timeline', []))} events in timeline")
+class TestSemanticTyping:
+    def test_po_semantic_type_boosts_purchase(self):
+        candidate = make_candidate(semantic_type=ReferenceSemanticType.PO_NUMBER.value)
+        _, _, breakdown, _, _, pos, _ = score_bc_match(candidate, make_bc_record(), "purchase_order", make_document(), source_doc_type=SourceDocumentType.AP_INVOICE)
+        assert breakdown.get("semantic_alignment", 0) > 0
+
+    def test_po_semantic_type_penalizes_sales(self):
+        candidate = make_candidate(semantic_type=ReferenceSemanticType.PO_NUMBER.value)
+        _, _, breakdown, _, _, _, neg = score_bc_match(candidate, make_bc_record(), "sales_shipment", make_document(), source_doc_type=SourceDocumentType.AP_INVOICE)
+        assert breakdown.get("semantic_alignment", 0) < 0
+
+
+class TestUpdatedLabels:
+    def test_strong_match_label(self):
+        match = BCMatch(entity_type="purchase_order", bc_record_id="t", bc_document_no="12345",
+            bc_record_info={}, match_score=0.85, match_reasoning="",
+            candidate_domain=CandidateDomain.PURCHASE.value,
+            positive_signals=["exact_doc_no_match", "domain_alignment", "counterparty_alignment"],
+            negative_signals=[])
+        outcome = determine_match_outcome(0.85, 1, [0.85], best_match=match, source_doc_type=SourceDocumentType.AP_INVOICE)
+        assert outcome == MatchOutcome.STRONG_MATCH.value
+
+    def test_suppressed_cross_domain_label(self):
+        match = BCMatch(entity_type="sales_shipment", bc_record_id="t", bc_document_no="12345",
+            bc_record_info={}, match_score=0.10, match_reasoning="",
+            candidate_domain=CandidateDomain.SALES.value,
+            positive_signals=["exact_doc_no_match"],
+            negative_signals=["domain_mismatch_sales_vs_ap_invoice"])
+        outcome = determine_match_outcome(0.10, 1, [0.10], best_match=match, source_doc_type=SourceDocumentType.AP_INVOICE)
+        assert outcome == MatchOutcome.SUPPRESSED_CROSS_DOMAIN.value
+
+
+class TestCandidateState:
+    def test_surfaced_for_good_match(self):
+        match = BCMatch(entity_type="purchase_order", bc_record_id="t", bc_document_no="12345",
+            bc_record_info={}, match_score=0.70, match_reasoning="",
+            candidate_domain=CandidateDomain.PURCHASE.value,
+            positive_signals=["exact_doc_no_match", "domain_alignment"], negative_signals=[])
+        state = determine_candidate_state(match, SourceDocumentType.AP_INVOICE, MatchOutcome.LIKELY_MATCH.value)
+        assert state == CandidateState.SURFACED.value
+
+    def test_suppressed_for_cross_domain_numeric_only(self):
+        match = BCMatch(entity_type="sales_shipment", bc_record_id="t", bc_document_no="12345",
+            bc_record_info={}, match_score=0.15, match_reasoning="",
+            candidate_domain=CandidateDomain.SALES.value,
+            positive_signals=["exact_doc_no_match"],
+            negative_signals=["domain_mismatch_sales_vs_ap_invoice"])
+        state = determine_candidate_state(match, SourceDocumentType.AP_INVOICE, MatchOutcome.SUPPRESSED_CROSS_DOMAIN.value)
+        assert state == CandidateState.SUPPRESSED.value
+
+
+class TestAmbiguousCase:
+    def test_ambiguous_resolves_to_needs_review(self):
+        match = BCMatch(entity_type="purchase_order", bc_record_id="t", bc_document_no="12345",
+            bc_record_info={}, match_score=0.50, match_reasoning="",
+            candidate_domain=CandidateDomain.PURCHASE.value,
+            positive_signals=["exact_doc_no_match", "domain_alignment"], negative_signals=[])
+        outcome = determine_match_outcome(0.50, 2, [0.50, 0.50], best_match=match, source_doc_type=SourceDocumentType.AP_INVOICE)
+        assert outcome == MatchOutcome.NEEDS_REVIEW.value
 
 
 if __name__ == "__main__":

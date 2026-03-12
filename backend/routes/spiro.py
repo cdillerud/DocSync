@@ -12,7 +12,7 @@ import os
 import logging
 from datetime import datetime, timezone
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Depends, Form
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -382,4 +382,58 @@ async def test_spiro_context(
             "email_from": email_from
         },
         "spiro_context": context.to_dict()
+    }
+
+
+
+# =============================================================================
+# VENDOR MATCHING ENDPOINTS (extracted from server.py Domain 6)
+# =============================================================================
+
+@spiro_router.post("/match-vendor")
+async def spiro_match_vendor(vendor_name: str = Form(...), min_score: float = Form(0.7)):
+    """
+    Match a vendor name against Spiro CRM companies.
+    Uses fuzzy matching to find the best match.
+    """
+    from services.spiro_vendor_matcher import match_vendor_with_spiro
+    result = await match_vendor_with_spiro(db, vendor_name, min_score)
+    return result
+
+
+@spiro_router.get("/search-companies")
+async def spiro_search_companies(query: str = Query(...), limit: int = Query(10)):
+    """Search Spiro companies by name."""
+    from services.spiro_vendor_matcher import get_spiro_matcher
+    matcher = get_spiro_matcher(db)
+    companies = await matcher.search_companies(query, limit)
+    return {
+        "query": query,
+        "count": len(companies),
+        "companies": companies
+    }
+
+
+@spiro_router.get("/freight-carriers")
+async def spiro_get_freight_carriers():
+    """Get all freight carriers from Spiro."""
+    from services.spiro_vendor_matcher import get_spiro_matcher
+    matcher = get_spiro_matcher(db)
+    carriers = await matcher.get_freight_carriers()
+    return {
+        "count": len(carriers),
+        "carriers": carriers
+    }
+
+
+@spiro_router.post("/is-freight-carrier")
+async def spiro_is_freight_carrier(vendor_name: str = Form(...)):
+    """Check if a vendor is a freight carrier based on Spiro data."""
+    from services.spiro_vendor_matcher import get_spiro_matcher
+    matcher = get_spiro_matcher(db)
+    is_freight, company = await matcher.is_freight_carrier(vendor_name)
+    return {
+        "vendor_name": vendor_name,
+        "is_freight_carrier": is_freight,
+        "matched_company": company
     }

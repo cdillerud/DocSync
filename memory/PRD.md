@@ -1196,6 +1196,9 @@ Created `/app/memory/SQUARE9_COMPARISON.md` documenting alignment status.
 - [x] Add "Create BC Sales Order" Button to UI — **Full flow: eligibility, preflight, confirm modal, create, error handling, graph writeback** (March 12, 2026)
 
 ### P2 - Upcoming
+- [x] Add "Create BC Purchase Invoice" flow for AP_Invoice documents — **Same pattern as SO: vendor resolution, preflight, confirm modal, create, graph writeback** (March 12, 2026)
+
+### P2 - Upcoming
 - [ ] Outbound Document Delivery module (email posted sales invoices)
 - [ ] "Stable Vendor" metric implementation
 - [ ] Fuzzy matching improvements
@@ -2591,5 +2594,35 @@ Added "Create BC Sales Order" action to the Document Detail page for eligible cu
 - Backend: 16/16 tests passed (100%)
 - Frontend: 8/8 UI tests passed (100%)
 - Test report: `/app/test_reports/iteration_42.json`
+
+*Last Updated: March 12, 2026*
+
+
+## Create BC Purchase Invoice from Document (Completed - March 12, 2026)
+
+### Overview
+Added "Create BC Purchase Invoice" action to the Document Detail page for AP_Invoice documents. Same UX pattern as Sales Order: eligibility → preflight → confirmation → create → graph writeback.
+
+### Backend
+- **Vendor resolution**: `_resolve_vendor_no()` — 3-tier lookup: validation_results.bc_record_info → vendor_candidates → bc_reference_cache regex
+- **Preflight**: `POST /api/gpi-integration/purchase-invoices/preflight/{doc_id}` — validates eligibility, resolves vendor, maps invoice/dates/lines
+- **Create**: `POST /api/gpi-integration/purchase-invoices/from-document/{doc_id}` — creates PI, writes `bc_purchase_invoice` to MongoDB, emits event
+- **Idempotency**: Deterministic key `PI_{SHA256(doc_id)[:24]}`
+
+### Frontend
+- **Component**: `/app/frontend/src/components/CreateBCPurchaseInvoicePanel.js`
+- **Eligibility**: Only visible for `AP_Invoice` document types
+- **Preflight view**: Vendor info with match confidence, invoice number, document/posting/due dates, PO number, line items, total amount
+- **Vendor override**: Input shown when vendor is unresolved
+
+### Mutual Exclusivity
+- Sales Order panel: visible ONLY on Sales_Order, SalesOrder, Order_Confirmation, PurchaseOrder
+- Purchase Invoice panel: visible ONLY on AP_Invoice
+- Both panels hidden on non-eligible document types
+
+### Test Results
+- Backend: 16/16 tests passed (100%)
+- Frontend: 8/8 UI tests passed (100%)
+- Test report: `/app/test_reports/iteration_43.json`
 
 *Last Updated: March 12, 2026*

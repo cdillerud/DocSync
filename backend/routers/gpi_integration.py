@@ -44,6 +44,9 @@ router = APIRouter(prefix="/gpi-integration", tags=["GPI Integration"])
 # Document types eligible for BC Sales Order creation
 SALES_ORDER_ELIGIBLE_TYPES = {"Sales_Order", "SalesOrder", "Order_Confirmation", "PurchaseOrder"}
 
+# Document types eligible for BC Purchase Invoice creation
+PURCHASE_INVOICE_ELIGIBLE_TYPES = {"AP_Invoice"}
+
 
 # =========================================================================
 # Request/Response Models
@@ -451,6 +454,305 @@ async def gpi_create_purchase_invoice(req: CreatePurchaseInvoiceRequest):
     except Exception as e:
         logger.error("Failed to create purchase invoice: %s", str(e))
         raise HTTPException(status_code=502, detail=f"BC API error: {str(e)}")
+
+
+async def _resolve_vendor_no(doc: dict) -> dict:
+    """Try to resolve a BC vendor number from document data.
+    Returns {vendor_no, vendor_name, match_method, confidence}.
+    """
+    ef = doc.get("extracted_fields") or {}
+    nf = doc.get("normalized_fields") or {}
+    vr = doc.get("validation_results") or {}
+
+    vendor_name = ef.get("vendor") or nf.get("vendor") or ""
+    vendor_no = doc.get("vendor_canonical") or ""
+    match_method = "vendor_canonical" if vendor_no else "none"
+    confidence = 0.85 if vendor_no else 0.0
+
+    # 1. Check if BC vendor was resolved via validation_results
+    bc_record_info = vr.get("bc_record_info") or {}
+    if bc_record_info.get("number"):
+        vendor_no = bc_record_info["number"]
+        vendor_name = vendor_name or bc_record_info.get("displayName", "")
+        match_method = "validation"
+        confidence = 0.95
+
+    # 2. Try vendor_candidates on the doc or in validation_results
+    if not vendor_no:
+        candidates = doc.get("vendor_candidates") or vr.get("vendor_candidates") or []
+        for cand in candidates:
+            cand_no = cand.get("number") or cand.get("vendor_id") or ""
+            if cand_no and cand_no != "null":
+                vendor_no = cand_no if len(cand_no) < 30 else ""
+                vendor_name = vendor_name or cand.get("display_name") or cand.get("displayName", "")
+                match_method = f"candidate_{cand.get('source', 'unknown')}"
+                confidence = float(cand.get("score", 0.8))
+                break
+
+    # 3. Try bc_reference_cache lookup
+    if not vendor_no and vendor_name:
+        db = get_db()
+        cached = await db.bc_reference_cache.find_one(
+            {"displayName": {"$regex": vendor_name[:30], "$options": "i"}, "entity_type": {"$in": ["vendor", "Vendor"]}},
+            {"_id": 0, "number": 1, "displayName": 1, "entity_type": 1}
+        )
+        if cached:
+            vendor_no = cached.get("number", "")
+            vendor_name = vendor_name or cached.get("displayName", "")
+            match_method = "cache_lookup"
+            confidence = 0.7
+
+    return {
+        "vendor_no": vendor_no,
+        "vendor_name": vendor_name,
+        "match_method": match_method,
+        "confidence": confidence,
+    }
+
+
+def _build_pi_idempotency_key(doc_id: str) -> str:
+    """Build a stable, deterministic idempotency key for purchase invoice from a document ID."""
+    return f"PI_{hashlib.sha256(doc_id.encode()).hexdigest()[:24]}"
+
+
+@router.post("/purchase-invoices/preflight/{doc_id}")
+async def purchase_invoice_preflight(doc_id: str):
+    """Preflight validation: check if a document is ready for BC Purchase Invoice creation."""
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    ef = doc.get("extracted_fields") or {}
+    nf = doc.get("normalized_fields") or {}
+    warnings = []
+    missing_fields = []
+    errors = []
+
+    # Check eligibility
+    doc_type = doc.get("document_type", "")
+    eligible = doc_type in PURCHASE_INVOICE_ELIGIBLE_TYPES
+    if not eligible:
+        errors.append(f"Document type '{doc_type}' is not eligible for Purchase Invoice creation. Expected: {', '.join(PURCHASE_INVOICE_ELIGIBLE_TYPES)}")
+
+    # Check for existing BC Purchase Invoice
+    existing_pi = doc.get("bc_purchase_invoice")
+    if existing_pi:
+        return {
+            "eligible": eligible,
+            "ready": False,
+            "already_created": True,
+            "existing_purchase_invoice": existing_pi,
+            "mapped_values": {},
+            "missing_fields": [],
+            "warnings": ["A BC Purchase Invoice has already been created for this document."],
+            "errors": [],
+            "line_count": 0,
+        }
+
+    # Resolve vendor
+    vendor_info = await _resolve_vendor_no(doc)
+    vendor_no = vendor_info["vendor_no"]
+    vendor_name = vendor_info["vendor_name"]
+
+    if not vendor_no:
+        missing_fields.append("vendor_no")
+        warnings.append("No BC vendor number could be resolved. Manual vendor mapping may be required.")
+
+    # Extract key fields
+    vendor_invoice_no = ef.get("invoice_number") or nf.get("invoice_number") or ""
+    document_date = ef.get("invoice_date") or nf.get("invoice_date") or ""
+    posting_date = document_date  # Default posting date = invoice date
+    due_date = ef.get("due_date") or nf.get("due_date") or ""
+    line_items = ef.get("line_items") or nf.get("line_items") or []
+    amount = nf.get("amount") or ef.get("amount")
+    po_number = ef.get("po_number") or nf.get("po_number") or ""
+
+    if not vendor_invoice_no:
+        missing_fields.append("vendor_invoice_no")
+        warnings.append("No vendor invoice number found.")
+
+    if not document_date:
+        missing_fields.append("document_date")
+        warnings.append("No invoice date extracted. Current date will be used as fallback.")
+
+    if not line_items:
+        warnings.append("No line items extracted. A header-only purchase invoice will be created.")
+
+    if not HAS_CREDENTIALS:
+        errors.append("BC credentials are not configured. Cannot create invoices until credentials are set.")
+
+    from services.gpi_integration_service import BC_ENVIRONMENT, BC_COMPANY_ID
+    bc_company = BC_COMPANY_ID or "auto-detect"
+    bc_environment = BC_ENVIRONMENT
+
+    ready = eligible and bool(vendor_no) and not errors
+
+    idempotency_key = _build_pi_idempotency_key(doc_id)
+
+    return {
+        "eligible": eligible,
+        "ready": ready,
+        "already_created": False,
+        "existing_purchase_invoice": None,
+        "mapped_values": {
+            "vendor_no": vendor_no,
+            "vendor_name": vendor_name,
+            "vendor_match_method": vendor_info["match_method"],
+            "vendor_match_confidence": vendor_info["confidence"],
+            "vendor_invoice_no": vendor_invoice_no,
+            "document_date": document_date or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "document_date_source": "extracted" if document_date else "fallback_today",
+            "posting_date": posting_date or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "posting_date_source": "extracted" if posting_date else "fallback_today",
+            "due_date": due_date,
+            "po_number": po_number,
+            "total_amount": amount,
+            "bc_company": bc_company,
+            "bc_environment": bc_environment,
+            "idempotency_key": idempotency_key,
+        },
+        "line_items": [
+            {
+                "description": li.get("description", ""),
+                "quantity": li.get("quantity", 0),
+                "unit_price": li.get("unit_price", 0),
+                "total": li.get("total", 0),
+            }
+            for li in line_items
+        ],
+        "line_count": len(line_items),
+        "missing_fields": missing_fields,
+        "warnings": warnings,
+        "errors": errors,
+    }
+
+
+@router.post("/purchase-invoices/from-document/{doc_id}")
+async def create_purchase_invoice_from_document(doc_id: str, vendor_no_override: str = Query("", description="Override vendor number")):
+    """Create a BC Purchase Invoice from a GPI Hub document.
+    Performs preflight, creates the invoice, and writes back to the document graph.
+    """
+    if not HAS_CREDENTIALS:
+        raise HTTPException(status_code=503, detail="BC credentials not configured")
+
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Check for existing PI
+    existing_pi = doc.get("bc_purchase_invoice")
+    if existing_pi:
+        return {
+            "success": True,
+            "already_exists": True,
+            "bc_record_no": existing_pi.get("bc_record_no", ""),
+            "bc_system_id": existing_pi.get("bc_system_id", ""),
+            "idempotency_key": existing_pi.get("idempotency_key", ""),
+            "status": "already_exists",
+            "message": "A BC Purchase Invoice was already created for this document.",
+            "created_at": existing_pi.get("created_at", ""),
+        }
+
+    # Check eligibility
+    doc_type = doc.get("document_type", "")
+    if doc_type not in PURCHASE_INVOICE_ELIGIBLE_TYPES:
+        raise HTTPException(status_code=422, detail=f"Document type '{doc_type}' is not eligible for Purchase Invoice creation")
+
+    # Resolve fields
+    ef = doc.get("extracted_fields") or {}
+    nf = doc.get("normalized_fields") or {}
+
+    vendor_info = await _resolve_vendor_no(doc)
+    vendor_no = vendor_no_override or vendor_info["vendor_no"]
+    if not vendor_no:
+        raise HTTPException(status_code=422, detail={
+            "error": "missing_vendor",
+            "message": "Cannot create Purchase Invoice: no BC vendor number resolved. Provide vendor_no_override or map the vendor first.",
+        })
+
+    vendor_invoice_no = ef.get("invoice_number") or nf.get("invoice_number") or ""
+    document_date = ef.get("invoice_date") or nf.get("invoice_date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    posting_date = document_date
+
+    idempotency_key = _build_pi_idempotency_key(doc_id)
+    transaction_id = f"TXN_{uuid.uuid4().hex[:12]}"
+
+    try:
+        result = await create_purchase_invoice(
+            vendor_no=vendor_no,
+            vendor_invoice_no=vendor_invoice_no,
+            document_date=document_date,
+            posting_date=posting_date,
+            source_doc_id=doc_id,
+            idempotency_key=idempotency_key,
+            transaction_id=transaction_id,
+        )
+    except Exception as e:
+        logger.error("Failed to create purchase invoice from doc %s: %s", doc_id, str(e))
+        raise HTTPException(status_code=502, detail=f"BC API error: {str(e)}")
+
+    # Graph writeback
+    now = datetime.now(timezone.utc).isoformat()
+    bc_purchase_invoice = {
+        "bc_record_no": result.get("bc_record_no", ""),
+        "bc_system_id": result.get("bc_system_id", ""),
+        "idempotency_key": idempotency_key,
+        "transaction_id": transaction_id,
+        "status": result.get("status", ""),
+        "success": result.get("success", False),
+        "vendor_no": vendor_no,
+        "vendor_name": vendor_info["vendor_name"],
+        "vendor_invoice_no": vendor_invoice_no,
+        "document_date": document_date,
+        "posting_date": posting_date,
+        "created_at": now,
+        "created_by": "gpi_hub",
+        "error_message": result.get("error_message", ""),
+    }
+
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "bc_purchase_invoice": bc_purchase_invoice,
+            "updated_utc": now,
+        }}
+    )
+
+    # Emit event
+    try:
+        from services.event_service import get_event_service
+        es = get_event_service()
+        if es:
+            await es.emit_event(
+                document_id=doc_id,
+                event_type="bc.purchase_invoice.created" if result.get("success") else "bc.purchase_invoice.failed",
+                source_service="gpi_integration",
+                payload={
+                    "bc_record_no": result.get("bc_record_no", ""),
+                    "vendor_no": vendor_no,
+                    "vendor_invoice_no": vendor_invoice_no,
+                    "idempotency_key": idempotency_key,
+                    "status": result.get("status", ""),
+                },
+                actor="system",
+            )
+    except Exception as evt_err:
+        logger.warning("Failed to emit BC purchase invoice event: %s", evt_err)
+
+    return {
+        "success": result.get("success", False),
+        "already_exists": result.get("status") == "already_exists",
+        "bc_record_no": result.get("bc_record_no", ""),
+        "bc_system_id": result.get("bc_system_id", ""),
+        "idempotency_key": idempotency_key,
+        "transaction_id": transaction_id,
+        "status": result.get("status", ""),
+        "message": "Purchase Invoice created successfully" if result.get("success") else result.get("error_message", "Creation failed"),
+        "error_message": result.get("error_message", ""),
+        "created_at": now,
+    }
 
 
 @router.post("/customers")

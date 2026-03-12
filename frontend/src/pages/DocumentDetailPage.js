@@ -22,6 +22,7 @@ import FreightGLRoutingPanel from '../components/FreightGLRoutingPanel';
 import APValidationPanel from '../components/APValidationPanel';
 import MatchingDebugPanel from '../components/MatchingDebugPanel';
 import CreateBCSalesOrderPanel from '../components/CreateBCSalesOrderPanel';
+import CreateBCPurchaseInvoicePanel from '../components/CreateBCPurchaseInvoicePanel';
 
 const STATUS_CLASSES = {
   Received: 'status-received',
@@ -449,6 +450,12 @@ export default function DocumentDetailPage() {
 
           {/* BC Sales Order Panel - for eligible document types */}
           <CreateBCSalesOrderPanel 
+            document={doc} 
+            onUpdate={() => fetchDoc()} 
+          />
+
+          {/* BC Purchase Invoice Panel - for AP_Invoice document types */}
+          <CreateBCPurchaseInvoicePanel 
             document={doc} 
             onUpdate={() => fetchDoc()} 
           />

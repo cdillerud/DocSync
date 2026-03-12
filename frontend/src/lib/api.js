@@ -304,4 +304,13 @@ export const createSalesOrderFromDocument = (docId, customerNoOverride = '') => 
   return api.post(`/gpi-integration/sales-orders/from-document/${docId}`, null, { params });
 };
 
+// Preflight validation for BC Purchase Invoice creation
+export const purchaseInvoicePreflight = (docId) => api.post(`/gpi-integration/purchase-invoices/preflight/${docId}`);
+
+// Create BC Purchase Invoice from document
+export const createPurchaseInvoiceFromDocument = (docId, vendorNoOverride = '') => {
+  const params = vendorNoOverride ? { vendor_no_override: vendorNoOverride } : {};
+  return api.post(`/gpi-integration/purchase-invoices/from-document/${docId}`, null, { params });
+};
+
 export default api;

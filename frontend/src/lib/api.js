@@ -288,4 +288,20 @@ export const extractInvoiceData = (docId) =>
 export const getExtractionStatus = (docId) => 
   api.get(`/ap-review/documents/${docId}/extraction-status`);
 
+// =============================================================================
+// GPI INTEGRATION APIs (BC Sales Order creation)
+// =============================================================================
+
+// Get GPI Integration status
+export const getGPIIntegrationStatus = () => api.get('/gpi-integration/status');
+
+// Preflight validation for BC Sales Order creation
+export const salesOrderPreflight = (docId) => api.post(`/gpi-integration/sales-orders/preflight/${docId}`);
+
+// Create BC Sales Order from document
+export const createSalesOrderFromDocument = (docId, customerNoOverride = '') => {
+  const params = customerNoOverride ? { customer_no_override: customerNoOverride } : {};
+  return api.post(`/gpi-integration/sales-orders/from-document/${docId}`, null, { params });
+};
+
 export default api;

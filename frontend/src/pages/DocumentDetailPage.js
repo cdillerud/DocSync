@@ -21,6 +21,7 @@ import ReferenceIntelligencePanel from '../components/ReferenceIntelligencePanel
 import FreightGLRoutingPanel from '../components/FreightGLRoutingPanel';
 import APValidationPanel from '../components/APValidationPanel';
 import MatchingDebugPanel from '../components/MatchingDebugPanel';
+import CreateBCSalesOrderPanel from '../components/CreateBCSalesOrderPanel';
 
 const STATUS_CLASSES = {
   Received: 'status-received',
@@ -445,6 +446,12 @@ export default function DocumentDetailPage() {
               </CardContent>
             </Card>
           )}
+
+          {/* BC Sales Order Panel - for eligible document types */}
+          <CreateBCSalesOrderPanel 
+            document={doc} 
+            onUpdate={() => fetchDoc()} 
+          />
 
           {/* Reference Intelligence Panel */}
           <ReferenceIntelligencePanel 

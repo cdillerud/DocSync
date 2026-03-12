@@ -9,19 +9,24 @@ Endpoints:
   GET  /gpi-integration/status          - Integration status
   GET  /gpi-integration/companies       - List BC companies
   POST /gpi-integration/sales-orders    - Create sales order
+  POST /gpi-integration/sales-orders/preflight/{doc_id} - Preflight validation
+  POST /gpi-integration/sales-orders/from-document/{doc_id} - Create from document
   POST /gpi-integration/purchase-invoices - Create purchase invoice
   POST /gpi-integration/customers       - Create customer
   POST /gpi-integration/vendors         - Create vendor
   GET  /gpi-integration/logs            - Integration audit logs
 """
 
+import hashlib
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from deps import get_db
 from services.gpi_integration_service import (
     list_companies,
     create_sales_order,
@@ -35,6 +40,9 @@ from services.gpi_integration_service import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/gpi-integration", tags=["GPI Integration"])
+
+# Document types eligible for BC Sales Order creation
+SALES_ORDER_ELIGIBLE_TYPES = {"Sales_Order", "SalesOrder", "Order_Confirmation", "PurchaseOrder"}
 
 
 # =========================================================================
@@ -126,6 +134,297 @@ async def gpi_create_sales_order(req: CreateSalesOrderRequest):
     except Exception as e:
         logger.error("Failed to create sales order: %s", str(e))
         raise HTTPException(status_code=502, detail=f"BC API error: {str(e)}")
+
+
+def _build_idempotency_key(doc_id: str) -> str:
+    """Build a stable, deterministic idempotency key from a document ID."""
+    return f"SO_{hashlib.sha256(doc_id.encode()).hexdigest()[:24]}"
+
+
+async def _resolve_customer_no(doc: dict) -> dict:
+    """Try to resolve a BC customer number from document data.
+    Returns {customer_no, customer_name, match_method, confidence}.
+    """
+    ef = doc.get("extracted_fields") or {}
+    nf = doc.get("normalized_fields") or {}
+    vr = doc.get("validation_results") or {}
+
+    customer_name = ef.get("customer") or nf.get("customer") or ""
+    customer_no = ""
+    match_method = "none"
+    confidence = 0.0
+
+    # 1. Check if a BC customer number was already resolved (e.g. validation)
+    bc_record_info = vr.get("bc_record_info") or {}
+    if bc_record_info.get("number"):
+        customer_no = bc_record_info["number"]
+        customer_name = customer_name or bc_record_info.get("displayName", "")
+        match_method = vr.get("match_method", "validation")
+        confidence = float(vr.get("match_score", 0.9))
+
+    # 2. Try customer_candidates on the doc
+    if not customer_no:
+        for cand in (doc.get("customer_candidates") or []):
+            if cand.get("number"):
+                customer_no = cand["number"]
+                customer_name = customer_name or cand.get("displayName", "")
+                match_method = "customer_candidate"
+                confidence = float(cand.get("score", 0.8))
+                break
+
+    # 3. Try bc_reference_cache lookup
+    if not customer_no and customer_name:
+        db = get_db()
+        cached = await db.bc_reference_cache.find_one(
+            {"displayName": {"$regex": customer_name[:30], "$options": "i"}, "entity_type": {"$in": ["customer", "Customer"]}},
+            {"_id": 0, "number": 1, "displayName": 1, "entity_type": 1}
+        )
+        if cached:
+            customer_no = cached.get("number", "")
+            customer_name = customer_name or cached.get("displayName", "")
+            match_method = "cache_lookup"
+            confidence = 0.7
+
+    return {
+        "customer_no": customer_no,
+        "customer_name": customer_name,
+        "match_method": match_method,
+        "confidence": confidence,
+    }
+
+
+@router.post("/sales-orders/preflight/{doc_id}")
+async def sales_order_preflight(doc_id: str):
+    """Preflight validation: check if a document is ready for BC Sales Order creation.
+    Returns mapped values, missing fields, warnings, and overall readiness.
+    """
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    ef = doc.get("extracted_fields") or {}
+    nf = doc.get("normalized_fields") or {}
+    warnings = []
+    missing_fields = []
+    errors = []
+
+    # Check eligibility
+    doc_type = doc.get("document_type", "")
+    eligible = doc_type in SALES_ORDER_ELIGIBLE_TYPES
+    if not eligible:
+        errors.append(f"Document type '{doc_type}' is not eligible for Sales Order creation. Expected: {', '.join(SALES_ORDER_ELIGIBLE_TYPES)}")
+
+    # Check for existing BC Sales Order
+    existing_so = doc.get("bc_sales_order")
+    if existing_so:
+        return {
+            "eligible": eligible,
+            "ready": False,
+            "already_created": True,
+            "existing_sales_order": existing_so,
+            "mapped_values": {},
+            "missing_fields": [],
+            "warnings": ["A BC Sales Order has already been created for this document."],
+            "errors": [],
+            "line_count": 0,
+        }
+
+    # Resolve customer
+    customer_info = await _resolve_customer_no(doc)
+    customer_no = customer_info["customer_no"]
+    customer_name = customer_info["customer_name"]
+
+    if not customer_no:
+        missing_fields.append("customer_no")
+        warnings.append("No BC customer number could be resolved. Manual customer mapping may be required.")
+
+    # Extract key fields
+    external_doc_no = ef.get("po_number") or nf.get("po_number") or ""
+    order_date = ef.get("order_date") or nf.get("order_date") or ""
+    line_items = ef.get("line_items") or nf.get("line_items") or []
+    amount = ef.get("amount") or nf.get("amount")
+
+    if not external_doc_no:
+        missing_fields.append("external_doc_no")
+        warnings.append("No PO number / external document number found.")
+
+    if not order_date:
+        missing_fields.append("order_date")
+        warnings.append("No order date extracted. Current date will be used as fallback.")
+
+    if not line_items:
+        warnings.append("No line items extracted. A header-only sales order will be created.")
+
+    # Integration status
+    if not HAS_CREDENTIALS:
+        errors.append("BC credentials are not configured. Cannot create orders until credentials are set.")
+
+    # Compute BC company
+    from services.gpi_integration_service import BC_ENVIRONMENT, BC_COMPANY_ID
+    bc_company = BC_COMPANY_ID or "auto-detect"
+    bc_environment = BC_ENVIRONMENT
+
+    ready = eligible and bool(customer_no) and not errors
+
+    idempotency_key = _build_idempotency_key(doc_id)
+
+    return {
+        "eligible": eligible,
+        "ready": ready,
+        "already_created": False,
+        "existing_sales_order": None,
+        "mapped_values": {
+            "customer_no": customer_no,
+            "customer_name": customer_name,
+            "customer_match_method": customer_info["match_method"],
+            "customer_match_confidence": customer_info["confidence"],
+            "external_doc_no": external_doc_no,
+            "order_date": order_date or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "order_date_source": "extracted" if order_date else "fallback_today",
+            "total_amount": amount,
+            "bc_company": bc_company,
+            "bc_environment": bc_environment,
+            "idempotency_key": idempotency_key,
+        },
+        "line_items": [
+            {
+                "description": li.get("description", ""),
+                "quantity": li.get("quantity", 0),
+                "unit_price": li.get("unit_price", 0),
+                "total": li.get("total", 0),
+            }
+            for li in line_items
+        ],
+        "line_count": len(line_items),
+        "missing_fields": missing_fields,
+        "warnings": warnings,
+        "errors": errors,
+    }
+
+
+@router.post("/sales-orders/from-document/{doc_id}")
+async def create_sales_order_from_document(doc_id: str, customer_no_override: str = Query("", description="Override customer number")):
+    """Create a BC Sales Order from a GPI Hub document.
+    Performs preflight, creates the order, and writes back to the document graph.
+    """
+    if not HAS_CREDENTIALS:
+        raise HTTPException(status_code=503, detail="BC credentials not configured")
+
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Check for existing SO
+    existing_so = doc.get("bc_sales_order")
+    if existing_so:
+        return {
+            "success": True,
+            "already_exists": True,
+            "bc_record_no": existing_so.get("bc_record_no", ""),
+            "bc_system_id": existing_so.get("bc_system_id", ""),
+            "idempotency_key": existing_so.get("idempotency_key", ""),
+            "status": "already_exists",
+            "message": "A BC Sales Order was already created for this document.",
+            "created_at": existing_so.get("created_at", ""),
+        }
+
+    # Check eligibility
+    doc_type = doc.get("document_type", "")
+    if doc_type not in SALES_ORDER_ELIGIBLE_TYPES:
+        raise HTTPException(status_code=422, detail=f"Document type '{doc_type}' is not eligible for Sales Order creation")
+
+    # Resolve fields
+    ef = doc.get("extracted_fields") or {}
+    nf = doc.get("normalized_fields") or {}
+
+    customer_info = await _resolve_customer_no(doc)
+    customer_no = customer_no_override or customer_info["customer_no"]
+    if not customer_no:
+        raise HTTPException(status_code=422, detail={
+            "error": "missing_customer",
+            "message": "Cannot create Sales Order: no BC customer number resolved. Provide customer_no_override or map the customer first.",
+        })
+
+    external_doc_no = ef.get("po_number") or nf.get("po_number") or ""
+    order_date = ef.get("order_date") or nf.get("order_date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    idempotency_key = _build_idempotency_key(doc_id)
+    transaction_id = f"TXN_{uuid.uuid4().hex[:12]}"
+
+    try:
+        result = await create_sales_order(
+            customer_no=customer_no,
+            external_doc_no=external_doc_no,
+            order_date=order_date,
+            source_doc_id=doc_id,
+            idempotency_key=idempotency_key,
+            transaction_id=transaction_id,
+        )
+    except Exception as e:
+        logger.error("Failed to create sales order from doc %s: %s", doc_id, str(e))
+        raise HTTPException(status_code=502, detail=f"BC API error: {str(e)}")
+
+    # Graph writeback: store the BC Sales Order reference on the document
+    now = datetime.now(timezone.utc).isoformat()
+    bc_sales_order = {
+        "bc_record_no": result.get("bc_record_no", ""),
+        "bc_system_id": result.get("bc_system_id", ""),
+        "idempotency_key": idempotency_key,
+        "transaction_id": transaction_id,
+        "status": result.get("status", ""),
+        "success": result.get("success", False),
+        "customer_no": customer_no,
+        "customer_name": customer_info["customer_name"],
+        "external_doc_no": external_doc_no,
+        "order_date": order_date,
+        "created_at": now,
+        "created_by": "gpi_hub",
+        "error_message": result.get("error_message", ""),
+    }
+
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "bc_sales_order": bc_sales_order,
+            "updated_utc": now,
+        }}
+    )
+
+    # Also emit an event if event service is available
+    try:
+        from services.event_service import get_event_service
+        es = get_event_service()
+        if es:
+            await es.emit_event(
+                document_id=doc_id,
+                event_type="bc.sales_order.created" if result.get("success") else "bc.sales_order.failed",
+                source_service="gpi_integration",
+                payload={
+                    "bc_record_no": result.get("bc_record_no", ""),
+                    "customer_no": customer_no,
+                    "external_doc_no": external_doc_no,
+                    "idempotency_key": idempotency_key,
+                    "status": result.get("status", ""),
+                },
+                actor="system",
+            )
+    except Exception as evt_err:
+        logger.warning("Failed to emit BC sales order event: %s", evt_err)
+
+    return {
+        "success": result.get("success", False),
+        "already_exists": result.get("status") == "already_exists",
+        "bc_record_no": result.get("bc_record_no", ""),
+        "bc_system_id": result.get("bc_system_id", ""),
+        "idempotency_key": idempotency_key,
+        "transaction_id": transaction_id,
+        "status": result.get("status", ""),
+        "message": "Sales Order created successfully" if result.get("success") else result.get("error_message", "Creation failed"),
+        "error_message": result.get("error_message", ""),
+        "created_at": now,
+    }
 
 
 @router.post("/purchase-invoices")

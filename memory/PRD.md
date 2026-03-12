@@ -1193,7 +1193,7 @@ Created `/app/memory/SQUARE9_COMPARISON.md` documenting alignment status.
 - [x] Package & Publish BC (AL) Extension to Sandbox — **AL Extension Complete, Python bridge service deployed** (March 12, 2026)
 - [x] G/L Account Routing for Freight (inbound vs outbound) - Completed March 10, 2026
 - [x] Reference Label Correction Feedback Loop — Completed March 11, 2026
-- [ ] Add "Create BC Sales Order" Button to UI
+- [x] Add "Create BC Sales Order" Button to UI — **Full flow: eligibility, preflight, confirm modal, create, error handling, graph writeback** (March 12, 2026)
 
 ### P2 - Upcoming
 - [ ] Outbound Document Delivery module (email posted sales invoices)
@@ -2564,5 +2564,32 @@ Complete Business Central AL extension providing stable, idempotent REST API end
 
 ### Publishing Guide
 See `/app/bc-extension/docs/PUBLISHING_GUIDE.md` for step-by-step instructions.
+
+*Last Updated: March 12, 2026*
+
+
+## Create BC Sales Order from Document (Completed - March 12, 2026)
+
+### Overview
+Added "Create BC Sales Order" action to the Document Detail page for eligible customer PO documents. Full flow: eligibility → preflight validation → confirmation modal → create with idempotency → graph writeback → success/error UX.
+
+### Backend
+- **Preflight endpoint**: `POST /api/gpi-integration/sales-orders/preflight/{doc_id}` — validates eligibility, resolves customer number, maps extracted fields, returns readiness
+- **Create endpoint**: `POST /api/gpi-integration/sales-orders/from-document/{doc_id}` — creates SO, writes `bc_sales_order` back to document, emits event
+- **Customer resolution**: 3-tier lookup (validation results → customer_candidates → bc_reference_cache regex search)
+- **Idempotency**: Deterministic key from `SHA256(doc_id)` — same doc always gets same key
+
+### Frontend
+- **Component**: `/app/frontend/src/components/CreateBCSalesOrderPanel.js`
+- **States**: idle → loading → preflight → creating → success/error
+- **Eligibility**: Only visible for `Sales_Order`, `SalesOrder`, `Order_Confirmation`, `PurchaseOrder` document types
+- **Preflight view**: Shows mapped values, line items, warnings, customer override input
+- **Success view**: BC Sales Order No, System ID, idempotency key, timestamps
+- **Error view**: Categorized errors (missing_customer, credentials, permission, duplicate), retry/dismiss
+
+### Test Results
+- Backend: 16/16 tests passed (100%)
+- Frontend: 8/8 UI tests passed (100%)
+- Test report: `/app/test_reports/iteration_42.json`
 
 *Last Updated: March 12, 2026*

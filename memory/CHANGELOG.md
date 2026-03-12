@@ -1,5 +1,21 @@
 # CHANGELOG - GPI Document Hub
 
+## [2026-03-12] Backend Refactor Phase 2 — COMPLETE
+- Extracted all 85 routes from server.py into 9 domain-specific router files
+- server.py now has 0 active @api_router routes (down from 85)
+- New router files: aliases.py, mailbox_sources.py, file_import.py, bc_integration.py, documents.py, workflows.py, reference_intelligence.py
+- Dynamic route registration pattern: app.add_api_route() for complex routes during startup
+
+## [2026-03-12] Reference Intelligence Redesign — COMPLETE
+- Domain-aware multi-signal scoring replaces naive numeric matching
+- Context gate: AP invoices exclude sales/customer candidates by default
+- Counterparty consistency scoring: vendor match boosts, mismatch penalizes
+- Two-signal minimum for "Likely Match" (at least one contextual)
+- Candidate states: surfaced/suppressed/rejected
+- Explainable scoring output with full signal breakdown
+- 16 regression tests covering the original false positive scenario
+- Critical regression verified: AP invoice PO→purchase beats PO→sales_shipment
+
 ## 2026-03-11: Stable Vendor Admin Page (New Feature)
 
 ### What Was Built

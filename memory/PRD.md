@@ -2448,3 +2448,77 @@ The server.py monolith refactor has been completed using a safe bootstrapping st
 - Test report: /app/test_reports/iteration_38.json
 
 *Last Updated: March 11, 2026*
+
+---
+
+## Backend Refactor Phase 2 — COMPLETE (March 12, 2026)
+
+### Summary
+All 85 routes extracted from server.py into 9 domain-specific router files.
+Server.py now has ZERO active @api_router routes — it serves only as a library
+of helper functions, services, constants, and lifecycle management.
+
+### Domain Extraction Summary
+| Domain | Router File | Routes | Method |
+|--------|-------------|--------|--------|
+| 1. Auth | routes/auth.py | 2 | Direct (already existed) |
+| 2. Aliases | routers/aliases.py | 4 | Direct implementation |
+| 3. Mailbox Sources | routers/mailbox_sources.py | 8 | Direct implementation |
+| 4. File Import | routers/file_import.py | 6 | Direct implementation |
+| 5. BC Integration | routers/bc_integration.py | 2 | Thin wrapper |
+| 6. Spiro | routes/spiro.py | 4 | Added to existing |
+| 7. Documents | routers/documents.py | 22 | Hybrid (direct + app.add_api_route) |
+| 8. Workflows | routers/workflows.py | 29 | Hybrid (direct + app.add_api_route) |
+| 9. Reference Intelligence | routers/reference_intelligence.py | 7 | app.add_api_route |
+| **TOTAL** | | **85** | |
+
+### Architecture Pattern
+- **Simple routes**: Moved directly to router files using deps.get_db()
+- **Complex routes**: Server.py functions registered on app via app.add_api_route() during startup
+- **Deferred registration**: register_server_routes(app) called in main.py startup event
+
+### Test Results
+- Backend: 43/43 pass (100%) — 27 router tests + 16 reference intelligence tests
+- Frontend: All UI pages verified (100%)
+- Test report: /app/test_reports/iteration_40.json
+
+---
+
+## Reference Intelligence Redesign (March 12, 2026) — COMPLETE
+
+### Problem
+False positive: AP invoice PO 110353 matched to a sales shipment simply because
+the document number matched. Naked numeric match was over-weighted.
+
+### Solution — Domain-Aware Multi-Signal Scoring
+12 requirements implemented:
+
+1. **Domain classification**: Each BC candidate classified as purchase/sales/vendor/customer/finance/unknown
+2. **Source doc type awareness**: ap_invoice, ar_invoice, etc. drives scoring bias
+3. **Context gate**: Primary/secondary/excluded candidate pools per source type
+4. **Reference semantic typing**: po_number, invoice_number, shipment_number, etc.
+5. **Reduced naked number weight**: Exact match reduced from 0.40 to 0.35
+6. **Counterparty consistency**: Vendor match boosts (+0.20), mismatch penalizes (-0.30)
+7. **Two-signal minimum**: Likely Match requires 2+ signals, at least 1 contextual
+8. **Candidate states**: surfaced, suppressed, rejected
+9. **Explainable scoring**: Full breakdown per candidate (exact_doc_no_match, domain_alignment, etc.)
+10. **Updated labels**: Strong Match, Likely Match, Needs Review, Suppressed Cross-Domain, Counterparty Mismatch, Rejected
+11. **UI requirements**: Domain, counterparty, signal breakdown visible (UI update pending)
+12. **Regression tests**: 16 unit tests covering all requirements
+
+### Signal Weights
+- exact_doc_no_match: +0.35 (reduced from 0.40)
+- domain_alignment: +0.20 (primary), +0.05 (secondary), -0.40 (excluded)
+- counterparty_alignment: +0.20 (match), -0.30 (mismatch)
+- semantic_alignment: +0.10 (match), -0.15 (mismatch)
+- date_proximity: +0.05 (≤7d), +0.03 (≤30d)
+- amount_plausibility: +0.05
+- entity_type_alignment: +0.05
+- candidate_confidence: variable (×0.05)
+
+### Files Modified
+- /app/backend/services/reference_intelligence_service.py — Core scoring overhaul
+- /app/backend/routers/reference_intelligence.py — New router (7 routes)
+- /app/backend/tests/test_reference_intelligence.py — 16 regression tests
+
+*Last Updated: March 12, 2026*

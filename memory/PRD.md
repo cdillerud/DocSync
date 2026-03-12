@@ -1190,7 +1190,7 @@ Created `/app/memory/SQUARE9_COMPARISON.md` documenting alignment status.
 ### P1 - In Progress
 - [x] Integrate `APValidationService` into main processing flow - Completed March 10, 2026
 - [ ] Continue backend refactoring (move endpoints from server.py to routers)
-- [ ] Package & Publish BC (AL) Extension to Sandbox
+- [x] Package & Publish BC (AL) Extension to Sandbox — **AL Extension Complete, Python bridge service deployed** (March 12, 2026)
 - [x] G/L Account Routing for Freight (inbound vs outbound) - Completed March 10, 2026
 - [x] Reference Label Correction Feedback Loop — Completed March 11, 2026
 - [ ] Add "Create BC Sales Order" Button to UI
@@ -2520,5 +2520,49 @@ the document number matched. Naked numeric match was over-weighted.
 - /app/backend/services/reference_intelligence_service.py — Core scoring overhaul
 - /app/backend/routers/reference_intelligence.py — New router (7 routes)
 - /app/backend/tests/test_reference_intelligence.py — 16 regression tests
+
+*Last Updated: March 12, 2026*
+
+
+
+---
+
+## GPI Hub Integration - Business Central AL Extension (Completed - March 12, 2026)
+
+### Overview
+Complete Business Central AL extension providing stable, idempotent REST API endpoints for creating Sales Orders, Purchase Invoices, Customers, and Vendors. Includes GPI Documents factbox, integration audit logging, and a Python backend bridge service.
+
+### AL Extension Objects (34 files)
+- **6 Tables**: GPI Document Link (50100), Integration Log (50101), Sales Order Request (50102), Purchase Invoice Request (50103), Customer Request (50104), Vendor Request (50105)
+- **4 Table Extensions**: Sales Header, Purchase Header, Customer, Vendor — adds GPI metadata fields
+- **4 Enums**: Doc Link Type, Doc Link Source, Record Type, Request Status
+- **5 Codeunits**: Integration Mgt, Sales Order Mgt, Purchase Invoice Mgt, Customer Mgt, Vendor Mgt — full business logic with idempotency, validation, record creation, audit logging
+- **6 API Pages**: Companies (read-only), Sales Orders, Purchase Invoices, Customers, Vendors (POST creates via codeunit), Integration Logs (read-only)
+- **4 Pages**: Document Link Factbox, List, Card, Document Link API
+- **4 Page Extensions**: Purchase Invoice, Posted Purchase Invoice, Sales Order, Posted Sales Invoice
+- **1 Permission Set**: GPI Hub Integration (50100)
+
+### Python Backend Service
+- **Service**: `/app/backend/services/gpi_integration_service.py` — OAuth2 token management, BC API client
+- **Router**: `/app/backend/routers/gpi_integration.py` — 7 endpoints prefixed `/api/gpi-integration/`
+
+### API Endpoints
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/gpi-integration/status | Integration configuration status |
+| GET | /api/gpi-integration/companies | List BC companies |
+| POST | /api/gpi-integration/sales-orders | Create sales order |
+| POST | /api/gpi-integration/purchase-invoices | Create purchase invoice |
+| POST | /api/gpi-integration/customers | Create customer |
+| POST | /api/gpi-integration/vendors | Create vendor |
+| GET | /api/gpi-integration/logs | Query integration audit logs |
+
+### Test Results
+- Backend: 14/14 tests passed (100%)
+- AL build validation: No duplicate object IDs
+- Test report: `/app/test_reports/iteration_41.json`
+
+### Publishing Guide
+See `/app/bc-extension/docs/PUBLISHING_GUIDE.md` for step-by-step instructions.
 
 *Last Updated: March 12, 2026*

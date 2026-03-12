@@ -1,166 +1,160 @@
 <analysis>**original_problem_statement:**
-The user wants to build GPI Document Hub, an event-driven workflow platform. The initial work in this session focused on completing a critical backend refactor of a 16,000+ line monolith () which was blocking further development.
+The user wants to build GPI Document Hub, an event-driven workflow platform. The initial project involved a massive backend refactor to modularize a 16,000-line monolith (). This refactor, including a complete redesign of the Reference Intelligence / Matching service, has been successfully completed.
 
-After successfully completing the first phase of the refactor and unblocking the project, the following features were requested and implemented:
-1.  **Stable Vendor Auto-Ready Rules:** A system to automatically mark documents from trusted vendors as Ready or Low Priority Review based on performance metrics, while maintaining strict safety controls.
-2.  **SharePoint Migration Module Removal:** A cleanup task to remove a now-obsolete feature from the codebase.
-3.  **Stable Vendor Admin Page:** A comprehensive UI for administrators to view vendor stability scores, understand the reasoning, and apply manual overrides with a full audit trail.
+The current and primary task is to build and publish a Business Central (BC) AL extension. This extension will create a stable, secure API layer for GPI Hub to interact with BC, enabling future features like creating sales orders and purchase invoices directly from the UI.
 
-The current and final task for this session is to continue the backend refactor by extracting the remaining ~88 routes from the legacy  file into domain-specific router files. A plan was approved, but the user provided significant new requirements for the  portion of this refactor just before implementation was to begin.
+**PRODUCT REQUIREMENTS (for AL Extension):**
+-   **Goal:** Create, package, and publish a Business Central AL extension to a sandbox environment.
+-   **API Surface:** Expose stable, idempotent API endpoints for creating Sales Orders, Purchase Invoices, Customers, and Vendors.
+-   **Idempotency:** All  operations must be protected against duplicates using a caller-supplied idempotency key.
+-   **Auditability:** Every transaction must be auditable, tracking the source system (GPI Hub), external request ID, and result. A custom log table should be implemented.
+-   **Validation:** Enforce strict validation rules to prevent the creation of incomplete or invalid records in BC.
+-   **Record Creation:** Implement real record creation for headers (Sales Order, Purchase Invoice) and master records (Customer, Vendor).
+-   **Permissions:** Define a minimal, secure permission set for the integration.
 
 **User's preferred language**: English
 
 **what currently exists?**
-The application is a mature, stable, and feature-rich document intelligence platform.
--   **Backend Architecture:** The backend is in a hybrid state. A new  entry point correctly bootstraps the application, loading both new modular routers from  and the remaining legacy routes from . The initial, critical refactor is complete and stable.
--   **Stable Vendor Automation:** A complete Stable Vendor system is in place. This includes the backend service (), integration into the document processing pipeline, a dashboard KPI widget, and workflow badges in the UI.
--   **Stable Vendor Admin UI:** A new page at  provides full visibility and manual control over vendor stability statuses, complete with override logic and history.
--   **Code Health:** The obsolete SharePoint migration module has been completely removed from the codebase. All recent feature additions and bug fixes have been validated with a 100% pass rate by the testing agent.
+The application is a stable document intelligence platform with a newly modularized backend. The  monolith has been fully dismantled, with all 85 routes extracted into domain-specific routers under . The Reference Intelligence service has been rewritten with a sophisticated new scoring and classification model.
+
+Work has just begun on the Business Central AL extension. The agent has created the initial project structure and foundational files within the  directory, including:
+-    configuration.
+-    table for auditing.
+-   Table extensions to add GPI-specific metadata to standard BC tables (, , , ).
+-   Stub files for the required  objects that will contain the core business logic.
 
 **Last working item**:
--   **Last item agent was working:** The agent was preparing to execute the second major phase of the backend refactor: extracting the ~88 remaining routes from . A detailed plan to use thin wrappers and a domain-by-domain approach was approved by the user. However, the user's very last message introduced significant new business logic requirements for the  domain, changing it from a simple code migration to a feature-heavy redesign.
--   **Status:** NOT STARTED
--   **Agent Testing Done:** N/A
--   **Which testing method agent to use?** backend testing agent
--   **User Testing Done:** N/A
+-   **Last item agent was working:** The agent was executing Batch 3 of its plan for the AL extension: creating the core integration and domain-specific codeunit files. It successfully created  and  and was about to create the remaining codeunits for purchase invoices, customers, and vendors.
+-   **Status:** IN PROGRESS
+-   **Agent Testing Done:** N
+-   **Which testing method agent to use?** This task will require a multi-stage testing approach. First, the agent must build the  package from the AL extension source code. Then, a backend service needs to be created in Python to call the new BC APIs. The  should be used to test this new Python service. However, since the agent cannot directly access or deploy to a BC sandbox, the final verification of the AL extension itself will require manual steps provided to the user.
+-   **User Testing Done:** N
 
 **All Pending/In progress Issue list**:
 -   **Issue 1: GitHub Branch/Deployment Confusion (P2 - Medium)**
     -   **Description:** The user is working on a non-standard  branch, which is a recurring source of friction and deployment problems.
+    -   **Attempted fixes:** None. The agent has focused on the primary development tasks.
+    -   **Next debug checklist:** After the current P0 task is complete, propose a standard git workflow (e.g., feature branches from /) and assist the user in migrating their work.
     -   **Why fix this issue and what will be achieved with the fix?** To establish a standard git workflow, eliminate merge conflicts, and enable reliable, predictable deployments.
     -   **Status:** NOT STARTED
     -   **Is recurring issue?** Y
     -   **Should Test frontend/backend/both after fix?** Backend.
-    -   **Blocked on other issue:** Blocked on the P0 refactoring task.
+    -   **Blocked on other issue:** Blocked on the P0 AL Extension task.
 
 **In progress Task List**:
--   **Task 1: Complete the  monolith refactor (P0 - CRITICAL)**
-    -   **Where to resume:** The agent must first acknowledge and integrate the user's latest, detailed requirements for the Reference Intelligence / Matching domain into the refactoring plan. The previous thin wrapper strategy is no longer sufficient for this specific domain.
-        -   **Proposed Next Steps:**
-            1.  Update the plan to tackle the  domain separately, as a combined refactor-and-feature-update task.
-            2.  Create the route inventory map requested by the user to track migration progress.
-            3.  Proceed with extracting the *other* domains (, , , etc.) using the approved thin wrapper approach first to reduce risk and make incremental progress.
-            4.  After the simpler domains are moved, begin the complex extraction and rewrite of the  routes, implementing the new semantic typing and scoring logic.
-    -   **What will be achieved with this?** A fully modular, maintainable backend architecture where  is only a lightweight bootstrap file. This will significantly improve developer velocity and code safety.
-    -   **Status:** NOT STARTED
-    -   **Should Test frontend/backend/both after fix?** Backend (extensive regression testing after each domain and a full suite at the end).
-    -   **Blocked on something:** The scope for one part of the task was significantly expanded by the user's last message, requiring a plan update before proceeding.
+-   **Task 1: Complete the Business Central AL Extension (P0 - CRITICAL)**
+    -   **Where to resume:** The agent has created the file structure and some initial  stubs. Resume at **Batch 3** of the plan:
+        1.  Create the remaining  files: , , .
+        2.  Proceed to **Batch 4**: Implement the API pages (, , etc.) that will expose the logic from the codeunits as web services.
+        3.  Implement the actual business logic within each  (idempotency checks, validation, record creation, logging).
+        4.  Create a build script to compile the AL project into a  file.
+        5.  Implement a new backend service () and router () in the Python application to act as a bridge, calling the newly created BC endpoints.
+    -   **What will be achieved with this?** A publishable BC extension and a corresponding backend service, enabling GPI Hub to create records in Business Central securely and reliably.
+    -   **Status:** IN PROGRESS
+    -   **Should Test frontend/backend/both after fix?** Backend.
+    -   **Blocked on something:** No.
 
 **Upcoming and Future Tasks**
 **Upcoming Tasks:**
--   **P1:** Package and Publish the Business Central (AL) Extension.
--   **P1:** Add Create BC Sales Order Button to UI.
+-   **P1:** Add Create BC Sales Order Button to UI. This task directly follows the completion of the AL extension.
 
 **Future Tasks:**
--   Implement Outbound Document Delivery module.
--   Replace mock email service with a production-ready solution.
+-   Implement the Outbound Document Delivery module.
+-   Replace the mock email service with a production-ready solution.
 -   Add multi-step approval routing for documents.
 -   Decommission the legacy Zetadocs system.
 -   Replace mock JWT auth with Entra ID SSO.
 
 **Completed work in this session**
--   ** Refactor - Phase 1 (DONE):** Successfully unblocked the project by creating a new  entry point, fixing broken router files, and migrating to a hybrid architecture where new modular routers and the old monolith coexist.
--   **Stable Vendor Auto-Ready Rules Feature (DONE):** Implemented the full backend service () and integrated it into the automation pipeline. Added frontend components including a dashboard KPI widget, document queue badges, and a document detail card.
--   **SharePoint Migration Module Removal (DONE):** Completely excised the obsolete feature from the frontend and backend, cleaning up all related routes, components, and services.
--   **Stable Vendor Admin Page Feature (DONE):** Built a new page at  with a full suite of admin controls, including manual vendor status overrides, detailed stability reasoning, and an audit history.
--   ** Bug Fix (DONE):** Resolved a  in  that caused the document Re-process functionality to fail.
+-   ** Monolith Refactor (DONE):** Successfully and completely dismantled the  monolith. All 85 routes were extracted into 9 domain-specific, modular routers located in .  now contains zero active routes.
+-   **Reference Intelligence Redesign (DONE):** Implemented a sophisticated new scoring engine for document matching in , fulfilling 12 detailed user requirements including domain classification, semantic typing, counterparty checks, and explainable scoring.
+-   **Refactor Validation (DONE):** Created a new regression test suite () for the new logic. Used the testing agent to run a comprehensive regression test across the entire application, achieving a 100% pass rate on 43 backend tests and verifying all frontend pages.
+-   **Route Inventory Map (DONE):** Created and finalized , documenting the successful migration of all routes out of .
+-   **AL Extension Scaffolding (DONE):** Initiated the new P0 task by creating the project structure and foundational files for the Business Central AL extension in .
 
 **Earlier issues found/mentioned but not fixed**
--   The non-standard Git branch issue () remains pending.
+-   The non-standard Git branch issue () remains the primary unresolved background issue.
 
 **Known issue recurrence from previous fork**
 -   **Issue recurrence in previous fork:** Deployment and Environment Hell tied to non-standard git branching.
--   **Recurrence count:** 6+
+-   **Recurrence count:** 7+
 -   **Status:** BLOCKED (pending standardization of git workflow).
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
--   **Incremental Refactoring:** The core strategy used to safely dismantle the  monolith. A new entry point () was created to load both new modular routers and the legacy routes, allowing for a gradual, stable migration.
--   **Rule-Based Automation & Human-in-the-Loop:** The Stable Vendor feature combines automated scoring (based on vendor performance) with a manual admin override system. This allows for both efficiency and trusted human oversight, with safety rules that cannot be bypassed by manual promotion.
+-   **Incremental Refactoring & Thin Wrappers:** Successfully used to dismantle the  monolith by creating a new entry point () and gradually migrating routes. Complex functions were initially wrapped and called from  before being fully moved.
+-   **Rule-Based Scoring Engine:** The redesigned Reference Intelligence service uses a multi-signal model with explicit weights, context gates, and explainable outputs to provide accurate document matching.
+-   **Business Central AL Development:** The current task involves creating a new application extension for Microsoft Dynamics 365 Business Central using the AL language.
 
 **key DB schema**
--   **vendor_profiles:** Extended to support the Stable Vendor feature.
-    -   
-    -   
-    -   
-    -    (e.g., 'force_stable', 'force_watch')
-    -   
-    -   
+-   ** (New BC Table):**
+    -   , , , , , , 
+-   **Standard BC Table Extensions (New):**
+    -   Added , ,  fields to , , , .
 
 **changes in tech stack**
--   None.
+-   **Microsoft Dynamics 365 Business Central AL:** Added for the development of the new integration extension.
 
 **All files of reference**
--   **/app/backend/server.py**: The legacy monolith, which is the primary target for the next refactoring task.
--   **/app/backend/main.py**: The new, clean application entry point that orchestrates the routers.
--   **/app/backend/services/stable_vendor_service.py**: New service containing all logic for vendor stability scoring, evaluation, and manual overrides.
--   **/app/backend/routers/stable_vendor.py**: New router for all stable-vendor-related API endpoints.
--   **/app/frontend/src/pages/StableVendorsAdminPage.js**: New React page for the Stable Vendor admin interface.
--   **/app/frontend/src/pages/DashboardPage.js**: Modified to include the Stable Vendor KPI widget.
--   **/app/frontend/src/pages/DocumentDetailPage.js**: Modified to include the Stable Vendor routing card.
--   **/app/frontend/src/pages/UnifiedQueuePage.js**: Modified to display routing status badges.
--   **/app/memory/CHANGELOG.md**: New file for tracking implemented features.
+-   **/app/bc-extension/**: The entire directory for the new AL extension project.
+-   **/app/backend/routers/**: The 9 new router files that replaced .
+-   **/app/backend/services/reference_intelligence_service.py**: Contains the complex new scoring logic.
+-   **/app/backend/tests/test_reference_intelligence.py**: New regression tests for the refactor.
+-   **/app/backend/main.py**: The main application entry point, which now registers all modular routers.
+-   **/app/backend/server.py**: The legacy monolith, now stripped of all  decorators.
+-   **/app/memory/ROUTE_INVENTORY.md**: Final map showing all routes successfully extracted.
 
 **Areas that need refactoring**:
--   The remaining ~88 routes within  must be extracted into domain-specific files in .
+-   The  file still contains a large amount of business logic functions that are imported and used by the new routers (e.g., via the thin wrapper pattern). A future cleanup task would be to move this logic into dedicated service files.
 
 **key api endpoints**
--   : Retrieves KPIs for the dashboard widget.
--   : Lists all vendors for the admin page, with filtering/sorting.
--   : Gets detailed information for a single vendor.
--   : Applies a manual status override (e.g., force_stable).
--   : Removes a manual override.
--   : Triggers a background job to re-score all vendors.
+-   All endpoints previously in  are now served from their respective routers (e.g.,  from ).
+-   **Planned BC Endpoints (to be created):**
+    -   
+    -   
+    -   
+    -   
+    -   
 
 **Critical Info for New Agent**
--   **The next task is the large-scale refactor of . DO NOT start implementation immediately.** You must first update the existing plan to account for the user's final message, which adds significant complexity to the  domain.
--   **Revised Plan:**
-    1.  Acknowledge the new requirements for .
-    2.  Create the route inventory map the user requested.
-    3.  First, refactor the *simpler* domains (, , , etc.) using the approved thin wrapper technique to make safe, incremental progress.
-    4.  Then, treat the  extraction as a separate, more complex task. This involves not just moving code, but implementing the new scoring logic (semantic typing, surfaced/suppressed candidates, etc.) as part of the refactor.
--   The project is currently in a very stable and healthy state. Proceed with caution to maintain this stability during the refactor. Verify functionality after each domain is extracted.
+-   You are in the middle of implementing the Business Central AL Extension. The project structure and initial files have been created in .
+-   Your immediate next step is to continue with **Batch 3** of the plan: create the remaining  stub files for Purchase Invoices, Customers, and Vendors.
+-   After creating the stubs, you must implement the  objects, which expose the functionality as web services.
+-   Following that, you will need to write the core logic inside each  (idempotency, validation, record insertion, and logging).
+-   Finally, you will need to build a new Python-based service and router in the backend to act as a client for these new BC APIs.
 
 **documents and test reports created in this job**
 -    (updated)
+-    (updated)
+-    (created and finalized)
 -    (created)
--    (Refactor Phase 1 Validation)
--    (Stable Vendor Feature Validation)
--    (Stable Vendor Admin Page Validation)
+-    (Refactor validation)
+-    (Full regression test post-refactor)
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  User requested to build the Stable Vendor Admin Page. (DONE)
-2.  Agent provided a plan for the Admin Page.
-3.  User approved the plan. (DONE)
-4.  User requested to remove the SharePoint migration module. (DONE)
-5.  Agent confirmed understanding.
-6.  User confirmed to proceed with removal. (DONE)
-7.  User provided the prompt to continue the backend refactor. (CURRENT TASK)
-8.  Agent provided a detailed plan for the refactor.
-9.  User approved the plan with specific guidance (use thin wrappers, create a route map).
-10. **PENDING:** User provided new, complex requirements for the  portion of the refactor. This message significantly alters the scope for that domain and must be addressed before starting implementation.
+1.  **PENDING:** The user provided a detailed specification for building a new Business Central AL extension to create an API layer for Sales Orders, Purchase Invoices, etc. This is the current, active P0 task. The user approved the agent's plan to proceed.
 
 **Project Health Check:**
--   **Broken:** None. The application is stable and all features are functional.
+-   **Broken:** None. The application is stable.
 -   **Mocked:** None.
 
 **3rd Party Integrations**
--   Dynamics 365 Business Central API
+-   Dynamics 365 Business Central API (both as a client and now as a provider via the new AL Extension)
 -   Microsoft Graph API / SharePoint
 -   Gemini (via Emergent LLM Key)
 -   Spiro CRM API
 -   APScheduler
 
 **Testing status**
--   **Testing agent used after significant changes:** YES. Used successfully for all features and the initial refactor, with 100% pass rates.
+-   **Testing agent used after significant changes:** YES. Used to validate the entire backend refactor, with a 100% pass rate.
 -   **Troubleshoot agent used after agent stuck in loop:** NO.
--   **Test files created:** Yes, multiple test suites were generated by the testing agent.
+-   **Test files created:** []
 -   **Known regressions:** None.
 
 **Credentials to test flow:**
 -   **Web UI:**  / 
 
 **What agent forgot to execute**
--   The agent has not forgotten any tasks. It was about to begin the final refactoring task when the user provided a last-minute change to the requirements for one part of it. The agent has not yet had an opportunity to process and respond to this new information.</analysis>
+-   The agent has not forgotten anything. It was systematically executing a multi-batch plan to create the AL extension and was halted mid-process. The next step is to continue creating the planned files.</analysis>

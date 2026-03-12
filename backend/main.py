@@ -66,6 +66,7 @@ from routers.aliases import router as aliases_router
 from routers.mailbox_sources import router as mailbox_sources_router
 from routers.file_import import router as file_import_router
 from routers.bc_integration import router as bc_integration_router
+from routers.gpi_integration import router as gpi_integration_router
 from routers.documents import router as documents_router, register_server_routes as register_doc_routes
 from routers.workflows import router as workflows_router, register_server_routes as register_wf_routes
 from routers.reference_intelligence import router as ref_intel_router, register_server_routes as register_ri_routes
@@ -110,6 +111,7 @@ app.include_router(aliases_router, prefix="/api")
 app.include_router(mailbox_sources_router, prefix="/api")
 app.include_router(file_import_router, prefix="/api")
 app.include_router(bc_integration_router, prefix="/api")
+app.include_router(gpi_integration_router, prefix="/api")
 app.include_router(documents_router, prefix="/api")
 app.include_router(workflows_router, prefix="/api")
 app.include_router(ref_intel_router, prefix="/api")

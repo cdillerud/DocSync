@@ -1,14 +1,8 @@
-/// <summary>
-/// Page Extension 50102 "GPI Sales Order Ext"
-/// Adds the GPI Documents factbox to the Sales Order page.
-/// Position: First in factbox area (top).
-/// </summary>
-pageextension 50102 "GPI Sales Order Ext" extends "Sales Order"
+pageextension 50102 "GPI Sales Order Extension" extends "Sales Order"
 {
     layout
     {
-        // Position factbox at top of factbox area
-        addfirst(FactBoxes)
+        addlast(FactBoxes)
         {
             part(GPIDocuments; "GPI Document Link Factbox")
             {
@@ -16,7 +10,6 @@ pageextension 50102 "GPI Sales Order Ext" extends "Sales Order"
                 Caption = 'GPI Documents';
                 SubPageLink = "Document Type" = const("Sales Order"),
                               "Target SystemId" = field(SystemId);
-                UpdatePropagation = Both;
             }
         }
     }

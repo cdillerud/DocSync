@@ -829,3 +829,131 @@ async def gpi_integration_logs(
     except Exception as e:
         logger.error("Failed to list integration logs: %s", str(e))
         raise HTTPException(status_code=502, detail=f"BC API error: {str(e)}")
+
+
+@router.get("/dashboard")
+async def gpi_integration_dashboard(
+    record_type: str = Query("", description="Filter by record type: sales_order, purchase_invoice"),
+    status: str = Query("", description="Filter by status: created, already_exists, failed"),
+    limit: int = Query(100, description="Max results", le=500),
+    skip: int = Query(0, description="Offset for pagination"),
+):
+    """Aggregated integration dashboard from local document graph data."""
+    db = get_db()
+
+    # Build pipeline to find all docs with bc_sales_order or bc_purchase_invoice
+    match_stage = {}
+    or_conditions = []
+
+    if record_type == "sales_order":
+        or_conditions = [{"bc_sales_order": {"$exists": True}}]
+    elif record_type == "purchase_invoice":
+        or_conditions = [{"bc_purchase_invoice": {"$exists": True}}]
+    else:
+        or_conditions = [
+            {"bc_sales_order": {"$exists": True}},
+            {"bc_purchase_invoice": {"$exists": True}},
+        ]
+
+    match_stage["$or"] = or_conditions
+
+    # Fetch documents
+    docs = await db.hub_documents.find(
+        match_stage,
+        {"_id": 0, "id": 1, "document_type": 1, "bc_sales_order": 1, "bc_purchase_invoice": 1,
+         "extracted_fields": 1, "normalized_fields": 1, "vendor_canonical": 1, "file_name": 1}
+    ).sort("updated_utc", -1).to_list(500)
+
+    # Build transaction records
+    transactions = []
+    counts = {"sales_order_created": 0, "purchase_invoice_created": 0, "already_exists": 0, "failed": 0, "total": 0}
+
+    for doc in docs:
+        so = doc.get("bc_sales_order")
+        pi = doc.get("bc_purchase_invoice")
+
+        if so:
+            so_status = so.get("status", "")
+            is_success = so.get("success", False)
+            txn = {
+                "record_type": "Sales Order",
+                "source_document_id": doc.get("id", ""),
+                "source_document_name": doc.get("file_name", ""),
+                "bc_record_no": so.get("bc_record_no", ""),
+                "bc_system_id": so.get("bc_system_id", ""),
+                "idempotency_key": so.get("idempotency_key", ""),
+                "transaction_id": so.get("transaction_id", ""),
+                "status": so_status,
+                "success": is_success,
+                "customer_no": so.get("customer_no", ""),
+                "customer_name": so.get("customer_name", ""),
+                "vendor_no": "",
+                "vendor_name": "",
+                "external_ref": so.get("external_doc_no", ""),
+                "error_message": so.get("error_message", ""),
+                "created_at": so.get("created_at", ""),
+                "created_by": so.get("created_by", ""),
+            }
+            transactions.append(txn)
+            counts["total"] += 1
+            if so_status == "already_exists":
+                counts["already_exists"] += 1
+            elif is_success:
+                counts["sales_order_created"] += 1
+            else:
+                counts["failed"] += 1
+
+        if pi:
+            pi_status = pi.get("status", "")
+            is_success = pi.get("success", False)
+            txn = {
+                "record_type": "Purchase Invoice",
+                "source_document_id": doc.get("id", ""),
+                "source_document_name": doc.get("file_name", ""),
+                "bc_record_no": pi.get("bc_record_no", ""),
+                "bc_system_id": pi.get("bc_system_id", ""),
+                "idempotency_key": pi.get("idempotency_key", ""),
+                "transaction_id": pi.get("transaction_id", ""),
+                "status": pi_status,
+                "success": is_success,
+                "customer_no": "",
+                "customer_name": "",
+                "vendor_no": pi.get("vendor_no", ""),
+                "vendor_name": pi.get("vendor_name", ""),
+                "external_ref": pi.get("vendor_invoice_no", ""),
+                "error_message": pi.get("error_message", ""),
+                "created_at": pi.get("created_at", ""),
+                "created_by": pi.get("created_by", ""),
+            }
+            transactions.append(txn)
+            counts["total"] += 1
+            if pi_status == "already_exists":
+                counts["already_exists"] += 1
+            elif is_success:
+                counts["purchase_invoice_created"] += 1
+            else:
+                counts["failed"] += 1
+
+    # Apply status filter
+    if status:
+        if status == "created":
+            transactions = [t for t in transactions if t["success"] and t["status"] != "already_exists"]
+        elif status == "already_exists":
+            transactions = [t for t in transactions if t["status"] == "already_exists"]
+        elif status == "failed":
+            transactions = [t for t in transactions if not t["success"] and t["status"] != "already_exists"]
+
+    # Sort by created_at descending
+    transactions.sort(key=lambda t: t.get("created_at", ""), reverse=True)
+
+    # Paginate
+    total = len(transactions)
+    transactions = transactions[skip:skip + limit]
+
+    return {
+        "counts": counts,
+        "transactions": transactions,
+        "total": total,
+        "limit": limit,
+        "skip": skip,
+    }

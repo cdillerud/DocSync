@@ -378,15 +378,33 @@ function MovementTable({ movements, total }) {
 /* INCOMING SUPPLY TABLE                                            */
 /* ════════════════════════════════════════════════════════════════ */
 
-const STATUS_COLORS = { expected: 'bg-sky-100 text-sky-700', in_transit: 'bg-amber-100 text-amber-700', received: 'bg-emerald-100 text-emerald-700', cancelled: 'bg-gray-100 text-gray-500' };
+const STATUS_COLORS = { planned: 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300', ordered: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300', expected: 'bg-sky-100 text-sky-700', in_transit: 'bg-amber-100 text-amber-700', received: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300', cancelled: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500' };
 
 function IncomingTable({ records, customerId, onUpdate }) {
-  const updateStatus = async (id, status) => {
+  const [transitioning, setTransitioning] = useState(null);
+
+  const transitionStatus = async (supplyId, newStatus) => {
+    setTransitioning(supplyId);
     try {
-      await fetch(`${API}/api/inventory-ledger/customers/${customerId}/incoming/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
-      toast.success(`Status updated to ${status}`);
-      onUpdate();
-    } catch { toast.error('Update failed'); }
+      const res = await fetch(`${API}/api/incoming-supply/${supplyId}/status`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        toast.success(`Status updated to ${newStatus}`);
+        if (data.receipt_movement_id) {
+          toast.success('Receipt movement created');
+        }
+        onUpdate();
+      } else if (res.status === 409) {
+        toast.error('Already received — duplicate receipt prevented');
+      } else {
+        const d = await res.json();
+        toast.error(d.detail || 'Update failed');
+      }
+    } catch { toast.error('Status update failed'); }
+    finally { setTransitioning(null); }
   };
 
   if (!records.length) return <div className="py-10 text-center text-muted-foreground text-sm">No incoming supply records.</div>;
@@ -403,25 +421,68 @@ function IncomingTable({ records, customerId, onUpdate }) {
               <th className="text-left py-2 px-3 font-medium">ETA</th>
               <th className="text-left py-2 px-3 font-medium">Source</th>
               <th className="text-left py-2 px-3 font-medium">Status</th>
-              <th className="text-right py-2 px-3 font-medium">Action</th>
+              <th className="text-right py-2 px-3 font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {records.map(r => (
-              <tr key={r.id} className="border-b border-border/50 hover:bg-muted/20" data-testid={`inv-incoming-${r.id}`}>
-                <td className="py-1.5 px-3 font-mono font-medium">{r.item}</td>
-                <td className="py-1.5 px-3 font-mono">{r.warehouse}</td>
-                <td className="py-1.5 px-3 text-right font-mono font-bold">{r.incoming_qty.toLocaleString()}</td>
-                <td className="py-1.5 px-3">{r.unit_of_measure}</td>
-                <td className="py-1.5 px-3">{r.eta || '-'}</td>
-                <td className="py-1.5 px-3 font-mono">{r.source_reference || '-'}</td>
-                <td className="py-1.5 px-3"><Badge variant="secondary" className={`text-[9px] ${STATUS_COLORS[r.status] || ''}`}>{r.status}</Badge></td>
-                <td className="py-1.5 px-3 text-right">
-                  {r.status === 'expected' && <Button variant="outline" size="sm" className="h-5 text-[9px] px-1.5" onClick={() => updateStatus(r.id, 'in_transit')}>In Transit</Button>}
-                  {r.status === 'in_transit' && <Button variant="outline" size="sm" className="h-5 text-[9px] px-1.5" onClick={() => updateStatus(r.id, 'received')}>Received</Button>}
-                </td>
-              </tr>
-            ))}
+            {records.map(r => {
+              const isBusy = transitioning === r.id;
+              return (
+                <tr key={r.id} className="border-b border-border/50 hover:bg-muted/20" data-testid={`inv-incoming-${r.id}`}>
+                  <td className="py-1.5 px-3 font-mono font-medium">{r.item}</td>
+                  <td className="py-1.5 px-3 font-mono">{r.warehouse}</td>
+                  <td className="py-1.5 px-3 text-right font-mono font-bold">{r.incoming_qty.toLocaleString()}</td>
+                  <td className="py-1.5 px-3">{r.unit_of_measure}</td>
+                  <td className="py-1.5 px-3">{r.eta || '-'}</td>
+                  <td className="py-1.5 px-3 font-mono">{r.source_reference || '-'}</td>
+                  <td className="py-1.5 px-3">
+                    <Badge variant="secondary" className={`text-[9px] ${STATUS_COLORS[r.status] || ''}`} data-testid={`inv-incoming-status-${r.id}`}>
+                      {r.status}
+                    </Badge>
+                  </td>
+                  <td className="py-1.5 px-3 text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      {r.status === 'planned' && (
+                        <>
+                          <Button variant="outline" size="sm" className="h-5 text-[9px] px-1.5" disabled={isBusy}
+                            onClick={() => transitionStatus(r.id, 'ordered')} data-testid={`inv-incoming-ordered-${r.id}`}>
+                            {isBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Ordered'}
+                          </Button>
+                          <Button variant="ghost" size="sm" className="h-5 text-[9px] px-1.5 text-red-500 hover:text-red-700" disabled={isBusy}
+                            onClick={() => transitionStatus(r.id, 'cancelled')} data-testid={`inv-incoming-cancel-${r.id}`}>
+                            Cancel
+                          </Button>
+                        </>
+                      )}
+                      {r.status === 'ordered' && (
+                        <>
+                          <Button variant="outline" size="sm" className="h-5 text-[9px] px-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50" disabled={isBusy}
+                            onClick={() => transitionStatus(r.id, 'received')} data-testid={`inv-incoming-received-${r.id}`}>
+                            {isBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Received'}
+                          </Button>
+                          <Button variant="ghost" size="sm" className="h-5 text-[9px] px-1.5 text-red-500 hover:text-red-700" disabled={isBusy}
+                            onClick={() => transitionStatus(r.id, 'cancelled')} data-testid={`inv-incoming-cancel-${r.id}`}>
+                            Cancel
+                          </Button>
+                        </>
+                      )}
+                      {r.status === 'expected' && (
+                        <Button variant="outline" size="sm" className="h-5 text-[9px] px-1.5" disabled={isBusy}
+                          onClick={() => transitionStatus(r.id, 'ordered')} data-testid={`inv-incoming-ordered-${r.id}`}>
+                          Ordered
+                        </Button>
+                      )}
+                      {r.status === 'in_transit' && (
+                        <Button variant="outline" size="sm" className="h-5 text-[9px] px-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50" disabled={isBusy}
+                          onClick={() => transitionStatus(r.id, 'received')} data-testid={`inv-incoming-received-${r.id}`}>
+                          Received
+                        </Button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </CardContent>

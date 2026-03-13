@@ -350,3 +350,31 @@ async def api_create_from_shortage(body: ShortageReq):
         return result
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+
+
+class StatusTransitionReq(BaseModel):
+    status: str
+
+
+@incoming_supply_router.post("/{supply_id}/status")
+async def api_transition_status(supply_id: str, body: StatusTransitionReq):
+    """Transition an incoming supply record's status.
+
+    Valid: planned→ordered, planned→cancelled, ordered→received, ordered→cancelled.
+    When received, creates a receipt ledger movement.
+    Returns 409 if already received. Returns 422 for invalid transitions.
+    """
+    db = get_db()
+    try:
+        from services.inventory_so_integration import (
+            transition_supply_status, DuplicateReceiptError,
+        )
+        result = await transition_supply_status(
+            db, supply_id=supply_id, new_status=body.status,
+        )
+        return result
+    except DuplicateReceiptError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))

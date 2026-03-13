@@ -470,3 +470,100 @@ async def create_shortage_supply(
         len(result["duplicates"]), len(result["errors"]),
     )
     return result
+
+
+# ═══════════════════════════════════════════════════════════════
+# INCOMING SUPPLY STATUS TRANSITIONS
+# ═══════════════════════════════════════════════════════════════
+
+VALID_TRANSITIONS = {
+    "planned": {"ordered", "cancelled"},
+    "ordered": {"received", "cancelled"},
+    # Legacy statuses (backward compat)
+    "expected": {"ordered", "cancelled"},
+    "in_transit": {"received", "cancelled"},
+}
+
+
+async def transition_supply_status(
+    db,
+    supply_id: str,
+    new_status: str,
+    created_by: str = "gpi_hub",
+) -> dict:
+    """Transition an incoming supply record through its lifecycle.
+
+    Valid transitions: planned→ordered, planned→cancelled,
+                       ordered→received, ordered→cancelled.
+
+    When transitioning to 'received', creates a receipt ledger movement
+    to move the quantity into on_hand.
+
+    Returns: {supply: <updated record>, receipt_movement_id: str|None}
+    Raises ValueError (→422) for invalid transition.
+    Raises DuplicateError (→409) if already received.
+    """
+    record = await db[INCOMING_COLL].find_one({"id": supply_id}, {"_id": 0})
+    if not record:
+        raise ValueError(f"Incoming supply record '{supply_id}' not found")
+
+    current = record["status"]
+
+    # Already in target state
+    if current == new_status:
+        if new_status == "received":
+            raise DuplicateReceiptError(
+                f"Supply '{supply_id}' is already received"
+            )
+        return {"supply": record, "receipt_movement_id": None}
+
+    # Check valid transition
+    allowed = VALID_TRANSITIONS.get(current, set())
+    if new_status not in allowed:
+        raise ValueError(
+            f"Invalid transition: '{current}' → '{new_status}'. "
+            f"Allowed from '{current}': {sorted(allowed) if allowed else 'none (terminal state)'}"
+        )
+
+    from datetime import datetime, timezone
+    update_doc = {"status": new_status, "updated_at": datetime.now(timezone.utc).isoformat()}
+    await db[INCOMING_COLL].update_one({"id": supply_id}, {"$set": update_doc})
+
+    receipt_movement_id = None
+
+    # If received → create a receipt ledger movement
+    if new_status == "received":
+        cust = await get_customer(db, record["customer_id"])
+        if not cust:
+            raise ValueError(f"Customer workspace '{record['customer_id']}' not found")
+
+        mv_result = await create_movement(
+            db, record["customer_id"],
+            item=record["item"],
+            item_description=record.get("item_description", ""),
+            warehouse=record.get("warehouse", "MAIN"),
+            ownership_type=record.get("ownership_type", "customer_owned"),
+            movement_type="receipt",
+            quantity_delta=record["incoming_qty"],  # Positive = adds to on_hand
+            unit_of_measure=record.get("unit_of_measure", "units"),
+            source_type="incoming_supply",
+            reference_type="incoming_supply",
+            reference_id=supply_id,
+            notes=f"Receipt from incoming supply (source: {record.get('source_reference', 'N/A')})",
+            created_by=created_by,
+            skip_balance_check=True,
+        )
+        if mv_result["success"]:
+            receipt_movement_id = mv_result["movement"]["id"]
+
+    updated = await db[INCOMING_COLL].find_one({"id": supply_id}, {"_id": 0})
+    logger.info(
+        "Supply '%s' transitioned %s → %s (receipt_mv=%s)",
+        supply_id, current, new_status, receipt_movement_id,
+    )
+    return {"supply": updated, "receipt_movement_id": receipt_movement_id}
+
+
+class DuplicateReceiptError(Exception):
+    """Raised when trying to receive an already-received supply."""
+    pass

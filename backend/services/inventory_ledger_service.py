@@ -28,14 +28,14 @@ MOVEMENT_TYPES = {
 # ── Source types (provenance tracking) ──
 SOURCE_TYPES = {
     "manual_entry", "spreadsheet_import", "sales_order_commitment",
-    "sales_order_release", "receipt", "correction",
+    "sales_order_release", "incoming_supply", "receipt", "correction",
 }
 
 # ── Ownership types ──
 OWNERSHIP_TYPES = {"customer_owned", "gamer_reserved", "mixed", "unknown"}
 
 # ── Incoming supply statuses ──
-SUPPLY_STATUSES = {"planned", "expected", "in_transit", "received", "cancelled"}
+SUPPLY_STATUSES = {"planned", "ordered", "expected", "in_transit", "received", "cancelled"}
 
 # ── Negative balance policies ──
 NEGATIVE_POLICIES = {"warn_only", "block_commitment"}
@@ -253,7 +253,7 @@ async def derive_balances(
     raw = await db[MOVEMENTS_COLL].aggregate(pipeline).to_list(5000)
 
     # Fetch incoming supply for this customer
-    inc_match = {"customer_id": customer_id, "status": {"$in": ["planned", "expected", "in_transit"]}}
+    inc_match = {"customer_id": customer_id, "status": {"$in": ["planned", "ordered", "expected", "in_transit"]}}
     if item:
         inc_match["item"] = item
     if warehouse:

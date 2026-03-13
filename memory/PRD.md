@@ -2926,3 +2926,42 @@ EMAIL_CLIENT_ID=8764d2d9-65cb-4bf8-b8ac-1d922e2b47f8
 **(a) More rule seeding** once user provides BC item numbers for glass/product and duty categories. This would push coverage to ~85%+. The mapping admin page is not needed yet — the API CRUD is sufficient.
 
 *Last Updated: March 13, 2026*
+
+---
+
+## Session Update: March 13, 2026 - BC Catalog Sync Layer
+
+### Completed
+
+#### BC Catalog Sync Service (`/app/backend/services/bc_catalog_sync_service.py`)
+- Syncs BC item master (1000 items) and G/L accounts (169) from Production environment
+- Paginated API fetches with `@odata.nextLink` support
+- Local MongoDB storage: `bc_catalog_items`, `bc_catalog_gl_accounts`, `bc_catalog_sync_meta`
+- Indexed for fast search (item_no, description, blocked)
+
+#### API Endpoints
+- `POST /api/gpi-integration/catalog/sync?entity=items|gl_accounts|all` — Manual sync trigger
+- `GET /api/gpi-integration/catalog/status` — Sync metadata and counts
+- `GET /api/gpi-integration/catalog/items?q=...` — Search items
+- `GET /api/gpi-integration/catalog/items/{item_no}` — Single item lookup
+- `GET /api/gpi-integration/catalog/items/{item_no}/validate` — Validate item exists and not blocked
+- `GET /api/gpi-integration/catalog/gl-accounts?q=...` — Search G/L accounts
+- `POST /api/gpi-integration/catalog/suggest-items` — Suggest BC items for a description
+
+#### Mapping Integration
+- Item mapping now validates against synced catalog: blocked items rejected, missing items allowed
+- New `catalog_description` and `catalog_exact` matching strategies against live BC data
+- Fixed `phrase_contained` scoring to prevent false positives on short phrases
+- Catalog validation flag (`catalog_validated`) on mapping results
+
+### Key Findings
+- "FREIGHT" is NOT a real BC item — it's a placeholder. All 20 mapping rules point to it.
+- Real glass items: 10004785 (16oz Vinegar), 12001210 (32oz Vinegar), etc.
+- No explicit freight/duty/customs G/L accounts found by keyword search
+- User needs to provide the correct item numbers/GL accounts for freight, duty, and services
+
+### Test Results
+- 41/41 tests pass (24 unit + 17 API)
+- Catalog sync: 1000 items + 169 GL accounts in ~2.7s total
+
+*Last Updated: March 13, 2026*

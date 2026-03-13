@@ -1,0 +1,82 @@
+{
+  "summary": "Comprehensive testing of GPI Document Hub - Customer Inventory Ledger Module. All 17 backend API tests passed via pytest. All frontend UI tests passed via Playwright.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed_tests": [
+    "GET /api/inventory-ledger/customers - returns list of customer workspaces (Hormel/Karlin seeded)",
+    "POST /api/inventory-ledger/customers - creates new workspace with negative_balance_policy",
+    "GET /api/inventory-ledger/customers/{id} - returns customer details",
+    "GET /api/inventory-ledger/customers/{id}/balances - returns derived balances with on_hand, incoming, committed, available, is_short, is_low",
+    "Balance derivation math verified: SPAM-12OZ GPI-MAIN = 600 on_hand, 300 incoming, 200 committed, 700 available",
+    "Shortage detection: SPAM-LITE shows is_short=true with negative available",
+    "GET /api/inventory-ledger/customers/{id}/summary - returns summary counts (total_items, total_on_hand, shortage_count etc)",
+    "GET /api/inventory-ledger/customers/{id}/movements - returns movement history (immutable ledger)",
+    "POST /api/inventory-ledger/customers/{id}/movements - creates movement with all types (receipt, order_commitment, etc)",
+    "POST /api/inventory-ledger/customers/{id}/movements with order_commitment on warn_only customer - succeeds with warning",
+    "POST /api/inventory-ledger/customers/{id}/movements with order_commitment on block_commitment customer - returns 422 when exceeding available",
+    "POST /api/inventory-ledger/customers/{id}/incoming - creates incoming supply record",
+    "PUT /api/inventory-ledger/customers/{id}/incoming/{supply_id} - updates status (expected->in_transit->received)",
+    "POST /api/inventory-ledger/customers/{id}/seed - batch seeds opening balances",
+    "GET /api/inventory-ledger/meta - returns valid enums (movement_types, source_types, ownership_types)",
+    "Frontend: /inventory-ledger page shows customer selector cards with policy badges",
+    "Frontend: Click customer card opens workspace with summary strip (Items Tracked, On Hand, Incoming, Committed, Shortages)",
+    "Frontend: Balance table shows item/warehouse/ownership/quantities with STATUS badges (SHORT/OK)",
+    "Frontend: Movements tab shows movement history with type badges and color-coded qty deltas",
+    "Frontend: Incoming tab shows incoming supply with status badges and action buttons (In Transit, Received)",
+    "Frontend: New Movement dialog opens with all required fields and submits correctly",
+    "Frontend: Add Incoming dialog opens with all required fields and submits correctly",
+    "Frontend: Create Customer dialog opens with Name/Code/Policy fields",
+    "Frontend: Balance search filter works correctly",
+    "Frontend: Back button navigates to customer selector",
+    "Frontend: Refresh button reloads data",
+    "Frontend: Inventory Ledger nav item appears in sidebar"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_inventory_ledger.py",
+    "/app/test_reports/pytest/inventory_ledger_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_inventory_ledger.py"
+  ],
+  "success_rate": {
+    "backend": "100% (17/17 tests passed)",
+    "frontend": "100% (all UI tests passed via Playwright)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://doc-workflow-test.preview.emergentagent.com"
+  },
+  "seed_data_used": "Hormel (warn_only policy): SPAM-12OZ, SPAM-LITE, DINTY-15OZ across GPI-MAIN/GPI-WEST with movements (opening_balance, receipt, order_commitment). Karlin (block_commitment policy): COFFEE-LB. Incoming supply: 300 SPAM-12OZ expected.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Customer Inventory Ledger module testing complete. Key endpoints: GET/POST /api/inventory-ledger/customers for workspaces, GET /api/inventory-ledger/customers/{id}/balances for derived balances (balance derivation via MongoDB aggregation), POST /api/inventory-ledger/customers/{id}/movements for ledger entries (immutable), POST /api/inventory-ledger/customers/{id}/incoming for supply tracking, POST /api/inventory-ledger/customers/{id}/seed for bulk import. Negative balance policies work correctly: warn_only allows over-commitment with warning, block_commitment returns 422. Frontend at /inventory-ledger with tabs for Balances, Movements, Incoming. Email service is MOCKED.",
+  "mocked_apis": ["Email service"],
+  "features_verified": {
+    "backend": {
+      "customer_workspaces": "CRUD operations, negative_balance_policy (warn_only/block_commitment)",
+      "derived_balances": "on_hand, incoming, committed, available, is_short, is_low - computed from movement ledger via MongoDB aggregation",
+      "movement_ledger": "Immutable entries - opening_balance, receipt, order_commitment, order_release, manual_adjustment, transfer, writeoff, correction",
+      "negative_balance_enforcement": "warn_only: success+warning, block_commitment: 422 error",
+      "incoming_supply": "Create, status transitions (expected->in_transit->received)",
+      "seed_import": "Batch opening balance creation",
+      "meta_endpoint": "Returns valid enums for frontend dropdowns"
+    },
+    "frontend": {
+      "customer_selector": "Cards with name, code, policy badge, New Customer button",
+      "customer_workspace": "Summary strip (5 metrics), 3 tabs (Balances, Movements, Incoming), back navigation, refresh",
+      "balance_table": "9 columns with ownership badges, qty formatting, SHORT/LOW/OK status badges, search filter",
+      "movement_table": "10 columns with type badges, color-coded qty deltas (+green/-red), reference links",
+      "incoming_table": "8 columns with status badges, action buttons for status transitions",
+      "dialogs": "New Movement (12 fields), Add Incoming (9 fields), Create Customer (3 fields)"
+    }
+  }
+}

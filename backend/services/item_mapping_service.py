@@ -156,8 +156,11 @@ def _score_mapping(norm_desc: str, desc_tokens: set, mapping: Dict) -> float:
 
         # Phrase contained in description
         if phrase in norm_desc:
-            score = 0.90 * (len(phrase) / max(len(norm_desc), 1))
-            score = max(score, 0.75)  # Floor at 0.75 for contained phrases
+            ratio = len(phrase) / max(len(norm_desc), 1)
+            score = 0.90 * ratio
+            # Only boost short phrases if they're a significant portion of the description
+            if ratio >= 0.4:
+                score = max(score, 0.75)
             if score > best_score:
                 best_score = score
                 best_method = "phrase_contained"

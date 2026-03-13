@@ -2897,3 +2897,32 @@ EMAIL_CLIENT_ID=8764d2d9-65cb-4bf8-b8ac-1d922e2b47f8
 - `bc_item_mapping_history` — Audit trail of mapping decisions
 
 *Last Updated: March 13, 2026*
+
+---
+
+## Session Update: March 13, 2026 - Initial Mapping Rules Seeded & Validated
+
+### Seeded Rules
+20 active mapping rules targeting recurring freight/logistics descriptions:
+- High-frequency: "cans plate trailer food grade", "glassware on skids", "intl freight handling charges"
+- Customs/fees: "customs clearance", "ISF fee", "FDA release", "harbor maintenance", "merchandise processing"
+- Misc freight: "CFS handling", "chassis fee", "pier pass", "port check", "exam fees", "admin fee"
+- General: "freight", "energy surcharge", "customs fees", "documentation", "dunnage"
+
+### Validation Results
+- **Coverage**: 65/100 lines mapped (65%) across all docs with line items
+- **False positive fixed**: "documentation" keyword match was triggering on consulting service descriptions. Fixed by tightening `phrase_contained` scoring — short phrases in long descriptions no longer get inflated confidence.
+- **0 false positives** remaining after fix
+
+### Remaining Unmapped (need user input for BC item numbers):
+| Category | Descriptions | Action Needed |
+|----------|-------------|---------------|
+| Glass/Product | "32oz, 28-405, CT, Flint, Glass...", "OI Pallet", "OI Tier Sheet", "OI Top Frame" | Need real BC item numbers |
+| Duty/Tariff | "SECTION 122 - 10% DUTY" | Need DUTY item code |
+| Consulting | "Professional Consulting Services", "Project Management" | Need SERVICES item code |
+| Test data | "Widget A", "Widget B" | Ignore |
+
+### Recommendation
+**(a) More rule seeding** once user provides BC item numbers for glass/product and duty categories. This would push coverage to ~85%+. The mapping admin page is not needed yet — the API CRUD is sufficient.
+
+*Last Updated: March 13, 2026*

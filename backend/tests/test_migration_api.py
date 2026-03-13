@@ -10,7 +10,7 @@ sys.path.insert(0, '/app/backend')
 
 
 # Test configuration
-API_BASE_URL = "https://bc-hub-preview.preview.emergentagent.com"
+API_BASE_URL = "https://gpi-doc-hub-2.preview.emergentagent.com"
 
 
 @pytest.fixture

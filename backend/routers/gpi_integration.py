@@ -336,8 +336,10 @@ async def _resolve_sales_lines(doc: dict, customer_no: str = "") -> list:
 
 @router.post("/sales-orders/preflight/{doc_id}")
 async def sales_order_preflight(doc_id: str):
-    """Preflight validation: check if a document is ready for BC Sales Order creation.
-    Returns mapped values, resolved lines, missing fields, warnings, and overall readiness.
+    """Preflight validation: structured review data before BC Sales Order creation.
+
+    Returns document_summary, validation_checklist, resolved_lines (with mapping metadata),
+    mapped_values, warnings, errors, and overall readiness.
     """
     db = get_db()
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
@@ -364,6 +366,8 @@ async def sales_order_preflight(doc_id: str):
             "ready": False,
             "already_created": True,
             "existing_sales_order": existing_so,
+            "document_summary": {},
+            "validation_checklist": [],
             "mapped_values": {},
             "missing_fields": [],
             "warnings": ["A BC Sales Order has already been created for this document."],
@@ -400,7 +404,6 @@ async def sales_order_preflight(doc_id: str):
     if not resolved_lines:
         errors.append("No sales lines could be resolved. The document has no extracted line items, no total amount, and no fallback G/L account or item code is configured. Header-only orders are not allowed.")
     else:
-        # Inform user about the line source
         line_sources = set(ln["source"] for ln in resolved_lines)
         mapped_count = sum(1 for ln in resolved_lines if ln.get("mapping", {}).get("matched"))
         unmapped_count = len(resolved_lines) - mapped_count
@@ -413,7 +416,7 @@ async def sales_order_preflight(doc_id: str):
             warnings.append("No line items extracted. A comment line will be created with the document total amount. Configure BC_SO_FALLBACK_GL_ACCOUNT for proper G/L posting.")
 
         if mapped_count > 0:
-            warnings.append(f"{mapped_count} of {len(resolved_lines)} line(s) mapped to BC item numbers.")
+            warnings.append(f"{mapped_count} of {len(resolved_lines)} line(s) mapped to BC item/GL targets.")
         if unmapped_count > 0 and "mapped" in line_sources:
             warnings.append(f"{unmapped_count} line(s) could not be mapped and will be created as Comment lines.")
 
@@ -429,11 +432,60 @@ async def sales_order_preflight(doc_id: str):
 
     idempotency_key = _build_idempotency_key(doc_id)
 
+    # ── Document Summary ──
+    capture_channel = doc.get("capture_channel", "")
+    source_display = capture_channel.replace("_", " ").title() if capture_channel else (
+        "Email" if doc.get("email_message_id") else "Upload"
+    )
+    extracted_field_count = sum(1 for v in ef.values() if v)
+    total_possible_fields = max(len(ef), 1)
+    extraction_completeness = round(extracted_field_count / total_possible_fields, 2)
+
+    document_summary = {
+        "document_id": doc_id,
+        "file_name": doc.get("file_name", ""),
+        "source": source_display,
+        "document_type": doc_type,
+        "customer_no": customer_no,
+        "customer_name": customer_name,
+        "external_doc_no": external_doc_no,
+        "order_date": order_date or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "order_date_source": "extracted" if order_date else "fallback_today",
+        "total_amount": amount,
+        "extraction_completeness": extraction_completeness,
+    }
+
+    # ── Duplicate Check ──
+    duplicate_found = False
+    duplicate_detail = "No duplicate found"
+    if external_doc_no:
+        dup = await db.hub_documents.find_one(
+            {"id": {"$ne": doc_id}, "bc_sales_order.external_doc_no": external_doc_no, "bc_sales_order.success": True},
+            {"_id": 0, "id": 1, "bc_sales_order.bc_record_no": 1},
+        )
+        if dup:
+            duplicate_found = True
+            dup_so = (dup.get("bc_sales_order") or {}).get("bc_record_no", "?")
+            duplicate_detail = f"PO '{external_doc_no}' already used on SO {dup_so} (doc {dup['id'][:8]}...)"
+            warnings.append(duplicate_detail)
+
+    # ── Validation Checklist ──
+    validation_checklist = [
+        {"label": "Customer resolved in BC", "passed": bool(customer_no), "detail": f"{customer_no} — {customer_name}" if customer_no else "Not resolved"},
+        {"label": "Required fields present", "passed": "customer_no" not in missing_fields, "detail": f"Missing: {', '.join(missing_fields)}" if missing_fields else "All present"},
+        {"label": "Duplicate check", "passed": not duplicate_found, "detail": duplicate_detail, "blocking": False},
+        {"label": "Lines resolved", "passed": bool(resolved_lines), "detail": f"{len(resolved_lines)} line(s)" if resolved_lines else "No lines"},
+        {"label": "Extraction completeness", "passed": extraction_completeness >= 0.5, "detail": f"{int(extraction_completeness * 100)}% of fields extracted", "blocking": False},
+        {"label": "BC credentials configured", "passed": HAS_CREDENTIALS, "detail": "Connected" if HAS_CREDENTIALS else "Not configured"},
+    ]
+
     return {
         "eligible": eligible,
         "ready": ready,
         "already_created": False,
         "existing_sales_order": None,
+        "document_summary": document_summary,
+        "validation_checklist": validation_checklist,
         "mapped_values": {
             "customer_no": customer_no,
             "customer_name": customer_name,
@@ -457,10 +509,49 @@ async def sales_order_preflight(doc_id: str):
     }
 
 
+class CreateSOFromDocumentRequest(BaseModel):
+    """Request body for creating a Sales Order from a document with user-edited lines."""
+    customer_no_override: str = Field("", description="Override customer number")
+    edited_lines: list = Field(default=None, description="User-edited lines (source of truth if provided)")
+
+
+async def _validate_edited_lines(db, lines: list) -> dict:
+    """Validate user-edited line targets against the synced catalog.
+    Returns {valid: bool, lines: [...with validation], errors: [...]}.
+    """
+    from services.item_mapping_service import _validate_target
+    validated = []
+    validation_errors = []
+    for i, ln in enumerate(lines):
+        lt = ln.get("lineType", "Comment")
+        obj = ln.get("lineObjectNumber", "")
+        target_type = "gl_account" if lt == "Account" else "item" if lt == "Item" else "comment"
+
+        catalog_check = {"valid": True, "reason": "comment", "description": ""}
+        if target_type != "comment" and obj:
+            catalog_check = await _validate_target(db, target_type, obj)
+            if not catalog_check.get("valid"):
+                validation_errors.append({
+                    "line": i,
+                    "target_type": target_type,
+                    "target_no": obj,
+                    "reason": catalog_check.get("reason", "unknown"),
+                    "message": f"Line {i+1}: {target_type} '{obj}' {catalog_check.get('reason', 'invalid')}",
+                })
+
+        v_line = {**ln, "_catalog_valid": catalog_check.get("valid", True), "_catalog_desc": catalog_check.get("description", "")}
+        validated.append(v_line)
+
+    return {"valid": len(validation_errors) == 0, "lines": validated, "errors": validation_errors}
+
+
 @router.post("/sales-orders/from-document/{doc_id}")
-async def create_sales_order_from_document(doc_id: str, customer_no_override: str = Query("", description="Override customer number")):
+async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocumentRequest = None, request: Request = None):
     """Create a BC Sales Order from a GPI Hub document.
-    Creates the header via GPI custom API, then adds resolved lines via standard BC API.
+
+    If `edited_lines` are provided in the body, they are used as the source of truth
+    (no re-resolution). Each line's target is validated against the synced catalog.
+    If `edited_lines` is null/empty, lines are auto-resolved from document data.
     """
     if not HAS_CREDENTIALS:
         raise HTTPException(status_code=503, detail="BC credentials not configured")
@@ -469,6 +560,20 @@ async def create_sales_order_from_document(doc_id: str, customer_no_override: st
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+
+    # Parse body — support both JSON body and query param for backwards compat
+    customer_no_override = ""
+    user_edited_lines = None
+    if body:
+        customer_no_override = body.customer_no_override or ""
+        user_edited_lines = body.edited_lines
+    elif request:
+        try:
+            raw = await request.json()
+            customer_no_override = raw.get("customer_no_override", "")
+            user_edited_lines = raw.get("edited_lines")
+        except Exception:
+            pass
 
     # Check for existing SO (idempotency)
     existing_so = doc.get("bc_sales_order")
@@ -503,12 +608,26 @@ async def create_sales_order_from_document(doc_id: str, customer_no_override: st
             "message": "Cannot create Sales Order: no BC customer number resolved. Provide customer_no_override or map the customer first.",
         })
 
-    # Resolve sales lines — block if none
-    resolved_lines = await _resolve_sales_lines(doc, customer_no=customer_no)
-    if not resolved_lines:
+    # Determine lines: user-edited (source of truth) vs auto-resolved
+    original_resolved_lines = await _resolve_sales_lines(doc, customer_no=customer_no)
+
+    if user_edited_lines and len(user_edited_lines) > 0:
+        # Validate user-edited targets against catalog
+        validation = await _validate_edited_lines(db, user_edited_lines)
+        if not validation["valid"]:
+            raise HTTPException(status_code=422, detail={
+                "error": "catalog_validation_failed",
+                "message": "Some edited line targets are not valid in the BC catalog.",
+                "validation_errors": validation["errors"],
+            })
+        submitted_lines = user_edited_lines
+    else:
+        submitted_lines = original_resolved_lines
+
+    if not submitted_lines:
         raise HTTPException(status_code=422, detail={
             "error": "no_lines",
-            "message": "Cannot create Sales Order: no sales lines could be resolved. The document has no extracted line items and no total amount. Header-only orders are not allowed.",
+            "message": "Cannot create Sales Order: no sales lines to submit.",
         })
 
     external_doc_no = ef.get("po_number") or nf.get("po_number") or ""
@@ -538,10 +657,10 @@ async def create_sales_order_from_document(doc_id: str, customer_no_override: st
     bc_record_no = result.get("bc_record_no", "")
 
     # Step 2: Add lines to the created SO via standard BC API
-    line_result = {"added": 0, "total": len(resolved_lines), "errors": []}
+    line_result = {"added": 0, "total": len(submitted_lines), "errors": []}
     if bc_system_id:
         try:
-            line_result = await add_sales_order_lines(bc_system_id, resolved_lines)
+            line_result = await add_sales_order_lines(bc_system_id, submitted_lines)
             logger.info("Added %d/%d lines to SO %s", line_result["added"], line_result["total"], bc_record_no)
         except Exception as e:
             logger.error("Failed to add lines to SO %s: %s", bc_record_no, str(e))
@@ -549,11 +668,10 @@ async def create_sales_order_from_document(doc_id: str, customer_no_override: st
     else:
         logger.warning("No bc_system_id returned for SO %s — cannot add lines", bc_record_no)
 
-    # Graph writeback
     now = datetime.now(timezone.utc).isoformat()
 
     # Record mapping history for audit
-    for idx, line in enumerate(resolved_lines):
+    for idx, line in enumerate(submitted_lines):
         mapping_meta = line.get("mapping", {})
         try:
             await record_mapping_history(
@@ -564,6 +682,35 @@ async def create_sales_order_from_document(doc_id: str, customer_no_override: st
             )
         except Exception as mh_err:
             logger.warning("Failed to record mapping history for line %d: %s", idx, mh_err)
+
+    # ── Audit log: store both original and submitted lines ──
+    audit_entry = {
+        "id": str(uuid.uuid4()),
+        "doc_id": doc_id,
+        "bc_record_no": bc_record_no,
+        "bc_system_id": bc_system_id,
+        "customer_no": customer_no,
+        "customer_name": customer_info["customer_name"],
+        "external_doc_no": external_doc_no,
+        "order_date": order_date,
+        "idempotency_key": idempotency_key,
+        "transaction_id": transaction_id,
+        "original_resolved_lines": _sanitize_lines(original_resolved_lines),
+        "submitted_lines": _sanitize_lines(submitted_lines),
+        "lines_were_edited": user_edited_lines is not None and len(user_edited_lines) > 0,
+        "lines_added": line_result["added"],
+        "lines_total": line_result["total"],
+        "line_errors": line_result["errors"],
+        "success": result.get("success", False),
+        "status": result.get("status", ""),
+        "error_message": result.get("error_message", ""),
+        "created_at": now,
+        "created_by": "gpi_hub",
+    }
+    try:
+        await db.bc_so_creation_audit.insert_one(audit_entry)
+    except Exception as ae:
+        logger.warning("Failed to write SO creation audit: %s", ae)
 
     bc_sales_order = {
         "bc_record_no": bc_record_no,
@@ -579,7 +726,7 @@ async def create_sales_order_from_document(doc_id: str, customer_no_override: st
         "lines_added": line_result["added"],
         "lines_total": line_result["total"],
         "line_errors": line_result["errors"],
-        "resolved_lines": resolved_lines,
+        "resolved_lines": _sanitize_lines(submitted_lines),
         "created_at": now,
         "created_by": "gpi_hub",
         "error_message": result.get("error_message", ""),
@@ -610,6 +757,7 @@ async def create_sales_order_from_document(doc_id: str, customer_no_override: st
                     "status": result.get("status", ""),
                     "lines_added": line_result["added"],
                     "lines_total": line_result["total"],
+                    "lines_were_edited": user_edited_lines is not None,
                 },
                 actor="system",
             )
@@ -631,6 +779,15 @@ async def create_sales_order_from_document(doc_id: str, customer_no_override: st
         "line_errors": line_result["errors"],
         "created_at": now,
     }
+
+
+def _sanitize_lines(lines: list) -> list:
+    """Strip internal fields from lines for storage."""
+    sanitized = []
+    for ln in (lines or []):
+        clean = {k: v for k, v in ln.items() if not k.startswith("_")}
+        sanitized.append(clean)
+    return sanitized
 
 
 @router.post("/purchase-invoices")

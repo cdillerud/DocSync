@@ -1,0 +1,79 @@
+{
+  "summary": "Comprehensive testing of GPI Document Hub - Sales Order Preflight Review Panel. All 11 backend API tests passed. Frontend UI verified working via Playwright testing.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed_tests": [
+    "POST /api/gpi-integration/sales-orders/preflight/{doc_id} - returns document_summary with doc_id, source, type, customer, PO, date, amount, extraction completeness",
+    "POST /api/gpi-integration/sales-orders/preflight/{doc_id} - returns validation_checklist with pass/fail/warn items (customer, required fields, duplicate, lines, extraction, credentials)",
+    "POST /api/gpi-integration/sales-orders/preflight/{doc_id} - returns resolved_lines with mapping metadata (lineType, description, qty, unitPrice, mapping object)",
+    "POST /api/gpi-integration/sales-orders/preflight/{doc_id} - returns mapped_values with bc_read_environment='Production' and bc_write_environment='Sandbox_11_3_2025'",
+    "POST /api/gpi-integration/sales-orders/preflight/{doc_id} - returns 404 for non-existent document",
+    "POST /api/gpi-integration/sales-orders/from-document/{doc_id} - accepts JSON body with edited_lines and customer_no_override",
+    "POST /api/gpi-integration/sales-orders/from-document/{doc_id} - validates edited lines against catalog, rejects invalid Item targets with 422 catalog_validation_failed",
+    "POST /api/gpi-integration/sales-orders/from-document/{doc_id} - validates edited lines against catalog, rejects invalid G/L Account targets with 422",
+    "POST /api/gpi-integration/sales-orders/from-document/{doc_id} - accepts Comment lines without target validation",
+    "POST /api/gpi-integration/sales-orders/from-document/{doc_id} - returns 422 missing_customer when customer not resolved and no override provided",
+    "GET /api/gpi-integration/status - returns integration configuration status",
+    "Frontend: Environment Banner shows 'Read: Production' and 'Write: Sandbox_11_3_2025'",
+    "Frontend: Document Summary shows doc ID, source, type, customer, PO, date, amount, extraction completeness",
+    "Frontend: Validation Checklist shows pass/fail/warn icons for customer, required fields, duplicate check, lines, extraction, credentials",
+    "Frontend: BC Customer Number (required) input appears when customer not resolved",
+    "Frontend: Order Total displays correctly ($2,250.00 for test document)",
+    "Frontend: Line table shows Widget A and Widget B lines as Comment type"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_preflight_review_panel.py",
+    "/app/test_reports/pytest/preflight_review_panel_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_preflight_review_panel.py"
+  ],
+  "success_rate": {
+    "backend": "100% (11/11 tests passed)",
+    "frontend": "100% (all core UI components verified)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://doc-workflow-test.preview.emergentagent.com",
+    "test_document_id": "44b2e236-c1ab-4e0e-9c23-23f542d68a71"
+  },
+  "seed_data_creation": "Used existing test document 44b2e236-c1ab-4e0e-9c23-23f542d68a71 with Widget A/Widget B lines",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Sales Order Preflight Review Panel testing complete. Key endpoints: POST /api/gpi-integration/sales-orders/preflight/{doc_id} returns structured preflight data, POST /api/gpi-integration/sales-orders/from-document/{doc_id} creates SO with catalog validation. Test document 44b2e236-c1ab-4e0e-9c23-23f542d68a71 has no resolved customer (must use customer_no_override). Catalog validation correctly rejects FAKE_ITEM_999 and invalid GL accounts. Email service is MOCKED.",
+  "features_verified": {
+    "backend": {
+      "preflight_endpoint": {
+        "document_summary": "Returns doc_id, source, document_type, customer_no, customer_name, external_doc_no, order_date, total_amount, extraction_completeness",
+        "validation_checklist": "6 items: customer resolved, required fields, duplicate check, lines resolved, extraction completeness, BC credentials",
+        "mapped_values": "Includes bc_read_environment, bc_write_environment, idempotency_key",
+        "resolved_lines": "Returns lines with lineType, description, quantity, unitPrice, mapping metadata"
+      },
+      "create_endpoint": {
+        "edited_lines": "Accepts JSON body with edited_lines array",
+        "catalog_validation": "Validates Item and Account targets against synced catalog",
+        "error_response": "Returns 422 with catalog_validation_failed error for invalid targets",
+        "customer_validation": "Returns 422 missing_customer when no customer resolved"
+      }
+    },
+    "frontend": {
+      "environment_banner": "Shows Read: Production, Write: Sandbox_11_3_2025",
+      "document_summary": "Displays all required fields with appropriate icons",
+      "validation_checklist": "Shows pass/fail/warn icons for each validation item",
+      "line_table": "Editable table with type dropdown, description, qty, price, target fields",
+      "order_total": "Displays computed total from line items",
+      "customer_override": "Input field appears when customer not resolved",
+      "confirmation_bar": "Shows line count, customer, environment, and total"
+    }
+  },
+  "mocked_apis": ["Email service"]
+}

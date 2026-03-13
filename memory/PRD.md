@@ -2768,4 +2768,15 @@ Multiple subsystems (BC Validation, AP Validation, derived state, document statu
 - **Backend fix**: `GET /api/documents/{doc_id}` now reconciles the stored `ap_validation_result` at read time — filters out vendor-dependent warnings and blocking issues when vendor is now resolved via `matched_vendor_no`, `vendor_id`, or `validation_results.bc_record_info`
 - **Frontend fix**: `APValidationPanel.js` filters warnings containing "vendor not resolved" when `vendorIsResolved` is true
 
+### Smoke Test Results (March 14, 2026)
+| Test | Result | Details |
+|------|--------|---------|
+| 0303914 Regression | CLEAN | No stale vendor warnings, no contradictions |
+| Create BC Purchase Invoice | PI 72533 | Created in Sandbox_11_3_2025 via TUMALOC |
+| Create BC Sales Order | SO 107038 | Created in Sandbox_11_3_2025 via customer NEW |
+| PI Idempotency | BLOCKED | already_created=true, returns PI 72533 |
+| SO Idempotency | BLOCKED | already_created=true, returns SO 107038 |
+| BC Integration Dashboard | 2 records | Both transactions visible with correct metadata |
+| Split Environment | Verified | Read=Production, Write=Sandbox_11_3_2025 |
+
 *Last Updated: March 14, 2026*

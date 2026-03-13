@@ -1,4 +1,4 @@
-enum 50101 "GPI Request Status"
+enum 50103 "GPI Request Status"
 {
     Extensible = true;
     Caption = 'GPI Request Status';

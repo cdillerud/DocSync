@@ -1,4 +1,4 @@
-enum 50100 "GPI Record Type"
+enum 50102 "GPI Record Type"
 {
     Extensible = true;
     Caption = 'GPI Record Type';

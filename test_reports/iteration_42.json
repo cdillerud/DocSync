@@ -40,7 +40,7 @@
   "seed_data_creation": "None - used existing test documents",
   "retest_needed": false,
   "should_main_agent_self_test": false,
-  "context_for_next_testing_agent": "BC Sales Order from Document feature is fully tested. Test documents: Sales_Order=44b2e236-c1ab-4e0e-9c23-23f542d68a71 (eligible, panel visible), AP_Invoice=80c7ab51-0cdb-48cc-b39c-b5d8a9c27c85 (not eligible, panel hidden). BC credentials in .env are placeholder values - any endpoint requiring BC API access returns 502 (expected).",
+  "context_for_next_testing_agent": "BC Sales Order from Document feature is fully tested. Test documents: Sales_Order=bc-hub-preview (eligible, panel visible), AP_Invoice=bc-hub-preview (not eligible, panel hidden). BC credentials in .env are placeholder values - any endpoint requiring BC API access returns 502 (expected).",
   "verified_endpoints": {
     "POST /api/gpi-integration/sales-orders/preflight/{doc_id} for Sales_Order": "PASS - Returns eligible=true, mapped_values, line_items, warnings",
     "POST /api/gpi-integration/sales-orders/preflight/{doc_id} for AP_Invoice": "PASS - Returns eligible=false with error message",

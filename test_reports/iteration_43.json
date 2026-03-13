@@ -41,7 +41,7 @@
   "seed_data_creation": "None - used existing test documents",
   "retest_needed": false,
   "should_main_agent_self_test": false,
-  "context_for_next_testing_agent": "BC Purchase Invoice from Document feature is fully tested. Test documents: AP_Invoice=80c7ab51-0cdb-48cc-b39c-b5d8a9c27c85 (eligible for PI, panel visible, vendor CARGOMO resolved at 95% confidence), Sales_Order=44b2e236-c1ab-4e0e-9c23-23f542d68a71 (not eligible for PI, panel hidden). BC credentials in .env are placeholder values - any endpoint requiring BC API access returns 502 (expected).",
+  "context_for_next_testing_agent": "BC Purchase Invoice from Document feature is fully tested. Test documents: AP_Invoice=bc-hub-preview (eligible for PI, panel visible, vendor CARGOMO resolved at 95% confidence), Sales_Order=bc-hub-preview (not eligible for PI, panel hidden). BC credentials in .env are placeholder values - any endpoint requiring BC API access returns 502 (expected).",
   "verified_endpoints": {
     "POST /api/gpi-integration/purchase-invoices/preflight/{ap_invoice_doc_id}": "PASS - Returns eligible=true, ready=true, vendor=CARGOMO, invoice_no=126156299-AR, 5 line_items, $2785 total",
     "POST /api/gpi-integration/purchase-invoices/preflight/{sales_order_doc_id}": "PASS - Returns eligible=false with error message 'not eligible for Purchase Invoice creation'",

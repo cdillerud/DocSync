@@ -2684,3 +2684,37 @@ Operational audit dashboard at `/bc-integration` showing all BC integration tran
 - `/app/backend/.env` — All real credentials, BC_ENVIRONMENT=Production
 
 *Last Updated: March 14, 2026*
+
+
+---
+
+## Session Update: March 14, 2026 - Split-Environment BC Integration
+
+### Completed
+
+#### Split-Environment BC Integration Model (User-Requested Architecture Change)
+- **Reads from Production**: vendor lookup, customer lookup, PO validation, document/reference validation
+- **Writes to Sandbox**: Create BC Sales Order, Create BC Purchase Invoice, future create/update actions
+- **Hard production write guard**: `_check_write_protection()` — if `BC_WRITE_ENVIRONMENT` resolves to Production and `BC_BLOCK_PRODUCTION_WRITES=true`, all write endpoints refuse the operation
+- **Config vars**: `BC_READ_ENVIRONMENT=Production`, `BC_WRITE_ENVIRONMENT=Sandbox_11_3_2025`, `BC_BLOCK_PRODUCTION_WRITES=true`
+- **New endpoint**: `GET /api/bc/environment-status` returns full split-env config
+- **Updated services**: `business_central_service.py`, `gpi_integration_service.py`, `bc_sandbox_service.py` all use split routing
+- **UI**: Sidebar shows READ/WRITE environments, BC Integration Dashboard has env banner, Sales Order + Purchase Invoice panels show split-env notice and confirmation messaging
+
+#### Testing: 100% Pass Rate
+- Backend: 21/21 tests passed (environment status, vendor lookup, split routing)
+- Frontend: 8/8 tests passed (sidebar, dashboard banner, login)
+
+### Files Modified
+- `/app/backend/.env` — added `BC_READ_ENVIRONMENT`, `BC_WRITE_ENVIRONMENT`, `BC_BLOCK_PRODUCTION_WRITES`
+- `/app/backend/services/business_central_service.py` — split read/write config, `ProductionWriteBlockedError`, `_check_write_protection()`, `get_environment_status()`
+- `/app/backend/services/gpi_integration_service.py` — split routing for GPI custom API
+- `/app/backend/services/bc_sandbox_service.py` — updated credential loading, added split-env to status
+- `/app/backend/routers/cache.py` — added `/bc/environment-status` endpoint
+- `/app/backend/routers/gpi_integration.py` — preflight responses include `bc_read_environment` and `bc_write_environment`
+- `/app/frontend/src/components/Layout.js` — sidebar shows READ/WRITE environments
+- `/app/frontend/src/components/CreateBCSalesOrderPanel.js` — split-env info + confirmation notice
+- `/app/frontend/src/components/CreateBCPurchaseInvoicePanel.js` — split-env info + confirmation notice
+- `/app/frontend/src/pages/BCIntegrationDashboard.js` — environment banner with badges + write-guard status
+
+*Last Updated: March 14, 2026*

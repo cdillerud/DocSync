@@ -2718,3 +2718,48 @@ Operational audit dashboard at `/bc-integration` showing all BC integration tran
 - `/app/frontend/src/pages/BCIntegrationDashboard.js` — environment banner with badges + write-guard status
 
 *Last Updated: March 14, 2026*
+
+
+---
+
+## Session Update: March 14, 2026 - P0 State Consistency Bug Fix
+
+### Root Cause
+Multiple subsystems (BC Validation, AP Validation, derived state, document status) computed vendor resolution independently with no cross-referencing or precedence rules. When BC validation resolved a vendor AFTER AP validation ran, the stale AP failure persisted.
+
+### Fixes Applied (7 bugs)
+
+#### 1. Derived State Service — Event precedence for vendor resolution
+- `bc.validation.completed` with `all_passed=true` now CLEARS all vendor-related blocking issues and overrides fail state
+- `vendor.resolved` event clears ALL vendor-related blocks (not just exact string match)
+- Post-processing cross-reference: checks `validation_results.bc_record_info` and `matched_vendor_no` on the document to clear stale vendor blocks
+
+#### 2. AP Validation — BC cross-reference
+- `POST /api/ap-validation/validate/{doc_id}` now checks `validation_results.bc_record_info` for vendor resolution before declaring vendor unresolved
+
+#### 3. Document header status badge
+- Uses derived state's `validation_state` as authoritative when available, replacing the stale `doc.status` field
+
+#### 4. AP Validation Panel — vendor reconciliation
+- Cross-references BC validation results and document fields (`matched_vendor_no`, `vendor_id`) to determine vendor resolution
+- Filters out stale vendor blocking issues when vendor is known resolved
+- Reconciles validation state: if fail was only due to vendor, upgrades to pass/warning when vendor is resolved
+
+#### 5. Extraction Quality 0/0 fix
+- Frontend was reading `extracted_count`/`total_fields` (doesn't exist). Now reads `required_extracted + optional_extracted` / `required_fields.length + optional_fields.length`
+
+#### 6. Line item total $0.00 fix
+- APReviewPanel now maps `amount` → `line_total` and computes `unit_price = amount / quantity` when loading line items from extracted data
+
+### Testing: 100% Pass Rate
+- Backend: 12/12 tests
+- Frontend: 11/11 UI checks
+
+### Files Modified
+- `/app/backend/services/derived_state_service.py` — event precedence, post-processing cross-reference
+- `/app/backend/routers/ap_validation.py` — BC validation cross-reference
+- `/app/frontend/src/pages/DocumentDetailPage.js` — header status badge, extraction quality keys
+- `/app/frontend/src/components/APValidationPanel.js` — vendor reconciliation, filtered blocking issues
+- `/app/frontend/src/components/APReviewPanel.js` — line item amount→line_total mapping
+
+*Last Updated: March 14, 2026*

@@ -174,6 +174,42 @@ async def get_document(doc_id: str, include_events: bool = Query(True)):
             derived_state = await derived_state_service.derive_state(doc_id, doc)
             derived_state["display"] = format_state_for_display(derived_state)
 
+    # Reconcile stale ap_validation_result warnings with current vendor state
+    ap_val = doc.get("ap_validation_result")
+    if ap_val:
+        vendor_resolved_now = bool(
+            ap_val.get("vendor_resolved")
+            or doc.get("matched_vendor_no")
+            or doc.get("vendor_id")
+            or (doc.get("validation_results", {}).get("bc_record_info", {}).get("number"))
+        )
+        if vendor_resolved_now:
+            # Filter stale vendor-dependent warnings
+            original_warnings = ap_val.get("warnings", [])
+            filtered_warnings = [
+                w for w in original_warnings
+                if "vendor not resolved" not in (
+                    (w.get("details", "") if isinstance(w, dict) else str(w)).lower()
+                )
+            ]
+            if len(filtered_warnings) != len(original_warnings):
+                ap_val["warnings"] = filtered_warnings
+            # Filter stale vendor blocking issues
+            original_blocking = ap_val.get("blocking_issues", [])
+            filtered_blocking = [
+                b for b in original_blocking
+                if "vendor" not in b.lower()
+            ]
+            if len(filtered_blocking) != len(original_blocking):
+                ap_val["blocking_issues"] = filtered_blocking
+            # Update vendor_resolved flag
+            if not ap_val.get("vendor_resolved"):
+                ap_val["vendor_resolved"] = True
+                vendor_no = doc.get("matched_vendor_no") or doc.get("vendor_id") or \
+                    doc.get("validation_results", {}).get("bc_record_info", {}).get("number", "")
+                if vendor_no:
+                    ap_val["matched_vendor_no"] = vendor_no
+
     return {
         "document": doc,
         "workflows": workflows,

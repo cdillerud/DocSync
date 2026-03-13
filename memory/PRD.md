@@ -2758,8 +2758,14 @@ Multiple subsystems (BC Validation, AP Validation, derived state, document statu
 ### Files Modified
 - `/app/backend/services/derived_state_service.py` — event precedence, post-processing cross-reference
 - `/app/backend/routers/ap_validation.py` — BC validation cross-reference
+- `/app/backend/routers/documents.py` — reconcile stale ap_validation_result on read (filter vendor warnings/blocking when vendor resolved)
 - `/app/frontend/src/pages/DocumentDetailPage.js` — header status badge, extraction quality keys
-- `/app/frontend/src/components/APValidationPanel.js` — vendor reconciliation, filtered blocking issues
+- `/app/frontend/src/components/APValidationPanel.js` — vendor reconciliation, filtered blocking issues AND warnings
 - `/app/frontend/src/components/APReviewPanel.js` — line item amount→line_total mapping
+
+### Follow-up Fix: Stale "Duplicate check skipped" Warning
+- **Issue**: AP Validation still showed "Duplicate check skipped: vendor not resolved" even after vendor was resolved by BC validation
+- **Backend fix**: `GET /api/documents/{doc_id}` now reconciles the stored `ap_validation_result` at read time — filters out vendor-dependent warnings and blocking issues when vendor is now resolved via `matched_vendor_no`, `vendor_id`, or `validation_results.bc_record_info`
+- **Frontend fix**: `APValidationPanel.js` filters warnings containing "vendor not resolved" when `vendorIsResolved` is true
 
 *Last Updated: March 14, 2026*

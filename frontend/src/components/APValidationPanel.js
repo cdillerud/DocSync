@@ -102,7 +102,12 @@ export default function APValidationPanel({ document: doc, onUpdate }) {
   };
 
   const checks = apVal?.checks || [];
-  const warnings = apVal?.warnings || [];
+  // Filter out stale vendor-dependent warnings if vendor is now resolved
+  const warnings = (apVal?.warnings || []).filter(w => {
+    if (!vendorIsResolved) return true;
+    const text = typeof w === 'string' ? w : (w.details || w.message || '');
+    return !text.toLowerCase().includes('vendor not resolved') && !text.toLowerCase().includes('vendor not matched');
+  });
   // Filter out stale vendor blocking issues if vendor is now resolved
   const blockingIssues = (apVal?.blocking_issues || []).filter(
     issue => !(vendorIsResolved && issue.toLowerCase().includes('vendor'))

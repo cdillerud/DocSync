@@ -302,3 +302,51 @@ async def api_release_commitments(body: ReleaseReq):
         return result
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+
+# ═══════════════════════════════════════════════════════════════
+# INCOMING SUPPLY FROM SHORTAGE (separate prefix)
+# ═══════════════════════════════════════════════════════════════
+
+incoming_supply_router = APIRouter(prefix="/incoming-supply", tags=["Incoming Supply"])
+
+
+class ShortageLineReq(BaseModel):
+    item: str
+    qty_needed: float
+    qty_available: float
+
+
+class ShortageReq(BaseModel):
+    sales_order_id: str
+    lines: list[ShortageLineReq]
+
+
+@incoming_supply_router.post("/from-shortage")
+async def api_create_from_shortage(body: ShortageReq):
+    """Create incoming supply records for SHORT items on a Sales Order.
+
+    Returns 409 if a duplicate supply record already exists for the same
+    item + order reference. Returns 422 if shortage <= 0.
+    """
+    db = get_db()
+    try:
+        from services.inventory_so_integration import create_shortage_supply
+        result = await create_shortage_supply(
+            db,
+            sales_order_id=body.sales_order_id,
+            lines=[{"item": ln.item, "qty_needed": ln.qty_needed, "qty_available": ln.qty_available} for ln in body.lines],
+            created_by="gpi_hub",
+        )
+        # If ALL lines were duplicates and nothing was created, return 409
+        if result["created"] == 0 and len(result["duplicates"]) > 0:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": f"Duplicate incoming supply already exists for: {', '.join(result['duplicates'])}",
+                    "duplicates": result["duplicates"],
+                },
+            )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))

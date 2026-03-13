@@ -317,3 +317,11 @@ export const createPurchaseInvoiceFromDocument = (docId, vendorNoOverride = '') 
 };
 
 export default api;
+
+// Create incoming supply from shortage lines
+export const createIncomingFromShortage = (salesOrderId, lines) => {
+  return api.post('/incoming-supply/from-shortage', {
+    sales_order_id: salesOrderId,
+    lines,
+  });
+};

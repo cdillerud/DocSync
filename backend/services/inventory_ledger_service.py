@@ -35,7 +35,7 @@ SOURCE_TYPES = {
 OWNERSHIP_TYPES = {"customer_owned", "gamer_reserved", "mixed", "unknown"}
 
 # ── Incoming supply statuses ──
-SUPPLY_STATUSES = {"expected", "in_transit", "received", "cancelled"}
+SUPPLY_STATUSES = {"planned", "expected", "in_transit", "received", "cancelled"}
 
 # ── Negative balance policies ──
 NEGATIVE_POLICIES = {"warn_only", "block_commitment"}
@@ -253,7 +253,7 @@ async def derive_balances(
     raw = await db[MOVEMENTS_COLL].aggregate(pipeline).to_list(5000)
 
     # Fetch incoming supply for this customer
-    inc_match = {"customer_id": customer_id, "status": {"$in": ["expected", "in_transit"]}}
+    inc_match = {"customer_id": customer_id, "status": {"$in": ["planned", "expected", "in_transit"]}}
     if item:
         inc_match["item"] = item
     if warehouse:
@@ -342,8 +342,10 @@ async def create_incoming(
     item: str, item_description: str, warehouse: str,
     ownership_type: str, incoming_qty: float, unit_of_measure: str,
     eta: str = "", source_reference: str = "", notes: str = "",
-    created_by: str = "system",
+    created_by: str = "system", status: str = "expected",
 ):
+    if status not in SUPPLY_STATUSES:
+        status = "expected"
     doc = {
         "id": str(uuid.uuid4()),
         "customer_id": customer_id,
@@ -355,7 +357,7 @@ async def create_incoming(
         "unit_of_measure": unit_of_measure.strip(),
         "eta": eta,
         "source_reference": source_reference,
-        "status": "expected",
+        "status": status,
         "notes": notes,
         "created_by": created_by,
         "created_at": datetime.now(timezone.utc).isoformat(),

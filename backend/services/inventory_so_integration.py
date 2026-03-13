@@ -13,9 +13,9 @@ import logging
 from typing import Optional
 from services.inventory_ledger_service import (
     derive_balances, create_movement, list_movements,
-    CUSTOMERS_COLL, MOVEMENTS_COLL,
+    create_incoming, get_customer,
+    CUSTOMERS_COLL, MOVEMENTS_COLL, INCOMING_COLL,
 )
-from services.inventory_ledger_service import get_customer
 
 logger = logging.getLogger(__name__)
 
@@ -374,5 +374,99 @@ async def release_order_commitments(
     logger.info(
         "Inventory releases for SO %s: released=%d skipped=%d errors=%d",
         sales_order_id, result["released"], result["skipped"], len(result["errors"]),
+    )
+    return result
+
+
+async def create_shortage_supply(
+    db,
+    sales_order_id: str,
+    lines: list,
+    created_by: str = "gpi_hub",
+) -> dict:
+    """Create incoming supply records for SHORT items on a Sales Order.
+
+    For each line: shortage = qty_needed - qty_available.
+    Rejects if shortage <= 0, or if a duplicate supply record already exists
+    for the same item + order reference (HTTP 409).
+
+    Returns: {created: int, skipped: int, supply_ids: [], errors: [], duplicates: []}
+    """
+    result = {"created": 0, "skipped": 0, "supply_ids": [], "errors": [], "duplicates": []}
+
+    if not lines:
+        return result
+
+    # Find the workspace from the commitment for this SO
+    sample = await db[MOVEMENTS_COLL].find_one(
+        {"movement_type": "order_commitment", "reference_id": sales_order_id},
+        {"_id": 0, "customer_id": 1},
+    )
+    if not sample:
+        raise ValueError(f"No order_commitment found for sales order '{sales_order_id}'")
+
+    workspace_id = sample["customer_id"]
+    cust = await get_customer(db, workspace_id)
+    if not cust:
+        raise ValueError(f"Customer workspace '{workspace_id}' not found")
+
+    for line in lines:
+        item = (line.get("item") or "").strip()
+        qty_needed = float(line.get("qty_needed", 0))
+        qty_available = float(line.get("qty_available", 0))
+        shortage = qty_needed - qty_available
+
+        if not item:
+            result["skipped"] += 1
+            continue
+
+        if shortage <= 0:
+            result["errors"].append(
+                f"Item '{item}': no shortage (needed={qty_needed}, available={qty_available})"
+            )
+            continue
+
+        # Duplicate check: same item + source_reference in this workspace
+        existing = await db[INCOMING_COLL].find_one({
+            "customer_id": workspace_id,
+            "item": item,
+            "source_reference": sales_order_id,
+            "status": {"$nin": ["cancelled", "received"]},
+        }, {"_id": 0, "id": 1})
+        if existing:
+            result["duplicates"].append(item)
+            continue
+
+        # Get item metadata from the commitment movement
+        commitment_doc = await db[MOVEMENTS_COLL].find_one(
+            {"customer_id": workspace_id, "movement_type": "order_commitment",
+             "reference_id": sales_order_id, "item": item},
+            {"_id": 0},
+        )
+        warehouse = commitment_doc.get("warehouse", "MAIN") if commitment_doc else "MAIN"
+        ownership = commitment_doc.get("ownership_type", "customer_owned") if commitment_doc else "customer_owned"
+        uom = commitment_doc.get("unit_of_measure", "units") if commitment_doc else "units"
+        item_desc = commitment_doc.get("item_description", "") if commitment_doc else ""
+
+        supply_doc = await create_incoming(
+            db, workspace_id,
+            item=item,
+            item_description=item_desc,
+            warehouse=warehouse,
+            ownership_type=ownership,
+            incoming_qty=round(shortage, 4),
+            unit_of_measure=uom,
+            source_reference=sales_order_id,
+            notes=f"Auto-created from shortage on SO {sales_order_id} (needed={qty_needed}, available={qty_available})",
+            created_by=created_by,
+            status="planned",
+        )
+        result["created"] += 1
+        result["supply_ids"].append(supply_doc["id"])
+
+    logger.info(
+        "Shortage supply for SO %s: created=%d skipped=%d duplicates=%d errors=%d",
+        sales_order_id, result["created"], result["skipped"],
+        len(result["duplicates"]), len(result["errors"]),
     )
     return result

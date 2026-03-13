@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
-import { salesOrderPreflight, createSalesOrderFromDocument } from '../lib/api';
+import { salesOrderPreflight, createSalesOrderFromDocument, createIncomingFromShortage } from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -13,7 +13,7 @@ import {
   ShoppingCart, Loader2, CheckCircle2, AlertCircle,
   AlertTriangle, ChevronRight, User, Calendar,
   FileText, Hash, Shield, XCircle, Pencil, RotateCcw,
-  Plus, Trash2, Copy, Server, Warehouse, Package,
+  Plus, Trash2, Copy, Server, Warehouse, Package, TruckIcon,
 } from 'lucide-react';
 
 const ELIGIBLE_TYPES = new Set(['Sales_Order', 'SalesOrder', 'Order_Confirmation', 'PurchaseOrder']);
@@ -103,6 +103,32 @@ export default function CreateBCSalesOrderPanel({ document, onUpdate }) {
     }
   }, [originalLines]);
 
+  const handleCreateShortageSupply = useCallback(async (shortageLines) => {
+    const wsId = preflight?.inventory_workspace?.id;
+    if (!wsId) {
+      toast.error('No inventory workspace linked');
+      return;
+    }
+    // Use external doc no or idempotency key as the SO reference
+    const soRef = preflight?.mapped_values?.external_doc_no
+      || preflight?.mapped_values?.idempotency_key || document.id;
+    try {
+      const res = await createIncomingFromShortage(soRef, shortageLines);
+      const d = res.data;
+      if (d.created > 0) {
+        toast.success(`Created ${d.created} incoming supply record(s)`);
+        // Re-run preflight to refresh inventory data
+        runPreflight();
+      } else if (d.duplicates?.length > 0) {
+        toast.warning(`Incoming supply already exists for: ${d.duplicates.join(', ')}`);
+      }
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      const msg = typeof detail === 'object' ? detail.message : detail;
+      toast.error(msg || 'Failed to create incoming supply');
+    }
+  }, [preflight, document.id, runPreflight]);
+
   if (!eligible && !existingSO) return null;
 
   if (existingSO && state === 'idle') {
@@ -153,6 +179,7 @@ export default function CreateBCSalesOrderPanel({ document, onUpdate }) {
             setCustomerOverride={setCustomerOverride}
             onConfirm={handleCreate}
             onCancel={() => { setState('idle'); setPreflight(null); setEditedLines(null); }}
+            onCreateShortageSupply={handleCreateShortageSupply}
           />
         )}
         {state === 'creating' && <LoadingState message="Creating Sales Order in BC..." />}
@@ -187,7 +214,7 @@ function LoadingState({ message = 'Running preflight checks...' }) {
 
 function PreflightReview({
   data, editedLines, setEditedLines, originalLines, resetLines,
-  customerOverride, setCustomerOverride, onConfirm, onCancel,
+  customerOverride, setCustomerOverride, onConfirm, onCancel, onCreateShortageSupply,
 }) {
   const mv = data.mapped_values || {};
   const ds = data.document_summary || {};
@@ -237,6 +264,7 @@ function PreflightReview({
         linesEdited={linesEdited}
         resetLines={resetLines}
         orderTotal={orderTotal}
+        onCreateShortageSupply={onCreateShortageSupply}
       />
 
       {/* ─── E. Warnings ─── */}
@@ -431,7 +459,7 @@ function InventorySummary({ invSummary, invWorkspace }) {
 // D. EDITABLE LINE TABLE
 // ════════════════════════════════════════════════════════════════
 
-function EditableLineTable({ lines, setLines, linesEdited, resetLines, orderTotal }) {
+function EditableLineTable({ lines, setLines, linesEdited, resetLines, orderTotal, onCreateShortageSupply }) {
   if (!lines || lines.length === 0) return null;
 
   const updateLine = (idx, field, value) => {
@@ -507,7 +535,7 @@ function EditableLineTable({ lines, setLines, linesEdited, resetLines, orderTota
           </thead>
           <tbody>
             {lines.map((ln, i) => (
-              <EditableLine key={i} index={i} line={ln} updateLine={updateLine} removeLine={removeLine} />
+              <EditableLine key={i} index={i} line={ln} updateLine={updateLine} removeLine={removeLine} onCreateShortageSupply={onCreateShortageSupply} />
             ))}
           </tbody>
           <tfoot>
@@ -525,7 +553,7 @@ function EditableLineTable({ lines, setLines, linesEdited, resetLines, orderTota
   );
 }
 
-function EditableLine({ index, line, updateLine, removeLine }) {
+function EditableLine({ index, line, updateLine, removeLine, onCreateShortageSupply }) {
   const mp = line.mapping || {};
   const inv = line.inventory || {};
   const lineTotal = (parseFloat(line.quantity) || 0) * (parseFloat(line.unitPrice) || 0);
@@ -542,6 +570,18 @@ function EditableLine({ index, line, updateLine, removeLine }) {
   if (inv.matched && inv.available < ordered) {
     invStatus = inv.available <= 0 ? 'SHORT' : 'LOW';
   }
+
+  const isShort = invStatus === 'SHORT' || invStatus === 'LOW';
+  const itemKey = line.lineObjectNumber || '';
+
+  const handleSupplyClick = () => {
+    if (!onCreateShortageSupply || !itemKey) return;
+    onCreateShortageSupply([{
+      item: itemKey,
+      qty_needed: ordered,
+      qty_available: inv.available ?? 0,
+    }]);
+  };
 
   return (
     <tr className="border-b border-border/50 last:border-0 group" data-testid={`so-line-${index}`}>
@@ -616,11 +656,24 @@ function EditableLine({ index, line, updateLine, removeLine }) {
           <span className="text-[10px] text-muted-foreground/40">-</span>
         )}
       </td>
-      {/* Inventory Status Badge */}
+      {/* Inventory Status Badge + Shortage Supply Button */}
       <td className="py-1 px-1.5 text-center" data-testid={`so-line-${index}-inv-status`}>
-        <Badge variant="outline" className={`text-[8px] h-4 px-1 ${INV_STATUS_BADGE[invStatus] || INV_STATUS_BADGE['NO_MATCH']}`}>
-          {invStatus === 'NO_MATCH' ? '—' : invStatus}
-        </Badge>
+        <div className="flex items-center justify-center gap-0.5">
+          <Badge variant="outline" className={`text-[8px] h-4 px-1 ${INV_STATUS_BADGE[invStatus] || INV_STATUS_BADGE['NO_MATCH']}`}>
+            {invStatus === 'NO_MATCH' ? '—' : invStatus}
+          </Badge>
+          {isShort && inv.matched && itemKey && (
+            <Button
+              variant="ghost" size="sm"
+              className="h-4 w-4 p-0 text-amber-500 hover:text-amber-700 dark:hover:text-amber-300"
+              onClick={handleSupplyClick}
+              title="Create Incoming Supply"
+              data-testid={`so-line-${index}-create-supply-btn`}
+            >
+              <TruckIcon className="w-3 h-3" />
+            </Button>
+          )}
+        </div>
       </td>
       {/* Remove */}
       <td className="py-1 px-0.5">

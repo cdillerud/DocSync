@@ -267,3 +267,38 @@ async def api_meta():
         "source_types": sorted(SOURCE_TYPES),
         "ownership_types": sorted(OWNERSHIP_TYPES),
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+# ORDER RELEASE
+# ═══════════════════════════════════════════════════════════════
+
+class ReleaseLineReq(BaseModel):
+    item: str
+    qty: float
+
+
+class ReleaseReq(BaseModel):
+    sales_order_id: str
+    lines: list[ReleaseLineReq]
+
+
+@router.post("/release")
+async def api_release_commitments(body: ReleaseReq):
+    """Release committed inventory for a fulfilled or cancelled Sales Order.
+
+    Validates that matching order_commitment exists and that release qty
+    does not exceed the outstanding committed quantity.
+    """
+    db = get_db()
+    try:
+        from services.inventory_so_integration import release_order_commitments
+        result = await release_order_commitments(
+            db,
+            sales_order_id=body.sales_order_id,
+            lines=[{"item": ln.item, "qty": ln.qty} for ln in body.lines],
+            created_by="gpi_hub",
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))

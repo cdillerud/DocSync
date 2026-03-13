@@ -227,9 +227,12 @@ async def derive_balances(
                 "unit_of_measure": "$unit_of_measure",
             },
             "item_description": {"$last": "$item_description"},
-            # Physical inventory: all types except order_commitment
+            # Physical inventory: all types except order_commitment and order_release
             "on_hand": {"$sum": {"$cond": [
-                {"$ne": ["$movement_type", "order_commitment"]},
+                {"$and": [
+                    {"$ne": ["$movement_type", "order_commitment"]},
+                    {"$ne": ["$movement_type", "order_release"]},
+                ]},
                 "$quantity_delta", 0,
             ]}},
             # Commitment deltas (stored negative)

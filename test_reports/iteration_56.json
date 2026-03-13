@@ -1,0 +1,76 @@
+{
+  "summary": "Comprehensive testing of order_release movement type for Customer Inventory Ledger. All 14 backend tests passed covering: commit→release lifecycle, full release, over-release rejection (422), non-existent SO rejection (422), multi-line release, balance derivation formulas, and regression tests. Frontend UI tests passed: login, navigation, workspace cards, balance table columns, tabs, status badges.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Inventory Ledger Balance Table",
+        "issues": ["Minor React hydration warnings about HTML nesting (<tr> inside <span>, <span> inside <tbody>) - cosmetic only, doesn't affect functionality"]
+      }
+    ]
+  },
+  "passed_tests": [
+    "Backend: POST /api/inventory-ledger/release - partial release lifecycle (seed 100, commit 50, release 30 → committed=20, available=80)",
+    "Backend: POST /api/inventory-ledger/release - full release (committed becomes 0, available returns to on_hand)",
+    "Backend: POST /api/inventory-ledger/release - over-release rejection → HTTP 422 with 'exceeds outstanding commitment' message",
+    "Backend: POST /api/inventory-ledger/release - non-existent SO → HTTP 422 with 'no order_commitment found' message",
+    "Backend: POST /api/inventory-ledger/release - release after full release rejected (nothing to release)",
+    "Backend: POST /api/inventory-ledger/release - multi-line release (2 items in one request)",
+    "Backend: derive_balances - on_hand excludes BOTH order_commitment AND order_release movements",
+    "Backend: derive_balances - committed formula correct: abs(commitment_raw) + release_raw = 100 + (-30) = 70",
+    "REGRESSION: GET /api/inventory-ledger/customers - still lists workspaces (Hormel, Karlin, test workspaces)",
+    "REGRESSION: POST /api/inventory-ledger/customers/{id}/movements - opening_balance still works",
+    "REGRESSION: POST /api/inventory-ledger/customers/{id}/movements - order_commitment still works",
+    "REGRESSION: GET /api/inventory-ledger/customers/{id}/balances - still derives balances correctly",
+    "REGRESSION: GET /api/inventory-ledger/meta - includes order_release in movement_types",
+    "REGRESSION: POST /api/gpi-integration/sales-orders/preflight/{doc_id} - still returns inventory_summary and inventory_workspace",
+    "Frontend: Login with admin/admin works correctly",
+    "Frontend: Navigate to Inventory Ledger page",
+    "Frontend: Customer selector shows workspace cards (Hormel Foods, Karlin Foods, etc.) with policy badges",
+    "Frontend: Click workspace opens balance table",
+    "Frontend: Balance table shows all 9 required columns (ITEM, WAREHOUSE, OWNERSHIP, ON HAND, INCOMING, COMMITTED, AVAILABLE, UOM, STATUS)",
+    "Frontend: Status badges render correctly (SHORT in red, OK in green)",
+    "Frontend: Summary strip shows metrics (7 Items Tracked, 2,160 On Hand, 300 Incoming, 6,324 Committed, 3 Shortages)",
+    "Frontend: Tabs (Balances, Movements, Incoming) present and functional"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_order_release.py",
+    "/app/test_reports/pytest/order_release_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_order_release.py"
+  ],
+  "success_rate": {
+    "backend": "100% (14/14 tests passed)",
+    "frontend": "100% (all UI tests passed via Playwright)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://order-ledger-1.preview.emergentagent.com"
+  },
+  "seed_data_used": "Each test creates unique items with UUID prefixes to avoid cross-test interference. Test workspace created per module with deactivation on teardown.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Order release feature fully tested. Key formulas verified: (1) committed = abs(commitment_raw) + release_raw (both stored as negative deltas), (2) on_hand excludes both order_commitment and order_release, (3) available = on_hand + incoming - committed. Release endpoint POST /api/inventory-ledger/release validates commitment exists and prevents over-release with 422 errors. Existing ledger functionality (opening_balance, order_commitment, balances, preflight inventory) unchanged.",
+  "mocked_apis": ["Email service"],
+  "features_verified": {
+    "backend": {
+      "release_endpoint": "POST /api/inventory-ledger/release with {sales_order_id, lines: [{item, qty}]}",
+      "release_validation": "Validates commitment exists for SO+item, prevents release > outstanding committed (422)",
+      "balance_formulas": "committed = (-1 * commitment_raw) + release_raw, on_hand excludes commitment and release",
+      "multi_line_release": "Supports releasing multiple items in single request"
+    },
+    "frontend": {
+      "inventory_ledger_page": "Customer selector cards, workspace summary strip, balance table with all columns, tabs",
+      "status_badges": "SHORT (red) and OK (green) badges render correctly",
+      "committed_column": "Shows committed values derived from order_commitment minus order_release"
+    }
+  }
+}

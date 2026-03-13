@@ -6,7 +6,7 @@ Bridges the Customer Inventory Ledger with the SO preflight and creation flow:
   2. Line-level inventory lookup: for each SO line, find the matching bucket
   3. Commitment creation: create order_commitment movements on successful SO create
   4. Idempotent commitment protection: prevent duplicate commitments on retry
-  5. Release foundation: support future order_release movements
+  5. Release: create order_release movements when SO lines are fulfilled or cancelled
 """
 
 import logging
@@ -15,6 +15,7 @@ from services.inventory_ledger_service import (
     derive_balances, create_movement, list_movements,
     CUSTOMERS_COLL, MOVEMENTS_COLL,
 )
+from services.inventory_ledger_service import get_customer
 
 logger = logging.getLogger(__name__)
 
@@ -242,5 +243,136 @@ async def create_order_commitments(
     logger.info(
         "Inventory commitments for SO %s: committed=%d skipped=%d blocked=%d",
         bc_record_no, result["committed"], result["skipped"], result["blocked"],
+    )
+    return result
+
+
+async def release_order_commitments(
+    db,
+    sales_order_id: str,
+    lines: list,
+    created_by: str = "gpi_hub",
+) -> dict:
+    """Release committed inventory for a Sales Order.
+
+    For each line in `lines` (with keys `item` and `qty`):
+      1. Look up existing order_commitment movements for this SO + item.
+      2. Look up existing order_release movements for this SO + item.
+      3. Validate that release qty does not exceed outstanding committed qty.
+      4. Create an order_release movement.
+
+    Returns: {released: int, skipped: int, errors: [], movement_ids: [], updated_balances: []}
+    Raises ValueError (→ 422) when release exceeds committed.
+    """
+    result = {"released": 0, "skipped": 0, "errors": [], "movement_ids": [], "updated_balances": []}
+
+    if not lines:
+        return result
+
+    # Find the workspace that holds commitments for this SO + requested items
+    requested_items = [ln.get("item", "").strip() for ln in lines if ln.get("item")]
+    sample_query = {"movement_type": "order_commitment", "reference_id": sales_order_id}
+    if requested_items:
+        sample_query["item"] = {"$in": requested_items}
+    sample_commitment = await db[MOVEMENTS_COLL].find_one(sample_query, {"_id": 0, "customer_id": 1})
+    if not sample_commitment:
+        raise ValueError(f"No order_commitment movements found for sales order '{sales_order_id}'")
+
+    workspace_id = sample_commitment["customer_id"]
+    cust = await get_customer(db, workspace_id)
+    if not cust:
+        raise ValueError(f"Customer workspace '{workspace_id}' not found")
+
+    for line in lines:
+        item = (line.get("item") or "").strip()
+        release_qty = float(line.get("qty", 0))
+
+        if not item or release_qty <= 0:
+            result["skipped"] += 1
+            continue
+
+        # Sum existing commitments for this SO + item (stored as negative deltas)
+        commitment_pipeline = [
+            {"$match": {
+                "customer_id": workspace_id,
+                "movement_type": "order_commitment",
+                "reference_id": sales_order_id,
+                "item": item,
+            }},
+            {"$group": {"_id": None, "total": {"$sum": "$quantity_delta"}}},
+        ]
+        commit_agg = await db[MOVEMENTS_COLL].aggregate(commitment_pipeline).to_list(1)
+        committed_delta = commit_agg[0]["total"] if commit_agg else 0  # negative
+        committed_qty = abs(committed_delta)  # positive
+
+        # Sum existing releases for this SO + item (stored as negative deltas)
+        release_pipeline = [
+            {"$match": {
+                "customer_id": workspace_id,
+                "movement_type": "order_release",
+                "reference_id": sales_order_id,
+                "item": item,
+            }},
+            {"$group": {"_id": None, "total": {"$sum": "$quantity_delta"}}},
+        ]
+        release_agg = await db[MOVEMENTS_COLL].aggregate(release_pipeline).to_list(1)
+        already_released_delta = release_agg[0]["total"] if release_agg else 0  # negative
+        already_released_qty = abs(already_released_delta)  # positive
+
+        outstanding = committed_qty - already_released_qty
+
+        if outstanding <= 0:
+            result["errors"].append(
+                f"Item '{item}': nothing to release (committed={committed_qty}, already released={already_released_qty})"
+            )
+            continue
+
+        if release_qty > outstanding:
+            raise ValueError(
+                f"Release quantity {release_qty} exceeds outstanding commitment "
+                f"{outstanding} for item '{item}' on SO '{sales_order_id}' "
+                f"(committed={committed_qty}, already_released={already_released_qty})"
+            )
+
+        # Find warehouse/ownership/uom from the original commitment
+        sample_line = await db[MOVEMENTS_COLL].find_one(
+            {"customer_id": workspace_id, "movement_type": "order_commitment",
+             "reference_id": sales_order_id, "item": item},
+            {"_id": 0},
+        )
+        warehouse = sample_line.get("warehouse", "MAIN") if sample_line else "MAIN"
+        ownership = sample_line.get("ownership_type", "customer_owned") if sample_line else "customer_owned"
+        uom = sample_line.get("unit_of_measure", "units") if sample_line else "units"
+        item_desc = sample_line.get("item_description", "") if sample_line else ""
+
+        mv_result = await create_movement(
+            db, workspace_id,
+            item=item,
+            item_description=item_desc,
+            warehouse=warehouse,
+            ownership_type=ownership,
+            movement_type="order_release",
+            quantity_delta=-release_qty,  # Negative delta, same convention as commitment
+            unit_of_measure=uom,
+            source_type="sales_order_release",
+            reference_type="sales_order",
+            reference_id=sales_order_id,
+            notes=f"Released {release_qty} {uom} from SO {sales_order_id}",
+            created_by=created_by,
+            skip_balance_check=True,
+        )
+        if mv_result["success"]:
+            result["released"] += 1
+            result["movement_ids"].append(mv_result["movement"]["id"])
+        else:
+            result["errors"].append(f"Item '{item}': movement creation failed")
+
+    # Return updated balances for the workspace
+    if result["released"] > 0:
+        result["updated_balances"] = await derive_balances(db, workspace_id)
+
+    logger.info(
+        "Inventory releases for SO %s: released=%d skipped=%d errors=%d",
+        sales_order_id, result["released"], result["skipped"], len(result["errors"]),
     )
     return result

@@ -2659,3 +2659,28 @@ Operational audit dashboard at `/bc-integration` showing all BC integration tran
 - Fixed: `launch.json` — added tenant, server, authentication, schemaUpdateMode
 
 *Last Updated: March 13, 2026*
+
+
+---
+
+## Session Update: March 14, 2026 - Credentials Fix (P0)
+
+### Completed
+
+#### Persistent Credentials Storage & Environment Fix (P0 - CRITICAL)
+- **Issue**: Credentials were lost across forks, causing production deployment to point to wrong BC environment
+- **Fix**: 
+  1. Created persistent `/app/memory/BC_CREDENTIALS.md` with all real credentials
+  2. Updated `/app/backend/.env` with correct real values:
+     - `TENANT_ID=c7b2de14-71d9-4c49-a0b9-2bec103a6fdc`
+     - `BC_CLIENT_ID=6ac62e44-8968-4ad9-b781-434507a5c83a`
+     - `BC_ENVIRONMENT=Production` (was `Sandbox_11_3_2025`)
+     - All Graph, Email, SharePoint credentials updated to real values
+  3. Verified BC API connectivity — vendor search returns real data
+  4. All services running and verified
+
+### Files Modified
+- `/app/memory/BC_CREDENTIALS.md` — Permanent credentials reference
+- `/app/backend/.env` — All real credentials, BC_ENVIRONMENT=Production
+
+*Last Updated: March 14, 2026*

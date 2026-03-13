@@ -432,6 +432,36 @@ async def sales_order_preflight(doc_id: str):
 
     idempotency_key = _build_idempotency_key(doc_id)
 
+    # ── Inventory Lookup ──
+    inventory_workspace = None
+    inventory_summary = None
+    try:
+        from services.inventory_so_integration import resolve_inventory_workspace, enrich_lines_with_inventory
+        ws_result = await resolve_inventory_workspace(db, customer_no=customer_no or "", customer_name=customer_name or "")
+        inventory_workspace = ws_result.get("workspace")
+        all_workspaces = ws_result.get("all_workspaces", [])
+
+        if inventory_workspace and resolved_lines:
+            resolved_lines, inventory_summary = await enrich_lines_with_inventory(db, inventory_workspace["id"], resolved_lines)
+            inventory_summary["workspace_name"] = inventory_workspace["name"]
+            inventory_summary["workspace_code"] = inventory_workspace["code"]
+            inventory_summary["negative_balance_policy"] = inventory_workspace.get("negative_balance_policy", "warn_only")
+            inventory_summary["match_method"] = ws_result["match_method"]
+
+            if inventory_summary["lines_short"] > 0:
+                warnings.append(f"{inventory_summary['lines_short']} line(s) have inventory shortages in the {inventory_workspace['name']} workspace.")
+        elif not inventory_workspace and all_workspaces:
+            inventory_summary = {
+                "workspace_id": None,
+                "workspace_name": None,
+                "lines_matched": 0, "lines_short": 0, "lines_no_match": len(resolved_lines) if resolved_lines else 0,
+                "total_lines": len(resolved_lines) if resolved_lines else 0,
+                "match_method": "no_match",
+                "available_workspaces": [{"id": w["id"], "name": w["name"], "code": w["code"]} for w in all_workspaces],
+            }
+    except Exception as inv_err:
+        logger.warning("Inventory lookup failed during preflight: %s", inv_err)
+
     # ── Document Summary ──
     capture_channel = doc.get("capture_channel", "")
     source_display = capture_channel.replace("_", " ").title() if capture_channel else (
@@ -506,6 +536,13 @@ async def sales_order_preflight(doc_id: str):
         "missing_fields": missing_fields,
         "warnings": warnings,
         "errors": errors,
+        "inventory_summary": inventory_summary,
+        "inventory_workspace": {
+            "id": inventory_workspace["id"],
+            "name": inventory_workspace["name"],
+            "code": inventory_workspace["code"],
+            "negative_balance_policy": inventory_workspace.get("negative_balance_policy", "warn_only"),
+        } if inventory_workspace else None,
     }
 
 
@@ -513,6 +550,7 @@ class CreateSOFromDocumentRequest(BaseModel):
     """Request body for creating a Sales Order from a document with user-edited lines."""
     customer_no_override: str = Field("", description="Override customer number")
     edited_lines: list = Field(default=None, description="User-edited lines (source of truth if provided)")
+    inventory_workspace_id: str = Field("", description="Inventory workspace ID for commitment creation")
 
 
 async def _validate_edited_lines(db, lines: list) -> dict:
@@ -564,14 +602,17 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
     # Parse body — support both JSON body and query param for backwards compat
     customer_no_override = ""
     user_edited_lines = None
+    inv_workspace_id = ""
     if body:
         customer_no_override = body.customer_no_override or ""
         user_edited_lines = body.edited_lines
+        inv_workspace_id = body.inventory_workspace_id or ""
     elif request:
         try:
             raw = await request.json()
             customer_no_override = raw.get("customer_no_override", "")
             user_edited_lines = raw.get("edited_lines")
+            inv_workspace_id = raw.get("inventory_workspace_id", "")
         except Exception:
             pass
 
@@ -712,6 +753,27 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
     except Exception as ae:
         logger.warning("Failed to write SO creation audit: %s", ae)
 
+    # ── Inventory Commitment Creation ──
+    commitment_result = None
+    if inv_workspace_id and result.get("success") and result.get("status") != "already_exists":
+        try:
+            from services.inventory_so_integration import create_order_commitments
+            commitment_result = await create_order_commitments(
+                db,
+                workspace_id=inv_workspace_id,
+                doc_id=doc_id,
+                bc_record_no=bc_record_no,
+                transaction_id=transaction_id,
+                submitted_lines=submitted_lines,
+                customer_no=customer_no,
+                created_by="gpi_hub",
+            )
+            if commitment_result.get("blocked", 0) > 0:
+                logger.warning("Some inventory commitments blocked for SO %s: %s", bc_record_no, commitment_result["errors"])
+        except Exception as inv_err:
+            logger.warning("Inventory commitment creation failed for SO %s: %s", bc_record_no, inv_err)
+            commitment_result = {"committed": 0, "errors": [str(inv_err)]}
+
     bc_sales_order = {
         "bc_record_no": bc_record_no,
         "bc_system_id": bc_system_id,
@@ -730,6 +792,7 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
         "created_at": now,
         "created_by": "gpi_hub",
         "error_message": result.get("error_message", ""),
+        "inventory_commitments": commitment_result,
     }
 
     await db.hub_documents.update_one(
@@ -778,10 +841,17 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
         "lines_total": line_result["total"],
         "line_errors": line_result["errors"],
         "created_at": now,
+        "inventory_commitments": commitment_result,
     }
 
 
 def _sanitize_lines(lines: list) -> list:
+    """Strip internal fields from lines for storage."""
+    sanitized = []
+    for ln in (lines or []):
+        clean = {k: v for k, v in ln.items() if not k.startswith("_")}
+        sanitized.append(clean)
+    return sanitized
     """Strip internal fields from lines for storage."""
     sanitized = []
     for ln in (lines or []):

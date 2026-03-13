@@ -13,7 +13,7 @@ import {
   ShoppingCart, Loader2, CheckCircle2, AlertCircle,
   AlertTriangle, ChevronRight, User, Calendar,
   FileText, Hash, Shield, XCircle, Pencil, RotateCcw,
-  Plus, Trash2, Copy, Server,
+  Plus, Trash2, Copy, Server, Warehouse, Package,
 } from 'lucide-react';
 
 const ELIGIBLE_TYPES = new Set(['Sales_Order', 'SalesOrder', 'Order_Confirmation', 'PurchaseOrder']);
@@ -65,16 +65,20 @@ export default function CreateBCSalesOrderPanel({ document, onUpdate }) {
     setError(null);
     try {
       const override = customerOverride.trim();
+      const wsId = preflight?.inventory_workspace?.id || '';
       const res = await createSalesOrderFromDocument(document.id, {
         customerNoOverride: override,
         editedLines: editedLines,
+        inventoryWorkspaceId: wsId,
       });
       setResult(res.data);
       if (res.data.success || res.data.already_exists) {
         setState('success');
+        const commitInfo = res.data.inventory_commitments;
+        const commitMsg = commitInfo?.committed ? ` (${commitInfo.committed} inventory commitments)` : '';
         toast.success(res.data.already_exists
           ? 'Sales Order already exists'
-          : `Sales Order ${res.data.bc_record_no} created`
+          : `Sales Order ${res.data.bc_record_no} created${commitMsg}`
         );
         onUpdate?.();
       } else {
@@ -90,7 +94,7 @@ export default function CreateBCSalesOrderPanel({ document, onUpdate }) {
       }
       setState('error');
     }
-  }, [document.id, customerOverride, editedLines, onUpdate]);
+  }, [document.id, customerOverride, editedLines, preflight, onUpdate]);
 
   const resetLines = useCallback(() => {
     if (originalLines) {
@@ -208,6 +212,9 @@ function PreflightReview({
 
       {/* ─── C. Validation Checklist ─── */}
       <ValidationChecklist checklist={checklist} />
+
+      {/* ─── C2. Inventory Summary ─── */}
+      <InventorySummary invSummary={data.inventory_summary} invWorkspace={data.inventory_workspace} />
 
       {/* ─── Customer override if missing ─── */}
       {!mv.customer_no && (
@@ -366,6 +373,61 @@ function ValidationChecklist({ checklist }) {
 }
 
 // ════════════════════════════════════════════════════════════════
+// C2. INVENTORY SUMMARY
+// ════════════════════════════════════════════════════════════════
+
+const INV_STATUS_BADGE = {
+  OK: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 border-emerald-200',
+  LOW: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 border-amber-200',
+  SHORT: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300 border-red-200',
+  'NO_MATCH': 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 border-gray-200',
+};
+
+function InventorySummary({ invSummary, invWorkspace }) {
+  if (!invSummary && !invWorkspace) return null;
+
+  return (
+    <div data-testid="bc-so-inventory-summary">
+      <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold mb-2">Customer Inventory</p>
+      {invWorkspace ? (
+        <div className="bg-muted/30 rounded-md p-3 border border-border space-y-2">
+          <div className="flex items-center gap-2 text-xs">
+            <Warehouse className="w-3.5 h-3.5 text-primary" />
+            <span className="font-medium">{invWorkspace.name}</span>
+            <span className="font-mono text-[10px] text-muted-foreground">{invWorkspace.code}</span>
+            <Badge variant="outline" className="text-[8px] h-4 px-1 ml-auto">
+              {invWorkspace.negative_balance_policy === 'block_commitment' ? 'Block on Short' : 'Warn Only'}
+            </Badge>
+          </div>
+          {invSummary && (
+            <div className="flex gap-4 text-[11px]">
+              <span className="text-emerald-600 dark:text-emerald-400">
+                <Package className="w-3 h-3 inline mr-0.5" />{invSummary.lines_matched} matched
+              </span>
+              {invSummary.lines_short > 0 && (
+                <span className="text-red-600 dark:text-red-400 font-medium">
+                  <AlertTriangle className="w-3 h-3 inline mr-0.5" />{invSummary.lines_short} short
+                </span>
+              )}
+              <span className="text-muted-foreground">{invSummary.lines_no_match} no match</span>
+            </div>
+          )}
+        </div>
+      ) : invSummary?.available_workspaces?.length > 0 ? (
+        <div className="bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-md p-2.5">
+          <p className="text-[11px] text-amber-700 dark:text-amber-300">
+            <AlertTriangle className="w-3 h-3 inline mr-1" />
+            No inventory workspace matched this customer. Available: {invSummary.available_workspaces.map(w => w.name).join(', ')}
+          </p>
+        </div>
+      ) : (
+        <p className="text-[11px] text-muted-foreground">No inventory workspaces configured.</p>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
 // D. EDITABLE LINE TABLE
 // ════════════════════════════════════════════════════════════════
 
@@ -434,12 +496,13 @@ function EditableLineTable({ lines, setLines, linesEdited, resetLines, orderTota
             <tr className="border-b border-border bg-muted/80">
               <th className="text-left py-1.5 px-2 font-medium text-muted-foreground w-[80px]">Type</th>
               <th className="text-left py-1.5 px-2 font-medium text-muted-foreground">Description</th>
-              <th className="text-left py-1.5 px-2 font-medium text-muted-foreground w-[90px]">Target</th>
-              <th className="text-center py-1.5 px-2 font-medium text-muted-foreground w-[50px]">Conf</th>
-              <th className="text-right py-1.5 px-2 font-medium text-muted-foreground w-[60px]">Qty</th>
-              <th className="text-right py-1.5 px-2 font-medium text-muted-foreground w-[80px]">Unit Price</th>
-              <th className="text-right py-1.5 px-2 font-medium text-muted-foreground w-[80px]">Total</th>
-              <th className="w-[30px]"></th>
+              <th className="text-left py-1.5 px-2 font-medium text-muted-foreground w-[80px]">Target</th>
+              <th className="text-right py-1.5 px-2 font-medium text-muted-foreground w-[55px]">Qty</th>
+              <th className="text-right py-1.5 px-2 font-medium text-muted-foreground w-[70px]">Price</th>
+              <th className="text-right py-1.5 px-2 font-medium text-muted-foreground w-[70px]">Total</th>
+              <th className="text-right py-1.5 px-2 font-medium text-muted-foreground w-[55px]">Avail</th>
+              <th className="text-center py-1.5 px-2 font-medium text-muted-foreground w-[50px]">Inv</th>
+              <th className="w-[26px]"></th>
             </tr>
           </thead>
           <tbody>
@@ -449,11 +512,11 @@ function EditableLineTable({ lines, setLines, linesEdited, resetLines, orderTota
           </tbody>
           <tfoot>
             <tr className="bg-muted/80 border-t border-border">
-              <td colSpan={6} className="py-2 px-2 text-right font-medium text-muted-foreground">Order Total</td>
+              <td colSpan={5} className="py-2 px-2 text-right font-medium text-muted-foreground">Order Total</td>
               <td className="py-2 px-2 text-right font-mono font-bold" data-testid="bc-so-order-total">
                 ${orderTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </td>
-              <td></td>
+              <td colSpan={3}></td>
             </tr>
           </tfoot>
         </table>
@@ -464,13 +527,21 @@ function EditableLineTable({ lines, setLines, linesEdited, resetLines, orderTota
 
 function EditableLine({ index, line, updateLine, removeLine }) {
   const mp = line.mapping || {};
+  const inv = line.inventory || {};
   const lineTotal = (parseFloat(line.quantity) || 0) * (parseFloat(line.unitPrice) || 0);
+  const ordered = parseFloat(line.quantity) || 0;
 
   const typeBadgeClass = {
     Item: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
     Account: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
     Comment: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
   }[line.lineType] || '';
+
+  // Compute inventory status relative to ordered qty
+  let invStatus = inv.status || (inv.matched ? 'OK' : 'NO_MATCH');
+  if (inv.matched && inv.available < ordered) {
+    invStatus = inv.available <= 0 ? 'SHORT' : 'LOW';
+  }
 
   return (
     <tr className="border-b border-border/50 last:border-0 group" data-testid={`so-line-${index}`}>
@@ -510,23 +581,10 @@ function EditableLine({ index, line, updateLine, removeLine }) {
           <span className="text-[10px] text-muted-foreground italic px-1">-</span>
         )}
       </td>
-      {/* Confidence */}
-      <td className="py-1 px-1.5 text-center">
-        {mp.matched ? (
-          <span className="text-[10px] text-muted-foreground" title={`${mp.method} (${Math.round((mp.confidence || 0) * 100)}%)`}>
-            {Math.round((mp.confidence || 0) * 100)}%
-            {mp.catalog_validated && <span className="text-emerald-500 ml-0.5" title="Catalog validated">&#10003;</span>}
-          </span>
-        ) : (
-          <span className="text-[10px] text-muted-foreground/50">-</span>
-        )}
-      </td>
       {/* Qty */}
       <td className="py-1 px-1.5">
         <Input
-          type="number"
-          min="0"
-          step="1"
+          type="number" min="0" step="1"
           className="h-6 text-[11px] font-mono border-0 bg-transparent px-1 text-right focus:bg-white dark:focus:bg-slate-900 rounded w-full"
           value={line.quantity ?? ''}
           onChange={(e) => updateLine(index, 'quantity', parseFloat(e.target.value) || 0)}
@@ -536,27 +594,40 @@ function EditableLine({ index, line, updateLine, removeLine }) {
       {/* Unit Price */}
       <td className="py-1 px-1.5">
         <Input
-          type="number"
-          min="0"
-          step="0.01"
+          type="number" min="0" step="0.01"
           className="h-6 text-[11px] font-mono border-0 bg-transparent px-1 text-right focus:bg-white dark:focus:bg-slate-900 rounded w-full"
           value={line.unitPrice ?? ''}
           onChange={(e) => updateLine(index, 'unitPrice', parseFloat(e.target.value) || 0)}
           data-testid={`so-line-${index}-price`}
         />
       </td>
-      {/* Line Total (read-only, computed) */}
+      {/* Line Total */}
       <td className="py-1 px-1.5 text-right font-mono font-medium text-[11px]" data-testid={`so-line-${index}-total`}>
         ${lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+      </td>
+      {/* Inventory Available */}
+      <td className="py-1 px-1.5 text-right" data-testid={`so-line-${index}-inv-avail`}>
+        {inv.matched ? (
+          <span className={`text-[10px] font-mono font-medium ${inv.available < ordered ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}
+            title={`OH:${inv.on_hand} IN:${inv.incoming} CM:${inv.committed} ${inv.unit_of_measure}`}>
+            {inv.available}
+          </span>
+        ) : (
+          <span className="text-[10px] text-muted-foreground/40">-</span>
+        )}
+      </td>
+      {/* Inventory Status Badge */}
+      <td className="py-1 px-1.5 text-center" data-testid={`so-line-${index}-inv-status`}>
+        <Badge variant="outline" className={`text-[8px] h-4 px-1 ${INV_STATUS_BADGE[invStatus] || INV_STATUS_BADGE['NO_MATCH']}`}>
+          {invStatus === 'NO_MATCH' ? '—' : invStatus}
+        </Badge>
       </td>
       {/* Remove */}
       <td className="py-1 px-0.5">
         <Button
-          variant="ghost"
-          size="sm"
+          variant="ghost" size="sm"
           className="h-5 w-5 p-0 opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-600"
-          onClick={() => removeLine(index)}
-          data-testid={`so-line-${index}-remove`}
+          onClick={() => removeLine(index)} data-testid={`so-line-${index}-remove`}
         >
           <Trash2 className="w-3 h-3" />
         </Button>

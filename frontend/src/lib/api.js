@@ -299,10 +299,11 @@ export const getGPIIntegrationStatus = () => api.get('/gpi-integration/status');
 export const salesOrderPreflight = (docId) => api.post(`/gpi-integration/sales-orders/preflight/${docId}`);
 
 // Create BC Sales Order from document with user-edited lines
-export const createSalesOrderFromDocument = (docId, { customerNoOverride = '', editedLines = null } = {}) => {
+export const createSalesOrderFromDocument = (docId, { customerNoOverride = '', editedLines = null, inventoryWorkspaceId = '' } = {}) => {
   return api.post(`/gpi-integration/sales-orders/from-document/${docId}`, {
     customer_no_override: customerNoOverride,
     edited_lines: editedLines,
+    inventory_workspace_id: inventoryWorkspaceId,
   });
 };
 

@@ -151,6 +151,7 @@ async def startup():
     # Inventory ledger indexes
     try:
         from services.inventory_ledger_service import ensure_indexes as inv_ensure_indexes
+        from deps import get_db
         await inv_ensure_indexes(get_db())
     except Exception as e:
         logger.warning("Inventory ledger index creation failed: %s", e)

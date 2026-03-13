@@ -1,0 +1,76 @@
+{
+  "summary": "Comprehensive testing of Inventory ↔ Sales Order Integration feature. All 16 backend API tests passed. Frontend UI tests passed via Playwright - verified Sales Dashboard, Document Detail with CreateBCSalesOrderPanel, and Inventory Ledger page with workspace balances.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Sales Dashboard, Document Detail",
+        "issues": ["Minor console warnings about HTML nesting: <tr> inside <span> and <span> inside <tbody> - these are React DevTools/hydration warnings from dynamic list rendering but don't affect functionality"]
+      }
+    ]
+  },
+  "passed_tests": [
+    "Backend: POST /api/gpi-integration/sales-orders/preflight/{doc_id} - returns inventory_summary with lines_matched, lines_short, lines_no_match",
+    "Backend: POST /api/gpi-integration/sales-orders/preflight/{doc_id} - returns inventory_workspace with id, name, code, negative_balance_policy",
+    "Backend: Preflight resolved_lines contain 'inventory' field with status (OK/LOW/SHORT/NO_MATCH)",
+    "Backend: When no workspace matches, inventory_summary contains available_workspaces list",
+    "Backend: GET /api/inventory-ledger/customers - returns customer workspaces with policy badges",
+    "Backend: POST /api/inventory-ledger/customers/{id}/movements - creates order_commitment movements",
+    "Backend: GET /api/inventory-ledger/customers/{id}/balances - derives balances with available = on_hand + incoming - committed",
+    "Backend: GET /api/inventory-ledger/meta - returns valid movement_types including order_commitment",
+    "Frontend: Login with admin/admin works correctly",
+    "Frontend: Sales Dashboard renders document list with columns (STATUS, CUSTOMER, PO/EXT DOC, FILE, AMOUNT, LINES, DATE, INFO, ACTION)",
+    "Frontend: Document Detail page renders CreateBCSalesOrderPanel with Environment Banner (Read: Production, Write: Sandbox)",
+    "Frontend: Click 'Check Readiness' triggers preflight and shows DOCUMENT SUMMARY, VALIDATION CHECKLIST sections",
+    "Frontend: CUSTOMER INVENTORY section shows 'No inventory workspace matched' with available workspaces list when no match",
+    "Frontend: Line Preview table shows columns: Type, Description, Target, Qty, Price, Total, **Avail**, **Inv** (inventory columns present)",
+    "Frontend: Inventory status badges show '—' (NO_MATCH) when no workspace matched",
+    "Frontend: Order Total in footer aligned correctly with colSpan={5} + total value + colSpan={3}",
+    "Frontend: Inventory Ledger page shows customer selector cards with name, code, policy badges",
+    "Frontend: Click customer card opens workspace with summary strip (7 Items Tracked, 2,160 On Hand, 300 Incoming, 6,324 Committed, 3 Shortages)",
+    "Frontend: Balance table shows ITEM, WAREHOUSE, OWNERSHIP, ON HAND, INCOMING, COMMITTED, AVAILABLE, UOM, STATUS columns",
+    "Frontend: Status badges (SHORT/OK) render correctly with appropriate colors (red for SHORT, green for OK)"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_inventory_so_integration.py",
+    "/app/test_reports/pytest/inventory_so_integration_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_inventory_so_integration.py"
+  ],
+  "success_rate": {
+    "backend": "100% (16/16 tests passed)",
+    "frontend": "100% (all UI tests passed via Playwright)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://order-ledger-1.preview.emergentagent.com"
+  },
+  "seed_data_used": "Hormel Foods workspace with items: SPAM-12OZ (600 OH, 300 IN, 200 CM = 700 AV), SPAM-LITE (200 OH, 999 CM = -799 AV SHORT), DINTY-150Z (1000 OH = OK). Karlin Foods workspace with block_commitment policy.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Inventory ↔ Sales Order Integration testing complete. Key integration points: (1) resolve_inventory_workspace matches customer_no/name to inventory workspace, (2) enrich_lines_with_inventory adds inventory field to each SO line with status/available/matched, (3) preflight response includes inventory_summary (lines_matched, lines_short, lines_no_match) and inventory_workspace (id, name, code, policy), (4) Frontend shows CUSTOMER INVENTORY section and Avail/Inv columns in line table. Email service is MOCKED. BC API calls may timeout in preview env due to auth - expected behavior.",
+  "mocked_apis": ["Email service"],
+  "features_verified": {
+    "backend": {
+      "preflight_inventory_lookup": "Resolves workspace by customer_no/name, enriches lines with inventory data",
+      "inventory_summary_in_preflight": "Returns lines_matched, lines_short, lines_no_match, total_lines, match_method",
+      "inventory_workspace_in_preflight": "Returns id, name, code, negative_balance_policy when matched",
+      "line_level_inventory": "Each resolved_line has inventory field with status (OK/LOW/SHORT/NO_MATCH), available, on_hand, committed",
+      "order_commitment_creation": "create_order_commitments function creates movements on SO creation (idempotent)"
+    },
+    "frontend": {
+      "sales_dashboard": "Document list with status badges, customer names, amounts, dates, action buttons (View/Review)",
+      "document_detail_preflight": "CreateBCSalesOrderPanel with Environment Banner, Document Summary, Validation Checklist, Customer Inventory section",
+      "inventory_columns": "Avail and Inv columns in line table showing available qty and status badges",
+      "inventory_ledger_page": "Customer selector cards, workspace summary strip, balance table with status badges, tabs for Balances/Movements/Incoming"
+    }
+  }
+}

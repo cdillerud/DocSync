@@ -2813,3 +2813,38 @@ EMAIL_CLIENT_ID=8764d2d9-65cb-4bf8-b8ac-1d922e2b47f8
 ```
 
 *Last Updated: March 13, 2026*
+
+---
+
+## Session Update: March 13, 2026 - Sales Order Line Creation
+
+### Completed
+
+#### Sales Order Line Mapping Logic (P0)
+- **Problem**: SO creation produced header-only orders with $0 total (e.g., SO 107038)
+- **Fix**: Implemented full line creation flow:
+  1. `_resolve_sales_lines()` maps extracted line_items → BC format (lineType, lineObjectNumber, description, quantity, unitPrice)
+  2. `add_sales_order_lines()` in `gpi_integration_service.py` adds lines via standard BC API after header creation
+  3. Fallback: when no structured lines exist, creates a single line using configured G/L account or item code + document total
+  4. Blocks header-only orders — returns 422 if no lines can be resolved
+  5. Updated preflight to return `resolved_lines` with full detail
+  6. Updated frontend `CreateBCSalesOrderPanel.js` to show resolved lines table with Type, Description, Qty, Unit Price, Total columns
+  7. Updated success view to show `lines_added/lines_total` count
+
+### Test Results
+- **SO 107039**: 2/2 lines (Widget A, Widget B) — test_invoice_different.pdf
+- **SO 107040**: 7/7 lines (glass, pallets, tier sheets, surcharge, freight, customs) — Sales-Order 110930.pdf
+- **Idempotency**: Verified for both — returns `already_exists` with preserved line counts
+- **Unit tests**: 8/8 pass (`/app/backend/tests/test_sales_order_lines.py`)
+- **Testing agent**: 100% pass rate (9/9 backend, all frontend verified)
+
+### Files Modified
+- `/app/backend/services/gpi_integration_service.py` — Added `add_sales_order_lines()`, `_get_company_id_standard_api()`, env vars `BC_SO_FALLBACK_GL_ACCOUNT`, `BC_SO_FALLBACK_ITEM_CODE`
+- `/app/backend/routers/gpi_integration.py` — Added `_resolve_sales_lines()`, updated preflight and from-document endpoints
+- `/app/frontend/src/components/CreateBCSalesOrderPanel.js` — Resolved lines table, fallback indicator, lines-added success display
+
+### Environment Variables Added
+- `BC_SO_FALLBACK_GL_ACCOUNT` — G/L account number for fallback lines (optional)
+- `BC_SO_FALLBACK_ITEM_CODE` — Falls back to `BC_DEFAULT_ITEM_CODE` (FREIGHT)
+
+*Last Updated: March 13, 2026*

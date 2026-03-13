@@ -1197,7 +1197,7 @@ Created `/app/memory/SQUARE9_COMPARISON.md` documenting alignment status.
 
 ### P2 - Upcoming
 - [x] Add "Create BC Purchase Invoice" flow for AP_Invoice documents — **Same pattern as SO: vendor resolution, preflight, confirm modal, create, graph writeback** (March 12, 2026)
-- [x] BC Integration Dashboard — **Summary cards, filterable audit log table, click-through to source docs** (March 13, 2026)
+- [x] BC Integration Dashboard — **Summary cards, filterable audit log table, expandable detail rows, click-through to source docs** (March 13, 2026)
 
 ### P2 - Upcoming
 - [ ] Outbound Document Delivery module (email posted sales invoices)

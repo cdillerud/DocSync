@@ -1,0 +1,105 @@
+{
+  "summary": "Comprehensive testing of Sales Order commitment reconciliation feature (iteration 59). All 14 backend tests passed covering: decrease qty creates order_release, increase qty creates order_commitment, unchanged qty creates no movement (action=none), multi-line reconciliation, cancel releases all remaining net commitments, repeat cancel is idempotent (adjustments=0), negative qty returns 422, non-existent SO returns 422, derive_balances committed recalculates correctly, available = on_hand + incoming - committed formula verified. Frontend tests verified: 'Cancel & Release Inventory' button visible on existing SO panel (data-testid='bc-so-cancel-order-btn'), Inventory Ledger page renders with workspaces, Balances tab shows items with committed/available values, Incoming tab shows records with status badges and action buttons.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed_tests": [
+    "Backend: POST /api/inventory-ledger/reconcile-sales-order — decrease line qty creates order_release movement (100→70 releases 30)",
+    "Backend: POST /api/inventory-ledger/reconcile-sales-order — increase line qty creates additional order_commitment (100→150 commits 50)",
+    "Backend: POST /api/inventory-ledger/reconcile-sales-order — unchanged qty creates no movement (action=none, delta=0)",
+    "Backend: POST /api/inventory-ledger/reconcile-sales-order — multi-line reconciliation (item1 decrease + item2 increase simultaneously)",
+    "Backend: POST /api/inventory-ledger/reconcile-sales-order — cancel releases all remaining net commitments (2 adjustments)",
+    "Backend: POST /api/inventory-ledger/reconcile-sales-order — repeat cancel is idempotent (adjustments=0 on second call)",
+    "Backend: POST /api/inventory-ledger/reconcile-sales-order — negative qty returns HTTP 422 with 'Negative' in message",
+    "Backend: POST /api/inventory-ledger/reconcile-sales-order — non-existent SO returns HTTP 422 with 'no order_commitment' message",
+    "Backend: derive_balances — committed recalculates correctly after reconciliation adjustments",
+    "Backend: derive_balances — available = on_hand + incoming - committed verified after edit and cancel",
+    "REGRESSION: POST /api/inventory-ledger/release — still works (released 30 units)",
+    "REGRESSION: POST /api/incoming-supply/from-shortage — still works (created supply record)",
+    "REGRESSION: POST /api/incoming-supply/{id}/status — transitions still work (planned→ordered)",
+    "REGRESSION: GET /api/inventory-ledger/customers — still lists workspaces correctly",
+    "Frontend: Login with admin/admin works correctly",
+    "Frontend: Navigate to Sales Orders page shows 6 documents with 'Already Created' status badges",
+    "Frontend: Click View on document with existing SO opens Document Detail",
+    "Frontend: 'Cancel & Release Inventory' button found with data-testid='bc-so-cancel-order-btn'",
+    "Frontend: Button text is ' Cancel & Release Inventory' and is visible",
+    "Frontend: BC Sales Order panel (data-testid='bc-sales-order-panel') found and visible",
+    "Frontend: Inventory Ledger page renders with 11 customer workspace cards",
+    "Frontend: Hormel Foods workspace shows summary: 7 Items Tracked, 2,160 On Hand, 300 Incoming, 6,324 Committed, 3 Shortages",
+    "Frontend: Balances tab shows items with columns: ITEM, WAREHOUSE, OWNERSHIP, ON HAND, INCOMING, COMMITTED, AVAILABLE, UOM, STATUS",
+    "Frontend: Incoming tab shows records with columns: ITEM, WAREHOUSE, QTY, UOM, ETA, SOURCE, STATUS, ACTIONS",
+    "Frontend: Incoming tab shows status badges (received=green, expected=blue) and action buttons"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_so_reconciliation.py",
+    "/app/test_reports/pytest/so_reconciliation_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "reconcile_sales_order function in inventory_so_integration.py correctly implements delta logic: increase creates order_commitment, decrease creates order_release",
+    "_get_net_committed helper correctly calculates outstanding = abs(commitments) - abs(releases)",
+    "Idempotent cancel behavior: when net_committed is 0, creates no movements (action=none)",
+    "Per-line results include all required fields: item, previous_committed, new_qty, delta, action",
+    "Frontend handleCancelOrder callback correctly calls reconcileSalesOrder with cancelled=true",
+    "Button data-testid='bc-so-cancel-order-btn' properly set for testing automation"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_so_reconciliation.py"
+  ],
+  "success_rate": {
+    "backend": "100% (14/14 tests passed)",
+    "frontend": "100% (all UI verifications passed)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://order-ledger-1.preview.emergentagent.com"
+  },
+  "seed_data_used": "Each test creates unique workspace with UUID prefix (TEST_RECONCILE_*, TEST_REGRESSION_*). Items seeded with opening_balance movements, then order_commitment movements created. Workspace deactivated on teardown.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "SO reconciliation feature fully tested. Key endpoint: POST /api/inventory-ledger/reconcile-sales-order with {sales_order_id, lines: [{item, qty}], cancelled: bool}. For edits: compares new qty to current net committed (commitments - releases) and creates delta movements. For cancel: releases ALL remaining net commitments for all items on the SO. Idempotent cancel: repeat call creates no movements if net already 0. Frontend button data-testid='bc-so-cancel-order-btn' visible on existing SO panel. reconcileSalesOrder API function added to frontend api.js calling /inventory-ledger/reconcile-sales-order.",
+  "mocked_apis": ["Email service"],
+  "features_verified": {
+    "backend": {
+      "endpoint": "POST /api/inventory-ledger/reconcile-sales-order",
+      "request_model": {
+        "sales_order_id": "string (references order_commitment movements)",
+        "lines": "[{item: string, qty: float}] (new quantities per line)",
+        "cancelled": "bool (true = release all remaining commitments)"
+      },
+      "response": {
+        "adjustments": "int (count of movements created)",
+        "movement_ids": "[string] (IDs of created movements)",
+        "per_line": "[{item, previous_committed, new_qty, delta, action}]",
+        "updated_balances": "[balance objects] (if adjustments > 0)"
+      },
+      "actions": {
+        "commit": "created when new_qty > previous_committed (order_commitment with negative delta)",
+        "release": "created when new_qty < previous_committed (order_release with negative delta)",
+        "none": "no movement when new_qty == previous_committed"
+      },
+      "error_codes": {
+        "422": "Non-existent SO or negative quantity"
+      }
+    },
+    "frontend": {
+      "cancel_button": {
+        "data_testid": "bc-so-cancel-order-btn",
+        "text": " Cancel & Release Inventory",
+        "location": "BC Sales Order Created panel (existingSO display)",
+        "callback": "handleCancelOrder() calls reconcileSalesOrder(soRef, [], true)"
+      },
+      "inventory_ledger_page": {
+        "workspaces": "Customer cards with name, code, negative_balance_policy",
+        "balances_tab": "Items with On Hand, Incoming, Committed, Available, Status",
+        "incoming_tab": "Supply records with status badges and action buttons"
+      }
+    }
+  }
+}

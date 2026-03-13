@@ -567,3 +567,219 @@ async def transition_supply_status(
 class DuplicateReceiptError(Exception):
     """Raised when trying to receive an already-received supply."""
     pass
+
+
+# ═══════════════════════════════════════════════════════════════
+# SALES ORDER COMMITMENT RECONCILIATION
+# ═══════════════════════════════════════════════════════════════
+
+async def _get_net_committed(db, workspace_id: str, sales_order_id: str, item: str = None):
+    """Return dict of {item: net_committed_qty} for the given SO.
+
+    net_committed = abs(sum(order_commitment)) - abs(sum(order_release))
+    """
+    match = {
+        "customer_id": workspace_id,
+        "reference_id": sales_order_id,
+        "movement_type": {"$in": ["order_commitment", "order_release"]},
+    }
+    if item:
+        match["item"] = item
+
+    pipeline = [
+        {"$match": match},
+        {"$group": {
+            "_id": {"item": "$item", "movement_type": "$movement_type"},
+            "total": {"$sum": "$quantity_delta"},
+        }},
+    ]
+    raw = await db[MOVEMENTS_COLL].aggregate(pipeline).to_list(5000)
+
+    # Build per-item sums
+    commitments = {}  # item → abs(sum of commitment deltas)
+    releases = {}     # item → abs(sum of release deltas)
+    for r in raw:
+        it = r["_id"]["item"]
+        mt = r["_id"]["movement_type"]
+        val = abs(r["total"])
+        if mt == "order_commitment":
+            commitments[it] = commitments.get(it, 0) + val
+        else:
+            releases[it] = releases.get(it, 0) + val
+
+    all_items = set(commitments.keys()) | set(releases.keys())
+    return {
+        it: round(commitments.get(it, 0) - releases.get(it, 0), 4)
+        for it in all_items
+    }
+
+
+async def _get_item_metadata(db, workspace_id: str, sales_order_id: str, item: str):
+    """Get warehouse/ownership/uom from the original commitment for this item."""
+    doc = await db[MOVEMENTS_COLL].find_one(
+        {"customer_id": workspace_id, "movement_type": "order_commitment",
+         "reference_id": sales_order_id, "item": item},
+        {"_id": 0},
+    )
+    if not doc:
+        return "MAIN", "customer_owned", "units", ""
+    return (
+        doc.get("warehouse", "MAIN"),
+        doc.get("ownership_type", "customer_owned"),
+        doc.get("unit_of_measure", "units"),
+        doc.get("item_description", ""),
+    )
+
+
+async def reconcile_sales_order(
+    db,
+    sales_order_id: str,
+    lines: list,
+    cancelled: bool = False,
+    created_by: str = "gpi_hub",
+) -> dict:
+    """Reconcile inventory commitments for an edited or cancelled Sales Order.
+
+    When `cancelled=True`: release all remaining net commitments for every
+    item tied to this SO.  Idempotent — repeating cancel when net is already
+    zero creates no movements.
+
+    When `cancelled=False`: for each line compare the new qty to the current
+    net committed and create delta commitment or release movements.
+
+    Returns: {adjustments: int, movement_ids: [], per_line: [...], updated_balances: []}
+    """
+    result = {
+        "adjustments": 0,
+        "movement_ids": [],
+        "per_line": [],
+        "updated_balances": [],
+    }
+
+    # Find workspace
+    sample = await db[MOVEMENTS_COLL].find_one(
+        {"movement_type": "order_commitment", "reference_id": sales_order_id},
+        {"_id": 0, "customer_id": 1},
+    )
+    if not sample:
+        raise ValueError(f"No order_commitment found for sales order '{sales_order_id}'")
+
+    workspace_id = sample["customer_id"]
+    cust = await get_customer(db, workspace_id)
+    if not cust:
+        raise ValueError(f"Customer workspace '{workspace_id}' not found")
+
+    net_committed = await _get_net_committed(db, workspace_id, sales_order_id)
+
+    if cancelled:
+        # Release ALL remaining net commitment for every item
+        for item, outstanding in net_committed.items():
+            if outstanding <= 0:
+                result["per_line"].append({
+                    "item": item, "previous_committed": 0,
+                    "new_qty": 0, "delta": 0, "action": "none",
+                })
+                continue
+
+            warehouse, ownership, uom, item_desc = await _get_item_metadata(
+                db, workspace_id, sales_order_id, item,
+            )
+            mv = await create_movement(
+                db, workspace_id,
+                item=item, item_description=item_desc,
+                warehouse=warehouse, ownership_type=ownership,
+                movement_type="order_release",
+                quantity_delta=-outstanding,
+                unit_of_measure=uom,
+                source_type="sales_order_release",
+                reference_type="sales_order",
+                reference_id=sales_order_id,
+                notes=f"SO {sales_order_id} cancelled — released {outstanding} {uom}",
+                created_by=created_by,
+                skip_balance_check=True,
+            )
+            if mv["success"]:
+                result["adjustments"] += 1
+                result["movement_ids"].append(mv["movement"]["id"])
+            result["per_line"].append({
+                "item": item, "previous_committed": outstanding,
+                "new_qty": 0, "delta": -outstanding, "action": "release",
+            })
+    else:
+        # Per-line reconciliation
+        for line in lines:
+            item = (line.get("item") or "").strip()
+            new_qty = float(line.get("qty", 0))
+
+            if not item:
+                continue
+            if new_qty < 0:
+                raise ValueError(f"Negative quantity {new_qty} for item '{item}'")
+
+            prev = net_committed.get(item, 0)
+            delta = round(new_qty - prev, 4)
+
+            if delta == 0:
+                result["per_line"].append({
+                    "item": item, "previous_committed": prev,
+                    "new_qty": new_qty, "delta": 0, "action": "none",
+                })
+                continue
+
+            warehouse, ownership, uom, item_desc = await _get_item_metadata(
+                db, workspace_id, sales_order_id, item,
+            )
+
+            if delta > 0:
+                # Need more commitment
+                mv = await create_movement(
+                    db, workspace_id,
+                    item=item, item_description=item_desc,
+                    warehouse=warehouse, ownership_type=ownership,
+                    movement_type="order_commitment",
+                    quantity_delta=-delta,
+                    unit_of_measure=uom,
+                    source_type="sales_order_commitment",
+                    reference_type="sales_order",
+                    reference_id=sales_order_id,
+                    notes=f"SO {sales_order_id} edit — additional commitment of {delta} {uom}",
+                    created_by=created_by,
+                    skip_balance_check=True,
+                )
+                action = "commit"
+            else:
+                # Release excess
+                release_amt = abs(delta)
+                mv = await create_movement(
+                    db, workspace_id,
+                    item=item, item_description=item_desc,
+                    warehouse=warehouse, ownership_type=ownership,
+                    movement_type="order_release",
+                    quantity_delta=delta,  # already negative
+                    unit_of_measure=uom,
+                    source_type="sales_order_release",
+                    reference_type="sales_order",
+                    reference_id=sales_order_id,
+                    notes=f"SO {sales_order_id} edit — released {release_amt} {uom}",
+                    created_by=created_by,
+                    skip_balance_check=True,
+                )
+                action = "release"
+
+            if mv["success"]:
+                result["adjustments"] += 1
+                result["movement_ids"].append(mv["movement"]["id"])
+            result["per_line"].append({
+                "item": item, "previous_committed": prev,
+                "new_qty": new_qty, "delta": delta, "action": action,
+            })
+
+    # Updated balances
+    if result["adjustments"] > 0:
+        result["updated_balances"] = await derive_balances(db, workspace_id)
+
+    logger.info(
+        "Reconcile SO %s (cancelled=%s): adjustments=%d lines=%d",
+        sales_order_id, cancelled, result["adjustments"], len(result["per_line"]),
+    )
+    return result

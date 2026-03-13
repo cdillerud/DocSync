@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
-import { salesOrderPreflight, createSalesOrderFromDocument, createIncomingFromShortage } from '../lib/api';
+import { salesOrderPreflight, createSalesOrderFromDocument, createIncomingFromShortage, reconcileSalesOrder } from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -129,17 +129,44 @@ export default function CreateBCSalesOrderPanel({ document, onUpdate }) {
     }
   }, [preflight, document.id, runPreflight]);
 
+  const handleCancelOrder = useCallback(async () => {
+    const soRef = existingSO?.bc_record_no || existingSO?.external_doc_no || document.id;
+    if (!soRef) return;
+    setState('creating');
+    try {
+      const res = await reconcileSalesOrder(soRef, [], true);
+      const d = res.data;
+      if (d.adjustments > 0) {
+        toast.success(`Order cancelled — ${d.adjustments} inventory release(s) created`);
+      } else {
+        toast.info('Order cancelled — no remaining commitments to release');
+      }
+      onUpdate?.();
+      setState('idle');
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Failed to cancel order inventory');
+      setState('idle');
+    }
+  }, [existingSO, document.id, onUpdate]);
+
   if (!eligible && !existingSO) return null;
 
   if (existingSO && state === 'idle') {
     return (
       <Card className="border border-emerald-300 dark:border-emerald-700 bg-emerald-50/50 dark:bg-emerald-950/20" data-testid="bc-sales-order-panel">
         <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-            <CardTitle className="text-sm font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400" style={{ fontFamily: 'Chivo, sans-serif' }}>
-              BC Sales Order Created
-            </CardTitle>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+              <CardTitle className="text-sm font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400" style={{ fontFamily: 'Chivo, sans-serif' }}>
+                BC Sales Order Created
+              </CardTitle>
+            </div>
+            <Button variant="ghost" size="sm" className="h-6 text-[10px] text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
+              onClick={handleCancelOrder} data-testid="bc-so-cancel-order-btn">
+              <XCircle className="w-3 h-3 mr-1" /> Cancel & Release Inventory
+            </Button>
           </div>
         </CardHeader>
         <CardContent>

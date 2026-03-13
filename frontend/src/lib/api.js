@@ -325,3 +325,12 @@ export const createIncomingFromShortage = (salesOrderId, lines) => {
     lines,
   });
 };
+
+// Reconcile SO commitments after edit or cancel
+export const reconcileSalesOrder = (salesOrderId, lines, cancelled = false) => {
+  return api.post('/inventory-ledger/reconcile-sales-order', {
+    sales_order_id: salesOrderId,
+    lines,
+    cancelled,
+  });
+};

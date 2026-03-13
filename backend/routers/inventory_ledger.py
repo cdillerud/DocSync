@@ -304,6 +304,43 @@ async def api_release_commitments(body: ReleaseReq):
         raise HTTPException(status_code=422, detail=str(e))
 
 
+
+# ═══════════════════════════════════════════════════════════════
+# SALES ORDER RECONCILIATION
+# ═══════════════════════════════════════════════════════════════
+
+class ReconcileLineReq(BaseModel):
+    item: str
+    qty: float
+
+
+class ReconcileSOReq(BaseModel):
+    sales_order_id: str
+    lines: list[ReconcileLineReq] = []
+    cancelled: bool = False
+
+
+@router.post("/reconcile-sales-order")
+async def api_reconcile_sales_order(body: ReconcileSOReq):
+    """Reconcile inventory commitments for an edited or cancelled Sales Order.
+
+    When cancelled=true, releases all remaining net commitments.
+    When cancelled=false, adjusts per-line: creates delta commitments or releases.
+    """
+    db = get_db()
+    try:
+        from services.inventory_so_integration import reconcile_sales_order
+        result = await reconcile_sales_order(
+            db,
+            sales_order_id=body.sales_order_id,
+            lines=[{"item": ln.item, "qty": ln.qty} for ln in body.lines],
+            cancelled=body.cancelled,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
 # ═══════════════════════════════════════════════════════════════
 # INCOMING SUPPLY FROM SHORTAGE (separate prefix)
 # ═══════════════════════════════════════════════════════════════

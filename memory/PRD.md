@@ -1197,6 +1197,7 @@ Created `/app/memory/SQUARE9_COMPARISON.md` documenting alignment status.
 
 ### P2 - Upcoming
 - [x] Add "Create BC Purchase Invoice" flow for AP_Invoice documents — **Same pattern as SO: vendor resolution, preflight, confirm modal, create, graph writeback** (March 12, 2026)
+- [x] BC Integration Dashboard — **Summary cards, filterable audit log table, click-through to source docs** (March 13, 2026)
 
 ### P2 - Upcoming
 - [ ] Outbound Document Delivery module (email posted sales invoices)
@@ -2626,3 +2627,35 @@ Added "Create BC Purchase Invoice" action to the Document Detail page for AP_Inv
 - Test report: `/app/test_reports/iteration_43.json`
 
 *Last Updated: March 12, 2026*
+
+
+## BC Integration Dashboard (Completed - March 13, 2026)
+
+### Overview
+Operational audit dashboard at `/bc-integration` showing all BC integration transactions (Sales Orders + Purchase Invoices) with summary cards, filterable table, and click-through to source documents.
+
+### Backend
+- **Dashboard endpoint**: `GET /api/gpi-integration/dashboard` — aggregates from MongoDB `hub_documents` collection
+- **Filters**: `record_type` (sales_order, purchase_invoice), `status` (created, already_exists, failed)
+- **Pagination**: `limit` and `skip` parameters
+
+### Frontend
+- **Page**: `/app/frontend/src/pages/BCIntegrationDashboard.js`
+- **Route**: `/bc-integration`
+- **Nav**: "BC Integration" in sidebar with ArrowLeftRight icon
+- **Summary Cards**: Sales Orders Created, Purchase Invoices Created, Already Exists, Failed
+- **Filters**: Search (client-side), Record Type dropdown, Status dropdown
+- **Table Columns**: Timestamp, Type, BC Record No, Counterparty, External Ref, Status, Idempotency Key, Transaction ID, Source Doc (link), Error
+
+### Test Results
+- Backend: 16/16 tests passed (100%)
+- Frontend: 8/8 UI tests passed (100%)
+- Test report: `/app/test_reports/iteration_44.json`
+
+### AL Extension Published
+- Successfully published `GPI_GPI Hub Integration_1.0.0.0.app` to Sandbox_11_3_2025
+- Fixed: Enum ID conflicts (50100/50101 → 50102/50103 for new enums)
+- Fixed: `app.json` platform version (24.0.0.0 → 27.0.0.0 → reverted to 24.0.0.0 for compat)
+- Fixed: `launch.json` — added tenant, server, authentication, schemaUpdateMode
+
+*Last Updated: March 13, 2026*

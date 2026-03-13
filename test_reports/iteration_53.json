@@ -1,0 +1,88 @@
+{
+  "summary": "Comprehensive testing of GPI Document Hub - Sales Dashboard / Orders Awaiting Review. All 14 backend API tests passed. All frontend UI tests passed via Playwright.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "console_warnings": [
+      {
+        "type": "React hydration warning",
+        "message": "In HTML, <tr> cannot be a child of <span>",
+        "severity": "minor",
+        "impact": "No functional impact - React dev mode warning only"
+      }
+    ]
+  },
+  "passed_tests": [
+    "GET /api/sales-dashboard/queue - returns items with status, customer info, external_doc_no, amount, warnings, blocking_issues",
+    "GET /api/sales-dashboard/queue - item structure includes all required fields (id, file_name, document_type, status, customer_name, etc.)",
+    "GET /api/sales-dashboard/queue?status=needs_review - filters to only needs_review items",
+    "GET /api/sales-dashboard/queue?status=already_created - filters to only already_created items",
+    "GET /api/sales-dashboard/queue?has_bc_order=no - filters to docs without BC order",
+    "GET /api/sales-dashboard/queue?has_bc_order=yes - filters to docs with BC order",
+    "GET /api/sales-dashboard/queue?search=<term> - searches by customer/PO/filename",
+    "GET /api/sales-dashboard/queue - pagination with skip/limit works",
+    "GET /api/sales-dashboard/queue?sort=created_desc - sorting works",
+    "GET /api/sales-dashboard/summary - returns fast summary counts (ready, ready_warnings, needs_review, already_created, total)",
+    "GET /api/sales-dashboard/summary - counts match queue summary counts",
+    "Data integrity: 6 sales-eligible documents exist (1 needs_review, 5 already_created)",
+    "Already created items have bc_record_no field",
+    "Needs review items have blocking_issues field",
+    "Frontend: Sales Orders page renders at /sales-orders with summary cards",
+    "Frontend: Summary cards show correct counts (Ready: 0, With Warnings: 0, Needs Review: 1, Already Created: 5)",
+    "Frontend: Clicking a summary card filters the table by that status",
+    "Frontend: Queue table shows Status badge, Customer, PO/Ext Doc, File, Amount, Lines, Date, Info, Action columns",
+    "Frontend: Already Created rows show SO number badge (e.g., SO 107040) in Info column",
+    "Frontend: Needs Review rows show warning text (Customer not resolved) in Info column",
+    "Frontend: Review/View button navigates to /documents/{id}",
+    "Frontend: Search input present and functional",
+    "Frontend: Status filter dropdown works",
+    "Frontend: Sales Orders nav item appears in sidebar with ShoppingCart icon"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_sales_dashboard.py",
+    "/app/test_reports/pytest/sales_dashboard_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_sales_dashboard.py"
+  ],
+  "success_rate": {
+    "backend": "100% (14/14 tests passed)",
+    "frontend": "100% (all UI tests passed via Playwright)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://doc-workflow-test.preview.emergentagent.com"
+  },
+  "seed_data_creation": "Used existing sales-eligible documents (6 total: 5 already_created with BC sales orders, 1 needs_review)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Sales Dashboard testing complete. Key endpoints: GET /api/sales-dashboard/queue returns items with lightweight readiness assessment, GET /api/sales-dashboard/summary returns fast counts. Test data includes 6 sales-eligible documents - Bragg Live Food Products (SO 107040), Gamer Packaging Inc (SO 107039), NEW (SO 107038), and test documents. The _assess_readiness function computes status based on bc_sales_order presence and field completeness. Email service is MOCKED.",
+  "mocked_apis": ["Email service"],
+  "features_verified": {
+    "backend": {
+      "queue_endpoint": {
+        "returns": "items array with status, customer_no, customer_name, external_doc_no, amount, warnings, blocking_issues, bc_record_no",
+        "filters": "status, has_bc_order, search, customer",
+        "sort": "created_desc/asc, amount_desc/asc",
+        "pagination": "skip, limit parameters"
+      },
+      "summary_endpoint": {
+        "returns": "counts for ready, ready_warnings, needs_review, already_created, total"
+      }
+    },
+    "frontend": {
+      "summary_cards": "4 clickable cards showing counts for Ready, With Warnings, Needs Review, Already Created",
+      "filters": "Search input (400ms debounce), status dropdown, BC status dropdown, sort dropdown, clear filters button",
+      "queue_table": "9 columns: Status, Customer, PO/Ext Doc, File, Amount, Lines, Date, Info, Action",
+      "info_column": "Shows BC SO number badge for created items, warning text for needs_review items",
+      "navigation": "Sidebar nav item, Review/View buttons navigate to /documents/{id}"
+    }
+  }
+}

@@ -61,6 +61,7 @@ from routers.square9 import router as square9_router
 from routers.email_polling import router as email_polling_router
 from routers.vendors import router as vendors_router
 from routers.migration_routes import router as migration_routes_router
+from routers.sales_dashboard import router as sales_dashboard_router
 from routers.stable_vendor import router as stable_vendor_router
 from routers.aliases import router as aliases_router
 from routers.mailbox_sources import router as mailbox_sources_router
@@ -106,6 +107,7 @@ app.include_router(square9_router, prefix="/api")
 app.include_router(email_polling_router, prefix="/api")
 app.include_router(vendors_router, prefix="/api")
 app.include_router(migration_routes_router, prefix="/api")
+app.include_router(sales_dashboard_router, prefix="/api")
 app.include_router(stable_vendor_router, prefix="/api")
 app.include_router(aliases_router, prefix="/api")
 app.include_router(mailbox_sources_router, prefix="/api")

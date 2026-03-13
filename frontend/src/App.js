@@ -19,6 +19,7 @@ import LabelCorrectionInsightsPage from "@/pages/LabelCorrectionInsightsPage";
 import LayoutFingerprintsPage from "@/pages/LayoutFingerprintsPage";
 import StableVendorsPage from "@/pages/StableVendorsPage";
 import BCIntegrationDashboard from "@/pages/BCIntegrationDashboard";
+import SalesDashboardPage from "@/pages/SalesDashboardPage";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -44,6 +45,7 @@ function AppRoutes() {
         <Route path="layout-fingerprints" element={<LayoutFingerprintsPage />} />
         <Route path="stable-vendors" element={<StableVendorsPage />} />
         <Route path="bc-integration" element={<BCIntegrationDashboard />} />
+        <Route path="sales-orders" element={<SalesDashboardPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

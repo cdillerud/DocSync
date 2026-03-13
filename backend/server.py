@@ -9168,6 +9168,7 @@ from routers.square9 import router as square9_router
 from routers.email_polling import router as email_polling_router
 from routers.vendors import router as vendors_router
 from routers.migration_routes import router as migration_routes_router
+from routers.sales_dashboard import router as sales_dashboard_router
 
 app.include_router(automation_rules_router, prefix="/api")
 app.include_router(freight_routing_router, prefix="/api")
@@ -9191,6 +9192,7 @@ app.include_router(square9_router, prefix="/api")
 app.include_router(email_polling_router, prefix="/api")
 app.include_router(vendors_router, prefix="/api")
 app.include_router(migration_routes_router, prefix="/api")
+app.include_router(sales_dashboard_router, prefix="/api")
 
 # --- Legacy api_router (remaining document + workflow routes) ---
 app.include_router(api_router)

@@ -1,0 +1,57 @@
+{
+  "summary": "Comprehensive testing of G/L Account Mapping Refactor feature. All 44 backend tests passed (16 unit + 15 API + 13 new G/L Account feature tests). Verified all 20 freight mapping rules now have target_type='gl_account' and target_no='60500'. Frontend correctly displays Account/Item/Comment badges with correct styling.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Console warnings", "issues": ["Minor React hydration warnings about <tr> and <span> elements in table - cosmetic only, does not affect functionality"]}
+    ]
+  },
+  "passed_tests": [
+    "Unit tests: 16/16 (test_item_mapping.py - includes test_gl_account_mapping_match)",
+    "API tests: 15/15 (test_item_mapping_api.py - CRUD, preflight, idempotency)",
+    "G/L Account Feature: 13/13 (test_gl_account_mapping_refactor.py)",
+    "GET /api/gpi-integration/item-mappings - returns 20 mappings with target_type='gl_account', target_no='60500'",
+    "POST /api/gpi-integration/item-mappings - creates G/L Account mapping with target_type='gl_account'",
+    "POST /api/gpi-integration/item-mappings - creates Item mapping with target_type='item'",
+    "PUT /api/gpi-integration/item-mappings/{id} - updates target_type from item to gl_account",
+    "DELETE /api/gpi-integration/item-mappings/{id} - deletes mapping",
+    "POST /api/gpi-integration/sales-orders/preflight/{doc_id} - returns lineType='Account' for gl_account mappings",
+    "POST /api/gpi-integration/sales-orders/preflight/{doc_id} - returns lineType='Item' for item mappings",
+    "POST /api/gpi-integration/sales-orders/preflight/{doc_id} - returns lineType='Comment' for unmapped lines",
+    "GET /api/gpi-integration/catalog/gl-accounts?q=shipping - returns GL account 60500 'Shipping / Delivery'",
+    "GET /api/gpi-integration/catalog/items?q=glass - returns matching items",
+    "POST /api/gpi-integration/catalog/suggest-items - returns ranked suggestions",
+    "Frontend: CreateBCSalesOrderPanel shows 'Account' badge (blue) for G/L Account lines",
+    "Frontend: CreateBCSalesOrderPanel shows 'Item' badge (green) for Item lines",
+    "Frontend: CreateBCSalesOrderPanel shows 'Comment' badge for unmapped lines",
+    "Frontend: Shows target_no '60500' with confidence percentage and 'Shipping / Delivery' description"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_item_mapping.py",
+    "/app/backend/tests/test_item_mapping_api.py",
+    "/app/backend/tests/test_gl_account_mapping_refactor.py",
+    "/app/test_reports/pytest/gl_account_mapping_refactor_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_gl_account_mapping_refactor.py"
+  ],
+  "success_rate": {
+    "backend": "100% (44/44 tests passed)",
+    "frontend": "100% (UI correctly renders Account/Item/Comment badges)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://doc-workflow-test.preview.emergentagent.com"
+  },
+  "seed_data_creation": "Test document 44b2e236-c1ab-4e0e-9c23-23f542d68a71 has Widget A/Widget B lines. 20 freight mapping rules all point to GL account 60500. BC catalog: 1000 items, 169 GL accounts.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "G/L Account mapping refactor is complete and working. All 20 freight/service mapping rules have target_type='gl_account' and target_no='60500' (Shipping / Delivery). The system correctly distinguishes between Item (target_type='item', lineType='Item'), G/L Account (target_type='gl_account', lineType='Account'), and Comment (unmapped) line types. Frontend badges: Account=blue, Item=green, Comment=default. Test with document 44b2e236-c1ab-4e0e-9c23-23f542d68a71."
+}

@@ -7,7 +7,7 @@ import requests
 import os
 import uuid
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://doc-workflow-test.preview.emergentagent.com').rstrip('/')
 
 # Test data - known documents from main agent context (full UUIDs)
 DOC_ID_ELIGIBLE = "44b2e236-c1ab-4e0e-9c23-23f542d68a71"  # Sales_Order type with 2 lines (Widget A, Widget B), no existing SO
@@ -200,7 +200,8 @@ class TestPreflightWithMapping:
             assert "matched" in mapping, f"Line {i} mapping missing 'matched'"
             assert "confidence" in mapping, f"Line {i} mapping missing 'confidence'"
             assert "method" in mapping, f"Line {i} mapping missing 'method'"
-            assert "item_number" in mapping, f"Line {i} mapping missing 'item_number'"
+            assert "target_no" in mapping, f"Line {i} mapping missing 'target_no'"
+            assert "target_type" in mapping, f"Line {i} mapping missing 'target_type'"
             
         print("✓ All lines have required mapping metadata")
         
@@ -221,9 +222,9 @@ class TestPreflightWithMapping:
             
             if mapping["matched"]:
                 assert widget_a["lineType"] == "Item", "Mapped line should have lineType=Item"
-                assert mapping["item_number"] == "WIDG-A", f"Expected WIDG-A, got {mapping['item_number']}"
+                assert mapping["target_no"] == "WIDG-A", f"Expected WIDG-A, got {mapping['target_no']}"
                 assert mapping["confidence"] >= 0.7, f"Confidence should be >= 0.7, got {mapping['confidence']}"
-                print(f"✓ Widget A mapped to {mapping['item_number']} with confidence {mapping['confidence']}")
+                print(f"✓ Widget A mapped to {mapping['target_no']} with confidence {mapping['confidence']}")
             else:
                 print(f"⚠ Widget A not matched - mapping confidence below threshold")
         else:
@@ -246,11 +247,11 @@ class TestPreflightWithMapping:
             
             if not mapping["matched"]:
                 assert widget_b["lineType"] == "Comment", "Unmapped line should have lineType=Comment"
-                assert mapping["item_number"] == "", "Unmapped line should have empty item_number"
+                assert mapping["target_no"] == "", "Unmapped line should have empty target_no"
                 assert mapping["confidence"] == 0, "Unmapped line should have confidence 0"
                 print(f"✓ Widget B correctly shows as unmapped Comment line")
             else:
-                print(f"⚠ Widget B unexpectedly matched to {mapping['item_number']}")
+                print(f"⚠ Widget B unexpectedly matched to {mapping['target_no']}")
         else:
             print("⚠ Widget B line not found in resolved lines")
             

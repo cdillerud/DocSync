@@ -72,21 +72,33 @@ class TestMapLineToItem:
     def mock_db(self):
         db = MagicMock()
 
-        # Default: no mappings, no history
-        find_mock = MagicMock()
-        find_mock.sort = MagicMock(return_value=find_mock)
-        find_mock.to_list = AsyncMock(return_value=[])
-        db.__getitem__ = MagicMock(return_value=MagicMock(
-            find=MagicMock(return_value=find_mock),
-            find_one=AsyncMock(return_value=None),
-        ))
+        # Mock collections with proper async mocks
+        def make_collection(find_results=None):
+            coll = MagicMock()
+            find_mock = MagicMock()
+            find_mock.sort = MagicMock(return_value=find_mock)
+            find_mock.to_list = AsyncMock(return_value=find_results or [])
+            coll.find = MagicMock(return_value=find_mock)
+            coll.find_one = AsyncMock(return_value=None)
+            coll.count_documents = AsyncMock(return_value=0)
+            return coll
+
+        collections = {}
+        def get_collection(name):
+            if name not in collections:
+                collections[name] = make_collection()
+            return collections[name]
+
+        db.__getitem__ = MagicMock(side_effect=get_collection)
         return db
 
     @pytest.mark.asyncio
     async def test_extracted_sku_takes_priority(self, mock_db):
         result = await map_line_to_item(mock_db, description="Some Widget", extracted_sku="WIDGET01")
         assert result["matched"] is True
-        assert result["item_number"] == "WIDGET01"
+        assert result["target_no"] == "WIDGET01"
+        assert result["target_type"] == "item"
+        assert result["line_type"] == "Item"
         assert result["method"] == "extracted_sku"
         assert result["confidence"] >= 0.9
 
@@ -94,7 +106,8 @@ class TestMapLineToItem:
     async def test_no_match_returns_unmatched(self, mock_db):
         result = await map_line_to_item(mock_db, description="random unknown item")
         assert result["matched"] is False
-        assert result["item_number"] == ""
+        assert result["target_no"] == ""
+        assert result["target_type"] == "comment"
         assert result["line_type"] == "Comment"
 
     @pytest.mark.asyncio
@@ -137,7 +150,61 @@ class TestMapLineToItem:
 
         result = await map_line_to_item(db, description="Glassware on Skids")
         assert result["matched"] is True
-        assert result["item_number"] == "GLASS001"
+        assert result["target_no"] == "GLASS001"
+        assert result["target_type"] == "item"
+        assert result["line_type"] == "Item"
+        assert result["confidence"] >= MIN_CONFIDENCE
+
+    @pytest.mark.asyncio
+    async def test_gl_account_mapping_match(self):
+        """Test that a mapping with target_type=gl_account returns Account line type."""
+        db = MagicMock()
+
+        mapping_data = [{
+            "id": "map-gl-1",
+            "keyword_phrase": "freight charges",
+            "keywords": ["freight"],
+            "aliases": ["shipping charges"],
+            "target_type": "gl_account",
+            "target_no": "60500",
+            "bc_item_number": "60500",
+            "bc_item_description": "Shipping / Delivery",
+            "active": True,
+            "priority": 1,
+            "customer_no": "",
+        }]
+
+        find_mock = MagicMock()
+        find_mock.sort = MagicMock(return_value=find_mock)
+        find_mock.to_list = AsyncMock(return_value=mapping_data)
+
+        history_coll = MagicMock()
+        history_coll.find_one = AsyncMock(return_value=None)
+
+        gl_coll = MagicMock()
+        gl_coll.count_documents = AsyncMock(return_value=0)  # No catalog = skip validation
+
+        catalog_coll = MagicMock()
+        catalog_coll.count_documents = AsyncMock(return_value=0)
+
+        def get_coll(name):
+            if name == "bc_item_mapping_history":
+                return history_coll
+            if name == "bc_catalog_gl_accounts":
+                return gl_coll
+            if name == "bc_catalog_items":
+                return catalog_coll
+            mock_coll = MagicMock()
+            mock_coll.find = MagicMock(return_value=find_mock)
+            return mock_coll
+
+        db.__getitem__ = MagicMock(side_effect=get_coll)
+
+        result = await map_line_to_item(db, description="Freight Charges")
+        assert result["matched"] is True
+        assert result["target_type"] == "gl_account"
+        assert result["target_no"] == "60500"
+        assert result["line_type"] == "Account"
         assert result["confidence"] >= MIN_CONFIDENCE
 
     @pytest.mark.asyncio
@@ -180,7 +247,7 @@ class TestMapLineToItem:
 
         result = await map_line_to_item(db, description="totally unrelated item")
         assert result["matched"] is False
-        assert result["item_number"] == ""
+        assert result["target_no"] == ""
 
     @pytest.mark.asyncio
     async def test_empty_description(self, mock_db):

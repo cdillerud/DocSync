@@ -195,22 +195,30 @@ class DerivedStateService:
                 blocking_issues.append("Vendor not matched")
             
             elif event_type == "vendor.resolved":
-                # Vendor was resolved - clear the blocking issue
-                if "Vendor not matched" in blocking_issues:
-                    blocking_issues.remove("Vendor not matched")
-                needs_review = review_queue == "vendor_pending"
+                # Vendor was resolved — clear ALL vendor-related blocking issues
+                blocking_issues = [i for i in blocking_issues if "Vendor" not in i and "vendor" not in i.lower()]
                 if review_queue == "vendor_pending":
                     review_queue = None
+                needs_review = bool(blocking_issues)
+                # If no other blocking issues remain, upgrade validation state
+                if not blocking_issues and validation_state == ValidationState.FAIL.value:
+                    validation_state = ValidationState.WARNING.value
             
             # BC validation events
             elif event_type == "bc.validation.completed":
                 has_bc_validation = True
                 if payload.get("all_passed"):
-                    if validation_state != ValidationState.FAIL.value:
-                        validation_state = ValidationState.PASS.value
-                        if payload.get("warnings"):
-                            validation_state = ValidationState.WARNING.value
-                            warnings.extend(payload.get("warnings", []))
+                    # BC validation passed — this is authoritative for vendor resolution.
+                    # Clear any stale vendor-related blocking issues from earlier events.
+                    blocking_issues = [i for i in blocking_issues if "Vendor" not in i and "vendor" not in i.lower()]
+                    validation_state = ValidationState.PASS.value
+                    if payload.get("warnings"):
+                        validation_state = ValidationState.WARNING.value
+                        warnings.extend(payload.get("warnings", []))
+                    # Clear vendor review queue if it was set
+                    if review_queue == "vendor_pending":
+                        review_queue = None
+                        needs_review = False
             
             elif event_type == "bc.validation.failed":
                 has_bc_validation = True
@@ -228,7 +236,7 @@ class DerivedStateService:
                 needs_review = False
                 review_queue = None
             
-            # AP Validation events (authoritative source)
+            # AP Validation events
             elif event_type == "validation.completed":
                 has_bc_validation = True
                 v_state = payload.get("validation_state", "")
@@ -236,7 +244,7 @@ class DerivedStateService:
                     validation_state = ValidationState.FAIL.value
                     needs_review = True
                     review_queue = "accounting_review"
-                    # Extract blocking issues
+                    # Extract blocking issues — but only add vendor issue if truly unresolved
                     bi_count = payload.get("blocking_issues_count", 0)
                     if bi_count > 0:
                         if not payload.get("vendor_resolved"):
@@ -250,7 +258,8 @@ class DerivedStateService:
                         if payload.get("is_duplicate"):
                             blocking_issues.append("Duplicate invoice detected")
                 elif v_state == "warning":
-                    validation_state = ValidationState.WARNING.value
+                    if validation_state != ValidationState.FAIL.value:
+                        validation_state = ValidationState.WARNING.value
                     needs_review = True
                     review_queue = "assisted_review"
                     automation_state = AutomationState.ASSISTED.value
@@ -258,6 +267,7 @@ class DerivedStateService:
                     if w_count > 0:
                         warnings.append(f"{w_count} warning(s) detected during AP validation")
                 elif v_state == "pass":
+                    # AP validation passed — clear non-vendor blocking issues from AP
                     if validation_state != ValidationState.FAIL.value:
                         validation_state = ValidationState.PASS.value
                         automation_state = AutomationState.ASSISTED.value
@@ -342,6 +352,31 @@ class DerivedStateService:
                 blocking_issues = []
                 warnings = []
         
+        # ================================================================
+        # POST-PROCESSING: Cross-reference document fields for consistency
+        # If the document has a successful BC validation with vendor resolved,
+        # but stale events left vendor blocking issues, clear them.
+        # ================================================================
+        bc_val = document.get("validation_results", {})
+        if bc_val.get("all_passed") and bc_val.get("bc_record_info"):
+            # BC validation resolved the vendor — clear any stale vendor blocking
+            vendor_blocks = [i for i in blocking_issues if "Vendor" in i or "vendor" in i.lower()]
+            if vendor_blocks:
+                blocking_issues = [i for i in blocking_issues if i not in vendor_blocks]
+                if not blocking_issues:
+                    validation_state = ValidationState.PASS.value if not warnings else ValidationState.WARNING.value
+                    needs_review = False
+                    review_queue = None
+
+        # Also check matched_vendor_no on the document
+        if document.get("matched_vendor_no") or document.get("vendor_id"):
+            vendor_blocks = [i for i in blocking_issues if "Vendor" in i or "vendor" in i.lower()]
+            if vendor_blocks:
+                blocking_issues = [i for i in blocking_issues if i not in vendor_blocks]
+                if not blocking_issues:
+                    if validation_state == ValidationState.FAIL.value:
+                        validation_state = ValidationState.WARNING.value
+
         # Determine final workflow state if still processing
         if workflow_state == WorkflowState.PROCESSING.value:
             if blocking_issues:

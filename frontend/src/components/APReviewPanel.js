@@ -74,7 +74,12 @@ export function APReviewPanel({ document, onUpdate }) {
         total_amount: document.amount_float || extracted.amount || '',
         tax_amount: document.tax_amount || '',
         po_number: document.po_number_clean || extracted.po_number || '',
-        line_items: document.line_items || []
+        line_items: (document.line_items || []).map(li => ({
+          description: li.description || '',
+          quantity: li.quantity || 1,
+          unit_price: li.unit_price || li.unit_cost || (li.amount ? (li.amount / (li.quantity || 1)) : 0),
+          line_total: li.line_total || li.total || li.amount || ((li.quantity || 1) * (li.unit_price || li.unit_cost || 0)),
+        })),
       });
       setVendorSearch(document.vendor_name_resolved || document.vendor_raw || extracted.vendor || '');
     }

@@ -48,7 +48,26 @@ export default function APValidationPanel({ document: doc, onUpdate }) {
   const [showWarnings, setShowWarnings] = useState(false);
 
   const apVal = doc?.ap_validation_result;
-  const valState = apVal?.validation_state || doc?.validation_state || 'pending';
+  
+  // Cross-reference: if BC validation resolved vendor, treat vendor as resolved
+  // even if AP validation ran before vendor was matched
+  const bcVal = doc?.validation_results;
+  const bcResolvedVendor = bcVal?.all_passed && bcVal?.bc_record_info;
+  const docHasVendor = !!(doc?.matched_vendor_no || doc?.vendor_id);
+  const vendorIsResolved = apVal?.vendor_resolved || bcResolvedVendor || docHasVendor;
+  
+  // Reconciled validation state: if AP says fail only because vendor wasn't resolved,
+  // but BC validation or document fields show vendor IS resolved, upgrade to pass/warning
+  let valState = apVal?.validation_state || doc?.validation_state || 'pending';
+  if (valState === 'fail' && apVal && vendorIsResolved) {
+    const nonVendorBlocking = (apVal.blocking_issues || []).filter(
+      i => !i.toLowerCase().includes('vendor')
+    );
+    if (nonVendorBlocking.length === 0) {
+      valState = (apVal.warnings?.length > 0) ? 'warning' : 'pass';
+    }
+  }
+  
   const config = STATE_CONFIG[valState] || STATE_CONFIG.pending;
   const StateIcon = config.icon;
 
@@ -84,7 +103,10 @@ export default function APValidationPanel({ document: doc, onUpdate }) {
 
   const checks = apVal?.checks || [];
   const warnings = apVal?.warnings || [];
-  const blockingIssues = apVal?.blocking_issues || [];
+  // Filter out stale vendor blocking issues if vendor is now resolved
+  const blockingIssues = (apVal?.blocking_issues || []).filter(
+    issue => !(vendorIsResolved && issue.toLowerCase().includes('vendor'))
+  );
   const passedChecks = checks.filter(c => c.passed);
   const failedChecks = checks.filter(c => !c.passed);
 
@@ -133,7 +155,7 @@ export default function APValidationPanel({ document: doc, onUpdate }) {
             {/* Required Checks Summary */}
             <div className="space-y-1.5" data-testid="ap-validation-checks-summary">
               {[
-                { key: 'vendor_resolved', label: 'Vendor resolved to BC', passed: apVal.vendor_resolved },
+                { key: 'vendor_resolved', label: 'Vendor resolved to BC', passed: vendorIsResolved },
                 { key: 'invoice_number', label: 'Invoice number', passed: apVal.invoice_number_present },
                 { key: 'invoice_date', label: 'Invoice date', passed: apVal.invoice_date_present },
                 { key: 'total_amount', label: 'Total amount', passed: apVal.total_amount_present },

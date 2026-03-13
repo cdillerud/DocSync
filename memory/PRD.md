@@ -1196,6 +1196,7 @@ Created `/app/memory/SQUARE9_COMPARISON.md` documenting alignment status.
 - [x] Add "Create BC Sales Order" Button to UI — **Full flow: eligibility, preflight, confirm modal, create, error handling, graph writeback** (March 12, 2026)
 - [x] Item vs. G/L Account Mapping for Sales Orders — **Refactored mapping rules to support target_type (item/gl_account), updated all 20 freight rules to GL account 60500 (Shipping/Delivery), catalog validation, frontend badges** (March 14, 2026)
 - [x] Sales Order Preflight Review Panel — **Full redesign: Document Summary, Validation Checklist (6 checks incl. duplicate detection), Editable Line Table (inline edit qty/price/desc/target/type, add/remove lines, live totals), Environment Banner, Catalog validation on submit, Audit logging (original + submitted lines), Reset to extracted values, Created vs Already Exists distinction** (March 14, 2026)
+- [x] Sales Dashboard / Orders Awaiting Review — **New role-oriented page: summary cards (Ready/Warnings/Review/Created), filterable queue table with readiness assessment, status badges, customer/PO/amount/lines/date columns, SO number display, search + status + BC status + sort filters, click-through to preflight review panel** (March 14, 2026)
 
 ### P2 - Upcoming
 - [x] Add "Create BC Purchase Invoice" flow for AP_Invoice documents — **Same pattern as SO: vendor resolution, preflight, confirm modal, create, graph writeback** (March 12, 2026)

@@ -158,6 +158,12 @@ function LoadingState({ message = 'Running preflight checks...' }) {
 function PreflightView({ data, customerOverride, setCustomerOverride, onConfirm, onCancel }) {
   const mv = data.mapped_values || {};
   const hasCustomer = !!(customerOverride.trim() || mv.customer_no);
+  const resolvedLines = data.resolved_lines || [];
+  const hasLines = resolvedLines.length > 0;
+
+  // Determine line source for display
+  const lineSource = resolvedLines.length > 0 ? resolvedLines[0].source : null;
+  const isFallback = lineSource && lineSource.startsWith('fallback');
 
   return (
     <div className="space-y-4" data-testid="bc-so-preflight-view">
@@ -207,7 +213,6 @@ function PreflightView({ data, customerOverride, setCustomerOverride, onConfirm,
           )}
           <FieldRow icon={<FileText className="w-3.5 h-3.5" />} label="External Doc No" value={mv.external_doc_no} missing={!mv.external_doc_no} />
           <FieldRow icon={<Calendar className="w-3.5 h-3.5" />} label="Order Date" value={mv.order_date} badge={mv.order_date_source === 'fallback_today' ? 'fallback' : null} />
-          <FieldRow icon={<Hash className="w-3.5 h-3.5" />} label="Line Items" value={`${data.line_count} line(s)`} />
           {mv.total_amount != null && (
             <FieldRow icon={<Hash className="w-3.5 h-3.5" />} label="Total Amount" value={typeof mv.total_amount === 'number' ? `$${mv.total_amount.toLocaleString()}` : `$${mv.total_amount}`} />
           )}
@@ -215,18 +220,68 @@ function PreflightView({ data, customerOverride, setCustomerOverride, onConfirm,
         </div>
       </div>
 
-      {/* Line items preview */}
-      {data.line_items?.length > 0 && (
-        <div>
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold mb-1.5">Line Items</p>
-          <div className="bg-muted/50 rounded-md p-2 space-y-1">
-            {data.line_items.map((li, i) => (
-              <div key={i} className="flex justify-between text-[11px]">
-                <span className="truncate mr-2">{li.description}</span>
-                <span className="font-mono shrink-0">{li.quantity} x ${li.unit_price} = ${li.total}</span>
-              </div>
-            ))}
+      {/* Resolved lines preview */}
+      {resolvedLines.length > 0 && (
+        <div data-testid="bc-so-resolved-lines">
+          <div className="flex items-center gap-2 mb-1.5">
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+              Sales Lines ({resolvedLines.length})
+            </p>
+            {isFallback && (
+              <Badge variant="outline" className="text-[9px] h-4 px-1.5 border-amber-300 text-amber-600 dark:text-amber-400">
+                Fallback
+              </Badge>
+            )}
           </div>
+          <div className="bg-muted/50 rounded-md overflow-hidden border border-border">
+            <table className="w-full text-[11px]">
+              <thead>
+                <tr className="border-b border-border bg-muted/80">
+                  <th className="text-left py-1.5 px-2 font-medium text-muted-foreground">Type</th>
+                  <th className="text-left py-1.5 px-2 font-medium text-muted-foreground">Description</th>
+                  <th className="text-right py-1.5 px-2 font-medium text-muted-foreground">Qty</th>
+                  <th className="text-right py-1.5 px-2 font-medium text-muted-foreground">Unit Price</th>
+                  <th className="text-right py-1.5 px-2 font-medium text-muted-foreground">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {resolvedLines.map((li, i) => (
+                  <tr key={i} className="border-b border-border/50 last:border-0">
+                    <td className="py-1.5 px-2">
+                      <Badge variant="secondary" className="text-[9px] h-4 px-1">
+                        {li.lineType}
+                      </Badge>
+                    </td>
+                    <td className="py-1.5 px-2 truncate max-w-[180px]">
+                      {li.description}
+                      {li.lineObjectNumber && (
+                        <span className="text-muted-foreground ml-1">({li.lineObjectNumber})</span>
+                      )}
+                    </td>
+                    <td className="py-1.5 px-2 text-right font-mono">{li.quantity}</td>
+                    <td className="py-1.5 px-2 text-right font-mono">${(li.unitPrice || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                    <td className="py-1.5 px-2 text-right font-mono font-medium">
+                      ${((li.quantity || 0) * (li.unitPrice || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="bg-muted/80">
+                  <td colSpan={4} className="py-1.5 px-2 text-right font-medium text-muted-foreground">Order Total</td>
+                  <td className="py-1.5 px-2 text-right font-mono font-bold">
+                    ${resolvedLines.reduce((sum, li) => sum + (li.quantity || 0) * (li.unitPrice || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          {isFallback && (
+            <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 flex items-start gap-1">
+              <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+              No structured line items extracted. Using fallback {lineSource === 'fallback_gl_account' ? 'G/L Account' : lineSource === 'fallback_item' ? 'Item' : 'amount'} line.
+            </p>
+          )}
         </div>
       )}
 
@@ -270,11 +325,11 @@ function PreflightView({ data, customerOverride, setCustomerOverride, onConfirm,
           size="sm"
           className="h-8 text-xs"
           onClick={onConfirm}
-          disabled={!hasCustomer || data.errors?.length > 0}
+          disabled={!hasCustomer || !hasLines || data.errors?.length > 0}
           data-testid="bc-so-confirm-create-btn"
         >
           <ShoppingCart className="w-3 h-3 mr-1.5" />
-          Create in {mv.bc_write_environment || 'Sandbox'}
+          Create in {mv.bc_write_environment || 'Sandbox'} ({resolvedLines.length} line{resolvedLines.length !== 1 ? 's' : ''})
         </Button>
         <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={onCancel} data-testid="bc-so-cancel-btn">
           Cancel
@@ -292,6 +347,14 @@ function SuccessDisplay({ data }) {
           <div className="flex items-center justify-between bg-emerald-50 dark:bg-emerald-950/30 rounded-md p-2.5">
             <span className="text-emerald-700 dark:text-emerald-300 font-medium">BC Sales Order No</span>
             <span className="font-mono font-bold text-emerald-800 dark:text-emerald-200">{data.bc_record_no}</span>
+          </div>
+        )}
+        {(data.lines_added != null || data.lines_total != null) && (
+          <div className="flex items-center justify-between bg-blue-50 dark:bg-blue-950/30 rounded-md p-2.5">
+            <span className="text-blue-700 dark:text-blue-300 font-medium">Sales Lines</span>
+            <span className="font-mono font-bold text-blue-800 dark:text-blue-200">
+              {data.lines_added ?? 0}/{data.lines_total ?? 0} added
+            </span>
           </div>
         )}
         {data.bc_system_id && (
@@ -317,6 +380,16 @@ function SuccessDisplay({ data }) {
           <FieldRow icon={<Calendar className="w-3.5 h-3.5" />} label="Created" value={new Date(data.created_at).toLocaleString()} />
         )}
       </div>
+      {data.line_errors?.length > 0 && (
+        <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md p-2.5">
+          <p className="text-[10px] font-medium text-amber-700 dark:text-amber-300 mb-1">Line Warnings</p>
+          {data.line_errors.map((e, i) => (
+            <p key={i} className="text-[10px] text-amber-600 dark:text-amber-400">
+              Line {e.line}: {typeof e.error === 'string' ? e.error.slice(0, 100) : JSON.stringify(e.error).slice(0, 100)}
+            </p>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

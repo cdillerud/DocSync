@@ -30,12 +30,15 @@ from deps import get_db
 from services.gpi_integration_service import (
     list_companies,
     create_sales_order,
+    add_sales_order_lines,
     create_purchase_invoice,
     create_customer,
     create_vendor,
     list_integration_logs,
     get_integration_status,
     HAS_CREDENTIALS,
+    BC_SO_FALLBACK_GL_ACCOUNT,
+    BC_SO_FALLBACK_ITEM_CODE,
 )
 
 logger = logging.getLogger(__name__)
@@ -196,10 +199,87 @@ async def _resolve_customer_no(doc: dict) -> dict:
     }
 
 
+def _resolve_sales_lines(doc: dict) -> list:
+    """Resolve the sales lines that will be created in BC.
+
+    Priority:
+      1. Extracted line_items from the document → mapped to BC format
+      2. Fallback: single line using G/L account or item code + total amount
+      3. Empty list → caller must block creation
+
+    Returns list of dicts with: lineType, lineObjectNumber, description, quantity, unitPrice, source
+    """
+    ef = doc.get("extracted_fields") or {}
+    nf = doc.get("normalized_fields") or {}
+    line_items = ef.get("line_items") or nf.get("line_items") or []
+
+    resolved = []
+
+    if line_items:
+        for li in line_items:
+            desc = li.get("description", "") or ""
+            qty = float(li.get("quantity", 1) or 1)
+            unit_price = float(li.get("unit_price", 0) or li.get("unitPrice", 0) or 0)
+            total = float(li.get("total", 0) or li.get("amount", 0) or 0)
+
+            # If we have total but no unit_price, derive it
+            if total > 0 and unit_price == 0 and qty > 0:
+                unit_price = round(total / qty, 2)
+
+            item_no = li.get("item_number") or li.get("itemNumber") or li.get("item_no") or ""
+
+            resolved.append({
+                "lineType": "Item" if item_no else "Comment",
+                "lineObjectNumber": item_no,
+                "description": desc[:100] if desc else "Line item",
+                "quantity": qty,
+                "unitPrice": unit_price,
+                "source": "extracted",
+            })
+    else:
+        # Fallback: create a single line from the document total
+        amount = nf.get("amount") or ef.get("amount")
+        if amount is not None:
+            amount = float(amount)
+        doc_desc = ef.get("description") or nf.get("description") or ""
+        fallback_desc = doc_desc[:80] if doc_desc else "Imported from Document Hub"
+
+        if BC_SO_FALLBACK_GL_ACCOUNT:
+            resolved.append({
+                "lineType": "Account",
+                "lineObjectNumber": BC_SO_FALLBACK_GL_ACCOUNT,
+                "description": fallback_desc,
+                "quantity": 1,
+                "unitPrice": amount or 0,
+                "source": "fallback_gl_account",
+            })
+        elif BC_SO_FALLBACK_ITEM_CODE:
+            resolved.append({
+                "lineType": "Item",
+                "lineObjectNumber": BC_SO_FALLBACK_ITEM_CODE,
+                "description": fallback_desc,
+                "quantity": 1,
+                "unitPrice": amount or 0,
+                "source": "fallback_item",
+            })
+        elif amount and amount > 0:
+            # No configured fallback code, but we have an amount — use Comment line
+            resolved.append({
+                "lineType": "Comment",
+                "lineObjectNumber": "",
+                "description": fallback_desc,
+                "quantity": 1,
+                "unitPrice": amount,
+                "source": "fallback_amount_only",
+            })
+
+    return resolved
+
+
 @router.post("/sales-orders/preflight/{doc_id}")
 async def sales_order_preflight(doc_id: str):
     """Preflight validation: check if a document is ready for BC Sales Order creation.
-    Returns mapped values, missing fields, warnings, and overall readiness.
+    Returns mapped values, resolved lines, missing fields, warnings, and overall readiness.
     """
     db = get_db()
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
@@ -230,6 +310,7 @@ async def sales_order_preflight(doc_id: str):
             "missing_fields": [],
             "warnings": ["A BC Sales Order has already been created for this document."],
             "errors": [],
+            "resolved_lines": [],
             "line_count": 0,
         }
 
@@ -245,8 +326,7 @@ async def sales_order_preflight(doc_id: str):
     # Extract key fields
     external_doc_no = ef.get("po_number") or nf.get("po_number") or ""
     order_date = ef.get("order_date") or nf.get("order_date") or ""
-    line_items = ef.get("line_items") or nf.get("line_items") or []
-    amount = ef.get("amount") or nf.get("amount")
+    amount = nf.get("amount") or ef.get("amount")
 
     if not external_doc_no:
         missing_fields.append("external_doc_no")
@@ -256,8 +336,20 @@ async def sales_order_preflight(doc_id: str):
         missing_fields.append("order_date")
         warnings.append("No order date extracted. Current date will be used as fallback.")
 
-    if not line_items:
-        warnings.append("No line items extracted. A header-only sales order will be created.")
+    # Resolve sales lines (extracted or fallback)
+    resolved_lines = _resolve_sales_lines(doc)
+
+    if not resolved_lines:
+        errors.append("No sales lines could be resolved. The document has no extracted line items, no total amount, and no fallback G/L account or item code is configured. Header-only orders are not allowed.")
+    else:
+        # Inform user about the line source
+        line_sources = set(ln["source"] for ln in resolved_lines)
+        if "fallback_gl_account" in line_sources:
+            warnings.append(f"No line items extracted. A fallback line will be created using G/L Account '{BC_SO_FALLBACK_GL_ACCOUNT}' with the document total amount.")
+        elif "fallback_item" in line_sources:
+            warnings.append(f"No line items extracted. A fallback line will be created using item '{BC_SO_FALLBACK_ITEM_CODE}' with the document total amount.")
+        elif "fallback_amount_only" in line_sources:
+            warnings.append("No line items extracted. A comment line will be created with the document total amount. Configure BC_SO_FALLBACK_GL_ACCOUNT for proper G/L posting.")
 
     # Integration status
     if not HAS_CREDENTIALS:
@@ -267,7 +359,7 @@ async def sales_order_preflight(doc_id: str):
     from services.gpi_integration_service import BC_WRITE_ENVIRONMENT, BC_READ_ENVIRONMENT, BC_COMPANY_ID
     bc_company = BC_COMPANY_ID or "auto-detect"
 
-    ready = eligible and bool(customer_no) and not errors
+    ready = eligible and bool(customer_no) and bool(resolved_lines) and not errors
 
     idempotency_key = _build_idempotency_key(doc_id)
 
@@ -291,16 +383,8 @@ async def sales_order_preflight(doc_id: str):
             "bc_environment": f"Read: {BC_READ_ENVIRONMENT} / Write: {BC_WRITE_ENVIRONMENT}",
             "idempotency_key": idempotency_key,
         },
-        "line_items": [
-            {
-                "description": li.get("description", ""),
-                "quantity": li.get("quantity", 0),
-                "unit_price": li.get("unit_price", 0),
-                "total": li.get("total", 0),
-            }
-            for li in line_items
-        ],
-        "line_count": len(line_items),
+        "resolved_lines": resolved_lines,
+        "line_count": len(resolved_lines),
         "missing_fields": missing_fields,
         "warnings": warnings,
         "errors": errors,
@@ -310,7 +394,7 @@ async def sales_order_preflight(doc_id: str):
 @router.post("/sales-orders/from-document/{doc_id}")
 async def create_sales_order_from_document(doc_id: str, customer_no_override: str = Query("", description="Override customer number")):
     """Create a BC Sales Order from a GPI Hub document.
-    Performs preflight, creates the order, and writes back to the document graph.
+    Creates the header via GPI custom API, then adds resolved lines via standard BC API.
     """
     if not HAS_CREDENTIALS:
         raise HTTPException(status_code=503, detail="BC credentials not configured")
@@ -320,7 +404,7 @@ async def create_sales_order_from_document(doc_id: str, customer_no_override: st
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    # Check for existing SO
+    # Check for existing SO (idempotency)
     existing_so = doc.get("bc_sales_order")
     if existing_so:
         return {
@@ -332,6 +416,8 @@ async def create_sales_order_from_document(doc_id: str, customer_no_override: st
             "status": "already_exists",
             "message": "A BC Sales Order was already created for this document.",
             "created_at": existing_so.get("created_at", ""),
+            "lines_added": existing_so.get("lines_added", 0),
+            "lines_total": existing_so.get("lines_total", 0),
         }
 
     # Check eligibility
@@ -351,12 +437,21 @@ async def create_sales_order_from_document(doc_id: str, customer_no_override: st
             "message": "Cannot create Sales Order: no BC customer number resolved. Provide customer_no_override or map the customer first.",
         })
 
+    # Resolve sales lines — block if none
+    resolved_lines = _resolve_sales_lines(doc)
+    if not resolved_lines:
+        raise HTTPException(status_code=422, detail={
+            "error": "no_lines",
+            "message": "Cannot create Sales Order: no sales lines could be resolved. The document has no extracted line items and no total amount. Header-only orders are not allowed.",
+        })
+
     external_doc_no = ef.get("po_number") or nf.get("po_number") or ""
     order_date = ef.get("order_date") or nf.get("order_date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     idempotency_key = _build_idempotency_key(doc_id)
     transaction_id = f"TXN_{uuid.uuid4().hex[:12]}"
 
+    # Step 1: Create SO header via GPI custom API
     try:
         result = await create_sales_order(
             customer_no=customer_no,
@@ -367,14 +462,32 @@ async def create_sales_order_from_document(doc_id: str, customer_no_override: st
             transaction_id=transaction_id,
         )
     except Exception as e:
-        logger.error("Failed to create sales order from doc %s: %s", doc_id, str(e))
-        raise HTTPException(status_code=502, detail=f"BC API error: {str(e)}")
+        logger.error("Failed to create sales order header from doc %s: %s", doc_id, str(e))
+        raise HTTPException(status_code=502, detail=f"BC API error (header): {str(e)}")
 
-    # Graph writeback: store the BC Sales Order reference on the document
+    if not result.get("success"):
+        raise HTTPException(status_code=502, detail=f"BC header creation failed: {result.get('error_message', 'Unknown error')}")
+
+    bc_system_id = result.get("bc_system_id", "")
+    bc_record_no = result.get("bc_record_no", "")
+
+    # Step 2: Add lines to the created SO via standard BC API
+    line_result = {"added": 0, "total": len(resolved_lines), "errors": []}
+    if bc_system_id:
+        try:
+            line_result = await add_sales_order_lines(bc_system_id, resolved_lines)
+            logger.info("Added %d/%d lines to SO %s", line_result["added"], line_result["total"], bc_record_no)
+        except Exception as e:
+            logger.error("Failed to add lines to SO %s: %s", bc_record_no, str(e))
+            line_result["errors"].append({"line": 0, "error": str(e)})
+    else:
+        logger.warning("No bc_system_id returned for SO %s — cannot add lines", bc_record_no)
+
+    # Graph writeback
     now = datetime.now(timezone.utc).isoformat()
     bc_sales_order = {
-        "bc_record_no": result.get("bc_record_no", ""),
-        "bc_system_id": result.get("bc_system_id", ""),
+        "bc_record_no": bc_record_no,
+        "bc_system_id": bc_system_id,
         "idempotency_key": idempotency_key,
         "transaction_id": transaction_id,
         "status": result.get("status", ""),
@@ -383,6 +496,10 @@ async def create_sales_order_from_document(doc_id: str, customer_no_override: st
         "customer_name": customer_info["customer_name"],
         "external_doc_no": external_doc_no,
         "order_date": order_date,
+        "lines_added": line_result["added"],
+        "lines_total": line_result["total"],
+        "line_errors": line_result["errors"],
+        "resolved_lines": resolved_lines,
         "created_at": now,
         "created_by": "gpi_hub",
         "error_message": result.get("error_message", ""),
@@ -396,7 +513,7 @@ async def create_sales_order_from_document(doc_id: str, customer_no_override: st
         }}
     )
 
-    # Also emit an event if event service is available
+    # Emit event
     try:
         from services.event_service import get_event_service
         es = get_event_service()
@@ -406,11 +523,13 @@ async def create_sales_order_from_document(doc_id: str, customer_no_override: st
                 event_type="bc.sales_order.created" if result.get("success") else "bc.sales_order.failed",
                 source_service="gpi_integration",
                 payload={
-                    "bc_record_no": result.get("bc_record_no", ""),
+                    "bc_record_no": bc_record_no,
                     "customer_no": customer_no,
                     "external_doc_no": external_doc_no,
                     "idempotency_key": idempotency_key,
                     "status": result.get("status", ""),
+                    "lines_added": line_result["added"],
+                    "lines_total": line_result["total"],
                 },
                 actor="system",
             )
@@ -420,13 +539,16 @@ async def create_sales_order_from_document(doc_id: str, customer_no_override: st
     return {
         "success": result.get("success", False),
         "already_exists": result.get("status") == "already_exists",
-        "bc_record_no": result.get("bc_record_no", ""),
-        "bc_system_id": result.get("bc_system_id", ""),
+        "bc_record_no": bc_record_no,
+        "bc_system_id": bc_system_id,
         "idempotency_key": idempotency_key,
         "transaction_id": transaction_id,
         "status": result.get("status", ""),
-        "message": "Sales Order created successfully" if result.get("success") else result.get("error_message", "Creation failed"),
+        "message": f"Sales Order {bc_record_no} created with {line_result['added']}/{line_result['total']} lines" if result.get("success") else result.get("error_message", "Creation failed"),
         "error_message": result.get("error_message", ""),
+        "lines_added": line_result["added"],
+        "lines_total": line_result["total"],
+        "line_errors": line_result["errors"],
         "created_at": now,
     }
 

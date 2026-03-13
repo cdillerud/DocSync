@@ -40,8 +40,13 @@ BC_ENVIRONMENT = BC_READ_ENVIRONMENT
 
 GPI_API_BASE = "https://api.businesscentral.dynamics.com/v2.0"
 GPI_API_GROUP = "gpi/integration/v1.0"
+BC_STANDARD_API = "v2.0"
 SOURCE_SYSTEM = "GPI_HUB"
 REQUEST_TIMEOUT = 30.0
+
+# Sales Order line defaults
+BC_SO_FALLBACK_GL_ACCOUNT = os.environ.get('BC_SO_FALLBACK_GL_ACCOUNT', '')
+BC_SO_FALLBACK_ITEM_CODE = os.environ.get('BC_SO_FALLBACK_ITEM_CODE', os.environ.get('BC_DEFAULT_ITEM_CODE', ''))
 
 # Token cache
 _token_cache = {"access_token": None, "expires_at": 0}
@@ -180,6 +185,81 @@ async def create_sales_order(
         "idempotency_key": idempotency_key,
         "transaction_id": transaction_id,
     }
+
+
+async def _get_company_id_standard_api() -> str:
+    """Get the BC company ID using the standard API (for line creation)."""
+    token = await _get_token()
+    url = f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/{BC_STANDARD_API}/companies"
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        resp = await client.get(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
+        resp.raise_for_status()
+        companies = resp.json().get("value", [])
+        if not companies:
+            raise ValueError("No BC companies found")
+        return companies[0]["id"]
+
+
+async def add_sales_order_lines(
+    order_system_id: str,
+    lines: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Add line items to an existing Sales Order using the standard BC API.
+
+    Each line dict should have:
+      lineType: "Item" | "Account" | "Comment"
+      lineObjectNumber: item number or G/L account number
+      description: text
+      quantity: number
+      unitPrice: number
+    """
+    _check_write_protection("add_sales_order_lines")
+    if not HAS_CREDENTIALS:
+        raise ValueError("BC credentials not configured")
+
+    token = await _get_token()
+    company_id = await _get_company_id_standard_api()
+    url = f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/{BC_STANDARD_API}/companies({company_id})/salesOrders({order_system_id})/salesOrderLines"
+
+    added = 0
+    errors = []
+
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        for idx, line in enumerate(lines):
+            line_payload = {
+                "lineType": line.get("lineType", "Item"),
+                "quantity": float(line.get("quantity", 1) or 1),
+            }
+            if line.get("lineObjectNumber"):
+                line_payload["lineObjectNumber"] = line["lineObjectNumber"]
+            if line.get("description"):
+                line_payload["description"] = line["description"][:100]
+            if line.get("unitPrice") is not None and float(line.get("unitPrice", 0)) > 0:
+                line_payload["unitPrice"] = float(line["unitPrice"])
+
+            logger.info("Adding SO line %d/%d: type=%s obj=%s qty=%s price=$%s",
+                        idx + 1, len(lines), line_payload.get("lineType"),
+                        line_payload.get("lineObjectNumber", "N/A"),
+                        line_payload["quantity"], line_payload.get("unitPrice", 0))
+
+            resp = await client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                json=line_payload,
+            )
+
+            if resp.status_code in (200, 201):
+                added += 1
+            else:
+                error_text = resp.text[:300]
+                logger.warning("Failed to add SO line %d: HTTP %d - %s", idx + 1, resp.status_code, error_text)
+                errors.append({"line": idx + 1, "status": resp.status_code, "error": error_text})
+
+    return {"added": added, "total": len(lines), "errors": errors}
 
 
 async def create_purchase_invoice(

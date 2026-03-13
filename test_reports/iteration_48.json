@@ -1,0 +1,64 @@
+{
+  "summary": "Completed comprehensive testing of Sales Order line creation feature. All backend APIs and frontend UI components working correctly. The fix properly implements line creation logic: extracted lines are mapped to BC sales lines, resolved_lines array is returned by preflight, and lines_added count is displayed in success view.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "component": "CreateBCSalesOrderPanel",
+        "issue": "React hydration warning in console when rendering resolved lines table (<tr> inside <span>)",
+        "severity": "minor",
+        "fix_priority": "LOW"
+      }
+    ]
+  },
+  "passed_tests": [
+    "Unit tests: 8/8 _resolve_sales_lines function tests pass",
+    "GET /api/gpi-integration/status - returns configured=true with split environment",
+    "POST /api/gpi-integration/sales-orders/preflight/{doc_id} - returns resolved_lines array with line details",
+    "Preflight returns already_created=true for docs with existing SO, includes lines_added/lines_total",
+    "Preflight returns resolved_lines with 2 items (Widget A, Widget B) for doc 44b2e236",
+    "Preflight correctly shows 7 lines for order confirmation doc 29be78fe",
+    "Preflight returns 404 for non-existent documents",
+    "POST /api/gpi-integration/sales-orders/from-document/{doc_id} - idempotency returns already_exists with lines_added/lines_total preserved",
+    "Idempotency preserves lines_added=2 for doc b3c5ddaa (SO 107039)",
+    "Idempotency preserves lines_added=7 for doc 29be78fe (SO 107040)",
+    "from-document returns 422 with missing_customer error when no customer mapped",
+    "Frontend: Login flow works with admin/admin credentials",
+    "Frontend: Document detail page loads correctly",
+    "Frontend: BC Sales Order panel visible on Sales_Order documents",
+    "Frontend: Success view shows 'BC SALES ORDER CREATED' with lines '2/2 added' for existing SO",
+    "Frontend: Preflight button triggers API call and shows preflight view",
+    "Frontend: PreflightView shows resolved lines table with Type, Description, Qty, Unit Price, Total columns",
+    "Frontend: PreflightView shows 'SALES LINES (2)' with Widget A and Widget B details",
+    "Frontend: PreflightView shows customer override input when customer not mapped",
+    "Frontend: PreflightView shows mapped values (Environment, External Doc, Order Date, Total Amount, Idempotency Key)"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_sales_order_lines.py",
+    "/app/backend/tests/test_sales_order_line_creation.py",
+    "/app/test_reports/pytest/sales_order_line_creation_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "React hydration warning when rendering table rows - consider wrapping dynamic content differently to avoid <span> inside <tbody>"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_sales_order_line_creation.py"
+  ],
+  "success_rate": {
+    "backend": "100% (9/9 API tests passed, 8/8 unit tests passed)",
+    "frontend": "100% (All UI components and integrations verified)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin"
+  },
+  "seed_data_creation": "Test documents eb589bf0 and 4369047f were created for testing fallback scenarios (automatically cleaned up)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "SO 107039 exists for doc b3c5ddaa (2 lines). SO 107040 exists for doc 29be78fe (7 lines). Doc 44b2e236 is eligible for SO creation but has no customer mapped. The _resolve_sales_lines function correctly maps extracted line_items to BC format. Fallback item code FREIGHT is configured in .env for documents without line items."
+}

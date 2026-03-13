@@ -120,9 +120,15 @@ class TestMapLineToItem:
         history_coll = MagicMock()
         history_coll.find_one = AsyncMock(return_value=None)
 
+        catalog_coll = MagicMock()
+        catalog_coll.count_documents = AsyncMock(return_value=0)
+        catalog_coll.find_one = AsyncMock(return_value=None)
+
         def get_coll(name):
             if name == "bc_item_mapping_history":
                 return history_coll
+            if name == "bc_catalog_items":
+                return catalog_coll
             mock_coll = MagicMock()
             mock_coll.find = MagicMock(return_value=find_mock)
             return mock_coll
@@ -157,9 +163,15 @@ class TestMapLineToItem:
         history_coll = MagicMock()
         history_coll.find_one = AsyncMock(return_value=None)
 
+        catalog_coll = MagicMock()
+        catalog_coll.count_documents = AsyncMock(return_value=0)
+        catalog_coll.find_one = AsyncMock(return_value=None)
+
         def get_coll(name):
             if name == "bc_item_mapping_history":
                 return history_coll
+            if name == "bc_catalog_items":
+                return catalog_coll
             mock_coll = MagicMock()
             mock_coll.find = MagicMock(return_value=find_mock)
             return mock_coll

@@ -117,22 +117,111 @@ async def map_line_to_item(
             best_confidence = conf
             best_match = mapping
 
-    # Apply match if above threshold
+    # Apply match if above threshold — validate against catalog if synced
     if best_match and best_confidence >= MIN_CONFIDENCE:
-        result["matched"] = True
-        result["item_number"] = best_match["bc_item_number"]
-        result["line_type"] = "Item"
-        result["confidence"] = round(best_confidence, 3)
-        result["method"] = best_match.get("_match_method", "keyword")
-        result["mapping_id"] = best_match.get("id")
-        return result
+        item_no = best_match["bc_item_number"]
+        # Validate the mapped item isn't blocked in BC
+        catalog_check = await _validate_item_in_catalog(db, item_no)
+        if catalog_check["reason"] == "blocked":
+            logger.warning("Mapped item %s is blocked in BC — skipping", item_no)
+        else:
+            result["matched"] = True
+            result["item_number"] = item_no
+            result["line_type"] = "Item"
+            result["confidence"] = round(best_confidence, 3)
+            result["method"] = best_match.get("_match_method", "keyword")
+            result["mapping_id"] = best_match.get("id")
+            result["catalog_validated"] = catalog_check["reason"] == "ok"
+            return result
 
-    # Strategy: Historical match as last resort
+    # Strategy 3: Direct catalog description match
+    catalog_result = await _match_catalog_description(db, norm_desc, desc_tokens)
+    if catalog_result:
+        return catalog_result
+
+    # Strategy 4: Historical match as last resort
     hist_result = await _match_historical(db, norm_desc, customer_no, doc_id)
     if hist_result:
         return hist_result
 
     return result
+
+
+async def _validate_item_in_catalog(db, item_no: str) -> Dict[str, Any]:
+    """Check if an item number exists and is usable in the synced catalog."""
+    from services.bc_catalog_sync_service import ITEMS_COLLECTION
+    catalog_count = await db[ITEMS_COLLECTION].count_documents({})
+    if catalog_count == 0:
+        return {"valid": True, "reason": "no_catalog"}  # Catalog not synced yet
+
+    item = await db[ITEMS_COLLECTION].find_one({"item_no": item_no}, {"_id": 0})
+    if not item:
+        return {"valid": False, "reason": "not_found"}
+    if item.get("blocked"):
+        return {"valid": False, "reason": "blocked"}
+    return {"valid": True, "reason": "ok", "item": item}
+
+
+async def _match_catalog_description(
+    db, norm_desc: str, desc_tokens: set
+) -> Optional[Dict[str, Any]]:
+    """Try to find an exact or near-exact description match in the synced BC item catalog."""
+    from services.bc_catalog_sync_service import ITEMS_COLLECTION
+
+    catalog_count = await db[ITEMS_COLLECTION].count_documents({})
+    if catalog_count == 0:
+        return None  # No catalog synced
+
+    # Strategy A: Exact normalized description match
+    items = await db[ITEMS_COLLECTION].find(
+        {"blocked": {"$ne": True}}, {"_id": 0}
+    ).to_list(5000)
+
+    best_item = None
+    best_score = 0.0
+
+    for item in items:
+        item_norm = _normalize(item.get("description", ""))
+        if not item_norm:
+            continue
+
+        # Exact match
+        if item_norm == norm_desc:
+            return {
+                "matched": True,
+                "item_number": item["item_no"],
+                "line_type": "Item",
+                "confidence": 0.92,
+                "method": "catalog_exact",
+                "mapping_id": None,
+                "original_description": norm_desc,
+                "catalog_validated": True,
+            }
+
+        # Token overlap scoring
+        item_tokens = _tokenize(item.get("description", ""))
+        if item_tokens and desc_tokens:
+            overlap = item_tokens & desc_tokens
+            if len(overlap) >= 2:
+                score = len(overlap) / max(len(item_tokens), len(desc_tokens))
+                if score > best_score:
+                    best_score = score
+                    best_item = item
+
+    # Only accept catalog matches with high token overlap
+    if best_item and best_score >= 0.75:
+        return {
+            "matched": True,
+            "item_number": best_item["item_no"],
+            "line_type": "Item",
+            "confidence": round(min(best_score * 0.90, 0.88), 3),
+            "method": "catalog_description",
+            "mapping_id": None,
+            "original_description": norm_desc,
+            "catalog_validated": True,
+        }
+
+    return None
 
 
 def _score_mapping(norm_desc: str, desc_tokens: set, mapping: Dict) -> float:

@@ -1199,3 +1199,76 @@ async def delete_mapping_endpoint(mapping_id: str):
     if not deleted:
         raise HTTPException(status_code=404, detail="Mapping not found")
     return {"success": True}
+
+
+# ── BC Catalog Sync Endpoints ──
+
+@router.post("/catalog/sync")
+async def trigger_catalog_sync(entity: str = Query("all", description="Sync entity: items, gl_accounts, or all")):
+    """Trigger a manual BC catalog sync. Reads from Production environment."""
+    from services.bc_catalog_sync_service import sync_items, sync_gl_accounts, sync_all
+    db = get_db()
+    if entity == "items":
+        result = await sync_items(db)
+    elif entity == "gl_accounts":
+        result = await sync_gl_accounts(db)
+    else:
+        result = await sync_all(db)
+    return {"success": True, "result": result}
+
+
+@router.get("/catalog/status")
+async def get_catalog_status():
+    """Get the current catalog sync status."""
+    from services.bc_catalog_sync_service import get_sync_status
+    db = get_db()
+    return await get_sync_status(db)
+
+
+@router.get("/catalog/items")
+async def search_catalog_items(q: str = "", blocked: bool = None, limit: int = 50):
+    """Search synced BC items by number or description."""
+    from services.bc_catalog_sync_service import search_items
+    db = get_db()
+    items = await search_items(db, query=q, blocked=blocked, limit=limit)
+    return {"items": items, "total": len(items)}
+
+
+@router.get("/catalog/items/{item_no}")
+async def get_catalog_item(item_no: str):
+    """Look up a single synced BC item."""
+    from services.bc_catalog_sync_service import get_item_by_number
+    db = get_db()
+    item = await get_item_by_number(db, item_no)
+    if not item:
+        raise HTTPException(status_code=404, detail=f"Item '{item_no}' not found in synced catalog")
+    return item
+
+
+@router.get("/catalog/items/{item_no}/validate")
+async def validate_catalog_item(item_no: str):
+    """Validate that an item number exists and is usable for sales."""
+    from services.bc_catalog_sync_service import validate_item_number
+    db = get_db()
+    return await validate_item_number(db, item_no)
+
+
+@router.get("/catalog/gl-accounts")
+async def search_catalog_gl_accounts(q: str = "", blocked: bool = None, limit: int = 50):
+    """Search synced BC G/L accounts by number or name."""
+    from services.bc_catalog_sync_service import search_gl_accounts
+    db = get_db()
+    accounts = await search_gl_accounts(db, query=q, blocked=blocked, limit=limit)
+    return {"accounts": accounts, "total": len(accounts)}
+
+
+@router.post("/catalog/suggest-items")
+async def suggest_items_for_line(request: Request):
+    """Suggest BC items for a given line description."""
+    from services.bc_catalog_sync_service import suggest_items_for_description
+    data = await request.json()
+    description = data.get("description", "")
+    limit = data.get("limit", 5)
+    db = get_db()
+    suggestions = await suggest_items_for_description(db, description, limit=limit)
+    return {"description": description, "suggestions": suggestions, "total": len(suggestions)}

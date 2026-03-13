@@ -2848,3 +2848,52 @@ EMAIL_CLIENT_ID=8764d2d9-65cb-4bf8-b8ac-1d922e2b47f8
 - `BC_SO_FALLBACK_ITEM_CODE` — Falls back to `BC_DEFAULT_ITEM_CODE` (FREIGHT)
 
 *Last Updated: March 13, 2026*
+
+
+---
+
+## Session Update: March 13, 2026 - Item Mapping Layer for SO Lines
+
+### Completed
+
+#### Item Mapping Service (`/app/backend/services/item_mapping_service.py`)
+- Configurable mapping rules stored in MongoDB collection `bc_item_mappings`
+- Multiple matching strategies: exact phrase, phrase contained, keyword tokens, alias/synonym, historical reuse
+- Confidence scoring (threshold: 70%) — only assigns item numbers above threshold
+- CRUD API endpoints: `GET/POST/PUT/DELETE /api/gpi-integration/item-mappings`
+- Mapping history stored in `bc_item_mapping_history` for audit and reuse
+
+#### Integration with SO Line Creation
+- `_resolve_sales_lines()` now async, calls `map_line_to_item()` per extracted line
+- High-confidence matches → `lineType: "Item"` with mapped item number
+- Low-confidence / no match → safe fallback to `lineType: "Comment"`
+- Mapping metadata (matched, item_number, confidence, method) attached to each resolved line
+
+#### Frontend Updates
+- Preflight table now shows "Item" column with mapped item number + confidence %
+- Mapped lines shown in green, unmapped in gray italic
+- "X mapped" badge when some lines have item mappings
+- Fallback indicator preserved
+
+#### Git Push Protection
+- Scrubbed plaintext secrets from `BC_CREDENTIALS.md` git history
+- File now uses Base64 encoded values only
+- Pushed to new branch `conflict_130326_1349`
+
+### Test Results
+- **Unit tests**: 24/24 pass (15 mapping + 9 line resolution)
+- **API tests**: All CRUD + preflight + idempotency verified
+- **Testing agent**: 39/39 pass (100% backend + frontend)
+- **Example**: "Widget A" → WIDG-A (98% exact_phrase), "Widget B" → unmapped (Comment)
+
+### Files Created/Modified
+- **NEW** `/app/backend/services/item_mapping_service.py`
+- **NEW** `/app/backend/tests/test_item_mapping.py`
+- **MOD** `/app/backend/routers/gpi_integration.py` — async _resolve_sales_lines, CRUD endpoints
+- **MOD** `/app/frontend/src/components/CreateBCSalesOrderPanel.js` — mapping columns
+
+### MongoDB Collections Added
+- `bc_item_mappings` — Mapping configuration rules
+- `bc_item_mapping_history` — Audit trail of mapping decisions
+
+*Last Updated: March 13, 2026*

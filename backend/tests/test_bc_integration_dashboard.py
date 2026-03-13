@@ -184,7 +184,7 @@ class TestBCIntegrationRegressionEndpoints:
         
         print(f"✓ Status endpoint working: {data}")
 
-    def test_preflight_endpoint_still_works(self):
+    def test_sales_order_preflight_endpoint_still_works(self):
         """POST /api/gpi-integration/sales-orders/preflight/{doc_id} returns expected response"""
         doc_id = "44b2e236-c1ab-4e0e-9c23-23f542d68a71"  # Known Sales_Order doc
         response = requests.post(f"{BASE_URL}/api/gpi-integration/sales-orders/preflight/{doc_id}")
@@ -197,9 +197,26 @@ class TestBCIntegrationRegressionEndpoints:
             assert "eligible" in data, "Preflight should have 'eligible' field"
             assert "ready" in data, "Preflight should have 'ready' field"
             assert "mapped_values" in data, "Preflight should have 'mapped_values' field"
-            print(f"✓ Preflight endpoint working: eligible={data['eligible']}, ready={data['ready']}")
+            print(f"✓ Sales Order Preflight endpoint working: eligible={data['eligible']}, ready={data['ready']}")
         else:
-            print("✓ Preflight endpoint working (doc not found - expected if test doc doesn't exist)")
+            print("✓ Sales Order Preflight endpoint working (doc not found - expected if test doc doesn't exist)")
+
+    def test_purchase_invoice_preflight_endpoint_still_works(self):
+        """POST /api/gpi-integration/purchase-invoices/preflight/{doc_id} returns expected response"""
+        doc_id = "80c7ab51-0cdb-48cc-b39c-b5d8a9c27c85"  # Known AP_Invoice doc
+        response = requests.post(f"{BASE_URL}/api/gpi-integration/purchase-invoices/preflight/{doc_id}")
+        
+        # Should return 200 (success) or 404 (doc not found)
+        assert response.status_code in [200, 404], f"Expected 200 or 404, got {response.status_code}"
+        
+        if response.status_code == 200:
+            data = response.json()
+            assert "eligible" in data, "Preflight should have 'eligible' field"
+            assert "ready" in data, "Preflight should have 'ready' field"
+            assert "mapped_values" in data, "Preflight should have 'mapped_values' field"
+            print(f"✓ Purchase Invoice Preflight endpoint working: eligible={data['eligible']}, ready={data['ready']}")
+        else:
+            print("✓ Purchase Invoice Preflight endpoint working (doc not found - expected if test doc doesn't exist)")
 
 
 class TestBCIntegrationDashboardEdgeCases:

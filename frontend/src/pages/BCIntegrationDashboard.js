@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
@@ -8,9 +8,10 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../components/ui/select';
 import {
-  ShoppingCart, FileInput, AlertTriangle, Copy, RefreshCw,
-  Loader2, ExternalLink, Search, ChevronLeft, ChevronRight,
-  CheckCircle2, XCircle, ArrowUpDown
+  ShoppingCart, FileInput, RefreshCw, Loader2, ExternalLink,
+  Search, ChevronLeft, ChevronRight, CheckCircle2, XCircle,
+  Copy, ChevronDown, ChevronUp, Shield, Hash, Calendar,
+  User, Building2, FileText, AlertCircle
 } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -21,6 +22,7 @@ export default function BCIntegrationDashboard() {
   const [error, setError] = useState(null);
   const [filters, setFilters] = useState({ record_type: '', status: '', search: '' });
   const [page, setPage] = useState(0);
+  const [expandedRow, setExpandedRow] = useState(null);
   const PAGE_SIZE = 25;
 
   const fetchData = useCallback(async () => {
@@ -156,7 +158,7 @@ export default function BCIntegrationDashboard() {
 
       {/* Error state */}
       {error && (
-        <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-md p-3 text-sm text-red-600 dark:text-red-400">
+        <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-md p-3 text-sm text-red-600 dark:text-red-400" data-testid="dashboard-error">
           Failed to load dashboard: {error}
         </div>
       )}
@@ -168,14 +170,13 @@ export default function BCIntegrationDashboard() {
             <table className="w-full text-xs" data-testid="dashboard-transactions-table">
               <thead>
                 <tr className="border-b bg-muted/40">
+                  <th className="w-8 p-3"></th>
                   <th className="text-left p-3 font-medium text-muted-foreground">Timestamp</th>
                   <th className="text-left p-3 font-medium text-muted-foreground">Type</th>
                   <th className="text-left p-3 font-medium text-muted-foreground">BC Record No</th>
                   <th className="text-left p-3 font-medium text-muted-foreground">Counterparty</th>
                   <th className="text-left p-3 font-medium text-muted-foreground">External Ref</th>
                   <th className="text-left p-3 font-medium text-muted-foreground">Status</th>
-                  <th className="text-left p-3 font-medium text-muted-foreground">Idempotency Key</th>
-                  <th className="text-left p-3 font-medium text-muted-foreground">Transaction ID</th>
                   <th className="text-left p-3 font-medium text-muted-foreground">Source Doc</th>
                   <th className="text-left p-3 font-medium text-muted-foreground">Error</th>
                 </tr>
@@ -183,21 +184,30 @@ export default function BCIntegrationDashboard() {
               <tbody>
                 {loading && !data && (
                   <tr>
-                    <td colSpan={10} className="p-8 text-center text-muted-foreground">
+                    <td colSpan={9} className="p-8 text-center text-muted-foreground">
                       <Loader2 className="w-5 h-5 animate-spin inline mr-2" />Loading...
                     </td>
                   </tr>
                 )}
                 {!loading && filteredTransactions.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="p-8 text-center text-muted-foreground">
+                    <td colSpan={9} className="p-8 text-center text-muted-foreground">
                       No integration transactions found.
                     </td>
                   </tr>
                 )}
-                {filteredTransactions.map((txn, i) => (
-                  <TransactionRow key={`${txn.source_document_id}-${txn.record_type}-${i}`} txn={txn} />
-                ))}
+                {filteredTransactions.map((txn, i) => {
+                  const rowKey = `${txn.source_document_id}-${txn.record_type}-${i}`;
+                  const isExpanded = expandedRow === rowKey;
+                  return (
+                    <TransactionRow
+                      key={rowKey}
+                      txn={txn}
+                      isExpanded={isExpanded}
+                      onToggle={() => setExpandedRow(isExpanded ? null : rowKey)}
+                    />
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -262,83 +272,202 @@ function SummaryCard({ title, count, icon, color, testId }) {
   );
 }
 
-function TransactionRow({ txn }) {
-  const counterparty = txn.record_type === 'Sales Order'
+function TransactionRow({ txn, isExpanded, onToggle }) {
+  const isSO = txn.record_type === 'Sales Order';
+  const counterparty = isSO
     ? `${txn.customer_no}${txn.customer_name ? ' — ' + txn.customer_name : ''}`
     : `${txn.vendor_no}${txn.vendor_name ? ' — ' + txn.vendor_name : ''}`;
 
   return (
-    <tr className="border-b last:border-0 hover:bg-muted/30 transition-colors" data-testid="transaction-row">
-      <td className="p-3 whitespace-nowrap">
-        {txn.created_at ? new Date(txn.created_at).toLocaleString(undefined, {
-          month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-        }) : '-'}
-      </td>
-      <td className="p-3">
-        <Badge variant="outline" className={`text-[10px] ${txn.record_type === 'Sales Order' ? 'border-blue-300 text-blue-700 dark:text-blue-400' : 'border-violet-300 text-violet-700 dark:text-violet-400'}`}>
-          {txn.record_type === 'Sales Order' ? <ShoppingCart className="w-2.5 h-2.5 mr-1 inline" /> : <FileInput className="w-2.5 h-2.5 mr-1 inline" />}
-          {txn.record_type}
-        </Badge>
-      </td>
-      <td className="p-3 font-mono font-medium">
-        {txn.bc_record_no || '-'}
-      </td>
-      <td className="p-3 max-w-[180px] truncate" title={counterparty}>
-        {counterparty || '-'}
-      </td>
-      <td className="p-3 font-mono text-[10px]">
-        {txn.external_ref || '-'}
-      </td>
-      <td className="p-3">
-        <StatusBadge status={txn.status} success={txn.success} />
-      </td>
-      <td className="p-3 font-mono text-[10px] max-w-[140px] truncate" title={txn.idempotency_key}>
-        {txn.idempotency_key || '-'}
-      </td>
-      <td className="p-3 font-mono text-[10px] max-w-[120px] truncate" title={txn.transaction_id}>
-        {txn.transaction_id || '-'}
-      </td>
-      <td className="p-3">
-        {txn.source_document_id ? (
-          <Link
-            to={`/documents/${txn.source_document_id}`}
-            className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline"
-            data-testid="source-doc-link"
-          >
-            <ExternalLink className="w-3 h-3" />
-            <span className="truncate max-w-[80px]">{txn.source_document_id.slice(0, 8)}...</span>
-          </Link>
-        ) : '-'}
-      </td>
-      <td className="p-3 max-w-[200px]">
-        {txn.error_message ? (
-          <span className="text-red-500 truncate block" title={txn.error_message}>
-            {txn.error_message.slice(0, 60)}{txn.error_message.length > 60 ? '...' : ''}
+    <>
+      <tr
+        className={`border-b hover:bg-muted/30 transition-colors cursor-pointer ${isExpanded ? 'bg-muted/20' : ''}`}
+        onClick={onToggle}
+        data-testid="transaction-row"
+      >
+        <td className="p-3 text-center">
+          {isExpanded
+            ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground inline" />
+            : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground inline" />
+          }
+        </td>
+        <td className="p-3 whitespace-nowrap">
+          {txn.created_at ? new Date(txn.created_at).toLocaleString(undefined, {
+            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+          }) : '-'}
+        </td>
+        <td className="p-3">
+          <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded border ${isSO ? 'border-blue-300 text-blue-700 dark:text-blue-400' : 'border-violet-300 text-violet-700 dark:text-violet-400'}`}>
+            {isSO ? <ShoppingCart className="w-2.5 h-2.5" /> : <FileInput className="w-2.5 h-2.5" />}
+            {txn.record_type}
           </span>
-        ) : '-'}
-      </td>
-    </tr>
+        </td>
+        <td className="p-3 font-mono font-medium">
+          {txn.bc_record_no || '-'}
+        </td>
+        <td className="p-3 max-w-[180px] truncate" title={counterparty}>
+          {counterparty || '-'}
+        </td>
+        <td className="p-3 font-mono text-[10px]">
+          {txn.external_ref || '-'}
+        </td>
+        <td className="p-3">
+          <StatusBadge status={txn.status} success={txn.success} />
+        </td>
+        <td className="p-3">
+          {txn.source_document_id ? (
+            <Link
+              to={`/documents/${txn.source_document_id}`}
+              className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline"
+              onClick={e => e.stopPropagation()}
+              data-testid="source-doc-link"
+            >
+              <ExternalLink className="w-3 h-3" />
+              <span className="truncate max-w-[80px]">{txn.source_document_id.slice(0, 8)}...</span>
+            </Link>
+          ) : '-'}
+        </td>
+        <td className="p-3 max-w-[200px]">
+          {txn.error_message ? (
+            <span className="text-red-500 truncate block" title={txn.error_message}>
+              {txn.error_message.slice(0, 50)}{txn.error_message.length > 50 ? '...' : ''}
+            </span>
+          ) : '-'}
+        </td>
+      </tr>
+      {isExpanded && (
+        <tr className="bg-muted/10" data-testid="transaction-detail-row">
+          <td colSpan={9} className="p-0">
+            <ExpandedDetail txn={txn} />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+function ExpandedDetail({ txn }) {
+  const isSO = txn.record_type === 'Sales Order';
+
+  return (
+    <div className="px-6 py-4 border-t border-dashed border-border" data-testid="transaction-expanded-detail">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-8 gap-y-3">
+        {/* Column 1: Record Info */}
+        <div className="space-y-2.5">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold mb-2">Record</p>
+          <DetailField icon={<Hash className="w-3 h-3" />} label="BC Record No" value={txn.bc_record_no} mono />
+          <DetailField icon={<Hash className="w-3 h-3" />} label="System ID" value={txn.bc_system_id ? String(txn.bc_system_id).slice(0, 20) + '...' : '-'} mono />
+          <DetailField
+            icon={isSO ? <ShoppingCart className="w-3 h-3" /> : <FileInput className="w-3 h-3" />}
+            label="Record Type"
+            value={txn.record_type}
+          />
+          <DetailField
+            icon={<CheckCircle2 className="w-3 h-3" />}
+            label="Status"
+            value={<StatusBadge status={txn.status} success={txn.success} />}
+          />
+        </div>
+
+        {/* Column 2: Counterparty */}
+        <div className="space-y-2.5">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold mb-2">
+            {isSO ? 'Customer' : 'Vendor'}
+          </p>
+          <DetailField
+            icon={isSO ? <User className="w-3 h-3" /> : <Building2 className="w-3 h-3" />}
+            label={isSO ? 'Customer No' : 'Vendor No'}
+            value={isSO ? txn.customer_no : txn.vendor_no}
+            mono
+          />
+          <DetailField
+            icon={isSO ? <User className="w-3 h-3" /> : <Building2 className="w-3 h-3" />}
+            label="Name"
+            value={isSO ? txn.customer_name : txn.vendor_name}
+          />
+          <DetailField icon={<FileText className="w-3 h-3" />} label="External Ref" value={txn.external_ref} mono />
+        </div>
+
+        {/* Column 3: Traceability */}
+        <div className="space-y-2.5">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold mb-2">Traceability</p>
+          <DetailField icon={<Shield className="w-3 h-3" />} label="Idempotency Key" value={txn.idempotency_key} mono />
+          <DetailField icon={<Hash className="w-3 h-3" />} label="Transaction ID" value={txn.transaction_id} mono />
+          <DetailField
+            icon={<ExternalLink className="w-3 h-3" />}
+            label="Source Document"
+            value={
+              txn.source_document_id ? (
+                <Link
+                  to={`/documents/${txn.source_document_id}`}
+                  className="text-blue-600 dark:text-blue-400 hover:underline font-mono"
+                >
+                  {txn.source_document_id}
+                </Link>
+              ) : '-'
+            }
+          />
+          {txn.source_document_name && (
+            <DetailField icon={<FileText className="w-3 h-3" />} label="File Name" value={txn.source_document_name} />
+          )}
+        </div>
+
+        {/* Column 4: Timestamps & Errors */}
+        <div className="space-y-2.5">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold mb-2">Audit</p>
+          <DetailField
+            icon={<Calendar className="w-3 h-3" />}
+            label="Created At"
+            value={txn.created_at ? new Date(txn.created_at).toLocaleString() : '-'}
+          />
+          <DetailField icon={<User className="w-3 h-3" />} label="Created By" value={txn.created_by || 'system'} />
+          {txn.error_message && (
+            <div className="mt-2 p-2 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded text-xs">
+              <div className="flex items-center gap-1.5 mb-1">
+                <AlertCircle className="w-3 h-3 text-red-500" />
+                <span className="font-medium text-red-700 dark:text-red-300">Error</span>
+              </div>
+              <p className="text-red-600 dark:text-red-400 break-words">{txn.error_message}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DetailField({ icon, label, value, mono }) {
+  return (
+    <div className="flex items-start gap-2 text-xs">
+      <span className="text-muted-foreground shrink-0 mt-0.5">{icon}</span>
+      <div className="min-w-0">
+        <span className="text-muted-foreground">{label}: </span>
+        <span className={`${mono ? 'font-mono text-[10px]' : ''} break-all`}>
+          {value || '-'}
+        </span>
+      </div>
+    </div>
   );
 }
 
 function StatusBadge({ status, success }) {
   if (status === 'already_exists') {
     return (
-      <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700 dark:text-amber-400 bg-amber-50/50 dark:bg-amber-950/20">
-        <Copy className="w-2.5 h-2.5 mr-1 inline" />Duplicate
-      </Badge>
+      <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded border border-amber-300 text-amber-700 dark:text-amber-400 bg-amber-50/50 dark:bg-amber-950/20">
+        <Copy className="w-2.5 h-2.5" />Duplicate
+      </span>
     );
   }
   if (success) {
     return (
-      <Badge variant="outline" className="text-[10px] border-emerald-300 text-emerald-700 dark:text-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/20">
-        <CheckCircle2 className="w-2.5 h-2.5 mr-1 inline" />Created
-      </Badge>
+      <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded border border-emerald-300 text-emerald-700 dark:text-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/20">
+        <CheckCircle2 className="w-2.5 h-2.5" />Created
+      </span>
     );
   }
   return (
-    <Badge variant="outline" className="text-[10px] border-red-300 text-red-700 dark:text-red-400 bg-red-50/50 dark:bg-red-950/20">
-      <XCircle className="w-2.5 h-2.5 mr-1 inline" />Failed
-    </Badge>
+    <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded border border-red-300 text-red-700 dark:text-red-400 bg-red-50/50 dark:bg-red-950/20">
+      <XCircle className="w-2.5 h-2.5" />Failed
+    </span>
   );
 }

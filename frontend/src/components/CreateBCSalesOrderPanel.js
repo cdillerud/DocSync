@@ -164,6 +164,7 @@ function PreflightView({ data, customerOverride, setCustomerOverride, onConfirm,
   // Determine line source for display
   const lineSource = resolvedLines.length > 0 ? resolvedLines[0].source : null;
   const isFallback = lineSource && lineSource.startsWith('fallback');
+  const mappedCount = resolvedLines.filter(l => l.mapping?.matched).length;
 
   return (
     <div className="space-y-4" data-testid="bc-so-preflight-view">
@@ -232,6 +233,11 @@ function PreflightView({ data, customerOverride, setCustomerOverride, onConfirm,
                 Fallback
               </Badge>
             )}
+            {mappedCount > 0 && (
+              <Badge variant="outline" className="text-[9px] h-4 px-1.5 border-emerald-300 text-emerald-600 dark:text-emerald-400">
+                {mappedCount} mapped
+              </Badge>
+            )}
           </div>
           <div className="bg-muted/50 rounded-md overflow-hidden border border-border">
             <table className="w-full text-[11px]">
@@ -239,36 +245,51 @@ function PreflightView({ data, customerOverride, setCustomerOverride, onConfirm,
                 <tr className="border-b border-border bg-muted/80">
                   <th className="text-left py-1.5 px-2 font-medium text-muted-foreground">Type</th>
                   <th className="text-left py-1.5 px-2 font-medium text-muted-foreground">Description</th>
+                  <th className="text-left py-1.5 px-2 font-medium text-muted-foreground">Item</th>
                   <th className="text-right py-1.5 px-2 font-medium text-muted-foreground">Qty</th>
                   <th className="text-right py-1.5 px-2 font-medium text-muted-foreground">Unit Price</th>
                   <th className="text-right py-1.5 px-2 font-medium text-muted-foreground">Total</th>
                 </tr>
               </thead>
               <tbody>
-                {resolvedLines.map((li, i) => (
-                  <tr key={i} className="border-b border-border/50 last:border-0">
-                    <td className="py-1.5 px-2">
-                      <Badge variant="secondary" className="text-[9px] h-4 px-1">
-                        {li.lineType}
-                      </Badge>
-                    </td>
-                    <td className="py-1.5 px-2 truncate max-w-[180px]">
-                      {li.description}
-                      {li.lineObjectNumber && (
-                        <span className="text-muted-foreground ml-1">({li.lineObjectNumber})</span>
-                      )}
-                    </td>
-                    <td className="py-1.5 px-2 text-right font-mono">{li.quantity}</td>
-                    <td className="py-1.5 px-2 text-right font-mono">${(li.unitPrice || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                    <td className="py-1.5 px-2 text-right font-mono font-medium">
-                      ${((li.quantity || 0) * (li.unitPrice || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    </td>
-                  </tr>
-                ))}
+                {resolvedLines.map((li, i) => {
+                  const mp = li.mapping || {};
+                  return (
+                    <tr key={i} className="border-b border-border/50 last:border-0">
+                      <td className="py-1.5 px-2">
+                        <Badge variant="secondary" className={`text-[9px] h-4 px-1 ${mp.matched ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' : ''}`}>
+                          {li.lineType}
+                        </Badge>
+                      </td>
+                      <td className="py-1.5 px-2 truncate max-w-[150px]" title={li.description}>
+                        {li.description}
+                      </td>
+                      <td className="py-1.5 px-2">
+                        {mp.matched ? (
+                          <span className="font-mono text-emerald-600 dark:text-emerald-400 flex items-center gap-1" data-testid={`so-line-${i}-item`}>
+                            {mp.item_number}
+                            <span className="text-[8px] text-muted-foreground" title={`${mp.method} (${Math.round((mp.confidence||0)*100)}%)`}>
+                              {Math.round((mp.confidence||0)*100)}%
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground text-[10px] italic" data-testid={`so-line-${i}-unmapped`}>
+                            {li.lineObjectNumber || 'unmapped'}
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-1.5 px-2 text-right font-mono">{li.quantity}</td>
+                      <td className="py-1.5 px-2 text-right font-mono">${(li.unitPrice || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                      <td className="py-1.5 px-2 text-right font-mono font-medium">
+                        ${((li.quantity || 0) * (li.unitPrice || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
               <tfoot>
                 <tr className="bg-muted/80">
-                  <td colSpan={4} className="py-1.5 px-2 text-right font-medium text-muted-foreground">Order Total</td>
+                  <td colSpan={5} className="py-1.5 px-2 text-right font-medium text-muted-foreground">Order Total</td>
                   <td className="py-1.5 px-2 text-right font-mono font-bold">
                     ${resolvedLines.reduce((sum, li) => sum + (li.quantity || 0) * (li.unitPrice || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </td>

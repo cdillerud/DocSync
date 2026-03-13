@@ -23,7 +23,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from deps import get_db
@@ -39,6 +39,14 @@ from services.gpi_integration_service import (
     HAS_CREDENTIALS,
     BC_SO_FALLBACK_GL_ACCOUNT,
     BC_SO_FALLBACK_ITEM_CODE,
+)
+from services.item_mapping_service import (
+    map_line_to_item,
+    record_mapping_history,
+    list_mappings as list_item_mappings,
+    create_mapping as create_item_mapping,
+    update_mapping as update_item_mapping,
+    delete_mapping as delete_item_mapping,
 )
 
 logger = logging.getLogger(__name__)
@@ -199,16 +207,21 @@ async def _resolve_customer_no(doc: dict) -> dict:
     }
 
 
-def _resolve_sales_lines(doc: dict) -> list:
+async def _resolve_sales_lines(doc: dict, customer_no: str = "") -> list:
     """Resolve the sales lines that will be created in BC.
 
+    For each extracted line, attempts item mapping via the mapping service.
+    Falls back to Comment/fallback lines when confidence is low.
+
     Priority:
-      1. Extracted line_items from the document → mapped to BC format
+      1. Extracted line_items → mapped to BC item via item_mapping_service
       2. Fallback: single line using G/L account or item code + total amount
       3. Empty list → caller must block creation
 
-    Returns list of dicts with: lineType, lineObjectNumber, description, quantity, unitPrice, source
+    Returns list of dicts with: lineType, lineObjectNumber, description,
+    quantity, unitPrice, source, mapping metadata
     """
+    db = get_db()
     ef = doc.get("extracted_fields") or {}
     nf = doc.get("normalized_fields") or {}
     line_items = ef.get("line_items") or nf.get("line_items") or []
@@ -222,20 +235,52 @@ def _resolve_sales_lines(doc: dict) -> list:
             unit_price = float(li.get("unit_price", 0) or li.get("unitPrice", 0) or 0)
             total = float(li.get("total", 0) or li.get("amount", 0) or 0)
 
-            # If we have total but no unit_price, derive it
             if total > 0 and unit_price == 0 and qty > 0:
                 unit_price = round(total / qty, 2)
 
-            item_no = li.get("item_number") or li.get("itemNumber") or li.get("item_no") or ""
+            extracted_sku = li.get("item_number") or li.get("itemNumber") or li.get("item_no") or ""
 
-            resolved.append({
-                "lineType": "Item" if item_no else "Comment",
-                "lineObjectNumber": item_no,
-                "description": desc[:100] if desc else "Line item",
-                "quantity": qty,
-                "unitPrice": unit_price,
-                "source": "extracted",
-            })
+            # Attempt item mapping
+            mapping_result = await map_line_to_item(
+                db,
+                description=desc,
+                extracted_sku=extracted_sku,
+                customer_no=customer_no,
+                doc_id=doc.get("id", ""),
+            )
+
+            if mapping_result["matched"]:
+                resolved.append({
+                    "lineType": mapping_result["line_type"],
+                    "lineObjectNumber": mapping_result["item_number"],
+                    "description": desc[:100] if desc else "Line item",
+                    "quantity": qty,
+                    "unitPrice": unit_price,
+                    "source": "mapped",
+                    "mapping": {
+                        "matched": True,
+                        "item_number": mapping_result["item_number"],
+                        "confidence": mapping_result["confidence"],
+                        "method": mapping_result["method"],
+                        "mapping_id": mapping_result.get("mapping_id"),
+                    },
+                })
+            else:
+                resolved.append({
+                    "lineType": "Comment",
+                    "lineObjectNumber": "",
+                    "description": desc[:100] if desc else "Line item",
+                    "quantity": qty,
+                    "unitPrice": unit_price,
+                    "source": "extracted",
+                    "mapping": {
+                        "matched": False,
+                        "item_number": "",
+                        "confidence": 0,
+                        "method": "none",
+                        "mapping_id": None,
+                    },
+                })
     else:
         # Fallback: create a single line from the document total
         amount = nf.get("amount") or ef.get("amount")
@@ -243,6 +288,11 @@ def _resolve_sales_lines(doc: dict) -> list:
             amount = float(amount)
         doc_desc = ef.get("description") or nf.get("description") or ""
         fallback_desc = doc_desc[:80] if doc_desc else "Imported from Document Hub"
+
+        fallback_mapping = {
+            "matched": False, "item_number": "", "confidence": 0,
+            "method": "none", "mapping_id": None,
+        }
 
         if BC_SO_FALLBACK_GL_ACCOUNT:
             resolved.append({
@@ -252,6 +302,7 @@ def _resolve_sales_lines(doc: dict) -> list:
                 "quantity": 1,
                 "unitPrice": amount or 0,
                 "source": "fallback_gl_account",
+                "mapping": fallback_mapping,
             })
         elif BC_SO_FALLBACK_ITEM_CODE:
             resolved.append({
@@ -261,9 +312,9 @@ def _resolve_sales_lines(doc: dict) -> list:
                 "quantity": 1,
                 "unitPrice": amount or 0,
                 "source": "fallback_item",
+                "mapping": fallback_mapping,
             })
         elif amount and amount > 0:
-            # No configured fallback code, but we have an amount — use Comment line
             resolved.append({
                 "lineType": "Comment",
                 "lineObjectNumber": "",
@@ -271,6 +322,7 @@ def _resolve_sales_lines(doc: dict) -> list:
                 "quantity": 1,
                 "unitPrice": amount,
                 "source": "fallback_amount_only",
+                "mapping": fallback_mapping,
             })
 
     return resolved
@@ -336,20 +388,28 @@ async def sales_order_preflight(doc_id: str):
         missing_fields.append("order_date")
         warnings.append("No order date extracted. Current date will be used as fallback.")
 
-    # Resolve sales lines (extracted or fallback)
-    resolved_lines = _resolve_sales_lines(doc)
+    # Resolve sales lines (extracted or fallback) with item mapping
+    resolved_lines = await _resolve_sales_lines(doc, customer_no=customer_no or "")
 
     if not resolved_lines:
         errors.append("No sales lines could be resolved. The document has no extracted line items, no total amount, and no fallback G/L account or item code is configured. Header-only orders are not allowed.")
     else:
         # Inform user about the line source
         line_sources = set(ln["source"] for ln in resolved_lines)
+        mapped_count = sum(1 for ln in resolved_lines if ln.get("mapping", {}).get("matched"))
+        unmapped_count = len(resolved_lines) - mapped_count
+
         if "fallback_gl_account" in line_sources:
             warnings.append(f"No line items extracted. A fallback line will be created using G/L Account '{BC_SO_FALLBACK_GL_ACCOUNT}' with the document total amount.")
         elif "fallback_item" in line_sources:
             warnings.append(f"No line items extracted. A fallback line will be created using item '{BC_SO_FALLBACK_ITEM_CODE}' with the document total amount.")
         elif "fallback_amount_only" in line_sources:
             warnings.append("No line items extracted. A comment line will be created with the document total amount. Configure BC_SO_FALLBACK_GL_ACCOUNT for proper G/L posting.")
+
+        if mapped_count > 0:
+            warnings.append(f"{mapped_count} of {len(resolved_lines)} line(s) mapped to BC item numbers.")
+        if unmapped_count > 0 and "mapped" in line_sources:
+            warnings.append(f"{unmapped_count} line(s) could not be mapped and will be created as Comment lines.")
 
     # Integration status
     if not HAS_CREDENTIALS:
@@ -438,7 +498,7 @@ async def create_sales_order_from_document(doc_id: str, customer_no_override: st
         })
 
     # Resolve sales lines — block if none
-    resolved_lines = _resolve_sales_lines(doc)
+    resolved_lines = await _resolve_sales_lines(doc, customer_no=customer_no)
     if not resolved_lines:
         raise HTTPException(status_code=422, detail={
             "error": "no_lines",
@@ -485,6 +545,20 @@ async def create_sales_order_from_document(doc_id: str, customer_no_override: st
 
     # Graph writeback
     now = datetime.now(timezone.utc).isoformat()
+
+    # Record mapping history for audit
+    for idx, line in enumerate(resolved_lines):
+        mapping_meta = line.get("mapping", {})
+        try:
+            await record_mapping_history(
+                db, doc_id=doc_id, line_index=idx,
+                description=line.get("description", ""),
+                mapping_result=mapping_meta,
+                customer_no=customer_no,
+            )
+        except Exception as mh_err:
+            logger.warning("Failed to record mapping history for line %d: %s", idx, mh_err)
+
     bc_sales_order = {
         "bc_record_no": bc_record_no,
         "bc_system_id": bc_system_id,
@@ -1081,3 +1155,47 @@ async def gpi_integration_dashboard(
         "limit": limit,
         "skip": skip,
     }
+
+
+# ── Item Mapping CRUD Endpoints ──
+
+@router.get("/item-mappings")
+async def get_item_mappings(customer_no: str = "", active_only: bool = False):
+    """List all item mapping rules."""
+    db = get_db()
+    mappings = await list_item_mappings(db, customer_no=customer_no or None, active_only=active_only)
+    return {"mappings": mappings, "total": len(mappings)}
+
+
+@router.post("/item-mappings")
+async def create_mapping_endpoint(request: Request):
+    """Create a new item mapping rule."""
+    data = await request.json()
+    if not data.get("bc_item_number"):
+        raise HTTPException(status_code=422, detail="bc_item_number is required")
+    if not data.get("keyword_phrase") and not data.get("keywords"):
+        raise HTTPException(status_code=422, detail="keyword_phrase or keywords is required")
+    db = get_db()
+    mapping = await create_item_mapping(db, data)
+    return {"success": True, "mapping": mapping}
+
+
+@router.put("/item-mappings/{mapping_id}")
+async def update_mapping_endpoint(mapping_id: str, request: Request):
+    """Update an existing item mapping rule."""
+    data = await request.json()
+    db = get_db()
+    mapping = await update_item_mapping(db, mapping_id, data)
+    if not mapping:
+        raise HTTPException(status_code=404, detail="Mapping not found")
+    return {"success": True, "mapping": mapping}
+
+
+@router.delete("/item-mappings/{mapping_id}")
+async def delete_mapping_endpoint(mapping_id: str):
+    """Delete an item mapping rule."""
+    db = get_db()
+    deleted = await delete_item_mapping(db, mapping_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Mapping not found")
+    return {"success": True}

@@ -1,0 +1,67 @@
+{
+  "summary": "Comprehensive testing of Item Mapping Layer for BC Sales Order Line Creation. All backend APIs and frontend UI components are working correctly. 39/39 tests passed including unit tests, API tests, and integration tests.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "component": "CreateBCSalesOrderPanel",
+        "issue": "React hydration warning in console: <tr> cannot be a child of <span> in tbody. Dynamic content wrapping causes this warning but functionality works correctly.",
+        "severity": "minor",
+        "fix_priority": "LOW"
+      }
+    ]
+  },
+  "passed_tests": [
+    "Unit tests: 15/15 item_mapping_service tests (normalize, tokenize, score_mapping, map_line_to_item)",
+    "Unit tests: 9/9 _resolve_sales_lines tests",
+    "API: POST /api/gpi-integration/item-mappings - CRUD create mapping rule",
+    "API: GET /api/gpi-integration/item-mappings - returns 3 configured mappings (GLASS001, TIER001, WIDG-A)",
+    "API: PUT /api/gpi-integration/item-mappings/{id} - updates mapping successfully",
+    "API: DELETE /api/gpi-integration/item-mappings/{id} - deletes mapping successfully",
+    "API: POST /api/gpi-integration/sales-orders/preflight/{doc_id} - returns resolved_lines with mapping metadata",
+    "Preflight: Widget A mapped to WIDG-A with 98% confidence (exact_phrase method), lineType=Item",
+    "Preflight: Widget B unmapped, lineType=Comment with 0% confidence",
+    "Preflight: Shows '1 mapped' badge for partial mapping",
+    "Preflight: Returns 404 for nonexistent documents",
+    "Idempotency: Re-calling from-document returns already_exists=true without duplicating",
+    "Idempotency: Preserves lines_added (2/2) info for existing SO 107039",
+    "Frontend: Login with admin/admin works correctly",
+    "Frontend: BC Sales Order panel visible on Sales_Order type documents",
+    "Frontend: CreateBCSalesOrderPanel shows preflight view with mapping columns",
+    "Frontend: PreflightView shows SALES LINES (2) table with Type, Description, Item, Qty, Unit Price, Total columns",
+    "Frontend: Mapped line shows WIDG-A 98% in green",
+    "Frontend: Unmapped line shows 'unmapped' in gray italic",
+    "Frontend: '1 mapped' badge visible when some lines have mappings",
+    "Frontend: Existing SO display shows BC Sales Order Created with SO 107039, 2/2 lines added",
+    "Frontend: Customer override input displayed when customer not mapped"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_item_mapping.py",
+    "/app/backend/tests/test_sales_order_lines.py",
+    "/app/backend/tests/test_item_mapping_api.py",
+    "/app/test_reports/pytest/item_mapping_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "React hydration warning: Consider wrapping dynamic table rows differently to avoid <span> elements inside <tbody>. Current implementation works but generates console warnings."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_item_mapping_api.py"
+  ],
+  "success_rate": {
+    "backend": "100% (39/39 tests passed)",
+    "frontend": "100% (All UI components and data-testids verified working)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin"
+  },
+  "seed_data_creation": "3 item mappings exist: WIDG-A (widget a), GLASS001 (glassware on skids), TIER001 (tier sheets)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Document 44b2e236-c1ab-4e0e-9c23-23f542d68a71 has 2 lines: Widget A (maps to WIDG-A at 98% confidence) and Widget B (unmapped). Documents b3c5ddaa and 29be78fe have existing SOs for idempotency testing. The confidence threshold is 0.70 (70%). Item mapping uses exact_phrase, phrase_contained, keyword_tokens, and historical_reuse methods. API endpoints: GET/POST/PUT/DELETE /api/gpi-integration/item-mappings for CRUD, POST /api/gpi-integration/sales-orders/preflight/{doc_id} for mapping preview."
+}

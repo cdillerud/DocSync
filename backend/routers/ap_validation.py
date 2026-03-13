@@ -41,6 +41,13 @@ async def validate_document_ap(doc_id: str):
         vendor_no = uvm["bc_vendor_number"]
         vendor_name = uvm.get("best_match", {}).get("name") or vendor_name
     
+    # Cross-reference BC validation results — if BC resolved the vendor, use that
+    bc_val = doc.get("validation_results") or {}
+    bc_record = bc_val.get("bc_record_info") or {}
+    if not vendor_no and bc_record.get("number"):
+        vendor_no = bc_record["number"]
+        vendor_name = bc_record.get("displayName") or vendor_name
+    
     vendor_match = None
     if vendor_no:
         vendor_match = {

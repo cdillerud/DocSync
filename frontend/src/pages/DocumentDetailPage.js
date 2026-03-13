@@ -187,8 +187,20 @@ export default function DocumentDetailPage() {
             <h2 className="text-2xl font-bold tracking-tight truncate" style={{ fontFamily: 'Chivo, sans-serif' }}>
               {doc.file_name}
             </h2>
-            <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold shrink-0 ${STATUS_CLASSES[doc.status] || ''}`}>
-              {doc.status}
+            <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold shrink-0 ${
+              derivedState ? (
+                derivedState.validation_state === 'pass' ? 'bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-700' :
+                derivedState.validation_state === 'warning' ? 'bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-700' :
+                derivedState.validation_state === 'fail' ? 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/30 dark:text-red-400 dark:border-red-700' :
+                'bg-gray-100 text-gray-700 border-gray-300 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600'
+              ) : (STATUS_CLASSES[doc.status] || '')
+            }`} data-testid="doc-status-badge">
+              {derivedState ? (
+                derivedState.validation_state === 'pass' ? 'Validated' :
+                derivedState.validation_state === 'warning' ? 'Warnings' :
+                derivedState.validation_state === 'fail' ? 'Failed' :
+                doc.status
+              ) : doc.status}
             </span>
           </div>
           <p className="text-xs text-muted-foreground font-mono mt-1" data-testid="doc-id-display">{doc.id}</p>
@@ -359,7 +371,17 @@ export default function DocumentDetailPage() {
                 ))}
 
                 {/* Extraction Quality */}
-                {doc.validation_results.extraction_quality && (
+                {doc.validation_results.extraction_quality && (() => {
+                  const eq = doc.validation_results.extraction_quality;
+                  const reqFields = eq.required_fields || [];
+                  const optFields = eq.optional_fields || [];
+                  const totalFields = reqFields.length + optFields.length;
+                  const extractedCount = (eq.required_extracted || 0) + (eq.optional_extracted || 0);
+                  // Fallback to legacy keys if present
+                  const finalExtracted = extractedCount || eq.extracted_count || 0;
+                  const finalTotal = totalFields || eq.total_fields || 0;
+                  const completeness = eq.completeness_score || 0;
+                  return (
                   <div className="border-t border-border pt-3 mt-3">
                     <p className="text-xs font-medium mb-2 flex items-center gap-1.5">
                       <FileSearch className="w-3 h-3" /> Extraction Quality
@@ -367,15 +389,16 @@ export default function DocumentDetailPage() {
                     <div className="grid grid-cols-2 gap-2 text-[11px]">
                       <div className="bg-muted/50 rounded px-2 py-1">
                         <span className="text-muted-foreground">Fields Extracted:</span>
-                        <span className="font-mono ml-1">{doc.validation_results.extraction_quality.extracted_count || 0}/{doc.validation_results.extraction_quality.total_fields || 0}</span>
+                        <span className="font-mono ml-1">{finalExtracted}/{finalTotal}</span>
                       </div>
                       <div className="bg-muted/50 rounded px-2 py-1">
                         <span className="text-muted-foreground">Completeness:</span>
-                        <span className="font-mono ml-1">{((doc.validation_results.extraction_quality.completeness_score || 0) * 100).toFixed(0)}%</span>
+                        <span className="font-mono ml-1">{(completeness * 100).toFixed(0)}%</span>
                       </div>
                     </div>
                   </div>
-                )}
+                  );
+                })()}
 
                 {/* Match Info */}
                 {doc.validation_results.match_method && (

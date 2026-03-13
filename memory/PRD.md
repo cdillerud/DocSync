@@ -1194,13 +1194,16 @@ Created `/app/memory/SQUARE9_COMPARISON.md` documenting alignment status.
 - [x] G/L Account Routing for Freight (inbound vs outbound) - Completed March 10, 2026
 - [x] Reference Label Correction Feedback Loop — Completed March 11, 2026
 - [x] Add "Create BC Sales Order" Button to UI — **Full flow: eligibility, preflight, confirm modal, create, error handling, graph writeback** (March 12, 2026)
+- [x] Item vs. G/L Account Mapping for Sales Orders — **Refactored mapping rules to support target_type (item/gl_account), updated all 20 freight rules to GL account 60500 (Shipping/Delivery), catalog validation, frontend badges** (March 14, 2026)
 
 ### P2 - Upcoming
 - [x] Add "Create BC Purchase Invoice" flow for AP_Invoice documents — **Same pattern as SO: vendor resolution, preflight, confirm modal, create, graph writeback** (March 12, 2026)
 - [x] BC Integration Dashboard — **Summary cards, filterable audit log table, expandable detail rows, click-through to source docs** (March 13, 2026)
+- [ ] Build admin UI for managing item mapping rules (CRUD operations)
 
 ### P2 - Upcoming
 - [ ] Outbound Document Delivery module (email posted sales invoices)
+- [ ] Decommission the legacy Zetadocs system
 - [ ] "Stable Vendor" metric implementation
 - [ ] Fuzzy matching improvements
 - [ ] Migration UI Detail Drawer for SharePoint
@@ -1213,11 +1216,9 @@ Created `/app/memory/SQUARE9_COMPARISON.md` documenting alignment status.
 
 ---
 
-*Last Updated: March 11, 2026*
+*Last Updated: March 14, 2026*
 
----
-
-## Session Update 2: February 25, 2026 - SharePoint Fix
+---## Session Update 2: February 25, 2026 - SharePoint Fix
 
 ### Completed
 

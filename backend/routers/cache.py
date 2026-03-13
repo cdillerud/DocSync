@@ -17,6 +17,13 @@ async def get_bc_write_guard_status():
     return guard.get_status()
 
 
+@router.get("/bc/environment-status")
+async def get_bc_environment_status():
+    """Return the split-environment BC configuration for the frontend."""
+    from services.business_central_service import get_environment_status
+    return get_environment_status()
+
+
 @router.post("/bc/write-guard/check")
 async def check_bc_write_permission(
     document_id: str = Query(...),

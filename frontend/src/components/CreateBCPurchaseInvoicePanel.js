@@ -186,7 +186,16 @@ function PreflightView({ data, vendorOverride, setVendorOverride, onConfirm, onC
       <div className="space-y-2">
         <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Mapped Values</p>
         <div className="grid grid-cols-1 gap-2 text-xs">
-          <FieldRow icon={<Package className="w-3.5 h-3.5" />} label="BC Environment" value={mv.bc_environment || '-'} />
+          <div className="bg-blue-50/60 dark:bg-blue-950/20 border border-blue-200/60 dark:border-blue-800/40 rounded-md p-2 space-y-1" data-testid="bc-pi-env-info">
+            <div className="flex items-center justify-between">
+              <span className="text-blue-700 dark:text-blue-300 font-medium flex items-center gap-1"><Package className="w-3.5 h-3.5" /> Read (Validation)</span>
+              <span className="font-mono text-[11px]">{mv.bc_read_environment || 'Production'}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-amber-700 dark:text-amber-300 font-medium flex items-center gap-1"><Package className="w-3.5 h-3.5" /> Write (Create)</span>
+              <span className="font-mono text-[11px]">{mv.bc_write_environment || 'Sandbox'}</span>
+            </div>
+          </div>
           <FieldRow icon={<Building2 className="w-3.5 h-3.5" />} label="Vendor" value={mv.vendor_no ? `${mv.vendor_no} — ${mv.vendor_name}` : ''} missing={!mv.vendor_no} />
           {mv.vendor_match_method && mv.vendor_match_method !== 'none' && (
             <div className="ml-7 text-[10px] text-muted-foreground">
@@ -249,6 +258,12 @@ function PreflightView({ data, vendorOverride, setVendorOverride, onConfirm, onC
         </div>
       )}
 
+      {/* Split-environment notice */}
+      <div className="bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-800/40 rounded-md p-2.5 text-[11px] text-amber-800 dark:text-amber-200" data-testid="bc-pi-env-notice">
+        <p className="font-medium mb-1">Split-Environment Mode</p>
+        <p>Validation uses <strong>Production</strong> data. The Purchase Invoice will be created in <strong>{mv.bc_write_environment || 'Sandbox'}</strong>.</p>
+      </div>
+
       {/* Actions */}
       <div className="flex gap-2 pt-2 border-t border-border">
         <Button
@@ -259,7 +274,7 @@ function PreflightView({ data, vendorOverride, setVendorOverride, onConfirm, onC
           data-testid="bc-pi-confirm-create-btn"
         >
           <FileInput className="w-3 h-3 mr-1.5" />
-          Create Purchase Invoice
+          Create in {mv.bc_write_environment || 'Sandbox'}
         </Button>
         <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={onCancel} data-testid="bc-pi-cancel-btn">
           Cancel

@@ -1,0 +1,86 @@
+{
+  "summary": "Split-Environment BC Integration feature testing complete. All 21 backend API tests passed (100%). All 8 frontend UI test cases passed (100%). The app correctly routes reads to Production BC environment and writes to Sandbox_11_3_2025, with a hard production write-guard active.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_split_env_bc_integration.py",
+    "/app/test_reports/pytest/split_env_bc_integration_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Split-environment configuration correctly implemented in business_central_service.py and gpi_integration_service.py",
+    "BC_READ_ENVIRONMENT=Production and BC_WRITE_ENVIRONMENT=Sandbox_11_3_2025 properly configured in backend/.env",
+    "BC_BLOCK_PRODUCTION_WRITES=true is enforced with _check_write_protection() guard function",
+    "All three status endpoints correctly return read/write environment info",
+    "Sidebar displays BC CONNECTED with READ Production and WRITE Sandbox_11_3_2025",
+    "BC Integration Dashboard shows environment banner with Production read badge, Sandbox write badge, and write-guard active message",
+    "Vendor lookup (GET /api/ap-review/vendors) correctly uses Production BC (mock=false)",
+    "CreateBCSalesOrderPanel.js and CreateBCPurchaseInvoicePanel.js show split-env notice explaining validation vs. creation environments"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_split_env_bc_integration.py"
+  ],
+  "success_rate": {
+    "backend": "100% (21/21 tests)",
+    "frontend": "100% (8/8 test cases)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "None - used existing environment",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Split-environment BC integration is fully functional. Reads (vendor lookup, PO validation) route to Production. Writes (create SO, create PI) route to Sandbox_11_3_2025. Production write-guard is active to prevent accidental production writes. UI correctly displays both environments in sidebar and dashboard.",
+  "verified_endpoints": {
+    "GET /api/bc/environment-status": {
+      "status": "PASS",
+      "response": {
+        "read_environment": "Production",
+        "write_environment": "Sandbox_11_3_2025",
+        "block_production_writes": true,
+        "has_credentials": true,
+        "mock_mode": false
+      }
+    },
+    "GET /api/gpi-integration/status": {
+      "status": "PASS",
+      "response": {
+        "configured": true,
+        "read_environment": "Production",
+        "write_environment": "Sandbox_11_3_2025",
+        "block_production_writes": true
+      }
+    },
+    "GET /api/bc-sandbox/status": {
+      "status": "PASS",
+      "response": {
+        "demo_mode": false,
+        "config.read_environment": "Production",
+        "config.write_environment": "Sandbox_11_3_2025",
+        "config.has_secret": true
+      }
+    },
+    "GET /api/ap-review/vendors?search=cargo": {
+      "status": "PASS",
+      "notes": "Returns real vendor data from Production BC (mock=false)"
+    }
+  },
+  "frontend_tests_verified": {
+    "Login with admin/admin credentials": "PASS",
+    "Sidebar displays 'BC CONNECTED'": "PASS",
+    "Sidebar displays 'READ Production'": "PASS",
+    "Sidebar displays 'WRITE Sandbox_11_3_2025'": "PASS",
+    "BC Integration Dashboard loads with title": "PASS",
+    "Dashboard shows READ Production badge in banner": "PASS",
+    "Dashboard shows WRITE Sandbox_11_3_2025 badge in banner": "PASS",
+    "Dashboard shows 'Production write-guard active' message": "PASS"
+  },
+  "mocked_apis": {
+    "has_mocked_apis": false
+  }
+}

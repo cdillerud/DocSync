@@ -263,10 +263,9 @@ async def sales_order_preflight(doc_id: str):
     if not HAS_CREDENTIALS:
         errors.append("BC credentials are not configured. Cannot create orders until credentials are set.")
 
-    # Compute BC company
-    from services.gpi_integration_service import BC_ENVIRONMENT, BC_COMPANY_ID
+    # Compute BC environment info
+    from services.gpi_integration_service import BC_WRITE_ENVIRONMENT, BC_READ_ENVIRONMENT, BC_COMPANY_ID
     bc_company = BC_COMPANY_ID or "auto-detect"
-    bc_environment = BC_ENVIRONMENT
 
     ready = eligible and bool(customer_no) and not errors
 
@@ -287,7 +286,9 @@ async def sales_order_preflight(doc_id: str):
             "order_date_source": "extracted" if order_date else "fallback_today",
             "total_amount": amount,
             "bc_company": bc_company,
-            "bc_environment": bc_environment,
+            "bc_read_environment": BC_READ_ENVIRONMENT,
+            "bc_write_environment": BC_WRITE_ENVIRONMENT,
+            "bc_environment": f"Read: {BC_READ_ENVIRONMENT} / Write: {BC_WRITE_ENVIRONMENT}",
             "idempotency_key": idempotency_key,
         },
         "line_items": [
@@ -582,9 +583,8 @@ async def purchase_invoice_preflight(doc_id: str):
     if not HAS_CREDENTIALS:
         errors.append("BC credentials are not configured. Cannot create invoices until credentials are set.")
 
-    from services.gpi_integration_service import BC_ENVIRONMENT, BC_COMPANY_ID
+    from services.gpi_integration_service import BC_WRITE_ENVIRONMENT, BC_READ_ENVIRONMENT, BC_COMPANY_ID
     bc_company = BC_COMPANY_ID or "auto-detect"
-    bc_environment = BC_ENVIRONMENT
 
     ready = eligible and bool(vendor_no) and not errors
 
@@ -609,7 +609,9 @@ async def purchase_invoice_preflight(doc_id: str):
             "po_number": po_number,
             "total_amount": amount,
             "bc_company": bc_company,
-            "bc_environment": bc_environment,
+            "bc_read_environment": BC_READ_ENVIRONMENT,
+            "bc_write_environment": BC_WRITE_ENVIRONMENT,
+            "bc_environment": f"Read: {BC_READ_ENVIRONMENT} / Write: {BC_WRITE_ENVIRONMENT}",
             "idempotency_key": idempotency_key,
         },
         "line_items": [

@@ -40,18 +40,17 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 # BC Sandbox credentials - for WRITE operations
-BC_SANDBOX_CLIENT_ID = os.environ.get('BC_SANDBOX_CLIENT_ID', '22c4e601-51e8-4305-bd63-d4aa7d19defd')
-BC_SANDBOX_TENANT_ID = os.environ.get('BC_SANDBOX_TENANT_ID', '***REMOVED_TENANT_ID***')
-# Check both env var names for the secret (BC_SANDBOX_CLIENT_SECRET or BC_CLIENT_SECRET)
+BC_SANDBOX_CLIENT_ID = os.environ.get('BC_SANDBOX_CLIENT_ID') or os.environ.get('BC_CLIENT_ID', '')
+BC_SANDBOX_TENANT_ID = os.environ.get('BC_SANDBOX_TENANT_ID') or os.environ.get('TENANT_ID') or os.environ.get('BC_TENANT_ID', '')
 BC_SANDBOX_CLIENT_SECRET = os.environ.get('BC_SANDBOX_CLIENT_SECRET') or os.environ.get('BC_CLIENT_SECRET', '')
-BC_SANDBOX_ENVIRONMENT = os.environ.get('BC_SANDBOX_ENVIRONMENT', 'Sandbox')
-BC_SANDBOX_COMPANY_NAME = os.environ.get('BC_SANDBOX_COMPANY_NAME', '')
+BC_SANDBOX_ENVIRONMENT = os.environ.get('BC_WRITE_ENVIRONMENT') or os.environ.get('BC_SANDBOX_ENVIRONMENT', 'Sandbox_11_3_2025')
+BC_SANDBOX_COMPANY_NAME = os.environ.get('BC_SANDBOX_COMPANY_NAME') or os.environ.get('BC_COMPANY_NAME', '')
 
 # BC Production credentials - for READ operations (validation, vendor lookup)
-BC_PROD_CLIENT_ID = os.environ.get('BC_PROD_CLIENT_ID', '')
-BC_PROD_CLIENT_SECRET = os.environ.get('BC_PROD_CLIENT_SECRET', '')
-BC_PROD_TENANT_ID = os.environ.get('BC_PROD_TENANT_ID', '')
-BC_PROD_ENVIRONMENT = os.environ.get('BC_PROD_ENVIRONMENT', 'Production')
+BC_PROD_CLIENT_ID = os.environ.get('BC_PROD_CLIENT_ID') or os.environ.get('BC_CLIENT_ID', '')
+BC_PROD_CLIENT_SECRET = os.environ.get('BC_PROD_CLIENT_SECRET') or os.environ.get('BC_CLIENT_SECRET', '')
+BC_PROD_TENANT_ID = os.environ.get('BC_PROD_TENANT_ID') or os.environ.get('TENANT_ID') or os.environ.get('BC_TENANT_ID', '')
+BC_PROD_ENVIRONMENT = os.environ.get('BC_READ_ENVIRONMENT') or os.environ.get('BC_PROD_ENVIRONMENT', 'Production')
 
 # Check if Production credentials are configured
 USE_PROD_FOR_READS = bool(BC_PROD_CLIENT_ID and BC_PROD_CLIENT_SECRET and BC_PROD_TENANT_ID)
@@ -1292,6 +1291,10 @@ def get_bc_sandbox_status() -> Dict[str, Any]:
     except ImportError:
         effective_secret = BC_SANDBOX_CLIENT_SECRET
     
+    BC_READ_ENV = os.environ.get('BC_READ_ENVIRONMENT') or os.environ.get('BC_PROD_ENVIRONMENT', 'Production')
+    BC_WRITE_ENV = os.environ.get('BC_WRITE_ENVIRONMENT') or BC_SANDBOX_ENVIRONMENT
+    BC_BLOCK_PROD = os.environ.get('BC_BLOCK_PRODUCTION_WRITES', 'true').lower() == 'true'
+    
     return {
         "service": "bc_sandbox_service",
         "demo_mode": DEMO_MODE,
@@ -1304,6 +1307,9 @@ def get_bc_sandbox_status() -> Dict[str, Any]:
             "environment": BC_SANDBOX_ENVIRONMENT,
             "company_name": BC_SANDBOX_COMPANY_NAME or "(not set)",
             "has_secret": bool(effective_secret),
+            "read_environment": BC_READ_ENV,
+            "write_environment": BC_WRITE_ENV,
+            "block_production_writes": BC_BLOCK_PROD,
         },
         "api_base": BC_API_BASE,
         "available_operations": [

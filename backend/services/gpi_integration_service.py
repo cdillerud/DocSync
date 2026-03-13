@@ -2,7 +2,11 @@
 GPI Document Hub - GPI Integration API Service
 
 Python client for the GPI Hub Integration BC extension's custom API pages.
-Calls the BC REST API endpoints exposed by the AL extension:
+Uses SPLIT ENVIRONMENT model:
+  - READ operations → BC_READ_ENVIRONMENT (Production)
+  - WRITE operations → BC_WRITE_ENVIRONMENT (Sandbox)
+
+Custom API endpoints (on the WRITE environment):
   - /api/gpi/integration/v1.0/companies({companyId})/salesOrderRequests
   - /api/gpi/integration/v1.0/companies({companyId})/purchaseInvoiceRequests
   - /api/gpi/integration/v1.0/companies({companyId})/customerRequests
@@ -20,12 +24,19 @@ from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
 
-# Configuration from environment
+# Configuration from environment — shared credentials
 BC_TENANT_ID = os.environ.get('TENANT_ID') or os.environ.get('BC_TENANT_ID', '')
 BC_CLIENT_ID = os.environ.get('BC_CLIENT_ID') or os.environ.get('BC_SANDBOX_CLIENT_ID', '')
 BC_CLIENT_SECRET = os.environ.get('BC_CLIENT_SECRET') or os.environ.get('BC_SANDBOX_CLIENT_SECRET', '')
-BC_ENVIRONMENT = os.environ.get('BC_ENVIRONMENT') or os.environ.get('BC_SANDBOX_ENVIRONMENT', 'Sandbox')
 BC_COMPANY_ID = os.environ.get('BC_COMPANY_ID', '')
+
+# Split environment routing
+BC_READ_ENVIRONMENT = os.environ.get('BC_READ_ENVIRONMENT') or os.environ.get('BC_PROD_ENVIRONMENT', 'Production')
+BC_WRITE_ENVIRONMENT = os.environ.get('BC_WRITE_ENVIRONMENT') or os.environ.get('BC_SANDBOX_ENVIRONMENT', 'Sandbox_11_3_2025')
+BC_BLOCK_PRODUCTION_WRITES = os.environ.get('BC_BLOCK_PRODUCTION_WRITES', 'true').lower() == 'true'
+
+# Legacy alias (some code references BC_ENVIRONMENT)
+BC_ENVIRONMENT = BC_READ_ENVIRONMENT
 
 GPI_API_BASE = "https://api.businesscentral.dynamics.com/v2.0"
 GPI_API_GROUP = "gpi/integration/v1.0"
@@ -60,20 +71,33 @@ async def _get_token() -> str:
         return data["access_token"]
 
 
-def _build_url(entity_set: str) -> str:
+def _check_write_protection(operation: str):
+    """Hard guard: refuse writes to Production."""
+    if not BC_BLOCK_PRODUCTION_WRITES:
+        return
+    target = BC_WRITE_ENVIRONMENT.lower()
+    if target == "production" or target.startswith("prod"):
+        raise ValueError(
+            f"BLOCKED: Write operation '{operation}' refused — target environment "
+            f"'{BC_WRITE_ENVIRONMENT}' resolves to Production and BC_BLOCK_PRODUCTION_WRITES=true."
+        )
+
+
+def _build_url(entity_set: str, environment: str = None) -> str:
     """Build the URL for a GPI custom API entity set."""
+    env = environment or BC_WRITE_ENVIRONMENT
     if BC_COMPANY_ID:
-        return f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/{GPI_API_GROUP}/companies({BC_COMPANY_ID})/{entity_set}"
-    return f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/{GPI_API_GROUP}/{entity_set}"
+        return f"{GPI_API_BASE}/{BC_TENANT_ID}/{env}/api/{GPI_API_GROUP}/companies({BC_COMPANY_ID})/{entity_set}"
+    return f"{GPI_API_BASE}/{BC_TENANT_ID}/{env}/api/{GPI_API_GROUP}/{entity_set}"
 
 
-async def _api_request(method: str, entity_set: str, payload: Optional[Dict] = None, params: Optional[Dict] = None) -> Dict:
+async def _api_request(method: str, entity_set: str, payload: Optional[Dict] = None, params: Optional[Dict] = None, environment: str = None) -> Dict:
     """Make an authenticated request to the GPI custom BC API."""
     if not HAS_CREDENTIALS:
         raise ValueError("BC credentials not configured. Set BC_TENANT_ID, BC_CLIENT_ID, BC_CLIENT_SECRET in .env")
 
     token = await _get_token()
-    url = _build_url(entity_set)
+    url = _build_url(entity_set, environment=environment)
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
@@ -106,11 +130,11 @@ def _generate_idempotency_key(prefix: str, source_doc_id: str = "") -> str:
 # =========================================================================
 
 async def list_companies() -> List[Dict]:
-    """List available BC companies via GPI custom API."""
+    """List available BC companies via GPI custom API (READ environment)."""
     if not HAS_CREDENTIALS:
         return [{"name": "DEMO", "displayName": "Demo Company (no BC credentials)"}]
 
-    url = f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/{GPI_API_GROUP}/companies"
+    url = f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/{GPI_API_GROUP}/companies"
     token = await _get_token()
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
@@ -129,7 +153,8 @@ async def create_sales_order(
     idempotency_key: str = "",
     transaction_id: str = "",
 ) -> Dict[str, Any]:
-    """Create a Sales Order in BC via GPI custom API."""
+    """Create a Sales Order in BC WRITE environment (Sandbox) via GPI custom API."""
+    _check_write_protection("create_sales_order")
     if not idempotency_key:
         idempotency_key = _generate_idempotency_key("SO", source_doc_id)
     if not transaction_id:
@@ -145,7 +170,7 @@ async def create_sales_order(
         "orderDate": order_date or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
     }
 
-    result = await _api_request("POST", "salesOrderRequests", payload)
+    result = await _api_request("POST", "salesOrderRequests", payload, environment=BC_WRITE_ENVIRONMENT)
     return {
         "success": result.get("resultSuccess", False),
         "bc_record_no": result.get("resultRecordNo", ""),
@@ -166,7 +191,8 @@ async def create_purchase_invoice(
     idempotency_key: str = "",
     transaction_id: str = "",
 ) -> Dict[str, Any]:
-    """Create a Purchase Invoice in BC via GPI custom API."""
+    """Create a Purchase Invoice in BC WRITE environment (Sandbox) via GPI custom API."""
+    _check_write_protection("create_purchase_invoice")
     if not idempotency_key:
         idempotency_key = _generate_idempotency_key("PI", source_doc_id)
     if not transaction_id:
@@ -184,7 +210,7 @@ async def create_purchase_invoice(
         "postingDate": posting_date or today,
     }
 
-    result = await _api_request("POST", "purchaseInvoiceRequests", payload)
+    result = await _api_request("POST", "purchaseInvoiceRequests", payload, environment=BC_WRITE_ENVIRONMENT)
     return {
         "success": result.get("resultSuccess", False),
         "bc_record_no": result.get("resultRecordNo", ""),
@@ -206,7 +232,8 @@ async def create_customer(
     source_doc_id: str = "",
     idempotency_key: str = "",
 ) -> Dict[str, Any]:
-    """Create a Customer in BC via GPI custom API."""
+    """Create a Customer in BC WRITE environment (Sandbox) via GPI custom API."""
+    _check_write_protection("create_customer")
     if not idempotency_key:
         idempotency_key = _generate_idempotency_key("CUST", source_doc_id)
 
@@ -222,7 +249,7 @@ async def create_customer(
         "countryCode": country_code or "",
     }
 
-    result = await _api_request("POST", "customerRequests", payload)
+    result = await _api_request("POST", "customerRequests", payload, environment=BC_WRITE_ENVIRONMENT)
     return {
         "success": result.get("resultSuccess", False),
         "bc_record_no": result.get("resultRecordNo", ""),
@@ -243,7 +270,8 @@ async def create_vendor(
     source_doc_id: str = "",
     idempotency_key: str = "",
 ) -> Dict[str, Any]:
-    """Create a Vendor in BC via GPI custom API."""
+    """Create a Vendor in BC WRITE environment (Sandbox) via GPI custom API."""
+    _check_write_protection("create_vendor")
     if not idempotency_key:
         idempotency_key = _generate_idempotency_key("VEND", source_doc_id)
 
@@ -259,7 +287,7 @@ async def create_vendor(
         "countryCode": country_code or "",
     }
 
-    result = await _api_request("POST", "vendorRequests", payload)
+    result = await _api_request("POST", "vendorRequests", payload, environment=BC_WRITE_ENVIRONMENT)
     return {
         "success": result.get("resultSuccess", False),
         "bc_record_no": result.get("resultRecordNo", ""),
@@ -294,7 +322,10 @@ def get_integration_status() -> Dict:
     return {
         "configured": HAS_CREDENTIALS,
         "tenant_id": BC_TENANT_ID[:8] + "..." if BC_TENANT_ID else "",
-        "environment": BC_ENVIRONMENT,
+        "read_environment": BC_READ_ENVIRONMENT,
+        "write_environment": BC_WRITE_ENVIRONMENT,
+        "block_production_writes": BC_BLOCK_PRODUCTION_WRITES,
+        "environment": BC_WRITE_ENVIRONMENT,
         "company_id": BC_COMPANY_ID[:8] + "..." if BC_COMPANY_ID else "auto-detect",
         "source_system": SOURCE_SYSTEM,
         "api_group": GPI_API_GROUP,

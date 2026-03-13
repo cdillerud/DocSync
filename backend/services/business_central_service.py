@@ -1,18 +1,18 @@
 """
 GPI Document Hub - Business Central Integration Service
 
-This service provides methods for interacting with Business Central API
-for vendor lookup, PO lookup, and posting purchase invoices.
+Split-environment BC integration:
+  - READ operations (vendor lookup, PO validation, etc.) → BC_READ_ENVIRONMENT (Production)
+  - WRITE operations (create invoice, create SO, etc.) → BC_WRITE_ENVIRONMENT (Sandbox)
 
-Supports both mock mode (for development/testing) and real BC API calls.
+Hard protection: if BC_BLOCK_PRODUCTION_WRITES=true, any write targeting Production is refused.
 
 Configuration via environment variables:
-- BC_CLIENT_ID: App registration client ID
-- BC_CLIENT_SECRET: App registration client secret  
+- BC_CLIENT_ID / BC_CLIENT_SECRET: App registration credentials (same for both envs)
 - BC_TENANT_ID: Azure AD tenant ID
-- BC_ENVIRONMENT: BC environment name (e.g., "Sandbox_11_3_2025")
-- BC_COMPANY_ID: BC company GUID (optional, auto-detected if not set)
-- BC_MOCK_MODE: Set to "true" to use mock responses
+- BC_READ_ENVIRONMENT: BC environment for reads (e.g., "Production")
+- BC_WRITE_ENVIRONMENT: BC environment for writes (e.g., "Sandbox_11_3_2025")
+- BC_BLOCK_PRODUCTION_WRITES: Hard guard against Production writes (default: true)
 """
 
 import os
@@ -27,21 +27,26 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# CONFIGURATION
+# CONFIGURATION — SPLIT ENVIRONMENT MODEL
 # =============================================================================
 
-# SANDBOX BC Credentials (for WRITES - creating invoices, posting)
+# Shared credentials (same Azure AD app registration for both environments)
 BC_CLIENT_ID = os.environ.get('BC_CLIENT_ID') or os.environ.get('BC_SANDBOX_CLIENT_ID', '')
 BC_CLIENT_SECRET = os.environ.get('BC_CLIENT_SECRET') or os.environ.get('BC_SANDBOX_CLIENT_SECRET', '')
-BC_TENANT_ID = os.environ.get('TENANT_ID') or os.environ.get('BC_TENANT_ID') or os.environ.get('BC_SANDBOX_TENANT_ID', '')
-BC_ENVIRONMENT = os.environ.get('BC_ENVIRONMENT') or os.environ.get('BC_SANDBOX_ENVIRONMENT', 'Sandbox')
+BC_TENANT_ID = os.environ.get('TENANT_ID') or os.environ.get('BC_TENANT_ID', '')
 BC_COMPANY_ID = os.environ.get('BC_COMPANY_ID', '')
-BC_COMPANY_NAME = os.environ.get('BC_COMPANY_NAME') or os.environ.get('BC_SANDBOX_COMPANY_NAME', '')
+BC_COMPANY_NAME = os.environ.get('BC_COMPANY_NAME', '')
 
-# PRODUCTION BC Credentials (for READS - validation, vendor lookup, PO matching)
-BC_PROD_CLIENT_ID = os.environ.get('BC_PROD_CLIENT_ID', '')
-BC_PROD_CLIENT_SECRET = os.environ.get('BC_PROD_CLIENT_SECRET', '')
-BC_PROD_TENANT_ID = os.environ.get('BC_PROD_TENANT_ID', '')
+# Split environment routing
+BC_READ_ENVIRONMENT = os.environ.get('BC_READ_ENVIRONMENT') or os.environ.get('BC_PROD_ENVIRONMENT', 'Production')
+BC_WRITE_ENVIRONMENT = os.environ.get('BC_WRITE_ENVIRONMENT') or os.environ.get('BC_SANDBOX_ENVIRONMENT', 'Sandbox_11_3_2025')
+BC_BLOCK_PRODUCTION_WRITES = os.environ.get('BC_BLOCK_PRODUCTION_WRITES', 'true').lower() == 'true'
+
+# Legacy fallback vars (kept for backward compat with bc_sandbox_service)
+BC_ENVIRONMENT = os.environ.get('BC_ENVIRONMENT', BC_READ_ENVIRONMENT)
+BC_PROD_CLIENT_ID = os.environ.get('BC_PROD_CLIENT_ID', BC_CLIENT_ID)
+BC_PROD_CLIENT_SECRET = os.environ.get('BC_PROD_CLIENT_SECRET', BC_CLIENT_SECRET)
+BC_PROD_TENANT_ID = os.environ.get('BC_PROD_TENANT_ID', BC_TENANT_ID)
 BC_PROD_ENVIRONMENT = os.environ.get('BC_PROD_ENVIRONMENT', 'Production')
 
 # Mock mode control
@@ -51,34 +56,44 @@ DEMO_MODE = os.environ.get('DEMO_MODE', 'false').lower() == 'true'
 # Feature flag for BC link writeback
 BC_WRITEBACK_LINK_ENABLED = os.environ.get('BC_WRITEBACK_LINK_ENABLED', 'true').lower() == 'true'
 
-# Auto-enable mock mode ONLY if explicitly set or credentials are missing
-# Changed: DEMO_MODE=false now means use real BC
 USE_MOCK = BC_MOCK_MODE or (not BC_CLIENT_ID) or (not BC_CLIENT_SECRET) or (not BC_TENANT_ID)
-
-# Check if Production credentials are available for read operations
-USE_PROD_FOR_READS = bool(BC_PROD_CLIENT_ID and BC_PROD_CLIENT_SECRET and BC_PROD_TENANT_ID)
+USE_PROD_FOR_READS = True  # Always use read environment for reads
 
 if USE_MOCK:
     logger.info("BusinessCentralService: MOCK MODE (BC_CLIENT_ID=%s, BC_CLIENT_SECRET=%s, BC_TENANT_ID=%s)", 
                 bool(BC_CLIENT_ID), bool(BC_CLIENT_SECRET), bool(BC_TENANT_ID))
-
-if USE_PROD_FOR_READS:
-    logger.info("BusinessCentralService: Using PRODUCTION BC for reads (tenant=%s, env=%s)", 
-                BC_PROD_TENANT_ID[:20] + "..." if BC_PROD_TENANT_ID else "N/A", BC_PROD_ENVIRONMENT)
+else:
+    logger.info("BusinessCentralService: SPLIT ENVIRONMENT MODE")
+    logger.info("  READ  → %s (tenant=%s)", BC_READ_ENVIRONMENT, BC_TENANT_ID[:12] + "..." if BC_TENANT_ID else "N/A")
+    logger.info("  WRITE → %s (tenant=%s)", BC_WRITE_ENVIRONMENT, BC_TENANT_ID[:12] + "..." if BC_TENANT_ID else "N/A")
+    logger.info("  BLOCK_PRODUCTION_WRITES=%s", BC_BLOCK_PRODUCTION_WRITES)
 
 BC_API_BASE = "https://api.businesscentral.dynamics.com/v2.0"
 BC_REQUEST_TIMEOUT = 30.0
 
-# Token caches - separate for sandbox and production
-_token_cache = {
-    "access_token": None,
-    "expires_at": 0
-}
+# Token caches — one per environment
+_token_cache = {"access_token": None, "expires_at": 0}
+_prod_token_cache = {"access_token": None, "expires_at": 0}
 
-_prod_token_cache = {
-    "access_token": None,
-    "expires_at": 0
-}
+
+class ProductionWriteBlockedError(Exception):
+    """Raised when a write operation targets Production and BC_BLOCK_PRODUCTION_WRITES is true."""
+    def __init__(self, operation: str):
+        self.operation = operation
+        super().__init__(
+            f"BLOCKED: Write operation '{operation}' refused — target environment "
+            f"'{BC_WRITE_ENVIRONMENT}' resolves to Production and BC_BLOCK_PRODUCTION_WRITES=true. "
+            f"Change BC_WRITE_ENVIRONMENT to a Sandbox to proceed, or set BC_BLOCK_PRODUCTION_WRITES=false for go-live."
+        )
+
+
+def _check_write_protection(operation: str):
+    """Hard guard: refuse writes to Production unless explicitly overridden."""
+    if not BC_BLOCK_PRODUCTION_WRITES:
+        return
+    target = BC_WRITE_ENVIRONMENT.lower()
+    if target == "production" or target.startswith("prod"):
+        raise ProductionWriteBlockedError(operation)
 
 
 # =============================================================================
@@ -109,13 +124,17 @@ MOCK_PURCHASE_ORDERS = [
 # AUTHENTICATION
 # =============================================================================
 
-async def get_bc_token() -> str:
-    """Get OAuth token for BC API calls. Uses caching to avoid repeated auth calls."""
-    global _token_cache
+async def get_bc_token(environment: str = None) -> str:
+    """Get OAuth token for BC API calls. Uses caching. Environment param selects cache."""
+    global _token_cache, _prod_token_cache
     
-    # Check cache
-    if _token_cache["access_token"] and _token_cache["expires_at"] > datetime.now(timezone.utc).timestamp():
-        return _token_cache["access_token"]
+    # Select the right cache based on environment
+    env = environment or BC_WRITE_ENVIRONMENT
+    is_read_env = (env == BC_READ_ENVIRONMENT)
+    cache = _prod_token_cache if is_read_env else _token_cache
+    
+    if cache["access_token"] and cache["expires_at"] > datetime.now(timezone.utc).timestamp():
+        return cache["access_token"]
     
     if not BC_CLIENT_ID or not BC_CLIENT_SECRET:
         raise ValueError("BC_CLIENT_ID and BC_CLIENT_SECRET must be configured")
@@ -138,88 +157,58 @@ async def get_bc_token() -> str:
             raise Exception(f"Failed to get BC token: {resp.status_code}")
         
         data = resp.json()
-        _token_cache["access_token"] = data["access_token"]
-        _token_cache["expires_at"] = datetime.now(timezone.utc).timestamp() + data.get("expires_in", 3600) - 60
+        cache["access_token"] = data["access_token"]
+        cache["expires_at"] = datetime.now(timezone.utc).timestamp() + data.get("expires_in", 3600) - 60
         
-        return _token_cache["access_token"]
+        return cache["access_token"]
 
 
 async def get_bc_prod_token() -> str:
-    """
-    Get an access token for PRODUCTION BC environment (for READ operations only).
-    Uses separate token cache from sandbox.
-    """
-    if not USE_PROD_FOR_READS:
-        logger.warning("Production BC credentials not configured, falling back to sandbox token")
-        return await get_bc_token()
-    
-    # Check cache
-    if _prod_token_cache["access_token"] and _prod_token_cache["expires_at"] > datetime.now(timezone.utc).timestamp():
-        return _prod_token_cache["access_token"]
-    
-    # Fetch new token for Production
-    token_url = f"https://login.microsoftonline.com/{BC_PROD_TENANT_ID}/oauth2/v2.0/token"
-    
-    async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
-        resp = await client.post(
-            token_url,
-            data={
-                "grant_type": "client_credentials",
-                "client_id": BC_PROD_CLIENT_ID,
-                "client_secret": BC_PROD_CLIENT_SECRET,
-                "scope": "https://api.businesscentral.dynamics.com/.default"
-            }
-        )
-        
-        if resp.status_code != 200:
-            logger.error("Failed to get Production BC token: %s - %s", resp.status_code, resp.text)
-            raise Exception(f"Failed to get Production BC token: {resp.status_code}")
-        
-        data = resp.json()
-        _prod_token_cache["access_token"] = data["access_token"]
-        _prod_token_cache["expires_at"] = datetime.now(timezone.utc).timestamp() + data.get("expires_in", 3600) - 60
-        
-        return _prod_token_cache["access_token"]
+    """Get an access token for the READ environment (Production)."""
+    return await get_bc_token(environment=BC_READ_ENVIRONMENT)
 
 
 def get_bc_read_config():
-    """
-    Get the BC configuration for READ operations.
-    Returns Production config if available, otherwise Sandbox.
-    """
-    if USE_PROD_FOR_READS:
-        return {
-            "tenant_id": BC_PROD_TENANT_ID,
-            "environment": BC_PROD_ENVIRONMENT,
-            "label": f"Production ({BC_PROD_ENVIRONMENT})"
-        }
-    else:
-        return {
-            "tenant_id": BC_TENANT_ID,
-            "environment": BC_ENVIRONMENT,
-            "label": f"Sandbox ({BC_ENVIRONMENT})"
-        }
-
-
-def get_bc_write_config():
-    """
-    Get the BC configuration for WRITE operations.
-    Always returns Sandbox config.
-    """
+    """Get BC configuration for READ operations (Production)."""
     return {
         "tenant_id": BC_TENANT_ID,
-        "environment": BC_ENVIRONMENT,
-        "label": f"Sandbox ({BC_ENVIRONMENT})"
+        "environment": BC_READ_ENVIRONMENT,
+        "label": f"Production ({BC_READ_ENVIRONMENT})"
     }
 
 
-async def get_bc_company_id() -> str:
-    """Get the BC company ID. Uses configured value or auto-detects."""
+def get_bc_write_config():
+    """Get BC configuration for WRITE operations (Sandbox)."""
+    return {
+        "tenant_id": BC_TENANT_ID,
+        "environment": BC_WRITE_ENVIRONMENT,
+        "label": f"Sandbox ({BC_WRITE_ENVIRONMENT})"
+    }
+
+
+def get_environment_status() -> Dict[str, Any]:
+    """Return full split-environment status for the frontend."""
+    return {
+        "read_environment": BC_READ_ENVIRONMENT,
+        "write_environment": BC_WRITE_ENVIRONMENT,
+        "block_production_writes": BC_BLOCK_PRODUCTION_WRITES,
+        "tenant_id": BC_TENANT_ID[:12] + "..." if BC_TENANT_ID else "",
+        "has_credentials": bool(BC_CLIENT_ID and BC_CLIENT_SECRET and BC_TENANT_ID),
+        "mock_mode": USE_MOCK,
+        "company_name": BC_COMPANY_NAME,
+        "read_label": f"Production ({BC_READ_ENVIRONMENT})",
+        "write_label": f"Sandbox ({BC_WRITE_ENVIRONMENT})",
+    }
+
+
+async def get_bc_company_id(environment: str = None) -> str:
+    """Get the BC company ID for a given environment. Uses configured value or auto-detects."""
     if BC_COMPANY_ID:
         return BC_COMPANY_ID
     
-    token = await get_bc_token()
-    url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies"
+    env = environment or BC_READ_ENVIRONMENT
+    token = await get_bc_token(environment=env)
+    url = f"{BC_API_BASE}/{BC_TENANT_ID}/{env}/api/v2.0/companies"
     
     async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
         resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
@@ -253,24 +242,26 @@ class BusinessCentralService:
         """
         self.use_mock = use_mock if use_mock is not None else USE_MOCK
         self._company_id = None
+        self._company_id_cache = {}  # env -> company_id
         
         if self.use_mock:
             logger.info("BusinessCentralService initialized in MOCK mode")
         else:
-            logger.info("BusinessCentralService initialized in REAL mode (tenant=%s, env=%s)", 
-                       BC_TENANT_ID[:8] + "..." if BC_TENANT_ID else "N/A", BC_ENVIRONMENT)
+            logger.info("BusinessCentralService initialized: READ→%s, WRITE→%s", 
+                       BC_READ_ENVIRONMENT, BC_WRITE_ENVIRONMENT)
     
-    async def _get_company_id(self) -> str:
-        """Get and cache the company ID."""
-        if self._company_id:
-            return self._company_id
+    async def _get_company_id(self, environment: str = None) -> str:
+        """Get and cache the company ID for a specific environment."""
+        env = environment or BC_READ_ENVIRONMENT
+        if env in self._company_id_cache:
+            return self._company_id_cache[env]
         
         if self.use_mock:
-            self._company_id = "mock-company-id"
+            self._company_id_cache[env] = "mock-company-id"
         else:
-            self._company_id = await get_bc_company_id()
+            self._company_id_cache[env] = await get_bc_company_id(environment=env)
         
-        return self._company_id
+        return self._company_id_cache[env]
     
     async def _get_company_id_for_env(self, tenant_id: str, environment: str, token: str) -> str:
         """Get company ID for a specific BC environment."""
@@ -324,10 +315,10 @@ class BusinessCentralService:
                 "mock": True
             }
         
-        # Use Production BC for reads if available
+        # Use READ environment (Production) for vendor lookups
         read_config = get_bc_read_config()
-        token = await get_bc_prod_token() if USE_PROD_FOR_READS else await get_bc_token()
-        company_id = await self._get_company_id_for_env(read_config["tenant_id"], read_config["environment"], token)
+        token = await get_bc_token(environment=BC_READ_ENVIRONMENT)
+        company_id = await self._get_company_id(environment=BC_READ_ENVIRONMENT)
         
         url = f"{BC_API_BASE}/{read_config['tenant_id']}/{read_config['environment']}/api/v2.0/companies({company_id})/vendors"
         params = {"$select": "id,number,displayName,email,phoneNumber", "$top": str(limit)}
@@ -373,17 +364,17 @@ class BusinessCentralService:
             }
     
     async def get_vendor_by_id(self, vendor_id: str) -> Optional[Dict[str, Any]]:
-        """Get a specific vendor by ID."""
+        """Get a specific vendor by ID. Uses READ environment."""
         if self.use_mock:
             for v in MOCK_VENDORS:
                 if v["id"] == vendor_id or v["number"] == vendor_id:
                     return v
             return None
         
-        token = await get_bc_token()
-        company_id = await self._get_company_id()
+        token = await get_bc_token(environment=BC_READ_ENVIRONMENT)
+        company_id = await self._get_company_id(environment=BC_READ_ENVIRONMENT)
         
-        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors({vendor_id})"
+        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors({vendor_id})"
         
         async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
             resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
@@ -420,11 +411,11 @@ class BusinessCentralService:
                 "mock": True
             }
         
-        # Real BC API call
-        token = await get_bc_token()
-        company_id = await self._get_company_id()
+        # Real BC API call — use READ environment (Production)
+        token = await get_bc_token(environment=BC_READ_ENVIRONMENT)
+        company_id = await self._get_company_id(environment=BC_READ_ENVIRONMENT)
         
-        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseOrders"
+        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseOrders"
         # Note: BC purchaseOrders API has different field names - use valid ones only
         params = {
             "$select": "id,number,vendorNumber,vendorName,orderDate,status",
@@ -469,22 +460,10 @@ class BusinessCentralService:
     
     async def create_purchase_invoice(self, invoice_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Create a purchase invoice in BC.
-        
-        Args:
-            invoice_data: Invoice data including:
-                - vendorId or vendorNumber: BC vendor reference
-                - invoiceNumber: External document number
-                - invoiceDate: Invoice date (YYYY-MM-DD)
-                - dueDate: Due date (YYYY-MM-DD)
-                - currencyCode: Currency (e.g., "USD")
-                - lines: List of line items with description, quantity, unitCost
-                
-        Returns:
-            Dict with created invoice details including bcDocumentId
+        Create a purchase invoice in BC WRITE environment (Sandbox).
+        Hard-blocked from writing to Production when BC_BLOCK_PRODUCTION_WRITES=true.
         """
         if self.use_mock:
-            # Generate mock response
             mock_bc_id = f"PI-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
             return {
                 "success": True,
@@ -493,12 +472,15 @@ class BusinessCentralService:
                 "status": "Draft",
                 "message": "Purchase invoice created (mock mode)",
                 "mock": True,
-                "createdAt": datetime.now(timezone.utc).isoformat()
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "bc_write_environment": BC_WRITE_ENVIRONMENT,
             }
         
-        # Real BC API call
-        token = await get_bc_token()
-        company_id = await self._get_company_id()
+        # HARD GUARD: refuse writes to Production
+        _check_write_protection("create_purchase_invoice")
+        
+        token = await get_bc_token(environment=BC_WRITE_ENVIRONMENT)
+        company_id = await self._get_company_id(environment=BC_WRITE_ENVIRONMENT)
         
         # Build the invoice payload per BC API spec
         # Note: BC API uses 'vendorInvoiceNumber' (not 'externalDocumentNumber') for the vendor's invoice reference
@@ -513,7 +495,7 @@ class BusinessCentralService:
         # Remove None values
         payload = {k: v for k, v in payload.items() if v is not None}
         
-        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseInvoices"
+        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseInvoices"
         
         async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
             resp = await client.post(
@@ -554,7 +536,8 @@ class BusinessCentralService:
                 "bcResponse": data,
                 "linesAdded": line_result.get("added", 0) if line_result else 0,
                 "linesTotal": line_result.get("total", 0) if line_result else 0,
-                "lineErrors": line_result.get("errors", []) if line_result else []
+                "lineErrors": line_result.get("errors", []) if line_result else [],
+                "bc_write_environment": BC_WRITE_ENVIRONMENT,
             }
     
     async def _add_invoice_lines(self, invoice_id: str, lines: List[Dict], token: str, company_id: str):
@@ -570,7 +553,7 @@ class BusinessCentralService:
         
         Uses BC_DEFAULT_ITEM_CODE (e.g., "FREIGHT") as the default item for all lines.
         """
-        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseInvoices({invoice_id})/purchaseInvoiceLines"
+        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseInvoices({invoice_id})/purchaseInvoiceLines"
         
         added_count = 0
         errors = []
@@ -659,7 +642,7 @@ class BusinessCentralService:
         Returns:
             The item's GUID if found, None otherwise
         """
-        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/items"
+        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/v2.0/companies({company_id})/items"
         
         try:
             async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
@@ -701,7 +684,7 @@ class BusinessCentralService:
             return None
     
     async def get_purchase_invoice(self, invoice_id: str) -> Optional[Dict[str, Any]]:
-        """Get a purchase invoice by ID."""
+        """Get a purchase invoice by ID. Uses READ environment."""
         if self.use_mock:
             return {
                 "id": invoice_id,
@@ -710,10 +693,10 @@ class BusinessCentralService:
                 "mock": True
             }
         
-        token = await get_bc_token()
-        company_id = await self._get_company_id()
+        token = await get_bc_token(environment=BC_READ_ENVIRONMENT)
+        company_id = await self._get_company_id(environment=BC_READ_ENVIRONMENT)
         
-        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseInvoices({invoice_id})"
+        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseInvoices({invoice_id})"
         
         async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
             resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
@@ -768,11 +751,14 @@ class BusinessCentralService:
             }
         
         try:
-            token = await get_bc_token()
-            company_id = await self._get_company_id()
+            # HARD GUARD: refuse writes to Production
+            _check_write_protection("update_purchase_invoice_link")
+            
+            token = await get_bc_token(environment=BC_WRITE_ENVIRONMENT)
+            company_id = await self._get_company_id(environment=BC_WRITE_ENVIRONMENT)
             
             # Use the GPI Document Links custom API endpoint
-            api_base_url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/gpi/documents/v1.0/companies({company_id})/documentLinks"
+            api_base_url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/gpi/documents/v1.0/companies({company_id})/documentLinks"
             
             async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
                 # First, check if a link already exists for this invoice
@@ -880,7 +866,7 @@ class BusinessCentralService:
         Used when the GPI custom API extension is not installed.
         """
         try:
-            url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseInvoices({invoice_id})/purchaseInvoiceLines"
+            url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseInvoices({invoice_id})/purchaseInvoiceLines"
             
             # Truncate URL if too long (BC description field is typically 100 chars)
             link_text = f"GPI Doc: {sharepoint_url}"
@@ -923,19 +909,8 @@ class BusinessCentralService:
 
     async def create_sales_order(self, order_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Create a Sales Order in Business Central.
-        
-        Args:
-            order_data: Dict containing:
-                - customerNumber: BC customer number (e.g., "NEW")
-                - orderDate: Order date (YYYY-MM-DD)
-                - requestedDeliveryDate: Requested delivery date (YYYY-MM-DD)
-                - externalDocumentNumber: Customer PO number
-                - currencyCode: Currency (e.g., "USD")
-                - lines: List of line items with itemNumber, quantity, unitPrice
-                
-        Returns:
-            Dict with created sales order details including bcDocumentId
+        Create a Sales Order in BC WRITE environment (Sandbox).
+        Hard-blocked from writing to Production when BC_BLOCK_PRODUCTION_WRITES=true.
         """
         if self.use_mock:
             mock_bc_id = f"SO-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
@@ -946,11 +921,15 @@ class BusinessCentralService:
                 "status": "Draft",
                 "message": "Sales order created (mock mode)",
                 "mock": True,
-                "createdAt": datetime.now(timezone.utc).isoformat()
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "bc_write_environment": BC_WRITE_ENVIRONMENT,
             }
         
-        token = await get_bc_token()
-        company_id = await self._get_company_id()
+        # HARD GUARD: refuse writes to Production
+        _check_write_protection("create_sales_order")
+        
+        token = await get_bc_token(environment=BC_WRITE_ENVIRONMENT)
+        company_id = await self._get_company_id(environment=BC_WRITE_ENVIRONMENT)
         
         # Build the sales order payload per BC API spec
         payload = {
@@ -978,9 +957,9 @@ class BusinessCentralService:
         # Remove None values
         payload = {k: v for k, v in payload.items() if v is not None}
         
-        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/salesOrders"
+        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/v2.0/companies({company_id})/salesOrders"
         
-        logger.info("Creating Sales Order in BC for customer %s", payload.get("customerNumber"))
+        logger.info("Creating Sales Order in BC WRITE env (%s) for customer %s", BC_WRITE_ENVIRONMENT, payload.get("customerNumber"))
         
         async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
             resp = await client.post(
@@ -1023,7 +1002,8 @@ class BusinessCentralService:
                 "bcResponse": data,
                 "linesAdded": line_result.get("added", 0) if line_result else 0,
                 "linesTotal": line_result.get("total", 0) if line_result else 0,
-                "lineErrors": line_result.get("errors", []) if line_result else []
+                "lineErrors": line_result.get("errors", []) if line_result else [],
+                "bc_write_environment": BC_WRITE_ENVIRONMENT,
             }
 
     async def _add_sales_order_lines(self, order_id: str, lines: List[Dict], token: str, company_id: str):
@@ -1036,7 +1016,7 @@ class BusinessCentralService:
         - quantity
         - unitPrice
         """
-        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/salesOrders({order_id})/salesOrderLines"
+        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/v2.0/companies({company_id})/salesOrders({order_id})/salesOrderLines"
         
         added_count = 0
         errors = []

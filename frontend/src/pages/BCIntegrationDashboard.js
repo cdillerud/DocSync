@@ -20,6 +20,7 @@ export default function BCIntegrationDashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [envStatus, setEnvStatus] = useState(null);
   const [filters, setFilters] = useState({ record_type: '', status: '', search: '' });
   const [page, setPage] = useState(0);
   const [expandedRow, setExpandedRow] = useState(null);
@@ -47,6 +48,13 @@ export default function BCIntegrationDashboard() {
   }, [filters.record_type, filters.status, page]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  useEffect(() => {
+    fetch(`${API}/api/bc/environment-status`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setEnvStatus(d))
+      .catch(() => {});
+  }, []);
 
   const filteredTransactions = (data?.transactions || []).filter(t => {
     if (!filters.search) return true;
@@ -82,6 +90,29 @@ export default function BCIntegrationDashboard() {
           Refresh
         </Button>
       </div>
+
+      {/* Environment Status Banner */}
+      {envStatus && (
+        <div className="flex flex-wrap items-center gap-4 bg-muted/40 border border-border rounded-lg px-4 py-3" data-testid="bc-env-banner">
+          <div className="flex items-center gap-2 text-xs">
+            <span className="font-medium text-muted-foreground uppercase tracking-wider">Read</span>
+            <Badge variant="outline" className="font-mono text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700">{envStatus.read_environment}</Badge>
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            <span className="font-medium text-muted-foreground uppercase tracking-wider">Write</span>
+            <Badge variant="outline" className="font-mono text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700">{envStatus.write_environment}</Badge>
+          </div>
+          {envStatus.block_production_writes && (
+            <div className="flex items-center gap-1.5 text-xs">
+              <Shield className="w-3.5 h-3.5 text-emerald-600" />
+              <span className="text-emerald-700 dark:text-emerald-300 font-medium">Production write-guard active</span>
+            </div>
+          )}
+          <div className="flex items-center gap-1.5 text-xs ml-auto text-muted-foreground">
+            <span>{envStatus.company_name}</span>
+          </div>
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" data-testid="dashboard-summary-cards">

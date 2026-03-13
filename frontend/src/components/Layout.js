@@ -33,61 +33,37 @@ export default function Layout() {
   const { theme, setTheme } = useTheme();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [bcStatus, setBcStatus] = useState({ loading: true, connected: false, demoMode: false, environment: '' });
+  const [bcStatus, setBcStatus] = useState({ loading: true, connected: false, demoMode: false, readEnv: '', writeEnv: '' });
 
   // Fetch BC status on mount
   useEffect(() => {
     const fetchBCStatus = async () => {
       try {
-        // Fetch both sandbox status and write guard in parallel
-        const [res, guardRes] = await Promise.all([
+        const [res, envRes] = await Promise.all([
           fetch(`${API}/api/bc-sandbox/status`),
-          fetch(`${API}/api/bc/write-guard/status`).catch(() => null),
+          fetch(`${API}/api/bc/environment-status`).catch(() => null),
         ]);
         if (res.ok) {
           const data = await res.json();
-          const guard = guardRes?.ok ? await guardRes.json() : null;
+          const envData = envRes?.ok ? await envRes.json() : null;
           const hasCredentials = data.config?.has_secret === true;
           const isNotDemoMode = data.demo_mode === false;
           const isConnected = isNotDemoMode && hasCredentials;
-          const readEnv = guard?.environment || data.config?.environment || 'Unknown';
-          const writeBlocked = guard?.write_enabled === false;
           
           setBcStatus({
             loading: false,
             connected: isConnected,
             demoMode: data.demo_mode === true,
-            environment: readEnv,
-            writeBlocked,
+            readEnv: envData?.read_environment || 'Unknown',
+            writeEnv: envData?.write_environment || 'Unknown',
+            blockProdWrites: envData?.block_production_writes ?? true,
           });
         } else {
-          // If BC status fails, try settings endpoint as fallback
-          console.warn('[BC Status] Primary endpoint failed:', res.status, '- trying settings fallback');
-          try {
-            const settingsRes = await fetch(`${API}/api/settings`);
-            if (settingsRes.ok) {
-              const settings = await settingsRes.json();
-              const bcConfig = settings.bc_sandbox || {};
-              const hasSecret = bcConfig.client_secret_set || bcConfig.has_secret;
-              setBcStatus({
-                loading: false,
-                connected: hasSecret === true,
-                demoMode: !hasSecret,
-                environment: bcConfig.environment || 'Configured'
-              });
-              console.log('[BC Status] Using settings fallback:', bcConfig);
-            } else {
-              setBcStatus({ loading: false, connected: false, demoMode: true, environment: '' });
-            }
-          } catch (fallbackErr) {
-            console.warn('[BC Status] Settings fallback also failed:', fallbackErr);
-            setBcStatus({ loading: false, connected: false, demoMode: true, environment: '' });
-          }
+          setBcStatus({ loading: false, connected: false, demoMode: true, readEnv: '', writeEnv: '' });
         }
       } catch (err) {
         console.error('[BC Status] Fetch failed:', err.message);
-        // On network error, show neutral state instead of error
-        setBcStatus({ loading: false, connected: false, demoMode: true, environment: '' });
+        setBcStatus({ loading: false, connected: false, demoMode: true, readEnv: '', writeEnv: '' });
       }
     };
     fetchBCStatus();
@@ -154,27 +130,34 @@ export default function Layout() {
         </nav>
 
         <div className="p-3 border-t border-border shrink-0">
-          <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground" data-testid="bc-status-indicator">
+          <div className="px-3 py-2 text-xs text-muted-foreground space-y-1" data-testid="bc-status-indicator">
             {bcStatus.loading ? (
-              <>
+              <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-gray-400 animate-pulse" />
                 <span className="font-mono">CHECKING...</span>
-              </>
+              </div>
             ) : bcStatus.connected ? (
               <>
-                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="font-mono text-emerald-600 dark:text-emerald-400">
-                  BC {bcStatus.environment?.toUpperCase() || 'CONNECTED'}
-                  {bcStatus.writeBlocked ? ' (R/O)' : ''}
-                </span>
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="font-mono text-emerald-600 dark:text-emerald-400">BC CONNECTED</span>
+                </div>
+                <div className="flex items-center gap-2 pl-4" data-testid="bc-read-env">
+                  <span className="font-mono text-[10px] text-blue-600 dark:text-blue-400">READ</span>
+                  <span className="font-mono text-[10px]">{bcStatus.readEnv}</span>
+                </div>
+                <div className="flex items-center gap-2 pl-4" data-testid="bc-write-env">
+                  <span className="font-mono text-[10px] text-amber-600 dark:text-amber-400">WRITE</span>
+                  <span className="font-mono text-[10px]">{bcStatus.writeEnv}</span>
+                </div>
               </>
             ) : (
-              <>
+              <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-amber-500" />
                 <span className="font-mono text-amber-600 dark:text-amber-400">
                   {bcStatus.demoMode ? 'DEMO MODE' : 'BC STANDBY'}
                 </span>
-              </>
+              </div>
             )}
           </div>
         </div>

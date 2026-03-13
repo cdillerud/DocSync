@@ -2805,11 +2805,11 @@ All 3 PIs created in BC Sandbox (Sandbox_11_3_2025). Idempotency guards confirme
 
 ### Credential Reference (for future forks)
 ```
-TENANT_ID=c7b2de14-71d9-4c49-a0b9-2bec103a6fdc
-BC_CLIENT_ID=6ac62e44-8968-4ad9-b781-434507a5c83a
-BC_SANDBOX_CLIENT_ID=6ac62e44-8968-4ad9-b781-434507a5c83a
-GRAPH_CLIENT_ID=22c4e601-51e8-4305-bd63-d4aa7d19defd
-EMAIL_CLIENT_ID=8764d2d9-65cb-4bf8-b8ac-1d922e2b47f8
+TENANT_ID=doc-workflow-test
+BC_CLIENT_ID=doc-workflow-test
+BC_SANDBOX_CLIENT_ID=doc-workflow-test
+GRAPH_CLIENT_ID=doc-workflow-test
+EMAIL_CLIENT_ID=doc-workflow-test
 ```
 
 *Last Updated: March 13, 2026*

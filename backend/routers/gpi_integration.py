@@ -252,17 +252,20 @@ async def _resolve_sales_lines(doc: dict, customer_no: str = "") -> list:
             if mapping_result["matched"]:
                 resolved.append({
                     "lineType": mapping_result["line_type"],
-                    "lineObjectNumber": mapping_result["item_number"],
+                    "lineObjectNumber": mapping_result["target_no"],
                     "description": desc[:100] if desc else "Line item",
                     "quantity": qty,
                     "unitPrice": unit_price,
                     "source": "mapped",
                     "mapping": {
                         "matched": True,
-                        "item_number": mapping_result["item_number"],
+                        "target_type": mapping_result["target_type"],
+                        "target_no": mapping_result["target_no"],
+                        "target_description": mapping_result.get("target_description", ""),
                         "confidence": mapping_result["confidence"],
                         "method": mapping_result["method"],
                         "mapping_id": mapping_result.get("mapping_id"),
+                        "catalog_validated": mapping_result.get("catalog_validated", False),
                     },
                 })
             else:
@@ -275,10 +278,13 @@ async def _resolve_sales_lines(doc: dict, customer_no: str = "") -> list:
                     "source": "extracted",
                     "mapping": {
                         "matched": False,
-                        "item_number": "",
+                        "target_type": "comment",
+                        "target_no": "",
+                        "target_description": "",
                         "confidence": 0,
                         "method": "none",
                         "mapping_id": None,
+                        "catalog_validated": False,
                     },
                 })
     else:
@@ -1171,10 +1177,12 @@ async def get_item_mappings(customer_no: str = "", active_only: bool = False):
 async def create_mapping_endpoint(request: Request):
     """Create a new item mapping rule."""
     data = await request.json()
-    if not data.get("bc_item_number"):
-        raise HTTPException(status_code=422, detail="bc_item_number is required")
+    target_no = data.get("target_no") or data.get("bc_item_number")
+    if not target_no:
+        raise HTTPException(status_code=422, detail="target_no (or bc_item_number) is required")
     if not data.get("keyword_phrase") and not data.get("keywords"):
         raise HTTPException(status_code=422, detail="keyword_phrase or keywords is required")
+    data["target_no"] = target_no
     db = get_db()
     mapping = await create_item_mapping(db, data)
     return {"success": True, "mapping": mapping}

@@ -60,26 +60,32 @@ async def map_line_to_item(
     customer_no: str = "",
     doc_id: str = "",
 ) -> Dict[str, Any]:
-    """Attempt to map a line description to a BC item number.
+    """Attempt to map a line description to a BC item number or G/L account.
 
     Returns:
         {
             "matched": bool,
-            "item_number": str,
-            "line_type": "Item" | "Comment",
+            "target_type": "item" | "gl_account" | "comment",
+            "target_no": str,          # BC item number or GL account number
+            "target_description": str,  # Catalog description of the target
+            "line_type": "Item" | "Account" | "Comment",  # BC sales line type
             "confidence": float (0-1),
             "method": str,
             "mapping_id": str | None,
+            "catalog_validated": bool,
             "original_description": str,
         }
     """
     result = {
         "matched": False,
-        "item_number": "",
+        "target_type": "comment",
+        "target_no": "",
+        "target_description": "",
         "line_type": "Comment",
         "confidence": 0.0,
         "method": "none",
         "mapping_id": None,
+        "catalog_validated": False,
         "original_description": description,
     }
 
@@ -89,24 +95,21 @@ async def map_line_to_item(
     norm_desc = _normalize(description)
     desc_tokens = _tokenize(description)
 
-    # Strategy 1: Extracted SKU direct match
+    # Strategy 1: Extracted SKU direct match → always Item type
     if extracted_sku:
+        cat_check = await _validate_target(db, "item", extracted_sku)
         result["matched"] = True
-        result["item_number"] = extracted_sku
+        result["target_type"] = "item"
+        result["target_no"] = extracted_sku
+        result["target_description"] = cat_check.get("description", "")
         result["line_type"] = "Item"
         result["confidence"] = HIGH_CONFIDENCE
         result["method"] = "extracted_sku"
+        result["catalog_validated"] = cat_check.get("valid", False)
         return result
 
-    # Get all active mappings
+    # Strategy 2: Configured mapping rules
     mappings = await get_all_mappings(db, customer_no=customer_no)
-
-    if not mappings:
-        # Try historical match
-        hist_result = await _match_historical(db, norm_desc, customer_no, doc_id)
-        if hist_result:
-            return hist_result
-        return result
 
     best_match = None
     best_confidence = 0.0
@@ -117,24 +120,33 @@ async def map_line_to_item(
             best_confidence = conf
             best_match = mapping
 
-    # Apply match if above threshold — validate against catalog if synced
     if best_match and best_confidence >= MIN_CONFIDENCE:
-        item_no = best_match["bc_item_number"]
-        # Validate the mapped item isn't blocked in BC
-        catalog_check = await _validate_item_in_catalog(db, item_no)
-        if catalog_check["reason"] == "blocked":
-            logger.warning("Mapped item %s is blocked in BC — skipping", item_no)
+        target_type = best_match.get("target_type", "item")
+        target_no = best_match.get("target_no") or best_match.get("bc_item_number", "")
+
+        # Validate the target isn't blocked
+        cat_check = await _validate_target(db, target_type, target_no)
+        if cat_check.get("reason") == "blocked":
+            logger.warning("Mapped target %s/%s is blocked — skipping", target_type, target_no)
         else:
+            bc_line_type = "Account" if target_type == "gl_account" else "Item"
             result["matched"] = True
-            result["item_number"] = item_no
-            result["line_type"] = "Item"
+            result["target_type"] = target_type
+            result["target_no"] = target_no
+            result["target_description"] = cat_check.get("description", best_match.get("bc_item_description", ""))
+            result["line_type"] = bc_line_type
             result["confidence"] = round(best_confidence, 3)
             result["method"] = best_match.get("_match_method", "keyword")
             result["mapping_id"] = best_match.get("id")
-            result["catalog_validated"] = catalog_check["reason"] == "ok"
+            result["catalog_validated"] = cat_check.get("valid", False)
             return result
 
-    # Strategy 3: Direct catalog description match
+    # Strategy 3: Direct catalog description match (items only)
+    if not mappings or not best_match:
+        hist_result = await _match_historical(db, norm_desc, customer_no, doc_id)
+        if hist_result:
+            return hist_result
+
     catalog_result = await _match_catalog_description(db, norm_desc, desc_tokens)
     if catalog_result:
         return catalog_result
@@ -147,19 +159,31 @@ async def map_line_to_item(
     return result
 
 
-async def _validate_item_in_catalog(db, item_no: str) -> Dict[str, Any]:
-    """Check if an item number exists and is usable in the synced catalog."""
-    from services.bc_catalog_sync_service import ITEMS_COLLECTION
-    catalog_count = await db[ITEMS_COLLECTION].count_documents({})
-    if catalog_count == 0:
-        return {"valid": True, "reason": "no_catalog"}  # Catalog not synced yet
+async def _validate_target(db, target_type: str, target_no: str) -> Dict[str, Any]:
+    """Validate a mapping target (item or GL account) against the synced catalog."""
+    from services.bc_catalog_sync_service import ITEMS_COLLECTION, GL_ACCOUNTS_COLLECTION
 
-    item = await db[ITEMS_COLLECTION].find_one({"item_no": item_no}, {"_id": 0})
-    if not item:
-        return {"valid": False, "reason": "not_found"}
-    if item.get("blocked"):
-        return {"valid": False, "reason": "blocked"}
-    return {"valid": True, "reason": "ok", "item": item}
+    if target_type == "gl_account":
+        count = await db[GL_ACCOUNTS_COLLECTION].count_documents({})
+        if count == 0:
+            return {"valid": True, "reason": "no_catalog", "description": ""}
+        acct = await db[GL_ACCOUNTS_COLLECTION].find_one({"account_no": target_no}, {"_id": 0})
+        if not acct:
+            return {"valid": False, "reason": "not_found", "description": ""}
+        if acct.get("blocked"):
+            return {"valid": False, "reason": "blocked", "description": acct.get("name", "")}
+        return {"valid": True, "reason": "ok", "description": acct.get("name", "")}
+    else:
+        # Item validation
+        count = await db[ITEMS_COLLECTION].count_documents({})
+        if count == 0:
+            return {"valid": True, "reason": "no_catalog", "description": ""}
+        item = await db[ITEMS_COLLECTION].find_one({"item_no": target_no}, {"_id": 0})
+        if not item:
+            return {"valid": False, "reason": "not_found", "description": ""}
+        if item.get("blocked"):
+            return {"valid": False, "reason": "blocked", "description": item.get("description", "")}
+        return {"valid": True, "reason": "ok", "description": item.get("description", "")}
 
 
 async def _match_catalog_description(
@@ -189,13 +213,15 @@ async def _match_catalog_description(
         if item_norm == norm_desc:
             return {
                 "matched": True,
-                "item_number": item["item_no"],
+                "target_type": "item",
+                "target_no": item["item_no"],
+                "target_description": item.get("description", ""),
                 "line_type": "Item",
                 "confidence": 0.92,
                 "method": "catalog_exact",
                 "mapping_id": None,
-                "original_description": norm_desc,
                 "catalog_validated": True,
+                "original_description": norm_desc,
             }
 
         # Token overlap scoring
@@ -212,13 +238,15 @@ async def _match_catalog_description(
     if best_item and best_score >= 0.75:
         return {
             "matched": True,
-            "item_number": best_item["item_no"],
+            "target_type": "item",
+            "target_no": best_item["item_no"],
+            "target_description": best_item.get("description", ""),
             "line_type": "Item",
             "confidence": round(min(best_score * 0.90, 0.88), 3),
             "method": "catalog_description",
             "mapping_id": None,
-            "original_description": norm_desc,
             "catalog_validated": True,
+            "original_description": norm_desc,
         }
 
     return None
@@ -292,11 +320,14 @@ async def _match_historical(
     if history and history.get("item_number"):
         return {
             "matched": True,
-            "item_number": history["item_number"],
-            "line_type": "Item",
+            "target_type": history.get("target_type", "item"),
+            "target_no": history["item_number"],
+            "target_description": history.get("target_description", ""),
+            "line_type": "Account" if history.get("target_type") == "gl_account" else "Item",
             "confidence": round(min(history.get("confidence", 0.7) * 0.95, 0.85), 3),
             "method": "historical_reuse",
             "mapping_id": history.get("mapping_id"),
+            "catalog_validated": False,
             "original_description": norm_desc,
         }
 
@@ -319,7 +350,9 @@ async def record_mapping_history(
         "normalized_description": _normalize(description),
         "customer_no": customer_no,
         "matched": mapping_result.get("matched", False),
-        "item_number": mapping_result.get("item_number", ""),
+        "item_number": mapping_result.get("target_no", ""),
+        "target_type": mapping_result.get("target_type", "comment"),
+        "target_description": mapping_result.get("target_description", ""),
         "confidence": mapping_result.get("confidence", 0),
         "method": mapping_result.get("method", "none"),
         "mapping_id": mapping_result.get("mapping_id"),
@@ -338,8 +371,10 @@ async def create_mapping(db, data: Dict) -> Dict:
         "keyword_phrase": data.get("keyword_phrase", ""),
         "keywords": data.get("keywords", []),
         "aliases": data.get("aliases", []),
-        "bc_item_number": data["bc_item_number"],
-        "bc_item_description": data.get("bc_item_description", ""),
+        "target_type": data.get("target_type", "item"),
+        "target_no": data.get("target_no", data.get("bc_item_number", "")),
+        "bc_item_number": data.get("target_no", data.get("bc_item_number", "")),  # backwards compat
+        "bc_item_description": data.get("bc_item_description", data.get("target_description", "")),
         "customer_no": data.get("customer_no", ""),
         "priority": data.get("priority", 100),
         "active": data.get("active", True),

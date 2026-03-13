@@ -245,7 +245,7 @@ function PreflightView({ data, customerOverride, setCustomerOverride, onConfirm,
                 <tr className="border-b border-border bg-muted/80">
                   <th className="text-left py-1.5 px-2 font-medium text-muted-foreground">Type</th>
                   <th className="text-left py-1.5 px-2 font-medium text-muted-foreground">Description</th>
-                  <th className="text-left py-1.5 px-2 font-medium text-muted-foreground">Item</th>
+                  <th className="text-left py-1.5 px-2 font-medium text-muted-foreground">Target</th>
                   <th className="text-right py-1.5 px-2 font-medium text-muted-foreground">Qty</th>
                   <th className="text-right py-1.5 px-2 font-medium text-muted-foreground">Unit Price</th>
                   <th className="text-right py-1.5 px-2 font-medium text-muted-foreground">Total</th>
@@ -254,24 +254,40 @@ function PreflightView({ data, customerOverride, setCustomerOverride, onConfirm,
               <tbody>
                 {resolvedLines.map((li, i) => {
                   const mp = li.mapping || {};
+                  const isGL = mp.target_type === 'gl_account';
+                  const isItem = mp.target_type === 'item';
+                  const typeColor = mp.matched
+                    ? isGL ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
+                           : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                    : '';
                   return (
                     <tr key={i} className="border-b border-border/50 last:border-0">
                       <td className="py-1.5 px-2">
-                        <Badge variant="secondary" className={`text-[9px] h-4 px-1 ${mp.matched ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' : ''}`}>
+                        <Badge variant="secondary" className={`text-[9px] h-4 px-1 ${typeColor}`}>
                           {li.lineType}
                         </Badge>
                       </td>
-                      <td className="py-1.5 px-2 truncate max-w-[150px]" title={li.description}>
+                      <td className="py-1.5 px-2 truncate max-w-[140px]" title={li.description}>
                         {li.description}
                       </td>
                       <td className="py-1.5 px-2">
                         {mp.matched ? (
-                          <span className="font-mono text-emerald-600 dark:text-emerald-400 flex items-center gap-1" data-testid={`so-line-${i}-item`}>
-                            {mp.item_number}
-                            <span className="text-[8px] text-muted-foreground" title={`${mp.method} (${Math.round((mp.confidence||0)*100)}%)`}>
-                              {Math.round((mp.confidence||0)*100)}%
+                          <div className="flex flex-col" data-testid={`so-line-${i}-target`}>
+                            <span className={`font-mono text-[10px] ${isGL ? 'text-blue-600 dark:text-blue-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                              {mp.target_no}
+                              <span className="text-[8px] text-muted-foreground ml-1" title={`${mp.method} (${Math.round((mp.confidence||0)*100)}%)`}>
+                                {Math.round((mp.confidence||0)*100)}%
+                              </span>
+                              {mp.catalog_validated && (
+                                <span className="text-[7px] text-emerald-500 ml-0.5" title="Validated in BC catalog">&#10003;</span>
+                              )}
                             </span>
-                          </span>
+                            {mp.target_description && (
+                              <span className="text-[8px] text-muted-foreground truncate max-w-[120px]" title={mp.target_description}>
+                                {mp.target_description}
+                              </span>
+                            )}
+                          </div>
                         ) : (
                           <span className="text-muted-foreground text-[10px] italic" data-testid={`so-line-${i}-unmapped`}>
                             {li.lineObjectNumber || 'unmapped'}

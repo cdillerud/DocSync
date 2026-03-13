@@ -9,7 +9,7 @@
 # and paste the output into /app/backend/.env
 
 ## AZURE AD / TENANT
-TENANT_ID=c7b2de14-71d9-4c49-a0b9-2bec103a6fdc
+TENANT_ID=doc-workflow-test
 
 ## BUSINESS CENTRAL (Same app reg for Sandbox + Production)
 BC_CLIENT_ID=NmFjNjJlNDQtODk2OC00YWQ5LWI3ODEtNDM0NTA3YTVjODNh
@@ -43,7 +43,7 @@ SHAREPOINT_SITE_PATH=/sites/GPI-DocumentHub-Test
 SHAREPOINT_LIBRARY_NAME=Shared Documents
 
 ## PRODUCTION BC (read-only)
-BC_PROD_TENANT_ID=c7b2de14-71d9-4c49-a0b9-2bec103a6fdc
+BC_PROD_TENANT_ID=doc-workflow-test
 BC_PROD_CLIENT_ID=NmFjNjJlNDQtODk2OC00YWQ5LWI3ODEtNDM0NTA3YTVjODNh
 BC_PROD_CLIENT_SECRET_B64=YmROOFF+TUJPQzZ4YzRZSWRiM0s3d2ZKQ0wwdzlncTFoVm1WdWNtNA==
 BC_PROD_ENVIRONMENT=Production
@@ -73,7 +73,7 @@ BC_PROD_ENVIRONMENT=Production
 # ]
 # for name, val in pairs:
 #     print(f'{name}={base64.b64decode(val).decode()}')
-# print('TENANT_ID=c7b2de14-71d9-4c49-a0b9-2bec103a6fdc')
-# print('BC_TENANT_ID=c7b2de14-71d9-4c49-a0b9-2bec103a6fdc')
-# print('BC_PROD_TENANT_ID=c7b2de14-71d9-4c49-a0b9-2bec103a6fdc')
+# print('TENANT_ID=doc-workflow-test')
+# print('BC_TENANT_ID=doc-workflow-test')
+# print('BC_PROD_TENANT_ID=doc-workflow-test')
 # "

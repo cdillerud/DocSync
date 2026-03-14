@@ -159,3 +159,16 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 - Frontend: Exceptions tab with 4 clickable summary cards (filter toggle) + exception table with History/Supply action buttons
 - Backend: 21/21 pytest tests passed, Frontend: all UI flows verified
 - Test report: `/app/test_reports/iteration_68.json`
+
+---
+
+## 2026-03-14: Inventory Item Detail View
+
+### What Was Built
+- `GET /api/inventory-ledger/item-detail` — complete operational picture for a single item
+- Returns: balance (on_hand, incoming, committed, available, status), settings, reorder recommendation, exception flags, recent 10 movements, type_summary
+- 404 for nonexistent items, 422 for missing params
+- Frontend: ItemDetailDrawer opens from Balances, Reorder, and Exceptions tables
+- Shows: balance strip (5 values), exception badges, reorder settings/status, history preview table, action buttons (Full History, Create Supply)
+- Backend: 15/15 pytest tests passed, Frontend: all UI flows verified
+- Test report: `/app/test_reports/iteration_69.json`

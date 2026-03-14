@@ -713,6 +713,161 @@ async def api_supply_coverage(
 
 
 # ═══════════════════════════════════════════════════════════════
+# ACTION CENTER
+# ═══════════════════════════════════════════════════════════════
+
+ACTION_TYPES = {"shortage", "reorder", "demand_gap", "coverage_risk", "no_incoming"}
+
+# Priority weights: higher = more urgent
+_PRIORITY_WEIGHTS = {
+    "shortage": 50,
+    "coverage_risk": 30,
+    "demand_gap": 20,
+    "reorder": 10,
+    "no_incoming": 5,
+}
+
+
+def _compute_action_item(b, reorder_info, committed):
+    """Classify a single balance row into action types and compute priority."""
+    is_short = b.get("is_short", False)
+    is_low = b.get("is_low", False)
+    incoming = b.get("incoming", 0)
+    on_hand = b.get("on_hand", 0)
+    avail = b.get("available", 0)
+
+    action_types = []
+    if is_short:
+        action_types.append("shortage")
+    if reorder_info:
+        action_types.append("reorder")
+    if committed > 0:
+        demand_gap = round(committed - avail, 4)
+        if demand_gap > 0:
+            action_types.append("demand_gap")
+        coverage = round(on_hand + incoming - committed, 4)
+        if coverage < 0:
+            action_types.append("coverage_risk")
+    else:
+        demand_gap = 0
+        coverage = None
+    if (is_short or is_low) and incoming == 0:
+        action_types.append("no_incoming")
+
+    if not action_types:
+        return None
+
+    priority_score = sum(_PRIORITY_WEIGHTS.get(a, 0) for a in action_types)
+    status = "SHORT" if is_short else ("LOW" if is_low else "OK")
+
+    row = {
+        "item": b["item"],
+        "item_description": b.get("item_description", ""),
+        "warehouse": b.get("warehouse", ""),
+        "ownership_type": b.get("ownership_type", ""),
+        "on_hand": on_hand,
+        "incoming": incoming,
+        "committed": committed,
+        "available": avail,
+        "status": status,
+        "action_types": action_types,
+        "priority_score": priority_score,
+        "unit_of_measure": b.get("unit_of_measure", ""),
+    }
+
+    if reorder_info:
+        row["recommended_qty"] = reorder_info["recommended_qty"]
+    if committed > 0:
+        row["demand_gap"] = demand_gap
+        row["coverage"] = coverage
+        row["coverage_status"] = "covered" if coverage >= 0 else "at_risk"
+
+    return row
+
+
+@router.get("/action-center")
+async def api_action_center(
+    customer_id: str = Query(..., description="Customer workspace ID"),
+    item: str = Query("", description="Filter by item"),
+    action_type: str = Query("", description="Filter by action type"),
+    limit: int = Query(500, ge=1, le=5000),
+):
+    """Unified prioritized action queue consolidating exceptions, reorder,
+    demand, and supply coverage.
+
+    Uses only existing pipelines. Returns merged rows with action_types and
+    priority_score. Sorted by priority_score desc, then available asc.
+    """
+    db = get_db()
+    balances = await derive_balances(db, customer_id, item=item or None)
+
+    # Build reorder map (same logic as reorder-recommendations)
+    settings_docs = await db["inv_item_settings"].find(
+        {"customer_id": customer_id}, {"_id": 0}
+    ).to_list(5000)
+    settings_map = {s["item"]: s for s in settings_docs}
+
+    reorder_map = {}
+    for b in balances:
+        avail = b.get("available", 0)
+        is_short = b.get("is_short", False)
+        s = settings_map.get(b["item"])
+        threshold = s["reorder_threshold"] if s else DEFAULT_REORDER_THRESHOLD
+        buffer = s["safety_buffer"] if s else DEFAULT_SAFETY_BUFFER
+        if avail > threshold and not is_short:
+            continue
+        rec_qty = round(max(0, threshold - avail) + buffer, 4)
+        key = f'{b["item"]}|{b.get("warehouse", "")}|{b.get("ownership_type", "")}'
+        reorder_map[key] = {"recommended_qty": rec_qty, "reorder_threshold": threshold, "safety_buffer": buffer}
+
+    # Classify all items
+    all_rows = []
+    counts = {a: 0 for a in ACTION_TYPES}
+
+    filter_types = set()
+    if action_type:
+        for t in action_type.split(","):
+            t = t.strip().lower()
+            if t in ACTION_TYPES:
+                filter_types.add(t)
+
+    for b in balances:
+        key = f'{b["item"]}|{b.get("warehouse", "")}|{b.get("ownership_type", "")}'
+        committed = b.get("committed", 0)
+        reorder_info = reorder_map.get(key)
+
+        row = _compute_action_item(b, reorder_info, committed)
+        if not row:
+            continue
+
+        # Count all (before filter)
+        for a in row["action_types"]:
+            counts[a] += 1
+
+        # Apply filter
+        if filter_types and not filter_types.intersection(row["action_types"]):
+            continue
+
+        all_rows.append(row)
+
+    # Sort: priority_score desc, then available asc
+    all_rows.sort(key=lambda r: (-r["priority_score"], r["available"]))
+
+    return {
+        "total": min(len(all_rows), limit),
+        "action_summary": {
+            "shortage_count": counts["shortage"],
+            "coverage_risk_count": counts["coverage_risk"],
+            "demand_gap_count": counts["demand_gap"],
+            "reorder_count": counts["reorder"],
+            "no_incoming_count": counts["no_incoming"],
+            "total_action_items": len(all_rows),
+        },
+        "actions": all_rows[:limit],
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
 # ITEM DETAIL
 # ═══════════════════════════════════════════════════════════════
 
@@ -806,6 +961,16 @@ async def api_item_detail(
             "coverage_status": "covered" if cov >= 0 else "at_risk",
         }
 
+    # Action center summary (reuse _compute_action_item)
+    reorder_info_for_action = {"recommended_qty": rec_qty} if is_reorder else None
+    action_item = _compute_action_item(b, reorder_info_for_action, committed)
+    action_summary = None
+    if action_item:
+        action_summary = {
+            "action_types": action_item["action_types"],
+            "priority_score": action_item["priority_score"],
+        }
+
     return {
         "item": item,
         "customer_id": customer_id,
@@ -815,6 +980,7 @@ async def api_item_detail(
         "exceptions": exceptions,
         "demand": demand,
         "supply_coverage": supply_coverage,
+        "action_summary": action_summary,
         "history_preview": history_data.get("movements", []),
         "history_total": history_data.get("total", 0),
         "type_summary": type_summary.get("movement_type_totals", {}),

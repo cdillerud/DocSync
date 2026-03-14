@@ -17,7 +17,7 @@ import {
   Warehouse, Loader2, Plus, Package, TrendingDown, TrendingUp,
   AlertTriangle, RefreshCw, Search, ArrowLeftRight, History,
   ChevronRight, ChevronLeft, Box, Truck, ClipboardList,
-  RotateCcw, FileText, Download, Settings, Pencil, Upload, ShieldCheck,
+  RotateCcw, FileText, Download, Settings, Pencil, Upload, ShieldCheck, Zap,
 } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -193,6 +193,7 @@ function CustomerWorkspace({ customer }) {
             <TabsTrigger value="exceptions" data-testid="inv-tab-exceptions"><AlertTriangle className="w-3.5 h-3.5 mr-1" /> Exceptions</TabsTrigger>
             <TabsTrigger value="demand" data-testid="inv-tab-demand"><TrendingDown className="w-3.5 h-3.5 mr-1" /> Demand</TabsTrigger>
             <TabsTrigger value="coverage" data-testid="inv-tab-coverage"><ShieldCheck className="w-3.5 h-3.5 mr-1" /> Supply Coverage</TabsTrigger>
+            <TabsTrigger value="action-center" data-testid="inv-tab-action-center"><Zap className="w-3.5 h-3.5 mr-1" /> Action Center</TabsTrigger>
           </TabsList>
           <div className="flex gap-2">
             {tab === 'balances' && (
@@ -258,6 +259,9 @@ function CustomerWorkspace({ customer }) {
         </TabsContent>
         <TabsContent value="coverage">
           <SupplyCoveragePanel customerId={cid} onItemClick={(item) => setDetailItem({ item, customerId: cid })} onSupplyCreated={refresh} />
+        </TabsContent>
+        <TabsContent value="action-center">
+          <ActionCenterPanel customerId={cid} onItemClick={(item) => setDetailItem({ item, customerId: cid })} onSupplyCreated={refresh} onHistoryClick={(item) => { setDetailItem(null); setHistoryItem({ item, customerId: cid }); }} />
         </TabsContent>
       </Tabs>
 
@@ -806,6 +810,155 @@ function DemandPanel({ customerId, onItemClick, onSupplyCreated }) {
 }
 
 /* ════════════════════════════════════════════════════════════════ */
+/* ACTION CENTER PANEL                                               */
+/* ════════════════════════════════════════════════════════════════ */
+
+const ACTION_BADGES = {
+  shortage: { label: 'SHORTAGE', cls: 'bg-red-500/10 text-red-600 border-red-500/20' },
+  coverage_risk: { label: 'COVERAGE RISK', cls: 'bg-orange-500/10 text-orange-600 border-orange-500/20' },
+  demand_gap: { label: 'DEMAND GAP', cls: 'bg-amber-500/10 text-amber-600 border-amber-500/20' },
+  reorder: { label: 'REORDER', cls: 'bg-blue-500/10 text-blue-600 border-blue-500/20' },
+  no_incoming: { label: 'NO INCOMING', cls: 'bg-violet-500/10 text-violet-600 border-violet-500/20' },
+};
+
+function ActionCenterPanel({ customerId, onItemClick, onSupplyCreated, onHistoryClick }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('');
+  const [creating, setCreating] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const q = new URLSearchParams({ customer_id: customerId });
+      if (filter) q.set('action_type', filter);
+      const res = await fetch(`${API}/api/inventory-ledger/action-center?${q}`);
+      setData(await res.json());
+    } catch { toast.error('Failed to load action center'); }
+    finally { setLoading(false); }
+  }, [customerId, filter]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const createSupply = async (item) => {
+    setCreating(item);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/customers/${customerId}/incoming`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_no: item, quantity: 0, source_reference: `ACTION-${item}`, notes: 'Created from action center' }),
+      });
+      if (res.ok) { toast.success(`Incoming supply created for ${item}`); onSupplyCreated?.(); load(); }
+      else { const d = await res.json(); toast.error(d.detail || 'Failed'); }
+    } catch { toast.error('Failed'); }
+    finally { setCreating(null); }
+  };
+
+  const summary = data?.action_summary || {};
+  const actions = data?.actions || [];
+  const cards = [
+    { key: 'shortage', label: 'Shortages', count: summary.shortage_count || 0, color: 'text-red-500 border-red-500/30' },
+    { key: 'coverage_risk', label: 'Coverage Risk', count: summary.coverage_risk_count || 0, color: 'text-orange-500 border-orange-500/30' },
+    { key: 'demand_gap', label: 'Demand Gaps', count: summary.demand_gap_count || 0, color: 'text-amber-500 border-amber-500/30' },
+    { key: 'reorder', label: 'Reorder', count: summary.reorder_count || 0, color: 'text-blue-500 border-blue-500/30' },
+    { key: 'no_incoming', label: 'No Incoming', count: summary.no_incoming_count || 0, color: 'text-violet-500 border-violet-500/30' },
+  ];
+
+  return (
+    <div className="space-y-4" data-testid="inv-action-center-panel">
+      {/* Summary Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3" data-testid="inv-action-summary">
+        {cards.map(c => (
+          <button key={c.key}
+            onClick={() => setFilter(f => f === c.key ? '' : c.key)}
+            className={`border rounded-md p-3 text-left transition-all ${filter === c.key ? 'ring-2 ring-primary bg-muted/50' : 'bg-muted/20 hover:bg-muted/40'}`}
+            data-testid={`inv-action-card-${c.key}`}>
+            <p className={`text-2xl font-bold ${c.color}`}>{c.count}</p>
+            <p className="text-[10px] text-muted-foreground">{c.label}{filter === c.key ? ' (active)' : ''}</p>
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">{summary.total_action_items || 0} total action items</p>
+        <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={load}>
+          <RefreshCw className="w-3 h-3 mr-1" /> Refresh
+        </Button>
+      </div>
+
+      {/* Action Table */}
+      <Card className="border-border/50">
+        <CardContent className="p-0">
+          {loading ? (
+            <div className="flex items-center justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+          ) : actions.length === 0 ? (
+            <div className="text-center py-10 text-sm text-muted-foreground" data-testid="inv-action-center-empty">No action items found{filter ? ` for "${filter}"` : ''}.</div>
+          ) : (
+            <table className="w-full text-xs" data-testid="inv-action-center-table">
+              <thead className="border-b border-border/50 bg-muted/30">
+                <tr>
+                  <th className="p-2 text-left font-medium">Item</th>
+                  <th className="p-2 text-right font-medium">On Hand</th>
+                  <th className="p-2 text-right font-medium">Incoming</th>
+                  <th className="p-2 text-right font-medium">Committed</th>
+                  <th className="p-2 text-right font-medium">Available</th>
+                  <th className="p-2 text-left font-medium">Actions Needed</th>
+                  <th className="p-2 text-right font-medium">Rec. Qty</th>
+                  <th className="p-2 text-center font-medium">Priority</th>
+                  <th className="p-2 text-center font-medium">Ops</th>
+                </tr>
+              </thead>
+              <tbody>
+                {actions.map((a, i) => (
+                  <tr key={i} className={`border-b border-border/20 hover:bg-muted/20 ${a.action_types?.includes('shortage') ? 'bg-red-500/5' : a.action_types?.includes('coverage_risk') ? 'bg-orange-500/5' : ''}`} data-testid={`inv-action-row-${i}`}>
+                    <td className="p-2">
+                      <span className="font-mono font-medium cursor-pointer hover:underline text-blue-600" onClick={() => onItemClick?.(a.item)} data-testid={`inv-action-item-${i}`}>{a.item}</span>
+                      {a.item_description && <span className="text-[10px] text-muted-foreground block truncate max-w-[150px]">{a.item_description}</span>}
+                    </td>
+                    <td className="p-2 text-right font-mono">{a.on_hand?.toLocaleString()}</td>
+                    <td className="p-2 text-right font-mono">{a.incoming > 0 ? <span className="text-sky-600">+{a.incoming?.toLocaleString()}</span> : '—'}</td>
+                    <td className="p-2 text-right font-mono">{a.committed > 0 ? a.committed?.toLocaleString() : '—'}</td>
+                    <td className={`p-2 text-right font-mono font-bold ${a.available < 0 ? 'text-red-500' : ''}`}>{a.available?.toLocaleString()}</td>
+                    <td className="p-2">
+                      <div className="flex flex-wrap gap-1">
+                        {a.action_types?.map(t => (
+                          <span key={t} className={`text-[9px] px-1.5 py-0.5 rounded border font-medium ${ACTION_BADGES[t]?.cls || ''}`}>
+                            {ACTION_BADGES[t]?.label || t}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="p-2 text-right font-bold">{a.recommended_qty != null ? a.recommended_qty.toLocaleString() : '—'}</td>
+                    <td className="p-2 text-center">
+                      <span className={`text-[10px] font-bold ${a.priority_score >= 50 ? 'text-red-600' : a.priority_score >= 30 ? 'text-orange-600' : 'text-amber-600'}`} data-testid={`inv-action-priority-${i}`}>
+                        {a.priority_score}
+                      </span>
+                    </td>
+                    <td className="p-2 text-center">
+                      <div className="flex justify-center gap-1">
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => onHistoryClick?.(a.item)} title="Full history"
+                          data-testid={`inv-action-history-${i}`}>
+                          <History className="w-3 h-3" />
+                        </Button>
+                        {(a.action_types?.includes('shortage') || a.action_types?.includes('coverage_risk') || a.action_types?.includes('reorder')) && (
+                          <Button variant="ghost" size="icon" className="h-6 w-6" disabled={creating === a.item}
+                            onClick={() => createSupply(a.item)} title="Create incoming supply"
+                            data-testid={`inv-action-supply-${i}`}>
+                            {creating === a.item ? <Loader2 className="w-3 h-3 animate-spin" /> : <Truck className="w-3 h-3" />}
+                          </Button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════ */
 /* SUPPLY COVERAGE PANEL                                             */
 /* ════════════════════════════════════════════════════════════════ */
 
@@ -1050,6 +1203,23 @@ function ItemDetailDrawer({ item, customerId, onClose, onOpenFullHistory, onRefr
                     className={`text-[9px] ${detail.supply_coverage.coverage_status === 'covered' ? 'border-emerald-300 text-emerald-600' : ''}`}>
                     {detail.supply_coverage.coverage_status === 'at_risk' ? 'AT RISK' : 'COVERED'}
                   </Badge>
+                </div>
+              </div>
+            )}
+
+            {/* Action Summary */}
+            {detail.action_summary && (
+              <div className="border border-border rounded p-2.5 space-y-1" data-testid="inv-detail-action-summary">
+                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Action Summary</p>
+                <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap gap-1">
+                    {detail.action_summary.action_types?.map(t => (
+                      <span key={t} className={`text-[9px] px-1.5 py-0.5 rounded border font-medium ${ACTION_BADGES[t]?.cls || 'bg-muted text-muted-foreground'}`}>
+                        {ACTION_BADGES[t]?.label || t}
+                      </span>
+                    ))}
+                  </div>
+                  <span className="text-[10px] text-muted-foreground">Priority: <span className="font-bold">{detail.action_summary.priority_score}</span></span>
                 </div>
               </div>
             )}

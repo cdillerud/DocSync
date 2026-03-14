@@ -115,3 +115,19 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 - Responsive grid: 2 cols mobile, 4 cols tablet, 8 cols desktop
 - Backend: 13/13 pytest tests passed, Frontend: all UI flows verified
 - Test report: `/app/test_reports/iteration_65.json`
+
+---
+
+## 2026-03-14: Inventory CSV Import
+
+### What Was Built
+- New endpoint `POST /api/inventory-ledger/import` accepts CSV upload with multipart form data
+- Import modes: `opening_balance` and `manual_adjustment` — rows converted to immutable ledger movements
+- Validates required columns (item, qty), rejects zero qty, non-numeric qty, empty item
+- Duplicate import protection via SHA-256 file hash (customer_id + mode included in hash)
+- Opening balance duplicates per item/warehouse/ownership rejected
+- Optional columns: warehouse, ownership_type, uom, reference, notes, item_description
+- Movements created with source_type=spreadsheet_import, reference_type=csv_import
+- Frontend: Import CSV button on Balances tab, dialog with mode selector + file upload + results display
+- Backend: 22/22 pytest tests passed, Frontend: all UI flows verified
+- Test report: `/app/test_reports/iteration_66.json`

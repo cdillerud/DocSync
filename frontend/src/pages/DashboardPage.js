@@ -597,6 +597,28 @@ function OperationsQueueSummaryCard() {
               <span className="text-xs text-red-500">High Priority</span>
               <p className="text-xl font-bold font-mono text-red-600" data-testid="ops-dash-high">{data.high_priority_count}</p>
             </div>
+            {(data.due_soon_count > 0 || data.overdue_count > 0 || data.escalated_count > 0) && (
+              <>
+                {data.due_soon_count > 0 && (
+                  <div className="text-right">
+                    <span className="text-xs text-amber-500">Due Soon</span>
+                    <p className="text-xl font-bold font-mono text-amber-600" data-testid="ops-dash-due-soon">{data.due_soon_count}</p>
+                  </div>
+                )}
+                {data.overdue_count > 0 && (
+                  <div className="text-right">
+                    <span className="text-xs text-red-600">Overdue</span>
+                    <p className="text-xl font-bold font-mono text-red-600" data-testid="ops-dash-overdue">{data.overdue_count}</p>
+                  </div>
+                )}
+                {data.escalated_count > 0 && (
+                  <div className="text-right">
+                    <span className="text-xs text-red-700">Escalated</span>
+                    <p className="text-xl font-bold font-mono text-red-700" data-testid="ops-dash-escalated">{data.escalated_count}</p>
+                  </div>
+                )}
+              </>
+            )}
             <Button variant="outline" size="sm" className="text-xs h-7" onClick={() => navigate('/operations-queue')} data-testid="ops-dash-view-all">
               View All <ArrowRight className="w-3 h-3 ml-1" />
             </Button>

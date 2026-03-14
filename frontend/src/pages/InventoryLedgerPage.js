@@ -18,7 +18,7 @@ import {
   AlertTriangle, RefreshCw, Search, ArrowLeftRight, History,
   ChevronRight, ChevronLeft, Box, Truck, ClipboardList,
   RotateCcw, FileText, Download, Settings, Pencil, Upload, ShieldCheck, Zap,
-  Check, X, Trash2, Link,
+  Check, X, Trash2, Link, Calendar, Clock,
 } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -848,6 +848,90 @@ function ProcessChecklistSection({ checklist, complete }) {
   );
 }
 
+const ESCALATION_STYLES = {
+  on_track: { variant: 'outline', label: 'On Track', className: '' },
+  due_soon: { variant: 'secondary', label: 'Due Soon', className: 'bg-amber-500 text-white' },
+  overdue: { variant: 'destructive', label: 'Overdue', className: '' },
+  escalated: { variant: 'destructive', label: 'Escalated', className: 'bg-red-700' },
+};
+
+function EscalationSection({ entityType, entityId, dueDate: initialDue, escalationStatus: initialStatus, onChanged }) {
+  const [dueDate, setDueDate] = useState(initialDue || '');
+  const [saving, setSaving] = useState(false);
+  const [escalation, setEscalation] = useState(null);
+
+  const load = useCallback(async () => {
+    if (!entityId) return;
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/escalations?entity_type=${entityType}&entity_id=${encodeURIComponent(entityId)}`);
+      if (res.ok) {
+        const d = await res.json();
+        if (d.entries?.length) { setEscalation(d.entries[0]); setDueDate(d.entries[0].due_date || ''); }
+      }
+    } catch { /* silent */ }
+  }, [entityType, entityId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const status = escalation?.escalation_status || initialStatus || '';
+  const style = ESCALATION_STYLES[status] || ESCALATION_STYLES.on_track;
+
+  const saveDueDate = async () => {
+    if (!dueDate.trim()) { toast.error('Due date is required'); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/escalations`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entity_type: entityType, entity_id: entityId, due_date: dueDate.trim() }),
+      });
+      if (res.ok) { toast.success('Due date saved'); load(); onChanged?.(); }
+      else { const d = await res.json(); toast.error(d.detail || 'Failed'); }
+    } catch { toast.error('Failed to save due date'); }
+    finally { setSaving(false); }
+  };
+
+  const markEscalated = async () => {
+    if (!escalation) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/escalations/${escalation.escalation_id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ escalation_status: 'escalated', notes: 'Manually escalated' }),
+      });
+      if (res.ok) { toast.success('Marked as escalated'); load(); onChanged?.(); }
+      else { const d = await res.json(); toast.error(d.detail || 'Failed'); }
+    } catch { toast.error('Failed'); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="space-y-1.5" data-testid="escalation-section">
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1"><Clock className="w-3 h-3" /> Due Date</p>
+        {status && <Badge className={`text-[7px] ${style.className}`} variant={style.variant} data-testid="escalation-status-badge">{style.label}</Badge>}
+      </div>
+      <div className="flex gap-2 items-center">
+        <Input type="date" className="h-6 text-[10px] w-[130px]" value={dueDate} onChange={e => setDueDate(e.target.value)} data-testid="escalation-due-date" />
+        <Button size="sm" className="h-6 text-[10px]" disabled={saving || !dueDate.trim()} onClick={saveDueDate} data-testid="escalation-save-btn">
+          {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Calendar className="w-3 h-3 mr-1" />} Set
+        </Button>
+        {escalation && status !== 'escalated' && (
+          <Button size="sm" variant="destructive" className="h-6 text-[10px]" disabled={saving} onClick={markEscalated} data-testid="escalation-escalate-btn">
+            Escalate
+          </Button>
+        )}
+      </div>
+      {escalation && (
+        <div className="flex gap-3 text-[9px] text-muted-foreground">
+          {escalation.days_to_due != null && escalation.days_to_due > 0 && <span>{escalation.days_to_due} days to due</span>}
+          {escalation.days_overdue != null && escalation.days_overdue > 0 && <span className="text-red-600 font-medium">{escalation.days_overdue} days overdue</span>}
+          {escalation.notes && <span>{escalation.notes}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const APPROVAL_STATUS_STYLES = {
   approved: { variant: 'default', label: 'Approved', className: 'bg-green-600' },
   pending: { variant: 'secondary', label: 'Pending', className: 'bg-amber-500 text-white' },
@@ -1304,6 +1388,7 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
                 <ProcessChecklistSection checklist={summary.process_checklist} complete={summary.checklist_complete} />
               )}
               <ApprovalSection entityType="sales_order" entityId={soId.trim()} approvalType="sales_order" approvalStatus={summary.approval_status} onChanged={() => loadSummary()} />
+              <EscalationSection entityType="sales_order" entityId={soId.trim()} dueDate={summary.due_date} escalationStatus={summary.escalation_status} onChanged={() => loadSummary()} />
 
               {/* ═══ DROP-SHIP PO DRAFT SECTION ═══ */}
               {isDropShip && (
@@ -2598,6 +2683,7 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
               <ProcessChecklistSection checklist={draft.process_checklist} complete={draft.checklist_complete} />
             )}
             <ApprovalSection entityType="po_draft" entityId={draftId} approvalType="purchase_order" approvalStatus={draft.approval_status} onChanged={() => loadDraft()} />
+            <EscalationSection entityType="po_draft" entityId={draftId} dueDate={draft.due_date} escalationStatus={draft.escalation_status} onChanged={() => loadDraft()} />
 
             {/* Actions */}
             <div className="flex flex-wrap gap-2 pt-1" data-testid="inv-po-draft-actions">

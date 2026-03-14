@@ -1,54 +1,57 @@
 <analysis>**original_problem_statement:**
-The user wants to implement a feature to convert a reviewed Purchase Order (PO) draft into planned  records. This will connect the purchasing intent generated from the Action Center back into the inventory system's supply projection, allowing for more accurate availability calculations.
+Implement **Operational Escalations and Due Dates** so the Operations Queue becomes time-aware and can surface not just what needs action, but what is becoming overdue or at risk of slipping.
 
 PRODUCT REQUIREMENTS:
 - **Backend:**
-    - Create a new endpoint: .
-    - This endpoint should load a stored PO draft and, for each line item, create a corresponding  record with .
-    - It must prevent duplicate supply creation from the same draft.
-    - After conversion, the PO draft should be updated with an indicator that supply has been created (e.g., ).
-    - The new  must be reflected in all existing inventory calculations (, reorder recommendations, exceptions, etc.) without any new balance math.
+    - Create a new model for escalations with fields like , , etc.
+    - Provide CRUD endpoints for managing these escalation records ().
+    - Implement derived logic to automatically set status (, , ) based on the current date vs. the due date.
+    - Integrate escalation status into the  endpoint, adding new fields (, ) and updating the  based on urgency.
+    - Enrich the Sales Order and PO Draft detail endpoints with escalation information.
 - **UI:**
-    - In the PO Draft detail view, add a Create Incoming Supply button.
-    - After clicking, show a confirmation and refresh all relevant inventory views (Balances, Dashboards, Action Center) to show the impact of the new planned supply.
+    - Add a new Operations Queue page to display all actionable items, with filters for escalation status.
+    - In the SO and PO workflow views, add UI to set/edit due dates and manually set an  status.
+    - Display color-coded badges for the escalation status in all relevant views.
+    - Update the main dashboard to show counts for , , and  items.
 - **Testing:**
-    - Add backend tests for successful conversion, duplicate prevention, and correct impact on derived balances.
-    - Add frontend/regression tests for the UI flow of triggering the conversion and verifying the inventory views update correctly.
-    - All existing tests from iteration 74 must continue to pass.
+    - Add backend tests for creating due dates, derived status logic, and priority score updates.
+    - Add frontend tests for the new UI controls, filters, and dashboard cards.
+    - All existing tests from iteration_87 must continue to pass.
 - **Target Iteration:** .
 
 **User's preferred language**: English
 
 **what currently exists?**
-The GPI Document Hub is a full-stack application with a sophisticated inventory management module built on an immutable ledger. The module is feature-rich, providing:
-- Core ledger for , , and  balances.
-- Sales Order integration for inventory commitment and release.
-- A complete PO Draft workflow: generation from an Action Center, storage, review, and export.
-- Multiple analytical views: Dashboard Summary, Reorder Recommendations, Exceptions, Demand Signals, and Supply Coverage.
-- A unified Action Center that prioritizes items needing attention.
-- Detailed drill-down views for individual items.
-- Functionality for manual adjustments and CSV imports/exports.
+The application is a comprehensive inventory intelligence platform. It features a full PO and SO operational lifecycle, including warehouse vs. drop-ship logic, document linkage, process checklists, and approval workflows. It also includes an Operations Queue, a unified worklist that surfaces items requiring action based on a priority scoring system. The system tracks handoffs to a mock Business Central (BC) system.
 
 **Last working item**:
-- **Last item agent was working:** The agent was about to start implementing the PO Draft to Incoming Supply conversion feature. The user has just provided the prompt.
-- **Status:** NOT STARTED
+- **Last item agent was working:** The agent was implementing Operational Escalations and Due Dates (iteration_88), adding time-awareness to the Operations Queue. The backend model, endpoints, and logic are complete. The frontend UI for the queue, dashboard, and individual workflow views has also been implemented.
+- **Status:** TESTING PENDING
 - **Agent Testing Done:** N
-- **Which testing method agent to use?** Both. First, self-test the backend changes using  and the frontend UI with the  tool. After confirming basic functionality, call the  for comprehensive end-to-end and regression testing.
+- **Which testing method agent to use?** both
 - **User Testing Done:** N
 
 **All Pending/In progress Issue list**:
-There are no pending bugs or issues blocking progress.
+  - There are no pending issues. The current task is ready for final testing.
 
 **In progress Task List**:
-There are no tasks currently in progress. The agent is ready to begin the next feature.
+  - Task 1:  (P0) Finalize and test Operational Escalations and Due Dates (iteration_88).
+
+ Task Detail:
+  - Task 1: 
+     - **Where to resume:** The full feature has been implemented (backend and frontend). The next and final step is to run the comprehensive  to validate all changes, including the new backend logic, the Operations Queue page, the dashboard summary, and the workflow dialogs.
+     - **What will be achieved with this?** This will complete iteration_88, providing users with time-aware operational visibility, allowing them to prioritize work based on due dates and see aging tasks.
+     - **Status:**  TESTING PENDING
+     - **Should Test frontend/backend/both after fix?** both
+     - **Blocked on something:** None
 
 **Upcoming and Future Tasks**
 **Upcoming Tasks:**
--   **P0: Implement PO Draft to Incoming Supply conversion (iteration_75)**: The task outlined in the original problem statement.
--   **P1:** Build an admin UI for managing item mapping rules (CRUD).
--   **P2:** Decommission the legacy Zetadocs system.
+-   **P0:** Inventory Planning Horizon (Demand Forecast + Purchase Timing)
 
 **Future Tasks:**
+-   Build an admin UI for managing item mapping rules (CRUD).
+-   Decommission the legacy Zetadocs system.
 -   Implement the Outbound Document Delivery module.
 -   Replace the mock email service with a production-ready solution.
 -   Implement Entra ID SSO to replace mock JWT auth.
@@ -56,113 +59,104 @@ There are no tasks currently in progress. The agent is ready to begin the next f
 -   Add multi-step approval routing for documents.
 
 **Completed work in this session**
-The agent has successfully implemented a series of progressively complex features, building out the entire inventory intelligence module.
-- **Recently completed:**
-  - **PO Draft Review and Export (iteration_74):** Added UI and APIs to list, view details of, and export PO drafts.
-  - **PO Draft Generation from Action Center (iteration_73):** Implemented multi-select in the Action Center to generate PO drafts.
-  - **Inventory Action Center (iteration_72):** Created a unified, prioritized view of all inventory issues.
-  - **Inventory Supply Coverage Projection (iteration_71):** Added a view to project if supply covers demand.
-  - **Inventory Demand Signal Tracking (iteration_70):** Added a view to track demand from open Sales Orders.
-  - **Inventory Item Detail View (iteration_69):** Created a comprehensive drill-down view for a single item.
-  - **Inventory Exception View (iteration_68):** Created a view to filter for items needing attention (short, low, etc.).
-  - **Inventory Snapshot Export (iteration_67):** Implemented a JSON export of the complete inventory state.
-  - **Inventory Balance Import from CSV (iteration_66):** Added functionality to bulk-import opening balances.
-  - **Inventory Dashboard Summary Metrics (iteration_65):** Added a top-level summary strip for inventory health.
-  - **Configurable Reorder Thresholds (iteration_64):** Made reorder logic configurable per item.
+- **Operational Escalations and Due Dates (iteration_88):** Added due date tracking and escalation statuses (On Track, Due Soon, Overdue, Escalated) to SOs and POs, integrated into the Operations Queue and dashboard. (Testing Pending)
+- **Operations Queue (Unified Worklist) (iteration_87):** Implemented a new global dashboard to see all SOs and POs that require action, with priority scoring and filtering.
+- **Approval Workflow Tracking (iteration_86):** Added an approval log, status tracking (Pending, Approved, Rejected), and UI controls for SOs and PO Drafts, integrated into the process checklists.
+- **Document Linkage and Process Checklist (iteration_85):** Implemented a system to attach document metadata to SOs and POs and a derived checklist to track workflow completeness.
+- **Drop-Ship Purchase Order Workflow (iteration_84):** Built the end-to-end workflow for drop-ship orders, from generating a PO draft from an SO to tracking vendor shipments, separate from warehouse inventory.
+- **Sales Order Type Awareness (iteration_83):** Fixed and completed the implementation to differentiate between  and  sales orders.
 
 **Earlier issues found/mentioned but not fixed**
--   **Issue 1: Non-Standard Git Branch and Deployment Workflow (P2)**
-    -   **Description:** The user works on temporary  branches, which can complicate deployments.
-    -   **Debug checklist:** Propose a standard git workflow (e.g., feature branches from ) after a major feature set is complete.
-    -   **Why to solve this issue and what will be achieved with this?** To create a more reliable and standard deployment process.
-    -   **Should Test frontend/backend/both after fix:** N/A
-    -   **Is recurring issue?** Y
+   - **Issue 1: Non-Standard Git Branch and Deployment Workflow (P2)**
+     - **Description:** The user works on temporary  branches, which is not a standard practice and could complicate deployments.
+     - **Debug checklist:** Propose a standard git workflow (e.g., feature branches from ) after a major feature set is complete.
+     - **Why to solve this issue and what will be achieved with this?** To create a more reliable and standard deployment process.
+     - **Should Test frontend/backend/both after fix:** N/A
+     - **Is recurring issue?** Y
 
 **Known issue recurrence from previous fork**
--   **Issue recurrence in previous fork:** Credential loss after forking.
--   **Recurrence count:** 10+
--   **Status:** RESOLVED (for this session). Agent successfully handled credential restoration, but the user remains sensitive to this issue.
+  - **Issue recurrence in previous fork:** Forward reference Python error ().
+  - **Recurrence count:** 3
+  - **Status:** RESOLVED (but requires vigilance). This happened repeatedly when the agent's  on  was too broad and accidentally deleted Pydantic model class definitions. The agent successfully identified and fixed it each time, but it's a recurring pattern. The next agent should be cautious with large-scale replacements in this file.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
 -   **Ledger-Based Inventory:** Using an immutable log of movements to derive current balances.
--   **Integrated Workflow:** Tightly coupling Sales Order creation, inventory state, and purchasing intent (PO Drafts).
--   **Unified Action Center:** Consolidating various inventory alerts (shortages, reorders, demand gaps) into a single prioritized queue.
--   **PO Draft Workflow:** A lightweight, non-ERP-integrated process for generating, reviewing, exporting, and now converting purchase order drafts into planned supply.
+-   **Operational Handoffs:** Mocking integration points (payload generation, status logging) for an external system (Business Central).
+-   **Derived Work Queues:** Creating a unified Operations Queue by aggregating and scoring actionable items from different entities (SOs, POs) based on a set of business rules.
+-   **Time-Awareness & Escalations:** Adding due dates to operational items and using derived logic (, , ) to influence priority and visibility.
+-   **Workflow Metadata:** Tracking operational state (document links, checklists, approvals, escalations) in separate collections to enrich core entities without modifying inventory logic.
 
 **key DB schema**
--   ****: 
--   ****: 
--   ****: 
--   ****: 
--   ****:  (New)
+-   ****: Core immutable ledger.
+-   ****: Tracks planned/ordered/received supply for warehouse POs.
+-   ****: Holds PO data before BC handoff; now includes  ('warehouse_supply', 'drop_ship') and .
+-   ****: Links a Sales Order ID to an  ('warehouse', 'drop_ship').
+-   ****: Stores metadata for documents attached to SOs or PO Drafts.
+-   ****: Tracks approval history (pending, approved, rejected) for SOs and PO Drafts.
+-   ****: (Newly added) Stores due dates and escalation status for SOs and PO Drafts.
+-   ****: Traceability log for warehouse shipments.
+-   ****: (Newly added) Traceability log for drop-ship vendor shipments.
 
 **changes in tech stack**
 - None.
 
 **All files of reference**
--   : The primary file for all inventory-related endpoints. The new logic will interact with functions here.
--   : Contains the endpoints for managing PO drafts. The new  endpoint will logically belong with this group.
--   : Contains the core  and  logic that the new feature will rely on.
--   : The main frontend file containing all UI components for the inventory module, including the PO Draft detail drawer that needs to be updated.
+-   : The primary file for all backend changes. All new models, endpoints, and logic were added here.
+-   : The main UI file for PO and SO workflows. It was updated to include new sections for Documents, Checklists, Approvals, and Escalations.
+-   : A new file created to house the unified Operations Queue.
+-   : Modified to add the route for the new Operations Queue page.
 
 **Areas that need refactoring**:
--   The frontend file  has become a very large monolithic component. It now contains the state and rendering logic for the Balances, Reorder, Exceptions, Demand, Supply Coverage, Action Center, and PO Drafts tabs, as well as multiple drawers and dialogs. It should be broken down into smaller, more manageable, and self-contained components to improve maintainability.
+-   The frontend file  has grown even larger. The agent created reusable components (, , , ) but defined them within this monolithic file. They should be extracted into their own files under .
+-   The backend router  is extremely large and difficult to maintain. It should be split into multiple routers based on functionality (e.g., , , ).
 
 **key api endpoints**
--   : (To be implemented) Converts a PO draft into planned  records.
--   : Fetches the details of a specific PO draft.
--   : Exports a PO draft as a downloadable JSON file.
--   : Generates a new PO draft from items selected in the Action Center.
--   : Provides a prioritized list of inventory items that require user action.
+-   : Creates or updates a due date for an entity.
+-   : Retrieves escalation records for an entity.
+-   : Manually updates an escalation record.
+-   : Retrieves the list of all actionable work items, now enriched with escalation status and filters.
+-   : Request an approval.
+-   : Attach a document link.
 
 **Critical Info for New Agent**
--   Your immediate task is to implement the PO Draft to Incoming Supply conversion feature as per the user's latest prompt.
--   The backend logic should leverage the existing  collection and the  service. No new balance calculation logic should be created.
--   The frontend work involves adding a button to the  component inside  and wiring it to the new backend endpoint.
--   Be mindful that  is very large. While a full refactor is not requested, ensure your changes are clean and well-contained to avoid adding to the complexity.
--   After implementation, follow the standard testing procedure:  for the backend, a  for the UI, followed by a comprehensive run of the .
+-   Your immediate task is to complete **iteration_88** by running comprehensive tests using . All backend and frontend code has been written.
+-   Be aware of the recurring Forward reference issue in  when making large-scale changes. A broad  can accidentally delete necessary Pydantic class definitions that appear later in the file.
+-   The application logic is heavily concentrated in two files:  for all backend logic and  for most workflow UI.
 
 **documents and test reports created in this job**
--   : Updated with all completed features.
--   : Created and updated to track progress.
--   : The latest test report from the testing agent.
+-   
+-   
+-   
+-   
+-   
+-    (updated after each iteration)
+-    (updated after each iteration)
 
 **Last 10 User Messages and any pending HUMAN messages**
-The user messages have been a clear sequence of feature requests, each building upon the last.
--   **User:** Prompt for  (current task): Implement PO Draft to Incoming Supply conversion.
--   **User:** Prompt for : Implement PO Draft Review and Export.
--   **User:** Prompt for : Implement PO Draft generation from supply actions.
--   **User:** Prompt for : Implement inventory action center.
--   **User:** Prompt for : Implement inventory supply coverage projection.
--   **User:** Prompt for : Implement inventory demand signal tracking.
--   **User:** Prompt for : Implement inventory item detail view.
--   **User:** Prompt for : Implement inventory exception view.
--   **User:** Prompt for : Implement inventory snapshot export.
--   **User:** Prompt for : Implement inventory balance import from CSV.
+- The last several messages consist of the user providing a detailed prompt for a new iteration (88, 87, 86, etc.) followed by a proceed or go confirmation. The last user message was the prompt for **iteration_88**, which is the current in-progress task.
 
 **Project Health Check:**
--   **Broken:** None. The application is fully functional.
+-   **Broken:** No. The application is running and passed a smoke test, but the latest feature requires full testing.
 -   **Mocked:** Email service.
 
 **3rd Party Integrations**
--   Dynamics 365 Business Central API
+-   Dynamics 365 Business Central API (Mocked via handoff endpoints)
 -   Microsoft Graph API / SharePoint
 -   Gemini (via Emergent LLM Key)
 -   Spiro CRM API
 -   APScheduler
 
 **Testing status**
--   **Testing agent used after significant changes:** YES. The  has been used successfully after every feature implementation in this session.
+-   **Testing agent used after significant changes:** YES. The agent has consistently used  after completing each major iteration.
 -   **Troubleshoot agent used after agent stuck in loop:** NO
 -   **Test files created:** Yes, backend test coverage has been expanded with each new feature.
 -   **Known regressions:** None.
 
 **Credentials to test flow:**
 -   **Web UI:**  / 
--   **BC Credentials:** Stored in .
 
 **What agent forgot to execute**
-Nothing. The previous agent has been methodically completing every feature requested by the user.</analysis>
+- The agent has implemented the entire Operational Escalations and Due Dates feature (iteration_88) but was interrupted before it could run the final, comprehensive tests with . This is the immediate next step required to complete the task.</analysis>

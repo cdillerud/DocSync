@@ -1,0 +1,133 @@
+{
+  "summary": "Iteration 88 - Operational Escalations and Due Dates feature testing completed. All 22 backend tests passed. Frontend verification confirms Operations Queue displays escalation summary cards (Due Soon, Overdue, Escalated), color-coded badges, due dates with days late/to due indicators, escalation filter dropdown, and EscalationSection component works in SO workflow view for setting/updating due dates and manual escalation.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed_tests": [
+    "Backend: POST /api/inventory-ledger/escalations - creates escalation with on_track status for future date",
+    "Backend: POST /api/inventory-ledger/escalations - creates with due_soon status for date within 3 days",
+    "Backend: POST /api/inventory-ledger/escalations - creates with overdue status for past date",
+    "Backend: POST /api/inventory-ledger/escalations - returns 422 for invalid entity_type",
+    "Backend: POST /api/inventory-ledger/escalations - returns 404 for non-existent PO Draft",
+    "Backend: GET /api/inventory-ledger/escalations - lists all escalations",
+    "Backend: GET /api/inventory-ledger/escalations?entity_type=sales_order - filters by entity_type",
+    "Backend: GET /api/inventory-ledger/escalations?entity_id=X - filters by entity_id",
+    "Backend: PATCH /api/inventory-ledger/escalations/{id} - updates due_date and re-derives status",
+    "Backend: PATCH /api/inventory-ledger/escalations/{id} - manual escalation preserves escalated status",
+    "Backend: PATCH /api/inventory-ledger/escalations/{id} - returns 404 for non-existent escalation",
+    "Backend: PATCH /api/inventory-ledger/escalations/{id} - returns 422 for invalid escalation_status",
+    "Backend: GET /api/inventory-ledger/operations-queue - returns due_soon_count, overdue_count, escalated_count",
+    "Backend: GET /api/inventory-ledger/operations-queue - items have due_date, escalation_status, days_to_due, days_overdue",
+    "Backend: GET /api/inventory-ledger/operations-queue?escalation=overdue - filters correctly",
+    "Backend: GET /api/inventory-ledger/operations-queue?escalation=due_soon - filters correctly",
+    "Backend: Priority score boosted by escalation: due_soon +10, overdue +20, escalated +30",
+    "Backend: Derived status - due date today = due_soon",
+    "Backend: Derived status - due date 3 days = due_soon",
+    "Backend: Derived status - due date 4 days = on_track",
+    "Backend: Manual escalated status preserved even with future due date",
+    "Backend: SO summary endpoint includes escalation enrichment fields",
+    "Backend: PO Draft detail endpoint includes escalation enrichment fields",
+    "Frontend: Operations Queue page loads at /operations-queue",
+    "Frontend: Summary cards show Total Queue, High Priority, Due Soon, Overdue, Escalated counts",
+    "Frontend: Escalation filter dropdown present with options (all, due_soon, overdue, escalated, on_track)",
+    "Frontend: Table displays Escalation column with color-coded badges",
+    "Frontend: Table displays Due Date column with days late/to due indicators",
+    "Frontend: Row detail panel shows escalation info in Actions Required",
+    "Frontend: EscalationSection visible in SO workflow (Record BC Shipment dialog)",
+    "Frontend: EscalationSection has due date input field",
+    "Frontend: EscalationSection has Set button to save due date",
+    "Frontend: EscalationSection has Escalate button for manual escalation",
+    "Frontend: EscalationSection shows derived status badge (Overdue/Due Soon/On Track/Escalated)",
+    "Frontend: Due date save shows success toast 'Due date saved'",
+    "Frontend: Overdue items show days late indicator (e.g., '53d late')"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_escalation_feature.py",
+    "/app/test_reports/pytest/escalation_feature_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend escalation endpoints at lines 3371-3473: POST (create/upsert), GET (list), PATCH (update)",
+    "Derived status logic at lines 3307-3321: overdue for past, due_soon for <=3 days, on_track for >3 days, escalated preserved",
+    "Priority score boost at line 3296: ESCALATION_SCORE = {due_soon: 10, overdue: 20, escalated: 30}",
+    "Operations Queue enrichment at lines 3572-3586 (SO) and 3651-3664 (PO Draft)",
+    "Frontend EscalationSection component at lines 858-932 in InventoryLedgerPage.js",
+    "Frontend Operations Queue escalation display at lines 226-236 in OperationsQueuePage.js"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_escalation_feature.py"
+  ],
+  "success_rate": {
+    "backend": "100% (22/22 tests passed)",
+    "frontend": "100% (all UI elements verified)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://priority-escalate.preview.emergentagent.com"
+  },
+  "seed_data_used": {
+    "test_so": "SO-NOOP-0a8987 with escalation set to 2026-01-20 (overdue)",
+    "queue_items": "120 items total, 1 overdue, 1 escalated",
+    "test_escalations": "Multiple test escalations created with TEST- prefix"
+  },
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 88 - Escalations feature fully tested. Backend endpoints: POST/GET/PATCH /api/inventory-ledger/escalations. GET /api/inventory-ledger/operations-queue now returns escalation fields (due_date, escalation_status, days_to_due, days_overdue) and counts (due_soon_count, overdue_count, escalated_count). Priority score boosted: due_soon +10, overdue +20, escalated +30. Frontend: Operations Queue page shows escalation summary cards and color-coded badges. EscalationSection component in InventoryLedgerPage.js used in SO workflow (ShipmentCaptureDialog) and PO Draft detail drawer. Derived status logic: past date = overdue, <=3 days = due_soon, >3 days = on_track, manual escalated = preserved.",
+  "features_verified": {
+    "backend_endpoints": {
+      "create_escalation": {
+        "method": "POST",
+        "path": "/api/inventory-ledger/escalations",
+        "body": ["entity_type (sales_order|po_draft)", "entity_id", "due_date", "notes"],
+        "response": ["escalation_id", "entity_type", "entity_id", "due_date", "escalation_status", "notes", "created_at"]
+      },
+      "list_escalations": {
+        "method": "GET",
+        "path": "/api/inventory-ledger/escalations",
+        "params": ["entity_type (optional)", "entity_id (optional)"],
+        "response": ["total", "entries[]"]
+      },
+      "update_escalation": {
+        "method": "PATCH",
+        "path": "/api/inventory-ledger/escalations/{escalation_id}",
+        "body": ["due_date (optional)", "escalation_status (optional)", "notes (optional)"],
+        "response": "updated escalation object"
+      },
+      "operations_queue_enrichment": {
+        "path": "/api/inventory-ledger/operations-queue",
+        "new_response_fields": ["due_soon_count", "overdue_count", "escalated_count"],
+        "new_item_fields": ["due_date", "escalation_status", "days_to_due", "days_overdue"],
+        "escalation_filter": "?escalation=overdue|due_soon|escalated|on_track"
+      }
+    },
+    "derived_status_logic": {
+      "overdue": "due_date < today",
+      "due_soon": "due_date within 0-3 days (inclusive)",
+      "on_track": "due_date > 3 days away",
+      "escalated": "manually set, preserved regardless of due_date"
+    },
+    "priority_score_boost": {
+      "due_soon": "+10",
+      "overdue": "+20",
+      "escalated": "+30"
+    },
+    "frontend_components": {
+      "OperationsQueuePage": {
+        "summary_cards": ["Total Queue", "High Priority", "Due Soon", "Overdue", "Escalated"],
+        "filters": ["entity_type", "escalation status"],
+        "table_columns": ["Type", "ID", "Order Type", "Priority", "Action Required", "Next Action", "Approval", "Escalation", "Due Date", "Created"]
+      },
+      "EscalationSection": {
+        "location": "InventoryLedgerPage.js lines 858-932",
+        "features": ["Due date input", "Set button", "Status badge", "Escalate button", "Days to due/overdue display"],
+        "used_in": ["SO workflow (ShipmentCaptureDialog)", "PO Draft detail drawer"]
+      }
+    }
+  }
+}

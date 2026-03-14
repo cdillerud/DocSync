@@ -3,10 +3,17 @@ import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Loader2, RefreshCw, AlertTriangle, ChevronRight, Warehouse, Truck, ClipboardList, Package, FileText } from 'lucide-react';
+import { Loader2, RefreshCw, AlertTriangle, ChevronRight, Warehouse, Truck, ClipboardList, Package, FileText, Clock, Calendar } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = process.env.REACT_APP_BACKEND_URL;
+
+const ESC_BADGE = {
+  on_track: { variant: 'outline', label: 'On Track', cls: '' },
+  due_soon: { variant: 'secondary', label: 'Due Soon', cls: 'bg-amber-500 text-white' },
+  overdue: { variant: 'destructive', label: 'Overdue', cls: '' },
+  escalated: { variant: 'destructive', label: 'Escalated', cls: 'bg-red-700' },
+};
 
 function priorityColor(score) {
   if (score >= 40) return 'text-red-600 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800';
@@ -24,8 +31,12 @@ export default function OperationsQueuePage() {
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [highPriority, setHighPriority] = useState(0);
+  const [dueSoonCount, setDueSoonCount] = useState(0);
+  const [overdueCount, setOverdueCount] = useState(0);
+  const [escalatedCount, setEscalatedCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [filterType, setFilterType] = useState('all');
+  const [filterEsc, setFilterEsc] = useState('all');
   const [search, setSearch] = useState('');
   // Dialog state for opening SO/PO workflows
   const [selectedItem, setSelectedItem] = useState(null);
@@ -35,18 +46,22 @@ export default function OperationsQueuePage() {
     try {
       const params = new URLSearchParams({ limit: '200', offset: '0' });
       if (filterType !== 'all') params.set('entity_type', filterType);
+      if (filterEsc !== 'all') params.set('escalation', filterEsc);
       const res = await fetch(`${API}/api/inventory-ledger/operations-queue?${params}`);
       if (res.ok) {
         const d = await res.json();
         setItems(d.items || []);
         setTotal(d.total || 0);
         setHighPriority(d.high_priority_count || 0);
+        setDueSoonCount(d.due_soon_count || 0);
+        setOverdueCount(d.overdue_count || 0);
+        setEscalatedCount(d.escalated_count || 0);
       } else {
         toast.error('Failed to load operations queue');
       }
     } catch { toast.error('Failed to load operations queue'); }
     finally { setLoading(false); }
-  }, [filterType]);
+  }, [filterType, filterEsc]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -69,7 +84,7 @@ export default function OperationsQueuePage() {
       </div>
 
       {/* Summary Strip */}
-      <div className="flex gap-4 text-sm" data-testid="ops-queue-summary">
+      <div className="flex gap-4 text-sm flex-wrap" data-testid="ops-queue-summary">
         <div className="flex items-center gap-2 border border-border rounded-lg px-4 py-2.5">
           <ClipboardList className="w-4 h-4 text-muted-foreground" />
           <div>
@@ -84,6 +99,29 @@ export default function OperationsQueuePage() {
             <p className="text-lg font-bold font-mono text-red-600" data-testid="ops-queue-high-priority">{highPriority}</p>
           </div>
         </div>
+        <div className="flex items-center gap-2 border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-4 py-2.5">
+          <Clock className="w-4 h-4 text-amber-500" />
+          <div>
+            <p className="text-xs text-amber-600">Due Soon</p>
+            <p className="text-lg font-bold font-mono text-amber-600" data-testid="ops-queue-due-soon">{dueSoonCount}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 rounded-lg px-4 py-2.5">
+          <Calendar className="w-4 h-4 text-red-600" />
+          <div>
+            <p className="text-xs text-red-600">Overdue</p>
+            <p className="text-lg font-bold font-mono text-red-600" data-testid="ops-queue-overdue">{overdueCount}</p>
+          </div>
+        </div>
+        {escalatedCount > 0 && (
+          <div className="flex items-center gap-2 border border-red-300 dark:border-red-700 bg-red-100 dark:bg-red-900/30 rounded-lg px-4 py-2.5">
+            <AlertTriangle className="w-4 h-4 text-red-700" />
+            <div>
+              <p className="text-xs text-red-700">Escalated</p>
+              <p className="text-lg font-bold font-mono text-red-700" data-testid="ops-queue-escalated">{escalatedCount}</p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Filters */}
@@ -96,6 +134,18 @@ export default function OperationsQueuePage() {
             <SelectItem value="all">All Types</SelectItem>
             <SelectItem value="sales_order">Sales Orders</SelectItem>
             <SelectItem value="po_draft">PO Drafts</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={filterEsc} onValueChange={setFilterEsc}>
+          <SelectTrigger className="h-8 w-[140px] text-xs" data-testid="ops-queue-esc-filter">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Escalations</SelectItem>
+            <SelectItem value="due_soon">Due Soon</SelectItem>
+            <SelectItem value="overdue">Overdue</SelectItem>
+            <SelectItem value="escalated">Escalated</SelectItem>
+            <SelectItem value="on_track">On Track</SelectItem>
           </SelectContent>
         </Select>
         <Input className="h-8 text-xs max-w-[250px]" placeholder="Search by ID or action..." value={search} onChange={e => setSearch(e.target.value)} data-testid="ops-queue-search" />
@@ -123,6 +173,8 @@ export default function OperationsQueuePage() {
                 <th className="p-2.5 text-left font-medium">Action Required</th>
                 <th className="p-2.5 text-left font-medium">Next Action</th>
                 <th className="p-2.5 text-left font-medium">Approval</th>
+                <th className="p-2.5 text-center font-medium">Escalation</th>
+                <th className="p-2.5 text-left font-medium">Due Date</th>
                 <th className="p-2.5 text-right font-medium">Created</th>
                 <th className="p-2.5 w-8"></th>
               </tr>
@@ -131,7 +183,7 @@ export default function OperationsQueuePage() {
               {filtered.map((item, i) => (
                 <tr
                   key={`${item.entity_type}-${item.entity_id}`}
-                  className="border-t border-border/30 hover:bg-muted/20 cursor-pointer transition-colors"
+                  className={`border-t border-border/30 hover:bg-muted/20 cursor-pointer transition-colors ${item.escalation_status === 'overdue' ? 'bg-red-50/50 dark:bg-red-900/10' : item.escalation_status === 'escalated' ? 'bg-red-100/60 dark:bg-red-900/20' : item.escalation_status === 'due_soon' ? 'bg-amber-50/40 dark:bg-amber-900/10' : ''}`}
                   onClick={() => setSelectedItem(item)}
                   data-testid={`ops-queue-row-${i}`}
                 >
@@ -170,6 +222,17 @@ export default function OperationsQueuePage() {
                     >
                       {item.approval_status}
                     </Badge>
+                  </td>
+                  <td className="p-2.5 text-center">
+                    {item.escalation_status && (() => {
+                      const es = ESC_BADGE[item.escalation_status] || ESC_BADGE.on_track;
+                      return <Badge className={`text-[8px] ${es.cls}`} variant={es.variant} data-testid={`ops-queue-esc-${i}`}>{es.label}</Badge>;
+                    })()}
+                  </td>
+                  <td className="p-2.5 text-[10px] font-mono text-muted-foreground" data-testid={`ops-queue-due-${i}`}>
+                    {item.due_date ? item.due_date.slice(0, 10) : '—'}
+                    {item.days_overdue > 0 && <span className="text-red-600 ml-1">({item.days_overdue}d late)</span>}
+                    {item.days_to_due > 0 && item.days_to_due <= 3 && <span className="text-amber-600 ml-1">({item.days_to_due}d)</span>}
                   </td>
                   <td className="p-2.5 text-right text-muted-foreground text-[10px] font-mono">{(item.created_at || '').slice(0, 10)}</td>
                   <td className="p-2.5"><ChevronRight className="w-3.5 h-3.5 text-muted-foreground" /></td>

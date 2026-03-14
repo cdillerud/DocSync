@@ -1072,6 +1072,10 @@ async def api_get_po_draft(draft_id: str):
     appr_summary = await _get_approval_enrichment(db, "po_draft", draft_id)
     doc.update(appr_summary)
 
+    # Escalation enrichment
+    esc_enrich = await _get_escalation_enrichment(db, "po_draft", draft_id)
+    doc.update(esc_enrich)
+
     return doc
 
 
@@ -2866,6 +2870,9 @@ async def api_sales_order_summary(sales_order_id: str):
         # Approval enrichment
         appr = await _get_approval_enrichment(db, "sales_order", sales_order_id)
         ds_summary.update(appr)
+        # Escalation enrichment
+        esc_enrich = await _get_escalation_enrichment(db, "sales_order", sales_order_id)
+        ds_summary.update(esc_enrich)
         return ds_summary
 
     # Warehouse orders: existing behavior
@@ -2966,6 +2973,9 @@ async def api_sales_order_summary(sales_order_id: str):
     # Approval enrichment
     appr = await _get_approval_enrichment(db, "sales_order", sales_order_id)
     wh_summary.update(appr)
+    # Escalation enrichment
+    esc_enrich = await _get_escalation_enrichment(db, "sales_order", sales_order_id)
+    wh_summary.update(esc_enrich)
     return wh_summary
 
 
@@ -3283,6 +3293,185 @@ PRIORITY_WEIGHTS = {
     "pending_invoice": 5,
 }
 
+ESCALATION_SCORE = {"due_soon": 10, "overdue": 20, "escalated": 30}
+
+
+# ═══════════════════════════════════════════════════════════════
+# ESCALATIONS & DUE DATES
+# ═══════════════════════════════════════════════════════════════
+
+ESCALATIONS_COLL = "escalations"
+VALID_ESCALATION_STATUSES = ("on_track", "due_soon", "overdue", "escalated")
+
+
+def _derive_escalation_status(due_date_str: str, current_status: str = ""):
+    """Derive escalation status from due_date vs current date."""
+    if current_status == "escalated":
+        return "escalated"
+    try:
+        due = datetime.fromisoformat(due_date_str[:10]).replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return "on_track"
+    now = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    delta = (due - now).days
+    if delta < 0:
+        return "overdue"
+    if delta <= 3:
+        return "due_soon"
+    return "on_track"
+
+
+def _calc_days(due_date_str: str):
+    """Return (days_to_due, days_overdue) from due_date string."""
+    try:
+        due = datetime.fromisoformat(due_date_str[:10]).replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None, None
+    now = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    delta = (due - now).days
+    if delta >= 0:
+        return delta, 0
+    return 0, abs(delta)
+
+
+async def _get_escalation(db, entity_type: str, entity_id: str):
+    """Return latest escalation for an entity, or None."""
+    doc = await db[ESCALATIONS_COLL].find_one(
+        {"entity_type": entity_type, "entity_id": entity_id},
+        {"_id": 0},
+        sort=[("created_at", -1)],
+    )
+    return doc
+
+
+async def _get_escalation_enrichment(db, entity_type: str, entity_id: str):
+    """Return escalation enrichment fields for summary/detail."""
+    esc = await _get_escalation(db, entity_type, entity_id)
+    if not esc:
+        return {"due_date": "", "escalation_status": "", "days_to_due": None, "days_overdue": None}
+    due = esc.get("due_date", "")
+    status = _derive_escalation_status(due, esc.get("escalation_status", ""))
+    days_to, days_over = _calc_days(due)
+    return {"due_date": due, "escalation_status": status, "days_to_due": days_to, "days_overdue": days_over}
+
+
+class EscalationIn(BaseModel):
+    entity_type: str = Field(...)
+    entity_id: str = Field(..., min_length=1)
+    due_date: str = Field(..., min_length=1)
+    notes: str = Field(default="")
+
+
+class EscalationUpdateIn(BaseModel):
+    due_date: str = Field(default="")
+    escalation_status: str = Field(default="")
+    notes: str = Field(default="")
+
+
+@router.post("/escalations")
+async def api_create_escalation(body: EscalationIn):
+    """Create or upsert a due date / escalation record."""
+    import uuid as _uuid
+
+    if body.entity_type not in ("sales_order", "po_draft"):
+        raise HTTPException(status_code=422, detail="entity_type must be sales_order or po_draft")
+
+    db = get_db()
+    # Validate PO draft exists if applicable
+    if body.entity_type == "po_draft":
+        draft = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": body.entity_id}, {"_id": 0, "po_draft_id": 1})
+        if not draft:
+            raise HTTPException(status_code=404, detail=f"PO Draft '{body.entity_id}' not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+    derived_status = _derive_escalation_status(body.due_date.strip())
+
+    # Upsert: replace existing record for same entity
+    existing = await db[ESCALATIONS_COLL].find_one(
+        {"entity_type": body.entity_type, "entity_id": body.entity_id.strip()}, {"_id": 0}
+    )
+    if existing:
+        update = {
+            "due_date": body.due_date.strip(),
+            "escalation_status": derived_status,
+            "notes": body.notes.strip(),
+            "updated_at": now,
+        }
+        await db[ESCALATIONS_COLL].update_one(
+            {"entity_type": body.entity_type, "entity_id": body.entity_id.strip()},
+            {"$set": update},
+        )
+        result = {**existing, **update}
+        return result
+
+    record = {
+        "escalation_id": f"ESC-{_uuid.uuid4().hex[:8].upper()}",
+        "entity_type": body.entity_type,
+        "entity_id": body.entity_id.strip(),
+        "due_date": body.due_date.strip(),
+        "escalation_status": derived_status,
+        "escalation_reason": "",
+        "notes": body.notes.strip(),
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db[ESCALATIONS_COLL].insert_one(record.copy())
+    record.pop("_id", None)
+    return record
+
+
+@router.get("/escalations")
+async def api_list_escalations(entity_type: str = "", entity_id: str = ""):
+    """List escalation records, optionally filtered."""
+    db = get_db()
+    query = {}
+    if entity_type:
+        query["entity_type"] = entity_type
+    if entity_id:
+        query["entity_id"] = entity_id
+    cursor = db[ESCALATIONS_COLL].find(query, {"_id": 0}).sort("created_at", -1)
+    entries = await cursor.to_list(length=200)
+    # Refresh derived status
+    for e in entries:
+        e["escalation_status"] = _derive_escalation_status(e.get("due_date", ""), e.get("escalation_status", ""))
+        days_to, days_over = _calc_days(e.get("due_date", ""))
+        e["days_to_due"] = days_to
+        e["days_overdue"] = days_over
+    return {"total": len(entries), "entries": entries}
+
+
+@router.patch("/escalations/{escalation_id}")
+async def api_update_escalation(escalation_id: str, body: EscalationUpdateIn):
+    """Update a due date / escalation record."""
+    db = get_db()
+    existing = await db[ESCALATIONS_COLL].find_one({"escalation_id": escalation_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Escalation '{escalation_id}' not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+    update = {"updated_at": now}
+    if body.due_date.strip():
+        update["due_date"] = body.due_date.strip()
+    if body.escalation_status.strip():
+        if body.escalation_status not in VALID_ESCALATION_STATUSES:
+            raise HTTPException(status_code=422, detail=f"Invalid escalation_status. Must be one of: {VALID_ESCALATION_STATUSES}")
+        update["escalation_status"] = body.escalation_status
+    if body.notes.strip():
+        update["notes"] = body.notes.strip()
+
+    # Re-derive status if due_date changed and not manually escalated
+    new_status = update.get("escalation_status", existing.get("escalation_status", ""))
+    new_due = update.get("due_date", existing.get("due_date", ""))
+    if new_status != "escalated":
+        update["escalation_status"] = _derive_escalation_status(new_due, new_status)
+
+    await db[ESCALATIONS_COLL].update_one({"escalation_id": escalation_id}, {"$set": update})
+    result = {**existing, **update}
+    days_to, days_over = _calc_days(result.get("due_date", ""))
+    result["days_to_due"] = days_to
+    result["days_overdue"] = days_over
+    return result
+
 
 async def _build_so_queue_items(db, limit: int = 200):
     """Build queue items for Sales Orders that need attention."""
@@ -3374,7 +3563,26 @@ async def _build_so_queue_items(db, limit: int = 200):
             "action_required": actions,
             "next_action": next_action,
             "created_at": created_at,
+            "due_date": "",
+            "escalation_status": "",
+            "days_to_due": None,
+            "days_overdue": None,
         })
+
+    # Enrich with escalation data
+    for item in items:
+        esc = await _get_escalation(db, "sales_order", item["entity_id"])
+        if esc:
+            due = esc.get("due_date", "")
+            esc_status = _derive_escalation_status(due, esc.get("escalation_status", ""))
+            days_to, days_over = _calc_days(due)
+            item["due_date"] = due
+            item["escalation_status"] = esc_status
+            item["days_to_due"] = days_to
+            item["days_overdue"] = days_over
+            item["priority_score"] += ESCALATION_SCORE.get(esc_status, 0)
+            if esc_status in ("due_soon", "overdue", "escalated"):
+                item["action_required"].append(f"{esc_status.replace('_', ' ').title()}: due {due}")
 
     return items
 
@@ -3434,7 +3642,26 @@ async def _build_po_draft_queue_items(db, limit: int = 200):
             "action_required": actions,
             "next_action": next_action,
             "created_at": draft.get("created_at", ""),
+            "due_date": "",
+            "escalation_status": "",
+            "days_to_due": None,
+            "days_overdue": None,
         })
+
+    # Enrich with escalation data
+    for item in items:
+        esc = await _get_escalation(db, "po_draft", item["entity_id"])
+        if esc:
+            due = esc.get("due_date", "")
+            esc_status = _derive_escalation_status(due, esc.get("escalation_status", ""))
+            days_to, days_over = _calc_days(due)
+            item["due_date"] = due
+            item["escalation_status"] = esc_status
+            item["days_to_due"] = days_to
+            item["days_overdue"] = days_over
+            item["priority_score"] += ESCALATION_SCORE.get(esc_status, 0)
+            if esc_status in ("due_soon", "overdue", "escalated"):
+                item["action_required"].append(f"{esc_status.replace('_', ' ').title()}: due {due}")
 
     return items
 
@@ -3443,6 +3670,7 @@ async def _build_po_draft_queue_items(db, limit: int = 200):
 async def api_operations_queue(
     entity_type: str = "",
     status: str = "",
+    escalation: str = "",
     limit: int = 100,
     offset: int = 0,
 ):
@@ -3455,9 +3683,13 @@ async def api_operations_queue(
     if not entity_type or entity_type == "po_draft":
         all_items.extend(await _build_po_draft_queue_items(db))
 
-    # Filter by status if provided
+    # Filter by approval status if provided
     if status:
         all_items = [i for i in all_items if i["approval_status"] == status]
+
+    # Filter by escalation status if provided
+    if escalation:
+        all_items = [i for i in all_items if i.get("escalation_status") == escalation]
 
     # Sort: priority_score DESC, then created_at ASC
     all_items.sort(key=lambda x: (-x["priority_score"], x["created_at"] or ""))
@@ -3465,10 +3697,16 @@ async def api_operations_queue(
     total = len(all_items)
     page = all_items[offset: offset + limit]
     high_priority = sum(1 for i in all_items if i["priority_score"] >= 40)
+    due_soon_count = sum(1 for i in all_items if i.get("escalation_status") == "due_soon")
+    overdue_count = sum(1 for i in all_items if i.get("escalation_status") == "overdue")
+    escalated_count = sum(1 for i in all_items if i.get("escalation_status") == "escalated")
 
     return {
         "total": total,
         "high_priority_count": high_priority,
+        "due_soon_count": due_soon_count,
+        "overdue_count": overdue_count,
+        "escalated_count": escalated_count,
         "offset": offset,
         "limit": limit,
         "items": page,

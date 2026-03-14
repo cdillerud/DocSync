@@ -21,7 +21,7 @@ import pytest
 import requests
 import os
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://order-type-aware.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://priority-escalate.preview.emergentagent.com').rstrip('/')
 
 
 class TestHealthCheck:

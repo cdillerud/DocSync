@@ -1076,6 +1076,10 @@ async def api_get_po_draft(draft_id: str):
     esc_enrich = await _get_escalation_enrichment(db, "po_draft", draft_id)
     doc.update(esc_enrich)
 
+    # Assignment enrichment
+    asgn_enrich = await _get_assignment_enrichment(db, "po_draft", draft_id)
+    doc.update(asgn_enrich)
+
     return doc
 
 
@@ -2873,6 +2877,9 @@ async def api_sales_order_summary(sales_order_id: str):
         # Escalation enrichment
         esc_enrich = await _get_escalation_enrichment(db, "sales_order", sales_order_id)
         ds_summary.update(esc_enrich)
+        # Assignment enrichment
+        asgn_enrich = await _get_assignment_enrichment(db, "sales_order", sales_order_id)
+        ds_summary.update(asgn_enrich)
         return ds_summary
 
     # Warehouse orders: existing behavior
@@ -2976,6 +2983,9 @@ async def api_sales_order_summary(sales_order_id: str):
     # Escalation enrichment
     esc_enrich = await _get_escalation_enrichment(db, "sales_order", sales_order_id)
     wh_summary.update(esc_enrich)
+    # Assignment enrichment
+    asgn_enrich = await _get_assignment_enrichment(db, "sales_order", sales_order_id)
+    wh_summary.update(asgn_enrich)
     return wh_summary
 
 
@@ -3473,6 +3483,141 @@ async def api_update_escalation(escalation_id: str, body: EscalationUpdateIn):
     return result
 
 
+# ═══════════════════════════════════════════════════════════════
+# ASSIGNMENTS & OWNERSHIP
+# ═══════════════════════════════════════════════════════════════
+
+ASSIGNMENTS_COLL = "assignments"
+VALID_ASSIGNMENT_STATUSES = ("assigned", "in_progress", "waiting", "completed")
+
+
+async def _get_active_assignment(db, entity_type: str, entity_id: str):
+    """Return the latest active (non-completed) assignment for an entity, or None."""
+    doc = await db[ASSIGNMENTS_COLL].find_one(
+        {"entity_type": entity_type, "entity_id": entity_id, "assignment_status": {"$ne": "completed"}},
+        {"_id": 0},
+        sort=[("assigned_at", -1)],
+    )
+    return doc
+
+
+async def _get_assignment_enrichment(db, entity_type: str, entity_id: str):
+    """Return assignment enrichment fields for summary/detail/queue."""
+    asgn = await _get_active_assignment(db, entity_type, entity_id)
+    if not asgn:
+        return {"current_owner": None, "assignment_status": "unassigned", "assignment_updated_at": None}
+    return {
+        "current_owner": asgn.get("assigned_to", ""),
+        "assignment_status": asgn.get("assignment_status", "assigned"),
+        "assignment_updated_at": asgn.get("updated_at", asgn.get("assigned_at", "")),
+    }
+
+
+class AssignmentIn(BaseModel):
+    entity_type: str = Field(...)
+    entity_id: str = Field(..., min_length=1)
+    assigned_to: str = Field(..., min_length=1)
+    assigned_by: str = Field(default="system")
+    notes: str = Field(default="")
+
+
+class AssignmentUpdateIn(BaseModel):
+    assigned_to: str = Field(default="")
+    assignment_status: str = Field(default="")
+    notes: str = Field(default="")
+
+
+@router.post("/assignments")
+async def api_create_assignment(body: AssignmentIn):
+    """Create or upsert the active assignment for an entity."""
+    import uuid as _uuid
+
+    if body.entity_type not in ("sales_order", "po_draft"):
+        raise HTTPException(status_code=422, detail="entity_type must be sales_order or po_draft")
+
+    db = get_db()
+    # Validate entity exists
+    if body.entity_type == "po_draft":
+        draft = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": body.entity_id.strip()}, {"_id": 0, "po_draft_id": 1})
+        if not draft:
+            raise HTTPException(status_code=404, detail=f"PO Draft '{body.entity_id}' not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Upsert: update existing active assignment for same entity
+    existing = await db[ASSIGNMENTS_COLL].find_one(
+        {"entity_type": body.entity_type, "entity_id": body.entity_id.strip(), "assignment_status": {"$ne": "completed"}},
+        {"_id": 0},
+    )
+    if existing:
+        update = {
+            "assigned_to": body.assigned_to.strip(),
+            "assigned_by": body.assigned_by.strip(),
+            "notes": body.notes.strip(),
+            "updated_at": now,
+            "assignment_status": "assigned",
+        }
+        await db[ASSIGNMENTS_COLL].update_one(
+            {"assignment_id": existing["assignment_id"]},
+            {"$set": update},
+        )
+        result = {**existing, **update}
+        return result
+
+    record = {
+        "assignment_id": f"ASGN-{_uuid.uuid4().hex[:8].upper()}",
+        "entity_type": body.entity_type,
+        "entity_id": body.entity_id.strip(),
+        "assigned_to": body.assigned_to.strip(),
+        "assigned_by": body.assigned_by.strip(),
+        "assigned_at": now,
+        "assignment_status": "assigned",
+        "notes": body.notes.strip(),
+        "updated_at": now,
+    }
+    await db[ASSIGNMENTS_COLL].insert_one(record.copy())
+    record.pop("_id", None)
+    return record
+
+
+@router.get("/assignments")
+async def api_list_assignments(entity_type: str = "", entity_id: str = ""):
+    """List assignment records, optionally filtered."""
+    db = get_db()
+    query = {}
+    if entity_type:
+        query["entity_type"] = entity_type
+    if entity_id:
+        query["entity_id"] = entity_id
+    cursor = db[ASSIGNMENTS_COLL].find(query, {"_id": 0}).sort("assigned_at", -1)
+    entries = await cursor.to_list(length=200)
+    return {"total": len(entries), "entries": entries}
+
+
+@router.patch("/assignments/{assignment_id}")
+async def api_update_assignment(assignment_id: str, body: AssignmentUpdateIn):
+    """Update an assignment record."""
+    db = get_db()
+    existing = await db[ASSIGNMENTS_COLL].find_one({"assignment_id": assignment_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Assignment '{assignment_id}' not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+    update = {"updated_at": now}
+    if body.assigned_to.strip():
+        update["assigned_to"] = body.assigned_to.strip()
+    if body.assignment_status.strip():
+        if body.assignment_status not in VALID_ASSIGNMENT_STATUSES:
+            raise HTTPException(status_code=422, detail=f"Invalid assignment_status. Must be one of: {VALID_ASSIGNMENT_STATUSES}")
+        update["assignment_status"] = body.assignment_status
+    if body.notes.strip():
+        update["notes"] = body.notes.strip()
+
+    await db[ASSIGNMENTS_COLL].update_one({"assignment_id": assignment_id}, {"$set": update})
+    result = {**existing, **update}
+    return result
+
+
 async def _build_so_queue_items(db, limit: int = 200):
     """Build queue items for Sales Orders that need attention."""
     items = []
@@ -3671,6 +3816,9 @@ async def api_operations_queue(
     entity_type: str = "",
     status: str = "",
     escalation: str = "",
+    assigned_to: str = "",
+    assignment_status: str = "",
+    unassigned_only: str = "",
     limit: int = 100,
     offset: int = 0,
 ):
@@ -3683,6 +3831,14 @@ async def api_operations_queue(
     if not entity_type or entity_type == "po_draft":
         all_items.extend(await _build_po_draft_queue_items(db))
 
+    # Enrich with assignment data
+    for item in all_items:
+        asgn = await _get_assignment_enrichment(db, item["entity_type"], item["entity_id"])
+        item.update(asgn)
+        # +10 priority for unassigned high-priority items
+        if not item.get("current_owner") and item["priority_score"] >= 40:
+            item["priority_score"] += 10
+
     # Filter by approval status if provided
     if status:
         all_items = [i for i in all_items if i["approval_status"] == status]
@@ -3690,6 +3846,14 @@ async def api_operations_queue(
     # Filter by escalation status if provided
     if escalation:
         all_items = [i for i in all_items if i.get("escalation_status") == escalation]
+
+    # Filter by assignment
+    if assigned_to:
+        all_items = [i for i in all_items if (i.get("current_owner") or "").lower() == assigned_to.lower()]
+    if assignment_status:
+        all_items = [i for i in all_items if i.get("assignment_status") == assignment_status]
+    if unassigned_only.lower() in ("true", "1", "yes"):
+        all_items = [i for i in all_items if not i.get("current_owner")]
 
     # Sort: priority_score DESC, then created_at ASC
     all_items.sort(key=lambda x: (-x["priority_score"], x["created_at"] or ""))
@@ -3701,12 +3865,20 @@ async def api_operations_queue(
     overdue_count = sum(1 for i in all_items if i.get("escalation_status") == "overdue")
     escalated_count = sum(1 for i in all_items if i.get("escalation_status") == "escalated")
 
+    # Assignment counts (computed from all_items before pagination)
+    unassigned_count = sum(1 for i in all_items if not i.get("current_owner"))
+    in_progress_count = sum(1 for i in all_items if i.get("assignment_status") == "in_progress")
+    waiting_count = sum(1 for i in all_items if i.get("assignment_status") == "waiting")
+
     return {
         "total": total,
         "high_priority_count": high_priority,
         "due_soon_count": due_soon_count,
         "overdue_count": overdue_count,
         "escalated_count": escalated_count,
+        "unassigned_count": unassigned_count,
+        "in_progress_count": in_progress_count,
+        "waiting_count": waiting_count,
         "offset": offset,
         "limit": limit,
         "items": page,

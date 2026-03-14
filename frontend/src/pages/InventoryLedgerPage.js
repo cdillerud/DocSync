@@ -18,7 +18,7 @@ import {
   AlertTriangle, RefreshCw, Search, ArrowLeftRight, History,
   ChevronRight, ChevronLeft, Box, Truck, ClipboardList,
   RotateCcw, FileText, Download, Settings, Pencil, Upload, ShieldCheck, Zap,
-  Check, X, Trash2, Link, Calendar, Clock,
+  Check, X, Trash2, Link, Calendar, Clock, User, UserX,
 } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -932,6 +932,101 @@ function EscalationSection({ entityType, entityId, dueDate: initialDue, escalati
   );
 }
 
+const ASSIGNMENT_STATUS_STYLES = {
+  assigned: { variant: 'secondary', label: 'Assigned', className: 'bg-blue-500 text-white' },
+  in_progress: { variant: 'secondary', label: 'In Progress', className: 'bg-indigo-500 text-white' },
+  waiting: { variant: 'secondary', label: 'Waiting', className: 'bg-amber-500 text-white' },
+  completed: { variant: 'default', label: 'Completed', className: 'bg-green-600 text-white' },
+  unassigned: { variant: 'outline', label: 'Unassigned', className: 'border-dashed text-muted-foreground' },
+};
+
+function AssignmentSection({ entityType, entityId, currentOwner: initialOwner, assignmentStatus: initialStatus, onChanged }) {
+  const [owner, setOwner] = useState(initialOwner || '');
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [assignment, setAssignment] = useState(null);
+  const [statusVal, setStatusVal] = useState('');
+
+  const load = useCallback(async () => {
+    if (!entityId) return;
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/assignments?entity_type=${entityType}&entity_id=${encodeURIComponent(entityId)}`);
+      if (res.ok) {
+        const d = await res.json();
+        const active = d.entries?.find(e => e.assignment_status !== 'completed');
+        if (active) {
+          setAssignment(active);
+          setOwner(active.assigned_to || '');
+          setStatusVal(active.assignment_status || '');
+          setNotes(active.notes || '');
+        }
+      }
+    } catch { /* silent */ }
+  }, [entityType, entityId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const status = assignment?.assignment_status || initialStatus || 'unassigned';
+  const style = ASSIGNMENT_STATUS_STYLES[status] || ASSIGNMENT_STATUS_STYLES.unassigned;
+
+  const saveAssignment = async () => {
+    if (!owner.trim()) { toast.error('Owner name is required'); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/assignments`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entity_type: entityType, entity_id: entityId, assigned_to: owner.trim(), notes: notes.trim() }),
+      });
+      if (res.ok) { toast.success('Assignment saved'); load(); onChanged?.(); }
+      else { const d = await res.json(); toast.error(d.detail || 'Failed'); }
+    } catch { toast.error('Failed to save assignment'); }
+    finally { setSaving(false); }
+  };
+
+  const updateStatus = async (newStatus) => {
+    if (!assignment) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/assignments/${assignment.assignment_id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignment_status: newStatus }),
+      });
+      if (res.ok) { toast.success(`Status updated to ${newStatus}`); load(); onChanged?.(); }
+      else { const d = await res.json(); toast.error(d.detail || 'Failed'); }
+    } catch { toast.error('Failed to update status'); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="space-y-1.5" data-testid="assignment-section">
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1"><User className="w-3 h-3" /> Owner</p>
+        <Badge className={`text-[7px] ${style.className}`} variant={style.variant} data-testid="assignment-status-badge">{style.label}</Badge>
+      </div>
+      <div className="flex gap-2 items-center">
+        <Input className="h-6 text-[10px] w-[140px]" placeholder="Assign to..." value={owner} onChange={e => setOwner(e.target.value)} data-testid="assignment-owner-input" />
+        <Button size="sm" className="h-6 text-[10px]" disabled={saving || !owner.trim()} onClick={saveAssignment} data-testid="assignment-save-btn">
+          {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <User className="w-3 h-3 mr-1" />} Assign
+        </Button>
+      </div>
+      {assignment && (
+        <>
+          <div className="flex gap-1 items-center flex-wrap">
+            <Input className="h-6 text-[10px] flex-1 min-w-[100px]" placeholder="Notes..." value={notes} onChange={e => setNotes(e.target.value)} data-testid="assignment-notes-input" />
+          </div>
+          <div className="flex gap-1 flex-wrap">
+            {['in_progress', 'waiting', 'completed'].filter(s => s !== status).map(s => (
+              <Button key={s} size="sm" variant="outline" className="h-5 text-[9px] px-2" disabled={saving} onClick={() => updateStatus(s)} data-testid={`assignment-status-${s}-btn`}>
+                {ASSIGNMENT_STATUS_STYLES[s].label}
+              </Button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 const APPROVAL_STATUS_STYLES = {
   approved: { variant: 'default', label: 'Approved', className: 'bg-green-600' },
   pending: { variant: 'secondary', label: 'Pending', className: 'bg-amber-500 text-white' },
@@ -1389,6 +1484,7 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
               )}
               <ApprovalSection entityType="sales_order" entityId={soId.trim()} approvalType="sales_order" approvalStatus={summary.approval_status} onChanged={() => loadSummary()} />
               <EscalationSection entityType="sales_order" entityId={soId.trim()} dueDate={summary.due_date} escalationStatus={summary.escalation_status} onChanged={() => loadSummary()} />
+              <AssignmentSection entityType="sales_order" entityId={soId.trim()} currentOwner={summary.current_owner} assignmentStatus={summary.assignment_status} onChanged={() => loadSummary()} />
 
               {/* ═══ DROP-SHIP PO DRAFT SECTION ═══ */}
               {isDropShip && (
@@ -2684,6 +2780,7 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
             )}
             <ApprovalSection entityType="po_draft" entityId={draftId} approvalType="purchase_order" approvalStatus={draft.approval_status} onChanged={() => loadDraft()} />
             <EscalationSection entityType="po_draft" entityId={draftId} dueDate={draft.due_date} escalationStatus={draft.escalation_status} onChanged={() => loadDraft()} />
+            <AssignmentSection entityType="po_draft" entityId={draftId} currentOwner={draft.current_owner} assignmentStatus={draft.assignment_status} onChanged={() => loadDraft()} />
 
             {/* Actions */}
             <div className="flex flex-wrap gap-2 pt-1" data-testid="inv-po-draft-actions">

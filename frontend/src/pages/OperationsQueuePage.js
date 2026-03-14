@@ -3,7 +3,7 @@ import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Loader2, RefreshCw, AlertTriangle, ChevronRight, Warehouse, Truck, ClipboardList, Package, FileText, Clock, Calendar } from 'lucide-react';
+import { Loader2, RefreshCw, AlertTriangle, ChevronRight, Warehouse, Truck, ClipboardList, Package, FileText, Clock, Calendar, User, UserX } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -13,6 +13,14 @@ const ESC_BADGE = {
   due_soon: { variant: 'secondary', label: 'Due Soon', cls: 'bg-amber-500 text-white' },
   overdue: { variant: 'destructive', label: 'Overdue', cls: '' },
   escalated: { variant: 'destructive', label: 'Escalated', cls: 'bg-red-700' },
+};
+
+const ASGN_BADGE = {
+  assigned: { variant: 'secondary', label: 'Assigned', cls: 'bg-blue-500 text-white' },
+  in_progress: { variant: 'secondary', label: 'In Progress', cls: 'bg-indigo-500 text-white' },
+  waiting: { variant: 'secondary', label: 'Waiting', cls: 'bg-amber-500 text-white' },
+  completed: { variant: 'default', label: 'Completed', cls: 'bg-green-600 text-white' },
+  unassigned: { variant: 'outline', label: 'Unassigned', cls: 'border-dashed text-muted-foreground' },
 };
 
 function priorityColor(score) {
@@ -34,11 +42,15 @@ export default function OperationsQueuePage() {
   const [dueSoonCount, setDueSoonCount] = useState(0);
   const [overdueCount, setOverdueCount] = useState(0);
   const [escalatedCount, setEscalatedCount] = useState(0);
+  const [unassignedCount, setUnassignedCount] = useState(0);
+  const [inProgressCount, setInProgressCount] = useState(0);
+  const [waitingCount, setWaitingCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [filterType, setFilterType] = useState('all');
   const [filterEsc, setFilterEsc] = useState('all');
+  const [filterOwner, setFilterOwner] = useState('');
+  const [filterAsgn, setFilterAsgn] = useState('all');
   const [search, setSearch] = useState('');
-  // Dialog state for opening SO/PO workflows
   const [selectedItem, setSelectedItem] = useState(null);
 
   const load = useCallback(async () => {
@@ -47,6 +59,12 @@ export default function OperationsQueuePage() {
       const params = new URLSearchParams({ limit: '200', offset: '0' });
       if (filterType !== 'all') params.set('entity_type', filterType);
       if (filterEsc !== 'all') params.set('escalation', filterEsc);
+      if (filterAsgn === 'unassigned') {
+        params.set('unassigned_only', 'true');
+      } else if (filterAsgn !== 'all') {
+        params.set('assignment_status', filterAsgn);
+      }
+      if (filterOwner.trim()) params.set('assigned_to', filterOwner.trim());
       const res = await fetch(`${API}/api/inventory-ledger/operations-queue?${params}`);
       if (res.ok) {
         const d = await res.json();
@@ -56,17 +74,20 @@ export default function OperationsQueuePage() {
         setDueSoonCount(d.due_soon_count || 0);
         setOverdueCount(d.overdue_count || 0);
         setEscalatedCount(d.escalated_count || 0);
+        setUnassignedCount(d.unassigned_count || 0);
+        setInProgressCount(d.in_progress_count || 0);
+        setWaitingCount(d.waiting_count || 0);
       } else {
         toast.error('Failed to load operations queue');
       }
     } catch { toast.error('Failed to load operations queue'); }
     finally { setLoading(false); }
-  }, [filterType, filterEsc]);
+  }, [filterType, filterEsc, filterAsgn, filterOwner]);
 
   useEffect(() => { load(); }, [load]);
 
   const filtered = search.trim()
-    ? items.filter(i => i.entity_id.toLowerCase().includes(search.toLowerCase()) || i.action_required.some(a => a.toLowerCase().includes(search.toLowerCase())))
+    ? items.filter(i => i.entity_id.toLowerCase().includes(search.toLowerCase()) || i.action_required.some(a => a.toLowerCase().includes(search.toLowerCase())) || (i.current_owner || '').toLowerCase().includes(search.toLowerCase()))
     : items;
 
   return (
@@ -84,29 +105,29 @@ export default function OperationsQueuePage() {
       </div>
 
       {/* Summary Strip */}
-      <div className="flex gap-4 text-sm flex-wrap" data-testid="ops-queue-summary">
-        <div className="flex items-center gap-2 border border-border rounded-lg px-4 py-2.5">
+      <div className="flex gap-3 text-sm flex-wrap" data-testid="ops-queue-summary">
+        <div className="flex items-center gap-2 border border-border rounded-lg px-3 py-2">
           <ClipboardList className="w-4 h-4 text-muted-foreground" />
           <div>
             <p className="text-xs text-muted-foreground">Total Queue</p>
             <p className="text-lg font-bold font-mono" data-testid="ops-queue-total">{total}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2 border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 rounded-lg px-4 py-2.5">
+        <div className="flex items-center gap-2 border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 rounded-lg px-3 py-2">
           <AlertTriangle className="w-4 h-4 text-red-500" />
           <div>
             <p className="text-xs text-red-600 dark:text-red-400">High Priority</p>
             <p className="text-lg font-bold font-mono text-red-600" data-testid="ops-queue-high-priority">{highPriority}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2 border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-4 py-2.5">
+        <div className="flex items-center gap-2 border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-3 py-2">
           <Clock className="w-4 h-4 text-amber-500" />
           <div>
             <p className="text-xs text-amber-600">Due Soon</p>
             <p className="text-lg font-bold font-mono text-amber-600" data-testid="ops-queue-due-soon">{dueSoonCount}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2 border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 rounded-lg px-4 py-2.5">
+        <div className="flex items-center gap-2 border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 rounded-lg px-3 py-2">
           <Calendar className="w-4 h-4 text-red-600" />
           <div>
             <p className="text-xs text-red-600">Overdue</p>
@@ -114,7 +135,7 @@ export default function OperationsQueuePage() {
           </div>
         </div>
         {escalatedCount > 0 && (
-          <div className="flex items-center gap-2 border border-red-300 dark:border-red-700 bg-red-100 dark:bg-red-900/30 rounded-lg px-4 py-2.5">
+          <div className="flex items-center gap-2 border border-red-300 dark:border-red-700 bg-red-100 dark:bg-red-900/30 rounded-lg px-3 py-2">
             <AlertTriangle className="w-4 h-4 text-red-700" />
             <div>
               <p className="text-xs text-red-700">Escalated</p>
@@ -122,12 +143,35 @@ export default function OperationsQueuePage() {
             </div>
           </div>
         )}
+        <div className="flex items-center gap-2 border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-900/20 rounded-lg px-3 py-2">
+          <UserX className="w-4 h-4 text-orange-600" />
+          <div>
+            <p className="text-xs text-orange-600">Unassigned</p>
+            <p className="text-lg font-bold font-mono text-orange-600" data-testid="ops-queue-unassigned">{unassignedCount}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg px-3 py-2">
+          <User className="w-4 h-4 text-indigo-600" />
+          <div>
+            <p className="text-xs text-indigo-600">In Progress</p>
+            <p className="text-lg font-bold font-mono text-indigo-600" data-testid="ops-queue-in-progress">{inProgressCount}</p>
+          </div>
+        </div>
+        {waitingCount > 0 && (
+          <div className="flex items-center gap-2 border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-3 py-2">
+            <Clock className="w-4 h-4 text-amber-600" />
+            <div>
+              <p className="text-xs text-amber-600">Waiting</p>
+              <p className="text-lg font-bold font-mono text-amber-600" data-testid="ops-queue-waiting">{waitingCount}</p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Filters */}
-      <div className="flex gap-3 items-center" data-testid="ops-queue-filters">
+      <div className="flex gap-3 items-center flex-wrap" data-testid="ops-queue-filters">
         <Select value={filterType} onValueChange={setFilterType}>
-          <SelectTrigger className="h-8 w-[160px] text-xs" data-testid="ops-queue-type-filter">
+          <SelectTrigger className="h-8 w-[140px] text-xs" data-testid="ops-queue-type-filter">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -148,7 +192,21 @@ export default function OperationsQueuePage() {
             <SelectItem value="on_track">On Track</SelectItem>
           </SelectContent>
         </Select>
-        <Input className="h-8 text-xs max-w-[250px]" placeholder="Search by ID or action..." value={search} onChange={e => setSearch(e.target.value)} data-testid="ops-queue-search" />
+        <Select value={filterAsgn} onValueChange={setFilterAsgn}>
+          <SelectTrigger className="h-8 w-[150px] text-xs" data-testid="ops-queue-asgn-filter">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Assignments</SelectItem>
+            <SelectItem value="unassigned">Unassigned</SelectItem>
+            <SelectItem value="assigned">Assigned</SelectItem>
+            <SelectItem value="in_progress">In Progress</SelectItem>
+            <SelectItem value="waiting">Waiting</SelectItem>
+            <SelectItem value="completed">Completed</SelectItem>
+          </SelectContent>
+        </Select>
+        <Input className="h-8 text-xs w-[150px]" placeholder="Filter by owner..." value={filterOwner} onChange={e => setFilterOwner(e.target.value)} onKeyDown={e => e.key === 'Enter' && load()} data-testid="ops-queue-owner-filter" />
+        <Input className="h-8 text-xs max-w-[200px]" placeholder="Search ID / action / owner..." value={search} onChange={e => setSearch(e.target.value)} data-testid="ops-queue-search" />
         <span className="text-xs text-muted-foreground ml-auto">{filtered.length} items</span>
       </div>
 
@@ -170,80 +228,85 @@ export default function OperationsQueuePage() {
                 <th className="p-2.5 text-left font-medium">ID</th>
                 <th className="p-2.5 text-left font-medium">Order Type</th>
                 <th className="p-2.5 text-center font-medium">Priority</th>
-                <th className="p-2.5 text-left font-medium">Action Required</th>
+                <th className="p-2.5 text-left font-medium">Owner</th>
+                <th className="p-2.5 text-center font-medium">Status</th>
                 <th className="p-2.5 text-left font-medium">Next Action</th>
                 <th className="p-2.5 text-left font-medium">Approval</th>
                 <th className="p-2.5 text-center font-medium">Escalation</th>
                 <th className="p-2.5 text-left font-medium">Due Date</th>
-                <th className="p-2.5 text-right font-medium">Created</th>
                 <th className="p-2.5 w-8"></th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((item, i) => (
-                <tr
-                  key={`${item.entity_type}-${item.entity_id}`}
-                  className={`border-t border-border/30 hover:bg-muted/20 cursor-pointer transition-colors ${item.escalation_status === 'overdue' ? 'bg-red-50/50 dark:bg-red-900/10' : item.escalation_status === 'escalated' ? 'bg-red-100/60 dark:bg-red-900/20' : item.escalation_status === 'due_soon' ? 'bg-amber-50/40 dark:bg-amber-900/10' : ''}`}
-                  onClick={() => setSelectedItem(item)}
-                  data-testid={`ops-queue-row-${i}`}
-                >
-                  <td className="p-2.5">
-                    <Badge variant="outline" className="text-[9px] gap-1">
-                      {item.entity_type === 'sales_order' ? <Package className="w-3 h-3" /> : <ClipboardList className="w-3 h-3" />}
-                      {item.entity_type === 'sales_order' ? 'SO' : 'PO Draft'}
-                    </Badge>
-                  </td>
-                  <td className="p-2.5 font-mono font-bold" data-testid={`ops-queue-id-${i}`}>{item.entity_id}</td>
-                  <td className="p-2.5">
-                    <Badge variant="secondary" className="text-[9px] gap-1">
-                      {item.order_type === 'drop_ship' ? <Truck className="w-3 h-3" /> : <Warehouse className="w-3 h-3" />}
-                      {item.order_type === 'drop_ship' ? 'Drop-Ship' : item.order_type === 'warehouse_supply' ? 'WH Supply' : 'Warehouse'}
-                    </Badge>
-                  </td>
-                  <td className="p-2.5 text-center">
-                    <Badge variant={priorityBadge(item.priority_score)} className={`text-[9px] font-mono font-bold ${priorityColor(item.priority_score)} border`} data-testid={`ops-queue-priority-${i}`}>
-                      {item.priority_score}
-                    </Badge>
-                  </td>
-                  <td className="p-2.5 max-w-[280px]">
-                    <div className="flex flex-wrap gap-1">
-                      {item.action_required.slice(0, 3).map((a, j) => (
-                        <span key={j} className="text-[9px] px-1.5 py-0.5 bg-muted/60 rounded">{a}</span>
-                      ))}
-                      {item.action_required.length > 3 && <span className="text-[9px] text-muted-foreground">+{item.action_required.length - 3}</span>}
-                    </div>
-                  </td>
-                  <td className="p-2.5 text-[10px] font-medium" data-testid={`ops-queue-next-${i}`}>{item.next_action}</td>
-                  <td className="p-2.5">
-                    <Badge
-                      variant={item.approval_status === 'approved' ? 'default' : item.approval_status === 'pending' ? 'secondary' : item.approval_status === 'rejected' ? 'destructive' : 'outline'}
-                      className={`text-[8px] ${item.approval_status === 'approved' ? 'bg-green-600' : item.approval_status === 'pending' ? 'bg-amber-500 text-white' : ''}`}
-                      data-testid={`ops-queue-approval-${i}`}
-                    >
-                      {item.approval_status}
-                    </Badge>
-                  </td>
-                  <td className="p-2.5 text-center">
-                    {item.escalation_status && (() => {
-                      const es = ESC_BADGE[item.escalation_status] || ESC_BADGE.on_track;
-                      return <Badge className={`text-[8px] ${es.cls}`} variant={es.variant} data-testid={`ops-queue-esc-${i}`}>{es.label}</Badge>;
-                    })()}
-                  </td>
-                  <td className="p-2.5 text-[10px] font-mono text-muted-foreground" data-testid={`ops-queue-due-${i}`}>
-                    {item.due_date ? item.due_date.slice(0, 10) : '—'}
-                    {item.days_overdue > 0 && <span className="text-red-600 ml-1">({item.days_overdue}d late)</span>}
-                    {item.days_to_due > 0 && item.days_to_due <= 3 && <span className="text-amber-600 ml-1">({item.days_to_due}d)</span>}
-                  </td>
-                  <td className="p-2.5 text-right text-muted-foreground text-[10px] font-mono">{(item.created_at || '').slice(0, 10)}</td>
-                  <td className="p-2.5"><ChevronRight className="w-3.5 h-3.5 text-muted-foreground" /></td>
-                </tr>
-              ))}
+              {filtered.map((item, i) => {
+                const isUnassignedHighPri = !item.current_owner && item.priority_score >= 40;
+                const asgnStyle = ASGN_BADGE[item.assignment_status] || ASGN_BADGE.unassigned;
+                return (
+                  <tr
+                    key={`${item.entity_type}-${item.entity_id}`}
+                    className={`border-t border-border/30 hover:bg-muted/20 cursor-pointer transition-colors ${isUnassignedHighPri ? 'bg-orange-50/60 dark:bg-orange-900/15 border-l-2 border-l-orange-400' : item.escalation_status === 'overdue' ? 'bg-red-50/50 dark:bg-red-900/10' : item.escalation_status === 'escalated' ? 'bg-red-100/60 dark:bg-red-900/20' : item.escalation_status === 'due_soon' ? 'bg-amber-50/40 dark:bg-amber-900/10' : ''}`}
+                    onClick={() => setSelectedItem(item)}
+                    data-testid={`ops-queue-row-${i}`}
+                  >
+                    <td className="p-2.5">
+                      <Badge variant="outline" className="text-[9px] gap-1">
+                        {item.entity_type === 'sales_order' ? <Package className="w-3 h-3" /> : <ClipboardList className="w-3 h-3" />}
+                        {item.entity_type === 'sales_order' ? 'SO' : 'PO Draft'}
+                      </Badge>
+                    </td>
+                    <td className="p-2.5 font-mono font-bold" data-testid={`ops-queue-id-${i}`}>{item.entity_id}</td>
+                    <td className="p-2.5">
+                      <Badge variant="secondary" className="text-[9px] gap-1">
+                        {item.order_type === 'drop_ship' ? <Truck className="w-3 h-3" /> : <Warehouse className="w-3 h-3" />}
+                        {item.order_type === 'drop_ship' ? 'Drop-Ship' : item.order_type === 'warehouse_supply' ? 'WH Supply' : 'Warehouse'}
+                      </Badge>
+                    </td>
+                    <td className="p-2.5 text-center">
+                      <Badge variant={priorityBadge(item.priority_score)} className={`text-[9px] font-mono font-bold ${priorityColor(item.priority_score)} border`} data-testid={`ops-queue-priority-${i}`}>
+                        {item.priority_score}
+                      </Badge>
+                    </td>
+                    <td className="p-2.5" data-testid={`ops-queue-owner-${i}`}>
+                      {item.current_owner ? (
+                        <span className="text-[10px] font-medium flex items-center gap-1"><User className="w-3 h-3 text-indigo-500" />{item.current_owner}</span>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground flex items-center gap-1 italic"><UserX className="w-3 h-3 text-orange-400" />Unassigned</span>
+                      )}
+                    </td>
+                    <td className="p-2.5 text-center">
+                      <Badge className={`text-[8px] ${asgnStyle.cls}`} variant={asgnStyle.variant} data-testid={`ops-queue-asgn-${i}`}>{asgnStyle.label}</Badge>
+                    </td>
+                    <td className="p-2.5 text-[10px] font-medium" data-testid={`ops-queue-next-${i}`}>{item.next_action}</td>
+                    <td className="p-2.5">
+                      <Badge
+                        variant={item.approval_status === 'approved' ? 'default' : item.approval_status === 'pending' ? 'secondary' : item.approval_status === 'rejected' ? 'destructive' : 'outline'}
+                        className={`text-[8px] ${item.approval_status === 'approved' ? 'bg-green-600' : item.approval_status === 'pending' ? 'bg-amber-500 text-white' : ''}`}
+                        data-testid={`ops-queue-approval-${i}`}
+                      >
+                        {item.approval_status}
+                      </Badge>
+                    </td>
+                    <td className="p-2.5 text-center">
+                      {item.escalation_status && (() => {
+                        const es = ESC_BADGE[item.escalation_status] || ESC_BADGE.on_track;
+                        return <Badge className={`text-[8px] ${es.cls}`} variant={es.variant} data-testid={`ops-queue-esc-${i}`}>{es.label}</Badge>;
+                      })()}
+                    </td>
+                    <td className="p-2.5 text-[10px] font-mono text-muted-foreground" data-testid={`ops-queue-due-${i}`}>
+                      {item.due_date ? item.due_date.slice(0, 10) : '\u2014'}
+                      {item.days_overdue > 0 && <span className="text-red-600 ml-1">({item.days_overdue}d late)</span>}
+                      {item.days_to_due > 0 && item.days_to_due <= 3 && <span className="text-amber-600 ml-1">({item.days_to_due}d)</span>}
+                    </td>
+                    <td className="p-2.5"><ChevronRight className="w-3.5 h-3.5 text-muted-foreground" /></td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
 
-      {/* Selected Item Detail - Navigate to Inventory Ledger */}
+      {/* Selected Item Detail */}
       {selectedItem && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center" onClick={() => setSelectedItem(null)} data-testid="ops-queue-detail-overlay">
           <div className="bg-background border border-border rounded-lg p-5 max-w-md w-full shadow-xl space-y-3" onClick={e => e.stopPropagation()} data-testid="ops-queue-detail-panel">
@@ -262,6 +325,18 @@ export default function OperationsQueuePage() {
                   {selectedItem.order_type === 'drop_ship' ? <Truck className="w-3 h-3" /> : <Warehouse className="w-3 h-3" />}
                   {selectedItem.order_type === 'drop_ship' ? 'Drop-Ship' : selectedItem.order_type === 'warehouse_supply' ? 'WH Supply' : 'Warehouse'}
                 </Badge>
+              </div>
+              <div className="flex gap-2">
+                <span className="text-muted-foreground w-24">Owner:</span>
+                {selectedItem.current_owner ? (
+                  <span className="font-medium flex items-center gap-1"><User className="w-3 h-3 text-indigo-500" />{selectedItem.current_owner}</span>
+                ) : (
+                  <span className="text-muted-foreground italic flex items-center gap-1"><UserX className="w-3 h-3 text-orange-400" />Unassigned</span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <span className="text-muted-foreground w-24">Assignment:</span>
+                {(() => { const s = ASGN_BADGE[selectedItem.assignment_status] || ASGN_BADGE.unassigned; return <Badge className={`text-[9px] ${s.cls}`} variant={s.variant}>{s.label}</Badge>; })()}
               </div>
               <div className="flex gap-2">
                 <span className="text-muted-foreground w-24">Approval:</span>

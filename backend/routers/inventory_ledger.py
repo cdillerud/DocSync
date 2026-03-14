@@ -661,6 +661,58 @@ async def api_demand_signals(
 
 
 # ═══════════════════════════════════════════════════════════════
+# SUPPLY COVERAGE
+# ═══════════════════════════════════════════════════════════════
+
+
+@router.get("/supply-coverage")
+async def api_supply_coverage(
+    customer_id: str = Query(..., description="Customer workspace ID"),
+    item: str = Query("", description="Filter by item"),
+    limit: int = Query(500, ge=1, le=5000),
+):
+    """Return supply coverage projection per item.
+
+    coverage = on_hand + incoming - committed
+    coverage_status = 'covered' if coverage >= 0 else 'at_risk'
+    Only items with committed > 0 included.
+    Sorted by coverage ascending (largest shortages first).
+    """
+    db = get_db()
+    balances = await derive_balances(db, customer_id, item=item or None)
+
+    rows = []
+    for b in balances:
+        committed = b.get("committed", 0)
+        if committed <= 0:
+            continue
+        on_hand = b.get("on_hand", 0)
+        incoming = b.get("incoming", 0)
+        avail = b.get("available", 0)
+        coverage = round(on_hand + incoming - committed, 4)
+        rows.append({
+            "item": b["item"],
+            "item_description": b.get("item_description", ""),
+            "warehouse": b.get("warehouse", ""),
+            "ownership_type": b.get("ownership_type", ""),
+            "on_hand": on_hand,
+            "incoming": incoming,
+            "committed": committed,
+            "available": avail,
+            "coverage": coverage,
+            "coverage_status": "covered" if coverage >= 0 else "at_risk",
+            "unit_of_measure": b.get("unit_of_measure", ""),
+            "status": "SHORT" if b.get("is_short") else ("LOW" if b.get("is_low") else "OK"),
+        })
+
+    rows.sort(key=lambda r: r["coverage"])
+    return {
+        "total": min(len(rows), limit),
+        "coverage": rows[:limit],
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
 # ITEM DETAIL
 # ═══════════════════════════════════════════════════════════════
 
@@ -742,10 +794,16 @@ async def api_item_detail(
     # Demand signal (only when committed > 0)
     committed = balance["committed"]
     demand = None
+    supply_coverage = None
     if committed > 0:
         demand = {
             "total_open_order_qty": committed,
             "demand_gap": round(committed - balance["available"], 4),
+        }
+        cov = round(balance["on_hand"] + balance["incoming"] - committed, 4)
+        supply_coverage = {
+            "coverage": cov,
+            "coverage_status": "covered" if cov >= 0 else "at_risk",
         }
 
     return {
@@ -756,6 +814,7 @@ async def api_item_detail(
         "reorder": reorder,
         "exceptions": exceptions,
         "demand": demand,
+        "supply_coverage": supply_coverage,
         "history_preview": history_data.get("movements", []),
         "history_total": history_data.get("total", 0),
         "type_summary": type_summary.get("movement_type_totals", {}),

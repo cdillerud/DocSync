@@ -17,7 +17,7 @@ import {
   Warehouse, Loader2, Plus, Package, TrendingDown, TrendingUp,
   AlertTriangle, RefreshCw, Search, ArrowLeftRight, History,
   ChevronRight, ChevronLeft, Box, Truck, ClipboardList,
-  RotateCcw, FileText, Download, Settings, Pencil, Upload,
+  RotateCcw, FileText, Download, Settings, Pencil, Upload, ShieldCheck,
 } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -192,6 +192,7 @@ function CustomerWorkspace({ customer }) {
             <TabsTrigger value="settings" data-testid="inv-tab-settings"><Settings className="w-3.5 h-3.5 mr-1" /> Item Settings</TabsTrigger>
             <TabsTrigger value="exceptions" data-testid="inv-tab-exceptions"><AlertTriangle className="w-3.5 h-3.5 mr-1" /> Exceptions</TabsTrigger>
             <TabsTrigger value="demand" data-testid="inv-tab-demand"><TrendingDown className="w-3.5 h-3.5 mr-1" /> Demand</TabsTrigger>
+            <TabsTrigger value="coverage" data-testid="inv-tab-coverage"><ShieldCheck className="w-3.5 h-3.5 mr-1" /> Supply Coverage</TabsTrigger>
           </TabsList>
           <div className="flex gap-2">
             {tab === 'balances' && (
@@ -254,6 +255,9 @@ function CustomerWorkspace({ customer }) {
         </TabsContent>
         <TabsContent value="demand">
           <DemandPanel customerId={cid} onItemClick={(item) => setDetailItem({ item, customerId: cid })} onSupplyCreated={refresh} />
+        </TabsContent>
+        <TabsContent value="coverage">
+          <SupplyCoveragePanel customerId={cid} onItemClick={(item) => setDetailItem({ item, customerId: cid })} onSupplyCreated={refresh} />
         </TabsContent>
       </Tabs>
 
@@ -802,6 +806,116 @@ function DemandPanel({ customerId, onItemClick, onSupplyCreated }) {
 }
 
 /* ════════════════════════════════════════════════════════════════ */
+/* SUPPLY COVERAGE PANEL                                             */
+/* ════════════════════════════════════════════════════════════════ */
+
+function SupplyCoveragePanel({ customerId, onItemClick, onSupplyCreated }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/supply-coverage?customer_id=${customerId}`);
+      const data = await res.json();
+      setRows(data.coverage || []);
+    } catch { toast.error('Failed to load supply coverage'); }
+    finally { setLoading(false); }
+  }, [customerId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const createSupply = async (item) => {
+    setCreating(item);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/customers/${customerId}/incoming`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_no: item, quantity: 0, source_reference: `COVERAGE-${item}`, notes: 'Created from supply coverage view' }),
+      });
+      if (res.ok) { toast.success(`Incoming supply created for ${item}`); onSupplyCreated?.(); load(); }
+      else { const d = await res.json(); toast.error(d.detail || 'Failed'); }
+    } catch { toast.error('Failed'); }
+    finally { setCreating(null); }
+  };
+
+  const atRiskCount = rows.filter(r => r.coverage_status === 'at_risk').length;
+
+  if (loading) return <div className="py-10 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto" /></div>;
+  if (!rows.length) return (
+    <div className="py-10 text-center text-muted-foreground" data-testid="inv-coverage-empty">
+      <ShieldCheck className="w-8 h-8 mx-auto mb-2 opacity-30" />
+      <p className="text-sm font-medium">No committed demand</p>
+      <p className="text-xs mt-1">No open order commitments to evaluate coverage for.</p>
+    </div>
+  );
+
+  return (
+    <Card className="border border-border" data-testid="inv-coverage-panel">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-xs font-bold uppercase tracking-wider" style={{ fontFamily: 'Chivo, sans-serif' }}>
+            <ShieldCheck className="w-3.5 h-3.5 inline mr-1 text-blue-500" />
+            {rows.length} item{rows.length !== 1 ? 's' : ''} with committed demand
+            {atRiskCount > 0 && <span className="ml-2 text-red-500 font-bold">{atRiskCount} at risk</span>}
+          </CardTitle>
+          <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={load}>
+            <RefreshCw className="w-3 h-3 mr-1" /> Refresh
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0 overflow-x-auto">
+        <table className="w-full text-xs" data-testid="inv-coverage-table">
+          <thead>
+            <tr className="border-b border-border bg-muted/40 text-[10px] text-muted-foreground uppercase tracking-wider">
+              <th className="text-left py-2 px-3 font-medium">Item</th>
+              <th className="text-right py-2 px-3 font-medium">On Hand</th>
+              <th className="text-right py-2 px-3 font-medium">Incoming</th>
+              <th className="text-right py-2 px-3 font-medium">Committed</th>
+              <th className="text-right py-2 px-3 font-medium">Available</th>
+              <th className="text-right py-2 px-3 font-medium">Coverage</th>
+              <th className="text-center py-2 px-3 font-medium">Coverage Status</th>
+              <th className="text-right py-2 px-3 font-medium">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i} className={`border-b border-border/50 hover:bg-muted/20 ${r.coverage_status === 'at_risk' ? 'bg-red-500/5' : ''}`} data-testid={`inv-coverage-row-${i}`}>
+                <td className="py-1.5 px-3">
+                  <span className="font-mono font-medium cursor-pointer hover:underline text-blue-600" onClick={() => onItemClick?.(r.item)} data-testid={`inv-coverage-item-${i}`}>{r.item}</span>
+                  {r.item_description && <span className="text-[10px] text-muted-foreground block truncate max-w-[180px]">{r.item_description}</span>}
+                </td>
+                <td className="py-1.5 px-3 text-right font-mono">{r.on_hand?.toLocaleString()}</td>
+                <td className="py-1.5 px-3 text-right font-mono">{r.incoming > 0 ? <span className="text-sky-600">+{r.incoming?.toLocaleString()}</span> : '—'}</td>
+                <td className="py-1.5 px-3 text-right font-mono text-amber-600">{r.committed?.toLocaleString()}</td>
+                <td className={`py-1.5 px-3 text-right font-mono font-bold ${r.available < 0 ? 'text-red-600' : ''}`}>{r.available?.toLocaleString()}</td>
+                <td className={`py-1.5 px-3 text-right font-mono font-bold ${r.coverage < 0 ? 'text-red-600' : 'text-emerald-600'}`}>{r.coverage?.toLocaleString()}</td>
+                <td className="py-1.5 px-3 text-center">
+                  <Badge variant={r.coverage_status === 'at_risk' ? 'destructive' : 'outline'} className={`text-[9px] ${r.coverage_status === 'covered' ? 'border-emerald-300 text-emerald-600' : ''}`} data-testid={`inv-coverage-status-${i}`}>
+                    {r.coverage_status === 'at_risk' ? 'AT RISK' : 'COVERED'}
+                  </Badge>
+                </td>
+                <td className="py-1.5 px-3 text-right">
+                  {r.coverage_status === 'at_risk' && (
+                    <Button variant="outline" size="sm" className="h-5 text-[9px] px-1.5"
+                      disabled={creating === r.item}
+                      onClick={() => createSupply(r.item)}
+                      data-testid={`inv-coverage-supply-${i}`}>
+                      {creating === r.item ? <Loader2 className="w-3 h-3 animate-spin" /> : <Truck className="w-3 h-3 mr-0.5" />}
+                      Supply
+                    </Button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════ */
 /* ITEM DETAIL DRAWER                                                */
 /* ════════════════════════════════════════════════════════════════ */
 
@@ -922,6 +1036,20 @@ function ItemDetailDrawer({ item, customerId, onClose, onOpenFullHistory, onRefr
                 <div className="flex gap-4 text-xs">
                   <div>Open Orders: <span className="font-bold text-blue-600">{detail.demand.total_open_order_qty?.toLocaleString()}</span></div>
                   <div>Demand Gap: <span className={`font-bold ${detail.demand.demand_gap > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{detail.demand.demand_gap > 0 ? '+' : ''}{detail.demand.demand_gap?.toLocaleString()}</span></div>
+                </div>
+              </div>
+            )}
+
+            {/* Supply Coverage */}
+            {detail.supply_coverage && (
+              <div className="border border-border rounded p-2.5 space-y-1" data-testid="inv-detail-coverage">
+                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Supply Coverage</p>
+                <div className="flex gap-4 text-xs items-center">
+                  <div>Coverage: <span className={`font-bold ${detail.supply_coverage.coverage < 0 ? 'text-red-600' : 'text-emerald-600'}`}>{detail.supply_coverage.coverage?.toLocaleString()}</span></div>
+                  <Badge variant={detail.supply_coverage.coverage_status === 'at_risk' ? 'destructive' : 'outline'}
+                    className={`text-[9px] ${detail.supply_coverage.coverage_status === 'covered' ? 'border-emerald-300 text-emerald-600' : ''}`}>
+                    {detail.supply_coverage.coverage_status === 'at_risk' ? 'AT RISK' : 'COVERED'}
+                  </Badge>
                 </div>
               </div>
             )}

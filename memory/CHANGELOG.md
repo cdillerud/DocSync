@@ -404,3 +404,25 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 
 
 - Test report: `/app/test_reports/iteration_75.json`
+
+---
+
+## 2026-03-14: Sales Order Type Awareness — Warehouse vs Drop-Ship (iteration_83)
+
+### What Was Built
+- `GET /api/inventory-ledger/sales-orders/{id}/order-type` — returns order type (default: warehouse)
+- `PATCH /api/inventory-ledger/sales-orders/{id}/order-type` — sets order type (warehouse|drop_ship), validates no remaining commitments before allowing switch to drop_ship
+- `POST /bc-shipment` updated: drop_ship orders record shipment without inventory release (no order_release movements)
+- `POST /bc-invoice` updated: drop_ship orders only require shipment log (skip commitment/release checks)
+- `GET /summary` updated: drop_ship returns order_type, 0 commitments, empty lines, operational_status from shipment/invoice logs
+- `POST /reconcile-sales-order` rejects drop_ship orders (422: no inventory commitments to reconcile)
+- `so_order_types` collection stores per-SO order type settings
+- Demand signals, supply coverage, action center naturally exclude drop_ship (no commitments exist)
+- Frontend: ShipmentCaptureDialog enhanced with order type selector (Warehouse/Drop-Ship dropdown)
+- Frontend: Teal "Drop-Ship Order" summary strip for drop_ship, standard commitment strip for warehouse
+- Frontend: Manual line entry (item # + qty) for drop_ship shipments instead of commitment-based lines
+- Frontend: Order type badge ("No inventory impact" / "Warehouse inventory")
+- Frontend: Conditional invoice section shows after shipment for drop_ship (no commitment gate)
+- Frontend: Shipment history shows "drop-ship" badge for drop_ship shipments
+- Backend: 14/14 tests passed, Frontend: 100% UI verification
+- Test report: `/app/test_reports/iteration_83.json`

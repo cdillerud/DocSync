@@ -2298,6 +2298,7 @@ incoming_supply_router = APIRouter(prefix="/incoming-supply", tags=["Incoming Su
 # ═══════════════════════════════════════════════════════════════
 
 BC_SHIPMENT_LOGS_COLL = "bc_shipment_logs"
+BC_INVOICE_LOGS_COLL = "bc_invoice_logs"
 
 
 class ShipmentLineIn(BaseModel):
@@ -2440,6 +2441,90 @@ async def api_list_shipment_logs(sales_order_id: str):
     return {"sales_order_id": sales_order_id, "total": len(entries), "entries": entries}
 
 
+# ═══════════════════════════════════════════════════════════════
+# BC INVOICE CAPTURE
+# ═══════════════════════════════════════════════════════════════
+
+class BCInvoiceIn(BaseModel):
+    bc_invoice_number: str = Field(..., min_length=1, description="BC invoice number")
+    bc_document_id: str = Field(default="", description="BC document ID")
+    invoice_date: str = Field(default="", description="Invoice date YYYY-MM-DD")
+    invoice_notes: str = Field(default="", description="Notes")
+
+
+@router.post("/sales-orders/{sales_order_id}/bc-invoice")
+async def api_bc_invoice_capture(sales_order_id: str, body: BCInvoiceIn):
+    """Record that a shipped Sales Order has been invoiced in BC.
+
+    Informational only. Does NOT create ledger movements,
+    accounting entries, or call BC APIs.
+    """
+    import uuid as _uuid
+
+    db = get_db()
+
+    # Verify SO exists via commitments
+    sample = await db[MOVEMENTS_COLL].find_one(
+        {"movement_type": "order_commitment", "reference_id": sales_order_id},
+        {"_id": 0, "customer_id": 1},
+    )
+    if not sample:
+        raise HTTPException(status_code=404, detail=f"No order commitments found for '{sales_order_id}'")
+
+    # Check remaining committed qty — must be fully released to invoice
+    pipeline = [
+        {"$match": {"reference_id": sales_order_id, "movement_type": {"$in": ["order_commitment", "order_release"]}}},
+        {"$group": {"_id": "$movement_type", "total": {"$sum": "$quantity_delta"}}},
+    ]
+    agg = await db[MOVEMENTS_COLL].aggregate(pipeline).to_list(5)
+    committed = 0
+    released = 0
+    for a in agg:
+        if a["_id"] == "order_commitment":
+            committed = abs(a["total"])
+        elif a["_id"] == "order_release":
+            released = abs(a["total"])
+    remaining = round(committed - released, 4)
+
+    if remaining > 0:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Cannot invoice: {remaining} qty still committed. Ship all committed quantity first.",
+        )
+
+    # Verify shipment activity exists
+    shipment_count = await db[BC_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
+    if shipment_count == 0:
+        raise HTTPException(status_code=422, detail="No shipment activity recorded. Record shipment before invoicing.")
+
+    now = datetime.now(timezone.utc).isoformat()
+    log_entry = {
+        "invoice_log_id": f"INV-{_uuid.uuid4().hex[:8].upper()}",
+        "sales_order_id": sales_order_id,
+        "customer_id": sample["customer_id"],
+        "bc_invoice_number": body.bc_invoice_number.strip(),
+        "bc_document_id": body.bc_document_id.strip(),
+        "invoice_date": body.invoice_date.strip() or now[:10],
+        "invoice_notes": body.invoice_notes.strip(),
+        "captured_at": now,
+    }
+    await db[BC_INVOICE_LOGS_COLL].insert_one(log_entry.copy())
+    log_entry.pop("_id", None)
+
+    return log_entry
+
+
+@router.get("/sales-orders/{sales_order_id}/invoice-log")
+async def api_list_invoice_logs(sales_order_id: str):
+    """List all invoice log entries for a sales order, reverse chronological."""
+    db = get_db()
+    cursor = db[BC_INVOICE_LOGS_COLL].find(
+        {"sales_order_id": sales_order_id}, {"_id": 0}
+    ).sort("captured_at", -1)
+    entries = await cursor.to_list(length=200)
+    return {"sales_order_id": sales_order_id, "total": len(entries), "entries": entries}
+
+
 @router.get("/sales-orders/{sales_order_id}/summary")
 async def api_sales_order_summary(sales_order_id: str):
     """Return a summary of commitment/release status for a sales order."""
@@ -2495,6 +2580,29 @@ async def api_sales_order_summary(sales_order_id: str):
         sort=[("shipped_at", -1)],
     )
 
+    # Latest invoice info
+    latest_invoice = await db[BC_INVOICE_LOGS_COLL].find_one(
+        {"sales_order_id": sales_order_id}, {"_id": 0},
+        sort=[("captured_at", -1)],
+    )
+    invoice_count = await db[BC_INVOICE_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
+    shipment_count = await db[BC_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
+
+    # Derive operational_status
+    is_fully_released = total_remaining <= 0
+    has_shipment = shipment_count > 0
+    has_invoice = invoice_count > 0
+    if has_invoice and is_fully_released:
+        operational_status = "complete"
+    elif has_shipment and is_fully_released:
+        operational_status = "shipped"
+    elif has_shipment:
+        operational_status = "partially_shipped"
+    elif total_released > 0:
+        operational_status = "partially_released"
+    else:
+        operational_status = "committed"
+
     return {
         "sales_order_id": sales_order_id,
         "customer_id": workspace_id,
@@ -2503,6 +2611,10 @@ async def api_sales_order_summary(sales_order_id: str):
         "total_remaining_committed_qty": total_remaining,
         "latest_bc_shipment_number": latest_shipment.get("bc_shipment_number", "") if latest_shipment else "",
         "latest_bc_shipped_at": latest_shipment.get("shipped_at", "") if latest_shipment else "",
+        "latest_bc_invoice_number": latest_invoice.get("bc_invoice_number", "") if latest_invoice else "",
+        "latest_bc_invoice_at": latest_invoice.get("captured_at", "") if latest_invoice else "",
+        "operational_status": operational_status,
+        "is_fulfillment_complete": operational_status == "complete",
         "lines": lines,
     }
 

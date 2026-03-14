@@ -1,0 +1,155 @@
+{
+  "summary": "Comprehensive testing of BC Sales Invoice Capture feature (iteration_82). Backend: 16 passed, 1 skipped. Frontend: All UI elements verified. POST /api/inventory-ledger/sales-orders/{id}/bc-invoice captures invoice after full shipment. GET invoice-log returns reverse chronological entries. Summary enriched with operational_status (committed/partially_released/partially_shipped/shipped/complete) and is_fulfillment_complete. Invoice form visible in dialog when remaining=0 and shipments exist. Fulfillment Complete indicator shows when operational_status=complete.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Console warnings", "issues": ["Missing aria-describedby for DialogContent (accessibility)", "Hydration warnings for span/tr in table - cosmetic, not functional"]}
+    ]
+  },
+  "passed_tests": [
+    "Backend: POST /sales-orders/{id}/bc-invoice returns 404 for nonexistent SO",
+    "Backend: Invoice rejected with 422 when remaining committed qty > 0",
+    "Backend: Invoice capture success for fully shipped SO (200)",
+    "Backend: Invoice log entry stores bc_invoice_number, bc_document_id, invoice_date, invoice_notes, captured_at",
+    "Backend: GET invoice-log returns reverse chronological entries",
+    "Backend: GET invoice-log returns entries for SO without invoices (empty array)",
+    "Backend: Summary returns operational_status field",
+    "Backend: Summary returns is_fulfillment_complete boolean",
+    "Backend: complete status when shipped and invoiced (is_fulfillment_complete=true)",
+    "Backend: shipped status when released but not invoiced",
+    "Backend: committed status when only commitments exist",
+    "Backend: Summary returns latest_bc_invoice_number and latest_bc_invoice_at",
+    "Backend: Invoice does not create ledger movements (informational only)",
+    "Backend REGRESSION: Shipment capture still works",
+    "Backend REGRESSION: Shipment logs still visible",
+    "Backend REGRESSION: SO summary still shows commitment/release data",
+    "Frontend: Record Shipment button visible on Demand tab",
+    "Frontend: Shipment dialog opens with SO ID input and Load button",
+    "Frontend: After loading SO, shows commitment summary with operational_status badge",
+    "Frontend: Invoice section visible when remaining=0 and shipments exist",
+    "Frontend: Invoice form with BC Invoice #, Doc ID, Date, Notes, Record Invoice button (visible when not complete)",
+    "Frontend: Invoice result display after successful capture",
+    "Frontend: Fulfillment Complete indicator shown when operational_status=complete",
+    "Frontend: Invoice History section shows captured invoices",
+    "Frontend: Operational status badge displays correct value (committed/partially_released/partially_shipped/shipped/complete)",
+    "Frontend: Shipment History section still visible (regression)"
+  ],
+  "skipped_tests": [
+    "Backend: test_invoice_rejected_when_no_shipment_activity (no SO without shipments but with full release available)"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_bc_invoice_capture.py",
+    "/app/test_reports/pytest/bc_invoice_capture_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend inventory_ledger.py Lines 2455-2514: POST /sales-orders/{id}/bc-invoice validates 1) SO exists via commitments, 2) remaining committed qty = 0, 3) shipment activity exists before storing invoice log",
+    "Backend inventory_ledger.py Lines 2517-2525: GET invoice-log returns reverse chronological entries from bc_invoice_logs collection",
+    "Backend inventory_ledger.py Lines 2591-2617: operational_status derived from: complete (fully_released + shipped + invoiced), shipped (fully_released + shipped), partially_shipped (has shipment but remaining > 0), partially_released (some released), committed (no releases)",
+    "Backend inventory_ledger.py Line 2617: is_fulfillment_complete = operational_status == 'complete'",
+    "Frontend InventoryLedgerPage.js Lines 967-1027: Invoice section visibility controlled by total_remaining_committed_qty <= 0 && shipmentLogs.length > 0. Invoice form shows when !summary.is_fulfillment_complete. Fulfillment Complete indicator shows when is_fulfillment_complete=true",
+    "Frontend Lines 970-997: Invoice form fields: BC Invoice # (inv-invoice-num), BC Document ID (inv-invoice-doc), Invoice Date (inv-invoice-date), Notes (inv-invoice-notes), Record Invoice button (inv-invoice-confirm)",
+    "Frontend Lines 1010-1026: Invoice History section shows reverse chronological invoice logs with bc_invoice_number, bc_document_id, invoice_date"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_bc_invoice_capture.py"
+  ],
+  "success_rate": {
+    "backend": "100% (16/16 passed, 1 skipped)",
+    "frontend": "100% (all UI elements verified)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://po-supply-bridge.preview.emergentagent.com"
+  },
+  "seed_data_used": "SO-TEST (Hormel Foods) - fully released and invoiced (operational_status=complete, INV-30482). SO-TEST-001 has 25 remaining committed on TEST-COMMIT-7CC683 (operational_status=partially_shipped). SO-107040 has 193 remaining on SPAM-12OZ (operational_status=partially_shipped). SO-TEST invoice-log has 3 entries including INV-TEST-82-SUCCESS created during testing.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "BC Sales Invoice Capture feature fully tested. POST /api/inventory-ledger/sales-orders/{id}/bc-invoice requires: 1) SO exists (404), 2) remaining_committed_qty = 0 (422), 3) shipment_count > 0 (422). Stores invoice log with invoice_log_id, bc_invoice_number, bc_document_id, invoice_date, invoice_notes, captured_at. GET summary enriched with operational_status (committed/partially_released/partially_shipped/shipped/complete) and is_fulfillment_complete boolean. Frontend invoice section appears in ShipmentCaptureDialog when remaining=0 AND shipments exist. Invoice form hidden when is_fulfillment_complete=true, replaced by Fulfillment Complete indicator.",
+  "features_verified": {
+    "backend_endpoints": {
+      "bc_invoice": {
+        "method": "POST",
+        "path": "/api/inventory-ledger/sales-orders/{sales_order_id}/bc-invoice",
+        "request_body": {
+          "bc_invoice_number": "string (required)",
+          "bc_document_id": "string (optional)",
+          "invoice_date": "string YYYY-MM-DD (optional, defaults to captured_at date)",
+          "invoice_notes": "string (optional)"
+        },
+        "response": {
+          "invoice_log_id": "string (e.g. INV-xxxxxxxx)",
+          "sales_order_id": "string",
+          "customer_id": "string",
+          "bc_invoice_number": "string",
+          "bc_document_id": "string",
+          "invoice_date": "string",
+          "invoice_notes": "string",
+          "captured_at": "string ISO datetime"
+        },
+        "error_codes": {
+          "404": "No order commitments found for sales order",
+          "422": "Cannot invoice: remaining qty still committed (ship first) OR No shipment activity recorded"
+        }
+      },
+      "invoice_log": {
+        "method": "GET",
+        "path": "/api/inventory-ledger/sales-orders/{sales_order_id}/invoice-log",
+        "response": {
+          "sales_order_id": "string",
+          "total": "number",
+          "entries": "[{invoice_log_id, sales_order_id, customer_id, bc_invoice_number, bc_document_id, invoice_date, invoice_notes, captured_at}]"
+        }
+      },
+      "summary_enrichment": {
+        "new_fields": {
+          "operational_status": "committed | partially_released | partially_shipped | shipped | complete",
+          "is_fulfillment_complete": "boolean (true when operational_status=complete)",
+          "latest_bc_invoice_number": "string",
+          "latest_bc_invoice_at": "string ISO datetime"
+        }
+      }
+    },
+    "frontend_components": {
+      "invoice_section": {
+        "testid": "inv-invoice-section",
+        "visible_when": "total_remaining_committed_qty <= 0 AND shipmentLogs.length > 0"
+      },
+      "invoice_form": {
+        "testid": "inv-invoice-form",
+        "visible_when": "invoice_section visible AND is_fulfillment_complete = false",
+        "elements": {
+          "bc_invoice_num": "inv-invoice-num",
+          "bc_document_id": "inv-invoice-doc",
+          "invoice_date": "inv-invoice-date",
+          "invoice_notes": "inv-invoice-notes",
+          "confirm_btn": "inv-invoice-confirm"
+        }
+      },
+      "invoice_result": {
+        "testid": "inv-invoice-result",
+        "shows": "Invoice Captured message with invoice number and log ID"
+      },
+      "fulfillment_complete": {
+        "testid": "inv-fulfillment-complete",
+        "visible_when": "is_fulfillment_complete = true (operational_status = complete)",
+        "message": "Shipped and invoiced. BC is the system of record for financial posting."
+      },
+      "invoice_history": {
+        "testid": "inv-invoice-log-section",
+        "entry_testid": "inv-invoice-log-{i}",
+        "displays": "bc_invoice_number, bc_document_id, invoice_date, invoice_notes"
+      },
+      "operational_status_badge": {
+        "testid": "inv-so-operational-status",
+        "location": "SO summary area in shipment dialog",
+        "values": ["committed", "partially_released", "partially_shipped", "shipped", "complete"]
+      }
+    }
+  }
+}

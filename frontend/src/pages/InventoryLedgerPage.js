@@ -735,6 +735,13 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
   const [shipmentLogs, setShipmentLogs] = useState([]);
+  const [invoiceLogs, setInvoiceLogs] = useState([]);
+  const [invNum, setInvNum] = useState('');
+  const [invDocId, setInvDocId] = useState('');
+  const [invDate, setInvDate] = useState('');
+  const [invNotes, setInvNotes] = useState('');
+  const [submittingInv, setSubmittingInv] = useState(false);
+  const [invResult, setInvResult] = useState(null);
 
   const loadSummary = useCallback(async () => {
     if (!soId.trim()) return;
@@ -760,8 +767,12 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
   const loadLogs = useCallback(async () => {
     if (!soId.trim()) return;
     try {
-      const res = await fetch(`${API}/api/inventory-ledger/sales-orders/${encodeURIComponent(soId.trim())}/shipment-log`);
-      if (res.ok) { const d = await res.json(); setShipmentLogs(d.entries || []); }
+      const [shipRes, invRes] = await Promise.all([
+        fetch(`${API}/api/inventory-ledger/sales-orders/${encodeURIComponent(soId.trim())}/shipment-log`),
+        fetch(`${API}/api/inventory-ledger/sales-orders/${encodeURIComponent(soId.trim())}/invoice-log`),
+      ]);
+      if (shipRes.ok) { const d = await shipRes.json(); setShipmentLogs(d.entries || []); }
+      if (invRes.ok) { const d = await invRes.json(); setInvoiceLogs(d.entries || []); }
     } catch { /* silent */ }
   }, [soId]);
 
@@ -795,6 +806,29 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
     finally { setSubmitting(false); }
   };
 
+  const recordInvoice = async () => {
+    if (!invNum.trim()) { toast.error('BC Invoice Number is required'); return; }
+    setSubmittingInv(true);
+    setInvResult(null);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/sales-orders/${encodeURIComponent(soId.trim())}/bc-invoice`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bc_invoice_number: invNum.trim(), bc_document_id: invDocId.trim(), invoice_date: invDate.trim(), invoice_notes: invNotes.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setInvResult(data);
+        toast.success(`Invoice ${data.bc_invoice_number} captured`);
+        loadSummary();
+        loadLogs();
+        onShipped?.();
+      } else {
+        toast.error(data.detail || 'Invoice capture failed');
+      }
+    } catch { toast.error('Failed to record invoice'); }
+    finally { setSubmittingInv(false); }
+  };
+
   const hasOutstanding = summary?.lines?.some(l => l.remaining_committed_qty > 0);
 
   return (
@@ -825,7 +859,11 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
                 <span>Committed: <strong>{summary.total_committed_qty?.toLocaleString()}</strong></span>
                 <span>Released: <strong className="text-green-600">{summary.total_released_qty?.toLocaleString()}</strong></span>
                 <span>Remaining: <strong className={summary.total_remaining_committed_qty > 0 ? 'text-amber-600' : 'text-green-600'}>{summary.total_remaining_committed_qty?.toLocaleString()}</strong></span>
-                {summary.latest_bc_shipment_number && <span>Last: <strong className="text-blue-600">{summary.latest_bc_shipment_number}</strong></span>}
+                {summary.latest_bc_shipment_number && <span>Last Ship: <strong className="text-blue-600">{summary.latest_bc_shipment_number}</strong></span>}
+                {summary.latest_bc_invoice_number && <span>Invoice: <strong className="text-purple-600">{summary.latest_bc_invoice_number}</strong></span>}
+                {summary.operational_status && (
+                  <Badge variant={summary.operational_status === 'complete' ? 'default' : summary.operational_status === 'shipped' ? 'outline' : 'secondary'} className="text-[8px]" data-testid="inv-so-operational-status">{summary.operational_status}</Badge>
+                )}
               </div>
 
               {/* Lines */}
@@ -922,6 +960,70 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Invoice Section */}
+              {summary.total_remaining_committed_qty <= 0 && shipmentLogs.length > 0 && (
+                <div className="space-y-2" data-testid="inv-invoice-section">
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Invoice Capture</p>
+                  {!summary.is_fulfillment_complete && (
+                    <div className="space-y-2 border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/20 rounded p-2.5" data-testid="inv-invoice-form">
+                      <div className="flex gap-2">
+                        <div className="flex-1 space-y-1">
+                          <Label className="text-[10px]">BC Invoice #</Label>
+                          <Input className="h-6 text-[10px]" value={invNum} onChange={e => setInvNum(e.target.value)} placeholder="e.g. INV-30482" data-testid="inv-invoice-num" />
+                        </div>
+                        <div className="flex-1 space-y-1">
+                          <Label className="text-[10px]">BC Document ID</Label>
+                          <Input className="h-6 text-[10px]" value={invDocId} onChange={e => setInvDocId(e.target.value)} placeholder="Optional" data-testid="inv-invoice-doc" />
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <div className="space-y-1">
+                          <Label className="text-[10px]">Invoice Date</Label>
+                          <Input className="h-6 text-[10px] w-[120px]" type="date" value={invDate} onChange={e => setInvDate(e.target.value)} data-testid="inv-invoice-date" />
+                        </div>
+                        <div className="flex-1 space-y-1">
+                          <Label className="text-[10px]">Notes</Label>
+                          <Input className="h-6 text-[10px]" value={invNotes} onChange={e => setInvNotes(e.target.value)} placeholder="Optional" data-testid="inv-invoice-notes" />
+                        </div>
+                      </div>
+                      <Button size="sm" className="h-7 text-[10px] w-full bg-purple-600 hover:bg-purple-700 text-white" disabled={submittingInv || !invNum.trim()} onClick={recordInvoice} data-testid="inv-invoice-confirm">
+                        {submittingInv ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <FileText className="w-3 h-3 mr-1" />}
+                        Record Invoice
+                      </Button>
+                    </div>
+                  )}
+                  {invResult && (
+                    <div className="border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/20 rounded p-2.5 text-xs" data-testid="inv-invoice-result">
+                      <p className="font-medium text-purple-700 dark:text-purple-300">Invoice Captured — {invResult.bc_invoice_number}</p>
+                      <p className="text-[10px] text-muted-foreground">{invResult.invoice_log_id} | {invResult.invoice_date}</p>
+                    </div>
+                  )}
+                  {summary.is_fulfillment_complete && (
+                    <div className="border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20 rounded p-2 text-xs" data-testid="inv-fulfillment-complete">
+                      <p className="font-medium text-green-700 dark:text-green-300">Fulfillment Complete</p>
+                      <p className="text-[10px] text-muted-foreground">Shipped and invoiced. BC is the system of record for financial posting.</p>
+                    </div>
+                  )}
+                  {invoiceLogs.length > 0 && (
+                    <div data-testid="inv-invoice-log-section">
+                      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Invoice History</p>
+                      <div className="border border-border rounded overflow-hidden">
+                        {invoiceLogs.map((log, i) => (
+                          <div key={log.invoice_log_id || i} className="border-b border-border/20 last:border-b-0 p-2 text-[10px]" data-testid={`inv-invoice-log-${i}`}>
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="text-[8px] font-mono text-purple-600">{log.bc_invoice_number}</Badge>
+                              {log.bc_document_id && <span className="font-mono text-muted-foreground">{log.bc_document_id}</span>}
+                              <span className="text-muted-foreground">{log.invoice_date || log.captured_at?.slice(0, 10)}</span>
+                            </div>
+                            {log.invoice_notes && <p className="mt-0.5 text-muted-foreground">{log.invoice_notes}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </>

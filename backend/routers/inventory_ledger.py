@@ -1059,6 +1059,14 @@ async def api_get_po_draft(draft_id: str):
         doc["linked_supply_total_qty"] = qa["total_qty"]
         doc["linked_supply_received_qty"] = qa["received_qty"]
 
+    # Document linkage + process checklist enrichment
+    doc_count, docs_by_type, _ = await _get_document_links_summary(db, "po_draft", draft_id)
+    checklist_items, checklist_complete = _derive_po_draft_checklist(doc, doc_count, docs_by_type)
+    doc["linked_document_count"] = doc_count
+    doc["linked_documents_by_type"] = docs_by_type
+    doc["process_checklist"] = checklist_items
+    doc["checklist_complete"] = checklist_complete
+
     return doc
 
 
@@ -2822,7 +2830,7 @@ async def api_sales_order_summary(sales_order_id: str):
         else:
             operational_status = "pending"
         customer_id = (latest_shipment or {}).get("customer_id", "")
-        return {
+        ds_summary = {
             "sales_order_id": sales_order_id,
             "customer_id": customer_id,
             "order_type": order_type,
@@ -2843,6 +2851,14 @@ async def api_sales_order_summary(sales_order_id: str):
             "latest_vendor_shipment_number": latest_vendor_shipment.get("vendor_shipment_number", "") if latest_vendor_shipment else "",
             "latest_vendor_shipped_at": latest_vendor_shipment.get("shipped_at", "") if latest_vendor_shipment else "",
         }
+        # Enrich with document linkage + checklist
+        doc_count, docs_by_type, _ = await _get_document_links_summary(db, "sales_order", sales_order_id)
+        checklist_items, checklist_complete = await _derive_so_checklist(db, sales_order_id, order_type, doc_count, docs_by_type)
+        ds_summary["linked_document_count"] = doc_count
+        ds_summary["linked_documents_by_type"] = docs_by_type
+        ds_summary["process_checklist"] = checklist_items
+        ds_summary["checklist_complete"] = checklist_complete
+        return ds_summary
 
     # Warehouse orders: existing behavior
     sample = await db[MOVEMENTS_COLL].find_one(
@@ -2917,7 +2933,7 @@ async def api_sales_order_summary(sales_order_id: str):
     else:
         operational_status = "committed"
 
-    return {
+    wh_summary = {
         "sales_order_id": sales_order_id,
         "customer_id": workspace_id,
         "order_type": "warehouse",
@@ -2932,6 +2948,180 @@ async def api_sales_order_summary(sales_order_id: str):
         "is_fulfillment_complete": operational_status == "complete",
         "lines": lines,
     }
+    # Enrich with document linkage + checklist
+    doc_count, docs_by_type, _ = await _get_document_links_summary(db, "sales_order", sales_order_id)
+    checklist_items, checklist_complete = await _derive_so_checklist(db, sales_order_id, "warehouse", doc_count, docs_by_type)
+    wh_summary["linked_document_count"] = doc_count
+    wh_summary["linked_documents_by_type"] = docs_by_type
+    wh_summary["process_checklist"] = checklist_items
+    wh_summary["checklist_complete"] = checklist_complete
+    return wh_summary
+
+
+# ═══════════════════════════════════════════════════════════════
+# DOCUMENT LINKAGE & PROCESS CHECKLIST
+# ═══════════════════════════════════════════════════════════════
+
+DOCUMENT_LINKS_COLL = "document_links"
+VALID_ENTITY_TYPES = ("sales_order", "po_draft")
+VALID_DOCUMENT_TYPES = ("customer_po", "warehouse_agreement", "approval_backup", "vendor_po_support", "other")
+
+
+class DocumentLinkIn(BaseModel):
+    entity_type: str = Field(..., description="sales_order or po_draft")
+    entity_id: str = Field(..., min_length=1)
+    document_type: str = Field(..., description="customer_po, warehouse_agreement, approval_backup, vendor_po_support, other")
+    document_name: str = Field(..., min_length=1)
+    document_url: str = Field(default="")
+    notes: str = Field(default="")
+
+
+@router.post("/document-links")
+async def api_create_document_link(body: DocumentLinkIn):
+    """Create a document linkage record for a Sales Order or PO Draft."""
+    import uuid as _uuid
+
+    if body.entity_type not in VALID_ENTITY_TYPES:
+        raise HTTPException(status_code=422, detail=f"Invalid entity_type '{body.entity_type}'. Must be one of: {VALID_ENTITY_TYPES}")
+    if body.document_type not in VALID_DOCUMENT_TYPES:
+        raise HTTPException(status_code=422, detail=f"Invalid document_type '{body.document_type}'. Must be one of: {VALID_DOCUMENT_TYPES}")
+
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "document_link_id": f"DOCL-{_uuid.uuid4().hex[:8].upper()}",
+        "entity_type": body.entity_type,
+        "entity_id": body.entity_id.strip(),
+        "document_type": body.document_type,
+        "document_name": body.document_name.strip(),
+        "document_url": body.document_url.strip(),
+        "uploaded_at": now,
+        "uploaded_by": None,
+        "notes": body.notes.strip(),
+    }
+    await db[DOCUMENT_LINKS_COLL].insert_one(doc.copy())
+    doc.pop("_id", None)
+    return doc
+
+
+@router.get("/document-links")
+async def api_list_document_links(entity_type: str, entity_id: str):
+    """List document links for a given entity."""
+    if entity_type not in VALID_ENTITY_TYPES:
+        raise HTTPException(status_code=422, detail=f"Invalid entity_type '{entity_type}'.")
+    db = get_db()
+    cursor = db[DOCUMENT_LINKS_COLL].find(
+        {"entity_type": entity_type, "entity_id": entity_id}, {"_id": 0}
+    ).sort("uploaded_at", -1)
+    docs = await cursor.to_list(length=200)
+    return {"entity_type": entity_type, "entity_id": entity_id, "total": len(docs), "documents": docs}
+
+
+@router.delete("/document-links/{document_link_id}")
+async def api_delete_document_link(document_link_id: str):
+    """Remove a document linkage record."""
+    db = get_db()
+    result = await db[DOCUMENT_LINKS_COLL].delete_one({"document_link_id": document_link_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail=f"Document link '{document_link_id}' not found")
+    return {"deleted": document_link_id}
+
+
+async def _get_document_links_summary(db, entity_type: str, entity_id: str):
+    """Helper: return doc link count and by-type summary."""
+    cursor = db[DOCUMENT_LINKS_COLL].find(
+        {"entity_type": entity_type, "entity_id": entity_id}, {"_id": 0}
+    ).sort("uploaded_at", -1)
+    docs = await cursor.to_list(length=200)
+    by_type = {}
+    for d in docs:
+        dt = d["document_type"]
+        by_type[dt] = by_type.get(dt, 0) + 1
+    return len(docs), by_type, docs
+
+
+async def _derive_so_checklist(db, sales_order_id: str, order_type: str, doc_count: int, docs_by_type: dict):
+    """Derive process checklist for a Sales Order."""
+    items = []
+
+    # Common: customer PO attached
+    has_customer_po = docs_by_type.get("customer_po", 0) > 0
+    items.append({"key": "customer_po_attached", "label": "Customer PO attached", "satisfied": has_customer_po})
+
+    # Common: approval support present
+    has_approval = docs_by_type.get("approval_backup", 0) > 0
+    items.append({"key": "approval_support_present", "label": "Approval-ready support present", "satisfied": has_approval})
+
+    if order_type == "warehouse":
+        # Warehouse: warehouse agreement
+        has_agreement = docs_by_type.get("warehouse_agreement", 0) > 0
+        items.append({"key": "warehouse_agreement", "label": "Warehouse agreement attached", "satisfied": has_agreement})
+    else:
+        # Drop-ship: linked DS PO draft
+        ds_draft_count = await db[PO_DRAFTS_COLL].count_documents(
+            {"sales_order_id": sales_order_id, "po_type": "drop_ship"}
+        )
+        items.append({"key": "ds_po_draft_created", "label": "Drop-Ship PO draft created", "satisfied": ds_draft_count > 0})
+
+    all_satisfied = all(i["satisfied"] for i in items)
+    return items, all_satisfied
+
+
+def _derive_po_draft_checklist(draft: dict, doc_count: int, docs_by_type: dict):
+    """Derive process checklist for a PO Draft."""
+    items = []
+
+    # Vendor assigned
+    has_vendor = bool(draft.get("vendor_name") or draft.get("vendor_id"))
+    items.append({"key": "vendor_assigned", "label": "Vendor assigned", "satisfied": has_vendor})
+
+    # Export-ready for BC (has lines and vendor)
+    has_lines = len(draft.get("lines", [])) > 0
+    export_ready = has_vendor and has_lines
+    items.append({"key": "export_ready", "label": "Export-ready for BC", "satisfied": export_ready})
+
+    # Supporting document present
+    has_support = doc_count > 0
+    items.append({"key": "support_doc_present", "label": "Supporting document present", "satisfied": has_support})
+
+    all_satisfied = all(i["satisfied"] for i in items)
+    return items, all_satisfied
+
+
+@router.get("/document-links/checklist/sales-order/{sales_order_id}")
+async def api_so_checklist(sales_order_id: str):
+    """Return derived process checklist for a Sales Order."""
+    db = get_db()
+    order_type = await _get_order_type(db, sales_order_id)
+    doc_count, docs_by_type, _ = await _get_document_links_summary(db, "sales_order", sales_order_id)
+    items, all_satisfied = await _derive_so_checklist(db, sales_order_id, order_type, doc_count, docs_by_type)
+    return {
+        "sales_order_id": sales_order_id,
+        "order_type": order_type,
+        "linked_document_count": doc_count,
+        "linked_documents_by_type": docs_by_type,
+        "process_checklist": items,
+        "checklist_complete": all_satisfied,
+    }
+
+
+@router.get("/document-links/checklist/po-draft/{po_draft_id}")
+async def api_po_draft_checklist(po_draft_id: str):
+    """Return derived process checklist for a PO Draft."""
+    db = get_db()
+    draft = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": po_draft_id}, {"_id": 0})
+    if not draft:
+        raise HTTPException(status_code=404, detail=f"PO Draft '{po_draft_id}' not found")
+    doc_count, docs_by_type, _ = await _get_document_links_summary(db, "po_draft", po_draft_id)
+    items, all_satisfied = _derive_po_draft_checklist(draft, doc_count, docs_by_type)
+    return {
+        "po_draft_id": po_draft_id,
+        "linked_document_count": doc_count,
+        "linked_documents_by_type": docs_by_type,
+        "process_checklist": items,
+        "checklist_complete": all_satisfied,
+    }
+
 
 
 class ShortageLineReq(BaseModel):

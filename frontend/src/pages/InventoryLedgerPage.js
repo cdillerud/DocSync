@@ -18,6 +18,7 @@ import {
   AlertTriangle, RefreshCw, Search, ArrowLeftRight, History,
   ChevronRight, ChevronLeft, Box, Truck, ClipboardList,
   RotateCcw, FileText, Download, Settings, Pencil, Upload, ShieldCheck, Zap,
+  Check, X, Trash2, Link,
 } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -724,6 +725,129 @@ function ExceptionsPanel({ customerId, onHistoryClick, onSupplyCreated }) {
 /* SHIPMENT CAPTURE DIALOG                                          */
 /* ════════════════════════════════════════════════════════════════ */
 
+const DOC_TYPE_LABELS = {
+  customer_po: 'Customer PO', warehouse_agreement: 'Warehouse Agreement',
+  approval_backup: 'Approval Backup', vendor_po_support: 'Vendor PO Support', other: 'Other',
+};
+const DOC_TYPE_OPTIONS = Object.entries(DOC_TYPE_LABELS);
+
+function DocumentLinksSection({ entityType, entityId, onChanged }) {
+  const [docs, setDocs] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [docType, setDocType] = useState('customer_po');
+  const [docName, setDocName] = useState('');
+  const [docUrl, setDocUrl] = useState('');
+  const [docNotes, setDocNotes] = useState('');
+  const [adding, setAdding] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!entityId) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/document-links?entity_type=${entityType}&entity_id=${encodeURIComponent(entityId)}`);
+      if (res.ok) { const d = await res.json(); setDocs(d.documents || []); }
+    } catch { /* silent */ }
+    finally { setLoading(false); }
+  }, [entityType, entityId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const addDoc = async () => {
+    if (!docName.trim()) { toast.error('Document name is required'); return; }
+    setAdding(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/document-links`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entity_type: entityType, entity_id: entityId, document_type: docType, document_name: docName.trim(), document_url: docUrl.trim(), notes: docNotes.trim() }),
+      });
+      if (res.ok) {
+        toast.success('Document linked');
+        setShowAdd(false); setDocName(''); setDocUrl(''); setDocNotes(''); setDocType('customer_po');
+        load(); onChanged?.();
+      } else { const d = await res.json(); toast.error(d.detail || 'Failed'); }
+    } catch { toast.error('Failed to add document link'); }
+    finally { setAdding(false); }
+  };
+
+  const removeDoc = async (id) => {
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/document-links/${id}`, { method: 'DELETE' });
+      if (res.ok) { toast.success('Document link removed'); load(); onChanged?.(); }
+      else { toast.error('Failed to remove'); }
+    } catch { toast.error('Failed to remove document link'); }
+  };
+
+  return (
+    <div className="space-y-1.5" data-testid="doc-links-section">
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1"><Link className="w-3 h-3" /> Documents</p>
+        <Button variant="ghost" size="sm" className="h-5 text-[10px] px-1.5" onClick={() => setShowAdd(!showAdd)} data-testid="doc-links-add-btn">
+          {showAdd ? <X className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
+        </Button>
+      </div>
+      {showAdd && (
+        <div className="space-y-1.5 border border-border rounded p-2 bg-muted/20" data-testid="doc-links-add-form">
+          <div className="flex gap-2">
+            <Select value={docType} onValueChange={setDocType}>
+              <SelectTrigger className="h-6 text-[10px] w-[150px]" data-testid="doc-links-type-select"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {DOC_TYPE_OPTIONS.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Input className="h-6 text-[10px] flex-1" placeholder="Document name" value={docName} onChange={e => setDocName(e.target.value)} data-testid="doc-links-name" />
+          </div>
+          <div className="flex gap-2">
+            <Input className="h-6 text-[10px] flex-1" placeholder="URL / reference (optional)" value={docUrl} onChange={e => setDocUrl(e.target.value)} data-testid="doc-links-url" />
+            <Input className="h-6 text-[10px] flex-1" placeholder="Notes (optional)" value={docNotes} onChange={e => setDocNotes(e.target.value)} data-testid="doc-links-notes" />
+          </div>
+          <Button size="sm" className="h-6 text-[10px] w-full" disabled={adding || !docName.trim()} onClick={addDoc} data-testid="doc-links-confirm">
+            {adding ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Link className="w-3 h-3 mr-1" />} Attach Document
+          </Button>
+        </div>
+      )}
+      {loading && <div className="flex justify-center py-1"><Loader2 className="w-3 h-3 animate-spin" /></div>}
+      {docs.length > 0 && (
+        <div className="border border-border rounded overflow-hidden" data-testid="doc-links-list">
+          {docs.map((doc, i) => (
+            <div key={doc.document_link_id} className="flex items-center gap-2 border-b border-border/20 last:border-b-0 p-1.5 text-[10px]" data-testid={`doc-link-${i}`}>
+              <Badge variant="outline" className="text-[7px] shrink-0">{DOC_TYPE_LABELS[doc.document_type] || doc.document_type}</Badge>
+              <span className="font-medium truncate flex-1">{doc.document_name}</span>
+              {doc.document_url && <a href={doc.document_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline shrink-0"><Link className="w-3 h-3" /></a>}
+              <Button variant="ghost" size="icon" className="h-5 w-5 text-red-500 shrink-0" onClick={() => removeDoc(doc.document_link_id)} data-testid={`doc-link-delete-${i}`}>
+                <Trash2 className="w-3 h-3" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+      {!loading && docs.length === 0 && <p className="text-[9px] text-muted-foreground italic">No documents linked</p>}
+    </div>
+  );
+}
+
+function ProcessChecklistSection({ checklist, complete }) {
+  if (!checklist || !checklist.length) return null;
+  return (
+    <div className="space-y-1" data-testid="process-checklist-section">
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1"><ShieldCheck className="w-3 h-3" /> Process Checklist</p>
+        <Badge variant={complete ? 'default' : 'secondary'} className="text-[7px]" data-testid="checklist-status-badge">{complete ? 'Complete' : 'Incomplete'}</Badge>
+      </div>
+      <div className="border border-border rounded overflow-hidden" data-testid="checklist-items">
+        {checklist.map((item, i) => (
+          <div key={item.key} className={`flex items-center gap-2 p-1.5 text-[10px] border-b border-border/20 last:border-b-0 ${item.satisfied ? '' : 'bg-amber-50/50 dark:bg-amber-900/10'}`} data-testid={`checklist-item-${i}`}>
+            {item.satisfied
+              ? <Check className="w-3 h-3 text-green-600 shrink-0" />
+              : <AlertTriangle className="w-3 h-3 text-amber-500 shrink-0" />}
+            <span className={item.satisfied ? 'text-muted-foreground' : 'font-medium text-amber-700 dark:text-amber-400'}>{item.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipped }) {
   const [soId, setSoId] = useState(initialSoId || '');
   const [summary, setSummary] = useState(null);
@@ -1040,6 +1164,12 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
                     <Badge variant={summary.operational_status === 'complete' ? 'default' : summary.operational_status === 'shipped' ? 'outline' : 'secondary'} className="text-[8px]" data-testid="inv-so-operational-status">{summary.operational_status}</Badge>
                   )}
                 </div>
+              )}
+
+              {/* ═══ DOCUMENTS & PROCESS CHECKLIST ═══ */}
+              <DocumentLinksSection entityType="sales_order" entityId={soId.trim()} onChanged={() => loadSummary()} />
+              {summary.process_checklist && (
+                <ProcessChecklistSection checklist={summary.process_checklist} complete={summary.checklist_complete} />
               )}
 
               {/* ═══ DROP-SHIP PO DRAFT SECTION ═══ */}
@@ -1989,26 +2119,26 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
   const [recordingReceipt, setRecordingReceipt] = useState(false);
   const [receiptResult, setReceiptResult] = useState(null);
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const res = await fetch(`${API}/api/inventory-ledger/po-drafts/${draftId}`);
-        if (res.ok) {
-          const d = await res.json();
-          setDraft(d);
-          setVendorId(d.vendor_id || '');
-          setVendorName(d.vendor_name || '');
-          setBcRespStatus(d.bc_response_status || '');
-          setBcPoNumber(d.bc_po_number || '');
-          setBcDocId(d.bc_document_id || '');
-          setBcRespNotes(d.bc_response_notes || '');
-        }
-        else toast.error('Draft not found');
-      } catch { toast.error('Failed to load draft'); }
-      finally { setLoading(false); }
-    })();
+  const loadDraft = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/po-drafts/${draftId}`);
+      if (res.ok) {
+        const d = await res.json();
+        setDraft(d);
+        setVendorId(d.vendor_id || '');
+        setVendorName(d.vendor_name || '');
+        setBcRespStatus(d.bc_response_status || '');
+        setBcPoNumber(d.bc_po_number || '');
+        setBcDocId(d.bc_document_id || '');
+        setBcRespNotes(d.bc_response_notes || '');
+      }
+      else toast.error('Draft not found');
+    } catch { toast.error('Failed to load draft'); }
+    finally { setLoading(false); }
   }, [draftId]);
+
+  useEffect(() => { loadDraft(); }, [loadDraft]);
 
   const loadSubmissionLogs = useCallback(async () => {
     setLogsLoading(true);
@@ -2328,6 +2458,12 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
                 </table>
               </div>
             </div>
+
+            {/* Documents & Process Checklist */}
+            <DocumentLinksSection entityType="po_draft" entityId={draftId} onChanged={() => loadDraft()} />
+            {draft.process_checklist && (
+              <ProcessChecklistSection checklist={draft.process_checklist} complete={draft.checklist_complete} />
+            )}
 
             {/* Actions */}
             <div className="flex flex-wrap gap-2 pt-1" data-testid="inv-po-draft-actions">

@@ -1,0 +1,126 @@
+{
+  "summary": "Comprehensive testing of Document Linkage and Process Checklist features (iteration_85). Backend: 16/16 tests passed. Frontend: All document linkage and process checklist UI elements verified in both ShipmentCaptureDialog and PODraftDetailDrawer. Regression tests from iteration_83 and iteration_84 pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "InventoryLedgerPage", "issues": ["React hydration warnings in console due to <span> inside <tbody> - cosmetic only, no functional impact (existing issue from iteration_84)"]}
+    ]
+  },
+  "passed_tests": [
+    "Backend: POST /api/inventory-ledger/document-links creates document linkage for sales_order",
+    "Backend: POST /api/inventory-ledger/document-links creates document linkage for po_draft",
+    "Backend: POST /api/inventory-ledger/document-links rejects invalid entity_type with 422",
+    "Backend: POST /api/inventory-ledger/document-links rejects invalid document_type with 422",
+    "Backend: GET /api/inventory-ledger/document-links lists linked docs sorted newest first",
+    "Backend: DELETE /api/inventory-ledger/document-links/{id} removes linkage",
+    "Backend: DELETE /api/inventory-ledger/document-links/{id} returns 404 for unknown ID",
+    "Backend: GET /api/inventory-ledger/document-links/checklist/sales-order/{id} returns warehouse checklist (customer_po_attached, approval_support_present, warehouse_agreement)",
+    "Backend: GET /api/inventory-ledger/document-links/checklist/sales-order/{id} returns drop_ship checklist (customer_po_attached, approval_support_present, ds_po_draft_created)",
+    "Backend: GET /api/inventory-ledger/document-links/checklist/po-draft/{id} returns PO draft checklist (vendor_assigned, export_ready, support_doc_present)",
+    "Backend: GET /api/inventory-ledger/sales-orders/{id}/summary includes linked_document_count, linked_documents_by_type, process_checklist, checklist_complete",
+    "Backend: GET /api/inventory-ledger/po-drafts/{id} includes linked_document_count, linked_documents_by_type, process_checklist, checklist_complete",
+    "Backend: Checklist updates correctly when docs are added/removed",
+    "Backend: Regression - iteration_84 drop-ship PO workflow still works",
+    "Backend: Regression - iteration_83 order type awareness still works",
+    "Frontend: ShipmentCaptureDialog shows DocumentLinksSection with add form and linked docs list",
+    "Frontend: ShipmentCaptureDialog shows ProcessChecklistSection with checked/unchecked items",
+    "Frontend: Document add form has type selector (customer_po, warehouse_agreement, approval_backup, vendor_po_support, other), name input, url input, notes input",
+    "Frontend: PODraftDetailDrawer shows DOCUMENTS section with linked docs and add button",
+    "Frontend: PODraftDetailDrawer shows PROCESS CHECKLIST with status badge (Complete/Incomplete)",
+    "Frontend: Checklist items show check mark for satisfied, warning triangle for unsatisfied",
+    "Frontend: Document can be deleted via trash icon"
+  ],
+  "skipped_tests": [],
+  "test_report_links": [
+    "/app/backend/tests/test_document_linkage_checklist.py",
+    "/app/test_reports/pytest/document_linkage_checklist_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend inventory_ledger.py Lines 2965-3027: Document links CRUD endpoints (POST/GET/DELETE) with validation",
+    "Backend inventory_ledger.py Lines 3030-3067: Helper functions for document links summary and SO checklist derivation",
+    "Backend inventory_ledger.py Lines 3070-3088: PO draft checklist derivation (vendor_assigned, export_ready, support_doc_present)",
+    "Backend inventory_ledger.py Lines 3091-3123: Checklist endpoints for SO and PO draft",
+    "Backend inventory_ledger.py Lines 2854-2860: DS summary enrichment with doc links and checklist",
+    "Backend inventory_ledger.py Lines 2951-2957: Warehouse summary enrichment with doc links and checklist",
+    "Backend inventory_ledger.py Lines 1062-1068: PO draft detail enrichment with doc links and checklist",
+    "Frontend InventoryLedgerPage.js Lines 734-826: DocumentLinksSection reusable component",
+    "Frontend InventoryLedgerPage.js Lines 829-848: ProcessChecklistSection reusable component",
+    "Frontend InventoryLedgerPage.js Lines 1170-1172: DocumentLinksSection and ProcessChecklistSection in ShipmentCaptureDialog",
+    "Frontend InventoryLedgerPage.js Lines 2463-2465: DocumentLinksSection and ProcessChecklistSection in PODraftDetailDrawer"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_document_linkage_checklist.py"
+  ],
+  "success_rate": {
+    "backend": "100% (16/16 passed)",
+    "frontend": "100% (all UI elements verified)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://order-type-aware.preview.emergentagent.com"
+  },
+  "seed_data_used": {
+    "existing_so": "SO-TEST-DROP-001 (drop-ship SO with documents linked)",
+    "existing_po_draft": "PO-DRAFT-20260314203040-AF20B0 (has 2 vendor_po_support docs, checklist incomplete)",
+    "test_customer": "Healthy Corp (HC-22137) for PO draft testing"
+  },
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Document linkage and process checklist fully implemented in iteration_85. New collection: document_links. Document types: customer_po, warehouse_agreement, approval_backup, vendor_po_support, other. Entity types: sales_order, po_draft. Checklist for warehouse SO: customer_po_attached + approval_support_present + warehouse_agreement. Checklist for drop_ship SO: customer_po_attached + approval_support_present + ds_po_draft_created. Checklist for PO draft: vendor_assigned + export_ready + support_doc_present. DocumentLinksSection and ProcessChecklistSection are reusable components used in both ShipmentCaptureDialog and PODraftDetailDrawer. All iteration_83 and iteration_84 features still work.",
+  "features_verified": {
+    "backend_endpoints": {
+      "create_document_link": {
+        "method": "POST",
+        "path": "/api/inventory-ledger/document-links",
+        "request_body": {"entity_type": "sales_order|po_draft", "entity_id": "string", "document_type": "customer_po|warehouse_agreement|approval_backup|vendor_po_support|other", "document_name": "string", "document_url": "string", "notes": "string"},
+        "response": {"document_link_id": "DOCL-...", "entity_type": "...", "entity_id": "...", "document_type": "...", "document_name": "...", "document_url": "...", "uploaded_at": "...", "notes": "..."},
+        "validation": "Rejects invalid entity_type or document_type with 422"
+      },
+      "list_document_links": {
+        "method": "GET",
+        "path": "/api/inventory-ledger/document-links?entity_type=X&entity_id=Y",
+        "response": {"entity_type": "...", "entity_id": "...", "total": "number", "documents": []},
+        "sorting": "newest first by uploaded_at"
+      },
+      "delete_document_link": {
+        "method": "DELETE",
+        "path": "/api/inventory-ledger/document-links/{document_link_id}",
+        "response": {"deleted": "DOCL-..."},
+        "validation": "Returns 404 for unknown ID"
+      },
+      "so_checklist": {
+        "method": "GET",
+        "path": "/api/inventory-ledger/document-links/checklist/sales-order/{sales_order_id}",
+        "response": {"sales_order_id": "...", "order_type": "warehouse|drop_ship", "linked_document_count": "number", "linked_documents_by_type": {}, "process_checklist": [], "checklist_complete": "boolean"}
+      },
+      "po_draft_checklist": {
+        "method": "GET",
+        "path": "/api/inventory-ledger/document-links/checklist/po-draft/{po_draft_id}",
+        "response": {"po_draft_id": "...", "linked_document_count": "number", "linked_documents_by_type": {}, "process_checklist": [], "checklist_complete": "boolean"}
+      },
+      "so_summary_enrichment": {
+        "new_fields": ["linked_document_count", "linked_documents_by_type", "process_checklist", "checklist_complete"]
+      },
+      "po_draft_detail_enrichment": {
+        "new_fields": ["linked_document_count", "linked_documents_by_type", "process_checklist", "checklist_complete"]
+      }
+    },
+    "frontend_components": {
+      "DocumentLinksSection": {
+        "testid": "doc-links-section",
+        "features": ["add form", "linked docs list", "delete via trash icon"],
+        "form_fields": ["type selector (doc-links-type-select)", "name input (doc-links-name)", "url input (doc-links-url)", "notes input (doc-links-notes)"]
+      },
+      "ProcessChecklistSection": {
+        "testid": "process-checklist-section",
+        "features": ["checklist badge (Complete/Incomplete)", "checklist items with satisfied/unsatisfied indicators"]
+      }
+    }
+  }
+}

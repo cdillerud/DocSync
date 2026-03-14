@@ -613,6 +613,125 @@ async def api_export_balances(
 # INVENTORY SNAPSHOT
 # ═══════════════════════════════════════════════════════════════
 
+EXCEPTION_TYPES = {"short", "low", "reorder", "no_incoming"}
+
+
+@router.get("/exceptions")
+async def api_exceptions(
+    customer_id: str = Query(..., description="Customer workspace ID"),
+    item: str = Query("", description="Filter by item"),
+    exception_type: str = Query("", description="Filter by exception type (short|low|reorder|no_incoming)"),
+    limit: int = Query(500, ge=1, le=5000),
+):
+    """Return inventory items that need attention.
+
+    Uses existing derive_balances and reorder recommendation logic.
+    """
+    db = get_db()
+    balances = await derive_balances(db, customer_id, item=item or None)
+
+    # Build reorder set (same logic as reorder-recommendations)
+    settings_docs = await db["inv_item_settings"].find(
+        {"customer_id": customer_id}, {"_id": 0}
+    ).to_list(5000)
+    settings_map = {s["item"]: s for s in settings_docs}
+
+    reorder_map = {}
+    for b in balances:
+        avail = b.get("available", 0)
+        is_short = b.get("is_short", False)
+        s = settings_map.get(b["item"])
+        threshold = s["reorder_threshold"] if s else DEFAULT_REORDER_THRESHOLD
+        buffer = s["safety_buffer"] if s else DEFAULT_SAFETY_BUFFER
+        if avail > threshold and not is_short:
+            continue
+        rec_qty = round(max(0, threshold - avail) + buffer, 4)
+        reorder_map[f'{b["item"]}|{b.get("warehouse", "")}|{b.get("ownership_type", "")}'] = {
+            "recommended_qty": rec_qty,
+            "reorder_threshold": threshold,
+            "safety_buffer": buffer,
+        }
+
+    # Classify exceptions
+    rows = []
+    short_count = low_count = reorder_count = no_incoming_count = 0
+
+    filter_types = set()
+    if exception_type:
+        for t in exception_type.split(","):
+            t = t.strip().lower()
+            if t in EXCEPTION_TYPES:
+                filter_types.add(t)
+
+    for b in balances:
+        exc_types = []
+        key = f'{b["item"]}|{b.get("warehouse", "")}|{b.get("ownership_type", "")}'
+        is_short = b.get("is_short", False)
+        is_low = b.get("is_low", False)
+        incoming = b.get("incoming", 0)
+
+        if is_short:
+            exc_types.append("short")
+        if is_low:
+            exc_types.append("low")
+        if key in reorder_map:
+            exc_types.append("reorder")
+        if (is_short or is_low) and incoming == 0:
+            exc_types.append("no_incoming")
+
+        if not exc_types:
+            continue
+
+        # Count all exceptions (before filter)
+        if "short" in exc_types:
+            short_count += 1
+        if "low" in exc_types:
+            low_count += 1
+        if "reorder" in exc_types:
+            reorder_count += 1
+        if "no_incoming" in exc_types:
+            no_incoming_count += 1
+
+        # Apply exception_type filter
+        if filter_types and not filter_types.intersection(exc_types):
+            continue
+
+        status = "SHORT" if is_short else ("LOW" if is_low else "OK")
+        row = {
+            "item": b["item"],
+            "item_description": b.get("item_description", ""),
+            "warehouse": b.get("warehouse", ""),
+            "ownership_type": b.get("ownership_type", ""),
+            "on_hand": b.get("on_hand", 0),
+            "incoming": incoming,
+            "committed": b.get("committed", 0),
+            "available": b.get("available", 0),
+            "unit_of_measure": b.get("unit_of_measure", ""),
+            "status": status,
+            "exception_types": exc_types,
+        }
+        if key in reorder_map:
+            row["recommended_qty"] = reorder_map[key]["recommended_qty"]
+            row["reorder_threshold"] = reorder_map[key]["reorder_threshold"]
+            row["safety_buffer"] = reorder_map[key]["safety_buffer"]
+
+        rows.append(row)
+
+    # Sort most critical first (available ascending)
+    rows.sort(key=lambda r: r["available"])
+
+    return {
+        "total": len(rows[:limit]),
+        "exception_summary": {
+            "short_count": short_count,
+            "low_count": low_count,
+            "reorder_count": reorder_count,
+            "no_incoming_count": no_incoming_count,
+        },
+        "exceptions": rows[:limit],
+    }
+
+
 async def _build_snapshot(db, customer_id: str, item: str = "", include_reorders: bool = True):
     """Build a read-only snapshot of current inventory state.
 

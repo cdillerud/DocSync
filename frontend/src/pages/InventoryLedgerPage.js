@@ -189,6 +189,7 @@ function CustomerWorkspace({ customer }) {
             <TabsTrigger value="incoming" data-testid="inv-tab-incoming"><Truck className="w-3.5 h-3.5 mr-1" /> Incoming</TabsTrigger>
             <TabsTrigger value="reorder" data-testid="inv-tab-reorder"><AlertTriangle className="w-3.5 h-3.5 mr-1" /> Reorder</TabsTrigger>
             <TabsTrigger value="settings" data-testid="inv-tab-settings"><Settings className="w-3.5 h-3.5 mr-1" /> Item Settings</TabsTrigger>
+            <TabsTrigger value="exceptions" data-testid="inv-tab-exceptions"><AlertTriangle className="w-3.5 h-3.5 mr-1" /> Exceptions</TabsTrigger>
           </TabsList>
           <div className="flex gap-2">
             {tab === 'balances' && (
@@ -245,6 +246,9 @@ function CustomerWorkspace({ customer }) {
         </TabsContent>
         <TabsContent value="settings">
           <ItemSettingsPanel customerId={cid} />
+        </TabsContent>
+        <TabsContent value="exceptions">
+          <ExceptionsPanel customerId={cid} onHistoryClick={(item) => setHistoryItem({ item, customerId: cid })} onSupplyCreated={refresh} />
         </TabsContent>
       </Tabs>
 
@@ -535,6 +539,140 @@ function ItemSettingsPanel({ customerId }) {
           </CardContent>
         </Card>
       )}
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════ */
+/* EXCEPTIONS PANEL                                                  */
+/* ════════════════════════════════════════════════════════════════ */
+
+const EXC_BADGES = {
+  short: { label: 'SHORT', cls: 'bg-red-500/10 text-red-600 border-red-500/20' },
+  low: { label: 'LOW', cls: 'bg-amber-500/10 text-amber-600 border-amber-500/20' },
+  reorder: { label: 'REORDER', cls: 'bg-orange-500/10 text-orange-600 border-orange-500/20' },
+  no_incoming: { label: 'NO INCOMING', cls: 'bg-violet-500/10 text-violet-600 border-violet-500/20' },
+};
+
+function ExceptionsPanel({ customerId, onHistoryClick, onSupplyCreated }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('');
+  const [creating, setCreating] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const q = new URLSearchParams({ customer_id: customerId });
+      if (filter) q.set('exception_type', filter);
+      const res = await fetch(`${API}/api/inventory-ledger/exceptions?${q}`);
+      setData(await res.json());
+    } catch { toast.error('Failed to load exceptions'); }
+    finally { setLoading(false); }
+  }, [customerId, filter]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const createSupply = async (item) => {
+    setCreating(item);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/customers/${customerId}/incoming`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_no: item, quantity: 0, source_reference: `EXCEPTION-${item}`, notes: 'Created from exceptions view' }),
+      });
+      if (res.ok) { toast.success(`Incoming supply created for ${item}`); onSupplyCreated?.(); load(); }
+      else { const d = await res.json(); toast.error(d.detail || 'Failed'); }
+    } catch { toast.error('Failed'); }
+    finally { setCreating(null); }
+  };
+
+  const summary = data?.exception_summary || {};
+  const exceptions = data?.exceptions || [];
+  const cards = [
+    { key: 'short', label: 'SHORT', count: summary.short_count || 0, color: 'text-red-500 border-red-500/30' },
+    { key: 'low', label: 'LOW', count: summary.low_count || 0, color: 'text-amber-500 border-amber-500/30' },
+    { key: 'reorder', label: 'Reorder', count: summary.reorder_count || 0, color: 'text-orange-500 border-orange-500/30' },
+    { key: 'no_incoming', label: 'No Incoming', count: summary.no_incoming_count || 0, color: 'text-violet-500 border-violet-500/30' },
+  ];
+
+  return (
+    <div className="space-y-4" data-testid="inv-exceptions-panel">
+      {/* Exception Summary Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3" data-testid="inv-exception-summary">
+        {cards.map(c => (
+          <button key={c.key}
+            onClick={() => setFilter(f => f === c.key ? '' : c.key)}
+            className={`border rounded-md p-3 text-left transition-all ${filter === c.key ? 'ring-2 ring-primary bg-muted/50' : 'bg-muted/20 hover:bg-muted/40'}`}
+            data-testid={`inv-exc-card-${c.key}`}>
+            <p className={`text-2xl font-bold ${c.color}`}>{c.count}</p>
+            <p className="text-[10px] text-muted-foreground">{c.label}{filter === c.key ? ' (active)' : ''}</p>
+          </button>
+        ))}
+      </div>
+
+      {/* Exception Table */}
+      <Card className="border-border/50">
+        <CardContent className="p-0">
+          {loading ? (
+            <div className="flex items-center justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+          ) : exceptions.length === 0 ? (
+            <div className="text-center py-10 text-sm text-muted-foreground" data-testid="inv-exceptions-empty">No exceptions found{filter ? ` for "${filter}"` : ''}.</div>
+          ) : (
+            <table className="w-full text-xs" data-testid="inv-exceptions-table">
+              <thead className="border-b border-border/50 bg-muted/30">
+                <tr>
+                  <th className="p-2 text-left font-medium">Item</th>
+                  <th className="p-2 text-left font-medium">Warehouse</th>
+                  <th className="p-2 text-right font-medium">On Hand</th>
+                  <th className="p-2 text-right font-medium">Incoming</th>
+                  <th className="p-2 text-right font-medium">Committed</th>
+                  <th className="p-2 text-right font-medium">Available</th>
+                  <th className="p-2 text-left font-medium">Exceptions</th>
+                  <th className="p-2 text-right font-medium">Rec. Qty</th>
+                  <th className="p-2 text-center font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {exceptions.map((e, i) => (
+                  <tr key={i} className="border-b border-border/20 hover:bg-muted/20" data-testid={`inv-exc-row-${i}`}>
+                    <td className="p-2 font-mono">{e.item}</td>
+                    <td className="p-2 text-muted-foreground">{e.warehouse || '—'}</td>
+                    <td className="p-2 text-right">{e.on_hand?.toLocaleString()}</td>
+                    <td className="p-2 text-right">{e.incoming?.toLocaleString()}</td>
+                    <td className="p-2 text-right">{e.committed?.toLocaleString()}</td>
+                    <td className={`p-2 text-right font-bold ${e.available < 0 ? 'text-red-500' : ''}`}>{e.available?.toLocaleString()}</td>
+                    <td className="p-2">
+                      <div className="flex flex-wrap gap-1">
+                        {e.exception_types?.map(t => (
+                          <span key={t} className={`text-[9px] px-1.5 py-0.5 rounded border font-medium ${EXC_BADGES[t]?.cls || ''}`}>
+                            {EXC_BADGES[t]?.label || t}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="p-2 text-right font-bold">{e.recommended_qty != null ? e.recommended_qty.toLocaleString() : '—'}</td>
+                    <td className="p-2 text-center">
+                      <div className="flex justify-center gap-1">
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => onHistoryClick?.(e.item)} title="View history"
+                          data-testid={`inv-exc-history-${i}`}>
+                          <History className="w-3 h-3" />
+                        </Button>
+                        {(e.exception_types?.includes('short') || e.exception_types?.includes('no_incoming')) && (
+                          <Button variant="ghost" size="icon" className="h-6 w-6" disabled={creating === e.item}
+                            onClick={() => createSupply(e.item)} title="Create incoming supply"
+                            data-testid={`inv-exc-supply-${i}`}>
+                            {creating === e.item ? <Loader2 className="w-3 h-3 animate-spin" /> : <Truck className="w-3 h-3" />}
+                          </Button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

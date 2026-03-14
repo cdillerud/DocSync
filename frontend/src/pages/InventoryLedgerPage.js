@@ -186,6 +186,7 @@ function CustomerWorkspace({ customer }) {
             <TabsTrigger value="balances" data-testid="inv-tab-balances"><Box className="w-3.5 h-3.5 mr-1" /> Balances</TabsTrigger>
             <TabsTrigger value="movements" data-testid="inv-tab-movements"><History className="w-3.5 h-3.5 mr-1" /> Movements</TabsTrigger>
             <TabsTrigger value="incoming" data-testid="inv-tab-incoming"><Truck className="w-3.5 h-3.5 mr-1" /> Incoming</TabsTrigger>
+            <TabsTrigger value="reorder" data-testid="inv-tab-reorder"><AlertTriangle className="w-3.5 h-3.5 mr-1" /> Reorder</TabsTrigger>
           </TabsList>
           <div className="flex gap-2">
             {tab === 'balances' && (
@@ -223,6 +224,9 @@ function CustomerWorkspace({ customer }) {
         <TabsContent value="incoming">
           <IncomingTable records={incoming} customerId={cid} onUpdate={refresh} />
         </TabsContent>
+        <TabsContent value="reorder">
+          <ReorderPanel customerId={cid} onSupplyCreated={refresh} />
+        </TabsContent>
       </Tabs>
 
       {/* Movement Form Dialog */}
@@ -241,6 +245,129 @@ function CustomerWorkspace({ customer }) {
         />
       )}
     </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════ */
+/* REORDER RECOMMENDATIONS                                          */
+/* ════════════════════════════════════════════════════════════════ */
+
+function ReorderPanel({ customerId, onSupplyCreated }) {
+  const [recs, setRecs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(null);
+
+  const fetchRecs = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/reorder-recommendations?customer_id=${customerId}`);
+      const data = await res.json();
+      setRecs(data.recommendations || []);
+    } catch { toast.error('Failed to load recommendations'); }
+    finally { setLoading(false); }
+  }, [customerId]);
+
+  useEffect(() => { fetchRecs(); }, [fetchRecs]);
+
+  const createSupply = async (rec) => {
+    setCreating(rec.item);
+    try {
+      // Need an SO reference — use "REORDER-<item>" as a generic reference
+      // This endpoint requires an existing order_commitment, so we use the incoming supply endpoint directly
+      const payload = {
+        item: rec.item,
+        item_description: rec.item_description,
+        warehouse: rec.warehouse,
+        ownership_type: rec.ownership_type,
+        incoming_qty: rec.recommended_qty,
+        unit_of_measure: rec.unit_of_measure,
+        source_reference: `REORDER-${rec.item}`,
+        status: 'planned',
+      };
+      const res = await fetch(`${API}/api/inventory-ledger/customers/${customerId}/incoming`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        toast.success(`Incoming supply created for ${rec.item} (${rec.recommended_qty} ${rec.unit_of_measure})`);
+        onSupplyCreated();
+        fetchRecs();
+      } else {
+        const d = await res.json();
+        toast.error(d.detail || 'Failed to create supply');
+      }
+    } catch { toast.error('Failed to create supply'); }
+    finally { setCreating(null); }
+  };
+
+  if (loading) return <div className="py-10 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto" /></div>;
+  if (!recs.length) return (
+    <div className="py-10 text-center text-muted-foreground" data-testid="inv-reorder-empty">
+      <Package className="w-8 h-8 mx-auto mb-2 opacity-30" />
+      <p className="text-sm font-medium">No reorder recommendations</p>
+      <p className="text-xs mt-1">All items have healthy inventory levels.</p>
+    </div>
+  );
+
+  return (
+    <Card className="border border-border" data-testid="inv-reorder-panel">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-xs font-bold uppercase tracking-wider" style={{ fontFamily: 'Chivo, sans-serif' }}>
+            <AlertTriangle className="w-3.5 h-3.5 inline mr-1 text-amber-500" />
+            {recs.length} item{recs.length !== 1 ? 's' : ''} need replenishment
+          </CardTitle>
+          <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={fetchRecs}>
+            <RefreshCw className="w-3 h-3 mr-1" /> Refresh
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0 overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-border bg-muted/40 text-[10px] text-muted-foreground uppercase tracking-wider">
+              <th className="text-left py-2 px-3 font-medium">Item</th>
+              <th className="text-right py-2 px-3 font-medium">On Hand</th>
+              <th className="text-right py-2 px-3 font-medium">Incoming</th>
+              <th className="text-right py-2 px-3 font-medium">Committed</th>
+              <th className="text-right py-2 px-3 font-medium">Available</th>
+              <th className="text-center py-2 px-3 font-medium">Status</th>
+              <th className="text-right py-2 px-3 font-medium">Recommended Qty</th>
+              <th className="text-right py-2 px-3 font-medium">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {recs.map((r, i) => (
+              <tr key={i} className="border-b border-border/50 hover:bg-muted/20" data-testid={`inv-reorder-row-${i}`}>
+                <td className="py-1.5 px-3">
+                  <span className="font-mono font-medium">{r.item}</span>
+                  {r.item_description && <span className="text-[10px] text-muted-foreground block truncate max-w-[180px]">{r.item_description}</span>}
+                </td>
+                <td className="py-1.5 px-3 text-right font-mono">{r.on_hand.toLocaleString()}</td>
+                <td className="py-1.5 px-3 text-right font-mono">{r.incoming > 0 ? <span className="text-sky-600">+{r.incoming.toLocaleString()}</span> : '-'}</td>
+                <td className="py-1.5 px-3 text-right font-mono">{r.committed > 0 ? <span className="text-amber-600">-{r.committed.toLocaleString()}</span> : '-'}</td>
+                <td className={`py-1.5 px-3 text-right font-mono font-bold ${r.available < 0 ? 'text-red-600' : ''}`}>{r.available.toLocaleString()}</td>
+                <td className="py-1.5 px-3 text-center">
+                  <Badge variant={r.status === 'SHORT' ? 'destructive' : 'outline'} className={`text-[9px] ${r.status === 'LOW' ? 'border-amber-300 text-amber-600' : ''}`}>
+                    {r.status}
+                  </Badge>
+                </td>
+                <td className="py-1.5 px-3 text-right font-mono font-bold text-emerald-600">{r.recommended_qty.toLocaleString()}</td>
+                <td className="py-1.5 px-3 text-right">
+                  <Button variant="outline" size="sm" className="h-5 text-[9px] px-1.5"
+                    disabled={creating === r.item}
+                    onClick={() => createSupply(r)}
+                    data-testid={`inv-reorder-create-${i}`}>
+                    {creating === r.item ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3 mr-0.5" />}
+                    Supply
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
   );
 }
 

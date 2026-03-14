@@ -371,6 +371,60 @@ async def api_export_balances(
     )
 
 
+# ═══════════════════════════════════════════════════════════════
+# REORDER RECOMMENDATIONS
+# ═══════════════════════════════════════════════════════════════
+
+DEFAULT_SAFETY_BUFFER = 10
+DEFAULT_REORDER_THRESHOLD = 0
+
+
+@router.get("/reorder-recommendations")
+async def api_reorder_recommendations(
+    customer_id: str = Query(..., description="Customer workspace ID"),
+    item: str = Query("", description="Filter by item"),
+    limit: int = Query(100, ge=1, le=500),
+):
+    """Generate reorder recommendations based on current derived balances.
+
+    Recommends items where available <= 0 (SHORT). Read-only — no ledger mutations.
+    recommended_qty = abs(available) + safety_buffer.
+    """
+    db = get_db()
+    balances = await derive_balances(db, customer_id, item=item or None)
+
+    recs = []
+    for b in balances:
+        avail = b.get("available", 0)
+        is_short = b.get("is_short", False)
+
+        if not is_short and avail > DEFAULT_REORDER_THRESHOLD:
+            continue
+
+        rec_qty = round(abs(avail) + DEFAULT_SAFETY_BUFFER, 4) if avail <= 0 else DEFAULT_SAFETY_BUFFER
+
+        status = "SHORT" if is_short else ("LOW" if b.get("is_low") else "OK")
+        recs.append({
+            "item": b["item"],
+            "item_description": b.get("item_description", ""),
+            "warehouse": b.get("warehouse", "MAIN"),
+            "ownership_type": b.get("ownership_type", ""),
+            "on_hand": b.get("on_hand", 0),
+            "incoming": b.get("incoming", 0),
+            "committed": b.get("committed", 0),
+            "available": avail,
+            "unit_of_measure": b.get("unit_of_measure", "units"),
+            "status": status,
+            "recommended_qty": rec_qty,
+        })
+
+    # Sort by available ascending (most critical first), limit
+    recs.sort(key=lambda r: r["available"])
+    return {"recommendations": recs[:limit], "total": len(recs)}
+
+
+
+
 
 
 

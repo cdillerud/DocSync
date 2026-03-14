@@ -134,6 +134,7 @@ function CustomerWorkspace({ customer }) {
   const [search, setSearch] = useState('');
   const [detailItem, setDetailItem] = useState(null);
   const [historyItem, setHistoryItem] = useState(null);
+  const [viewDraftId, setViewDraftId] = useState(null);
 
   const cid = customer?.id;
 
@@ -194,6 +195,7 @@ function CustomerWorkspace({ customer }) {
             <TabsTrigger value="demand" data-testid="inv-tab-demand"><TrendingDown className="w-3.5 h-3.5 mr-1" /> Demand</TabsTrigger>
             <TabsTrigger value="coverage" data-testid="inv-tab-coverage"><ShieldCheck className="w-3.5 h-3.5 mr-1" /> Supply Coverage</TabsTrigger>
             <TabsTrigger value="action-center" data-testid="inv-tab-action-center"><Zap className="w-3.5 h-3.5 mr-1" /> Action Center</TabsTrigger>
+            <TabsTrigger value="po-drafts" data-testid="inv-tab-po-drafts"><FileText className="w-3.5 h-3.5 mr-1" /> PO Drafts</TabsTrigger>
           </TabsList>
           <div className="flex gap-2">
             {tab === 'balances' && (
@@ -261,7 +263,10 @@ function CustomerWorkspace({ customer }) {
           <SupplyCoveragePanel customerId={cid} onItemClick={(item) => setDetailItem({ item, customerId: cid })} onSupplyCreated={refresh} />
         </TabsContent>
         <TabsContent value="action-center">
-          <ActionCenterPanel customerId={cid} onItemClick={(item) => setDetailItem({ item, customerId: cid })} onSupplyCreated={refresh} onHistoryClick={(item) => { setDetailItem(null); setHistoryItem({ item, customerId: cid }); }} />
+          <ActionCenterPanel customerId={cid} onItemClick={(item) => setDetailItem({ item, customerId: cid })} onSupplyCreated={refresh} onHistoryClick={(item) => { setDetailItem(null); setHistoryItem({ item, customerId: cid }); }} onViewDraft={(id) => setViewDraftId(id)} />
+        </TabsContent>
+        <TabsContent value="po-drafts">
+          <PODraftsPanel customerId={cid} onViewDraft={(id) => setViewDraftId(id)} />
         </TabsContent>
       </Tabs>
 
@@ -283,6 +288,7 @@ function CustomerWorkspace({ customer }) {
           onClose={() => setDetailItem(null)}
           onOpenFullHistory={(item) => { setDetailItem(null); setHistoryItem({ item, customerId: cid }); }}
           onRefresh={refresh}
+          onViewDraft={(id) => { setDetailItem(null); setViewDraftId(id); }}
         />
       )}
       {/* Item History Modal */}
@@ -292,6 +298,10 @@ function CustomerWorkspace({ customer }) {
           customerId={historyItem.customerId}
           onClose={() => setHistoryItem(null)}
         />
+      )}
+      {/* PO Draft Detail Drawer */}
+      {viewDraftId && (
+        <PODraftDetailDrawer draftId={viewDraftId} onClose={() => setViewDraftId(null)} />
       )}
     </div>
   );
@@ -821,7 +831,7 @@ const ACTION_BADGES = {
   no_incoming: { label: 'NO INCOMING', cls: 'bg-violet-500/10 text-violet-600 border-violet-500/20' },
 };
 
-function ActionCenterPanel({ customerId, onItemClick, onSupplyCreated, onHistoryClick }) {
+function ActionCenterPanel({ customerId, onItemClick, onSupplyCreated, onHistoryClick, onViewDraft }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('');
@@ -944,7 +954,10 @@ function ActionCenterPanel({ customerId, onItemClick, onSupplyCreated, onHistory
         <div className="border border-emerald-500/30 bg-emerald-500/5 rounded-md p-3 space-y-1" data-testid="inv-po-draft-result">
           <div className="flex items-center justify-between">
             <p className="text-xs font-bold text-emerald-600">PO Draft Generated</p>
-            <Button variant="ghost" size="sm" className="h-5 text-[10px]" onClick={() => setDraftResult(null)}>Dismiss</Button>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" className="h-5 text-[10px]" onClick={() => onViewDraft?.(draftResult.po_draft_id)} data-testid="inv-po-draft-view">View Draft</Button>
+              <Button variant="ghost" size="sm" className="h-5 text-[10px]" onClick={() => setDraftResult(null)}>Dismiss</Button>
+            </div>
           </div>
           <p className="text-xs">Draft ID: <span className="font-mono font-bold" data-testid="inv-po-draft-id">{draftResult.po_draft_id}</span></p>
           <p className="text-xs">Lines: {draftResult.total_lines} | Total Qty: {draftResult.total_qty?.toLocaleString()}</p>
@@ -1149,10 +1162,218 @@ function SupplyCoveragePanel({ customerId, onItemClick, onSupplyCreated }) {
 }
 
 /* ════════════════════════════════════════════════════════════════ */
+/* PO DRAFTS PANEL                                                   */
+/* ════════════════════════════════════════════════════════════════ */
+
+function PODraftsPanel({ customerId, onViewDraft }) {
+  const [drafts, setDrafts] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/po-drafts?customer_id=${customerId}`);
+      const data = await res.json();
+      setDrafts(data.drafts || []);
+    } catch { toast.error('Failed to load PO drafts'); }
+    finally { setLoading(false); }
+  }, [customerId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <div className="py-10 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto" /></div>;
+  if (!drafts.length) return (
+    <div className="py-10 text-center text-muted-foreground" data-testid="inv-po-drafts-empty">
+      <FileText className="w-8 h-8 mx-auto mb-2 opacity-30" />
+      <p className="text-sm font-medium">No PO Drafts</p>
+      <p className="text-xs mt-1">Generate PO drafts from the Action Center tab.</p>
+    </div>
+  );
+
+  return (
+    <Card className="border border-border" data-testid="inv-po-drafts-panel">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-xs font-bold uppercase tracking-wider" style={{ fontFamily: 'Chivo, sans-serif' }}>
+            <FileText className="w-3.5 h-3.5 inline mr-1 text-blue-500" /> {drafts.length} PO Draft{drafts.length !== 1 ? 's' : ''}
+          </CardTitle>
+          <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={load}>
+            <RefreshCw className="w-3 h-3 mr-1" /> Refresh
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0 overflow-x-auto">
+        <table className="w-full text-xs" data-testid="inv-po-drafts-table">
+          <thead>
+            <tr className="border-b border-border bg-muted/40 text-[10px] text-muted-foreground uppercase tracking-wider">
+              <th className="text-left py-2 px-3 font-medium">Draft ID</th>
+              <th className="text-left py-2 px-3 font-medium">Created</th>
+              <th className="text-center py-2 px-3 font-medium">Status</th>
+              <th className="text-right py-2 px-3 font-medium">Lines</th>
+              <th className="text-right py-2 px-3 font-medium">Total Qty</th>
+              <th className="text-left py-2 px-3 font-medium">Items</th>
+              <th className="text-center py-2 px-3 font-medium">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {drafts.map((d, i) => (
+              <tr key={i} className="border-b border-border/50 hover:bg-muted/20" data-testid={`inv-po-draft-row-${i}`}>
+                <td className="py-1.5 px-3">
+                  <span className="font-mono font-medium cursor-pointer hover:underline text-blue-600" onClick={() => onViewDraft?.(d.po_draft_id)} data-testid={`inv-po-draft-id-${i}`}>{d.po_draft_id}</span>
+                </td>
+                <td className="py-1.5 px-3 text-muted-foreground">{d.created_at ? new Date(d.created_at).toLocaleString() : '—'}</td>
+                <td className="py-1.5 px-3 text-center">
+                  <Badge variant={d.status === 'draft' ? 'outline' : d.status === 'sent' ? 'default' : 'secondary'} className="text-[9px]">{d.status}</Badge>
+                </td>
+                <td className="py-1.5 px-3 text-right font-bold">{d.total_lines}</td>
+                <td className="py-1.5 px-3 text-right font-mono">{d.total_qty?.toLocaleString()}</td>
+                <td className="py-1.5 px-3 text-muted-foreground text-[10px] truncate max-w-[200px]">{d.lines?.map(l => l.item).join(', ')}</td>
+                <td className="py-1.5 px-3 text-center">
+                  <Button variant="ghost" size="sm" className="h-5 text-[10px] px-2" onClick={() => onViewDraft?.(d.po_draft_id)} data-testid={`inv-po-draft-view-${i}`}>
+                    View
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════ */
+/* PO DRAFT DETAIL DRAWER                                            */
+/* ════════════════════════════════════════════════════════════════ */
+
+function PODraftDetailDrawer({ draftId, onClose }) {
+  const [draft, setDraft] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [updating, setUpdating] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`${API}/api/inventory-ledger/po-drafts/${draftId}`);
+        if (res.ok) setDraft(await res.json());
+        else toast.error('Draft not found');
+      } catch { toast.error('Failed to load draft'); }
+      finally { setLoading(false); }
+    })();
+  }, [draftId]);
+
+  const updateStatus = async (newStatus) => {
+    setUpdating(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/po-drafts/${draftId}/status?status=${newStatus}`, { method: 'PATCH' });
+      if (res.ok) {
+        setDraft(prev => prev ? { ...prev, status: newStatus } : prev);
+        toast.success(`Draft marked as ${newStatus}`);
+      } else { const d = await res.json(); toast.error(d.detail || 'Failed'); }
+    } catch { toast.error('Failed'); }
+    finally { setUpdating(false); }
+  };
+
+  return (
+    <Dialog open={true} onOpenChange={onClose}>
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto" data-testid="inv-po-draft-detail">
+        <DialogHeader>
+          <DialogTitle className="text-sm font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>
+            <FileText className="w-4 h-4 inline mr-1.5" /> PO Draft
+          </DialogTitle>
+        </DialogHeader>
+
+        {loading ? (
+          <div className="flex items-center justify-center py-10"><Loader2 className="w-5 h-5 animate-spin" /></div>
+        ) : !draft ? (
+          <p className="text-sm text-muted-foreground py-4">Draft not found.</p>
+        ) : (
+          <div className="space-y-4">
+            {/* Header */}
+            <div className="grid grid-cols-2 gap-3" data-testid="inv-po-draft-header">
+              <div className="space-y-1">
+                <p className="text-[10px] text-muted-foreground">Draft ID</p>
+                <p className="text-xs font-mono font-bold" data-testid="inv-po-draft-detail-id">{draft.po_draft_id}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-[10px] text-muted-foreground">Status</p>
+                <Badge variant={draft.status === 'draft' ? 'outline' : draft.status === 'sent' ? 'default' : 'secondary'} className="text-[9px]" data-testid="inv-po-draft-detail-status">{draft.status}</Badge>
+              </div>
+              <div className="space-y-1">
+                <p className="text-[10px] text-muted-foreground">Created</p>
+                <p className="text-xs">{draft.created_at ? new Date(draft.created_at).toLocaleString() : '—'}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-[10px] text-muted-foreground">Customer</p>
+                <p className="text-xs">{draft.customer_name || draft.customer_id}</p>
+              </div>
+            </div>
+
+            {/* Summary */}
+            <div className="flex gap-4 text-xs border border-border rounded p-2.5">
+              <div>Lines: <span className="font-bold">{draft.total_lines}</span></div>
+              <div>Total Qty: <span className="font-bold">{draft.total_qty?.toLocaleString()}</span></div>
+              <div>Source: <span className="font-bold">{draft.source}</span></div>
+            </div>
+
+            {/* Lines */}
+            <div>
+              <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Draft Lines</p>
+              <div className="border border-border rounded overflow-hidden">
+                <table className="w-full text-[10px]" data-testid="inv-po-draft-lines">
+                  <thead className="bg-muted/30">
+                    <tr>
+                      <th className="p-1.5 text-left font-medium">#</th>
+                      <th className="p-1.5 text-left font-medium">Item</th>
+                      <th className="p-1.5 text-right font-medium">Qty</th>
+                      <th className="p-1.5 text-left font-medium">Source</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {draft.lines?.map((line, i) => (
+                      <tr key={i} className="border-t border-border/20" data-testid={`inv-po-draft-line-${i}`}>
+                        <td className="p-1.5 text-muted-foreground">{i + 1}</td>
+                        <td className="p-1.5 font-mono font-bold">{line.item}</td>
+                        <td className="p-1.5 text-right font-mono">{line.qty?.toLocaleString()}</td>
+                        <td className="p-1.5 text-muted-foreground">{line.source}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-2 pt-1" data-testid="inv-po-draft-actions">
+              <Button variant="outline" size="sm" className="h-7 text-[10px]"
+                onClick={() => window.open(`${API}/api/inventory-ledger/po-drafts/${draftId}/export`, '_blank')}
+                data-testid="inv-po-draft-export">
+                <Download className="w-3 h-3 mr-1" /> Export JSON
+              </Button>
+              {draft.status === 'draft' && (
+                <Button size="sm" className="h-7 text-[10px]" disabled={updating} onClick={() => updateStatus('sent')} data-testid="inv-po-draft-mark-sent">
+                  Mark as Sent
+                </Button>
+              )}
+              {draft.status !== 'archived' && (
+                <Button variant="ghost" size="sm" className="h-7 text-[10px]" disabled={updating} onClick={() => updateStatus('archived')} data-testid="inv-po-draft-archive">
+                  Archive
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════ */
 /* ITEM DETAIL DRAWER                                                */
 /* ════════════════════════════════════════════════════════════════ */
 
-function ItemDetailDrawer({ item, customerId, onClose, onOpenFullHistory, onRefresh }) {
+function ItemDetailDrawer({ item, customerId, onClose, onOpenFullHistory, onRefresh, onViewDraft }) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -1306,10 +1527,10 @@ function ItemDetailDrawer({ item, customerId, onClose, onOpenFullHistory, onRefr
 
             {/* Last PO Draft */}
             {detail.last_po_draft && (
-              <div className="border border-border rounded p-2.5 space-y-1" data-testid="inv-detail-po-draft">
+              <div className="border border-border rounded p-2.5 space-y-1 cursor-pointer hover:bg-muted/30" onClick={() => onViewDraft?.(detail.last_po_draft.po_draft_id)} data-testid="inv-detail-po-draft">
                 <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Last PO Draft</p>
                 <div className="flex gap-3 text-xs items-center">
-                  <span className="font-mono font-bold">{detail.last_po_draft.po_draft_id}</span>
+                  <span className="font-mono font-bold text-blue-600 hover:underline">{detail.last_po_draft.po_draft_id}</span>
                   <Badge variant="outline" className="text-[9px]">{detail.last_po_draft.status}</Badge>
                   <span className="text-muted-foreground text-[10px]">{detail.last_po_draft.created_at ? new Date(detail.last_po_draft.created_at).toLocaleDateString() : ''}</span>
                 </div>

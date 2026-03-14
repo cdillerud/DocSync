@@ -995,6 +995,39 @@ async def api_update_po_draft_status(
     return {"po_draft_id": draft_id, "status": status}
 
 
+@router.get("/po-drafts/{draft_id}")
+async def api_get_po_draft(draft_id: str):
+    """Return the full stored PO draft."""
+    db = get_db()
+    doc = await db[PO_DRAFTS_COLL].find_one(
+        {"po_draft_id": draft_id}, {"_id": 0}
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="PO draft not found")
+    return doc
+
+
+@router.get("/po-drafts/{draft_id}/export")
+async def api_export_po_draft(draft_id: str):
+    """Download PO draft as a JSON file. Uses stored data exactly as saved."""
+    from fastapi.responses import Response
+    import json as json_mod
+
+    db = get_db()
+    doc = await db[PO_DRAFTS_COLL].find_one(
+        {"po_draft_id": draft_id}, {"_id": 0}
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="PO draft not found")
+
+    filename = f"{draft_id}.json"
+    return Response(
+        content=json_mod.dumps(doc, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # ═══════════════════════════════════════════════════════════════
 # ITEM DETAIL
 # ═══════════════════════════════════════════════════════════════

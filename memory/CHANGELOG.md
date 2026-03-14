@@ -1,5 +1,16 @@
 # CHANGELOG - GPI Document Hub
 
+## [2026-03-14] Iteration 90 — Operational Notes and Activity Timeline — COMPLETE
+- **Backend:** Activity model + CRUD endpoints (POST/GET /api/inventory-ledger/activities) with 11 activity types (note, assignment, approval, document, bc_export, bc_response, shipment, invoice, receipt, escalation, system)
+- **Backend:** System auto-generation of activities for all major workflow events (approvals, documents, escalations, assignments, BC export/response, shipments, invoices, incoming supply creation)
+- **Backend:** SO summary and PO Draft detail enriched with latest_activity_at, latest_activity_type, activity_count
+- **Backend:** Operations Queue enriched with activity data + stale filter (stale_days), sort option (sort_by=latest_activity), dashboard counts (recent_activity_today, no_recent_activity_7d)
+- **Frontend:** ActivityTimelineSection component in SO and PO workflow views — add notes, filter by type, collapsible timeline with color-coded type badges
+- **Frontend:** Operations Queue: Activity Today / Stale (>7d) summary cards, Last Activity column with timeAgo, Sort: Latest Activity dropdown
+- **Testing:** 20/20 backend tests passed, all frontend UI elements verified (100% pass rate)
+- **Test report:** /app/test_reports/iteration_90.json
+
+
 ## [2026-03-14] Iteration 89 — Operational Ownership and Assignment Tracking — COMPLETE
 - **Backend:** Assignment CRUD endpoints (POST/GET/PATCH /api/inventory-ledger/assignments) with upsert semantics
 - **Backend:** Derived ownership logic (current_owner, assignment_status, assignment_updated_at) — unassigned returns null/unassigned

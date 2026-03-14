@@ -1,0 +1,136 @@
+{
+  "summary": "Comprehensive testing of CSV Import feature (iteration_66) - all tests passed. Backend: 22/22 pytest tests passed covering all import scenarios. Frontend: Import CSV button visible on Balances tab, dialog opens with mode selector and file input, all existing tabs work correctly (regression).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "InventoryLedgerPage",
+        "issues": ["Pre-existing React hydration warning: '<tr> cannot be a child of <span>' in table tbody - cosmetic, non-blocking", "Missing DialogContent aria-describedby (accessibility warning) - non-blocking"]
+      }
+    ]
+  },
+  "passed_tests": [
+    "Backend: POST /api/inventory-ledger/import - Successful opening_balance import (3 rows)",
+    "Backend: POST /api/inventory-ledger/import - Imported rows appear in movement history with source_type=spreadsheet_import",
+    "Backend: POST /api/inventory-ledger/import - Successful manual_adjustment import",
+    "Backend: POST /api/inventory-ledger/import - Duplicate file import returns 409",
+    "Backend: POST /api/inventory-ledger/import - Same content different mode is different import (hash includes mode)",
+    "Backend: POST /api/inventory-ledger/import - Invalid import_mode returns 422",
+    "Backend: POST /api/inventory-ledger/import - Missing 'item' column returns 422",
+    "Backend: POST /api/inventory-ledger/import - Missing 'qty' column returns 422",
+    "Backend: POST /api/inventory-ledger/import - Empty file returns 422",
+    "Backend: POST /api/inventory-ledger/import - Nonexistent customer returns 404",
+    "Backend: POST /api/inventory-ledger/import - Zero qty row rejected in results",
+    "Backend: POST /api/inventory-ledger/import - Invalid/non-numeric qty rejected",
+    "Backend: POST /api/inventory-ledger/import - Duplicate opening_balance per item/warehouse/ownership rejected",
+    "Backend: POST /api/inventory-ledger/import - Optional columns (warehouse, ownership_type, uom, reference, notes, item_description) work",
+    "Backend: POST /api/inventory-ledger/import - UOM alias 'uom' works for unit_of_measure",
+    "Backend: POST /api/inventory-ledger/import - Imported rows reflected in dashboard-summary",
+    "Backend REGRESSION: Dashboard summary still works",
+    "Backend REGRESSION: Balances tab still works",
+    "Backend REGRESSION: Movements tab still works",
+    "Backend REGRESSION: Reorder tab still works",
+    "Backend REGRESSION: Item Settings tab still works",
+    "Backend REGRESSION: CSV export still works",
+    "Frontend: Login with admin/admin successful",
+    "Frontend: Navigate to Inventory Ledger page",
+    "Frontend: Hormel Foods workspace loads",
+    "Frontend: Import CSV button visible on Balances tab (data-testid='inv-import-csv-btn')",
+    "Frontend: Import dialog opens (data-testid='inv-import-dialog')",
+    "Frontend: Mode selector present with Opening Balance and Manual Adjustment options (data-testid='inv-import-mode')",
+    "Frontend: File input present (data-testid='inv-import-file')",
+    "Frontend: Submit button present (data-testid='inv-import-submit')",
+    "Frontend REGRESSION: Balances tab works (data-testid='inv-balance-table')",
+    "Frontend REGRESSION: Movements tab works (data-testid='inv-movement-table')",
+    "Frontend REGRESSION: Incoming tab works",
+    "Frontend REGRESSION: Reorder tab works",
+    "Frontend REGRESSION: Item Settings tab works",
+    "Frontend REGRESSION: CSV Export button present"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_csv_import.py",
+    "/app/test_reports/pytest/csv_import_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend inventory_ledger.py Lines 386-550: /import endpoint correctly implements CSV parsing with multipart form data",
+    "Backend: File hash includes customer_id + import_mode for uniqueness (SHA-256)",
+    "Backend: Duplicate opening_balance check per item/warehouse/ownership works correctly",
+    "Backend: Movements created with source_type='spreadsheet_import', reference_type='csv_import', created_by='gpi_hub_import'",
+    "Backend: Import batch ID format: CSV-YYYYMMDD-HHMMSS-{hash[:8]}",
+    "Backend: Column names normalized to lowercase with underscores, supports both 'uom' and 'unit_of_measure'",
+    "Frontend InventoryLedgerPage.js Lines 1138-1248: ImportCSVDialog correctly handles file upload, mode selection, and results display",
+    "Frontend: Import results show rows_processed, rows_imported, rows_failed with error details",
+    "Frontend: Correct data-testids: inv-import-csv-btn, inv-import-dialog, inv-import-mode, inv-import-file, inv-import-submit, inv-import-result, inv-import-processed, inv-import-imported, inv-import-failed, inv-import-errors"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_csv_import.py"
+  ],
+  "success_rate": {
+    "backend": "100% (22/22 tests passed)",
+    "frontend": "100% (all UI verifications passed)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://item-master-4.preview.emergentagent.com"
+  },
+  "seed_data_used": "Used existing Hormel Foods workspace (ID: 366bfcce-4d68-4daf-b9f4-cb05a35de8c8). Test creates unique items with prefix TEST-IMPORT-{uuid} to avoid conflicts.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "CSV Import feature fully tested. Endpoint: POST /api/inventory-ledger/import (multipart form data: file, customer_id, import_mode). Modes: opening_balance, manual_adjustment. Returns: success, import_batch_id, rows_processed, rows_imported, rows_failed, errors. Duplicate file protection via SHA-256 hash. Opening balance duplicates per item/warehouse/ownership rejected. Columns: item (required), qty (required), warehouse, ownership_type, uom/unit_of_measure, reference, notes, item_description. Frontend: Import CSV button on Balances tab, dialog with mode selector and file input, results display. Test data created with TEST-IMPORT- prefix.",
+  "features_verified": {
+    "backend": {
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/inventory-ledger/import",
+        "content_type": "multipart/form-data",
+        "parameters": {
+          "file": "CSV file (required)",
+          "customer_id": "string (required)",
+          "import_mode": "opening_balance | manual_adjustment (required)"
+        },
+        "response_fields": [
+          "success (boolean)",
+          "import_batch_id (string, format: CSV-YYYYMMDD-HHMMSS-{hash[:8]})",
+          "rows_processed (int)",
+          "rows_imported (int)",
+          "rows_failed (int)",
+          "errors (array of {row, item, error})"
+        ],
+        "error_codes": {
+          "409": "Duplicate import detected",
+          "422": "Validation error (invalid mode, missing columns, empty file)",
+          "404": "Customer not found"
+        },
+        "csv_columns": {
+          "required": ["item", "qty"],
+          "optional": ["warehouse", "ownership_type", "uom/unit_of_measure", "reference", "notes", "item_description"]
+        }
+      }
+    },
+    "frontend": {
+      "import_button": {
+        "testid": "inv-import-csv-btn",
+        "location": "Balances tab toolbar (next to Export CSV)"
+      },
+      "import_dialog": {
+        "testid": "inv-import-dialog",
+        "elements": [
+          {"name": "Mode selector", "testid": "inv-import-mode", "options": ["Opening Balance", "Manual Adjustment"]},
+          {"name": "File input", "testid": "inv-import-file"},
+          {"name": "Submit button", "testid": "inv-import-submit"},
+          {"name": "Results container", "testid": "inv-import-result"},
+          {"name": "Processed count", "testid": "inv-import-processed"},
+          {"name": "Imported count", "testid": "inv-import-imported"},
+          {"name": "Failed count", "testid": "inv-import-failed"},
+          {"name": "Errors list", "testid": "inv-import-errors"}
+        ]
+      }
+    }
+  }
+}

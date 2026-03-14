@@ -17,7 +17,7 @@ import {
   Warehouse, Loader2, Plus, Package, TrendingDown, TrendingUp,
   AlertTriangle, RefreshCw, Search, ArrowLeftRight, History,
   ChevronRight, ChevronLeft, Box, Truck, ClipboardList,
-  RotateCcw, FileText, Download, Settings, Pencil,
+  RotateCcw, FileText, Download, Settings, Pencil, Upload,
 } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -130,6 +130,7 @@ function CustomerWorkspace({ customer }) {
   const [tab, setTab] = useState('balances');
   const [showMovementForm, setShowMovementForm] = useState(false);
   const [showIncomingForm, setShowIncomingForm] = useState(false);
+  const [showImportForm, setShowImportForm] = useState(false);
   const [search, setSearch] = useState('');
   const [historyItem, setHistoryItem] = useState(null);
 
@@ -203,6 +204,13 @@ function CustomerWorkspace({ customer }) {
                 <Download className="w-3.5 h-3.5 mr-1" /> Export CSV
               </Button>
             )}
+            {tab === 'balances' && (
+              <Button variant="outline" size="sm" className="h-8 text-xs"
+                onClick={() => setShowImportForm(true)}
+                data-testid="inv-import-csv-btn">
+                <Upload className="w-3.5 h-3.5 mr-1" /> Import CSV
+              </Button>
+            )}
             {tab === 'movements' && (
               <Button size="sm" className="h-8 text-xs" onClick={() => setShowMovementForm(true)} data-testid="inv-new-movement-btn">
                 <Plus className="w-3.5 h-3.5 mr-1" /> New Movement
@@ -239,6 +247,9 @@ function CustomerWorkspace({ customer }) {
       )}
       {showIncomingForm && (
         <IncomingFormDialog open={showIncomingForm} customerId={cid} onClose={() => setShowIncomingForm(false)} onCreated={() => { setShowIncomingForm(false); refresh(); }} />
+      )}
+      {showImportForm && (
+        <ImportCSVDialog open={showImportForm} customerId={cid} onClose={() => setShowImportForm(false)} onImported={() => { setShowImportForm(false); refresh(); }} />
       )}
       {/* Item History Modal */}
       {historyItem && (
@@ -1114,6 +1125,122 @@ function IncomingFormDialog({ open, customerId, onClose, onCreated }) {
           <Button size="sm" onClick={submit} disabled={saving} data-testid="inv-inc-submit">
             {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <Plus className="w-3.5 h-3.5 mr-1" />} Add Incoming
           </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════ */
+/* IMPORT CSV DIALOG                                                 */
+/* ════════════════════════════════════════════════════════════════ */
+
+function ImportCSVDialog({ open, customerId, onClose, onImported }) {
+  const [mode, setMode] = useState('opening_balance');
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const submit = async () => {
+    if (!file) { toast.error('Select a CSV file'); return; }
+    setUploading(true);
+    setResult(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('customer_id', customerId);
+      formData.append('import_mode', mode);
+      const res = await fetch(`${API}/api/inventory-ledger/import`, { method: 'POST', body: formData });
+      const data = await res.json();
+      if (res.status === 409) {
+        toast.error(data.detail || 'Duplicate import detected');
+        setResult({ ...data, duplicate: true });
+      } else if (res.ok) {
+        setResult(data);
+        if (data.rows_imported > 0) {
+          toast.success(`Imported ${data.rows_imported} row${data.rows_imported !== 1 ? 's' : ''}`);
+        }
+        if (data.rows_failed > 0) {
+          toast.warning(`${data.rows_failed} row${data.rows_failed !== 1 ? 's' : ''} failed`);
+        }
+      } else {
+        toast.error(data.detail || 'Import failed');
+        setResult({ rows_processed: 0, rows_imported: 0, rows_failed: 0, errors: [{ row: 0, error: data.detail }] });
+      }
+    } catch { toast.error('Import failed'); }
+    finally { setUploading(false); }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-md" data-testid="inv-import-dialog">
+        <DialogHeader>
+          <DialogTitle className="text-sm font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>
+            <Upload className="w-4 h-4 inline mr-1.5" /> Import CSV
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div>
+            <Label className="text-xs">Import Mode</Label>
+            <Select value={mode} onValueChange={setMode} disabled={!!result}>
+              <SelectTrigger className="h-8 text-xs" data-testid="inv-import-mode"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="opening_balance" className="text-xs">Opening Balance</SelectItem>
+                <SelectItem value="manual_adjustment" className="text-xs">Manual Adjustment</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              {mode === 'opening_balance' ? 'Set initial balances for items. Duplicates will be rejected.' : 'Adjust existing inventory levels up or down.'}
+            </p>
+          </div>
+          <div>
+            <Label className="text-xs">CSV File</Label>
+            <Input type="file" accept=".csv" className="h-8 text-xs cursor-pointer" disabled={!!result}
+              onChange={e => setFile(e.target.files?.[0] || null)} data-testid="inv-import-file" />
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Required columns: <span className="font-mono">item, qty</span>. Optional: <span className="font-mono">warehouse, ownership_type, uom, reference, notes, item_description</span>
+            </p>
+          </div>
+
+          {/* Import Results */}
+          {result && (
+            <div className="border border-border rounded-md p-3 space-y-2" data-testid="inv-import-result">
+              {result.duplicate ? (
+                <p className="text-xs text-red-500 font-medium">Duplicate import — this file has already been processed.</p>
+              ) : (
+                <>
+                  <div className="flex gap-4 text-xs">
+                    <div><span className="text-muted-foreground">Processed:</span> <span className="font-bold" data-testid="inv-import-processed">{result.rows_processed}</span></div>
+                    <div><span className="text-muted-foreground">Imported:</span> <span className="font-bold text-emerald-600" data-testid="inv-import-imported">{result.rows_imported}</span></div>
+                    <div><span className="text-muted-foreground">Failed:</span> <span className={`font-bold ${result.rows_failed > 0 ? 'text-red-600' : ''}`} data-testid="inv-import-failed">{result.rows_failed}</span></div>
+                  </div>
+                  {result.errors?.length > 0 && (
+                    <div className="max-h-32 overflow-y-auto border-t border-border/50 pt-2 space-y-1" data-testid="inv-import-errors">
+                      {result.errors.map((e, i) => (
+                        <p key={i} className="text-[10px] text-red-500">
+                          Row {e.row}{e.item ? ` (${e.item})` : ''}: {e.error}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          {result ? (
+            <Button size="sm" onClick={() => { if (result.rows_imported > 0) onImported(); else onClose(); }} data-testid="inv-import-done">
+              {result.rows_imported > 0 ? 'Done & Refresh' : 'Close'}
+            </Button>
+          ) : (
+            <>
+              <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+              <Button size="sm" onClick={submit} disabled={uploading || !file} data-testid="inv-import-submit">
+                {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <Upload className="w-3.5 h-3.5 mr-1" />} Import
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

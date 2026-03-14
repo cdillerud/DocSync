@@ -6,7 +6,11 @@ All endpoints under /inventory-ledger/.
 """
 
 import logging
-from fastapi import APIRouter, HTTPException, Query
+import hashlib
+import csv
+import io
+from datetime import datetime, timezone
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form
 from pydantic import BaseModel, Field
 from typing import Optional
 from deps import get_db
@@ -17,7 +21,7 @@ from services.inventory_ledger_service import (
     create_incoming, update_incoming, list_incoming,
     distinct_items, distinct_warehouses,
     seed_opening_balances, ensure_indexes,
-    MOVEMENT_TYPES, SOURCE_TYPES, OWNERSHIP_TYPES,
+    MOVEMENT_TYPES, SOURCE_TYPES, OWNERSHIP_TYPES, MOVEMENTS_COLL,
 )
 
 logger = logging.getLogger(__name__)
@@ -378,6 +382,172 @@ async def api_manual_movement(body: ManualMovementReq):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
+
+# ═══════════════════════════════════════════════════════════════
+# CSV IMPORT
+# ═══════════════════════════════════════════════════════════════
+
+IMPORT_ALLOWED_MODES = {"opening_balance", "manual_adjustment"}
+IMPORT_HASHES_COLL = "inv_import_hashes"
+
+
+@router.post("/import")
+async def api_import_csv(
+    file: UploadFile = File(...),
+    customer_id: str = Form(...),
+    import_mode: str = Form(...),
+):
+    """Import inventory movements from CSV.
+
+    Each row becomes an immutable ledger movement using the selected import_mode.
+    Only opening_balance and manual_adjustment are allowed.
+    Duplicate import protection via SHA-256 file hash (409 on duplicate).
+    For opening_balance: rejects rows where an opening balance already exists
+    for the same item/customer/warehouse/ownership.
+    """
+    db = get_db()
+
+    # Validate import mode
+    if import_mode not in IMPORT_ALLOWED_MODES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid import_mode '{import_mode}'. Allowed: {', '.join(sorted(IMPORT_ALLOWED_MODES))}",
+        )
+
+    # Validate customer exists
+    cust = await get_customer(db, customer_id)
+    if not cust:
+        raise HTTPException(status_code=404, detail="Customer workspace not found")
+
+    # Read file content
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=422, detail="Empty file")
+
+    # Duplicate import protection via file hash
+    file_hash = hashlib.sha256(raw + customer_id.encode() + import_mode.encode()).hexdigest()
+    existing_hash = await db[IMPORT_HASHES_COLL].find_one({"hash": file_hash})
+    if existing_hash:
+        raise HTTPException(
+            status_code=409,
+            detail="Duplicate import detected. This file has already been imported.",
+        )
+
+    # Parse CSV
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1")
+
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=422, detail="CSV has no columns")
+
+    # Normalize column names
+    cols = [c.strip().lower().replace(" ", "_") for c in reader.fieldnames]
+    if "item" not in cols:
+        raise HTTPException(status_code=422, detail="CSV missing required column: 'item'")
+    if "qty" not in cols:
+        raise HTTPException(status_code=422, detail="CSV missing required column: 'qty'")
+
+    rows_processed = 0
+    rows_imported = 0
+    rows_failed = 0
+    errors = []
+    import_batch_id = f"CSV-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{file_hash[:8]}"
+
+    for raw_row in reader:
+        rows_processed += 1
+        row_num = rows_processed + 1  # +1 for header
+
+        # Normalize keys
+        row = {k.strip().lower().replace(" ", "_"): v.strip() for k, v in raw_row.items() if v}
+
+        item = row.get("item", "").strip()
+        if not item:
+            rows_failed += 1
+            errors.append({"row": row_num, "error": "Missing required field: item"})
+            continue
+
+        qty_str = row.get("qty", "").strip()
+        try:
+            qty = float(qty_str)
+        except (ValueError, TypeError):
+            rows_failed += 1
+            errors.append({"row": row_num, "item": item, "error": f"Invalid qty: '{qty_str}'"})
+            continue
+
+        if qty == 0:
+            rows_failed += 1
+            errors.append({"row": row_num, "item": item, "error": "qty must not be zero"})
+            continue
+
+        warehouse = row.get("warehouse", "MAIN").strip() or "MAIN"
+        ownership_type = row.get("ownership_type", "customer_owned").strip() or "customer_owned"
+        unit_of_measure = row.get("uom", row.get("unit_of_measure", "units")).strip() or "units"
+        item_description = row.get("item_description", row.get("description", "")).strip()
+        reference = row.get("reference", "").strip()
+        notes = row.get("notes", "").strip()
+
+        # Duplicate opening_balance check
+        if import_mode == "opening_balance":
+            existing = await db[MOVEMENTS_COLL].find_one({
+                "customer_id": customer_id,
+                "item": item,
+                "warehouse": warehouse,
+                "ownership_type": ownership_type,
+                "movement_type": "opening_balance",
+            }, {"_id": 0, "id": 1})
+            if existing:
+                rows_failed += 1
+                errors.append({
+                    "row": row_num, "item": item,
+                    "error": f"Opening balance already exists for '{item}' in warehouse '{warehouse}'",
+                })
+                continue
+
+        try:
+            await create_movement(
+                db, customer_id,
+                item=item,
+                item_description=item_description,
+                warehouse=warehouse,
+                ownership_type=ownership_type,
+                movement_type=import_mode,
+                quantity_delta=qty,
+                unit_of_measure=unit_of_measure,
+                source_type="spreadsheet_import",
+                reference_type="csv_import",
+                reference_id=reference or import_batch_id,
+                notes=notes or f"CSV import ({import_mode})",
+                created_by="gpi_hub_import",
+                skip_balance_check=True,
+            )
+            rows_imported += 1
+        except Exception as e:
+            rows_failed += 1
+            errors.append({"row": row_num, "item": item, "error": str(e)})
+
+    # Store file hash only if at least one row was imported
+    if rows_imported > 0:
+        await db[IMPORT_HASHES_COLL].insert_one({
+            "hash": file_hash,
+            "customer_id": customer_id,
+            "import_mode": import_mode,
+            "filename": file.filename or "unknown",
+            "rows_imported": rows_imported,
+            "import_batch_id": import_batch_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    return {
+        "success": rows_imported > 0,
+        "import_batch_id": import_batch_id,
+        "rows_processed": rows_processed,
+        "rows_imported": rows_imported,
+        "rows_failed": rows_failed,
+        "errors": errors[:50],  # Cap errors to avoid huge responses
+    }
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -132,6 +132,7 @@ function CustomerWorkspace({ customer }) {
   const [showIncomingForm, setShowIncomingForm] = useState(false);
   const [showImportForm, setShowImportForm] = useState(false);
   const [search, setSearch] = useState('');
+  const [detailItem, setDetailItem] = useState(null);
   const [historyItem, setHistoryItem] = useState(null);
 
   const cid = customer?.id;
@@ -233,7 +234,7 @@ function CustomerWorkspace({ customer }) {
         </div>
 
         <TabsContent value="balances">
-          <BalanceTable balances={filteredBalances} loading={loading} onItemClick={(item) => setHistoryItem({ item, customerId: cid })} />
+          <BalanceTable balances={filteredBalances} loading={loading} onItemClick={(item) => setDetailItem({ item, customerId: cid })} />
         </TabsContent>
         <TabsContent value="movements">
           <MovementTable movements={movements} total={movementTotal} />
@@ -242,13 +243,13 @@ function CustomerWorkspace({ customer }) {
           <IncomingTable records={incoming} customerId={cid} onUpdate={refresh} />
         </TabsContent>
         <TabsContent value="reorder">
-          <ReorderPanel customerId={cid} onSupplyCreated={refresh} />
+          <ReorderPanel customerId={cid} onSupplyCreated={refresh} onItemClick={(item) => setDetailItem({ item, customerId: cid })} />
         </TabsContent>
         <TabsContent value="settings">
           <ItemSettingsPanel customerId={cid} />
         </TabsContent>
         <TabsContent value="exceptions">
-          <ExceptionsPanel customerId={cid} onHistoryClick={(item) => setHistoryItem({ item, customerId: cid })} onSupplyCreated={refresh} />
+          <ExceptionsPanel customerId={cid} onHistoryClick={(item) => setDetailItem({ item, customerId: cid })} onSupplyCreated={refresh} />
         </TabsContent>
       </Tabs>
 
@@ -261,6 +262,16 @@ function CustomerWorkspace({ customer }) {
       )}
       {showImportForm && (
         <ImportCSVDialog open={showImportForm} customerId={cid} onClose={() => setShowImportForm(false)} onImported={() => { setShowImportForm(false); refresh(); }} />
+      )}
+      {/* Item Detail Drawer */}
+      {detailItem && (
+        <ItemDetailDrawer
+          item={detailItem.item}
+          customerId={detailItem.customerId}
+          onClose={() => setDetailItem(null)}
+          onOpenFullHistory={(item) => { setDetailItem(null); setHistoryItem({ item, customerId: cid }); }}
+          onRefresh={refresh}
+        />
       )}
       {/* Item History Modal */}
       {historyItem && (
@@ -278,7 +289,7 @@ function CustomerWorkspace({ customer }) {
 /* REORDER RECOMMENDATIONS                                          */
 /* ════════════════════════════════════════════════════════════════ */
 
-function ReorderPanel({ customerId, onSupplyCreated }) {
+function ReorderPanel({ customerId, onSupplyCreated, onItemClick }) {
   const [recs, setRecs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(null);
@@ -368,7 +379,7 @@ function ReorderPanel({ customerId, onSupplyCreated }) {
             {recs.map((r, i) => (
               <tr key={i} className="border-b border-border/50 hover:bg-muted/20" data-testid={`inv-reorder-row-${i}`}>
                 <td className="py-1.5 px-3">
-                  <span className="font-mono font-medium">{r.item}</span>
+                  <span className="font-mono font-medium cursor-pointer hover:underline text-blue-600" onClick={() => onItemClick?.(r.item)} data-testid={`inv-reorder-item-${i}`}>{r.item}</span>
                   {r.item_description && <span className="text-[10px] text-muted-foreground block truncate max-w-[180px]">{r.item_description}</span>}
                 </td>
                 <td className="py-1.5 px-3 text-right font-mono">{r.on_hand.toLocaleString()}</td>
@@ -635,7 +646,7 @@ function ExceptionsPanel({ customerId, onHistoryClick, onSupplyCreated }) {
               <tbody>
                 {exceptions.map((e, i) => (
                   <tr key={i} className="border-b border-border/20 hover:bg-muted/20" data-testid={`inv-exc-row-${i}`}>
-                    <td className="p-2 font-mono">{e.item}</td>
+                    <td className="p-2 font-mono cursor-pointer hover:underline text-blue-600" onClick={() => onHistoryClick?.(e.item)} data-testid={`inv-exc-item-${i}`}>{e.item}</td>
                     <td className="p-2 text-muted-foreground">{e.warehouse || '—'}</td>
                     <td className="p-2 text-right">{e.on_hand?.toLocaleString()}</td>
                     <td className="p-2 text-right">{e.incoming?.toLocaleString()}</td>
@@ -674,6 +685,176 @@ function ExceptionsPanel({ customerId, onHistoryClick, onSupplyCreated }) {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════ */
+/* ITEM DETAIL DRAWER                                                */
+/* ════════════════════════════════════════════════════════════════ */
+
+function ItemDetailDrawer({ item, customerId, onClose, onOpenFullHistory, onRefresh }) {
+  const [detail, setDetail] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`${API}/api/inventory-ledger/item-detail?customer_id=${customerId}&item=${encodeURIComponent(item)}`);
+        if (res.ok) setDetail(await res.json());
+        else toast.error('Item not found');
+      } catch { toast.error('Failed to load item detail'); }
+      finally { setLoading(false); }
+    })();
+  }, [customerId, item]);
+
+  const createSupply = async () => {
+    setCreating(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/customers/${customerId}/incoming`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_no: item, quantity: detail?.reorder?.recommended_qty || 0, source_reference: `DETAIL-${item}`, notes: 'Created from item detail' }),
+      });
+      if (res.ok) { toast.success(`Incoming supply created for ${item}`); onRefresh?.(); }
+      else { const d = await res.json(); toast.error(d.detail || 'Failed'); }
+    } catch { toast.error('Failed'); }
+    finally { setCreating(false); }
+  };
+
+  const bal = detail?.balance || {};
+  const settings = detail?.settings;
+  const reorder = detail?.reorder || {};
+  const exc = detail?.exceptions || {};
+  const history = detail?.history_preview || [];
+  const excBadges = [
+    exc.short && { label: 'SHORT', cls: 'bg-red-500/10 text-red-600 border-red-500/20' },
+    exc.low && { label: 'LOW', cls: 'bg-amber-500/10 text-amber-600 border-amber-500/20' },
+    exc.reorder && { label: 'REORDER', cls: 'bg-orange-500/10 text-orange-600 border-orange-500/20' },
+    exc.no_incoming && { label: 'NO INCOMING', cls: 'bg-violet-500/10 text-violet-600 border-violet-500/20' },
+  ].filter(Boolean);
+
+  return (
+    <Dialog open={true} onOpenChange={onClose}>
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto" data-testid="inv-item-detail-drawer">
+        <DialogHeader>
+          <DialogTitle className="text-sm font-bold font-mono" style={{ fontFamily: 'Chivo, sans-serif' }}>
+            <Package className="w-4 h-4 inline mr-1.5" /> {item}
+          </DialogTitle>
+          {bal.item_description && <p className="text-xs text-muted-foreground">{bal.item_description}</p>}
+        </DialogHeader>
+
+        {loading ? (
+          <div className="flex items-center justify-center py-10"><Loader2 className="w-5 h-5 animate-spin" /></div>
+        ) : !detail ? (
+          <p className="text-sm text-muted-foreground py-4">Item not found.</p>
+        ) : (
+          <div className="space-y-4">
+            {/* Balance Strip */}
+            <div className="grid grid-cols-5 gap-2" data-testid="inv-detail-balance">
+              {[
+                { label: 'On Hand', value: bal.on_hand, color: '' },
+                { label: 'Incoming', value: bal.incoming, color: 'text-sky-600' },
+                { label: 'Committed', value: bal.committed, color: 'text-amber-600' },
+                { label: 'Available', value: bal.available, color: bal.available < 0 ? 'text-red-600' : 'text-emerald-600' },
+                { label: 'Status', value: bal.status, color: bal.status === 'SHORT' ? 'text-red-600' : bal.status === 'LOW' ? 'text-amber-600' : 'text-emerald-600' },
+              ].map(c => (
+                <div key={c.label} className="bg-muted/30 border border-border rounded p-2 text-center">
+                  <p className={`text-sm font-bold ${c.color}`}>{typeof c.value === 'number' ? c.value.toLocaleString() : c.value}</p>
+                  <p className="text-[9px] text-muted-foreground">{c.label}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Exception Badges */}
+            {excBadges.length > 0 && (
+              <div className="flex gap-1.5" data-testid="inv-detail-exceptions">
+                {excBadges.map(b => (
+                  <span key={b.label} className={`text-[10px] px-2 py-0.5 rounded border font-medium ${b.cls}`}>{b.label}</span>
+                ))}
+              </div>
+            )}
+
+            {/* Reorder Settings & Recommendation */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="border border-border rounded p-2.5 space-y-1" data-testid="inv-detail-settings">
+                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Reorder Settings</p>
+                {settings ? (
+                  <>
+                    <p className="text-xs">Threshold: <span className="font-bold">{settings.reorder_threshold}</span></p>
+                    <p className="text-xs">Buffer: <span className="font-bold">{settings.safety_buffer}</span></p>
+                    {settings.notes && <p className="text-[10px] text-muted-foreground italic">{settings.notes}</p>}
+                  </>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Using defaults (threshold: 0, buffer: 10)</p>
+                )}
+              </div>
+              <div className="border border-border rounded p-2.5 space-y-1" data-testid="inv-detail-reorder">
+                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Reorder Status</p>
+                {reorder.is_reorder_recommended ? (
+                  <>
+                    <p className="text-xs text-orange-600 font-bold">Reorder Recommended</p>
+                    <p className="text-xs">Qty: <span className="font-bold text-emerald-600">{reorder.recommended_qty?.toLocaleString()}</span></p>
+                  </>
+                ) : (
+                  <p className="text-xs text-emerald-600 font-medium">Stock levels OK</p>
+                )}
+              </div>
+            </div>
+
+            {/* Recent History */}
+            <div data-testid="inv-detail-history">
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Recent Movements ({detail.history_total} total)</p>
+                <Button variant="link" size="sm" className="h-5 text-[10px] p-0" onClick={() => onOpenFullHistory?.(item)} data-testid="inv-detail-full-history">
+                  View Full History
+                </Button>
+              </div>
+              {history.length === 0 ? (
+                <p className="text-xs text-muted-foreground py-2">No movements recorded.</p>
+              ) : (
+                <div className="border border-border rounded overflow-hidden">
+                  <table className="w-full text-[10px]">
+                    <thead className="bg-muted/30">
+                      <tr>
+                        <th className="p-1.5 text-left font-medium">Type</th>
+                        <th className="p-1.5 text-right font-medium">Qty</th>
+                        <th className="p-1.5 text-left font-medium">Reference</th>
+                        <th className="p-1.5 text-left font-medium">Date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {history.map((m, i) => (
+                        <tr key={i} className="border-t border-border/20" data-testid={`inv-detail-mov-${i}`}>
+                          <td className="p-1.5 capitalize">{m.movement_type?.replace(/_/g, ' ')}</td>
+                          <td className={`p-1.5 text-right font-mono font-bold ${m.quantity_delta > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                            {m.quantity_delta > 0 ? '+' : ''}{m.quantity_delta}
+                          </td>
+                          <td className="p-1.5 text-muted-foreground truncate max-w-[120px]">{m.reference_id || '—'}</td>
+                          <td className="p-1.5 text-muted-foreground">{m.created_at ? new Date(m.created_at).toLocaleDateString() : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-2 pt-1" data-testid="inv-detail-actions">
+              <Button variant="outline" size="sm" className="h-7 text-[10px]" onClick={() => onOpenFullHistory?.(item)} data-testid="inv-detail-action-history">
+                <History className="w-3 h-3 mr-1" /> Full History
+              </Button>
+              {reorder.is_reorder_recommended && (
+                <Button variant="outline" size="sm" className="h-7 text-[10px]" disabled={creating} onClick={createSupply} data-testid="inv-detail-action-supply">
+                  {creating ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Truck className="w-3 h-3 mr-1" />} Create Supply
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 

@@ -610,6 +610,98 @@ async def api_export_balances(
 
 
 # ═══════════════════════════════════════════════════════════════
+# ITEM DETAIL
+# ═══════════════════════════════════════════════════════════════
+
+
+@router.get("/item-detail")
+async def api_item_detail(
+    customer_id: str = Query(..., description="Customer workspace ID"),
+    item: str = Query(..., min_length=1, description="Item identifier"),
+):
+    """Return a complete operational picture for a single item.
+
+    Reuses derive_balances, item settings, reorder logic, exception
+    classification, and movement history pipelines.
+    """
+    db = get_db()
+    balances = await derive_balances(db, customer_id, item=item)
+    if not balances:
+        raise HTTPException(status_code=404, detail=f"Item '{item}' not found in this workspace")
+
+    # Aggregate across all warehouses/ownership for the item
+    b = balances[0]
+    is_short = b.get("is_short", False)
+    is_low = b.get("is_low", False)
+    status = "SHORT" if is_short else ("LOW" if is_low else "OK")
+
+    balance = {
+        "on_hand": b.get("on_hand", 0),
+        "incoming": b.get("incoming", 0),
+        "committed": b.get("committed", 0),
+        "available": b.get("available", 0),
+        "status": status,
+        "warehouse": b.get("warehouse", ""),
+        "ownership_type": b.get("ownership_type", ""),
+        "unit_of_measure": b.get("unit_of_measure", ""),
+        "item_description": b.get("item_description", ""),
+    }
+
+    # Item settings
+    settings_doc = await db["inv_item_settings"].find_one(
+        {"customer_id": customer_id, "item": item}, {"_id": 0}
+    )
+    settings = None
+    if settings_doc:
+        settings = {
+            "reorder_threshold": settings_doc.get("reorder_threshold", 0),
+            "safety_buffer": settings_doc.get("safety_buffer", 0),
+            "notes": settings_doc.get("notes", ""),
+        }
+
+    # Reorder recommendation
+    threshold = settings["reorder_threshold"] if settings else DEFAULT_REORDER_THRESHOLD
+    buffer = settings["safety_buffer"] if settings else DEFAULT_SAFETY_BUFFER
+    avail = balance["available"]
+    is_reorder = avail <= threshold or is_short
+    rec_qty = round(max(0, threshold - avail) + buffer, 4) if is_reorder else 0
+
+    reorder = {
+        "is_reorder_recommended": is_reorder,
+        "recommended_qty": rec_qty,
+        "reorder_threshold": threshold,
+        "safety_buffer": buffer,
+    }
+
+    # Exception flags
+    incoming = balance["incoming"]
+    exceptions = {
+        "short": is_short,
+        "low": is_low,
+        "reorder": is_reorder,
+        "no_incoming": (is_short or is_low) and incoming == 0,
+    }
+
+    # Recent movement history (latest 10)
+    history_data = await get_history(db, customer_id, item=item, limit=10)
+
+    # Movement type summary
+    type_summary = await item_audit_summary(db, customer_id, item)
+
+    return {
+        "item": item,
+        "customer_id": customer_id,
+        "balance": balance,
+        "settings": settings,
+        "reorder": reorder,
+        "exceptions": exceptions,
+        "history_preview": history_data.get("movements", []),
+        "history_total": history_data.get("total", 0),
+        "type_summary": type_summary.get("movement_type_totals", {}),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
 # INVENTORY SNAPSHOT
 # ═══════════════════════════════════════════════════════════════
 

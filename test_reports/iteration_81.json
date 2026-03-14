@@ -1,0 +1,142 @@
+{
+  "summary": "Comprehensive testing of BC Sales Shipment Capture feature (iteration_81). Backend: All 18 tests passed. Frontend: All UI elements verified - Record Shipment button on Demand tab, dialog with SO loading, commitment summary, line details, BC fields, and shipment history. POST /api/inventory-ledger/sales-orders/{id}/bc-shipment releases committed inventory via release_order_commitments pipeline. GET summary and shipment-log endpoints working.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed_tests": [
+    "Backend: POST bc-shipment returns 404 for nonexistent SO",
+    "Backend: GET summary returns 404 for nonexistent SO",
+    "Backend: GET summary for existing SO (SO-107040) returns commitment info with lines",
+    "Backend: GET summary for fully released SO (SO-TEST) works",
+    "Backend: Over-shipment (shipped > outstanding) returns 422",
+    "Backend: Idempotent - shipment on fully released SO returns skipped, not error",
+    "Backend: GET shipment-log returns entries for SO with shipments",
+    "Backend: GET shipment-log returns empty for SO with no shipments",
+    "Backend: Partial shipment releases only shipped qty, leaves remaining",
+    "Backend: Shipment creates order_release movement (movement_id returned)",
+    "Backend: Shipment log stores bc_shipment_number, bc_document_id, shipment_notes, shipped_lines",
+    "Backend REGRESSION: BC receipt capture still works",
+    "Backend REGRESSION: BC response capture still works",
+    "Backend REGRESSION: PO draft workflow still works",
+    "Backend REGRESSION: Inventory balances still work",
+    "Backend: Summary lines include committed_qty, released_qty, remaining_committed_qty",
+    "Backend: Summary includes latest_bc_shipment_number and latest_bc_shipped_at",
+    "Backend: Summary totals aggregate correctly across lines",
+    "Frontend: Record Shipment button visible on Demand tab toolbar",
+    "Frontend: Shipment dialog opens with SO ID input and Load button",
+    "Frontend: After loading SO, shows commitment summary (Committed/Released/Remaining/Last shipment)",
+    "Frontend: Line-level details table with Item, Committed, Released, Remaining, Ship Qty",
+    "Frontend: Ship Qty inputs available for lines with remaining commitment",
+    "Frontend: BC Shipment # field available",
+    "Frontend: BC Document ID field available",
+    "Frontend: Shipment Notes field available",
+    "Frontend: Record Shipment button (green) submits form",
+    "Frontend: Shipment History section shows previous shipments"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_bc_shipment_capture.py",
+    "/app/test_reports/pytest/bc_shipment_capture_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend inventory_ledger.py Lines 2315-2429: POST /sales-orders/{id}/bc-shipment correctly aggregates net committed per item from raw movements (commitments - releases), validates over-shipment (422), uses release_order_commitments pipeline for inventory release",
+    "Backend inventory_ledger.py Lines 2404-2418: Shipment log entry correctly stores shipment_id, bc_shipment_number, bc_document_id, shipped_at, shipment_notes, shipped_lines",
+    "Backend inventory_ledger.py Lines 2432-2440: GET shipment-log returns reverse chronological entries from bc_shipment_logs collection",
+    "Backend inventory_ledger.py Lines 2443-2507: GET summary aggregates commitment and release movements, calculates remaining_committed_qty per line, includes latest shipment info",
+    "Frontend InventoryLedgerPage.js Lines 240-242: Record Shipment button on Demand tab with data-testid='inv-record-shipment-btn'",
+    "Frontend ShipmentCaptureDialog Lines 727-932: Dialog component with SO lookup, summary display, line-level ship qty inputs, BC fields, shipment history section"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_bc_shipment_capture.py"
+  ],
+  "success_rate": {
+    "backend": "100% (18/18 tests passed)",
+    "frontend": "100% (all UI elements verified)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://po-supply-bridge.preview.emergentagent.com"
+  },
+  "seed_data_used": "SO-107040 (SPAM-12OZ with 200 committed, 7 released, 193 remaining). Previous shipments visible in history: SHP-FABBBBBB (SHP-BC-FIELDS-TEST), SHP-23512642 (SHP-RELEASE-TEST), SHP-52BAS98A (SHP-PARTIAL-5). Hormel Foods workspace (HORMEL).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "BC Sales Shipment Capture feature fully tested. POST /api/inventory-ledger/sales-orders/{id}/bc-shipment releases committed inventory via release_order_commitments. Key behaviors: 1) 404 if no commitments found, 2) 422 if over-shipment, 3) Idempotent (returns skipped for fully released), 4) Creates order_release movements with movement_id. GET summary returns lines with committed/released/remaining and latest shipment info. GET shipment-log returns reverse chronological entries. Frontend dialog on Demand tab shows SO lookup, commitment summary, line details, BC fields, and shipment history. SO-107040 has 193 remaining on SPAM-12OZ for testing additional shipments.",
+  "features_verified": {
+    "backend_endpoints": {
+      "bc_shipment": {
+        "method": "POST",
+        "path": "/api/inventory-ledger/sales-orders/{sales_order_id}/bc-shipment",
+        "request_body": {
+          "shipped_lines": [{"item": "string", "qty_shipped": "number"}],
+          "bc_shipment_number": "string (optional)",
+          "bc_document_id": "string (optional)",
+          "shipment_notes": "string (optional)"
+        },
+        "response": {
+          "sales_order_id": "string",
+          "shipment_id": "string (e.g. SHP-xxxxxxxx)",
+          "bc_shipment_number": "string",
+          "total_released": "number",
+          "total_skipped": "number",
+          "total_errors": "number",
+          "results": [{"item": "string", "status": "released|skipped", "qty_shipped": "number", "movement_id": "string", "reason": "string"}],
+          "errors": [{"item": "string", "error": "string"}]
+        },
+        "error_codes": {
+          "404": "No order commitments found for sales order",
+          "422": "Over-shipment: shipped > outstanding committed"
+        }
+      },
+      "summary": {
+        "method": "GET",
+        "path": "/api/inventory-ledger/sales-orders/{sales_order_id}/summary",
+        "response": {
+          "sales_order_id": "string",
+          "customer_id": "string",
+          "total_committed_qty": "number",
+          "total_released_qty": "number",
+          "total_remaining_committed_qty": "number",
+          "latest_bc_shipment_number": "string",
+          "latest_bc_shipped_at": "string",
+          "lines": [{"item": "string", "item_description": "string", "warehouse": "string", "unit_of_measure": "string", "committed_qty": "number", "released_qty": "number", "remaining_committed_qty": "number"}]
+        }
+      },
+      "shipment_log": {
+        "method": "GET",
+        "path": "/api/inventory-ledger/sales-orders/{sales_order_id}/shipment-log",
+        "response": {
+          "sales_order_id": "string",
+          "total": "number",
+          "entries": [{"shipment_id": "string", "bc_shipment_number": "string", "bc_document_id": "string", "shipped_at": "string", "shipment_notes": "string", "shipped_lines": []}]
+        }
+      }
+    },
+    "frontend_components": {
+      "record_shipment_button": {
+        "testid": "inv-record-shipment-btn",
+        "location": "Demand tab toolbar",
+        "visible": true
+      },
+      "shipment_dialog": {
+        "testid": "inv-shipment-dialog",
+        "elements": {
+          "so_input": "inv-shipment-so-input",
+          "load_btn": "inv-shipment-load-btn",
+          "summary": "inv-shipment-summary",
+          "lines": "inv-shipment-lines",
+          "bc_num_input": "inv-shipment-bc-num",
+          "bc_doc_input": "inv-shipment-bc-doc",
+          "notes_input": "inv-shipment-notes",
+          "confirm_btn": "inv-shipment-confirm",
+          "log_section": "inv-shipment-log-section"
+        }
+      }
+    }
+  }
+}

@@ -135,6 +135,7 @@ function CustomerWorkspace({ customer }) {
   const [detailItem, setDetailItem] = useState(null);
   const [historyItem, setHistoryItem] = useState(null);
   const [viewDraftId, setViewDraftId] = useState(null);
+  const [shipmentSO, setShipmentSO] = useState(null);
 
   const cid = customer?.id;
 
@@ -235,6 +236,11 @@ function CustomerWorkspace({ customer }) {
                 <Plus className="w-3.5 h-3.5 mr-1" /> Add Incoming
               </Button>
             )}
+            {tab === 'demand' && (
+              <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setShipmentSO({ customerId: cid })} data-testid="inv-record-shipment-btn">
+                <Package className="w-3.5 h-3.5 mr-1" /> Record Shipment
+              </Button>
+            )}
           </div>
         </div>
 
@@ -302,6 +308,10 @@ function CustomerWorkspace({ customer }) {
       {/* PO Draft Detail Drawer */}
       {viewDraftId && (
         <PODraftDetailDrawer draftId={viewDraftId} onClose={() => setViewDraftId(null)} onSupplyCreated={refresh} />
+      )}
+      {/* Shipment Capture Dialog */}
+      {shipmentSO && (
+        <ShipmentCaptureDialog customerId={shipmentSO.customerId} soId={shipmentSO.soId || ''} onClose={() => setShipmentSO(null)} onShipped={refresh} />
       )}
     </div>
   );
@@ -707,6 +717,218 @@ function ExceptionsPanel({ customerId, onHistoryClick, onSupplyCreated }) {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════ */
+/* SHIPMENT CAPTURE DIALOG                                          */
+/* ════════════════════════════════════════════════════════════════ */
+
+function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipped }) {
+  const [soId, setSoId] = useState(initialSoId || '');
+  const [summary, setSummary] = useState(null);
+  const [loadingSummary, setLoadingSummary] = useState(false);
+  const [bcShipNum, setBcShipNum] = useState('');
+  const [bcDocId, setBcDocId] = useState('');
+  const [shipNotes, setShipNotes] = useState('');
+  const [shippedQtys, setShippedQtys] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState(null);
+  const [shipmentLogs, setShipmentLogs] = useState([]);
+
+  const loadSummary = useCallback(async () => {
+    if (!soId.trim()) return;
+    setLoadingSummary(true);
+    setSummary(null);
+    setResult(null);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/sales-orders/${encodeURIComponent(soId.trim())}/summary`);
+      if (res.ok) {
+        const d = await res.json();
+        setSummary(d);
+        const qtys = {};
+        d.lines?.forEach(l => { if (l.remaining_committed_qty > 0) qtys[l.item] = l.remaining_committed_qty; });
+        setShippedQtys(qtys);
+      } else {
+        const d = await res.json();
+        toast.error(d.detail || 'Sales order not found');
+      }
+    } catch { toast.error('Failed to load SO summary'); }
+    finally { setLoadingSummary(false); }
+  }, [soId]);
+
+  const loadLogs = useCallback(async () => {
+    if (!soId.trim()) return;
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/sales-orders/${encodeURIComponent(soId.trim())}/shipment-log`);
+      if (res.ok) { const d = await res.json(); setShipmentLogs(d.entries || []); }
+    } catch { /* silent */ }
+  }, [soId]);
+
+  useEffect(() => { if (soId.trim()) { loadSummary(); loadLogs(); } }, []);
+
+  const recordShipment = async () => {
+    const lines = Object.entries(shippedQtys).filter(([, q]) => q > 0).map(([item, qty]) => ({ item, qty_shipped: qty }));
+    if (!lines.length) { toast.error('No lines to ship'); return; }
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/sales-orders/${encodeURIComponent(soId.trim())}/bc-shipment`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shipped_lines: lines, bc_shipment_number: bcShipNum.trim(), bc_document_id: bcDocId.trim(), shipment_notes: shipNotes.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setResult(data);
+        toast.success(`${data.total_released} line(s) released`);
+        loadSummary();
+        loadLogs();
+        onShipped?.();
+      } else {
+        const detail = data.detail;
+        if (typeof detail === 'object' && detail.errors) {
+          toast.error(detail.errors.map(e => `${e.item}: ${e.error}`).join('; '));
+        } else {
+          toast.error(typeof detail === 'string' ? detail : 'Shipment capture failed');
+        }
+      }
+    } catch { toast.error('Failed to record shipment'); }
+    finally { setSubmitting(false); }
+  };
+
+  const hasOutstanding = summary?.lines?.some(l => l.remaining_committed_qty > 0);
+
+  return (
+    <Dialog open={true} onOpenChange={onClose}>
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto" data-testid="inv-shipment-dialog">
+        <DialogHeader>
+          <DialogTitle className="text-sm font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>
+            <Package className="w-4 h-4 inline mr-1.5" /> Record BC Shipment
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          {/* SO Lookup */}
+          <div className="flex gap-2 items-end" data-testid="inv-shipment-so-lookup">
+            <div className="flex-1 space-y-1">
+              <Label className="text-[10px]">Sales Order ID</Label>
+              <Input className="h-7 text-xs font-mono" value={soId} onChange={e => setSoId(e.target.value)} placeholder="e.g. SO-107040" data-testid="inv-shipment-so-input" />
+            </div>
+            <Button size="sm" className="h-7 text-[10px]" disabled={loadingSummary || !soId.trim()} onClick={() => { loadSummary(); loadLogs(); }} data-testid="inv-shipment-load-btn">
+              {loadingSummary ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Load'}
+            </Button>
+          </div>
+
+          {/* Summary */}
+          {summary && (
+            <>
+              <div className="flex gap-3 text-[10px] text-muted-foreground border border-border rounded p-2" data-testid="inv-shipment-summary">
+                <span>Committed: <strong>{summary.total_committed_qty?.toLocaleString()}</strong></span>
+                <span>Released: <strong className="text-green-600">{summary.total_released_qty?.toLocaleString()}</strong></span>
+                <span>Remaining: <strong className={summary.total_remaining_committed_qty > 0 ? 'text-amber-600' : 'text-green-600'}>{summary.total_remaining_committed_qty?.toLocaleString()}</strong></span>
+                {summary.latest_bc_shipment_number && <span>Last: <strong className="text-blue-600">{summary.latest_bc_shipment_number}</strong></span>}
+              </div>
+
+              {/* Lines */}
+              {summary.lines?.length > 0 && (
+                <div className="border border-border rounded overflow-hidden" data-testid="inv-shipment-lines">
+                  <table className="w-full text-[10px]">
+                    <thead className="bg-muted/30">
+                      <tr>
+                        <th className="p-1.5 text-left font-medium">Item</th>
+                        <th className="p-1.5 text-right font-medium">Committed</th>
+                        <th className="p-1.5 text-right font-medium">Released</th>
+                        <th className="p-1.5 text-right font-medium">Remaining</th>
+                        <th className="p-1.5 text-right font-medium">Ship Qty</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {summary.lines.map((l, i) => (
+                        <tr key={i} className="border-t border-border/20" data-testid={`inv-shipment-line-${i}`}>
+                          <td className="p-1.5 font-mono font-bold">{l.item}</td>
+                          <td className="p-1.5 text-right font-mono">{l.committed_qty?.toLocaleString()}</td>
+                          <td className="p-1.5 text-right font-mono text-green-600">{l.released_qty?.toLocaleString()}</td>
+                          <td className={`p-1.5 text-right font-mono font-bold ${l.remaining_committed_qty > 0 ? 'text-amber-600' : 'text-green-600'}`}>{l.remaining_committed_qty?.toLocaleString()}</td>
+                          <td className="p-1.5 text-right">
+                            {l.remaining_committed_qty > 0 ? (
+                              <Input className="h-5 text-[10px] w-20 ml-auto text-right font-mono" type="number" min={0} max={l.remaining_committed_qty}
+                                value={shippedQtys[l.item] || ''} onChange={e => setShippedQtys(prev => ({ ...prev, [l.item]: parseFloat(e.target.value) || 0 }))}
+                                data-testid={`inv-shipment-qty-${i}`} />
+                            ) : (
+                              <Badge variant="outline" className="text-[8px]">Fully released</Badge>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* BC Fields */}
+              {hasOutstanding && (
+                <div className="space-y-2" data-testid="inv-shipment-bc-fields">
+                  <div className="flex gap-2">
+                    <div className="flex-1 space-y-1">
+                      <Label className="text-[10px]">BC Shipment #</Label>
+                      <Input className="h-6 text-[10px]" value={bcShipNum} onChange={e => setBcShipNum(e.target.value)} placeholder="e.g. SHP-20451" data-testid="inv-shipment-bc-num" />
+                    </div>
+                    <div className="flex-1 space-y-1">
+                      <Label className="text-[10px]">BC Document ID</Label>
+                      <Input className="h-6 text-[10px]" value={bcDocId} onChange={e => setBcDocId(e.target.value)} placeholder="Optional" data-testid="inv-shipment-bc-doc" />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px]">Shipment Notes</Label>
+                    <Input className="h-6 text-[10px]" value={shipNotes} onChange={e => setShipNotes(e.target.value)} placeholder="Optional notes" data-testid="inv-shipment-notes" />
+                  </div>
+                  <Button size="sm" className="h-7 text-[10px] w-full bg-emerald-600 hover:bg-emerald-700 text-white" disabled={submitting} onClick={recordShipment} data-testid="inv-shipment-confirm">
+                    {submitting ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Package className="w-3 h-3 mr-1" />}
+                    Record Shipment
+                  </Button>
+                </div>
+              )}
+
+              {/* Result */}
+              {result && (
+                <div className="border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20 rounded p-2.5 text-xs space-y-1" data-testid="inv-shipment-result">
+                  <p className="font-medium text-green-700 dark:text-green-300">Shipment Recorded — {result.shipment_id}</p>
+                  <div className="flex gap-3 text-[10px]">
+                    <span>Released: <strong>{result.total_released}</strong></span>
+                    {result.total_skipped > 0 && <span>Skipped: <strong>{result.total_skipped}</strong></span>}
+                    {result.total_errors > 0 && <span className="text-red-600">Errors: <strong>{result.total_errors}</strong></span>}
+                  </div>
+                  {result.bc_shipment_number && <p className="text-[10px] font-mono text-blue-600">{result.bc_shipment_number}</p>}
+                </div>
+              )}
+
+              {/* Shipment Logs */}
+              {shipmentLogs.length > 0 && (
+                <div className="space-y-1" data-testid="inv-shipment-log-section">
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Shipment History</p>
+                  <div className="border border-border rounded overflow-hidden">
+                    {shipmentLogs.map((log, i) => (
+                      <div key={log.shipment_id || i} className="border-b border-border/20 last:border-b-0 p-2 text-[10px]" data-testid={`inv-shipment-log-${i}`}>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="text-[8px] font-mono">{log.shipment_id}</Badge>
+                          {log.bc_shipment_number && <span className="font-mono text-blue-600">{log.bc_shipment_number}</span>}
+                          <span className="text-muted-foreground">{log.shipped_at ? new Date(log.shipped_at).toLocaleString() : '—'}</span>
+                        </div>
+                        {log.shipment_notes && <p className="mt-0.5 text-muted-foreground">{log.shipment_notes}</p>}
+                        <div className="mt-0.5 flex gap-2">
+                          {log.shipped_lines?.map((l, j) => (
+                            <span key={j} className="font-mono">{l.item}: {l.qty_shipped}</span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

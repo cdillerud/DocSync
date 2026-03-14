@@ -218,3 +218,22 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 - ItemDetailDrawer shows action summary section with badges and score
 - Backend: 20/20 pytest tests passed, Frontend: all UI flows verified
 - Test report: `/app/test_reports/iteration_72.json`
+
+---
+
+## 2026-03-14: PO Draft Generation from Supply Actions
+
+### What Was Built
+- `POST /api/inventory-ledger/generate-po-draft` — generates PO draft from selected items
+- Validates items exist in inventory, qty > 0, customer exists
+- Duplicate guard: same item+customer within 5 minutes returns 409
+- Stored in `po_drafts` collection: po_draft_id, lines, status (draft/sent/archived), total_qty, total_lines
+- `GET /api/inventory-ledger/po-drafts` — lists drafts by customer_id, filterable by status
+- `PATCH /api/inventory-ledger/po-drafts/{id}/status` — updates draft lifecycle
+- Item detail: shows last_po_draft (po_draft_id, created_at, status)
+- Frontend: Multi-select checkboxes on eligible Action Center rows (reorder/coverage_risk/shortage)
+- Generate PO Draft button + confirmation with draft ID, lines, and total qty
+- ItemDetailDrawer shows Last PO Draft section with ID, status badge, and date
+- Bugs fixed: (1) _id:None in insert_one, (2) 'actions' used before declaration
+- Backend: 20/20 pytest tests passed, Frontend: all UI flows verified
+- Test report: `/app/test_reports/iteration_73.json`

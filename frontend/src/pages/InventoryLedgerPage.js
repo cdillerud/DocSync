@@ -18,7 +18,7 @@ import {
   AlertTriangle, RefreshCw, Search, ArrowLeftRight, History,
   ChevronRight, ChevronLeft, Box, Truck, ClipboardList,
   RotateCcw, FileText, Download, Settings, Pencil, Upload, ShieldCheck, Zap,
-  Check, X, Trash2, Link, Calendar, Clock, User, UserX,
+  Check, X, Trash2, Link, Calendar, Clock, User, UserX, Activity,
 } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -1027,6 +1027,136 @@ function AssignmentSection({ entityType, entityId, currentOwner: initialOwner, a
   );
 }
 
+const ACTIVITY_TYPE_STYLES = {
+  note: { label: 'Note', cls: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300' },
+  assignment: { label: 'Assignment', cls: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300' },
+  approval: { label: 'Approval', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300' },
+  document: { label: 'Document', cls: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300' },
+  bc_export: { label: 'BC Export', cls: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900 dark:text-cyan-300' },
+  bc_response: { label: 'BC Response', cls: 'bg-teal-100 text-teal-700 dark:bg-teal-900 dark:text-teal-300' },
+  shipment: { label: 'Shipment', cls: 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300' },
+  invoice: { label: 'Invoice', cls: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300' },
+  receipt: { label: 'Receipt', cls: 'bg-lime-100 text-lime-700 dark:bg-lime-900 dark:text-lime-300' },
+  escalation: { label: 'Escalation', cls: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300' },
+  system: { label: 'System', cls: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' },
+};
+
+function ActivityTimelineSection({ entityType, entityId }) {
+  const [activities, setActivities] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [filterType, setFilterType] = useState('all');
+  const [noteTitle, setNoteTitle] = useState('');
+  const [noteBody, setNoteBody] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [expanded, setExpanded] = useState(true);
+
+  const load = useCallback(async () => {
+    if (!entityId) return;
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ entity_type: entityType, entity_id: entityId, limit: '50' });
+      if (filterType !== 'all') params.set('activity_type', filterType);
+      const res = await fetch(`${API}/api/inventory-ledger/activities?${params}`);
+      if (res.ok) { const d = await res.json(); setActivities(d.entries || []); setTotal(d.total || 0); }
+    } catch { /* silent */ }
+    finally { setLoading(false); }
+  }, [entityType, entityId, filterType]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const addNote = async () => {
+    if (!noteTitle.trim()) { toast.error('Title is required'); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/activities`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entity_type: entityType, entity_id: entityId, activity_type: 'note', title: noteTitle.trim(), body: noteBody.trim() }),
+      });
+      if (res.ok) { toast.success('Note added'); setNoteTitle(''); setNoteBody(''); load(); }
+      else { const d = await res.json(); toast.error(d.detail || 'Failed'); }
+    } catch { toast.error('Failed to add note'); }
+    finally { setSaving(false); }
+  };
+
+  const formatTime = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  return (
+    <div className="space-y-2 mt-3" data-testid="activity-timeline-section">
+      <div className="flex items-center justify-between cursor-pointer" onClick={() => setExpanded(!expanded)}>
+        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+          <Clock className="w-3 h-3" /> Activity Timeline ({total})
+        </p>
+        <ChevronRight className={`w-3 h-3 text-muted-foreground transition-transform ${expanded ? 'rotate-90' : ''}`} />
+      </div>
+
+      {expanded && (
+        <div className="space-y-2">
+          {/* Add Note */}
+          <div className="flex gap-1.5 items-start" data-testid="add-note-form">
+            <div className="flex-1 space-y-1">
+              <Input className="h-6 text-[10px]" placeholder="Note title..." value={noteTitle} onChange={e => setNoteTitle(e.target.value)} data-testid="note-title-input" />
+              <Input className="h-6 text-[10px]" placeholder="Details (optional)..." value={noteBody} onChange={e => setNoteBody(e.target.value)} data-testid="note-body-input" />
+            </div>
+            <Button size="sm" className="h-6 text-[10px] mt-0" disabled={saving || !noteTitle.trim()} onClick={addNote} data-testid="add-note-btn">
+              {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Add Note'}
+            </Button>
+          </div>
+
+          {/* Filter */}
+          <Select value={filterType} onValueChange={setFilterType}>
+            <SelectTrigger className="h-6 w-[130px] text-[10px]" data-testid="activity-type-filter"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Types</SelectItem>
+              <SelectItem value="note">Notes</SelectItem>
+              <SelectItem value="assignment">Assignment</SelectItem>
+              <SelectItem value="approval">Approval</SelectItem>
+              <SelectItem value="document">Document</SelectItem>
+              <SelectItem value="escalation">Escalation</SelectItem>
+              <SelectItem value="shipment">Shipment</SelectItem>
+              <SelectItem value="invoice">Invoice</SelectItem>
+              <SelectItem value="bc_export">BC Export</SelectItem>
+              <SelectItem value="bc_response">BC Response</SelectItem>
+              <SelectItem value="system">System</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {/* Timeline */}
+          {loading ? (
+            <div className="flex justify-center py-3"><Loader2 className="w-4 h-4 animate-spin" /></div>
+          ) : activities.length === 0 ? (
+            <p className="text-[10px] text-muted-foreground text-center py-2 italic">No activities yet</p>
+          ) : (
+            <div className="space-y-0.5 max-h-[200px] overflow-y-auto pr-1" data-testid="activity-timeline-list">
+              {activities.map((act, i) => {
+                const style = ACTIVITY_TYPE_STYLES[act.activity_type] || ACTIVITY_TYPE_STYLES.system;
+                return (
+                  <div key={act.activity_id || i} className="flex gap-2 py-1 border-l-2 border-border pl-2 hover:bg-muted/20 rounded-r transition-colors" data-testid={`activity-entry-${i}`}>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <Badge className={`text-[7px] px-1 py-0 ${style.cls}`} variant="secondary">{style.label}</Badge>
+                        <span className="text-[10px] font-medium truncate">{act.title}</span>
+                      </div>
+                      {act.body && <p className="text-[9px] text-muted-foreground mt-0.5 line-clamp-2">{act.body}</p>}
+                    </div>
+                    <div className="text-[8px] text-muted-foreground whitespace-nowrap pt-0.5">
+                      {formatTime(act.created_at)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const APPROVAL_STATUS_STYLES = {
   approved: { variant: 'default', label: 'Approved', className: 'bg-green-600' },
   pending: { variant: 'secondary', label: 'Pending', className: 'bg-amber-500 text-white' },
@@ -1485,6 +1615,7 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
               <ApprovalSection entityType="sales_order" entityId={soId.trim()} approvalType="sales_order" approvalStatus={summary.approval_status} onChanged={() => loadSummary()} />
               <EscalationSection entityType="sales_order" entityId={soId.trim()} dueDate={summary.due_date} escalationStatus={summary.escalation_status} onChanged={() => loadSummary()} />
               <AssignmentSection entityType="sales_order" entityId={soId.trim()} currentOwner={summary.current_owner} assignmentStatus={summary.assignment_status} onChanged={() => loadSummary()} />
+              <ActivityTimelineSection entityType="sales_order" entityId={soId.trim()} />
 
               {/* ═══ DROP-SHIP PO DRAFT SECTION ═══ */}
               {isDropShip && (
@@ -2781,6 +2912,7 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
             <ApprovalSection entityType="po_draft" entityId={draftId} approvalType="purchase_order" approvalStatus={draft.approval_status} onChanged={() => loadDraft()} />
             <EscalationSection entityType="po_draft" entityId={draftId} dueDate={draft.due_date} escalationStatus={draft.escalation_status} onChanged={() => loadDraft()} />
             <AssignmentSection entityType="po_draft" entityId={draftId} currentOwner={draft.current_owner} assignmentStatus={draft.assignment_status} onChanged={() => loadDraft()} />
+            <ActivityTimelineSection entityType="po_draft" entityId={draftId} />
 
             {/* Actions */}
             <div className="flex flex-wrap gap-2 pt-1" data-testid="inv-po-draft-actions">

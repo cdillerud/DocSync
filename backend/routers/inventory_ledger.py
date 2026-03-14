@@ -9,7 +9,7 @@ import logging
 import hashlib
 import csv
 import io
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -1080,6 +1080,10 @@ async def api_get_po_draft(draft_id: str):
     asgn_enrich = await _get_assignment_enrichment(db, "po_draft", draft_id)
     doc.update(asgn_enrich)
 
+    # Activity enrichment
+    act_enrich = await _get_activity_enrichment(db, "po_draft", draft_id)
+    doc.update(act_enrich)
+
     return doc
 
 
@@ -1231,6 +1235,10 @@ async def api_update_bc_response(draft_id: str, body: BCResponseIn):
 
     # Return the updated draft
     updated = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": draft_id}, {"_id": 0})
+    # System activity for BC response
+    await _create_activity(db, "po_draft", draft_id, "bc_response",
+                           f"BC response: {body.bc_response_status}", body.bc_response_notes.strip(), "system",
+                           {"bc_po_number": body.bc_po_number.strip()})
     return updated
 
 
@@ -1309,6 +1317,10 @@ async def api_bc_export_po_draft(draft_id: str):
         "bc_payload_snapshot": payload,
     }
     await db[PO_SUBMISSION_LOGS_COLL].insert_one(log_entry.copy())
+
+    # System activity for BC export
+    await _create_activity(db, "po_draft", draft_id, "bc_export",
+                           f"BC export payload generated", "", "system")
 
     filename = f"BC-PO-{draft_id}.json"
     return Response(
@@ -1664,6 +1676,9 @@ async def api_po_draft_create_incoming_supply(draft_id: str):
                 "incoming_supply_ids": created_ids,
             }},
         )
+        # System activity
+        await _create_activity(db, "po_draft", draft_id, "system",
+                               f"Converted to incoming supply ({rows_created} lines)", "", "system")
 
     return {
         "po_draft_id": draft_id,
@@ -2547,9 +2562,12 @@ async def api_drop_ship_vendor_shipment(sales_order_id: str, body: DSVendorShipm
     await db[DS_VENDOR_SHIPMENT_LOGS_COLL].insert_one(log_entry.copy())
     log_entry.pop("_id", None)
 
+    # System activity
+    await _create_activity(db, "sales_order", sales_order_id, "shipment",
+                           f"Vendor shipment recorded: {body.vendor_shipment_number.strip()}", "", "system",
+                           {"po_draft_id": body.po_draft_id.strip()})
+
     return {
-        "sales_order_id": sales_order_id,
-        "vendor_shipment_id": log_entry["vendor_shipment_id"],
         "vendor_shipment_number": body.vendor_shipment_number.strip(),
         "total_recorded": len(results),
         "results": results,
@@ -2673,6 +2691,11 @@ async def api_bc_shipment_capture(sales_order_id: str, body: BCShipmentIn):
     await db[BC_SHIPMENT_LOGS_COLL].insert_one(log_entry.copy())
     log_entry.pop("_id", None)
 
+    # System activity
+    await _create_activity(db, "sales_order", sales_order_id, "shipment",
+                           f"Shipment recorded: {body.bc_shipment_number.strip()}", "", "system",
+                           {"order_type": order_type})
+
     return {
         "sales_order_id": sales_order_id, "order_type": order_type, "shipment_id": log_entry["shipment_id"],
         "bc_shipment_number": body.bc_shipment_number.strip(),
@@ -2781,6 +2804,10 @@ async def api_bc_invoice_capture(sales_order_id: str, body: BCInvoiceIn):
     await db[BC_INVOICE_LOGS_COLL].insert_one(log_entry.copy())
     log_entry.pop("_id", None)
 
+    # System activity
+    await _create_activity(db, "sales_order", sales_order_id, "invoice",
+                           f"Invoice recorded: {body.bc_invoice_number.strip()}", "", "system")
+
     return log_entry
 
 
@@ -2880,6 +2907,9 @@ async def api_sales_order_summary(sales_order_id: str):
         # Assignment enrichment
         asgn_enrich = await _get_assignment_enrichment(db, "sales_order", sales_order_id)
         ds_summary.update(asgn_enrich)
+        # Activity enrichment
+        act_enrich = await _get_activity_enrichment(db, "sales_order", sales_order_id)
+        ds_summary.update(act_enrich)
         return ds_summary
 
     # Warehouse orders: existing behavior
@@ -2986,6 +3016,9 @@ async def api_sales_order_summary(sales_order_id: str):
     # Assignment enrichment
     asgn_enrich = await _get_assignment_enrichment(db, "sales_order", sales_order_id)
     wh_summary.update(asgn_enrich)
+    # Activity enrichment
+    act_enrich = await _get_activity_enrichment(db, "sales_order", sales_order_id)
+    wh_summary.update(act_enrich)
     return wh_summary
 
 
@@ -3032,6 +3065,10 @@ async def api_create_document_link(body: DocumentLinkIn):
     }
     await db[DOCUMENT_LINKS_COLL].insert_one(doc.copy())
     doc.pop("_id", None)
+    # System activity
+    await _create_activity(db, body.entity_type, body.entity_id.strip(), "document",
+                           f"Document linked: {body.document_name.strip()}", "", "system",
+                           {"document_type": body.document_type})
     return doc
 
 
@@ -3052,9 +3089,13 @@ async def api_list_document_links(entity_type: str, entity_id: str):
 async def api_delete_document_link(document_link_id: str):
     """Remove a document linkage record."""
     db = get_db()
+    existing = await db[DOCUMENT_LINKS_COLL].find_one({"document_link_id": document_link_id}, {"_id": 0})
     result = await db[DOCUMENT_LINKS_COLL].delete_one({"document_link_id": document_link_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail=f"Document link '{document_link_id}' not found")
+    if existing:
+        await _create_activity(db, existing["entity_type"], existing["entity_id"], "document",
+                               f"Document removed: {existing.get('document_name', document_link_id)}", "", "system")
     return {"deleted": document_link_id}
 
 
@@ -3244,6 +3285,10 @@ async def api_request_approval(body: ApprovalRequestIn):
     }
     await db[APPROVAL_LOGS_COLL].insert_one(record.copy())
     record.pop("_id", None)
+    # System activity
+    await _create_activity(db, body.entity_type, body.entity_id.strip(), "approval",
+                           f"Approval requested ({body.approval_type})", body.notes.strip(),
+                           body.requested_by.strip() or "system")
     return record
 
 
@@ -3271,6 +3316,10 @@ async def api_decide_approval(approval_id: str, body: ApprovalDecisionIn):
     await db[APPROVAL_LOGS_COLL].update_one({"approval_id": approval_id}, {"$set": update})
 
     result = {**existing, **update}
+    # System activity for approval decision
+    await _create_activity(db, existing["entity_type"], existing["entity_id"], "approval",
+                           f"Approval {body.approval_status}", body.notes.strip(),
+                           body.approved_by.strip() or "system")
     return result
 
 
@@ -3427,6 +3476,9 @@ async def api_create_escalation(body: EscalationIn):
     }
     await db[ESCALATIONS_COLL].insert_one(record.copy())
     record.pop("_id", None)
+    # System activity
+    await _create_activity(db, body.entity_type, body.entity_id.strip(), "escalation",
+                           f"Due date set: {body.due_date.strip()}", body.notes.strip(), "system")
     return record
 
 
@@ -3480,6 +3532,10 @@ async def api_update_escalation(escalation_id: str, body: EscalationUpdateIn):
     days_to, days_over = _calc_days(result.get("due_date", ""))
     result["days_to_due"] = days_to
     result["days_overdue"] = days_over
+    # System activity
+    esc_title = f"Escalation updated: {update.get('escalation_status', result.get('escalation_status', ''))}"
+    await _create_activity(db, existing["entity_type"], existing["entity_id"], "escalation",
+                           esc_title, body.notes.strip(), "system")
     return result
 
 
@@ -3562,6 +3618,10 @@ async def api_create_assignment(body: AssignmentIn):
             {"$set": update},
         )
         result = {**existing, **update}
+        # System activity for reassignment
+        await _create_activity(db, body.entity_type, body.entity_id.strip(), "assignment",
+                               f"Reassigned to {body.assigned_to.strip()}", body.notes.strip(),
+                               body.assigned_by.strip() or "system")
         return result
 
     record = {
@@ -3577,6 +3637,10 @@ async def api_create_assignment(body: AssignmentIn):
     }
     await db[ASSIGNMENTS_COLL].insert_one(record.copy())
     record.pop("_id", None)
+    # System activity for new assignment
+    await _create_activity(db, body.entity_type, body.entity_id.strip(), "assignment",
+                           f"Assigned to {body.assigned_to.strip()}", body.notes.strip(),
+                           body.assigned_by.strip() or "system")
     return record
 
 
@@ -3615,7 +3679,119 @@ async def api_update_assignment(assignment_id: str, body: AssignmentUpdateIn):
 
     await db[ASSIGNMENTS_COLL].update_one({"assignment_id": assignment_id}, {"$set": update})
     result = {**existing, **update}
+    # System activity for status update
+    status_change = update.get("assignment_status", "")
+    owner_change = update.get("assigned_to", "")
+    title_parts = []
+    if owner_change:
+        title_parts.append(f"Reassigned to {owner_change}")
+    if status_change:
+        title_parts.append(f"Status: {status_change}")
+    if title_parts:
+        await _create_activity(db, existing["entity_type"], existing["entity_id"], "assignment",
+                               " | ".join(title_parts), body.notes.strip(), "system")
     return result
+
+
+# ═══════════════════════════════════════════════════════════════
+# ACTIVITIES & NOTES TIMELINE
+# ═══════════════════════════════════════════════════════════════
+
+ACTIVITIES_COLL = "activities"
+VALID_ACTIVITY_TYPES = (
+    "note", "assignment", "approval", "document", "bc_export",
+    "bc_response", "shipment", "invoice", "receipt", "escalation", "system",
+)
+
+
+async def _create_activity(db, entity_type: str, entity_id: str, activity_type: str,
+                           title: str, body_text: str = "", created_by: str = "system", metadata: dict = None):
+    """Internal helper to create an activity record."""
+    import uuid as _uuid
+    now = datetime.now(timezone.utc).isoformat()
+    record = {
+        "activity_id": f"ACT-{_uuid.uuid4().hex[:8].upper()}",
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "activity_type": activity_type,
+        "title": title,
+        "body": body_text,
+        "created_by": created_by,
+        "created_at": now,
+        "metadata": metadata or {},
+    }
+    await db[ACTIVITIES_COLL].insert_one(record.copy())
+    record.pop("_id", None)
+    return record
+
+
+async def _get_activity_enrichment(db, entity_type: str, entity_id: str):
+    """Return activity enrichment fields for summary/detail."""
+    latest = await db[ACTIVITIES_COLL].find_one(
+        {"entity_type": entity_type, "entity_id": entity_id},
+        {"_id": 0, "created_at": 1, "activity_type": 1},
+        sort=[("created_at", -1)],
+    )
+    count = await db[ACTIVITIES_COLL].count_documents(
+        {"entity_type": entity_type, "entity_id": entity_id}
+    )
+    if latest:
+        return {
+            "latest_activity_at": latest.get("created_at", ""),
+            "latest_activity_type": latest.get("activity_type", ""),
+            "activity_count": count,
+        }
+    return {"latest_activity_at": "", "latest_activity_type": "", "activity_count": 0}
+
+
+class ActivityIn(BaseModel):
+    entity_type: str = Field(...)
+    entity_id: str = Field(..., min_length=1)
+    activity_type: str = Field(default="note")
+    title: str = Field(..., min_length=1)
+    body: str = Field(default="")
+    created_by: str = Field(default="user")
+
+
+@router.post("/activities")
+async def api_create_activity(req: ActivityIn):
+    """Create a manual note or activity record."""
+    if req.entity_type not in ("sales_order", "po_draft"):
+        raise HTTPException(status_code=422, detail="entity_type must be sales_order or po_draft")
+    if req.activity_type not in VALID_ACTIVITY_TYPES:
+        raise HTTPException(status_code=422, detail=f"Invalid activity_type. Must be one of: {VALID_ACTIVITY_TYPES}")
+
+    db = get_db()
+    if req.entity_type == "po_draft":
+        draft = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": req.entity_id.strip()}, {"_id": 0, "po_draft_id": 1})
+        if not draft:
+            raise HTTPException(status_code=404, detail=f"PO Draft '{req.entity_id}' not found")
+
+    record = await _create_activity(
+        db, req.entity_type, req.entity_id.strip(), req.activity_type,
+        req.title.strip(), req.body.strip(), req.created_by.strip(),
+    )
+    return record
+
+
+@router.get("/activities")
+async def api_list_activities(
+    entity_type: str = "", entity_id: str = "",
+    activity_type: str = "", limit: int = 50, offset: int = 0,
+):
+    """List activities/notes, newest first."""
+    db = get_db()
+    query = {}
+    if entity_type:
+        query["entity_type"] = entity_type
+    if entity_id:
+        query["entity_id"] = entity_id
+    if activity_type:
+        query["activity_type"] = activity_type
+    cursor = db[ACTIVITIES_COLL].find(query, {"_id": 0}).sort("created_at", -1).skip(offset).limit(limit)
+    entries = await cursor.to_list(length=limit)
+    total = await db[ACTIVITIES_COLL].count_documents(query)
+    return {"total": total, "offset": offset, "limit": limit, "entries": entries}
 
 
 async def _build_so_queue_items(db, limit: int = 200):
@@ -3819,6 +3995,8 @@ async def api_operations_queue(
     assigned_to: str = "",
     assignment_status: str = "",
     unassigned_only: str = "",
+    stale_days: int = 0,
+    sort_by: str = "",
     limit: int = 100,
     offset: int = 0,
 ):
@@ -3831,10 +4009,12 @@ async def api_operations_queue(
     if not entity_type or entity_type == "po_draft":
         all_items.extend(await _build_po_draft_queue_items(db))
 
-    # Enrich with assignment data
+    # Enrich with assignment + activity data
     for item in all_items:
         asgn = await _get_assignment_enrichment(db, item["entity_type"], item["entity_id"])
         item.update(asgn)
+        act = await _get_activity_enrichment(db, item["entity_type"], item["entity_id"])
+        item.update(act)
         # +10 priority for unassigned high-priority items
         if not item.get("current_owner") and item["priority_score"] >= 40:
             item["priority_score"] += 10
@@ -3855,8 +4035,16 @@ async def api_operations_queue(
     if unassigned_only.lower() in ("true", "1", "yes"):
         all_items = [i for i in all_items if not i.get("current_owner")]
 
-    # Sort: priority_score DESC, then created_at ASC
-    all_items.sort(key=lambda x: (-x["priority_score"], x["created_at"] or ""))
+    # Filter for stale items (no activity in N days)
+    if stale_days > 0:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=stale_days)).isoformat()
+        all_items = [i for i in all_items if not i.get("latest_activity_at") or i["latest_activity_at"] < cutoff]
+
+    # Sort
+    if sort_by == "latest_activity":
+        all_items.sort(key=lambda x: (x.get("latest_activity_at") or ""), reverse=True)
+    else:
+        all_items.sort(key=lambda x: (-x["priority_score"], x["created_at"] or ""))
 
     total = len(all_items)
     page = all_items[offset: offset + limit]
@@ -3865,10 +4053,17 @@ async def api_operations_queue(
     overdue_count = sum(1 for i in all_items if i.get("escalation_status") == "overdue")
     escalated_count = sum(1 for i in all_items if i.get("escalation_status") == "escalated")
 
-    # Assignment counts (computed from all_items before pagination)
+    # Assignment counts
     unassigned_count = sum(1 for i in all_items if not i.get("current_owner"))
     in_progress_count = sum(1 for i in all_items if i.get("assignment_status") == "in_progress")
     waiting_count = sum(1 for i in all_items if i.get("assignment_status") == "waiting")
+
+    # Activity counts
+    now_iso = datetime.now(timezone.utc)
+    today_start = now_iso.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    stale_cutoff = (now_iso - timedelta(days=7)).isoformat()
+    recent_activity_today = sum(1 for i in all_items if i.get("latest_activity_at", "") >= today_start)
+    no_recent_activity_7d = sum(1 for i in all_items if not i.get("latest_activity_at") or i["latest_activity_at"] < stale_cutoff)
 
     return {
         "total": total,
@@ -3879,6 +4074,8 @@ async def api_operations_queue(
         "unassigned_count": unassigned_count,
         "in_progress_count": in_progress_count,
         "waiting_count": waiting_count,
+        "recent_activity_today": recent_activity_today,
+        "no_recent_activity_7d": no_recent_activity_7d,
         "offset": offset,
         "limit": limit,
         "items": page,

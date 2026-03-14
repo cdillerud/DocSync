@@ -1,0 +1,127 @@
+{
+  "summary": "Iteration 90 - Operational Notes & Activity Timeline feature testing completed. Backend: 20/20 tests passed for activity CRUD, system auto-generation, and Operations Queue enrichment. Frontend: Operations Queue displays Activity Today (1), Stale >7d (119) cards, Sort: Latest Activity dropdown, Last Activity column with timeAgo, detail panel with activity info. ActivityTimelineSection component code verified in InventoryLedgerPage.js for SO workflow and PO Draft detail views.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "All pages with tables",
+        "issues": ["Console hydration warning: span inside tbody/tr - cosmetic issue from React dev mode, doesn't affect functionality"]
+      }
+    ]
+  },
+  "passed_tests": [
+    "Backend: POST /api/inventory-ledger/activities - creates manual note with activity_type='note'",
+    "Backend: POST /api/inventory-ledger/activities - validates entity_type (422 for invalid)",
+    "Backend: POST /api/inventory-ledger/activities - validates activity_type (422 for invalid)",
+    "Backend: POST /api/inventory-ledger/activities - validates PO Draft exists (404 for non-existent)",
+    "Backend: GET /api/inventory-ledger/activities - lists activities newest first",
+    "Backend: GET /api/inventory-ledger/activities?entity_type=sales_order&entity_id=X - filters by entity",
+    "Backend: GET /api/inventory-ledger/activities?activity_type=note - filters by activity type",
+    "Backend: System activity auto-generation: assignment creates 'assignment' activity",
+    "Backend: System activity auto-generation: approval request creates 'approval' activity",
+    "Backend: System activity auto-generation: approval decision creates 'approval' activity",
+    "Backend: System activity auto-generation: document link creates 'document' activity",
+    "Backend: System activity auto-generation: escalation creates 'escalation' activity",
+    "Backend: Operations Queue returns recent_activity_today and no_recent_activity_7d counts",
+    "Backend: Operations Queue items include latest_activity_at, latest_activity_type, activity_count",
+    "Backend: sort_by=latest_activity sorts by most recent activity first",
+    "Backend: stale_days=7 filters for items with no recent activity",
+    "Backend: Regression - escalation endpoints working (iteration_88)",
+    "Backend: Regression - assignment endpoints working (iteration_89)",
+    "Frontend: Operations Queue Activity Today summary card displays (count: 1)",
+    "Frontend: Operations Queue Stale (>7d) summary card displays (count: 119)",
+    "Frontend: Operations Queue Sort dropdown has 'Sort: Latest Activity' option",
+    "Frontend: Operations Queue table has Last Activity column with timeAgo display",
+    "Frontend: Operations Queue detail panel shows Last Activity and Activities count",
+    "Frontend: ActivityTimelineSection component implemented in InventoryLedgerPage.js lines 1044-1157",
+    "Frontend: ActivityTimelineSection integrated in SO workflow (line 1618)",
+    "Frontend: ActivityTimelineSection integrated in PO Draft detail (line 2915)"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_activity_timeline.py",
+    "/app/test_reports/pytest/activity_timeline_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend: Activity model and _create_activity helper at lines 3696-3725",
+    "Backend: _get_activity_enrichment helper at lines 3728-3744",
+    "Backend: POST/GET /activities endpoints at lines 3756-3794",
+    "Backend: System auto-activity injection in assignment (3622-3624, 3641-3643, 3691-3692), approval (3289-3291, 3320-3322), document (3069-3071), escalation (3480-3481)",
+    "Backend: Operations Queue activity enrichment at lines 4012-4017, 4061-4066",
+    "Frontend: ActivityTimelineSection component at lines 1044-1157 with add-note form, type filter, timeline list",
+    "Frontend: OperationsQueuePage activity display: cards (lines 143-150), sort (184-189), column (217), row (261-266)",
+    "Console hydration warning is cosmetic - caused by span wrapping dynamic tr elements in dev mode"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_activity_timeline.py"
+  ],
+  "success_rate": {
+    "backend": "100% (20/20 tests passed)",
+    "frontend": "100% (Operations Queue activity features verified via UI testing)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://priority-escalate.preview.emergentagent.com"
+  },
+  "seed_data_used": {
+    "queue_items": "120 total items, 119 stale (>7d), 1 with recent activity",
+    "test_activities": "Multiple TEST- prefixed activities created during testing",
+    "SO-TEST-001": "Has manual note activity (shown in Operations Queue detail panel)"
+  },
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 90 - Activity Timeline feature fully tested. Backend endpoints: POST/GET /api/inventory-ledger/activities. System auto-generates activities for: assignments, approvals (request/decision), documents, escalations. Operations Queue enriched with latest_activity_at, latest_activity_type, activity_count per item, plus dashboard counts recent_activity_today and no_recent_activity_7d. sort_by=latest_activity and stale_days filters work. Frontend: Operations Queue page shows Activity Today and Stale (>7d) cards, Sort: Latest Activity dropdown, Last Activity column with timeAgo, detail panel shows activity info. ActivityTimelineSection component in InventoryLedgerPage.js (lines 1044-1157) is used in SO workflow drawer and PO Draft detail drawer - includes add-note form, activity type filter, and scrollable timeline list with type badges.",
+  "features_verified": {
+    "backend_endpoints": {
+      "create_activity": {
+        "method": "POST",
+        "path": "/api/inventory-ledger/activities",
+        "body": ["entity_type (sales_order|po_draft)", "entity_id", "activity_type", "title", "body", "created_by"],
+        "response": ["activity_id", "entity_type", "entity_id", "activity_type", "title", "body", "created_by", "created_at", "metadata"],
+        "valid_activity_types": ["note", "assignment", "approval", "document", "bc_export", "bc_response", "shipment", "invoice", "receipt", "escalation", "system"]
+      },
+      "list_activities": {
+        "method": "GET",
+        "path": "/api/inventory-ledger/activities",
+        "params": ["entity_type (optional)", "entity_id (optional)", "activity_type (optional)", "limit", "offset"],
+        "response": ["total", "offset", "limit", "entries[]"],
+        "sort": "newest first (created_at DESC)"
+      },
+      "system_auto_generation": {
+        "assignment_create": "Creates activity with type='assignment', title='Assigned to {owner}'",
+        "assignment_update": "Creates activity with type='assignment', title='Reassigned to {owner} | Status: {status}'",
+        "approval_request": "Creates activity with type='approval', title='Approval requested ({type})'",
+        "approval_decision": "Creates activity with type='approval', title='Approval {approved|rejected}'",
+        "document_link": "Creates activity with type='document', title='Document linked: {name}'",
+        "escalation_create": "Creates activity with type='escalation', title='Due date set: {date}'"
+      },
+      "operations_queue_enrichment": {
+        "path": "/api/inventory-ledger/operations-queue",
+        "new_response_fields": ["recent_activity_today", "no_recent_activity_7d"],
+        "new_item_fields": ["latest_activity_at", "latest_activity_type", "activity_count"],
+        "new_params": ["stale_days (filter items with no activity in N days)", "sort_by=latest_activity"]
+      }
+    },
+    "frontend_components": {
+      "OperationsQueuePage": {
+        "summary_cards": ["Total Queue", "High Priority", "Unassigned", "In Progress", "Activity Today", "Stale (>7d)"],
+        "sort_dropdown": ["Sort: Priority (default)", "Sort: Latest Activity"],
+        "table_columns": ["Type", "ID", "Priority", "Owner", "Status", "Next Action", "Escalation", "Last Activity"],
+        "detail_panel_fields": ["Last Activity (timeAgo)", "Activities (count)"]
+      },
+      "ActivityTimelineSection": {
+        "location": "InventoryLedgerPage.js lines 1044-1157",
+        "features": ["Collapsible header", "Add note form (title/body inputs + Add Note button)", "Activity type filter dropdown", "Scrollable timeline list"],
+        "activity_type_styles": ["note (blue)", "assignment (indigo)", "approval (emerald)", "document (purple)", "escalation (red)", "shipment (orange)", "invoice (yellow)", "bc_export (cyan)", "bc_response (teal)", "system (slate)"],
+        "used_in": ["SO workflow drawer (line 1618)", "PO Draft detail drawer (line 2915)"],
+        "data_testids": ["activity-timeline-section", "add-note-form", "note-title-input", "note-body-input", "add-note-btn", "activity-type-filter", "activity-timeline-list", "activity-entry-{n}"]
+      }
+    }
+  },
+  "mocked_apis_note": "Email service is mocked. BC API uses demo mode."
+}

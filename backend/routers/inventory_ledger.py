@@ -1051,6 +1051,13 @@ class PODraftVendorIn(BaseModel):
     vendor_name: str = Field(..., min_length=1)
 
 
+class BCResponseIn(BaseModel):
+    bc_response_status: str = Field(..., description="created|rejected|pending")
+    bc_po_number: str = Field(default="", description="BC Purchase Order number")
+    bc_document_id: str = Field(default="", description="BC document ID")
+    bc_response_notes: str = Field(default="", description="Notes about the response")
+
+
 @router.patch("/po-drafts/{draft_id}/vendor")
 async def api_update_po_draft_vendor(draft_id: str, body: PODraftVendorIn):
     """Assign or update vendor on a PO draft."""
@@ -1066,6 +1073,93 @@ async def api_update_po_draft_vendor(draft_id: str, body: PODraftVendorIn):
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="PO draft not found")
     return {"po_draft_id": draft_id, "vendor_id": body.vendor_id.strip(), "vendor_name": body.vendor_name.strip()}
+
+
+BC_RESPONSE_STATUSES = ("created", "rejected", "pending")
+BC_RESPONSE_TO_LOG_STATUS = {"created": "acknowledged", "rejected": "failed", "pending": "submitted"}
+
+
+@router.patch("/po-drafts/{draft_id}/bc-response")
+async def api_update_bc_response(draft_id: str, body: BCResponseIn):
+    """Record the downstream BC processing result for a PO draft.
+
+    Does NOT create or modify BC records. Purely informational.
+    Auto-creates a submission log entry mapped from the response status.
+    """
+    import uuid as _uuid
+
+    if body.bc_response_status not in BC_RESPONSE_STATUSES:
+        raise HTTPException(status_code=422, detail=f"Invalid bc_response_status. Use: {', '.join(BC_RESPONSE_STATUSES)}")
+
+    if body.bc_response_status == "rejected" and not body.bc_response_notes.strip():
+        raise HTTPException(status_code=422, detail="bc_response_notes is required when status is 'rejected'")
+
+    db = get_db()
+    doc = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": draft_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="PO draft not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+    update_fields = {
+        "bc_response_status": body.bc_response_status,
+        "bc_response_at": now,
+        "bc_response_notes": body.bc_response_notes.strip(),
+        "updated_at": now,
+    }
+    if body.bc_po_number.strip():
+        update_fields["bc_po_number"] = body.bc_po_number.strip()
+    if body.bc_document_id.strip():
+        update_fields["bc_document_id"] = body.bc_document_id.strip()
+
+    await db[PO_DRAFTS_COLL].update_one(
+        {"po_draft_id": draft_id},
+        {"$set": update_fields},
+    )
+
+    # Auto-create submission log entry
+    vendor_id = (doc.get("vendor_id") or "").strip()
+    vendor_name = (doc.get("vendor_name") or "").strip()
+    log_status = BC_RESPONSE_TO_LOG_STATUS.get(body.bc_response_status, "submitted")
+    notes_parts = [f"BC response: {body.bc_response_status}"]
+    if body.bc_po_number.strip():
+        notes_parts.append(f"PO#: {body.bc_po_number.strip()}")
+    if body.bc_response_notes.strip():
+        notes_parts.append(body.bc_response_notes.strip())
+
+    # Build BC payload snapshot from current draft state
+    created_at = doc.get("created_at", "")
+    document_date = created_at[:10] if len(created_at) >= 10 else now[:10]
+    bc_lines = []
+    for line in doc.get("lines", []):
+        item = (line.get("item") or "").strip()
+        qty = line.get("qty", 0)
+        if item and qty > 0:
+            bc_lines.append({"itemNumber": item, "quantity": qty, "sourceReference": line.get("source", "")})
+
+    payload_snapshot = {
+        "poDraftId": doc["po_draft_id"],
+        "vendor": {"vendorId": vendor_id, "vendorName": vendor_name},
+        "documentDate": document_date,
+        "source": "GPI_Hub_PO_Draft",
+        "lines": bc_lines,
+    }
+
+    log_entry = {
+        "submission_id": f"SUB-{_uuid.uuid4().hex[:8].upper()}",
+        "po_draft_id": draft_id,
+        "submitted_at": now,
+        "submitted_by": None,
+        "vendor_id": vendor_id,
+        "vendor_name": vendor_name,
+        "status": log_status,
+        "notes": " | ".join(notes_parts),
+        "bc_payload_snapshot": payload_snapshot,
+    }
+    await db[PO_SUBMISSION_LOGS_COLL].insert_one(log_entry.copy())
+
+    # Return the updated draft
+    updated = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": draft_id}, {"_id": 0})
+    return updated
 
 
 @router.get("/po-drafts/{draft_id}/bc-export")
@@ -1458,7 +1552,7 @@ async def api_item_detail(
     # Last PO draft for this item
     last_po_draft = await db[PO_DRAFTS_COLL].find_one(
         {"customer_id": customer_id, "lines.item": item},
-        {"_id": 0, "po_draft_id": 1, "created_at": 1, "status": 1},
+        {"_id": 0, "po_draft_id": 1, "created_at": 1, "status": 1, "bc_po_number": 1, "bc_response_status": 1},
         sort=[("created_at", -1)],
     )
 

@@ -1227,11 +1227,15 @@ function PODraftsPanel({ customerId, onViewDraft }) {
                     <Badge variant={d.status === 'draft' ? 'outline' : d.status === 'sent' ? 'default' : 'secondary'} className="text-[9px]">{d.status}</Badge>
                     {d.incoming_supply_created && <Badge className="text-[8px] bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300" data-testid={`inv-po-draft-supply-badge-${i}`}><Truck className="w-2.5 h-2.5 mr-0.5" />Supply</Badge>}
                     {d.latest_submission_status && <Badge variant={d.latest_submission_status === 'acknowledged' ? 'default' : d.latest_submission_status === 'failed' ? 'destructive' : 'outline'} className="text-[8px]" data-testid={`inv-po-draft-sub-status-${i}`}>{d.latest_submission_status}</Badge>}
+                    {d.bc_response_status && <Badge variant={d.bc_response_status === 'created' ? 'default' : d.bc_response_status === 'rejected' ? 'destructive' : 'secondary'} className="text-[8px]" data-testid={`inv-po-draft-bc-resp-${i}`}>BC:{d.bc_response_status}</Badge>}
                   </div>
                 </td>
                 <td className="py-1.5 px-3 text-right font-bold">{d.total_lines}</td>
                 <td className="py-1.5 px-3 text-right font-mono">{d.total_qty?.toLocaleString()}</td>
-                <td className="py-1.5 px-3 text-muted-foreground text-[10px] truncate max-w-[200px]">{d.lines?.map(l => l.item).join(', ')}</td>
+                <td className="py-1.5 px-3 text-muted-foreground text-[10px] truncate max-w-[200px]">
+                  {d.bc_po_number ? <span className="font-mono font-bold text-blue-600 mr-1" data-testid={`inv-po-draft-bc-po-${i}`}>{d.bc_po_number}</span> : null}
+                  {d.lines?.map(l => l.item).join(', ')}
+                </td>
                 <td className="py-1.5 px-3 text-center">
                   <Button variant="ghost" size="sm" className="h-5 text-[10px] px-2" onClick={() => onViewDraft?.(d.po_draft_id)} data-testid={`inv-po-draft-view-${i}`}>
                     View
@@ -1266,6 +1270,11 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
   const [newLogStatus, setNewLogStatus] = useState('submitted');
   const [newLogNotes, setNewLogNotes] = useState('');
   const [addingLog, setAddingLog] = useState(false);
+  const [bcRespStatus, setBcRespStatus] = useState('');
+  const [bcPoNumber, setBcPoNumber] = useState('');
+  const [bcDocId, setBcDocId] = useState('');
+  const [bcRespNotes, setBcRespNotes] = useState('');
+  const [savingBcResp, setSavingBcResp] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -1277,6 +1286,10 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
           setDraft(d);
           setVendorId(d.vendor_id || '');
           setVendorName(d.vendor_name || '');
+          setBcRespStatus(d.bc_response_status || '');
+          setBcPoNumber(d.bc_po_number || '');
+          setBcDocId(d.bc_document_id || '');
+          setBcRespNotes(d.bc_response_notes || '');
         }
         else toast.error('Draft not found');
       } catch { toast.error('Failed to load draft'); }
@@ -1390,6 +1403,25 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
       } else { const d = await res.json(); toast.error(d.detail || 'Failed'); }
     } catch { toast.error('Failed to add log entry'); }
     finally { setAddingLog(false); }
+  };
+
+  const saveBcResponse = async () => {
+    if (!bcRespStatus) { toast.error('Select a response status'); return; }
+    if (bcRespStatus === 'rejected' && !bcRespNotes.trim()) { toast.error('Notes required for rejected status'); return; }
+    setSavingBcResp(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/po-drafts/${draftId}/bc-response`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bc_response_status: bcRespStatus, bc_po_number: bcPoNumber.trim(), bc_document_id: bcDocId.trim(), bc_response_notes: bcRespNotes.trim() }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setDraft(updated);
+        toast.success(`BC response recorded: ${bcRespStatus}`);
+        loadSubmissionLogs();
+      } else { const d = await res.json(); toast.error(d.detail || 'Failed'); }
+    } catch { toast.error('Failed to save BC response'); }
+    finally { setSavingBcResp(false); }
   };
 
   return (
@@ -1573,6 +1605,58 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
                 </Button>
               )}
             </div>
+
+            {/* BC Response */}
+            {hasVendor && (
+              <div className="space-y-2" data-testid="inv-po-draft-bc-response-section">
+                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Business Central Response</p>
+                {draft.bc_response_status && (
+                  <div className="border border-border rounded p-2.5 space-y-1 text-xs" data-testid="inv-po-draft-bc-response-info">
+                    <div className="flex items-center gap-2">
+                      <Badge variant={draft.bc_response_status === 'created' ? 'default' : draft.bc_response_status === 'rejected' ? 'destructive' : 'secondary'} className="text-[9px]" data-testid="inv-po-draft-bc-resp-status-badge">{draft.bc_response_status}</Badge>
+                      {draft.bc_po_number && <span className="font-mono font-bold" data-testid="inv-po-draft-bc-po-number">{draft.bc_po_number}</span>}
+                      {draft.bc_document_id && <span className="font-mono text-muted-foreground text-[10px]">{draft.bc_document_id}</span>}
+                    </div>
+                    {draft.bc_response_at && <p className="text-[10px] text-muted-foreground">Recorded: {new Date(draft.bc_response_at).toLocaleString()}</p>}
+                    {draft.bc_response_notes && <p className="text-[10px] text-muted-foreground">{draft.bc_response_notes}</p>}
+                  </div>
+                )}
+                {draft.status !== 'archived' && (
+                  <div className="space-y-2" data-testid="inv-po-draft-bc-response-form">
+                    <div className="flex gap-2 items-end">
+                      <div className="space-y-1">
+                        <Label className="text-[10px]">Status</Label>
+                        <Select value={bcRespStatus} onValueChange={setBcRespStatus}>
+                          <SelectTrigger className="h-6 text-[10px] w-[110px]" data-testid="inv-po-draft-bc-resp-status-select"><SelectValue placeholder="Select..." /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="created">Created</SelectItem>
+                            <SelectItem value="rejected">Rejected</SelectItem>
+                            <SelectItem value="pending">Pending</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex-1 space-y-1">
+                        <Label className="text-[10px]">BC PO Number</Label>
+                        <Input className="h-6 text-[10px]" value={bcPoNumber} onChange={e => setBcPoNumber(e.target.value)} placeholder="e.g. PO-104582" data-testid="inv-po-draft-bc-po-input" />
+                      </div>
+                      <div className="flex-1 space-y-1">
+                        <Label className="text-[10px]">BC Doc ID</Label>
+                        <Input className="h-6 text-[10px]" value={bcDocId} onChange={e => setBcDocId(e.target.value)} placeholder="Optional" data-testid="inv-po-draft-bc-doc-id-input" />
+                      </div>
+                    </div>
+                    <div className="flex gap-2 items-end">
+                      <div className="flex-1 space-y-1">
+                        <Label className="text-[10px]">Notes</Label>
+                        <Input className="h-6 text-[10px]" value={bcRespNotes} onChange={e => setBcRespNotes(e.target.value)} placeholder={bcRespStatus === 'rejected' ? 'Required for rejection' : 'Optional'} data-testid="inv-po-draft-bc-resp-notes-input" />
+                      </div>
+                      <Button size="sm" className="h-6 text-[10px] px-2" disabled={savingBcResp || !bcRespStatus} onClick={saveBcResponse} data-testid="inv-po-draft-save-bc-response">
+                        {savingBcResp ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Save Response'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Submission Log */}
             {hasVendor && (
@@ -1792,6 +1876,8 @@ function ItemDetailDrawer({ item, customerId, onClose, onOpenFullHistory, onRefr
                 <div className="flex gap-3 text-xs items-center">
                   <span className="font-mono font-bold text-blue-600 hover:underline">{detail.last_po_draft.po_draft_id}</span>
                   <Badge variant="outline" className="text-[9px]">{detail.last_po_draft.status}</Badge>
+                  {detail.last_po_draft.bc_response_status && <Badge variant={detail.last_po_draft.bc_response_status === 'created' ? 'default' : detail.last_po_draft.bc_response_status === 'rejected' ? 'destructive' : 'secondary'} className="text-[8px]" data-testid="inv-detail-bc-resp-status">BC:{detail.last_po_draft.bc_response_status}</Badge>}
+                  {detail.last_po_draft.bc_po_number && <span className="font-mono font-bold text-emerald-600 text-[10px]" data-testid="inv-detail-bc-po-number">{detail.last_po_draft.bc_po_number}</span>}
                   <span className="text-muted-foreground text-[10px]">{detail.last_po_draft.created_at ? new Date(detail.last_po_draft.created_at).toLocaleDateString() : ''}</span>
                 </div>
               </div>

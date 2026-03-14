@@ -3066,6 +3066,25 @@ EMAIL_CLIENT_ID=doc-workflow-test
 - Frontend: All UI flows verified (100%)
 - Test report: `/app/test_reports/iteration_78.json`
 
+
+---
+
+## Session Update: March 14, 2026 - BC PO Linkage to Incoming Supply (iteration_79)
+
+### Completed
+
+#### BC PO Linkage
+- **Backend**: Conversion stores `po_draft_id`. BC response `created` → planned supply advances to `ordered` with BC PO#/doc ID. Idempotent. Rejected/pending: no supply changes.
+- **Backend**: `GET /api/inventory-ledger/po-drafts/{id}/incoming-supply`. Draft detail enriched with linked supply summary.
+- **Frontend**: Linked Incoming Supply section in drawer (table, status badges). Refreshes on BC response save.
+- Fixed: duplicate check collection name bug (`incoming_supply` → `inv_incoming_supply`)
+
+### Test Results
+- Backend: 17/17 (100%)
+- Frontend: All UI flows verified (100%)
+- Test report: `/app/test_reports/iteration_79.json`
+
+*Last Updated: March 14, 2026*
 *Last Updated: March 14, 2026*
 
 *Last Updated: March 14, 2026*

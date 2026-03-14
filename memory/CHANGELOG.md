@@ -323,6 +323,24 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 - No ledger mutations, no BC API calls — informational response capture only
 - Backend: 19/19 tests passed, Frontend: all UI flows verified
 - Test report: `/app/test_reports/iteration_78.json`
+---
+
+## 2026-03-14: BC PO Linkage to Incoming Supply (iteration_79)
+
+### What Was Built
+- PO draft → incoming supply conversion now stores `po_draft_id` on created supply records
+- Fixed pre-existing bug: duplicate check used wrong collection (`incoming_supply` → `inv_incoming_supply`)
+- BC response `created` advances linked planned supply to `ordered`, sets `bc_po_number` and `bc_document_id`
+- BC response `rejected`/`pending` do NOT alter linked supply
+- Linkage is idempotent — safe to repeat
+- `GET /api/inventory-ledger/po-drafts/{id}/incoming-supply` returns linked supply records
+- PO draft detail enriched with `linked_supply_count`, `linked_supply_status_counts`, `linked_supply_has_bc_po_number`
+- Frontend: Linked Incoming Supply section in PO Draft detail drawer (table with item/qty/status/BC PO#, status count badges)
+- Frontend: After BC response created, linked supply refreshes to show ordered status and BC PO#
+- No ledger mutations, no BC API calls
+- Backend: 17/17 tests passed, Frontend: all UI flows verified
+- Test report: `/app/test_reports/iteration_79.json`
+
 
 - Test report: `/app/test_reports/iteration_77.json`
 

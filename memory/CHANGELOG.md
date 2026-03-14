@@ -426,3 +426,28 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 - Frontend: Shipment history shows "drop-ship" badge for drop_ship shipments
 - Backend: 14/14 tests passed, Frontend: 100% UI verification
 - Test report: `/app/test_reports/iteration_83.json`
+
+---
+
+## 2026-03-14: Drop-Ship Purchase Order Workflow Tracking (iteration_84)
+
+### What Was Built
+- PO draft model extended with `po_type` (warehouse_supply|drop_ship) and `sales_order_id` fields
+- `POST /api/inventory-ledger/sales-orders/{id}/generate-drop-ship-po-draft` — creates linked PO draft from drop-ship SO with lines, vendor, notes
+- `GET /api/inventory-ledger/sales-orders/{id}/drop-ship-po-drafts` — lists linked DS PO drafts
+- Drop-ship PO drafts excluded from incoming supply conversion (returns 422)
+- BC PO response capture works for drop-ship drafts but skips incoming supply linkage
+- `POST /api/inventory-ledger/sales-orders/{id}/drop-ship-vendor-shipment` — records vendor shipment for traceability only (no inventory movements)
+- `GET /api/inventory-ledger/sales-orders/{id}/drop-ship-vendor-shipment-log` — lists vendor shipment logs
+- Invoice capture updated: drop-ship accepts either BC shipment or vendor shipment as evidence
+- SO summary enriched with: linked_drop_ship_po_draft_count, linked_drop_ship_po_draft_id, latest_drop_ship_po_status, latest_vendor_shipment_number, latest_vendor_shipped_at
+- Operational status progression for drop-ship: pending → po_drafted → shipped → complete
+- New collection: `ds_vendor_shipment_logs` for vendor shipment traceability
+- Frontend: "Generate Drop-Ship PO" button + form (item/qty/description lines, vendor name, notes)
+- Frontend: Linked PO drafts list with status, vendor, line counts
+- Frontend: "Record Vendor Shipment" button + form (item/qty lines, vendor shipment #, linked PO draft select)
+- Frontend: Vendor shipment log display
+- Frontend: Drop-ship summary strip enriched with PO info, vendor shipment info
+- All safeguards: no BC API calls, no incoming supply for DS POs, no warehouse inventory impact
+- Backend: 15/15 tests passed, Frontend: 100% UI verified
+- Test report: `/app/test_reports/iteration_84.json`

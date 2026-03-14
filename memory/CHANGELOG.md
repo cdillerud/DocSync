@@ -1,5 +1,17 @@
 # CHANGELOG - GPI Document Hub
 
+## [2026-03-14] Iteration 88 — Operational Escalations and Due Dates — COMPLETE
+- **Backend:** Escalation CRUD endpoints (POST/GET/PATCH /api/inventory-ledger/escalations) with derived status logic (on_track, due_soon, overdue, escalated)
+- **Backend:** Operations Queue enriched with escalation data (due_date, escalation_status, days_to_due, days_overdue), priority score boosted (+10/+20/+30)
+- **Backend:** Escalation filter on operations-queue endpoint (?escalation=overdue|due_soon|escalated|on_track)
+- **Backend:** SO summary and PO Draft detail endpoints enriched with escalation fields
+- **Frontend:** Operations Queue page with summary cards (Total, High Priority, Due Soon, Overdue, Escalated), escalation filter dropdown, color-coded badges, row highlighting
+- **Frontend:** EscalationSection component in SO and PO workflow views — set/edit due dates, manual escalation, status badges, days-to-due/overdue display
+- **Testing:** 22/22 backend tests passed, all frontend UI elements verified (100% pass rate)
+- **Test report:** /app/test_reports/iteration_88.json
+
+
+
 ## [2026-03-12] Backend Refactor Phase 2 — COMPLETE
 - Extracted all 85 routes from server.py into 9 domain-specific router files
 - server.py now has 0 active @api_router routes (down from 85)

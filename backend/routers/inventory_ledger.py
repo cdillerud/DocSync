@@ -1028,6 +1028,96 @@ async def api_export_po_draft(draft_id: str):
     )
 
 
+class PODraftVendorIn(BaseModel):
+    vendor_id: str = Field(..., min_length=1)
+    vendor_name: str = Field(..., min_length=1)
+
+
+@router.patch("/po-drafts/{draft_id}/vendor")
+async def api_update_po_draft_vendor(draft_id: str, body: PODraftVendorIn):
+    """Assign or update vendor on a PO draft."""
+    db = get_db()
+    result = await db[PO_DRAFTS_COLL].update_one(
+        {"po_draft_id": draft_id},
+        {"$set": {
+            "vendor_id": body.vendor_id.strip(),
+            "vendor_name": body.vendor_name.strip(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="PO draft not found")
+    return {"po_draft_id": draft_id, "vendor_id": body.vendor_id.strip(), "vendor_name": body.vendor_name.strip()}
+
+
+@router.get("/po-drafts/{draft_id}/bc-export")
+async def api_bc_export_po_draft(draft_id: str):
+    """Generate a Business Central compatible purchase order payload.
+
+    Does NOT send data to BC or create any records. Returns a structured
+    JSON payload shaped for BC PO creation. Validates vendor info, lines,
+    and draft status before generating.
+    """
+    from fastapi.responses import Response
+    import json as json_mod
+
+    db = get_db()
+    doc = await db[PO_DRAFTS_COLL].find_one(
+        {"po_draft_id": draft_id}, {"_id": 0}
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="PO draft not found")
+
+    # --- Validation ---
+    if doc.get("status") == "archived":
+        raise HTTPException(status_code=422, detail="Cannot export an archived draft for BC")
+
+    lines = doc.get("lines", [])
+    if not lines:
+        raise HTTPException(status_code=422, detail="PO draft has no lines to export")
+
+    vendor_id = (doc.get("vendor_id") or "").strip()
+    vendor_name = (doc.get("vendor_name") or "").strip()
+    if not vendor_id or not vendor_name:
+        raise HTTPException(
+            status_code=422,
+            detail="Vendor information is required for BC export. Assign a vendor to this draft first.",
+        )
+
+    # --- Build BC payload ---
+    created_at = doc.get("created_at", "")
+    document_date = created_at[:10] if len(created_at) >= 10 else datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    bc_lines = []
+    for line in lines:
+        item = (line.get("item") or "").strip()
+        qty = line.get("qty", 0)
+        if item and qty > 0:
+            bc_lines.append({
+                "itemNumber": item,
+                "quantity": qty,
+                "sourceReference": line.get("source", ""),
+            })
+
+    payload = {
+        "poDraftId": doc["po_draft_id"],
+        "vendor": {
+            "vendorId": vendor_id,
+            "vendorName": vendor_name,
+        },
+        "documentDate": document_date,
+        "source": "GPI_Hub_PO_Draft",
+        "lines": bc_lines,
+    }
+
+    filename = f"BC-PO-{draft_id}.json"
+    return Response(
+        content=json_mod.dumps(payload, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.post("/po-drafts/{draft_id}/create-incoming-supply")
 async def api_po_draft_create_incoming_supply(draft_id: str):
     """Convert PO draft lines into planned incoming supply records.

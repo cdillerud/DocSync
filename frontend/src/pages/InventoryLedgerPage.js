@@ -1255,13 +1255,23 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
   const [updating, setUpdating] = useState(false);
   const [converting, setConverting] = useState(false);
   const [conversionResult, setConversionResult] = useState(null);
+  const [bcExporting, setBcExporting] = useState(false);
+  const [showMarkSentPrompt, setShowMarkSentPrompt] = useState(false);
+  const [vendorId, setVendorId] = useState('');
+  const [vendorName, setVendorName] = useState('');
+  const [savingVendor, setSavingVendor] = useState(false);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
       try {
         const res = await fetch(`${API}/api/inventory-ledger/po-drafts/${draftId}`);
-        if (res.ok) setDraft(await res.json());
+        if (res.ok) {
+          const d = await res.json();
+          setDraft(d);
+          setVendorId(d.vendor_id || '');
+          setVendorName(d.vendor_name || '');
+        }
         else toast.error('Draft not found');
       } catch { toast.error('Failed to load draft'); }
       finally { setLoading(false); }
@@ -1300,6 +1310,53 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
 
   const supplyAlreadyCreated = draft?.incoming_supply_created;
   const canConvert = draft && !supplyAlreadyCreated && draft.status !== 'archived' && draft.lines?.length > 0;
+  const hasVendor = !!(draft?.vendor_id && draft?.vendor_name);
+  const canBcExport = draft && draft.status !== 'archived' && draft.lines?.length > 0;
+
+  const saveVendor = async () => {
+    if (!vendorId.trim() || !vendorName.trim()) { toast.error('Vendor ID and Name are required'); return; }
+    setSavingVendor(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/po-drafts/${draftId}/vendor`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vendor_id: vendorId.trim(), vendor_name: vendorName.trim() }),
+      });
+      if (res.ok) {
+        setDraft(prev => prev ? { ...prev, vendor_id: vendorId.trim(), vendor_name: vendorName.trim() } : prev);
+        toast.success('Vendor assigned');
+      } else { const d = await res.json(); toast.error(d.detail || 'Failed'); }
+    } catch { toast.error('Failed to save vendor'); }
+    finally { setSavingVendor(false); }
+  };
+
+  const exportForBC = async () => {
+    setBcExporting(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/po-drafts/${draftId}/bc-export`);
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `BC-PO-${draftId}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+        toast.success('BC payload downloaded');
+        if (draft?.status === 'draft') setShowMarkSentPrompt(true);
+      } else {
+        const d = await res.json();
+        toast.error(d.detail || 'BC export failed');
+      }
+    } catch { toast.error('Failed to export BC payload'); }
+    finally { setBcExporting(false); }
+  };
+
+  const confirmMarkSent = async () => {
+    setShowMarkSentPrompt(false);
+    await updateStatus('sent');
+  };
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
@@ -1372,6 +1429,45 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
               </div>
             )}
 
+            {/* Vendor Assignment */}
+            {draft.status !== 'archived' && (
+              <div className="border border-border rounded p-2.5 space-y-2" data-testid="inv-po-draft-vendor-section">
+                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Vendor</p>
+                {hasVendor ? (
+                  <div className="flex items-center gap-2 text-xs">
+                    <Badge variant="outline" className="text-[9px]" data-testid="inv-po-draft-vendor-badge">{draft.vendor_id}</Badge>
+                    <span className="font-medium" data-testid="inv-po-draft-vendor-name">{draft.vendor_name}</span>
+                  </div>
+                ) : (
+                  <p className="text-xs text-amber-600 dark:text-amber-400" data-testid="inv-po-draft-no-vendor">No vendor assigned — required for BC export</p>
+                )}
+                <div className="flex gap-2 items-end">
+                  <div className="flex-1 space-y-1">
+                    <Label className="text-[10px]">Vendor ID</Label>
+                    <Input className="h-6 text-[10px]" value={vendorId} onChange={e => setVendorId(e.target.value)} placeholder="e.g. V10045" data-testid="inv-po-draft-vendor-id-input" />
+                  </div>
+                  <div className="flex-1 space-y-1">
+                    <Label className="text-[10px]">Vendor Name</Label>
+                    <Input className="h-6 text-[10px]" value={vendorName} onChange={e => setVendorName(e.target.value)} placeholder="e.g. Acme Supply" data-testid="inv-po-draft-vendor-name-input" />
+                  </div>
+                  <Button size="sm" className="h-6 text-[10px] px-2" disabled={savingVendor || !vendorId.trim() || !vendorName.trim()} onClick={saveVendor} data-testid="inv-po-draft-save-vendor">
+                    {savingVendor ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Save'}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Mark as Sent Prompt */}
+            {showMarkSentPrompt && (
+              <div className="border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 rounded p-2.5 text-xs space-y-1.5" data-testid="inv-po-draft-mark-sent-prompt">
+                <p className="font-medium text-blue-700 dark:text-blue-300">BC payload exported. Mark this draft as Sent?</p>
+                <div className="flex gap-2">
+                  <Button size="sm" className="h-6 text-[10px]" onClick={confirmMarkSent} data-testid="inv-po-draft-confirm-mark-sent">Yes, Mark as Sent</Button>
+                  <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => setShowMarkSentPrompt(false)} data-testid="inv-po-draft-dismiss-mark-sent">Not now</Button>
+                </div>
+              </div>
+            )}
+
             {/* Summary */}
             <div className="flex gap-4 text-xs border border-border rounded p-2.5">
               <div>Lines: <span className="font-bold">{draft.total_lines}</span></div>
@@ -1415,6 +1511,16 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
                   data-testid="inv-po-draft-create-supply">
                   {converting ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Truck className="w-3 h-3 mr-1" />}
                   Create Incoming Supply
+                </Button>
+              )}
+              {canBcExport && (
+                <Button size="sm" className="h-7 text-[10px]" variant={hasVendor ? 'default' : 'outline'}
+                  disabled={bcExporting || !hasVendor}
+                  onClick={exportForBC}
+                  title={hasVendor ? 'Export BC payload' : 'Assign a vendor first'}
+                  data-testid="inv-po-draft-bc-export">
+                  {bcExporting ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Download className="w-3 h-3 mr-1" />}
+                  Export for Business Central
                 </Button>
               )}
               <Button variant="outline" size="sm" className="h-7 text-[10px]"

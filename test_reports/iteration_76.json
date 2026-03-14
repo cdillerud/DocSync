@@ -1,0 +1,142 @@
+{
+  "summary": "Comprehensive testing of BC Purchase Order payload export feature (iteration_76). All 18 backend tests pass. All frontend UI tests pass. PATCH /api/inventory-ledger/po-drafts/{id}/vendor successfully assigns vendor to drafts. GET /api/inventory-ledger/po-drafts/{id}/bc-export generates BC-compatible JSON payload with proper structure and Content-Disposition header. Frontend shows vendor section with ID/Name inputs, Save button, 'No vendor assigned' warning, and 'Export for Business Central' button which is disabled until vendor is assigned. Mark as Sent prompt appears after BC export for draft-status drafts.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "InventoryLedgerPage",
+        "issues": [
+          "Pre-existing React hydration warning: '<tr> cannot be a child of <span>' in table tbody - cosmetic, non-blocking (same as previous iterations)"
+        ]
+      }
+    ]
+  },
+  "passed_tests": [
+    "Backend: PATCH /api/inventory-ledger/po-drafts/{id}/vendor - successful vendor assignment",
+    "Backend: PATCH /api/inventory-ledger/po-drafts/{id}/vendor - persists on draft GET",
+    "Backend: PATCH /api/inventory-ledger/po-drafts/{id}/vendor - returns 404 for non-existent draft",
+    "Backend: PATCH /api/inventory-ledger/po-drafts/{id}/vendor - requires vendor_id (422)",
+    "Backend: PATCH /api/inventory-ledger/po-drafts/{id}/vendor - requires vendor_name (422)",
+    "Backend: GET /api/inventory-ledger/po-drafts/{id}/bc-export - success with vendor assigned",
+    "Backend: GET /api/inventory-ledger/po-drafts/{id}/bc-export - documentDate in YYYY-MM-DD format",
+    "Backend: GET /api/inventory-ledger/po-drafts/{id}/bc-export - Content-Disposition header present",
+    "Backend: GET /api/inventory-ledger/po-drafts/{id}/bc-export - returns 422 when vendor missing",
+    "Backend: GET /api/inventory-ledger/po-drafts/{id}/bc-export - returns 422 for archived draft",
+    "Backend: GET /api/inventory-ledger/po-drafts/{id}/bc-export - returns 404 for non-existent draft",
+    "Backend: BC export lines contain itemNumber, quantity, sourceReference fields",
+    "Backend REGRESSION: PO Drafts list endpoint still works",
+    "Backend REGRESSION: PO Draft detail endpoint still works",
+    "Backend REGRESSION: PO Draft export endpoint still works",
+    "Backend REGRESSION: Create incoming supply endpoint still works",
+    "Backend REGRESSION: Balances endpoint still works",
+    "Backend REGRESSION: Action center endpoint still works",
+    "Frontend: Vendor section visible in PO Draft detail drawer",
+    "Frontend: 'No vendor assigned' warning shows when no vendor set",
+    "Frontend: Vendor ID and Name input fields visible",
+    "Frontend: Save Vendor button visible and functional",
+    "Frontend: Vendor badge and name display after save",
+    "Frontend: 'Export for Business Central' button visible for non-archived drafts",
+    "Frontend: BC Export button disabled when no vendor assigned",
+    "Frontend: BC Export button enabled after vendor assigned",
+    "Frontend: BC Export triggers file download with proper filename",
+    "Frontend: Mark as Sent prompt appears after BC export for draft-status drafts",
+    "Frontend: Confirm and Dismiss buttons visible in Mark as Sent prompt",
+    "Frontend: Export JSON button still works",
+    "Frontend: Draft lines table visible"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_bc_export_vendor_assignment.py",
+    "/app/test_reports/pytest/bc_export_vendor_assignment_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend inventory_ledger.py Lines 1031-1050: PATCH /po-drafts/{id}/vendor correctly updates vendor_id and vendor_name fields on draft document",
+    "Backend inventory_ledger.py Lines 1053-1118: GET /po-drafts/{id}/bc-export correctly validates vendor info, draft status (not archived), and generates BC-compatible payload",
+    "Backend BC payload structure: {poDraftId, vendor: {vendorId, vendorName}, documentDate (YYYY-MM-DD), source: 'GPI_Hub_PO_Draft', lines: [{itemNumber, quantity, sourceReference}]}",
+    "Backend correctly returns 422 with descriptive message when vendor missing: 'Vendor information is required for BC export. Assign a vendor to this draft first.'",
+    "Frontend PODraftDetailDrawer (line ~1252) correctly manages vendor state with vendorId/vendorName useState and saveVendor function",
+    "Frontend correctly shows 'No vendor assigned — required for BC export' warning when vendor not set (line ~1442)",
+    "Frontend BC Export button disabled when hasVendor is false (line ~1517-1518)",
+    "Frontend exportForBC function (line ~1332) downloads blob, creates temporary anchor for download, and triggers showMarkSentPrompt for draft-status drafts",
+    "Frontend Mark as Sent prompt (line ~1461-1469) with confirmMarkSent calling updateStatus('sent')"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_bc_export_vendor_assignment.py"
+  ],
+  "success_rate": {
+    "backend": "100% (18/18 tests passed)",
+    "frontend": "100% (all UI verifications passed)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://po-supply-bridge.preview.emergentagent.com"
+  },
+  "seed_data_used": "Used existing Hormel Foods workspace (customer_id: 366bfcce-4d68-4daf-b9f4-cb05a35de8c8). Draft PO-DRAFT-20260314163256-689B67 (already had vendor V10045/Acme Bottle Supply). Draft PO-DRAFT-20260314170144-8ED5A8 used for BC export testing. Test vendor UI-TEST-V001/UI Test Vendor Inc assigned during frontend testing.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "BC Purchase Order payload export feature fully tested. New endpoints: (1) PATCH /api/inventory-ledger/po-drafts/{id}/vendor - assigns vendor_id and vendor_name to draft, (2) GET /api/inventory-ledger/po-drafts/{id}/bc-export - generates BC-compatible JSON payload for download. BC export requires vendor assignment (returns 422 if missing) and rejects archived drafts (422). BC payload structure: {poDraftId, vendor: {vendorId, vendorName}, documentDate (YYYY-MM-DD), source: 'GPI_Hub_PO_Draft', lines: [{itemNumber, quantity, sourceReference}]}. Frontend shows vendor section in PO Draft detail drawer with ID/Name inputs and Save button. 'Export for Business Central' button is disabled until vendor assigned. Mark as Sent prompt appears after BC export for draft-status drafts.",
+  "features_verified": {
+    "backend_endpoints": {
+      "vendor_assignment": {
+        "method": "PATCH",
+        "path": "/api/inventory-ledger/po-drafts/{draft_id}/vendor",
+        "request_body": {"vendor_id": "string", "vendor_name": "string"},
+        "response": {"po_draft_id": "string", "vendor_id": "string", "vendor_name": "string"},
+        "errors": {
+          "404": "PO draft not found",
+          "422": "Validation error (missing vendor_id or vendor_name)"
+        }
+      },
+      "bc_export": {
+        "method": "GET",
+        "path": "/api/inventory-ledger/po-drafts/{draft_id}/bc-export",
+        "response_headers": {"Content-Disposition": "attachment; filename=\"BC-PO-{draft_id}.json\""},
+        "payload_structure": {
+          "poDraftId": "string",
+          "vendor": {"vendorId": "string", "vendorName": "string"},
+          "documentDate": "YYYY-MM-DD",
+          "source": "GPI_Hub_PO_Draft",
+          "lines": [{"itemNumber": "string", "quantity": "number", "sourceReference": "string"}]
+        },
+        "errors": {
+          "404": "PO draft not found",
+          "422_no_vendor": "Vendor information is required for BC export. Assign a vendor to this draft first.",
+          "422_archived": "Cannot export an archived draft for BC"
+        }
+      }
+    },
+    "frontend_components": {
+      "vendor_section": {
+        "testid": "inv-po-draft-vendor-section",
+        "condition": "draft.status !== 'archived'",
+        "children": {
+          "vendor_badge": {"testid": "inv-po-draft-vendor-badge", "condition": "vendor_id && vendor_name"},
+          "vendor_name_display": {"testid": "inv-po-draft-vendor-name", "condition": "vendor_id && vendor_name"},
+          "no_vendor_warning": {"testid": "inv-po-draft-no-vendor", "condition": "!vendor_id || !vendor_name", "text": "No vendor assigned — required for BC export"},
+          "vendor_id_input": {"testid": "inv-po-draft-vendor-id-input"},
+          "vendor_name_input": {"testid": "inv-po-draft-vendor-name-input"},
+          "save_vendor_button": {"testid": "inv-po-draft-save-vendor", "disabled_when": "!vendor_id.trim() || !vendor_name.trim()"}
+        }
+      },
+      "bc_export_button": {
+        "testid": "inv-po-draft-bc-export",
+        "text": "Export for Business Central",
+        "disabled_when": "!hasVendor",
+        "visible_when": "draft.status !== 'archived' && draft.lines?.length > 0"
+      },
+      "mark_sent_prompt": {
+        "testid": "inv-po-draft-mark-sent-prompt",
+        "appears_when": "draft.status === 'draft' after BC export",
+        "children": {
+          "confirm_button": {"testid": "inv-po-draft-confirm-mark-sent", "action": "updateStatus('sent')"},
+          "dismiss_button": {"testid": "inv-po-draft-dismiss-mark-sent", "action": "setShowMarkSentPrompt(false)"}
+        }
+      }
+    }
+  }
+}

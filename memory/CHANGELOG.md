@@ -87,3 +87,17 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 - AP Validation, Label Corrections, Alert Patterns, Email polling
 - Spiro CRM, Sales module, Square9 workflow, BC Reference Cache
 - Auto-Resolution Service, Vendor Extraction Profiles
+
+---
+
+## 2026-03-14: Configurable Item Master Data (Reorder Thresholds & Safety Buffers)
+
+### What Was Built
+- New backend router `/api/inventory-items/settings` (POST upsert, GET list) for per-item reorder settings
+- DB collection `inv_item_settings` with schema: {customer_id, item, reorder_threshold, safety_buffer, notes, created_at, updated_at}
+- Updated reorder recommendations to use configurable settings: `recommended_qty = max(0, threshold - available) + buffer`
+- Fallback to defaults (threshold=0, buffer=10) when no settings exist
+- Frontend: Item Settings tab in CustomerWorkspace with add/edit form + settings table
+- Frontend: Reorder tab updated with Threshold and Buffer columns
+- Backend: 17/17 pytest tests passed, Frontend: all UI flows verified
+- Test report: `/app/test_reports/iteration_64.json`

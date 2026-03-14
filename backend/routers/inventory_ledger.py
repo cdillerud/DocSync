@@ -1028,6 +1028,103 @@ async def api_export_po_draft(draft_id: str):
     )
 
 
+@router.post("/po-drafts/{draft_id}/create-incoming-supply")
+async def api_po_draft_create_incoming_supply(draft_id: str):
+    """Convert PO draft lines into planned incoming supply records.
+
+    Does NOT create ledger movements or ERP records. Creates incoming supply
+    via the existing create_incoming pipeline so derive_balances picks up
+    the planned quantities automatically.
+    Duplicate protection: if the draft has already been converted, returns 409.
+    """
+    db = get_db()
+    doc = await db[PO_DRAFTS_COLL].find_one(
+        {"po_draft_id": draft_id}, {"_id": 0}
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="PO draft not found")
+
+    if doc.get("status") == "archived":
+        raise HTTPException(status_code=422, detail="Cannot convert an archived draft")
+
+    # Duplicate protection: check if already converted
+    if doc.get("incoming_supply_created"):
+        raise HTTPException(
+            status_code=409,
+            detail="This PO draft has already been converted to incoming supply",
+        )
+
+    lines = doc.get("lines", [])
+    if not lines:
+        raise HTTPException(status_code=422, detail="PO draft has no lines")
+
+    customer_id = doc["customer_id"]
+    rows_processed = 0
+    rows_created = 0
+    rows_skipped = 0
+    created_ids = []
+    messages = []
+
+    for line in lines:
+        rows_processed += 1
+        item = line.get("item", "").strip()
+        qty = line.get("qty", 0)
+
+        if not item or qty <= 0:
+            rows_skipped += 1
+            messages.append({"item": item or "?", "status": "skipped", "reason": "Invalid item or qty"})
+            continue
+
+        # Check for existing incoming supply from this draft for this item
+        existing = await db["incoming_supply"].find_one(
+            {"customer_id": customer_id, "item": item, "source_reference": draft_id},
+            {"_id": 0, "id": 1},
+        )
+        if existing:
+            rows_skipped += 1
+            messages.append({"item": item, "status": "skipped", "reason": "Already converted", "supply_id": existing["id"]})
+            continue
+
+        supply = await create_incoming(
+            db, customer_id,
+            item=item,
+            item_description="",
+            warehouse="MAIN",
+            ownership_type="customer_owned",
+            incoming_qty=qty,
+            unit_of_measure="units",
+            eta="",
+            source_reference=draft_id,
+            notes=f"From PO draft {draft_id}",
+            created_by="po_draft_conversion",
+            status="planned",
+        )
+        rows_created += 1
+        created_ids.append(supply["id"])
+        messages.append({"item": item, "status": "created", "supply_id": supply["id"], "qty": qty})
+
+    # Mark draft as converted
+    if rows_created > 0:
+        now = datetime.now(timezone.utc).isoformat()
+        await db[PO_DRAFTS_COLL].update_one(
+            {"po_draft_id": draft_id},
+            {"$set": {
+                "incoming_supply_created": True,
+                "incoming_supply_created_at": now,
+                "incoming_supply_ids": created_ids,
+            }},
+        )
+
+    return {
+        "po_draft_id": draft_id,
+        "rows_processed": rows_processed,
+        "rows_created": rows_created,
+        "rows_skipped": rows_skipped,
+        "created_supply_ids": created_ids,
+        "messages": messages,
+    }
+
+
 # ═══════════════════════════════════════════════════════════════
 # ITEM DETAIL
 # ═══════════════════════════════════════════════════════════════

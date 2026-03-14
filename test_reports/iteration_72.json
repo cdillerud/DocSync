@@ -77,7 +77,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://item-master-4.preview.emergentagent.com"
+    "api_url": "https://po-supply-bridge.preview.emergentagent.com"
   },
   "seed_data_used": "Used existing Hormel Foods workspace (customer_id: 366bfcce-4d68-4daf-b9f4-cb05a35de8c8). Action items: TEST-ITEM-WARN (score=115, all 5 action_types), SPAM-LITE (score=115, all 5 action_types), IMPORT-ITEM-C (score=65, shortage+reorder+no_incoming), IMPORT-ITEM-B (score=65), TEST-IMPORT-A402AED7 (score=65), TEST-WARNONLY-732C83 (score=20, demand_gap only), TEST-REORDER-REG-* (score=5, no_incoming only), TEST_REGRESS_* (score=5).",
   "retest_needed": false,

@@ -187,3 +187,17 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 - ItemDetailDrawer shows demand signal section with Open Orders and Demand Gap
 - Backend: 16/16 pytest tests passed, Frontend: all UI flows verified
 - Test report: `/app/test_reports/iteration_70.json`
+
+---
+
+## 2026-03-14: Inventory Supply Coverage Projection
+
+### What Was Built
+- `GET /api/inventory-ledger/supply-coverage` — coverage = on_hand + incoming - committed per item
+- coverage_status: 'covered' (>=0) or 'at_risk' (<0), only items with committed > 0, sorted ascending
+- Item detail updated: includes supply_coverage (coverage, coverage_status) when committed > 0
+- Frontend: Supply Coverage tab with table, at_risk rows highlighted bg-red-500/5
+- Item clicks open ItemDetailDrawer, Create Supply button on at_risk rows
+- ItemDetailDrawer shows Supply Coverage section with value + status badge
+- Backend: 17/17 pytest tests passed, Frontend: all UI flows verified
+- Test report: `/app/test_reports/iteration_71.json`

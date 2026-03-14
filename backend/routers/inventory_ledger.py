@@ -1039,6 +1039,25 @@ async def api_get_po_draft(draft_id: str):
         doc["linked_supply_status_counts"] = {a["_id"]: a["count"] for a in agg}
         doc["linked_supply_has_bc_po_number"] = any(a["has_bc_po"] > 0 for a in agg)
 
+    # Receipt summary from aggregation
+    qty_pipeline = [
+        {"$match": {"source_reference": draft_id}},
+        {"$group": {
+            "_id": None,
+            "total_qty": {"$sum": "$incoming_qty"},
+            "received_qty": {"$sum": {"$cond": [{"$eq": ["$status", "received"]}, "$incoming_qty", 0]}},
+            "received_count": {"$sum": {"$cond": [{"$eq": ["$status", "received"]}, 1, 0]}},
+            "ordered_count": {"$sum": {"$cond": [{"$eq": ["$status", "ordered"]}, 1, 0]}},
+        }},
+    ]
+    qty_agg = await db["inv_incoming_supply"].aggregate(qty_pipeline).to_list(1)
+    if qty_agg:
+        qa = qty_agg[0]
+        doc["linked_supply_received_count"] = qa["received_count"]
+        doc["linked_supply_ordered_count"] = qa["ordered_count"]
+        doc["linked_supply_total_qty"] = qa["total_qty"]
+        doc["linked_supply_received_qty"] = qa["received_qty"]
+
     return doc
 
 
@@ -1392,7 +1411,141 @@ async def api_linked_incoming_supply(draft_id: str):
         {"_id": 0},
     ).sort("item", 1)
     records = await cursor.to_list(length=500)
-    return {"po_draft_id": draft_id, "total": len(records), "records": records}
+
+    # Compute receipt summary
+    received_count = sum(1 for r in records if r.get("status") == "received")
+    ordered_count = sum(1 for r in records if r.get("status") == "ordered")
+    total_qty = sum(r.get("incoming_qty", 0) for r in records)
+    received_qty = sum(r.get("incoming_qty", 0) for r in records if r.get("status") == "received")
+
+    return {
+        "po_draft_id": draft_id,
+        "total": len(records),
+        "records": records,
+        "receipt_summary": {
+            "received_count": received_count,
+            "ordered_count": ordered_count,
+            "total_qty": total_qty,
+            "received_qty": received_qty,
+        },
+    }
+
+
+class BCReceiptLineIn(BaseModel):
+    item: str = Field(..., min_length=1)
+    qty_received: float = Field(..., gt=0)
+
+
+class BCReceiptIn(BaseModel):
+    received_lines: list[BCReceiptLineIn] = Field(..., min_items=1)
+    receipt_notes: str = Field(default="", description="Notes about the receipt")
+
+
+@router.post("/po-drafts/{draft_id}/bc-receipt")
+async def api_bc_receipt_capture(draft_id: str, body: BCReceiptIn):
+    """Record that a BC PO has been received, advancing linked incoming supply
+    from ordered → received through the existing transition pipeline.
+
+    Uses transition_supply_status which auto-creates receipt ledger movements.
+    Does NOT call BC APIs or change balance formulas.
+    """
+    from services.inventory_so_integration import (
+        transition_supply_status, DuplicateReceiptError,
+    )
+
+    db = get_db()
+    doc = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": draft_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="PO draft not found")
+
+    # Must have BC response status = created
+    if doc.get("bc_response_status") != "created":
+        raise HTTPException(
+            status_code=422,
+            detail=f"BC response status must be 'created' to capture receipt. Current: '{doc.get('bc_response_status', 'none')}'",
+        )
+
+    # Get linked supply records
+    linked = await db["inv_incoming_supply"].find(
+        {"source_reference": draft_id}, {"_id": 0}
+    ).to_list(500)
+    if not linked:
+        raise HTTPException(status_code=422, detail="No linked incoming supply records found for this draft")
+
+    now = datetime.now(timezone.utc).isoformat()
+    results = []
+    errors = []
+
+    for line in body.received_lines:
+        item = line.item.strip()
+        qty = line.qty_received
+
+        # Find matching linked supply for this item
+        matching = [s for s in linked if s["item"] == item]
+        if not matching:
+            errors.append({"item": item, "error": "No linked incoming supply found for this item"})
+            continue
+
+        for supply_rec in matching:
+            supply_id = supply_rec["id"]
+            current_status = supply_rec["status"]
+            ordered_qty = supply_rec.get("incoming_qty", 0)
+
+            # Skip if already received or cancelled
+            if current_status in ("received", "cancelled"):
+                results.append({"item": item, "supply_id": supply_id, "status": "skipped", "reason": f"Already {current_status}"})
+                continue
+
+            # Must be ordered to receive
+            if current_status != "ordered":
+                errors.append({"item": item, "supply_id": supply_id, "error": f"Cannot receive: current status is '{current_status}', must be 'ordered'"})
+                continue
+
+            # Over-receipt check
+            if qty > ordered_qty:
+                errors.append({"item": item, "supply_id": supply_id, "error": f"Over-receipt: received {qty} > ordered {ordered_qty}"})
+                continue
+
+            # Partial receipt check — reject cleanly
+            if qty < ordered_qty:
+                errors.append({"item": item, "supply_id": supply_id, "error": f"Partial receipt not supported: received {qty} < ordered {ordered_qty}. Record full qty ({ordered_qty}) or adjust the incoming supply first."})
+                continue
+
+            # Full receipt — use existing transition pipeline
+            try:
+                result = await transition_supply_status(
+                    db, supply_id=supply_id, new_status="received",
+                    created_by="bc_receipt_capture",
+                )
+                # Add receipt trace fields
+                await db["inv_incoming_supply"].update_one(
+                    {"id": supply_id},
+                    {"$set": {"bc_receipt_at": now, "bc_receipt_notes": body.receipt_notes.strip()}},
+                )
+                results.append({
+                    "item": item,
+                    "supply_id": supply_id,
+                    "status": "received",
+                    "qty": ordered_qty,
+                    "receipt_movement_id": result.get("receipt_movement_id"),
+                })
+            except DuplicateReceiptError:
+                results.append({"item": item, "supply_id": supply_id, "status": "skipped", "reason": "Already received"})
+            except ValueError as e:
+                errors.append({"item": item, "supply_id": supply_id, "error": str(e)})
+
+    if errors and not results:
+        raise HTTPException(status_code=422, detail={"message": "Receipt capture failed", "errors": errors})
+
+    return {
+        "po_draft_id": draft_id,
+        "receipt_notes": body.receipt_notes.strip(),
+        "results": results,
+        "errors": errors,
+        "total_received": sum(1 for r in results if r.get("status") == "received"),
+        "total_skipped": sum(1 for r in results if r.get("status") == "skipped"),
+        "total_errors": len(errors),
+    }
 
 
 @router.post("/po-drafts/{draft_id}/create-incoming-supply")

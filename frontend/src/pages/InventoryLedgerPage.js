@@ -1277,6 +1277,10 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
   const [savingBcResp, setSavingBcResp] = useState(false);
   const [linkedSupply, setLinkedSupply] = useState([]);
   const [linkedLoading, setLinkedLoading] = useState(false);
+  const [showReceiptForm, setShowReceiptForm] = useState(false);
+  const [receiptNotes, setReceiptNotes] = useState('');
+  const [recordingReceipt, setRecordingReceipt] = useState(false);
+  const [receiptResult, setReceiptResult] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -1436,6 +1440,42 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
       } else { const d = await res.json(); toast.error(d.detail || 'Failed'); }
     } catch { toast.error('Failed to save BC response'); }
     finally { setSavingBcResp(false); }
+  };
+
+  const hasOrderedSupply = linkedSupply.some(s => s.status === 'ordered');
+
+  const recordReceipt = async () => {
+    const orderedLines = linkedSupply.filter(s => s.status === 'ordered').map(s => ({ item: s.item, qty_received: s.incoming_qty }));
+    if (!orderedLines.length) { toast.error('No ordered supply to receive'); return; }
+    setRecordingReceipt(true);
+    setReceiptResult(null);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/po-drafts/${draftId}/bc-receipt`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ received_lines: orderedLines, receipt_notes: receiptNotes.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setReceiptResult(data);
+        toast.success(`${data.total_received} item(s) received`);
+        setShowReceiptForm(false);
+        setReceiptNotes('');
+        // Reload everything
+        const draftRes = await fetch(`${API}/api/inventory-ledger/po-drafts/${draftId}`);
+        if (draftRes.ok) { const d = await draftRes.json(); setDraft(d); }
+        loadLinkedSupply();
+        loadSubmissionLogs();
+        onSupplyCreated?.();
+      } else {
+        const detail = data.detail;
+        if (typeof detail === 'object' && detail.errors) {
+          toast.error(detail.errors.map(e => `${e.item}: ${e.error}`).join('; '));
+        } else {
+          toast.error(typeof detail === 'string' ? detail : 'Receipt capture failed');
+        }
+      }
+    } catch { toast.error('Failed to record receipt'); }
+    finally { setRecordingReceipt(false); }
   };
 
   return (
@@ -1697,6 +1737,7 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
                           <th className="p-1.5 text-right font-medium">Qty</th>
                           <th className="p-1.5 text-center font-medium">Status</th>
                           <th className="p-1.5 text-left font-medium">BC PO#</th>
+                          <th className="p-1.5 text-left font-medium">Received</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1708,12 +1749,77 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
                               <Badge variant={s.status === 'ordered' ? 'default' : s.status === 'planned' ? 'secondary' : s.status === 'received' ? 'outline' : 'destructive'} className="text-[8px]" data-testid={`inv-po-draft-linked-status-badge-${i}`}>{s.status}</Badge>
                             </td>
                             <td className="p-1.5 font-mono text-blue-600" data-testid={`inv-po-draft-linked-bc-po-${i}`}>{s.bc_po_number || '—'}</td>
+                            <td className="p-1.5 text-muted-foreground" data-testid={`inv-po-draft-linked-receipt-${i}`}>{s.bc_receipt_at ? new Date(s.bc_receipt_at).toLocaleDateString() : '—'}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
                 )}
+
+                {/* Receipt summary */}
+                {(draft.linked_supply_received_count > 0 || draft.linked_supply_ordered_count > 0) && (
+                  <div className="flex gap-3 text-[10px] text-muted-foreground" data-testid="inv-po-draft-receipt-summary">
+                    <span>Total: <strong>{draft.linked_supply_total_qty?.toLocaleString()}</strong></span>
+                    <span>Received: <strong className="text-green-600">{draft.linked_supply_received_qty?.toLocaleString() || 0}</strong></span>
+                    <span>Ordered: <strong>{draft.linked_supply_ordered_count || 0}</strong></span>
+                    <span>Received: <strong>{draft.linked_supply_received_count || 0}</strong> records</span>
+                  </div>
+                )}
+
+                {/* Receipt result */}
+                {receiptResult && (
+                  <div className="border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20 rounded p-2.5 text-xs space-y-1" data-testid="inv-po-draft-receipt-result">
+                    <p className="font-medium text-green-700 dark:text-green-300">Receipt Recorded</p>
+                    <div className="flex gap-3 text-[10px]">
+                      <span>Received: <strong>{receiptResult.total_received}</strong></span>
+                      {receiptResult.total_skipped > 0 && <span>Skipped: <strong>{receiptResult.total_skipped}</strong></span>}
+                      {receiptResult.total_errors > 0 && <span className="text-red-600">Errors: <strong>{receiptResult.total_errors}</strong></span>}
+                    </div>
+                    {receiptResult.results?.map((r, i) => (
+                      <div key={i} className="text-[10px] flex items-center gap-2">
+                        <span className="font-mono font-bold">{r.item}</span>
+                        <Badge variant={r.status === 'received' ? 'outline' : 'secondary'} className="text-[8px]">{r.status}</Badge>
+                        {r.qty && <span>qty: {r.qty}</span>}
+                        {r.reason && <span className="text-muted-foreground">{r.reason}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Record Receipt action */}
+                {hasOrderedSupply && (
+                  <div data-testid="inv-po-draft-receipt-action">
+                    {!showReceiptForm ? (
+                      <Button size="sm" className="h-7 text-[10px] bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => setShowReceiptForm(true)} data-testid="inv-po-draft-record-receipt-btn">
+                        <Package className="w-3 h-3 mr-1" /> Record Receipt
+                      </Button>
+                    ) : (
+                      <div className="border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 rounded p-2.5 space-y-2" data-testid="inv-po-draft-receipt-form">
+                        <p className="text-[10px] font-medium text-emerald-700 dark:text-emerald-300">Record Full Receipt</p>
+                        <div className="text-[10px] space-y-0.5">
+                          {linkedSupply.filter(s => s.status === 'ordered').map((s, i) => (
+                            <div key={i} className="flex gap-2 items-center">
+                              <span className="font-mono">{s.item}</span>
+                              <span>qty: {s.incoming_qty?.toLocaleString()}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[10px]">Receipt Notes</Label>
+                          <Input className="h-6 text-[10px]" value={receiptNotes} onChange={e => setReceiptNotes(e.target.value)} placeholder="Optional receipt notes" data-testid="inv-po-draft-receipt-notes-input" />
+                        </div>
+                        <div className="flex gap-2">
+                          <Button size="sm" className="h-6 text-[10px] bg-emerald-600 hover:bg-emerald-700 text-white" disabled={recordingReceipt} onClick={recordReceipt} data-testid="inv-po-draft-confirm-receipt">
+                            {recordingReceipt ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Package className="w-3 h-3 mr-1" />}
+                            Confirm Receipt
+                          </Button>
+                          <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => setShowReceiptForm(false)} data-testid="inv-po-draft-cancel-receipt">Cancel</Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}}
               </div>
             )}
 

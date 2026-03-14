@@ -1226,6 +1226,7 @@ function PODraftsPanel({ customerId, onViewDraft }) {
                   <div className="flex items-center justify-center gap-1">
                     <Badge variant={d.status === 'draft' ? 'outline' : d.status === 'sent' ? 'default' : 'secondary'} className="text-[9px]">{d.status}</Badge>
                     {d.incoming_supply_created && <Badge className="text-[8px] bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300" data-testid={`inv-po-draft-supply-badge-${i}`}><Truck className="w-2.5 h-2.5 mr-0.5" />Supply</Badge>}
+                    {d.latest_submission_status && <Badge variant={d.latest_submission_status === 'acknowledged' ? 'default' : d.latest_submission_status === 'failed' ? 'destructive' : 'outline'} className="text-[8px]" data-testid={`inv-po-draft-sub-status-${i}`}>{d.latest_submission_status}</Badge>}
                   </div>
                 </td>
                 <td className="py-1.5 px-3 text-right font-bold">{d.total_lines}</td>
@@ -1260,6 +1261,11 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
   const [vendorId, setVendorId] = useState('');
   const [vendorName, setVendorName] = useState('');
   const [savingVendor, setSavingVendor] = useState(false);
+  const [submissionLogs, setSubmissionLogs] = useState([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [newLogStatus, setNewLogStatus] = useState('submitted');
+  const [newLogNotes, setNewLogNotes] = useState('');
+  const [addingLog, setAddingLog] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -1277,6 +1283,17 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
       finally { setLoading(false); }
     })();
   }, [draftId]);
+
+  const loadSubmissionLogs = useCallback(async () => {
+    setLogsLoading(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/po-drafts/${draftId}/submission-log`);
+      if (res.ok) { const d = await res.json(); setSubmissionLogs(d.entries || []); }
+    } catch { /* silent */ }
+    finally { setLogsLoading(false); }
+  }, [draftId]);
+
+  useEffect(() => { if (draftId) loadSubmissionLogs(); }, [draftId, loadSubmissionLogs]);
 
   const updateStatus = async (newStatus) => {
     setUpdating(true);
@@ -1344,6 +1361,7 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
         a.remove();
         window.URL.revokeObjectURL(url);
         toast.success('BC payload downloaded');
+        loadSubmissionLogs();
         if (draft?.status === 'draft') setShowMarkSentPrompt(true);
       } else {
         const d = await res.json();
@@ -1356,6 +1374,22 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
   const confirmMarkSent = async () => {
     setShowMarkSentPrompt(false);
     await updateStatus('sent');
+  };
+
+  const addSubmissionLog = async () => {
+    setAddingLog(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/po-drafts/${draftId}/submission-log`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newLogStatus, notes: newLogNotes.trim() }),
+      });
+      if (res.ok) {
+        toast.success(`Status "${newLogStatus}" logged`);
+        setNewLogNotes('');
+        loadSubmissionLogs();
+      } else { const d = await res.json(); toast.error(d.detail || 'Failed'); }
+    } catch { toast.error('Failed to add log entry'); }
+    finally { setAddingLog(false); }
   };
 
   return (
@@ -1539,6 +1573,55 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
                 </Button>
               )}
             </div>
+
+            {/* Submission Log */}
+            {hasVendor && (
+              <div className="space-y-2" data-testid="inv-po-draft-submission-log-section">
+                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Submission Log</p>
+                {/* Add entry form */}
+                {draft.status !== 'archived' && (
+                  <div className="flex gap-2 items-end" data-testid="inv-po-draft-add-log-form">
+                    <div className="space-y-1">
+                      <Label className="text-[10px]">Status</Label>
+                      <Select value={newLogStatus} onValueChange={setNewLogStatus}>
+                        <SelectTrigger className="h-6 text-[10px] w-[120px]" data-testid="inv-po-draft-log-status-select"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="submitted">Submitted</SelectItem>
+                          <SelectItem value="acknowledged">Acknowledged</SelectItem>
+                          <SelectItem value="failed">Failed</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex-1 space-y-1">
+                      <Label className="text-[10px]">Notes</Label>
+                      <Input className="h-6 text-[10px]" value={newLogNotes} onChange={e => setNewLogNotes(e.target.value)} placeholder="Optional notes" data-testid="inv-po-draft-log-notes-input" />
+                    </div>
+                    <Button size="sm" className="h-6 text-[10px] px-2" disabled={addingLog} onClick={addSubmissionLog} data-testid="inv-po-draft-add-log-btn">
+                      {addingLog ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3 mr-0.5" />} Log
+                    </Button>
+                  </div>
+                )}
+                {/* Log entries */}
+                {logsLoading ? (
+                  <div className="flex justify-center py-2"><Loader2 className="w-4 h-4 animate-spin" /></div>
+                ) : submissionLogs.length === 0 ? (
+                  <p className="text-[10px] text-muted-foreground" data-testid="inv-po-draft-no-logs">No submission log entries yet</p>
+                ) : (
+                  <div className="border border-border rounded overflow-hidden" data-testid="inv-po-draft-submission-log-list">
+                    {submissionLogs.map((log, i) => (
+                      <div key={log.submission_id || i} className="border-b border-border/20 last:border-b-0 p-2 text-[10px]" data-testid={`inv-po-draft-log-entry-${i}`}>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={log.status === 'acknowledged' ? 'default' : log.status === 'failed' ? 'destructive' : log.status === 'exported' ? 'outline' : 'secondary'} className="text-[8px]" data-testid={`inv-po-draft-log-status-${i}`}>{log.status}</Badge>
+                          <span className="text-muted-foreground">{log.submitted_at ? new Date(log.submitted_at).toLocaleString() : '—'}</span>
+                          {log.submission_id && <span className="font-mono text-muted-foreground/50">{log.submission_id}</span>}
+                        </div>
+                        {log.notes && <p className="mt-0.5 text-muted-foreground">{log.notes}</p>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </DialogContent>

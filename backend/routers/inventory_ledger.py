@@ -872,6 +872,7 @@ async def api_action_center(
 # ═══════════════════════════════════════════════════════════════
 
 PO_DRAFTS_COLL = "po_drafts"
+PO_SUBMISSION_LOGS_COLL = "po_submission_logs"
 PO_DUPLICATE_WINDOW_MINUTES = 5
 
 
@@ -974,6 +975,23 @@ async def api_list_po_drafts(
     docs = await db[PO_DRAFTS_COLL].find(
         query, {"_id": 0}
     ).sort("created_at", -1).to_list(limit)
+
+    # Enrich with latest submission status
+    draft_ids = [d["po_draft_id"] for d in docs]
+    if draft_ids:
+        pipeline = [
+            {"$match": {"po_draft_id": {"$in": draft_ids}}},
+            {"$sort": {"submitted_at": -1}},
+            {"$group": {"_id": "$po_draft_id", "latest_status": {"$first": "$status"}, "latest_at": {"$first": "$submitted_at"}}},
+        ]
+        agg = await db[PO_SUBMISSION_LOGS_COLL].aggregate(pipeline).to_list(500)
+        status_map = {a["_id"]: {"latest_submission_status": a["latest_status"], "latest_submission_at": a["latest_at"]} for a in agg}
+        for d in docs:
+            sub = status_map.get(d["po_draft_id"])
+            if sub:
+                d["latest_submission_status"] = sub["latest_submission_status"]
+                d["latest_submission_at"] = sub["latest_submission_at"]
+
     return {"total": len(docs), "drafts": docs}
 
 
@@ -1056,7 +1074,7 @@ async def api_bc_export_po_draft(draft_id: str):
 
     Does NOT send data to BC or create any records. Returns a structured
     JSON payload shaped for BC PO creation. Validates vendor info, lines,
-    and draft status before generating.
+    and draft status before generating. Auto-creates a submission log entry.
     """
     from fastapi.responses import Response
     import json as json_mod
@@ -1110,12 +1128,130 @@ async def api_bc_export_po_draft(draft_id: str):
         "lines": bc_lines,
     }
 
+    # --- Auto-create submission log entry ---
+    import uuid as _uuid
+    now = datetime.now(timezone.utc).isoformat()
+    log_entry = {
+        "submission_id": f"SUB-{_uuid.uuid4().hex[:8].upper()}",
+        "po_draft_id": draft_id,
+        "submitted_at": now,
+        "submitted_by": None,
+        "vendor_id": vendor_id,
+        "vendor_name": vendor_name,
+        "status": "exported",
+        "notes": "Auto-logged on BC payload export",
+        "bc_payload_snapshot": payload,
+    }
+    await db[PO_SUBMISSION_LOGS_COLL].insert_one(log_entry.copy())
+
     filename = f"BC-PO-{draft_id}.json"
     return Response(
         content=json_mod.dumps(payload, indent=2),
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ═══════════════════════════════════════════════════════════════
+# PO SUBMISSION LOG
+# ═══════════════════════════════════════════════════════════════
+
+SUBMISSION_STATUSES = ("exported", "submitted", "acknowledged", "failed")
+
+
+class SubmissionLogIn(BaseModel):
+    status: str = Field(..., description="exported|submitted|acknowledged|failed")
+    notes: str = Field(default="", description="Optional notes")
+
+
+@router.post("/po-drafts/{draft_id}/submission-log")
+async def api_create_submission_log(draft_id: str, body: SubmissionLogIn):
+    """Create a submission log entry for a PO draft.
+
+    Captures the current vendor info and a snapshot of the BC export payload.
+    Does NOT create BC records or modify ledger data.
+    """
+    import uuid as _uuid
+    import json as json_mod
+
+    if body.status not in SUBMISSION_STATUSES:
+        raise HTTPException(status_code=422, detail=f"Invalid status. Use: {', '.join(SUBMISSION_STATUSES)}")
+
+    db = get_db()
+    doc = await db[PO_DRAFTS_COLL].find_one(
+        {"po_draft_id": draft_id}, {"_id": 0}
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="PO draft not found")
+
+    # Validate draft is exportable (same rules as bc-export)
+    if doc.get("status") == "archived":
+        raise HTTPException(status_code=422, detail="Cannot log submission for an archived draft")
+
+    lines = doc.get("lines", [])
+    if not lines:
+        raise HTTPException(status_code=422, detail="PO draft has no lines")
+
+    vendor_id = (doc.get("vendor_id") or "").strip()
+    vendor_name = (doc.get("vendor_name") or "").strip()
+    if not vendor_id or not vendor_name:
+        raise HTTPException(
+            status_code=422,
+            detail="Vendor information is required. Assign a vendor first.",
+        )
+
+    # Build BC payload snapshot
+    created_at = doc.get("created_at", "")
+    document_date = created_at[:10] if len(created_at) >= 10 else datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    bc_lines = []
+    for line in lines:
+        item = (line.get("item") or "").strip()
+        qty = line.get("qty", 0)
+        if item and qty > 0:
+            bc_lines.append({"itemNumber": item, "quantity": qty, "sourceReference": line.get("source", "")})
+
+    payload_snapshot = {
+        "poDraftId": doc["po_draft_id"],
+        "vendor": {"vendorId": vendor_id, "vendorName": vendor_name},
+        "documentDate": document_date,
+        "source": "GPI_Hub_PO_Draft",
+        "lines": bc_lines,
+    }
+
+    now = datetime.now(timezone.utc).isoformat()
+    log_entry = {
+        "submission_id": f"SUB-{_uuid.uuid4().hex[:8].upper()}",
+        "po_draft_id": draft_id,
+        "submitted_at": now,
+        "submitted_by": None,
+        "vendor_id": vendor_id,
+        "vendor_name": vendor_name,
+        "status": body.status,
+        "notes": body.notes.strip(),
+        "bc_payload_snapshot": payload_snapshot,
+    }
+    await db[PO_SUBMISSION_LOGS_COLL].insert_one(log_entry.copy())
+
+    # Return without _id
+    log_entry.pop("_id", None)
+    return log_entry
+
+
+@router.get("/po-drafts/{draft_id}/submission-log")
+async def api_list_submission_logs(draft_id: str):
+    """List all submission log entries for a PO draft, reverse chronological."""
+    db = get_db()
+
+    # Verify draft exists
+    doc = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": draft_id}, {"_id": 0, "po_draft_id": 1})
+    if not doc:
+        raise HTTPException(status_code=404, detail="PO draft not found")
+
+    cursor = db[PO_SUBMISSION_LOGS_COLL].find(
+        {"po_draft_id": draft_id}, {"_id": 0}
+    ).sort("submitted_at", -1)
+    entries = await cursor.to_list(length=200)
+    return {"po_draft_id": draft_id, "total": len(entries), "entries": entries}
 
 
 @router.post("/po-drafts/{draft_id}/create-incoming-supply")

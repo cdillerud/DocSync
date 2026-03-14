@@ -172,3 +172,18 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 - Shows: balance strip (5 values), exception badges, reorder settings/status, history preview table, action buttons (Full History, Create Supply)
 - Backend: 15/15 pytest tests passed, Frontend: all UI flows verified
 - Test report: `/app/test_reports/iteration_69.json`
+
+---
+
+## 2026-03-14: Inventory Demand Signal Tracking
+
+### What Was Built
+- `GET /api/inventory-ledger/demand-signals` — forward demand pressure per item from SO commitments
+- total_open_order_qty = committed balance (outstanding SO commitments), demand_gap = committed - available
+- Only items with total_open_order_qty > 0 included, sorted by demand_gap descending (highest risk first)
+- Item detail endpoint updated: includes `demand` field (total_open_order_qty, demand_gap) when committed > 0, null otherwise
+- Frontend: Demand tab with demand table, rows highlighted bg-red-500/5 when demand_gap > 0
+- Item clicks open ItemDetailDrawer, Create Supply button on gap > 0 rows
+- ItemDetailDrawer shows demand signal section with Open Orders and Demand Gap
+- Backend: 16/16 pytest tests passed, Frontend: all UI flows verified
+- Test report: `/app/test_reports/iteration_70.json`

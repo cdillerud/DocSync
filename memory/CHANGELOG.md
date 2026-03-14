@@ -451,3 +451,25 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 - All safeguards: no BC API calls, no incoming supply for DS POs, no warehouse inventory impact
 - Backend: 15/15 tests passed, Frontend: 100% UI verified
 - Test report: `/app/test_reports/iteration_84.json`
+
+---
+
+## 2026-03-14: Document Linkage & Process Checklist (iteration_85)
+
+### What Was Built
+- New `document_links` collection with CRUD endpoints: POST/GET/DELETE
+- Document types: customer_po, warehouse_agreement, approval_backup, vendor_po_support, other
+- Entity types: sales_order, po_draft
+- Process checklist derivation:
+  - Warehouse SO: customer_po_attached, approval_support_present, warehouse_agreement
+  - Drop-ship SO: customer_po_attached, approval_support_present, ds_po_draft_created
+  - PO Draft: vendor_assigned, export_ready, support_doc_present
+- SO summary enriched with linked_document_count, linked_documents_by_type, process_checklist, checklist_complete
+- PO draft detail enriched with same fields
+- Dedicated checklist endpoints: GET /document-links/checklist/sales-order/{id} and /po-draft/{id}
+- Frontend: Reusable DocumentLinksSection component (add/list/delete docs)
+- Frontend: Reusable ProcessChecklistSection component (check/warning indicators, Complete/Incomplete badge)
+- Both components integrated in ShipmentCaptureDialog (for SOs) and PODraftDetailDrawer (for PO drafts)
+- All safeguards: no BC calls, no inventory changes, metadata pointers only
+- Backend: 16/16 tests passed, Frontend: 100% verified, Regression: iteration 83+84 pass
+- Test report: `/app/test_reports/iteration_85.json`

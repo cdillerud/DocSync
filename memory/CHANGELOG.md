@@ -101,3 +101,17 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 - Frontend: Reorder tab updated with Threshold and Buffer columns
 - Backend: 17/17 pytest tests passed, Frontend: all UI flows verified
 - Test report: `/app/test_reports/iteration_64.json`
+
+---
+
+## 2026-03-14: Inventory Dashboard Summary Metrics
+
+### What Was Built
+- New endpoint `GET /api/inventory-ledger/dashboard-summary` computes inventory health from existing `derive_balances` pipeline
+- Returns 9 fields: total_items, items_ok, items_low, items_short, total_on_hand, total_incoming, total_committed, total_available, total_reorder_recommendations
+- Status logic (is_short/is_low) matches balance table and CSV export
+- Reorder count mirrors `/reorder-recommendations` endpoint count
+- Frontend SummaryStrip updated from 5 cards to 8 cards (Total Items, OK, LOW, SHORT, Incoming, Committed, Available, Reorders Needed)
+- Responsive grid: 2 cols mobile, 4 cols tablet, 8 cols desktop
+- Backend: 13/13 pytest tests passed, Frontend: all UI flows verified
+- Test report: `/app/test_reports/iteration_65.json`

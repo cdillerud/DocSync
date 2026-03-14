@@ -21,6 +21,7 @@ import StableVendorsPage from "@/pages/StableVendorsPage";
 import BCIntegrationDashboard from "@/pages/BCIntegrationDashboard";
 import SalesDashboardPage from "@/pages/SalesDashboardPage";
 import InventoryLedgerPage from "@/pages/InventoryLedgerPage";
+import OperationsQueuePage from "@/pages/OperationsQueuePage";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -48,6 +49,7 @@ function AppRoutes() {
         <Route path="bc-integration" element={<BCIntegrationDashboard />} />
         <Route path="sales-orders" element={<SalesDashboardPage />} />
         <Route path="inventory-ledger" element={<InventoryLedgerPage />} />
+        <Route path="operations-queue" element={<OperationsQueuePage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

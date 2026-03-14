@@ -563,6 +563,62 @@ function IngestionSourcesChart({ data }) {
   );
 }
 
+const API_OPS = process.env.REACT_APP_BACKEND_URL;
+
+function OperationsQueueSummaryCard() {
+  const [data, setData] = useState(null);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_OPS}/api/inventory-ledger/operations-queue?limit=5`);
+        if (res.ok) setData(await res.json());
+      } catch { /* silent */ }
+    })();
+  }, []);
+
+  if (!data || data.total === 0) return null;
+
+  return (
+    <Card className="border border-border" data-testid="ops-queue-dashboard-card">
+      <CardContent className="p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <ClipboardCheck className="w-5 h-5 text-blue-500" />
+            <span className="text-sm font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Operations Queue</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="text-right">
+              <span className="text-xs text-muted-foreground">Total</span>
+              <p className="text-xl font-bold font-mono" data-testid="ops-dash-total">{data.total}</p>
+            </div>
+            <div className="text-right">
+              <span className="text-xs text-red-500">High Priority</span>
+              <p className="text-xl font-bold font-mono text-red-600" data-testid="ops-dash-high">{data.high_priority_count}</p>
+            </div>
+            <Button variant="outline" size="sm" className="text-xs h-7" onClick={() => navigate('/operations-queue')} data-testid="ops-dash-view-all">
+              View All <ArrowRight className="w-3 h-3 ml-1" />
+            </Button>
+          </div>
+        </div>
+        {data.items.length > 0 && (
+          <div className="space-y-1.5">
+            {data.items.slice(0, 3).map((item, i) => (
+              <div key={`${item.entity_type}-${item.entity_id}`} className="flex items-center gap-2 text-xs p-1.5 rounded bg-muted/20" data-testid={`ops-dash-item-${i}`}>
+                <Badge variant={item.priority_score >= 40 ? 'destructive' : item.priority_score >= 20 ? 'secondary' : 'outline'} className="text-[9px] font-mono w-8 justify-center">{item.priority_score}</Badge>
+                <span className="font-mono font-bold truncate w-[140px]">{item.entity_id}</span>
+                <Badge variant="outline" className="text-[8px]">{item.entity_type === 'sales_order' ? 'SO' : 'PO'}</Badge>
+                <span className="text-muted-foreground truncate flex-1">{item.next_action}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function DashboardPage() {
   const [stats, setStats] = useState(null);
   const [intelligence, setIntelligence] = useState(null);
@@ -669,6 +725,9 @@ export default function DashboardPage() {
       {intelligence?.action_required && (intelligence.action_required.total_action_needed > 0) && (
         <ActionRequiredCard data={intelligence.action_required} onNavigate={navigate} />
       )}
+
+      {/* Operations Queue Summary */}
+      <OperationsQueueSummaryCard />
 
       {/* Stable Vendor Auto-Ready KPIs */}
       {stableVendorMetrics && stableVendorMetrics.feature_enabled && (

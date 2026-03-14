@@ -3267,6 +3267,215 @@ async def api_list_approvals(entity_type: str, entity_id: str):
     return {"entity_type": entity_type, "entity_id": entity_id, "total": len(entries), "approvals": entries}
 
 
+# ═══════════════════════════════════════════════════════════════
+# OPERATIONS QUEUE (UNIFIED WORKLIST)
+# ═══════════════════════════════════════════════════════════════
+
+PRIORITY_WEIGHTS = {
+    "missing_approval": 50,
+    "missing_documents": 40,
+    "inventory_shortage": 35,
+    "missing_po_draft": 30,
+    "missing_vendor": 25,
+    "pending_bc_export": 20,
+    "pending_bc_response": 15,
+    "pending_shipment": 10,
+    "pending_invoice": 5,
+}
+
+
+async def _build_so_queue_items(db, limit: int = 200):
+    """Build queue items for Sales Orders that need attention."""
+    items = []
+
+    # Gather all known SOs from order_commitment movements + so_order_types + shipment/invoice logs
+    so_ids = set()
+    async for doc in db[SO_ORDER_TYPES_COLL].find({}, {"_id": 0, "sales_order_id": 1}):
+        so_ids.add(doc["sales_order_id"])
+    async for doc in db[MOVEMENTS_COLL].find(
+        {"movement_type": "order_commitment"}, {"_id": 0, "reference_id": 1}
+    ).limit(500):
+        so_ids.add(doc["reference_id"])
+    async for doc in db[BC_SHIPMENT_LOGS_COLL].find({}, {"_id": 0, "sales_order_id": 1}).limit(500):
+        so_ids.add(doc["sales_order_id"])
+    async for doc in db[DS_VENDOR_SHIPMENT_LOGS_COLL].find({}, {"_id": 0, "sales_order_id": 1}).limit(500):
+        so_ids.add(doc["sales_order_id"])
+
+    for so_id in so_ids:
+        order_type = await _get_order_type(db, so_id)
+        approval = await _get_latest_approval(db, "sales_order", so_id)
+        doc_count, docs_by_type, _ = await _get_document_links_summary(db, "sales_order", so_id)
+
+        score = 0
+        actions = []
+
+        # Approval missing
+        approval_status = approval["approval_status"] if approval else "not_requested"
+        if approval_status != "approved":
+            score += PRIORITY_WEIGHTS["missing_approval"]
+            actions.append("Approval missing" if approval_status == "not_requested" else f"Approval {approval_status}")
+
+        # Customer PO document missing
+        if docs_by_type.get("customer_po", 0) == 0:
+            score += PRIORITY_WEIGHTS["missing_documents"]
+            actions.append("Customer PO document missing")
+
+        if order_type == "warehouse":
+            # Inventory shortage: check if remaining committed > 0 and no shipment yet
+            has_shipment = await db[BC_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": so_id}) > 0
+            has_invoice = await db[BC_INVOICE_LOGS_COLL].count_documents({"sales_order_id": so_id}) > 0
+
+            if not has_shipment:
+                score += PRIORITY_WEIGHTS["pending_shipment"]
+                actions.append("Shipment not yet recorded")
+            if not has_invoice:
+                score += PRIORITY_WEIGHTS["pending_invoice"]
+                actions.append("Invoice not yet captured")
+        else:
+            # Drop-ship
+            ds_draft_count = await db[PO_DRAFTS_COLL].count_documents(
+                {"sales_order_id": so_id, "po_type": "drop_ship"}
+            )
+            if ds_draft_count == 0:
+                score += PRIORITY_WEIGHTS["missing_po_draft"]
+                actions.append("Drop-Ship PO draft not yet created")
+
+            has_vendor_ship = await db[DS_VENDOR_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": so_id}) > 0
+            has_bc_ship = await db[BC_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": so_id}) > 0
+            has_invoice = await db[BC_INVOICE_LOGS_COLL].count_documents({"sales_order_id": so_id}) > 0
+
+            if not has_vendor_ship and not has_bc_ship:
+                score += PRIORITY_WEIGHTS["pending_shipment"]
+                actions.append("Vendor shipment not recorded")
+            if not has_invoice:
+                score += PRIORITY_WEIGHTS["pending_invoice"]
+                actions.append("Invoice not yet captured")
+
+        if score == 0:
+            continue  # Fully complete, no action needed
+
+        # Determine next action
+        next_action = actions[0] if actions else "Review"
+
+        # Get created_at from the type record or first movement
+        type_rec = await db[SO_ORDER_TYPES_COLL].find_one({"sales_order_id": so_id}, {"_id": 0, "set_at": 1})
+        created_at = (type_rec or {}).get("set_at", "")
+
+        checklist_items, checklist_complete = await _derive_so_checklist(db, so_id, order_type, doc_count, docs_by_type)
+
+        items.append({
+            "entity_type": "sales_order",
+            "entity_id": so_id,
+            "order_type": order_type,
+            "vendor_name": "",
+            "approval_status": approval_status,
+            "checklist_complete": checklist_complete,
+            "priority_score": score,
+            "action_required": actions,
+            "next_action": next_action,
+            "created_at": created_at,
+        })
+
+    return items
+
+
+async def _build_po_draft_queue_items(db, limit: int = 200):
+    """Build queue items for PO Drafts that need attention."""
+    items = []
+    cursor = db[PO_DRAFTS_COLL].find(
+        {"status": {"$nin": ["archived"]}}, {"_id": 0}
+    ).sort("created_at", -1).limit(limit)
+
+    async for draft in cursor:
+        draft_id = draft["po_draft_id"]
+        score = 0
+        actions = []
+
+        # Vendor missing
+        has_vendor = bool(draft.get("vendor_name") or draft.get("vendor_id"))
+        if not has_vendor:
+            score += PRIORITY_WEIGHTS["missing_vendor"]
+            actions.append("Vendor not assigned")
+
+        # Approval not granted
+        approval = await _get_latest_approval(db, "po_draft", draft_id)
+        approval_status = approval["approval_status"] if approval else "not_requested"
+        if approval_status != "approved":
+            score += PRIORITY_WEIGHTS["missing_approval"]
+            actions.append("Approval not granted")
+
+        # BC export not yet performed
+        bc_payload = draft.get("bc_payload_snapshot")
+        if not bc_payload:
+            score += PRIORITY_WEIGHTS["pending_bc_export"]
+            actions.append("BC export not yet performed")
+
+        # BC response not yet captured
+        bc_response = draft.get("bc_response_status")
+        if not bc_response:
+            score += PRIORITY_WEIGHTS["pending_bc_response"]
+            actions.append("BC response not yet captured")
+
+        if score == 0:
+            continue
+
+        next_action = actions[0] if actions else "Review"
+        doc_count, docs_by_type, _ = await _get_document_links_summary(db, "po_draft", draft_id)
+        checklist_items, checklist_complete = _derive_po_draft_checklist(draft, doc_count, docs_by_type, approval=approval)
+
+        items.append({
+            "entity_type": "po_draft",
+            "entity_id": draft_id,
+            "order_type": draft.get("po_type", "warehouse_supply"),
+            "vendor_name": draft.get("vendor_name", ""),
+            "approval_status": approval_status,
+            "checklist_complete": checklist_complete,
+            "priority_score": score,
+            "action_required": actions,
+            "next_action": next_action,
+            "created_at": draft.get("created_at", ""),
+        })
+
+    return items
+
+
+@router.get("/operations-queue")
+async def api_operations_queue(
+    entity_type: str = "",
+    status: str = "",
+    limit: int = 100,
+    offset: int = 0,
+):
+    """Return a prioritized list of entities requiring operational attention."""
+    db = get_db()
+
+    all_items = []
+    if not entity_type or entity_type == "sales_order":
+        all_items.extend(await _build_so_queue_items(db))
+    if not entity_type or entity_type == "po_draft":
+        all_items.extend(await _build_po_draft_queue_items(db))
+
+    # Filter by status if provided
+    if status:
+        all_items = [i for i in all_items if i["approval_status"] == status]
+
+    # Sort: priority_score DESC, then created_at ASC
+    all_items.sort(key=lambda x: (-x["priority_score"], x["created_at"] or ""))
+
+    total = len(all_items)
+    page = all_items[offset: offset + limit]
+    high_priority = sum(1 for i in all_items if i["priority_score"] >= 40)
+
+    return {
+        "total": total,
+        "high_priority_count": high_priority,
+        "offset": offset,
+        "limit": limit,
+        "items": page,
+    }
+
+
+
 class ShortageLineReq(BaseModel):
     item: str
     qty_needed: float

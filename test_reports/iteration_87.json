@@ -1,0 +1,127 @@
+{
+  "summary": "Comprehensive testing of Operations Queue (Unified Worklist) for iteration_87. Backend: 19/19 tests passed covering operations-queue endpoint, priority scoring (missing_approval=50, missing_documents=40, etc.), filtering by entity_type, pagination, sorting by priority DESC + created_at ASC, and response structure. Frontend: All UI elements verified - Operations Queue page with table, filters (All Types/Sales Orders/PO Drafts), search, priority badges (red >= 40, amber 20-39, blue < 20), clickable rows with detail panel, and Dashboard summary card showing total and high priority counts.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "OperationsQueuePage", "issues": ["React hydration warnings in console due to <span> inside <tbody> - cosmetic only, no functional impact (existing issue from previous iterations)"]}
+    ]
+  },
+  "passed_tests": [
+    "Backend: GET /api/inventory-ledger/operations-queue returns 200 with correct structure",
+    "Backend: Response sorted by priority_score DESC",
+    "Backend: Filter entity_type=sales_order returns only SOs",
+    "Backend: Filter entity_type=po_draft returns only PO drafts",
+    "Backend: Each item has required fields (entity_type, entity_id, order_type, priority_score, action_required, next_action, approval_status)",
+    "Backend: Items with zero score excluded from queue",
+    "Backend: high_priority_count matches items with score >= 40",
+    "Backend: Missing approval adds 50 points to priority_score",
+    "Backend: action_required list not empty for items in queue",
+    "Backend: next_action matches first item in action_required",
+    "Backend: Pagination (limit/offset) works correctly",
+    "Backend: Response includes pagination metadata (total, offset, limit)",
+    "Backend: Warehouse SOs in queue if missing shipment/invoice/approval",
+    "Backend: Drop-ship SOs in queue if missing PO draft",
+    "Backend: PO drafts missing vendor have score >= 25",
+    "Backend: PO drafts include valid order_type (warehouse_supply/drop_ship)",
+    "Backend: Regression - Approval endpoints from iteration_86 still work",
+    "Backend: Regression - approval_status present in all queue items",
+    "Backend: Regression - Document link endpoint from iteration_85 still works",
+    "Frontend: Operations Queue page loads at /operations-queue",
+    "Frontend: Page title shows 'Operations Queue'",
+    "Frontend: Summary strip shows Total Queue and High Priority counts",
+    "Frontend: Type filter dropdown works (All Types/Sales Orders/PO Drafts)",
+    "Frontend: Search input filters results by ID or action",
+    "Frontend: Queue table displays items with correct columns (Type, ID, Order Type, Priority, Action Required, Next Action, Approval, Created)",
+    "Frontend: Priority badges show correct colors (red for >= 40)",
+    "Frontend: Clicking row opens detail panel with entity info and actions",
+    "Frontend: Detail panel has 'Open in Inventory Ledger' and 'Close' buttons",
+    "Frontend: Nav link 'Operations Queue' appears in sidebar",
+    "Frontend: Dashboard shows Operations Queue summary card with Total (120) and High Priority (120) counts"
+  ],
+  "skipped_tests": [],
+  "test_report_links": [
+    "/app/backend/tests/test_operations_queue.py",
+    "/app/test_reports/pytest/operations_queue_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend inventory_ledger.py Lines 3270-3475: Operations Queue endpoint with priority scoring and queue builder functions",
+    "Backend inventory_ledger.py Lines 3274-3284: PRIORITY_WEIGHTS dict defining score contributions",
+    "Backend inventory_ledger.py Lines 3287-3379: _build_so_queue_items function for Sales Orders",
+    "Backend inventory_ledger.py Lines 3382-3439: _build_po_draft_queue_items function for PO Drafts",
+    "Backend inventory_ledger.py Lines 3442-3475: GET /operations-queue endpoint with filtering and pagination",
+    "Frontend OperationsQueuePage.js: Complete page with table, filters, search, detail panel",
+    "Frontend DashboardPage.js Lines 566-620: OperationsQueueSummaryCard component",
+    "Frontend Layout.js Line 29: Nav link for Operations Queue"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_operations_queue.py"
+  ],
+  "success_rate": {
+    "backend": "100% (19/19 passed)",
+    "frontend": "100% (all UI elements verified)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://order-type-aware.preview.emergentagent.com"
+  },
+  "seed_data_used": {
+    "queue_items": "120 items in queue (103 drop-ship SOs, 17 PO drafts)",
+    "high_priority": "120 items with score >= 40",
+    "test_so": "SO-NOOP-0a8987 (score 135, drop-ship, not_requested approval)",
+    "test_po_draft": "PO-DRAFT-20260314181350-5E24C9 (score 110, warehouse_supply)"
+  },
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Operations Queue (iteration_87) fully implemented. Endpoint: GET /api/inventory-ledger/operations-queue with params entity_type, status, limit, offset. Priority scoring: missing_approval=50, missing_documents=40, inventory_shortage=35, missing_po_draft=30, missing_vendor=25, pending_bc_export=20, pending_bc_response=15, pending_shipment=10, pending_invoice=5. Items with score=0 excluded. Frontend page at /operations-queue with table, filters (All Types/Sales Orders/PO Drafts), search, priority badges (red >= 40, amber 20-39, blue < 20), and detail panel on row click. Dashboard at / shows OperationsQueueSummaryCard with total and high priority counts. All iteration_86 (approval workflow) and iteration_85 (document linkage) features still work.",
+  "features_verified": {
+    "backend_endpoints": {
+      "operations_queue": {
+        "method": "GET",
+        "path": "/api/inventory-ledger/operations-queue",
+        "params": {
+          "entity_type": "optional - sales_order or po_draft",
+          "status": "optional - filter by approval_status",
+          "limit": "default 100",
+          "offset": "default 0"
+        },
+        "response": {
+          "total": "int - total items in queue",
+          "high_priority_count": "int - items with score >= 40",
+          "offset": "int",
+          "limit": "int",
+          "items": "array of queue items"
+        },
+        "item_fields": ["entity_type", "entity_id", "order_type", "vendor_name", "approval_status", "checklist_complete", "priority_score", "action_required", "next_action", "created_at"]
+      }
+    },
+    "priority_weights": {
+      "missing_approval": 50,
+      "missing_documents": 40,
+      "inventory_shortage": 35,
+      "missing_po_draft": 30,
+      "missing_vendor": 25,
+      "pending_bc_export": 20,
+      "pending_bc_response": 15,
+      "pending_shipment": 10,
+      "pending_invoice": 5
+    },
+    "frontend_components": {
+      "OperationsQueuePage": {
+        "testid": "operations-queue-page",
+        "features": ["title", "summary strip (total/high priority)", "type filter dropdown", "search input", "queue table", "detail panel on row click"],
+        "table_columns": ["Type", "ID", "Order Type", "Priority", "Action Required", "Next Action", "Approval", "Created"]
+      },
+      "OperationsQueueSummaryCard": {
+        "testid": "ops-queue-dashboard-card",
+        "location": "DashboardPage.js",
+        "features": ["total count", "high priority count", "view all button", "quick preview items"]
+      }
+    }
+  }
+}

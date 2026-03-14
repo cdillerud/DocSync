@@ -868,6 +868,134 @@ async def api_action_center(
 
 
 # ═══════════════════════════════════════════════════════════════
+# PO DRAFT GENERATION
+# ═══════════════════════════════════════════════════════════════
+
+PO_DRAFTS_COLL = "po_drafts"
+PO_DUPLICATE_WINDOW_MINUTES = 5
+
+
+class PODraftLineIn(BaseModel):
+    item: str = Field(..., min_length=1)
+    recommended_qty: float = Field(..., gt=0)
+    source: str = Field(default="action_center")
+
+
+class PODraftIn(BaseModel):
+    customer_id: str = Field(..., min_length=1)
+    items: list[PODraftLineIn] = Field(..., min_length=1)
+
+
+@router.post("/generate-po-draft")
+async def api_generate_po_draft(body: PODraftIn):
+    """Generate a PO draft payload for vendor fulfillment.
+
+    Does NOT create ledger movements or ERP records.
+    Stores the draft in po_drafts collection.
+    Duplicate guard: rejects if the same item+customer had a draft
+    within the last PO_DUPLICATE_WINDOW_MINUTES.
+    """
+    db = get_db()
+
+    # Validate customer
+    cust = await get_customer(db, body.customer_id)
+    if not cust:
+        raise HTTPException(status_code=404, detail="Customer workspace not found")
+
+    # Validate items exist in inventory
+    balances = await derive_balances(db, body.customer_id)
+    known_items = {b["item"] for b in balances}
+
+    lines = []
+    now = datetime.now(timezone.utc)
+    cutoff = now - __import__("datetime").timedelta(minutes=PO_DUPLICATE_WINDOW_MINUTES)
+
+    for line in body.items:
+        item = line.item.strip()
+        if item not in known_items:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Item '{item}' not found in customer inventory",
+            )
+
+        # Duplicate guard
+        recent = await db[PO_DRAFTS_COLL].find_one({
+            "customer_id": body.customer_id,
+            "lines.item": item,
+            "status": "draft",
+            "created_at": {"$gte": cutoff.isoformat()},
+        }, {"_id": 0, "po_draft_id": 1})
+        if recent:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Duplicate draft: item '{item}' already has a recent draft ({recent['po_draft_id']}). Wait {PO_DUPLICATE_WINDOW_MINUTES} minutes or archive the existing draft.",
+            )
+
+        lines.append({
+            "item": item,
+            "qty": line.recommended_qty,
+            "source": line.source,
+        })
+
+    # Generate draft
+    import uuid
+    draft_id = f"PO-DRAFT-{now.strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
+
+    draft = {
+        "po_draft_id": draft_id,
+        "created_at": now.isoformat(),
+        "customer_id": body.customer_id,
+        "customer_name": cust.get("name", ""),
+        "lines": lines,
+        "source": "action_center",
+        "status": "draft",
+        "total_qty": sum(ln["qty"] for ln in lines),
+        "total_lines": len(lines),
+    }
+
+    # Insert draft (let MongoDB generate _id)
+    await db[PO_DRAFTS_COLL].insert_one(draft.copy())
+    # _id not in original draft dict, so no removal needed
+
+    return draft
+
+
+@router.get("/po-drafts")
+async def api_list_po_drafts(
+    customer_id: str = Query(..., description="Customer workspace ID"),
+    status: str = Query("", description="Filter by status (draft|sent|archived)"),
+    limit: int = Query(50, ge=1, le=500),
+):
+    """List PO drafts for a customer."""
+    db = get_db()
+    query = {"customer_id": customer_id}
+    if status:
+        query["status"] = status
+    docs = await db[PO_DRAFTS_COLL].find(
+        query, {"_id": 0}
+    ).sort("created_at", -1).to_list(limit)
+    return {"total": len(docs), "drafts": docs}
+
+
+@router.patch("/po-drafts/{draft_id}/status")
+async def api_update_po_draft_status(
+    draft_id: str,
+    status: str = Query(..., description="New status"),
+):
+    """Update PO draft status (draft -> sent -> archived)."""
+    if status not in ("draft", "sent", "archived"):
+        raise HTTPException(status_code=422, detail="Invalid status. Use: draft, sent, archived")
+    db = get_db()
+    result = await db[PO_DRAFTS_COLL].update_one(
+        {"po_draft_id": draft_id},
+        {"$set": {"status": status, "updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="PO draft not found")
+    return {"po_draft_id": draft_id, "status": status}
+
+
+# ═══════════════════════════════════════════════════════════════
 # ITEM DETAIL
 # ═══════════════════════════════════════════════════════════════
 
@@ -971,6 +1099,13 @@ async def api_item_detail(
             "priority_score": action_item["priority_score"],
         }
 
+    # Last PO draft for this item
+    last_po_draft = await db[PO_DRAFTS_COLL].find_one(
+        {"customer_id": customer_id, "lines.item": item},
+        {"_id": 0, "po_draft_id": 1, "created_at": 1, "status": 1},
+        sort=[("created_at", -1)],
+    )
+
     return {
         "item": item,
         "customer_id": customer_id,
@@ -981,6 +1116,7 @@ async def api_item_detail(
         "demand": demand,
         "supply_coverage": supply_coverage,
         "action_summary": action_summary,
+        "last_po_draft": last_po_draft,
         "history_preview": history_data.get("movements", []),
         "history_total": history_data.get("total", 0),
         "type_summary": type_summary.get("movement_type_totals", {}),

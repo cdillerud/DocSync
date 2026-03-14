@@ -826,6 +826,9 @@ function ActionCenterPanel({ customerId, onItemClick, onSupplyCreated, onHistory
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('');
   const [creating, setCreating] = useState(null);
+  const [selected, setSelected] = useState(new Set());
+  const [drafting, setDrafting] = useState(false);
+  const [draftResult, setDraftResult] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -853,8 +856,52 @@ function ActionCenterPanel({ customerId, onItemClick, onSupplyCreated, onHistory
     finally { setCreating(null); }
   };
 
+  // Derived data from response
   const summary = data?.action_summary || {};
   const actions = data?.actions || [];
+  
+  // Items eligible for PO draft (reorder, coverage_risk, or shortage action types)
+  const eligibleForPO = actions.filter(a => a.action_types?.some(t => ['reorder', 'coverage_risk', 'shortage'].includes(t)));
+  const selectedEligible = [...selected].filter(item => eligibleForPO.some(a => a.item === item));
+
+  const generatePO = async () => {
+    if (!selectedEligible.length) { toast.error('Select items to generate PO draft'); return; }
+    setDrafting(true);
+    setDraftResult(null);
+    try {
+      const items = selectedEligible.map(item => {
+        const a = actions.find(x => x.item === item);
+        return { item, recommended_qty: a?.recommended_qty || Math.abs(a?.available || 0) + 10, source: 'action_center' };
+      });
+      const res = await fetch(`${API}/api/inventory-ledger/generate-po-draft`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customer_id: customerId, items }),
+      });
+      const respData = await res.json();
+      if (res.ok) {
+        setDraftResult(respData);
+        setSelected(new Set());
+        toast.success(`PO Draft ${respData.po_draft_id} created with ${respData.total_lines} line(s)`);
+      } else {
+        toast.error(respData.detail || 'Failed to generate PO draft');
+      }
+    } catch { toast.error('Failed to generate PO draft'); }
+    finally { setDrafting(false); }
+  };
+
+  const toggleSelect = (item) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(item) ? next.delete(item) : next.add(item);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (selected.size === eligibleForPO.length) setSelected(new Set());
+    else setSelected(new Set(eligibleForPO.map(a => a.item)));
+  };
+
   const cards = [
     { key: 'shortage', label: 'Shortages', count: summary.shortage_count || 0, color: 'text-red-500 border-red-500/30' },
     { key: 'coverage_risk', label: 'Coverage Risk', count: summary.coverage_risk_count || 0, color: 'text-orange-500 border-orange-500/30' },
@@ -879,10 +926,35 @@ function ActionCenterPanel({ customerId, onItemClick, onSupplyCreated, onHistory
       </div>
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">{summary.total_action_items || 0} total action items</p>
-        <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={load}>
-          <RefreshCw className="w-3 h-3 mr-1" /> Refresh
-        </Button>
+        <div className="flex gap-2">
+          {selectedEligible.length > 0 && (
+            <Button size="sm" className="h-6 text-[10px]" onClick={generatePO} disabled={drafting} data-testid="inv-generate-po-btn">
+              {drafting ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <FileText className="w-3 h-3 mr-1" />}
+              Generate PO Draft ({selectedEligible.length})
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={load}>
+            <RefreshCw className="w-3 h-3 mr-1" /> Refresh
+          </Button>
+        </div>
       </div>
+
+      {/* PO Draft Result */}
+      {draftResult && (
+        <div className="border border-emerald-500/30 bg-emerald-500/5 rounded-md p-3 space-y-1" data-testid="inv-po-draft-result">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-bold text-emerald-600">PO Draft Generated</p>
+            <Button variant="ghost" size="sm" className="h-5 text-[10px]" onClick={() => setDraftResult(null)}>Dismiss</Button>
+          </div>
+          <p className="text-xs">Draft ID: <span className="font-mono font-bold" data-testid="inv-po-draft-id">{draftResult.po_draft_id}</span></p>
+          <p className="text-xs">Lines: {draftResult.total_lines} | Total Qty: {draftResult.total_qty?.toLocaleString()}</p>
+          <div className="text-[10px] text-muted-foreground">
+            {draftResult.lines?.map((l, i) => (
+              <span key={i} className="mr-3">{l.item}: {l.qty}</span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Action Table */}
       <Card className="border-border/50">
@@ -895,6 +967,9 @@ function ActionCenterPanel({ customerId, onItemClick, onSupplyCreated, onHistory
             <table className="w-full text-xs" data-testid="inv-action-center-table">
               <thead className="border-b border-border/50 bg-muted/30">
                 <tr>
+                  <th className="p-2 text-center w-8">
+                    <input type="checkbox" className="rounded" checked={selected.size > 0 && selected.size === eligibleForPO.length} onChange={toggleAll} data-testid="inv-action-select-all" />
+                  </th>
                   <th className="p-2 text-left font-medium">Item</th>
                   <th className="p-2 text-right font-medium">On Hand</th>
                   <th className="p-2 text-right font-medium">Incoming</th>
@@ -909,6 +984,11 @@ function ActionCenterPanel({ customerId, onItemClick, onSupplyCreated, onHistory
               <tbody>
                 {actions.map((a, i) => (
                   <tr key={i} className={`border-b border-border/20 hover:bg-muted/20 ${a.action_types?.includes('shortage') ? 'bg-red-500/5' : a.action_types?.includes('coverage_risk') ? 'bg-orange-500/5' : ''}`} data-testid={`inv-action-row-${i}`}>
+                    <td className="p-2 text-center">
+                      {eligibleForPO.some(e => e.item === a.item) && (
+                        <input type="checkbox" className="rounded" checked={selected.has(a.item)} onChange={() => toggleSelect(a.item)} data-testid={`inv-action-select-${i}`} />
+                      )}
+                    </td>
                     <td className="p-2">
                       <span className="font-mono font-medium cursor-pointer hover:underline text-blue-600" onClick={() => onItemClick?.(a.item)} data-testid={`inv-action-item-${i}`}>{a.item}</span>
                       {a.item_description && <span className="text-[10px] text-muted-foreground block truncate max-w-[150px]">{a.item_description}</span>}
@@ -1220,6 +1300,18 @@ function ItemDetailDrawer({ item, customerId, onClose, onOpenFullHistory, onRefr
                     ))}
                   </div>
                   <span className="text-[10px] text-muted-foreground">Priority: <span className="font-bold">{detail.action_summary.priority_score}</span></span>
+                </div>
+              </div>
+            )}
+
+            {/* Last PO Draft */}
+            {detail.last_po_draft && (
+              <div className="border border-border rounded p-2.5 space-y-1" data-testid="inv-detail-po-draft">
+                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Last PO Draft</p>
+                <div className="flex gap-3 text-xs items-center">
+                  <span className="font-mono font-bold">{detail.last_po_draft.po_draft_id}</span>
+                  <Badge variant="outline" className="text-[9px]">{detail.last_po_draft.status}</Badge>
+                  <span className="text-muted-foreground text-[10px]">{detail.last_po_draft.created_at ? new Date(detail.last_po_draft.created_at).toLocaleDateString() : ''}</span>
                 </div>
               </div>
             )}

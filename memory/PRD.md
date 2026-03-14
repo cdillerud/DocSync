@@ -3087,6 +3087,24 @@ EMAIL_CLIENT_ID=doc-workflow-test
 *Last Updated: March 14, 2026*
 *Last Updated: March 14, 2026*
 
+---
+
+## Session Update: March 14, 2026 - BC Receipt Capture (iteration_80)
+
+### Completed
+
+#### BC Receipt Capture
+- **Backend**: `POST /api/inventory-ledger/po-drafts/{id}/bc-receipt` advances ordered→received via existing transition pipeline (creates receipt ledger movements). Full receipt only; partial/over rejected 422. Idempotent for already-received. Sets bc_receipt_at/bc_receipt_notes.
+- **Backend**: Draft detail enriched with receipt summary (received_count, ordered_count, total_qty, received_qty). Linked supply endpoint returns receipt_summary.
+- **Frontend**: Record Receipt button/form in Linked Incoming Supply section. Receipt result display. Received column in supply table.
+
+### Test Results
+- Backend: 13/13 (100%)
+- Frontend: All UI flows verified (100%)
+- Test report: `/app/test_reports/iteration_80.json`
+
+*Last Updated: March 14, 2026*
+
 *Last Updated: March 14, 2026*
 - Test report: `/app/test_reports/iteration_75.json`
 

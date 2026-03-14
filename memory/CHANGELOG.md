@@ -340,6 +340,28 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 - No ledger mutations, no BC API calls
 - Backend: 17/17 tests passed, Frontend: all UI flows verified
 - Test report: `/app/test_reports/iteration_79.json`
+---
+
+## 2026-03-14: BC Receipt Capture (iteration_80)
+
+### What Was Built
+- `POST /api/inventory-ledger/po-drafts/{id}/bc-receipt` — records BC PO receipt, advancing ordered→received via existing `transition_supply_status` pipeline
+- Auto-creates receipt ledger movements through the standard workflow
+- Full receipt supported; partial receipt cleanly rejected (422); over-receipt rejected (422)
+- Sets `bc_receipt_at` and `bc_receipt_notes` on supply records for traceability
+- Duplicate receipt is idempotent (returns skipped, not error)
+- Validates: draft exists (404), bc_response_status=created (422), linked supply exists (422)
+- PO draft detail enriched with `linked_supply_received_count`, `linked_supply_ordered_count`, `linked_supply_total_qty`, `linked_supply_received_qty`
+- Linked supply endpoint returns `receipt_summary` object
+- Frontend: "Record Receipt" button in Linked Incoming Supply section (visible when ordered supply exists)
+- Frontend: Receipt form shows ordered items with qty, notes input, Confirm/Cancel
+- Frontend: Receipt result summary (received/skipped/error counts)
+- Frontend: Linked supply table now includes "Received" column with date
+- Frontend: Receipt summary strip below table (total qty, received qty, ordered/received counts)
+- Frontend: After receipt, refreshes linked supply, draft detail, and all inventory views
+- Backend: 13/13 tests passed, Frontend: all UI flows verified
+- Test report: `/app/test_reports/iteration_80.json`
+
 
 
 - Test report: `/app/test_reports/iteration_77.json`

@@ -1,0 +1,110 @@
+{
+  "summary": "Comprehensive testing of Inventory Movement History and Audit Detail feature (Iteration 60). Fixed critical bug: historyItem reference error in SummaryStrip component. All 15 backend tests pass. Frontend features verified: ItemHistoryModal opens from BalanceTable, balance summary strip shows On Hand/Incoming/Committed/Available, type breakdown badges are clickable to filter, reference filter works, movement history rows display Type/Effect/Reference/Source/Notes/Timestamp with display_effect enrichment.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed_tests": [
+    "Backend: GET /api/inventory-ledger/history — returns movements in reverse chronological order",
+    "Backend: GET /api/inventory-ledger/history — display_effect field enrichment on all movements",
+    "Backend: GET /api/inventory-ledger/history — order_release sign flip (negative delta → positive display_effect)",
+    "Backend: GET /api/inventory-ledger/history — movement_type filter works correctly",
+    "Backend: GET /api/inventory-ledger/history — reference filter works correctly",
+    "Backend: GET /api/inventory-ledger/history — item filter works correctly",
+    "Backend: GET /api/inventory-ledger/history — pagination (limit/offset) works correctly",
+    "Backend: GET /api/inventory-ledger/history — empty result for non-existent item (no server error)",
+    "Backend: GET /api/inventory-ledger/history/summary — returns per-type totals with count and total_qty",
+    "Backend: GET /api/inventory-ledger/history/summary — current_balances correct (on_hand=600, incoming=300, committed=150, available=750)",
+    "Backend: GET /api/inventory-ledger/history/summary — includes balance_details with per-bucket breakdown",
+    "REGRESSION: POST /api/inventory-ledger/reconcile-sales-order — still works",
+    "REGRESSION: POST /api/incoming-supply/from-shortage — still works (requires existing commitment)",
+    "REGRESSION: POST /api/incoming-supply/{id}/status — transitions still work (expected→ordered)",
+    "REGRESSION: POST /api/inventory-ledger/release — still works",
+    "Frontend: Login with admin/admin works",
+    "Frontend: Inventory Ledger page loads with customer workspace cards",
+    "Frontend: Hormel Foods workspace shows summary strip: 7 Items, 2,160 On Hand, 300 Incoming, 6,324 Committed, 3 Shortages",
+    "Frontend: Balances tab shows history icon on each row (data-testid='inv-history-btn-{i}')",
+    "Frontend: Click history icon opens ItemHistoryModal (data-testid='item-history-modal')",
+    "Frontend: Modal shows balance summary strip (data-testid='item-history-summary') with On Hand/Incoming/Committed/Available",
+    "Frontend: Modal shows type breakdown badges (data-testid='item-history-type-breakdown') - clickable to filter",
+    "Frontend: Modal shows movement history rows with Type/Effect/Reference/Source/Notes/Timestamp",
+    "Frontend: Type badge click filters history list (e.g., opening_balance filter reduces rows)",
+    "Frontend: Clear filter button appears when filter is active"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_inventory_history_audit.py",
+    "/app/test_reports/pytest/inventory_history_audit_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "FIXED BUG: historyItem/setHistoryItem were referenced in SummaryStrip but not passed as props - moved ItemHistoryModal to CustomerWorkspace component",
+    "_compute_display_effect correctly flips sign for order_release (negative delta → positive effect for UI display)",
+    "item_audit_summary correctly aggregates per-type totals via MongoDB aggregation pipeline",
+    "derive_balances formula verified: available = on_hand + incoming - committed",
+    "Frontend ItemHistoryModal fetches both history and summary endpoints in parallel for performance"
+  ],
+  "updated_files": [
+    "/app/frontend/src/pages/InventoryLedgerPage.js",
+    "/app/backend/tests/test_inventory_history_audit.py"
+  ],
+  "success_rate": {
+    "backend": "100% (15/15 tests passed)",
+    "frontend": "100% (all UI verifications passed)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://order-ledger-1.preview.emergentagent.com"
+  },
+  "seed_data_used": "Each backend test class creates unique workspace with UUID prefix (TEST_HIST_*, TEST_SUMMARY_*, TEST_REGRESSION_*). Items seeded with opening_balance, order_commitment, order_release, receipt movements. Workspaces deactivated on teardown.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "History/audit feature fully tested. Key endpoints: GET /api/inventory-ledger/history?customer_id=X&item=Y&movement_type=Z&reference=R&limit=N&offset=M returns movements with display_effect enrichment (order_release sign is flipped). GET /api/inventory-ledger/history/summary?customer_id=X&item=Y returns per-type totals + current_balances. Frontend ItemHistoryModal opened from BalanceTable rows via ClipboardList icon (data-testid='inv-history-btn-{i}'). Modal has: balance summary strip, clickable type badges for filtering, reference input filter, paginated movement list. Bug fixed: moved ItemHistoryModal from SummaryStrip to CustomerWorkspace to fix historyItem reference error.",
+  "mocked_apis": ["Email service"],
+  "features_verified": {
+    "backend": {
+      "history_endpoint": {
+        "url": "GET /api/inventory-ledger/history",
+        "query_params": ["customer_id (required)", "item", "reference", "movement_type", "limit", "offset"],
+        "response": {"movements": "array with display_effect enrichment", "total": "count"},
+        "ordering": "reverse chronological (created_at DESC)",
+        "display_effect_logic": "order_release flips sign: -30 delta → +30 display_effect"
+      },
+      "summary_endpoint": {
+        "url": "GET /api/inventory-ledger/history/summary",
+        "query_params": ["customer_id (required)", "item (required)"],
+        "response": {
+          "movement_type_totals": "{type: {total_qty, count}}",
+          "current_balances": "{on_hand, incoming, committed, available}",
+          "balance_details": "per-bucket breakdown"
+        }
+      }
+    },
+    "frontend": {
+      "balance_table_history_icon": {
+        "data_testid": "inv-history-btn-{i}",
+        "icon": "ClipboardList",
+        "behavior": "Opens ItemHistoryModal for the row's item"
+      },
+      "item_history_modal": {
+        "data_testid": "item-history-modal",
+        "components": {
+          "summary_strip": "data-testid='item-history-summary' - On Hand/Incoming/Committed/Available",
+          "type_breakdown": "data-testid='item-history-type-breakdown' - Clickable badges to filter",
+          "ref_filter": "data-testid='item-history-ref-filter' - Input to filter by reference",
+          "history_list": "data-testid='item-history-list' - Table with Type/Effect/Reference/Source/Notes/Timestamp"
+        }
+      }
+    }
+  },
+  "bug_fixed": {
+    "issue": "ReferenceError: historyItem is not defined in SummaryStrip component",
+    "cause": "ItemHistoryModal and historyItem state were incorrectly placed inside SummaryStrip component instead of CustomerWorkspace",
+    "fix": "Moved ItemHistoryModal render to CustomerWorkspace component where historyItem state is defined",
+    "file": "/app/frontend/src/pages/InventoryLedgerPage.js"
+  }
+}

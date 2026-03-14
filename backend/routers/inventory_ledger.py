@@ -12,7 +12,7 @@ from typing import Optional
 from deps import get_db
 from services.inventory_ledger_service import (
     list_customers, get_customer, create_customer, update_customer,
-    create_movement, list_movements,
+    create_movement, list_movements, get_history, item_audit_summary,
     derive_balances, customer_summary,
     create_incoming, update_incoming, list_incoming,
     distinct_items, distinct_warehouses,
@@ -192,6 +192,39 @@ async def api_create_movement(customer_id: str, body: CreateMovementReq):
         return result
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+
+
+# ═══════════════════════════════════════════════════════════════
+# HISTORY & AUDIT
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/history")
+async def api_history(
+    customer_id: str = Query(..., description="Customer workspace ID"),
+    item: str = Query("", description="Filter by item"),
+    reference: str = Query("", description="Filter by reference_id"),
+    movement_type: str = Query("", description="Filter by movement_type"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """Return movement history with display_effect enrichment, reverse chronological."""
+    db = get_db()
+    return await get_history(
+        db, customer_id, item=item, reference=reference,
+        movement_type=movement_type, skip=offset, limit=limit,
+    )
+
+
+@router.get("/history/summary")
+async def api_history_summary(
+    customer_id: str = Query(..., description="Customer workspace ID"),
+    item: str = Query(..., description="Item to summarize"),
+):
+    """Compact audit summary: per-type totals + current balance for a given item."""
+    db = get_db()
+    return await item_audit_summary(db, customer_id, item=item)
+
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -131,6 +131,7 @@ function CustomerWorkspace({ customer }) {
   const [showMovementForm, setShowMovementForm] = useState(false);
   const [showIncomingForm, setShowIncomingForm] = useState(false);
   const [search, setSearch] = useState('');
+  const [historyItem, setHistoryItem] = useState(null);
 
   const cid = customer?.id;
 
@@ -207,7 +208,7 @@ function CustomerWorkspace({ customer }) {
         </div>
 
         <TabsContent value="balances">
-          <BalanceTable balances={filteredBalances} loading={loading} />
+          <BalanceTable balances={filteredBalances} loading={loading} onItemClick={(item) => setHistoryItem({ item, customerId: cid })} />
         </TabsContent>
         <TabsContent value="movements">
           <MovementTable movements={movements} total={movementTotal} />
@@ -223,6 +224,14 @@ function CustomerWorkspace({ customer }) {
       )}
       {showIncomingForm && (
         <IncomingFormDialog open={showIncomingForm} customerId={cid} onClose={() => setShowIncomingForm(false)} onCreated={() => { setShowIncomingForm(false); refresh(); }} />
+      )}
+      {/* Item History Modal */}
+      {historyItem && (
+        <ItemHistoryModal
+          item={historyItem.item}
+          customerId={historyItem.customerId}
+          onClose={() => setHistoryItem(null)}
+        />
       )}
     </div>
   );
@@ -259,10 +268,160 @@ function SummaryStrip({ summary }) {
 }
 
 /* ════════════════════════════════════════════════════════════════ */
-/* BALANCE TABLE                                                    */
+/* ITEM HISTORY MODAL                                               */
 /* ════════════════════════════════════════════════════════════════ */
 
-function BalanceTable({ balances, loading }) {
+function ItemHistoryModal({ item, customerId, onClose }) {
+  const [summary, setSummary] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [typeFilter, setTypeFilter] = useState('');
+  const [refFilter, setRefFilter] = useState('');
+  const [offset, setOffset] = useState(0);
+  const pageSize = 50;
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ customer_id: customerId, item, limit: String(pageSize), offset: String(offset) });
+      if (typeFilter) params.set('movement_type', typeFilter);
+      if (refFilter) params.set('reference', refFilter);
+
+      const [sumRes, histRes] = await Promise.all([
+        fetch(`${API}/api/inventory-ledger/history/summary?customer_id=${customerId}&item=${encodeURIComponent(item)}`),
+        fetch(`${API}/api/inventory-ledger/history?${params}`),
+      ]);
+      const [sumData, histData] = await Promise.all([sumRes.json(), histRes.json()]);
+      setSummary(sumData);
+      setHistory(histData.movements || []);
+      setTotal(histData.total || 0);
+    } catch { toast.error('Failed to load history'); }
+    finally { setLoading(false); }
+  }, [customerId, item, typeFilter, refFilter, offset]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  const bal = summary?.current_balances || {};
+  const typeTotals = summary?.movement_type_totals || {};
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden flex flex-col" data-testid="item-history-modal">
+        <DialogHeader>
+          <DialogTitle className="text-sm font-bold uppercase tracking-wider" style={{ fontFamily: 'Chivo, sans-serif' }}>
+            <span className="font-mono">{item}</span> — Movement History
+          </DialogTitle>
+        </DialogHeader>
+
+        {/* Balance Summary Strip */}
+        <div className="grid grid-cols-4 gap-2 mb-3" data-testid="item-history-summary">
+          {[
+            { label: 'On Hand', value: bal.on_hand, color: 'text-foreground' },
+            { label: 'Incoming', value: bal.incoming, color: 'text-sky-600 dark:text-sky-400' },
+            { label: 'Committed', value: bal.committed, color: 'text-amber-600 dark:text-amber-400' },
+            { label: 'Available', value: bal.available, color: bal.available < 0 ? 'text-red-600' : 'text-emerald-600 dark:text-emerald-400' },
+          ].map(s => (
+            <div key={s.label} className="bg-muted/40 rounded-md p-2.5 text-center border border-border/50">
+              <div className={`text-lg font-bold font-mono ${s.color}`}>{(s.value ?? 0).toLocaleString()}</div>
+              <div className="text-[9px] text-muted-foreground uppercase tracking-wider">{s.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Type Breakdown */}
+        <div className="flex flex-wrap gap-1.5 mb-3" data-testid="item-history-type-breakdown">
+          {Object.entries(typeTotals).map(([mt, data]) => (
+            <Badge key={mt} variant="outline" className={`text-[9px] cursor-pointer ${typeFilter === mt ? 'ring-1 ring-primary' : ''} ${MOVE_COLORS[mt] || ''}`}
+              onClick={() => { setTypeFilter(typeFilter === mt ? '' : mt); setOffset(0); }}>
+              {mt.replace(/_/g, ' ')} ({data.count})
+            </Badge>
+          ))}
+          {typeFilter && (
+            <Button variant="ghost" size="sm" className="h-5 text-[9px] px-1.5" onClick={() => { setTypeFilter(''); setOffset(0); }}>
+              Clear filter
+            </Button>
+          )}
+        </div>
+
+        {/* Reference Filter */}
+        <div className="flex gap-2 mb-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+            <Input placeholder="Filter by reference..." value={refFilter}
+              onChange={e => { setRefFilter(e.target.value); setOffset(0); }}
+              className="pl-8 h-7 text-xs" data-testid="item-history-ref-filter" />
+          </div>
+        </div>
+
+        {/* Movement List */}
+        <div className="flex-1 overflow-y-auto border border-border rounded-md" data-testid="item-history-list">
+          {loading ? (
+            <div className="py-10 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto" /></div>
+          ) : !history.length ? (
+            <div className="py-10 text-center text-muted-foreground text-sm">No movements match filters.</div>
+          ) : (
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-muted/80 backdrop-blur-sm">
+                <tr className="border-b border-border text-[10px] text-muted-foreground uppercase tracking-wider">
+                  <th className="text-left py-2 px-2.5 font-medium">Type</th>
+                  <th className="text-right py-2 px-2.5 font-medium">Effect</th>
+                  <th className="text-left py-2 px-2.5 font-medium">Reference</th>
+                  <th className="text-left py-2 px-2.5 font-medium">Source</th>
+                  <th className="text-left py-2 px-2.5 font-medium">Notes</th>
+                  <th className="text-left py-2 px-2.5 font-medium">Timestamp</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((m, i) => {
+                  const effect = m.display_effect ?? m.quantity_delta;
+                  const isPos = effect > 0;
+                  return (
+                    <tr key={m.id || i} className="border-b border-border/30 hover:bg-muted/10" data-testid={`item-history-row-${i}`}>
+                      <td className="py-1.5 px-2.5">
+                        <Badge variant="secondary" className={`text-[8px] ${MOVE_COLORS[m.movement_type] || ''}`}>
+                          {m.movement_type?.replace(/_/g, ' ')}
+                        </Badge>
+                      </td>
+                      <td className={`py-1.5 px-2.5 text-right font-mono font-bold ${isPos ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                        {isPos ? '+' : ''}{effect.toLocaleString()}
+                      </td>
+                      <td className="py-1.5 px-2.5 font-mono text-muted-foreground">{m.reference_id || '-'}</td>
+                      <td className="py-1.5 px-2.5 text-muted-foreground">{m.source_type?.replace(/_/g, ' ') || '-'}</td>
+                      <td className="py-1.5 px-2.5 text-muted-foreground truncate max-w-[180px]" title={m.notes}>{m.notes || '-'}</td>
+                      <td className="py-1.5 px-2.5 text-muted-foreground font-mono">{m.created_at ? new Date(m.created_at).toLocaleString() : '-'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Pagination */}
+        {total > pageSize && (
+          <div className="flex items-center justify-between pt-2">
+            <span className="text-[10px] text-muted-foreground">
+              Showing {offset + 1}–{Math.min(offset + pageSize, total)} of {total}
+            </span>
+            <div className="flex gap-1">
+              <Button variant="outline" size="sm" className="h-6 text-[10px] px-2" disabled={offset === 0}
+                onClick={() => setOffset(Math.max(0, offset - pageSize))}>
+                <ChevronLeft className="w-3 h-3" /> Prev
+              </Button>
+              <Button variant="outline" size="sm" className="h-6 text-[10px] px-2" disabled={offset + pageSize >= total}
+                onClick={() => setOffset(offset + pageSize)}>
+                Next <ChevronRight className="w-3 h-3" />
+              </Button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function BalanceTable({ balances, loading, onItemClick }) {
   if (loading) return <div className="py-10 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto" /></div>;
   if (!balances.length) return <div className="py-10 text-center text-muted-foreground text-sm">No inventory data. Add movements to get started.</div>;
 
@@ -281,13 +440,14 @@ function BalanceTable({ balances, loading }) {
               <th className="text-right py-2.5 px-3 font-medium">Available</th>
               <th className="text-left py-2.5 px-3 font-medium">UOM</th>
               <th className="text-center py-2.5 px-3 font-medium">Status</th>
+              <th className="w-8"></th>
             </tr>
           </thead>
           <tbody>
             {balances.map((b, i) => {
               const oc = OWNERSHIP_COLORS[b.ownership_type] || OWNERSHIP_COLORS.unknown;
               return (
-                <tr key={i} className="border-b border-border/50 hover:bg-muted/20" data-testid={`inv-balance-row-${i}`}>
+                <tr key={i} className="border-b border-border/50 hover:bg-muted/20 group" data-testid={`inv-balance-row-${i}`}>
                   <td className="py-2 px-3">
                     <span className="font-mono text-xs font-medium">{b.item}</span>
                     {b.item_description && <span className="text-[10px] text-muted-foreground block truncate max-w-[200px]">{b.item_description}</span>}
@@ -303,6 +463,15 @@ function BalanceTable({ balances, loading }) {
                     {b.is_short ? <Badge variant="destructive" className="text-[9px]">SHORT</Badge>
                       : b.is_low ? <Badge variant="outline" className="text-[9px] border-amber-300 text-amber-600">LOW</Badge>
                       : <Badge variant="outline" className="text-[9px] border-emerald-300 text-emerald-600">OK</Badge>}
+                  </td>
+                  <td className="py-2 px-1">
+                    <Button variant="ghost" size="sm"
+                      className="h-6 w-6 p-0 opacity-40 group-hover:opacity-100 transition-opacity"
+                      onClick={() => onItemClick?.(b.item)}
+                      title="View movement history"
+                      data-testid={`inv-history-btn-${i}`}>
+                      <ClipboardList className="w-3.5 h-3.5" />
+                    </Button>
                   </td>
                 </tr>
               );

@@ -193,6 +193,79 @@ async def list_movements(
     return {"movements": docs, "total": total}
 
 
+def _compute_display_effect(movement_type: str, quantity_delta: float) -> float:
+    """Compute display_effect: net impact on available inventory for UI display.
+
+    order_release has negative delta but INCREASES available (frees committed),
+    so we flip its sign for display.
+    """
+    if movement_type == "order_release":
+        return -quantity_delta  # negative delta → positive display effect
+    return quantity_delta
+
+
+async def get_history(
+    db, customer_id: str,
+    item: str = "", reference: str = "",
+    movement_type: str = "",
+    skip: int = 0, limit: int = 100,
+):
+    """Return movement history with display_effect enrichment, reverse chronological."""
+    query: dict = {"customer_id": customer_id}
+    if item:
+        query["item"] = item
+    if reference:
+        query["reference_id"] = reference
+    if movement_type:
+        query["movement_type"] = movement_type
+
+    total = await db[MOVEMENTS_COLL].count_documents(query)
+    docs = await db[MOVEMENTS_COLL].find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+
+    for doc in docs:
+        doc["display_effect"] = _compute_display_effect(
+            doc.get("movement_type", ""), doc.get("quantity_delta", 0),
+        )
+
+    return {"movements": docs, "total": total}
+
+
+async def item_audit_summary(db, customer_id: str, item: str):
+    """Compact audit summary for a single item across all warehouses.
+
+    Returns per-type totals + current balance values from derive_balances.
+    """
+    pipeline = [
+        {"$match": {"customer_id": customer_id, "item": item}},
+        {"$group": {
+            "_id": "$movement_type",
+            "total_qty": {"$sum": "$quantity_delta"},
+            "count": {"$sum": 1},
+        }},
+    ]
+    raw = await db[MOVEMENTS_COLL].aggregate(pipeline).to_list(100)
+    type_totals = {r["_id"]: {"total_qty": r["total_qty"], "count": r["count"]} for r in raw}
+
+    # Get current balances
+    balances = await derive_balances(db, customer_id, item=item)
+
+    totals = {
+        "on_hand": sum(b.get("on_hand", 0) for b in balances),
+        "incoming": sum(b.get("incoming", 0) for b in balances),
+        "committed": sum(b.get("committed", 0) for b in balances),
+        "available": sum(b.get("available", 0) for b in balances),
+    }
+
+    return {
+        "item": item,
+        "customer_id": customer_id,
+        "movement_type_totals": type_totals,
+        "current_balances": totals,
+        "balance_details": balances,
+    }
+
+
+
 # ═══════════════════════════════════════════════════════════════
 # BALANCE DERIVATION (ledger-computed, never hand-maintained)
 # ═══════════════════════════════════════════════════════════════

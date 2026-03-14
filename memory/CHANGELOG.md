@@ -494,3 +494,24 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 - Visual indicators for pending (amber) and rejected (red) approvals
 - Backend: 19/19 tests passed, Frontend: 100% verified, Regression: iteration 84+85 pass
 - Test report: `/app/test_reports/iteration_86.json`
+
+---
+
+## 2026-03-14: Operations Queue — Unified Worklist (iteration_87)
+
+### What Was Built
+- GET /api/inventory-ledger/operations-queue endpoint with eligibility rules, priority scoring, filtering (entity_type, status), pagination (limit, offset)
+- Queue logic:
+  - Warehouse SO: approval, customer PO doc, shipment, invoice
+  - Drop-ship SO: approval, customer PO doc, DS PO draft, vendor/BC shipment, invoice
+  - PO Draft: vendor, approval, BC export, BC response
+- Priority scoring: missing_approval=50, missing_documents=40, inventory_shortage=35, missing_po_draft=30, missing_vendor=25, pending_bc_export=20, pending_bc_response=15, pending_shipment=10, pending_invoice=5
+- Items with all actions complete excluded from queue
+- Response: total, high_priority_count, items with entity_type/id, order_type, vendor_name, approval_status, checklist_complete, priority_score, action_required[], next_action, created_at
+- New /operations-queue page: table with Type/ID/Order Type/Priority/Action Required/Next Action/Approval/Created columns
+- Type filter dropdown (All/Sales Orders/PO Drafts), search by ID or action, priority color badges (red>=40, amber 20-39, blue<20)
+- Clickable rows open detail panel with entity info, actions list, link to Inventory Ledger
+- Dashboard OperationsQueueSummaryCard with total + high priority + top 3 items preview + View All link
+- Nav link "Operations Queue" in sidebar
+- Backend: 19/19 tests, Frontend: 100%, Regression: iterations 85-86 pass
+- Test report: `/app/test_reports/iteration_87.json`

@@ -473,3 +473,24 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 - All safeguards: no BC calls, no inventory changes, metadata pointers only
 - Backend: 16/16 tests passed, Frontend: 100% verified, Regression: iteration 83+84 pass
 - Test report: `/app/test_reports/iteration_85.json`
+
+---
+
+## 2026-03-14: Approval Workflow Tracking (iteration_86)
+
+### What Was Built
+- New `approval_logs` collection with CRUD endpoints: POST /approvals/request, PATCH /approvals/{id}, GET /approvals
+- Approval statuses: pending, approved, rejected (not_requested is derived when no approvals exist)
+- Entity types: sales_order, po_draft. Approval types: sales_order, purchase_order
+- Validation: invalid entity_type/approval_type returns 422, non-existent PO draft returns 404, already-decided approval returns 422
+- SO summary enriched with approval_status, latest_approval_type, latest_approval_at, approval_history_count
+- PO draft detail enriched with same fields
+- Checklist integration:
+  - Warehouse SO: customer_po_attached, approval_requested, approval_granted, warehouse_agreement
+  - Drop-ship SO: customer_po_attached, ds_po_draft_created, approval_granted
+  - PO draft: vendor_assigned, export_ready, approval_granted
+- Frontend: Reusable ApprovalSection component with status badge (color-coded), request form, approve/reject controls for pending, decision notes, approval history
+- Integrated in both ShipmentCaptureDialog (for SOs) and PODraftDetailDrawer (for PO drafts)
+- Visual indicators for pending (amber) and rejected (red) approvals
+- Backend: 19/19 tests passed, Frontend: 100% verified, Regression: iteration 84+85 pass
+- Test report: `/app/test_reports/iteration_86.json`

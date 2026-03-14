@@ -194,6 +194,124 @@ async def api_create_movement(customer_id: str, body: CreateMovementReq):
         raise HTTPException(status_code=422, detail=str(e))
 
 
+# ═══════════════════════════════════════════════════════════════
+# MANUAL MOVEMENT ENTRY (validated, restricted types)
+# ═══════════════════════════════════════════════════════════════
+
+MANUAL_ALLOWED_TYPES = {"opening_balance", "manual_adjustment", "transfer", "writeoff", "correction"}
+MANUAL_BLOCKED_TYPES = {"order_commitment", "order_release", "receipt"}
+
+
+class ManualMovementReq(BaseModel):
+    customer_id: str
+    movement_type: str
+    item: str
+    qty: float
+    item_description: str = ""
+    warehouse: str = "MAIN"
+    ownership_type: str = "customer_owned"
+    unit_of_measure: str = "units"
+    reference: str = ""
+    notes: str = ""
+    idempotency_key: str = ""
+
+
+@router.post("/movements")
+async def api_manual_movement(body: ManualMovementReq):
+    """Create a manual inventory ledger movement with strict validation.
+
+    Only allows: opening_balance, manual_adjustment, transfer, writeoff, correction.
+    Rejects order_commitment, order_release, receipt (use dedicated workflows).
+    Rejects zero quantity (422). Writeoff must be negative.
+    Duplicate opening_balance for same item/customer/warehouse/ownership is rejected.
+    Lightweight idempotency via idempotency_key.
+    """
+    db = get_db()
+
+    # Type validation
+    if body.movement_type in MANUAL_BLOCKED_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Movement type '{body.movement_type}' is not allowed through manual entry. "
+                   f"Use the dedicated workflow endpoint.",
+        )
+    if body.movement_type not in MANUAL_ALLOWED_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid movement type '{body.movement_type}'. "
+                   f"Allowed: {', '.join(sorted(MANUAL_ALLOWED_TYPES))}",
+        )
+
+    # Zero qty
+    if body.qty == 0:
+        raise HTTPException(status_code=422, detail="Quantity must not be zero")
+
+    # Writeoff must reduce inventory
+    if body.movement_type == "writeoff" and body.qty > 0:
+        raise HTTPException(
+            status_code=422,
+            detail="Writeoff must reduce inventory (use negative quantity)",
+        )
+
+    # Duplicate opening_balance check
+    if body.movement_type == "opening_balance":
+        from services.inventory_ledger_service import MOVEMENTS_COLL
+        existing = await db[MOVEMENTS_COLL].find_one({
+            "customer_id": body.customer_id,
+            "item": body.item.strip(),
+            "warehouse": body.warehouse.strip(),
+            "ownership_type": body.ownership_type,
+            "movement_type": "opening_balance",
+        }, {"_id": 0, "id": 1})
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Opening balance already exists for item '{body.item}' "
+                       f"in warehouse '{body.warehouse}'. Use 'correction' or "
+                       f"'manual_adjustment' to modify.",
+            )
+
+    # Idempotency guard
+    if body.idempotency_key:
+        from services.inventory_ledger_service import MOVEMENTS_COLL
+        dup = await db[MOVEMENTS_COLL].find_one(
+            {"idempotency_key": body.idempotency_key},
+            {"_id": 0, "id": 1},
+        )
+        if dup:
+            raise HTTPException(
+                status_code=409, detail="Duplicate submission detected (idempotency key match)",
+            )
+
+    try:
+        result = await create_movement(
+            db, body.customer_id,
+            item=body.item,
+            item_description=body.item_description,
+            warehouse=body.warehouse,
+            ownership_type=body.ownership_type,
+            movement_type=body.movement_type,
+            quantity_delta=body.qty,
+            unit_of_measure=body.unit_of_measure,
+            source_type="manual_entry",
+            reference_type="manual",
+            reference_id=body.reference,
+            notes=body.notes,
+            created_by="gpi_hub",
+        )
+        # Store idempotency_key on the movement if provided
+        if body.idempotency_key and result.get("success"):
+            from services.inventory_ledger_service import MOVEMENTS_COLL
+            await db[MOVEMENTS_COLL].update_one(
+                {"id": result["movement"]["id"]},
+                {"$set": {"idempotency_key": body.idempotency_key}},
+            )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+
 
 # ═══════════════════════════════════════════════════════════════
 # HISTORY & AUDIT

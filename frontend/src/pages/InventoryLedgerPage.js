@@ -663,18 +663,37 @@ function IncomingTable({ records, customerId, onUpdate }) {
 /* MOVEMENT FORM DIALOG                                             */
 /* ════════════════════════════════════════════════════════════════ */
 
+const MANUAL_MOVEMENT_TYPES = ['opening_balance', 'manual_adjustment', 'transfer', 'writeoff', 'correction'];
+
 function MovementFormDialog({ open, customerId, onClose, onCreated }) {
-  const [form, setForm] = useState({ item: '', item_description: '', warehouse: 'MAIN', ownership_type: 'customer_owned', movement_type: 'receipt', quantity_delta: '', unit_of_measure: 'cases', source_type: 'manual_entry', reference_type: '', reference_id: '', notes: '' });
+  const [form, setForm] = useState({ item: '', item_description: '', warehouse: 'MAIN', ownership_type: 'customer_owned', movement_type: 'manual_adjustment', quantity_delta: '', unit_of_measure: 'cases', reference_id: '', notes: '' });
   const [saving, setSaving] = useState(false);
 
   const update = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
 
   const submit = async () => {
     if (!form.item || !form.quantity_delta) { toast.error('Item and quantity are required'); return; }
+    const qty = parseFloat(form.quantity_delta);
+    if (isNaN(qty) || qty === 0) { toast.error('Quantity must be a non-zero number'); return; }
+    if (form.movement_type === 'writeoff' && qty > 0) { toast.error('Writeoff must be negative'); return; }
+
     setSaving(true);
+    const idempotencyKey = `${customerId}_${form.item}_${form.movement_type}_${qty}_${Date.now()}`;
     try {
-      const payload = { ...form, quantity_delta: parseFloat(form.quantity_delta) };
-      const res = await fetch(`${API}/api/inventory-ledger/customers/${customerId}/movements`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const payload = {
+        customer_id: customerId,
+        movement_type: form.movement_type,
+        item: form.item,
+        qty,
+        item_description: form.item_description,
+        warehouse: form.warehouse,
+        ownership_type: form.ownership_type,
+        unit_of_measure: form.unit_of_measure,
+        reference: form.reference_id,
+        notes: form.notes,
+        idempotency_key: idempotencyKey,
+      };
+      const res = await fetch(`${API}/api/inventory-ledger/movements`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const data = await res.json();
       if (res.ok && data.success) {
         toast.success('Movement recorded');
@@ -690,39 +709,41 @@ function MovementFormDialog({ open, customerId, onClose, onCreated }) {
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-lg" data-testid="inv-movement-dialog">
-        <DialogHeader><DialogTitle className="text-sm font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>New Movement Entry</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle className="text-sm font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>New Manual Movement</DialogTitle></DialogHeader>
         <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="text-xs">Movement Type</Label>
               <Select value={form.movement_type} onValueChange={v => update('movement_type', v)}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                <SelectContent>{MOVEMENT_TYPES.map(t => <SelectItem key={t} value={t} className="text-xs">{t.replace(/_/g, ' ')}</SelectItem>)}</SelectContent>
+                <SelectTrigger className="h-8 text-xs" data-testid="inv-mov-type"><SelectValue /></SelectTrigger>
+                <SelectContent>{MANUAL_MOVEMENT_TYPES.map(t => <SelectItem key={t} value={t} className="text-xs">{t.replace(/_/g, ' ')}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div>
-              <Label className="text-xs">Source Type</Label>
-              <Select value={form.source_type} onValueChange={v => update('source_type', v)}>
+              <Label className="text-xs">Ownership</Label>
+              <Select value={form.ownership_type} onValueChange={v => update('ownership_type', v)}>
                 <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                <SelectContent>{SOURCE_TYPES.map(t => <SelectItem key={t} value={t} className="text-xs">{t.replace(/_/g, ' ')}</SelectItem>)}</SelectContent>
+                <SelectContent>{OWNERSHIP_TYPES.map(t => <SelectItem key={t} value={t} className="text-xs">{OWNERSHIP_LABELS[t]}</SelectItem>)}</SelectContent>
               </Select>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="text-xs">Item / SKU</Label>
-              <Input className="h-8 text-xs" value={form.item} onChange={e => update('item', e.target.value)} placeholder="SPAM-12OZ" data-testid="inv-mov-item" />
+              <Input className="h-8 text-xs" value={form.item} onChange={e => update('item', e.target.value)} placeholder="PET-32" data-testid="inv-mov-item" />
             </div>
             <div>
               <Label className="text-xs">Description</Label>
-              <Input className="h-8 text-xs" value={form.item_description} onChange={e => update('item_description', e.target.value)} placeholder="SPAM Classic 12oz" />
+              <Input className="h-8 text-xs" value={form.item_description} onChange={e => update('item_description', e.target.value)} placeholder="PET 32oz Container" />
             </div>
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div>
               <Label className="text-xs">Quantity</Label>
               <Input type="number" className="h-8 text-xs font-mono" value={form.quantity_delta} onChange={e => update('quantity_delta', e.target.value)} placeholder="+100 or -50" data-testid="inv-mov-qty" />
-              <p className="text-[9px] text-muted-foreground mt-0.5">Positive = in, Negative = out</p>
+              <p className="text-[9px] text-muted-foreground mt-0.5">
+                {form.movement_type === 'writeoff' ? 'Must be negative' : 'Positive = in, Negative = out'}
+              </p>
             </div>
             <div>
               <Label className="text-xs">UOM</Label>
@@ -734,25 +755,12 @@ function MovementFormDialog({ open, customerId, onClose, onCreated }) {
             </div>
           </div>
           <div>
-            <Label className="text-xs">Ownership</Label>
-            <Select value={form.ownership_type} onValueChange={v => update('ownership_type', v)}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>{OWNERSHIP_TYPES.map(t => <SelectItem key={t} value={t} className="text-xs">{OWNERSHIP_LABELS[t]}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs">Reference Type</Label>
-              <Input className="h-8 text-xs" value={form.reference_type} onChange={e => update('reference_type', e.target.value)} placeholder="sales_order" />
-            </div>
-            <div>
-              <Label className="text-xs">Reference ID</Label>
-              <Input className="h-8 text-xs" value={form.reference_id} onChange={e => update('reference_id', e.target.value)} placeholder="SO-107040" />
-            </div>
+            <Label className="text-xs">Reference</Label>
+            <Input className="h-8 text-xs" value={form.reference_id} onChange={e => update('reference_id', e.target.value)} placeholder="Cycle Count 2026-03-13" data-testid="inv-mov-ref" />
           </div>
           <div>
             <Label className="text-xs">Notes</Label>
-            <Textarea className="text-xs min-h-[50px]" value={form.notes} onChange={e => update('notes', e.target.value)} />
+            <Textarea className="text-xs min-h-[50px]" value={form.notes} onChange={e => update('notes', e.target.value)} data-testid="inv-mov-notes" />
           </div>
         </div>
         <DialogFooter>

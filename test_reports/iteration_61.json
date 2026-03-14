@@ -1,0 +1,125 @@
+{
+  "summary": "Comprehensive testing of Manual Inventory Movement Entry feature (Iteration 61). All 19 backend tests passed for POST /api/inventory-ledger/movements endpoint. Frontend verified: MovementFormDialog shows only 5 manual types (opening_balance, manual_adjustment, transfer, writeoff, correction). Blocked types (order_commitment, order_release, receipt) correctly excluded. Form submission works with idempotency key, success toast shown, movement appears in table with source_type=manual_entry.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Movement Form Dialog",
+        "issues": ["Console warning: Missing Description or aria-describedby for DialogContent (accessibility)"]
+      }
+    ]
+  },
+  "passed_tests": [
+    "Backend: POST /api/inventory-ledger/movements — manual_adjustment success (positive qty)",
+    "Backend: POST /api/inventory-ledger/movements — correction success (negative qty)",
+    "Backend: POST /api/inventory-ledger/movements — writeoff success (negative qty)",
+    "Backend: POST /api/inventory-ledger/movements — transfer success",
+    "Backend: POST /api/inventory-ledger/movements — opening_balance success",
+    "Backend: POST /api/inventory-ledger/movements — order_commitment → 422 (blocked type)",
+    "Backend: POST /api/inventory-ledger/movements — order_release → 422 (blocked type)",
+    "Backend: POST /api/inventory-ledger/movements — receipt → 422 (blocked type)",
+    "Backend: POST /api/inventory-ledger/movements — zero quantity → 422",
+    "Backend: POST /api/inventory-ledger/movements — writeoff with positive qty → 422",
+    "Backend: POST /api/inventory-ledger/movements — invalid movement_type → 422",
+    "Backend: POST /api/inventory-ledger/movements — opening_balance + duplicate → 409",
+    "Backend: POST /api/inventory-ledger/movements — idempotency_key duplicate → 409",
+    "Backend: GET /api/inventory-ledger/history — manual entries appear with source_type=manual_entry",
+    "Backend: GET /api/inventory-ledger/history/summary — totals include manual entries",
+    "Backend: derive_balances — on_hand correct after manual_adjustment + correction + writeoff (1000+200-50-100=1050)",
+    "REGRESSION: POST /api/inventory-ledger/reconcile-sales-order — still works",
+    "REGRESSION: POST /api/incoming-supply/from-shortage — still works",
+    "REGRESSION: POST /api/incoming-supply/{id}/status — still works",
+    "Frontend: Login with admin/admin works",
+    "Frontend: Navigate to Inventory Ledger page loads correctly",
+    "Frontend: Select Hormel Foods workspace shows workspace view",
+    "Frontend: Click Movements tab shows movement table",
+    "Frontend: Click '+ Movement' button (data-testid='inv-new-movement-btn') opens dialog",
+    "Frontend: Movement Type dropdown shows ONLY 5 manual types",
+    "Frontend: Dropdown excludes blocked types (order_commitment, order_release, receipt)",
+    "Frontend: Form submission with item='TEST-UI-MANUAL-123', qty=456 succeeds",
+    "Frontend: Success toast 'Movement recorded' appears after submit",
+    "Frontend: New movement visible in table with source='manual entry'",
+    "Frontend: Summary strip updates (Items: 7→8, On Hand: 2160→2616)"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_manual_movement_entry.py",
+    "/app/test_reports/pytest/manual_movement_entry_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "MANUAL_ALLOWED_TYPES correctly limits to: opening_balance, manual_adjustment, transfer, writeoff, correction",
+    "MANUAL_BLOCKED_TYPES correctly rejects: order_commitment, order_release, receipt with 422",
+    "Zero qty validation: body.qty == 0 returns 422 'Quantity must not be zero'",
+    "Writeoff validation: qty > 0 returns 422 'Writeoff must reduce inventory'",
+    "Duplicate opening_balance check uses customer_id + item + warehouse + ownership_type composite key",
+    "Idempotency: checks idempotency_key in MOVEMENTS_COLL before creating, returns 409 on match",
+    "Frontend MANUAL_MOVEMENT_TYPES array correctly includes only 5 allowed types",
+    "Frontend generates idempotency_key = `${customerId}_${item}_${movement_type}_${qty}_${Date.now()}`"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_manual_movement_entry.py"
+  ],
+  "success_rate": {
+    "backend": "100% (19/19 tests passed)",
+    "frontend": "100% (all UI verifications passed)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://order-ledger-1.preview.emergentagent.com"
+  },
+  "seed_data_used": "Backend tests create unique workspace TEST_Manual_Movement_XXXXXX with warn_only policy. Each test creates unique items with uuid suffix (TEST_ADJ_POS_*, TEST_CORR_*, TEST_WO_*, etc.). Workspace deactivated on teardown.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Manual movement entry feature fully tested. Key endpoint: POST /api/inventory-ledger/movements with ManualMovementReq model {customer_id, movement_type, item, qty, item_description, warehouse, ownership_type, unit_of_measure, reference, notes, idempotency_key}. Only allows opening_balance/manual_adjustment/transfer/writeoff/correction. Rejects order_commitment/order_release/receipt with 422. Zero qty rejected 422. Writeoff must be negative. Duplicate opening_balance for same item/warehouse/ownership returns 409. Idempotency key duplicate returns 409. Frontend button data-testid='inv-new-movement-btn'. Dialog shows MANUAL_MOVEMENT_TYPES array with 5 options. Frontend generates idempotency key on submit.",
+  "mocked_apis": ["Email service"],
+  "features_verified": {
+    "backend": {
+      "endpoint": "POST /api/inventory-ledger/movements",
+      "request_model": {
+        "customer_id": "string (required)",
+        "movement_type": "string (must be in MANUAL_ALLOWED_TYPES)",
+        "item": "string (required)",
+        "qty": "float (non-zero, writeoff must be negative)",
+        "item_description": "string (optional)",
+        "warehouse": "string (default 'MAIN')",
+        "ownership_type": "string (default 'customer_owned')",
+        "unit_of_measure": "string (default 'units')",
+        "reference": "string (optional)",
+        "notes": "string (optional)",
+        "idempotency_key": "string (optional, prevents duplicate submissions)"
+      },
+      "validation_rules": {
+        "movement_type_blocked": "order_commitment, order_release, receipt → 422",
+        "zero_qty": "qty == 0 → 422",
+        "writeoff_positive": "writeoff with qty > 0 → 422",
+        "invalid_type": "type not in MANUAL_ALLOWED_TYPES → 422",
+        "duplicate_opening_balance": "same item/warehouse/ownership for opening_balance → 409",
+        "idempotency_key_duplicate": "same idempotency_key → 409"
+      },
+      "response": {
+        "success": "bool",
+        "movement": "movement document with id, source_type='manual_entry'",
+        "warning": "optional shortage warning"
+      }
+    },
+    "frontend": {
+      "movement_dialog": {
+        "button_testid": "inv-new-movement-btn",
+        "dialog_testid": "inv-movement-dialog",
+        "type_selector_testid": "inv-mov-type",
+        "item_input_testid": "inv-mov-item",
+        "qty_input_testid": "inv-mov-qty",
+        "ref_input_testid": "inv-mov-ref",
+        "notes_input_testid": "inv-mov-notes",
+        "submit_testid": "inv-mov-submit"
+      },
+      "manual_types_shown": ["opening_balance", "manual_adjustment", "transfer", "writeoff", "correction"],
+      "blocked_types_hidden": ["order_commitment", "order_release", "receipt"]
+    }
+  }
+}

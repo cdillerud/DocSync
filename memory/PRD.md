@@ -3125,6 +3125,24 @@ EMAIL_CLIENT_ID=doc-workflow-test
 
 *Last Updated: March 14, 2026*
 *Last Updated: March 14, 2026*
+
+---
+
+## Session Update: March 14, 2026 - BC Sales Invoice Capture (iteration_82)
+
+### Completed
+
+#### BC Sales Invoice Capture & Fulfillment Closeout
+- **Backend**: `POST /sales-orders/{id}/bc-invoice` captures invoice after full shipment. Validates remaining=0 + shipment exists. `GET /invoice-log` for history. Summary enriched with `operational_status` and `is_fulfillment_complete`.
+- **Frontend**: Invoice Capture section in ShipmentCaptureDialog. Invoice form, result, history, and Fulfillment Complete indicator.
+- Operational statuses: committed → partially_released → partially_shipped → shipped → complete
+
+### Test Results
+- Backend: 16/16 (100%)
+- Frontend: All UI flows verified (100%)
+- Test report: `/app/test_reports/iteration_82.json`
+
+*Last Updated: March 14, 2026*
 - Test report: `/app/test_reports/iteration_75.json`
 
 *Last Updated: March 14, 2026*

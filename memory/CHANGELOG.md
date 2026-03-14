@@ -379,6 +379,25 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 - Test report: `/app/test_reports/iteration_81.json`
 
 
+---
+
+## 2026-03-14: BC Sales Invoice Capture (iteration_82)
+
+### What Was Built
+- `POST /api/inventory-ledger/sales-orders/{id}/bc-invoice` — records BC invoice after full shipment
+- Validates: SO exists (404), remaining committed qty = 0 (422), shipment activity exists (422)
+- Invoice log stored in `bc_invoice_logs` (invoice_log_id, bc_invoice_number, bc_document_id, invoice_date, invoice_notes, captured_at)
+- `GET /api/inventory-ledger/sales-orders/{id}/invoice-log` — reverse chronological invoice history
+- SO summary enriched with `operational_status` (committed | partially_released | partially_shipped | shipped | complete) and `is_fulfillment_complete` flag
+- Summary includes `latest_bc_invoice_number` and `latest_bc_invoice_at`
+- Frontend: Invoice Capture section in ShipmentCaptureDialog (visible when fully shipped + shipments exist)
+- Frontend: Invoice form (BC Invoice #, Doc ID, Date, Notes, Record Invoice button)
+- Frontend: Fulfillment Complete indicator when operational_status=complete
+- Frontend: Invoice History section, operational status badge in summary
+- No ledger mutations, no accounting entries, no BC API calls
+- Backend: 16/16 tests passed, Frontend: all UI flows verified
+- Test report: `/app/test_reports/iteration_82.json`
+
 
 
 - Test report: `/app/test_reports/iteration_77.json`

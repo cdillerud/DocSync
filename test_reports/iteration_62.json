@@ -1,0 +1,106 @@
+{
+  "summary": "Comprehensive testing of Inventory Balance CSV Export feature (Iteration 62). All 16 backend tests passed for GET /api/inventory-ledger/export endpoint. Frontend verified: Export CSV button visible with data-testid='inv-export-csv-btn', opens new tab with export URL. Balance table renders with history icons. All regression endpoints working.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "InventoryLedgerPage",
+        "issues": ["Console hydration warnings: '<tr> cannot be a child of <span>' - React hydration issue in table rendering (non-critical, cosmetic)"]
+      }
+    ]
+  },
+  "passed_tests": [
+    "Backend: GET /api/inventory-ledger/export?customer_id=X returns 200",
+    "Backend: Content-Type is text/csv; charset=utf-8",
+    "Backend: Content-Disposition has attachment; filename='inventory_Hormel_Foods.csv'",
+    "Backend: CSV headers are correct (10 columns: item, item_description, warehouse, ownership_type, on_hand, incoming, committed, available, unit_of_measure, status)",
+    "Backend: CSV contains 9+ data rows for Hormel Foods workspace",
+    "Backend: Status values are only OK/LOW/SHORT (validated all rows)",
+    "Backend: SHORT status correctly set for items with is_short=True (SPAM-LITE, TEST-ITEM-WARN, TEST-WARNONLY-732C83)",
+    "Backend: Item filter works - item=SPAM-12OZ returns 2 rows (GPI-MAIN and GPI-WEST)",
+    "Backend: Empty result (non-existent item) returns CSV with headers only, 0 data rows",
+    "Backend: Exported values match GET /customers/{id}/balances API (9 items)",
+    "Backend: Missing customer_id returns 422 validation error",
+    "REGRESSION: POST /api/inventory-ledger/movements (manual entry) still works",
+    "REGRESSION: GET /api/inventory-ledger/history returns movements (14 total)",
+    "REGRESSION: POST /api/inventory-ledger/reconcile-sales-order responds correctly",
+    "REGRESSION: POST /api/incoming-supply/from-shortage responds correctly",
+    "REGRESSION: GET /customers/{id}/balances still works",
+    "Frontend: Login with admin/admin successful",
+    "Frontend: Navigate to Inventory Ledger page loads correctly",
+    "Frontend: Customer selector shows Hormel Foods workspace",
+    "Frontend: Click Hormel Foods loads workspace view",
+    "Frontend: Export CSV button (data-testid='inv-export-csv-btn') visible in Balances tab",
+    "Frontend: Button text is 'Export CSV' with Download icon",
+    "Frontend: Click Export CSV opens new browser tab",
+    "Frontend: Balance table renders with STATUS column badges (SHORT=red, LOW=yellow, OK=green)",
+    "Frontend: History icons (ClipboardList) present on each row (data-testid='inv-history-btn-X')"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_inventory_balance_export.py",
+    "/app/test_reports/pytest/inventory_balance_export_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Export endpoint uses derive_balances() - same pipeline as UI, ensures consistency",
+    "Status calculation: is_short → 'SHORT', is_low → 'LOW', else 'OK'",
+    "StreamingResponse with text/csv media type and Content-Disposition attachment",
+    "Filename sanitized: spaces → underscores, limited to 40 chars",
+    "Empty result correctly returns CSV with headers only (no error)",
+    "Frontend button uses window.open() to open export URL in new tab with customer_id and optional item filter"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_inventory_balance_export.py"
+  ],
+  "success_rate": {
+    "backend": "100% (16/16 tests passed)",
+    "frontend": "100% (all UI verifications passed)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://order-ledger-1.preview.emergentagent.com"
+  },
+  "seed_data_used": "Used existing Hormel Foods workspace (ID: 366bfcce-4d68-4daf-b9f4-cb05a35de8c8) with 10+ balance rows including SHORT/LOW/OK status items. Backend tests created TEST_EXPORT_REGRESS_* items for regression verification.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "CSV Export feature fully tested. Key endpoint: GET /api/inventory-ledger/export?customer_id=X[&item=Y][&warehouse=Z]. Returns StreamingResponse with text/csv, Content-Disposition attachment. Headers: item, item_description, warehouse, ownership_type, on_hand, incoming, committed, available, unit_of_measure, status. Status derived from is_short/is_low flags. Frontend button data-testid='inv-export-csv-btn' opens window.open() to export URL. Balance table shows status badges and history icons per row.",
+  "mocked_apis": ["Email service"],
+  "features_verified": {
+    "backend": {
+      "endpoint": "GET /api/inventory-ledger/export",
+      "query_params": {
+        "customer_id": "required - customer workspace UUID",
+        "item": "optional - filter by exact item name",
+        "warehouse": "optional - filter by warehouse"
+      },
+      "response": {
+        "content_type": "text/csv; charset=utf-8",
+        "content_disposition": "attachment; filename=\"inventory_<safe_name>.csv\"",
+        "csv_headers": ["item", "item_description", "warehouse", "ownership_type", "on_hand", "incoming", "committed", "available", "unit_of_measure", "status"],
+        "status_values": ["OK", "LOW", "SHORT"]
+      }
+    },
+    "frontend": {
+      "export_button": {
+        "testid": "inv-export-csv-btn",
+        "location": "Balances tab toolbar (right side)",
+        "action": "window.open() to export URL with customer_id and optional item filter",
+        "icon": "Download icon"
+      },
+      "balance_table": {
+        "testid": "inv-balance-table",
+        "status_badges": {
+          "SHORT": "red destructive badge",
+          "LOW": "yellow outline badge",
+          "OK": "green outline badge"
+        },
+        "history_icons": "ClipboardList icon button on each row (data-testid='inv-history-btn-{index}')"
+      }
+    }
+  }
+}

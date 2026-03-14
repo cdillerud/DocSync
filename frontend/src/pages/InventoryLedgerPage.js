@@ -17,7 +17,7 @@ import {
   Warehouse, Loader2, Plus, Package, TrendingDown, TrendingUp,
   AlertTriangle, RefreshCw, Search, ArrowLeftRight, History,
   ChevronRight, ChevronLeft, Box, Truck, ClipboardList,
-  RotateCcw, FileText,
+  RotateCcw, FileText, Download,
 } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -193,6 +193,13 @@ function CustomerWorkspace({ customer }) {
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
                 <Input placeholder="Filter items..." value={search} onChange={e => setSearch(e.target.value)} className="pl-8 h-8 text-xs" data-testid="inv-balance-search" />
               </div>
+            )}
+            {tab === 'balances' && (
+              <Button variant="outline" size="sm" className="h-8 text-xs"
+                onClick={() => { window.open(`${API}/api/inventory-ledger/export?customer_id=${cid}${search ? '&item=' + encodeURIComponent(search) : ''}`, '_blank'); }}
+                data-testid="inv-export-csv-btn">
+                <Download className="w-3.5 h-3.5 mr-1" /> Export CSV
+              </Button>
             )}
             {tab === 'movements' && (
               <Button size="sm" className="h-8 text-xs" onClick={() => setShowMovementForm(true)} data-testid="inv-new-movement-btn">

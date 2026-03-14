@@ -312,6 +312,67 @@ async def api_manual_movement(body: ManualMovementReq):
 
 
 
+# ═══════════════════════════════════════════════════════════════
+# BALANCE EXPORT (CSV)
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/export")
+async def api_export_balances(
+    customer_id: str = Query(..., description="Customer workspace ID"),
+    item: str = Query("", description="Filter by item"),
+    warehouse: str = Query("", description="Filter by warehouse"),
+):
+    """Export current inventory balances as CSV download.
+
+    Uses the same derive_balances pipeline as the UI — identical values and status logic.
+    Returns valid CSV with headers even when no rows match.
+    """
+    from fastapi.responses import StreamingResponse
+    import csv
+    import io
+
+    db = get_db()
+    cust = await get_customer(db, customer_id)
+    cust_name = cust["name"] if cust else customer_id
+
+    balances = await derive_balances(
+        db, customer_id,
+        item=item or None,
+        warehouse=warehouse or None,
+    )
+
+    headers = [
+        "item", "item_description", "warehouse", "ownership_type",
+        "on_hand", "incoming", "committed", "available",
+        "unit_of_measure", "status",
+    ]
+
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=headers, extrasaction="ignore")
+    writer.writeheader()
+    for b in balances:
+        row = {k: b.get(k, "") for k in headers}
+        if b.get("is_short"):
+            row["status"] = "SHORT"
+        elif b.get("is_low"):
+            row["status"] = "LOW"
+        else:
+            row["status"] = "OK"
+        writer.writerow(row)
+
+    buf.seek(0)
+    safe_name = cust_name.replace(" ", "_").replace("/", "_")[:40]
+    filename = f"inventory_{safe_name}.csv"
+
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+
+
 
 # ═══════════════════════════════════════════════════════════════
 # HISTORY & AUDIT

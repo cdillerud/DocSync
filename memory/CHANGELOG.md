@@ -131,3 +131,17 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 - Frontend: Import CSV button on Balances tab, dialog with mode selector + file upload + results display
 - Backend: 22/22 pytest tests passed, Frontend: all UI flows verified
 - Test report: `/app/test_reports/iteration_66.json`
+
+---
+
+## 2026-03-14: Inventory Snapshot Export
+
+### What Was Built
+- `GET /api/inventory-ledger/snapshot` — read-only JSON snapshot with generated_at, context, summary metrics, balance rows (with clean status field), optional reorder rows
+- `GET /api/inventory-ledger/snapshot/export` — downloadable JSON file with Content-Disposition header (filename: snapshot_{name}_{timestamp}.json)
+- Supports customer_id (required), item filter (optional), include_reorders toggle (default true)
+- Summary values match dashboard-summary exactly; balance rows strip internal flags
+- Empty/nonexistent customer returns valid snapshot with zeros and empty arrays
+- Frontend: Export Snapshot button on Balances tab toolbar
+- Backend: 25/25 pytest tests passed, Frontend: all UI flows verified
+- Test report: `/app/test_reports/iteration_67.json`

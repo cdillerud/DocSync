@@ -191,6 +191,7 @@ function CustomerWorkspace({ customer }) {
             <TabsTrigger value="reorder" data-testid="inv-tab-reorder"><AlertTriangle className="w-3.5 h-3.5 mr-1" /> Reorder</TabsTrigger>
             <TabsTrigger value="settings" data-testid="inv-tab-settings"><Settings className="w-3.5 h-3.5 mr-1" /> Item Settings</TabsTrigger>
             <TabsTrigger value="exceptions" data-testid="inv-tab-exceptions"><AlertTriangle className="w-3.5 h-3.5 mr-1" /> Exceptions</TabsTrigger>
+            <TabsTrigger value="demand" data-testid="inv-tab-demand"><TrendingDown className="w-3.5 h-3.5 mr-1" /> Demand</TabsTrigger>
           </TabsList>
           <div className="flex gap-2">
             {tab === 'balances' && (
@@ -250,6 +251,9 @@ function CustomerWorkspace({ customer }) {
         </TabsContent>
         <TabsContent value="exceptions">
           <ExceptionsPanel customerId={cid} onHistoryClick={(item) => setDetailItem({ item, customerId: cid })} onSupplyCreated={refresh} />
+        </TabsContent>
+        <TabsContent value="demand">
+          <DemandPanel customerId={cid} onItemClick={(item) => setDetailItem({ item, customerId: cid })} onSupplyCreated={refresh} />
         </TabsContent>
       </Tabs>
 
@@ -689,6 +693,115 @@ function ExceptionsPanel({ customerId, onHistoryClick, onSupplyCreated }) {
 }
 
 /* ════════════════════════════════════════════════════════════════ */
+/* DEMAND PANEL                                                      */
+/* ════════════════════════════════════════════════════════════════ */
+
+function DemandPanel({ customerId, onItemClick, onSupplyCreated }) {
+  const [signals, setSignals] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/demand-signals?customer_id=${customerId}`);
+      const data = await res.json();
+      setSignals(data.demand_signals || []);
+    } catch { toast.error('Failed to load demand signals'); }
+    finally { setLoading(false); }
+  }, [customerId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const createSupply = async (item) => {
+    setCreating(item);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/customers/${customerId}/incoming`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_no: item, quantity: 0, source_reference: `DEMAND-${item}`, notes: 'Created from demand view' }),
+      });
+      if (res.ok) { toast.success(`Incoming supply created for ${item}`); onSupplyCreated?.(); load(); }
+      else { const d = await res.json(); toast.error(d.detail || 'Failed'); }
+    } catch { toast.error('Failed'); }
+    finally { setCreating(null); }
+  };
+
+  if (loading) return <div className="py-10 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto" /></div>;
+  if (!signals.length) return (
+    <div className="py-10 text-center text-muted-foreground" data-testid="inv-demand-empty">
+      <Package className="w-8 h-8 mx-auto mb-2 opacity-30" />
+      <p className="text-sm font-medium">No demand signals</p>
+      <p className="text-xs mt-1">No open order commitments found.</p>
+    </div>
+  );
+
+  return (
+    <Card className="border border-border" data-testid="inv-demand-panel">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-xs font-bold uppercase tracking-wider" style={{ fontFamily: 'Chivo, sans-serif' }}>
+            <TrendingDown className="w-3.5 h-3.5 inline mr-1 text-blue-500" />
+            {signals.length} item{signals.length !== 1 ? 's' : ''} with open demand
+          </CardTitle>
+          <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={load}>
+            <RefreshCw className="w-3 h-3 mr-1" /> Refresh
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0 overflow-x-auto">
+        <table className="w-full text-xs" data-testid="inv-demand-table">
+          <thead>
+            <tr className="border-b border-border bg-muted/40 text-[10px] text-muted-foreground uppercase tracking-wider">
+              <th className="text-left py-2 px-3 font-medium">Item</th>
+              <th className="text-right py-2 px-3 font-medium">Open Order Qty</th>
+              <th className="text-right py-2 px-3 font-medium">On Hand</th>
+              <th className="text-right py-2 px-3 font-medium">Incoming</th>
+              <th className="text-right py-2 px-3 font-medium">Available</th>
+              <th className="text-right py-2 px-3 font-medium">Demand Gap</th>
+              <th className="text-center py-2 px-3 font-medium">Status</th>
+              <th className="text-right py-2 px-3 font-medium">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {signals.map((s, i) => (
+              <tr key={i} className={`border-b border-border/50 hover:bg-muted/20 ${s.demand_gap > 0 ? 'bg-red-500/5' : ''}`} data-testid={`inv-demand-row-${i}`}>
+                <td className="py-1.5 px-3">
+                  <span className="font-mono font-medium cursor-pointer hover:underline text-blue-600" onClick={() => onItemClick?.(s.item)} data-testid={`inv-demand-item-${i}`}>{s.item}</span>
+                  {s.item_description && <span className="text-[10px] text-muted-foreground block truncate max-w-[180px]">{s.item_description}</span>}
+                </td>
+                <td className="py-1.5 px-3 text-right font-mono font-bold text-blue-600">{s.total_open_order_qty?.toLocaleString()}</td>
+                <td className="py-1.5 px-3 text-right font-mono">{s.on_hand?.toLocaleString()}</td>
+                <td className="py-1.5 px-3 text-right font-mono">{s.incoming > 0 ? <span className="text-sky-600">+{s.incoming?.toLocaleString()}</span> : '—'}</td>
+                <td className={`py-1.5 px-3 text-right font-mono font-bold ${s.available < 0 ? 'text-red-600' : ''}`}>{s.available?.toLocaleString()}</td>
+                <td className={`py-1.5 px-3 text-right font-mono font-bold ${s.demand_gap > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{s.demand_gap > 0 ? '+' : ''}{s.demand_gap?.toLocaleString()}</td>
+                <td className="py-1.5 px-3 text-center">
+                  <Badge variant={s.status === 'SHORT' ? 'destructive' : 'outline'} className={`text-[9px] ${s.status === 'LOW' ? 'border-amber-300 text-amber-600' : ''}`}>
+                    {s.status}
+                  </Badge>
+                </td>
+                <td className="py-1.5 px-3 text-right">
+                  <div className="flex justify-end gap-1">
+                    {s.demand_gap > 0 && (
+                      <Button variant="outline" size="sm" className="h-5 text-[9px] px-1.5"
+                        disabled={creating === s.item}
+                        onClick={() => createSupply(s.item)}
+                        data-testid={`inv-demand-supply-${i}`}>
+                        {creating === s.item ? <Loader2 className="w-3 h-3 animate-spin" /> : <Truck className="w-3 h-3 mr-0.5" />}
+                        Supply
+                      </Button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════ */
 /* ITEM DETAIL DRAWER                                                */
 /* ════════════════════════════════════════════════════════════════ */
 
@@ -801,6 +914,17 @@ function ItemDetailDrawer({ item, customerId, onClose, onOpenFullHistory, onRefr
                 )}
               </div>
             </div>
+
+            {/* Demand Signal */}
+            {detail.demand && (
+              <div className="border border-border rounded p-2.5 space-y-1" data-testid="inv-detail-demand">
+                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Demand Signal</p>
+                <div className="flex gap-4 text-xs">
+                  <div>Open Orders: <span className="font-bold text-blue-600">{detail.demand.total_open_order_qty?.toLocaleString()}</span></div>
+                  <div>Demand Gap: <span className={`font-bold ${detail.demand.demand_gap > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{detail.demand.demand_gap > 0 ? '+' : ''}{detail.demand.demand_gap?.toLocaleString()}</span></div>
+                </div>
+              </div>
+            )}
 
             {/* Recent History */}
             <div data-testid="inv-detail-history">

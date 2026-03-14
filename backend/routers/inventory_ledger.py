@@ -610,6 +610,57 @@ async def api_export_balances(
 
 
 # ═══════════════════════════════════════════════════════════════
+# DEMAND SIGNALS
+# ═══════════════════════════════════════════════════════════════
+
+
+@router.get("/demand-signals")
+async def api_demand_signals(
+    customer_id: str = Query(..., description="Customer workspace ID"),
+    item: str = Query("", description="Filter by item"),
+    limit: int = Query(500, ge=1, le=5000),
+):
+    """Return forward demand pressure per item from Sales Order commitments.
+
+    Uses derive_balances for current inventory state.
+    total_open_order_qty = committed balance (outstanding SO commitments).
+    demand_gap = total_open_order_qty - available.
+    Rows included only when total_open_order_qty > 0.
+    Sorted by demand_gap descending (highest risk first).
+    """
+    db = get_db()
+    balances = await derive_balances(db, customer_id, item=item or None)
+
+    rows = []
+    for b in balances:
+        committed = b.get("committed", 0)
+        if committed <= 0:
+            continue
+        avail = b.get("available", 0)
+        demand_gap = round(committed - avail, 4)
+        rows.append({
+            "item": b["item"],
+            "item_description": b.get("item_description", ""),
+            "warehouse": b.get("warehouse", ""),
+            "ownership_type": b.get("ownership_type", ""),
+            "total_open_order_qty": committed,
+            "total_committed_qty": committed,
+            "on_hand": b.get("on_hand", 0),
+            "incoming": b.get("incoming", 0),
+            "available": avail,
+            "demand_gap": demand_gap,
+            "unit_of_measure": b.get("unit_of_measure", ""),
+            "status": "SHORT" if b.get("is_short") else ("LOW" if b.get("is_low") else "OK"),
+        })
+
+    rows.sort(key=lambda r: r["demand_gap"], reverse=True)
+    return {
+        "total": min(len(rows), limit),
+        "demand_signals": rows[:limit],
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
 # ITEM DETAIL
 # ═══════════════════════════════════════════════════════════════
 
@@ -688,6 +739,15 @@ async def api_item_detail(
     # Movement type summary
     type_summary = await item_audit_summary(db, customer_id, item)
 
+    # Demand signal (only when committed > 0)
+    committed = balance["committed"]
+    demand = None
+    if committed > 0:
+        demand = {
+            "total_open_order_qty": committed,
+            "demand_gap": round(committed - balance["available"], 4),
+        }
+
     return {
         "item": item,
         "customer_id": customer_id,
@@ -695,6 +755,7 @@ async def api_item_detail(
         "settings": settings,
         "reorder": reorder,
         "exceptions": exceptions,
+        "demand": demand,
         "history_preview": history_data.get("movements", []),
         "history_total": history_data.get("total", 0),
         "type_summary": type_summary.get("movement_type_totals", {}),

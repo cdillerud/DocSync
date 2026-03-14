@@ -1,0 +1,150 @@
+{
+  "summary": "Comprehensive testing of Demand Signals feature (iteration_70) - all tests passed. Backend: 16/16 pytest tests passed covering GET /api/inventory-ledger/demand-signals endpoint (returns total + demand_signals array, row fields, demand_gap calculation, sorting by gap descending, only open order items included, empty customer returns empty array, 422 on missing customer_id, item filter), item-detail demand integration (demand present when committed>0, null when committed=0, values correct), and regression tests (dashboard-summary, exceptions, reorder-recommendations, snapshot, item-settings). Frontend: Demand tab visible (data-testid='inv-tab-demand'), DemandPanel renders with item count header and table, rows with demand_gap>0 have red background highlight (bg-red-500/5), clicking item opens ItemDetailDrawer, Supply button visible on gap>0 rows, item detail drawer shows demand signal section (data-testid='inv-detail-demand').",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "InventoryLedgerPage",
+        "issues": [
+          "Pre-existing React hydration warning: '<tr> cannot be a child of <span>' in table tbody - cosmetic, non-blocking (same as previous iterations)",
+          "Pre-existing Warning: Missing `Description` or `aria-describedby` for DialogContent - accessibility enhancement opportunity"
+        ]
+      }
+    ]
+  },
+  "passed_tests": [
+    "Backend: GET /api/inventory-ledger/demand-signals?customer_id=X - Returns total and demand_signals array",
+    "Backend: demand_signals row has all required fields (item, total_open_order_qty, total_committed_qty, on_hand, incoming, available, demand_gap, status)",
+    "Backend: demand_gap = total_open_order_qty - available (verified calculation)",
+    "Backend: Rows sorted by demand_gap descending (10000, 1798, 90, -50, -500)",
+    "Backend: Only items with total_open_order_qty > 0 included",
+    "Backend: Empty/nonexistent customer returns empty array",
+    "Backend: Missing customer_id returns 422",
+    "Backend: Item filter (?item=X) works correctly",
+    "Backend: item-detail has demand field when committed > 0",
+    "Backend: item-detail demand is null when committed = 0",
+    "Backend: item-detail demand.total_open_order_qty and demand.demand_gap are correct",
+    "Backend REGRESSION: Dashboard summary still works",
+    "Backend REGRESSION: Exceptions endpoint still works",
+    "Backend REGRESSION: Reorder recommendations still works",
+    "Backend REGRESSION: Snapshot export still works",
+    "Backend REGRESSION: Item Settings still works",
+    "Frontend: Demand tab visible (data-testid='inv-tab-demand')",
+    "Frontend: DemandPanel renders with '5 ITEMS WITH OPEN DEMAND' header",
+    "Frontend: Demand table renders with rows (data-testid='inv-demand-table')",
+    "Frontend: Rows with demand_gap > 0 have red highlight (bg-red-500/5)",
+    "Frontend: Clicking item name opens ItemDetailDrawer (data-testid='inv-item-detail-drawer')",
+    "Frontend: Supply button on rows with demand_gap > 0 (data-testid='inv-demand-supply-{i}')",
+    "Frontend: Item detail drawer shows demand section (data-testid='inv-detail-demand')",
+    "Frontend: Demand section shows Open Orders and Demand Gap values",
+    "Frontend REGRESSION: Dashboard summary visible",
+    "Frontend REGRESSION: Exceptions tab working",
+    "Frontend REGRESSION: Reorder tab working",
+    "Frontend REGRESSION: Item Settings tab working",
+    "Frontend REGRESSION: Export CSV button visible",
+    "Frontend REGRESSION: Export Snapshot button visible"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_demand_signals.py",
+    "/app/test_reports/pytest/demand_signals_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend inventory_ledger.py Lines 617-660: /demand-signals endpoint correctly derives from derive_balances, filters committed>0, calculates demand_gap=committed-available, sorts descending",
+    "Backend inventory_ledger.py Lines 741-748: item-detail correctly adds demand field when balance.committed>0",
+    "Frontend InventoryLedgerPage.js Lines 699-801: DemandPanel component follows same pattern as ReorderPanel - fetch, display table, item click opens drawer, supply button on gap>0",
+    "Frontend InventoryLedgerPage.js Lines 919-927: ItemDetailDrawer demand section conditionally rendered when detail.demand exists"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_demand_signals.py"
+  ],
+  "success_rate": {
+    "backend": "100% (16/16 tests passed)",
+    "frontend": "100% (all UI verifications passed)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://item-master-4.preview.emergentagent.com"
+  },
+  "seed_data_used": "Used existing Hormel Foods workspace (customer_id: 366bfcce-4d68-4daf-b9f4-cb05a35de8c8). Items with demand: TEST-ITEM-WARN (committed=5000, gap=10000), SPAM-LITE (committed=999, gap=1798), TEST-WARNONLY-732C83 (committed=100, gap=90), TEST-COMMIT-7CC683 (committed=25, gap=-50), SPAM-12OZ (committed=200, gap=-500). Item without demand: IMPORT-ITEM-B (committed=0, demand=null).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Demand Signals feature fully tested. Backend endpoint: GET /api/inventory-ledger/demand-signals (customer_id required, item optional filter). Returns: {total: int, demand_signals: [{item, item_description, warehouse, ownership_type, total_open_order_qty, total_committed_qty, on_hand, incoming, available, demand_gap, unit_of_measure, status}]}. demand_gap = committed - available. Only items with committed>0 included. Sorted by demand_gap descending. Item-detail endpoint returns demand: {total_open_order_qty, demand_gap} when committed>0, else null. Frontend: Demand tab (inv-tab-demand), DemandPanel (inv-demand-panel), table (inv-demand-table), rows (inv-demand-row-{i}), item links (inv-demand-item-{i}), supply buttons (inv-demand-supply-{i}). Rows with gap>0 have bg-red-500/5. ItemDetailDrawer demand section (inv-detail-demand) shows Open Orders and Demand Gap.",
+  "features_verified": {
+    "backend": {
+      "demand_signals_endpoint": {
+        "method": "GET",
+        "path": "/api/inventory-ledger/demand-signals",
+        "parameters": {
+          "customer_id": "string (required)",
+          "item": "string (optional filter)",
+          "limit": "int (default 500)"
+        },
+        "response": {
+          "total": "number",
+          "demand_signals": [
+            {
+              "item": "string",
+              "item_description": "string",
+              "warehouse": "string",
+              "ownership_type": "string",
+              "total_open_order_qty": "number (= committed balance)",
+              "total_committed_qty": "number",
+              "on_hand": "number",
+              "incoming": "number",
+              "available": "number",
+              "demand_gap": "number (= committed - available)",
+              "unit_of_measure": "string",
+              "status": "SHORT|LOW|OK"
+            }
+          ]
+        },
+        "business_logic": [
+          "Only items with total_open_order_qty > 0 included",
+          "Sorted by demand_gap descending (highest risk first)",
+          "demand_gap = total_open_order_qty - available"
+        ],
+        "errors": {
+          "422": "Missing customer_id"
+        }
+      },
+      "item_detail_demand_field": {
+        "path": "/api/inventory-ledger/item-detail",
+        "demand_field": "Present when committed > 0, null when committed = 0",
+        "demand_structure": {
+          "total_open_order_qty": "number (= committed)",
+          "demand_gap": "number (= committed - available)"
+        }
+      }
+    },
+    "frontend": {
+      "demand_tab": {
+        "testid": "inv-tab-demand",
+        "icon": "TrendingDown"
+      },
+      "demand_panel": {
+        "testid": "inv-demand-panel",
+        "header": "Shows item count with open demand",
+        "table_testid": "inv-demand-table",
+        "columns": ["Item", "Open Order Qty", "On Hand", "Incoming", "Available", "Demand Gap", "Status", "Actions"]
+      },
+      "demand_row": {
+        "testid_pattern": "inv-demand-row-{i}",
+        "item_link_testid": "inv-demand-item-{i}",
+        "supply_btn_testid": "inv-demand-supply-{i}",
+        "highlighting": "bg-red-500/5 when demand_gap > 0",
+        "supply_button": "Only shown when demand_gap > 0"
+      },
+      "item_detail_demand_section": {
+        "testid": "inv-detail-demand",
+        "shows": "Open Orders and Demand Gap values",
+        "condition": "Only visible when detail.demand exists"
+      }
+    }
+  }
+}

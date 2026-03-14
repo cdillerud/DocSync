@@ -1015,13 +1015,30 @@ async def api_update_po_draft_status(
 
 @router.get("/po-drafts/{draft_id}")
 async def api_get_po_draft(draft_id: str):
-    """Return the full stored PO draft."""
+    """Return the full stored PO draft with linked supply summary."""
     db = get_db()
     doc = await db[PO_DRAFTS_COLL].find_one(
         {"po_draft_id": draft_id}, {"_id": 0}
     )
     if not doc:
         raise HTTPException(status_code=404, detail="PO draft not found")
+
+    # Enrich with linked supply summary
+    pipeline = [
+        {"$match": {"source_reference": draft_id}},
+        {"$group": {
+            "_id": "$status",
+            "count": {"$sum": 1},
+            "has_bc_po": {"$sum": {"$cond": [{"$gt": ["$bc_po_number", None]}, 1, 0]}},
+        }},
+    ]
+    agg = await db["inv_incoming_supply"].aggregate(pipeline).to_list(20)
+    total_linked = sum(a["count"] for a in agg)
+    if total_linked > 0:
+        doc["linked_supply_count"] = total_linked
+        doc["linked_supply_status_counts"] = {a["_id"]: a["count"] for a in agg}
+        doc["linked_supply_has_bc_po_number"] = any(a["has_bc_po"] > 0 for a in agg)
+
     return doc
 
 
@@ -1156,6 +1173,20 @@ async def api_update_bc_response(draft_id: str, body: BCResponseIn):
         "bc_payload_snapshot": payload_snapshot,
     }
     await db[PO_SUBMISSION_LOGS_COLL].insert_one(log_entry.copy())
+
+    # --- BC PO linkage to incoming supply ---
+    if body.bc_response_status == "created":
+        link_update = {"bc_po_number": body.bc_po_number.strip(), "bc_document_id": body.bc_document_id.strip(), "updated_at": now}
+        # Advance planned → ordered; leave ordered/received/cancelled unchanged
+        await db["inv_incoming_supply"].update_many(
+            {"source_reference": draft_id, "status": "planned"},
+            {"$set": {**link_update, "status": "ordered"}},
+        )
+        # For already ordered records, just set BC fields (idempotent)
+        await db["inv_incoming_supply"].update_many(
+            {"source_reference": draft_id, "status": "ordered"},
+            {"$set": {"bc_po_number": body.bc_po_number.strip(), "bc_document_id": body.bc_document_id.strip(), "updated_at": now}},
+        )
 
     # Return the updated draft
     updated = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": draft_id}, {"_id": 0})
@@ -1348,6 +1379,22 @@ async def api_list_submission_logs(draft_id: str):
     return {"po_draft_id": draft_id, "total": len(entries), "entries": entries}
 
 
+@router.get("/po-drafts/{draft_id}/incoming-supply")
+async def api_linked_incoming_supply(draft_id: str):
+    """Return all incoming supply records linked to a PO draft."""
+    db = get_db()
+    doc = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": draft_id}, {"_id": 0, "po_draft_id": 1})
+    if not doc:
+        raise HTTPException(status_code=404, detail="PO draft not found")
+
+    cursor = db["inv_incoming_supply"].find(
+        {"source_reference": draft_id},
+        {"_id": 0},
+    ).sort("item", 1)
+    records = await cursor.to_list(length=500)
+    return {"po_draft_id": draft_id, "total": len(records), "records": records}
+
+
 @router.post("/po-drafts/{draft_id}/create-incoming-supply")
 async def api_po_draft_create_incoming_supply(draft_id: str):
     """Convert PO draft lines into planned incoming supply records.
@@ -1396,7 +1443,7 @@ async def api_po_draft_create_incoming_supply(draft_id: str):
             continue
 
         # Check for existing incoming supply from this draft for this item
-        existing = await db["incoming_supply"].find_one(
+        existing = await db["inv_incoming_supply"].find_one(
             {"customer_id": customer_id, "item": item, "source_reference": draft_id},
             {"_id": 0, "id": 1},
         )
@@ -1418,6 +1465,11 @@ async def api_po_draft_create_incoming_supply(draft_id: str):
             notes=f"From PO draft {draft_id}",
             created_by="po_draft_conversion",
             status="planned",
+        )
+        # Store po_draft_id on the created supply record
+        await db["inv_incoming_supply"].update_one(
+            {"id": supply["id"]},
+            {"$set": {"po_draft_id": draft_id}},
         )
         rows_created += 1
         created_ids.append(supply["id"])

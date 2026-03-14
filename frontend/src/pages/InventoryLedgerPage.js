@@ -1275,6 +1275,8 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
   const [bcDocId, setBcDocId] = useState('');
   const [bcRespNotes, setBcRespNotes] = useState('');
   const [savingBcResp, setSavingBcResp] = useState(false);
+  const [linkedSupply, setLinkedSupply] = useState([]);
+  const [linkedLoading, setLinkedLoading] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -1307,6 +1309,17 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
   }, [draftId]);
 
   useEffect(() => { if (draftId) loadSubmissionLogs(); }, [draftId, loadSubmissionLogs]);
+
+  const loadLinkedSupply = useCallback(async () => {
+    setLinkedLoading(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/po-drafts/${draftId}/incoming-supply`);
+      if (res.ok) { const d = await res.json(); setLinkedSupply(d.records || []); }
+    } catch { /* silent */ }
+    finally { setLinkedLoading(false); }
+  }, [draftId]);
+
+  useEffect(() => { if (draftId) loadLinkedSupply(); }, [draftId, loadLinkedSupply]);
 
   const updateStatus = async (newStatus) => {
     setUpdating(true);
@@ -1419,6 +1432,7 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
         setDraft(updated);
         toast.success(`BC response recorded: ${bcRespStatus}`);
         loadSubmissionLogs();
+        loadLinkedSupply();
       } else { const d = await res.json(); toast.error(d.detail || 'Failed'); }
     } catch { toast.error('Failed to save BC response'); }
     finally { setSavingBcResp(false); }
@@ -1653,6 +1667,51 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
                         {savingBcResp ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Save Response'}
                       </Button>
                     </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Linked Incoming Supply */}
+            {draft.incoming_supply_created && (
+              <div className="space-y-2" data-testid="inv-po-draft-linked-supply-section">
+                <div className="flex items-center gap-2">
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Linked Incoming Supply</p>
+                  {draft.linked_supply_count > 0 && (
+                    <Badge variant="outline" className="text-[8px]" data-testid="inv-po-draft-linked-supply-count">{draft.linked_supply_count} record(s)</Badge>
+                  )}
+                  {draft.linked_supply_status_counts && Object.entries(draft.linked_supply_status_counts).map(([s, c]) => (
+                    <Badge key={s} variant={s === 'ordered' ? 'default' : s === 'planned' ? 'secondary' : 'outline'} className="text-[8px]" data-testid={`inv-po-draft-linked-status-${s}`}>{s}: {c}</Badge>
+                  ))}
+                </div>
+                {linkedLoading ? (
+                  <div className="flex justify-center py-2"><Loader2 className="w-4 h-4 animate-spin" /></div>
+                ) : linkedSupply.length === 0 ? (
+                  <p className="text-[10px] text-muted-foreground" data-testid="inv-po-draft-no-linked-supply">No linked supply records found</p>
+                ) : (
+                  <div className="border border-border rounded overflow-hidden" data-testid="inv-po-draft-linked-supply-list">
+                    <table className="w-full text-[10px]">
+                      <thead className="bg-muted/30">
+                        <tr>
+                          <th className="p-1.5 text-left font-medium">Item</th>
+                          <th className="p-1.5 text-right font-medium">Qty</th>
+                          <th className="p-1.5 text-center font-medium">Status</th>
+                          <th className="p-1.5 text-left font-medium">BC PO#</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {linkedSupply.map((s, i) => (
+                          <tr key={s.id || i} className="border-t border-border/20" data-testid={`inv-po-draft-linked-row-${i}`}>
+                            <td className="p-1.5 font-mono font-bold">{s.item}</td>
+                            <td className="p-1.5 text-right font-mono">{s.incoming_qty?.toLocaleString()}</td>
+                            <td className="p-1.5 text-center">
+                              <Badge variant={s.status === 'ordered' ? 'default' : s.status === 'planned' ? 'secondary' : s.status === 'received' ? 'outline' : 'destructive'} className="text-[8px]" data-testid={`inv-po-draft-linked-status-badge-${i}`}>{s.status}</Badge>
+                            </td>
+                            <td className="p-1.5 font-mono text-blue-600" data-testid={`inv-po-draft-linked-bc-po-${i}`}>{s.bc_po_number || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </div>

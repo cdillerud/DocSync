@@ -1,0 +1,125 @@
+{
+  "summary": "Comprehensive testing of BC PO Linkage to Incoming Supply feature (iteration_79). All 17 backend API tests passed. All frontend UI tests passed. PO draft → incoming supply conversion stores po_draft_id on created supply records. GET /api/inventory-ledger/po-drafts/{id}/incoming-supply returns linked supply records. BC response created advances planned supply to ordered with bc_po_number and bc_document_id set. BC response linkage is idempotent. BC response rejected/pending does NOT alter linked supply status. PO draft detail GET returns linked_supply_count, linked_supply_status_counts, linked_supply_has_bc_po_number. Frontend Linked Incoming Supply section visible in PO Draft detail drawer showing item, qty, status, BC PO# columns with status count badges.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "InventoryLedgerPage",
+        "issues": [
+          "Pre-existing React hydration warning: '<tr> cannot be a child of <span>' in table tbody - cosmetic, non-blocking (same as previous iterations)"
+        ]
+      }
+    ]
+  },
+  "passed_tests": [
+    "Backend: GET /api/inventory-ledger/po-drafts/{id}/incoming-supply - returns linked supply records",
+    "Backend: Linked supply records have expected fields (item, incoming_qty, status, bc_po_number)",
+    "Backend: GET linked supply returns 404 for nonexistent draft",
+    "Backend: PO draft detail returns linked_supply_count",
+    "Backend: PO draft detail returns linked_supply_status_counts",
+    "Backend: PO draft detail returns linked_supply_has_bc_po_number",
+    "Backend: BC response created sets bc_po_number and bc_document_id on linked supply",
+    "Backend: BC response created advances planned supply to ordered",
+    "Backend: BC response linkage is idempotent (repeat created response updates BC fields)",
+    "Backend: BC response rejected does NOT alter linked supply status",
+    "Backend: BC response pending does NOT alter linked supply status",
+    "Backend: Linked supply has source_reference matching draft_id",
+    "Backend: Linked supply has po_draft_id field set",
+    "Backend REGRESSION: BC export still works",
+    "Backend REGRESSION: Vendor assignment still works",
+    "Backend REGRESSION: Submission log still works",
+    "Backend REGRESSION: BC response capture still works",
+    "Backend REGRESSION: Balances endpoint still works",
+    "Frontend: Linked Incoming Supply section visible in PO Draft detail drawer",
+    "Frontend: Linked supply count badge shows '2 record(s)'",
+    "Frontend: Status count badges show 'ordered: 2'",
+    "Frontend: Linked supply table visible with Item, Qty, Status, BC PO# columns",
+    "Frontend: Linked supply rows show correct BC PO# (PO-9999)",
+    "Frontend: Linked supply rows show correct status (ordered) with green badge",
+    "Frontend: BC Response section shows 'created' status badge",
+    "Frontend: BC Response section shows BC PO# (PO-9999)"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_bc_po_linkage_incoming_supply.py",
+    "/app/test_reports/pytest/bc_po_linkage_incoming_supply_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend inventory_ledger.py Lines 1382-1395: GET /po-drafts/{id}/incoming-supply correctly queries inv_incoming_supply by source_reference, returns 404 for nonexistent draft",
+    "Backend inventory_ledger.py Lines 1027-1041: PO draft detail enriched with linked supply summary via MongoDB aggregation on inv_incoming_supply - linked_supply_count, linked_supply_status_counts, linked_supply_has_bc_po_number",
+    "Backend inventory_ledger.py Lines 1178-1189: BC response 'created' handler updates linked supply: planned→ordered with bc_po_number/bc_document_id, already ordered records just get BC fields updated (idempotent)",
+    "Backend inventory_ledger.py Lines 1469-1473: Conversion stores po_draft_id on newly created supply records",
+    "Frontend PODraftDetailDrawer Lines 1313-1322: loadLinkedSupply fetches GET /po-drafts/{id}/incoming-supply",
+    "Frontend Linked Incoming Supply section Lines 1675-1718: Shows section only when draft.incoming_supply_created, displays count badge, status count badges (planned/ordered), and linked supply table with item/qty/status/bc_po_number columns"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_bc_po_linkage_incoming_supply.py"
+  ],
+  "success_rate": {
+    "backend": "100% (17/17 tests passed)",
+    "frontend": "100% (all UI verifications passed)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://po-supply-bridge.preview.emergentagent.com"
+  },
+  "seed_data_used": "Used existing Hormel Foods workspace (customer_id: 366bfcce-4d68-4daf-b9f4-cb05a35de8c8). Draft PO-DRAFT-20260314163256-689B67 (has vendor V10045/Acme Bottle Supply, bc_response_status=created with bc_po_number=PO-9999, has 2 linked supply records SPAM-LITE and TEST-ITEM-WARN both at status=ordered with bc_po_number=PO-9999).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "BC PO Linkage to Incoming Supply feature fully tested. New endpoint: GET /api/inventory-ledger/po-drafts/{id}/incoming-supply returns linked supply records (source_reference=draft_id). PO draft detail enriched with linked_supply_count, linked_supply_status_counts, linked_supply_has_bc_po_number via aggregation. BC response 'created' handler advances planned→ordered and sets bc_po_number/bc_document_id on linked supply (idempotent for already ordered). BC response rejected/pending does NOT alter supply. Conversion stores po_draft_id on new supply records. Frontend shows Linked Incoming Supply section in PO Draft detail drawer (visible when incoming_supply_created=true) with count/status badges and table showing item/qty/status/bc_po_number.",
+  "features_verified": {
+    "backend_endpoints": {
+      "linked_incoming_supply": {
+        "method": "GET",
+        "path": "/api/inventory-ledger/po-drafts/{draft_id}/incoming-supply",
+        "response": {
+          "po_draft_id": "string",
+          "total": "number",
+          "records": "array of supply records with item, incoming_qty, status, bc_po_number, bc_document_id, source_reference, po_draft_id"
+        },
+        "errors": {
+          "404": "PO draft not found"
+        }
+      },
+      "po_draft_detail_enrichment": {
+        "new_fields": ["linked_supply_count", "linked_supply_status_counts", "linked_supply_has_bc_po_number"],
+        "source": "MongoDB aggregation on inv_incoming_supply collection where source_reference=draft_id"
+      },
+      "bc_response_linkage": {
+        "trigger": "PATCH /api/inventory-ledger/po-drafts/{draft_id}/bc-response with bc_response_status='created'",
+        "behavior": {
+          "planned_supply": "Advanced to status='ordered', bc_po_number and bc_document_id set",
+          "ordered_supply": "bc_po_number and bc_document_id updated (idempotent)",
+          "rejected_pending": "No changes to linked supply"
+        }
+      },
+      "conversion_po_draft_id": {
+        "endpoint": "POST /api/inventory-ledger/po-drafts/{draft_id}/create-incoming-supply",
+        "behavior": "Stores po_draft_id field on newly created supply records"
+      }
+    },
+    "frontend_components": {
+      "linked_supply_section": {
+        "testid": "inv-po-draft-linked-supply-section",
+        "visible_when": "draft.incoming_supply_created === true",
+        "children": {
+          "count_badge": {"testid": "inv-po-draft-linked-supply-count", "format": "{n} record(s)"},
+          "status_badges": {"testid": "inv-po-draft-linked-status-{status}", "variants": {"planned": "secondary", "ordered": "default"}},
+          "supply_table": {
+            "testid": "inv-po-draft-linked-supply-list",
+            "columns": ["Item", "Qty", "Status", "BC PO#"],
+            "row_testid": "inv-po-draft-linked-row-{i}",
+            "status_badge_testid": "inv-po-draft-linked-status-badge-{i}",
+            "bc_po_testid": "inv-po-draft-linked-bc-po-{i}"
+          },
+          "empty_message": {"testid": "inv-po-draft-no-linked-supply"}
+        }
+      }
+    }
+  }
+}

@@ -305,6 +305,25 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 - Frontend: Latest submission status badge in PO Drafts list table
 - No ledger mutations, no BC API calls — strictly informational tracking
 - Backend: 19/19 tests passed, Frontend: all UI flows verified
+---
+
+## 2026-03-14: BC PO Response Capture (iteration_78)
+
+### What Was Built
+- `PATCH /api/inventory-ledger/po-drafts/{id}/bc-response` — records downstream BC result (created/rejected/pending)
+- Fields: bc_response_status, bc_po_number, bc_document_id, bc_response_at, bc_response_notes
+- Validation: rejected requires notes (422), invalid status (422), not found (404)
+- Auto-creates submission log entry mapped: created→acknowledged, rejected→failed, pending→submitted
+- PO draft detail enriched with all BC response fields
+- PO Drafts list shows bc_response_status badge and bc_po_number
+- Item detail last_po_draft includes bc_po_number and bc_response_status
+- Frontend: BC Response section in PO Draft detail drawer (info display + form with status/PO#/DocID/notes)
+- Frontend: BC response badges and PO numbers in PO Drafts list table
+- Frontend: BC PO number shown in Item Detail's last PO draft section
+- No ledger mutations, no BC API calls — informational response capture only
+- Backend: 19/19 tests passed, Frontend: all UI flows verified
+- Test report: `/app/test_reports/iteration_78.json`
+
 - Test report: `/app/test_reports/iteration_77.json`
 
 

@@ -3049,6 +3049,25 @@ EMAIL_CLIENT_ID=doc-workflow-test
 - Frontend: All UI flows verified (100%)
 - Test report: `/app/test_reports/iteration_77.json`
 
+---
+
+## Session Update: March 14, 2026 - BC PO Response Capture (iteration_78)
+
+### Completed
+
+#### BC PO Response Capture
+- **Backend**: `PATCH /api/inventory-ledger/po-drafts/{id}/bc-response` records BC result (created/rejected/pending) with bc_po_number, bc_document_id, notes
+- Auto-creates submission log with mapped status. Rejection requires notes (422)
+- PO draft detail, list, and item detail all enriched with BC response fields
+- **Frontend**: BC Response section (info + form) in drawer. BC badges and PO# in list. Item detail shows BC PO#
+
+### Test Results
+- Backend: 19/19 (100%)
+- Frontend: All UI flows verified (100%)
+- Test report: `/app/test_reports/iteration_78.json`
+
+*Last Updated: March 14, 2026*
+
 *Last Updated: March 14, 2026*
 - Test report: `/app/test_reports/iteration_75.json`
 

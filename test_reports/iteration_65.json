@@ -1,0 +1,121 @@
+{
+  "summary": "Comprehensive testing of Dashboard Summary endpoint (iteration_65) - all tests passed. Backend: 13/13 pytest tests passed. Frontend: All UI flows verified - SummaryStrip renders 8 cards with correct values matching API, all data-testids present, all tabs working.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "InventoryLedgerPage",
+        "issues": ["Pre-existing React hydration warning: '<tr> cannot be a child of <span>' in table tbody - cosmetic, non-blocking"]
+      }
+    ]
+  },
+  "passed_tests": [
+    "Backend: GET /api/inventory-ledger/dashboard-summary?customer_id=X - Returns all 9 fields (200)",
+    "Backend: Status counts (items_ok + items_low + items_short) equals total balance buckets",
+    "Backend: total_reorder_recommendations matches /reorder-recommendations total (2 == 2)",
+    "Backend: Empty/nonexistent customer returns all zeros",
+    "Backend: Item filter works - nonexistent item returns zeros",
+    "Backend: Missing customer_id returns 422 validation error",
+    "Backend: Status logic (is_short/is_low flags) matches balance table counts",
+    "Backend REGRESSION: Balances endpoint still works",
+    "Backend REGRESSION: Movements endpoint still works",
+    "Backend REGRESSION: Incoming supply endpoint still works",
+    "Backend REGRESSION: Reorder recommendations still works",
+    "Backend REGRESSION: Item settings still works",
+    "Backend REGRESSION: CSV export still works",
+    "Frontend: Login with admin/admin successful",
+    "Frontend: Navigate to Inventory Ledger page",
+    "Frontend: Hormel Foods workspace loads",
+    "Frontend: SummaryStrip container present (data-testid='inv-dashboard-summary')",
+    "Frontend: 8 summary cards present and rendered correctly",
+    "Frontend: inv-summary-total-items shows 12",
+    "Frontend: inv-summary-ok shows 8",
+    "Frontend: inv-summary-low shows 3",
+    "Frontend: inv-summary-short shows 2",
+    "Frontend: inv-summary-incoming shows 400",
+    "Frontend: inv-summary-committed shows 6,324",
+    "Frontend: inv-summary-available shows -3,291",
+    "Frontend: inv-summary-reorders-needed shows 2",
+    "Frontend: Values match API response exactly",
+    "Frontend REGRESSION: Balances tab works (data-testid='inv-balance-table')",
+    "Frontend REGRESSION: Movements tab works (data-testid='inv-movement-table')",
+    "Frontend REGRESSION: Incoming tab works",
+    "Frontend REGRESSION: Reorder tab works - shows 2 items need replenishment",
+    "Frontend REGRESSION: Item Settings tab works",
+    "Frontend REGRESSION: CSV Export button present"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_dashboard_summary.py",
+    "/app/test_reports/pytest/dashboard_summary_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend inventory_ledger.py Lines 130-195: Dashboard-summary endpoint correctly implements derive_balances pipeline",
+    "Backend: total_items counts unique items using set(), status counts iterate over all balance rows",
+    "Backend: Reorder count logic identical to /reorder-recommendations endpoint (threshold comparison)",
+    "Frontend InventoryLedgerPage.js Lines 138-156: refresh() now calls /dashboard-summary instead of /customers/{cid}/summary",
+    "Frontend Lines 528-554: SummaryStrip correctly renders 8 cards with data-testid pattern inv-summary-{label-kebab-case}",
+    "Frontend: Responsive grid - 2 cols mobile, 4 cols tablet, 8 cols desktop (line 540)"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_dashboard_summary.py"
+  ],
+  "success_rate": {
+    "backend": "100% (13/13 tests passed)",
+    "frontend": "100% (all UI verifications passed)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://item-master-4.preview.emergentagent.com"
+  },
+  "seed_data_used": "Used existing Hormel Foods workspace (ID: 366bfcce-4d68-4daf-b9f4-cb05a35de8c8) with 12 unique items, 13 balance rows (8 OK, 3 LOW, 2 SHORT).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Dashboard Summary endpoint fully tested. Endpoint: GET /api/inventory-ledger/dashboard-summary?customer_id=X&item=Y (item optional). Returns 9 fields: total_items, items_ok, items_low, items_short, total_on_hand, total_incoming, total_committed, total_available, total_reorder_recommendations. Frontend SummaryStrip now shows 8 cards with data-testids: inv-dashboard-summary (container), inv-summary-total-items, inv-summary-ok, inv-summary-low, inv-summary-short, inv-summary-incoming, inv-summary-committed, inv-summary-available, inv-summary-reorders-needed.",
+  "features_verified": {
+    "backend": {
+      "new_endpoint": {
+        "method": "GET",
+        "path": "/api/inventory-ledger/dashboard-summary",
+        "query_params": {
+          "customer_id": "required",
+          "item": "optional filter"
+        },
+        "response_fields": [
+          "total_items (unique items count)",
+          "items_ok (balance rows not short/low)",
+          "items_low (balance rows with is_low=true)",
+          "items_short (balance rows with is_short=true)",
+          "total_on_hand",
+          "total_incoming",
+          "total_committed",
+          "total_available",
+          "total_reorder_recommendations (matches /reorder-recommendations total)"
+        ],
+        "notes": "Status counts are per-balance-row, not per-unique-item"
+      }
+    },
+    "frontend": {
+      "summary_strip": {
+        "container_testid": "inv-dashboard-summary",
+        "cards": [
+          {"label": "Total Items", "testid": "inv-summary-total-items", "icon": "Package"},
+          {"label": "OK", "testid": "inv-summary-ok", "icon": "TrendingUp"},
+          {"label": "LOW", "testid": "inv-summary-low", "icon": "AlertTriangle"},
+          {"label": "SHORT", "testid": "inv-summary-short", "icon": "TrendingDown"},
+          {"label": "Incoming", "testid": "inv-summary-incoming", "icon": "Truck"},
+          {"label": "Committed", "testid": "inv-summary-committed", "icon": "ClipboardList"},
+          {"label": "Available", "testid": "inv-summary-available", "icon": "Box"},
+          {"label": "Reorders Needed", "testid": "inv-summary-reorders-needed", "icon": "RotateCcw"}
+        ],
+        "responsive_grid": "grid-cols-2 sm:grid-cols-4 lg:grid-cols-8"
+      },
+      "api_integration": "CustomerWorkspace.refresh() calls /dashboard-summary instead of /customers/{cid}/summary"
+    }
+  }
+}

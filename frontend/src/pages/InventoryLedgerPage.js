@@ -140,7 +140,7 @@ function CustomerWorkspace({ customer }) {
     setLoading(true);
     try {
       const [sumRes, balRes, movRes, incRes] = await Promise.all([
-        fetch(`${API}/api/inventory-ledger/customers/${cid}/summary`),
+        fetch(`${API}/api/inventory-ledger/dashboard-summary?customer_id=${cid}`),
         fetch(`${API}/api/inventory-ledger/customers/${cid}/balances`),
         fetch(`${API}/api/inventory-ledger/customers/${cid}/movements?limit=200`),
         fetch(`${API}/api/inventory-ledger/customers/${cid}/incoming`),
@@ -527,21 +527,24 @@ function ItemSettingsPanel({ customerId }) {
 
 function SummaryStrip({ summary }) {
   const cards = [
-    { label: 'Items Tracked', value: summary.total_items, icon: Package, color: 'text-blue-500' },
-    { label: 'On Hand', value: summary.total_on_hand, icon: Box, color: 'text-emerald-500' },
+    { label: 'Total Items', value: summary.total_items, icon: Package, color: 'text-blue-500' },
+    { label: 'OK', value: summary.items_ok, icon: TrendingUp, color: 'text-emerald-500' },
+    { label: 'LOW', value: summary.items_low, icon: AlertTriangle, color: summary.items_low > 0 ? 'text-amber-500' : 'text-muted-foreground' },
+    { label: 'SHORT', value: summary.items_short, icon: TrendingDown, color: summary.items_short > 0 ? 'text-red-500' : 'text-muted-foreground' },
     { label: 'Incoming', value: summary.total_incoming, icon: Truck, color: 'text-sky-500' },
     { label: 'Committed', value: summary.total_committed, icon: ClipboardList, color: 'text-amber-500' },
-    { label: 'Shortages', value: summary.shortage_count, icon: TrendingDown, color: summary.shortage_count > 0 ? 'text-red-500' : 'text-muted-foreground' },
+    { label: 'Available', value: summary.total_available, icon: Box, color: 'text-emerald-500' },
+    { label: 'Reorders Needed', value: summary.total_reorder_recommendations, icon: RotateCcw, color: summary.total_reorder_recommendations > 0 ? 'text-orange-500' : 'text-muted-foreground' },
   ];
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3" data-testid="inv-summary-strip">
+    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3" data-testid="inv-dashboard-summary">
       {cards.map(c => {
         const Icon = c.icon;
         return (
-          <div key={c.label} className="bg-muted/30 border border-border rounded-md p-3 flex items-center gap-3">
+          <div key={c.label} className="bg-muted/30 border border-border rounded-md p-3 flex items-center gap-3" data-testid={`inv-summary-${c.label.toLowerCase().replace(/\s+/g, '-')}`}>
             <Icon className={`w-5 h-5 ${c.color} shrink-0`} />
             <div>
-              <p className="text-lg font-bold leading-tight">{typeof c.value === 'number' ? c.value.toLocaleString() : c.value}</p>
+              <p className="text-lg font-bold leading-tight">{typeof c.value === 'number' ? c.value.toLocaleString() : (c.value ?? 0)}</p>
               <p className="text-[10px] text-muted-foreground">{c.label}</p>
             </div>
           </div>

@@ -128,6 +128,74 @@ async def api_update_customer(customer_id: str, body: UpdateCustomerReq):
 
 
 # ═══════════════════════════════════════════════════════════════
+# DASHBOARD SUMMARY
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/dashboard-summary")
+async def api_dashboard_summary(
+    customer_id: str = Query(..., description="Customer workspace ID"),
+    item: str = Query("", description="Filter by item"),
+):
+    """Compute inventory health metrics from derive_balances.
+
+    Uses the same status logic (is_short / is_low) as the balance table and CSV export.
+    total_reorder_recommendations mirrors the count from /reorder-recommendations.
+    Returns zeros for all fields when no inventory exists.
+    """
+    db = get_db()
+    balances = await derive_balances(db, customer_id, item=item or None)
+
+    total_items = len(set(b["item"] for b in balances))
+    items_ok = 0
+    items_low = 0
+    items_short = 0
+    total_on_hand = 0.0
+    total_incoming = 0.0
+    total_committed = 0.0
+    total_available = 0.0
+
+    for b in balances:
+        total_on_hand += b.get("on_hand", 0)
+        total_incoming += b.get("incoming", 0)
+        total_committed += b.get("committed", 0)
+        total_available += b.get("available", 0)
+        if b.get("is_short"):
+            items_short += 1
+        elif b.get("is_low"):
+            items_low += 1
+        else:
+            items_ok += 1
+
+    # Reorder recommendation count — same logic as api_reorder_recommendations
+    settings_docs = await db["inv_item_settings"].find(
+        {"customer_id": customer_id}, {"_id": 0}
+    ).to_list(5000)
+    settings_map = {s["item"]: s for s in settings_docs}
+
+    reorder_count = 0
+    for b in balances:
+        avail = b.get("available", 0)
+        is_short = b.get("is_short", False)
+        s = settings_map.get(b["item"])
+        threshold = s["reorder_threshold"] if s else DEFAULT_REORDER_THRESHOLD
+        if avail > threshold and not is_short:
+            continue
+        reorder_count += 1
+
+    return {
+        "total_items": total_items,
+        "items_ok": items_ok,
+        "items_low": items_low,
+        "items_short": items_short,
+        "total_on_hand": round(total_on_hand, 2),
+        "total_incoming": round(total_incoming, 2),
+        "total_committed": round(total_committed, 2),
+        "total_available": round(total_available, 2),
+        "total_reorder_recommendations": reorder_count,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
 # BALANCES
 # ═══════════════════════════════════════════════════════════════
 

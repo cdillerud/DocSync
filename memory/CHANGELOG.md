@@ -253,3 +253,22 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 - Item Detail: PO draft indicator is clickable to open draft detail drawer
 - Backend: 15/15 pytest tests passed, Frontend: all UI flows verified
 - Test report: `/app/test_reports/iteration_74.json`
+
+---
+
+## 2026-03-14: PO Draft to Incoming Supply Conversion (iteration_75)
+
+### What Was Built
+- `POST /api/inventory-ledger/po-drafts/{draft_id}/create-incoming-supply` — converts PO draft lines into planned incoming supply records
+- Each draft line creates an `incoming_supply` record with `status=planned`, referencing the draft ID as `source_reference`
+- Duplicate prevention: 409 if draft already converted (`incoming_supply_created` flag)
+- Archived draft rejection: 422 if draft is archived
+- After conversion, draft updated with `incoming_supply_created=true`, `incoming_supply_created_at`, `incoming_supply_ids[]`
+- Planned supply integrates with existing `derive_balances` pipeline — no new balance math needed
+- Frontend: "Create Incoming Supply" green button in PO Draft detail drawer (hidden for converted/archived drafts)
+- Frontend: "Supply Created" green badge in header and green info box with conversion timestamp and record count
+- Frontend: Conversion result display with processed/created/skipped counts and per-item status
+- Frontend: "Supply" badge in PO Drafts list table for converted drafts
+- Frontend: `onSupplyCreated` callback triggers inventory view refresh after conversion
+- Backend: 10/10 tests passed, Frontend: all UI flows verified
+- Test report: `/app/test_reports/iteration_75.json`

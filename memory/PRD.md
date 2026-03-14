@@ -2989,3 +2989,27 @@ EMAIL_CLIENT_ID=doc-workflow-test
 - Catalog sync: 1000 items + 169 GL accounts in ~2.7s total
 
 *Last Updated: March 13, 2026*
+
+---
+
+## Session Update: March 14, 2026 - PO Draft to Incoming Supply Conversion (iteration_75)
+
+### Completed
+
+#### PO Draft → Incoming Supply Conversion
+- **Backend**: `POST /api/inventory-ledger/po-drafts/{draft_id}/create-incoming-supply` — converts draft lines into planned incoming supply records
+- Duplicate prevention (409), archived draft rejection (422), 404 for missing drafts
+- Draft flagged with `incoming_supply_created=true` after conversion
+- Planned supply flows through existing `derive_balances` pipeline — no new balance math
+- **Frontend**: "Create Incoming Supply" button in PO Draft detail drawer
+- "Supply Created" badge and green info box for converted drafts
+- Conversion result display with per-item status
+- "Supply" badge in PO Drafts list for converted drafts
+- Inventory views refresh after conversion via `onSupplyCreated` callback
+
+### Test Results
+- Backend: 10/10 (100%)
+- Frontend: All UI flows verified (100%)
+- Test report: `/app/test_reports/iteration_75.json`
+
+*Last Updated: March 14, 2026*

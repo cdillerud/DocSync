@@ -1,5 +1,18 @@
 # CHANGELOG - GPI Document Hub
 
+## [2026-03-14] Iteration 89 — Operational Ownership and Assignment Tracking — COMPLETE
+- **Backend:** Assignment CRUD endpoints (POST/GET/PATCH /api/inventory-ledger/assignments) with upsert semantics
+- **Backend:** Derived ownership logic (current_owner, assignment_status, assignment_updated_at) — unassigned returns null/unassigned
+- **Backend:** Operations Queue enriched with assignment data + filters (assigned_to, assignment_status, unassigned_only)
+- **Backend:** +10 priority boost for unassigned high-priority items; counts: unassigned_count, in_progress_count, waiting_count
+- **Backend:** SO summary and PO Draft detail endpoints enriched with assignment fields
+- **Frontend:** Operations Queue page: Owner column, assignment status badges, owner/assignment filter dropdowns, unassigned row highlighting (orange border)
+- **Frontend:** Summary cards: Unassigned, In Progress, Waiting counts
+- **Frontend:** AssignmentSection component in SO and PO workflow views — assign/reassign owner, update status (In Progress/Waiting/Completed), notes
+- **Testing:** 22/22 backend tests passed, all frontend UI elements verified (100% pass rate)
+- **Test report:** /app/test_reports/iteration_89.json
+
+
 ## [2026-03-14] Iteration 88 — Operational Escalations and Due Dates — COMPLETE
 - **Backend:** Escalation CRUD endpoints (POST/GET/PATCH /api/inventory-ledger/escalations) with derived status logic (on_track, due_soon, overdue, escalated)
 - **Backend:** Operations Queue enriched with escalation data (due_date, escalation_status, days_to_due, days_overdue), priority score boosted (+10/+20/+30)

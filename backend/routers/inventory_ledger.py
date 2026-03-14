@@ -387,25 +387,37 @@ async def api_reorder_recommendations(
 ):
     """Generate reorder recommendations based on current derived balances.
 
-    Recommends items where available <= 0 (SHORT). Read-only — no ledger mutations.
-    recommended_qty = abs(available) + safety_buffer.
+    Uses per-item settings (reorder_threshold, safety_buffer) when configured.
+    Falls back to defaults (threshold=0, buffer=10) when no settings exist.
+    recommended_qty = max(0, reorder_threshold - available) + safety_buffer.
     """
     db = get_db()
     balances = await derive_balances(db, customer_id, item=item or None)
 
+    # Load item settings for this workspace
+    settings_docs = await db["inv_item_settings"].find(
+        {"customer_id": customer_id}, {"_id": 0}
+    ).to_list(5000)
+    settings_map = {s["item"]: s for s in settings_docs}
+
     recs = []
     for b in balances:
         avail = b.get("available", 0)
+        item_name = b["item"]
         is_short = b.get("is_short", False)
 
-        if not is_short and avail > DEFAULT_REORDER_THRESHOLD:
+        s = settings_map.get(item_name)
+        threshold = s["reorder_threshold"] if s else DEFAULT_REORDER_THRESHOLD
+        buffer = s["safety_buffer"] if s else DEFAULT_SAFETY_BUFFER
+
+        if avail > threshold and not is_short:
             continue
 
-        rec_qty = round(abs(avail) + DEFAULT_SAFETY_BUFFER, 4) if avail <= 0 else DEFAULT_SAFETY_BUFFER
+        rec_qty = round(max(0, threshold - avail) + buffer, 4)
 
         status = "SHORT" if is_short else ("LOW" if b.get("is_low") else "OK")
         recs.append({
-            "item": b["item"],
+            "item": item_name,
             "item_description": b.get("item_description", ""),
             "warehouse": b.get("warehouse", "MAIN"),
             "ownership_type": b.get("ownership_type", ""),
@@ -416,9 +428,11 @@ async def api_reorder_recommendations(
             "unit_of_measure": b.get("unit_of_measure", "units"),
             "status": status,
             "recommended_qty": rec_qty,
+            "reorder_threshold": threshold,
+            "safety_buffer": buffer,
+            "has_settings": s is not None,
         })
 
-    # Sort by available ascending (most critical first), limit
     recs.sort(key=lambda r: r["available"])
     return {"recommendations": recs[:limit], "total": len(recs)}
 

@@ -17,7 +17,7 @@ import {
   Warehouse, Loader2, Plus, Package, TrendingDown, TrendingUp,
   AlertTriangle, RefreshCw, Search, ArrowLeftRight, History,
   ChevronRight, ChevronLeft, Box, Truck, ClipboardList,
-  RotateCcw, FileText, Download,
+  RotateCcw, FileText, Download, Settings, Pencil,
 } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -187,6 +187,7 @@ function CustomerWorkspace({ customer }) {
             <TabsTrigger value="movements" data-testid="inv-tab-movements"><History className="w-3.5 h-3.5 mr-1" /> Movements</TabsTrigger>
             <TabsTrigger value="incoming" data-testid="inv-tab-incoming"><Truck className="w-3.5 h-3.5 mr-1" /> Incoming</TabsTrigger>
             <TabsTrigger value="reorder" data-testid="inv-tab-reorder"><AlertTriangle className="w-3.5 h-3.5 mr-1" /> Reorder</TabsTrigger>
+            <TabsTrigger value="settings" data-testid="inv-tab-settings"><Settings className="w-3.5 h-3.5 mr-1" /> Item Settings</TabsTrigger>
           </TabsList>
           <div className="flex gap-2">
             {tab === 'balances' && (
@@ -226,6 +227,9 @@ function CustomerWorkspace({ customer }) {
         </TabsContent>
         <TabsContent value="reorder">
           <ReorderPanel customerId={cid} onSupplyCreated={refresh} />
+        </TabsContent>
+        <TabsContent value="settings">
+          <ItemSettingsPanel customerId={cid} />
         </TabsContent>
       </Tabs>
 
@@ -332,6 +336,8 @@ function ReorderPanel({ customerId, onSupplyCreated }) {
               <th className="text-right py-2 px-3 font-medium">Committed</th>
               <th className="text-right py-2 px-3 font-medium">Available</th>
               <th className="text-center py-2 px-3 font-medium">Status</th>
+              <th className="text-right py-2 px-3 font-medium">Threshold</th>
+              <th className="text-right py-2 px-3 font-medium">Buffer</th>
               <th className="text-right py-2 px-3 font-medium">Recommended Qty</th>
               <th className="text-right py-2 px-3 font-medium">Action</th>
             </tr>
@@ -352,6 +358,8 @@ function ReorderPanel({ customerId, onSupplyCreated }) {
                     {r.status}
                   </Badge>
                 </td>
+                <td className="py-1.5 px-3 text-right font-mono text-muted-foreground">{r.reorder_threshold ?? 0}</td>
+                <td className="py-1.5 px-3 text-right font-mono text-muted-foreground">{r.safety_buffer ?? 10}</td>
                 <td className="py-1.5 px-3 text-right font-mono font-bold text-emerald-600">{r.recommended_qty.toLocaleString()}</td>
                 <td className="py-1.5 px-3 text-right">
                   <Button variant="outline" size="sm" className="h-5 text-[9px] px-1.5"
@@ -368,6 +376,148 @@ function ReorderPanel({ customerId, onSupplyCreated }) {
         </table>
       </CardContent>
     </Card>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════ */
+/* ITEM SETTINGS PANEL                                              */
+/* ════════════════════════════════════════════════════════════════ */
+
+function ItemSettingsPanel({ customerId }) {
+  const [settings, setSettings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editRow, setEditRow] = useState(null); // {item, reorder_threshold, safety_buffer, notes}
+  const [saving, setSaving] = useState(false);
+
+  const fetchSettings = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-items/settings?customer_id=${customerId}`);
+      const data = await res.json();
+      setSettings(data.settings || []);
+    } catch { toast.error('Failed to load settings'); }
+    finally { setLoading(false); }
+  }, [customerId]);
+
+  useEffect(() => { fetchSettings(); }, [fetchSettings]);
+
+  const saveRow = async () => {
+    if (!editRow?.item) return;
+    if (editRow.reorder_threshold < 0 || editRow.safety_buffer < 0) {
+      toast.error('Threshold and buffer must not be negative');
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-items/settings`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customer_id: customerId, ...editRow }),
+      });
+      if (res.ok) {
+        toast.success(`Settings saved for ${editRow.item}`);
+        setEditRow(null);
+        fetchSettings();
+      } else {
+        const d = await res.json();
+        toast.error(d.detail || 'Save failed');
+      }
+    } catch { toast.error('Save failed'); }
+    finally { setSaving(false); }
+  };
+
+  if (loading) return <div className="py-10 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto" /></div>;
+
+  return (
+    <div className="space-y-3" data-testid="inv-settings-panel">
+      {/* Add/Edit Form */}
+      <Card className="border border-border">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-xs font-bold uppercase tracking-wider" style={{ fontFamily: 'Chivo, sans-serif' }}>
+            {editRow ? `Edit: ${editRow.item}` : 'Add Item Settings'}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-4 gap-3">
+            <div>
+              <Label className="text-xs">Item</Label>
+              <Input className="h-8 text-xs font-mono" value={editRow?.item || ''} disabled={!!editRow?.existing}
+                onChange={e => setEditRow(prev => ({ ...prev, item: e.target.value }))}
+                placeholder="PET-32" data-testid="inv-settings-item" />
+            </div>
+            <div>
+              <Label className="text-xs">Reorder Threshold</Label>
+              <Input type="number" className="h-8 text-xs font-mono" value={editRow?.reorder_threshold ?? ''}
+                onChange={e => setEditRow(prev => ({ ...prev, reorder_threshold: parseFloat(e.target.value) || 0 }))}
+                placeholder="100" data-testid="inv-settings-threshold" />
+            </div>
+            <div>
+              <Label className="text-xs">Safety Buffer</Label>
+              <Input type="number" className="h-8 text-xs font-mono" value={editRow?.safety_buffer ?? ''}
+                onChange={e => setEditRow(prev => ({ ...prev, safety_buffer: parseFloat(e.target.value) || 0 }))}
+                placeholder="25" data-testid="inv-settings-buffer" />
+            </div>
+            <div>
+              <Label className="text-xs">Notes</Label>
+              <Input className="h-8 text-xs" value={editRow?.notes || ''}
+                onChange={e => setEditRow(prev => ({ ...prev, notes: e.target.value }))}
+                placeholder="Core stock item" data-testid="inv-settings-notes" />
+            </div>
+          </div>
+          <div className="flex gap-2 mt-3">
+            <Button size="sm" className="h-7 text-xs" onClick={saveRow} disabled={saving || !editRow?.item} data-testid="inv-settings-save">
+              {saving ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Plus className="w-3 h-3 mr-1" />}
+              {editRow?.existing ? 'Update' : 'Save'} Settings
+            </Button>
+            {editRow && (
+              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setEditRow(null)}>Cancel</Button>
+            )}
+            {!editRow && (
+              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setEditRow({ item: '', reorder_threshold: 100, safety_buffer: 25, notes: '' })}>
+                <Plus className="w-3 h-3 mr-1" /> New
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Settings Table */}
+      {settings.length > 0 && (
+        <Card className="border border-border" data-testid="inv-settings-table">
+          <CardContent className="p-0 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border bg-muted/40 text-[10px] text-muted-foreground uppercase tracking-wider">
+                  <th className="text-left py-2 px-3 font-medium">Item</th>
+                  <th className="text-right py-2 px-3 font-medium">Reorder Threshold</th>
+                  <th className="text-right py-2 px-3 font-medium">Safety Buffer</th>
+                  <th className="text-left py-2 px-3 font-medium">Notes</th>
+                  <th className="text-left py-2 px-3 font-medium">Updated</th>
+                  <th className="w-8"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {settings.map((s, i) => (
+                  <tr key={i} className="border-b border-border/50 hover:bg-muted/20" data-testid={`inv-settings-row-${i}`}>
+                    <td className="py-1.5 px-3 font-mono font-medium">{s.item}</td>
+                    <td className="py-1.5 px-3 text-right font-mono">{s.reorder_threshold}</td>
+                    <td className="py-1.5 px-3 text-right font-mono">{s.safety_buffer}</td>
+                    <td className="py-1.5 px-3 text-muted-foreground truncate max-w-[200px]">{s.notes || '-'}</td>
+                    <td className="py-1.5 px-3 text-muted-foreground font-mono">{s.updated_at ? new Date(s.updated_at).toLocaleDateString() : '-'}</td>
+                    <td className="py-1.5 px-1">
+                      <Button variant="ghost" size="sm" className="h-5 w-5 p-0"
+                        onClick={() => setEditRow({ ...s, existing: true })}
+                        data-testid={`inv-settings-edit-${i}`}>
+                        <Pencil className="w-3 h-3" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
   );
 }
 

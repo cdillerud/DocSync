@@ -288,5 +288,24 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 - No ledger mutations, no BC API calls — strictly payload generation
 - Backend: 18/18 tests passed, Frontend: all UI flows verified
 - Test report: `/app/test_reports/iteration_76.json`
+---
+
+## 2026-03-14: BC PO Submission Log Tracking (iteration_77)
+
+### What Was Built
+- New collection `po_submission_logs` for tracking BC handoff events per PO draft
+- `POST /api/inventory-ledger/po-drafts/{id}/submission-log` — creates log entry with status, notes, vendor info, and bc_payload_snapshot
+- `GET /api/inventory-ledger/po-drafts/{id}/submission-log` — lists entries reverse chronological
+- Supported statuses: exported, submitted, acknowledged, failed
+- BC export (`GET bc-export`) auto-creates "exported" log entry with payload snapshot
+- PO Drafts list enriched with `latest_submission_status` and `latest_submission_at` via aggregation
+- Validation: invalid status (422), archived draft (422), no vendor (422), not found (404)
+- Frontend: Submission Log section in PO Draft detail drawer with status badge/timestamp/notes list
+- Frontend: Add-entry form (status select: Submitted/Acknowledged/Failed, notes input, Log button)
+- Frontend: Latest submission status badge in PO Drafts list table
+- No ledger mutations, no BC API calls — strictly informational tracking
+- Backend: 19/19 tests passed, Frontend: all UI flows verified
+- Test report: `/app/test_reports/iteration_77.json`
+
 
 - Test report: `/app/test_reports/iteration_75.json`

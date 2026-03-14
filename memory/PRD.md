@@ -3031,6 +3031,25 @@ EMAIL_CLIENT_ID=doc-workflow-test
 - Test report: `/app/test_reports/iteration_76.json`
 
 *Last Updated: March 14, 2026*
+
+---
+
+## Session Update: March 14, 2026 - BC PO Submission Log Tracking (iteration_77)
+
+### Completed
+
+#### PO Submission Log Tracking
+- **Backend**: New `po_submission_logs` collection. `POST` creates entries, `GET` lists reverse-chronological
+- **Backend**: BC export auto-logs with status=`exported`. PO Drafts list enriched with `latest_submission_status`
+- **Frontend**: Submission Log section in drawer (log list + add-entry form). Status badges in PO Drafts list
+- Statuses: exported, submitted, acknowledged, failed. All informational — no ledger/BC mutations
+
+### Test Results
+- Backend: 19/19 (100%)
+- Frontend: All UI flows verified (100%)
+- Test report: `/app/test_reports/iteration_77.json`
+
+*Last Updated: March 14, 2026*
 - Test report: `/app/test_reports/iteration_75.json`
 
 *Last Updated: March 14, 2026*

@@ -1,0 +1,142 @@
+{
+  "summary": "Comprehensive testing of Inventory Snapshot Export feature (iteration_67) - all tests passed. Backend: 25/25 pytest tests passed covering snapshot endpoint, export endpoint, and regression. Frontend: Export Snapshot button visible on Balances tab, properly opens snapshot export URL with JSON download. All existing tabs work correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "InventoryLedgerPage",
+        "issues": [
+          "Pre-existing React hydration warning: '<tr> cannot be a child of <span>' in table tbody - cosmetic, non-blocking (same as iteration_66)"
+        ]
+      }
+    ]
+  },
+  "passed_tests": [
+    "Backend: GET /api/inventory-ledger/snapshot - Returns generated_at, context, summary, balances",
+    "Backend: GET /api/inventory-ledger/snapshot - generated_at is ISO timestamp format",
+    "Backend: GET /api/inventory-ledger/snapshot - context has customer_id, item_filter, include_reorders",
+    "Backend: GET /api/inventory-ledger/snapshot - summary has all 9 expected metrics fields",
+    "Backend: GET /api/inventory-ledger/snapshot - Summary values EXACTLY match /dashboard-summary",
+    "Backend: GET /api/inventory-ledger/snapshot - Balance rows have status field (OK/LOW/SHORT)",
+    "Backend: GET /api/inventory-ledger/snapshot - Balance rows have all 10 expected fields",
+    "Backend: GET /api/inventory-ledger/snapshot - Balance rows stripped of internal flags (is_short, is_low)",
+    "Backend: GET /api/inventory-ledger/snapshot - Balance count matches /customers/{cid}/balances",
+    "Backend: GET /api/inventory-ledger/snapshot?include_reorders=true - Includes reorders array",
+    "Backend: GET /api/inventory-ledger/snapshot?include_reorders=false - No reorders key in response",
+    "Backend: GET /api/inventory-ledger/snapshot - Reorder rows have all 7 expected fields",
+    "Backend: GET /api/inventory-ledger/snapshot?item=X - Item filter works",
+    "Backend: GET /api/inventory-ledger/snapshot - Missing customer_id returns 422",
+    "Backend: GET /api/inventory-ledger/snapshot - Empty/nonexistent customer returns zeros and empty arrays",
+    "Backend: GET /api/inventory-ledger/snapshot/export - Returns valid JSON body",
+    "Backend: GET /api/inventory-ledger/snapshot/export - Has Content-Disposition: attachment header",
+    "Backend: GET /api/inventory-ledger/snapshot/export - Filename format: snapshot_{name}_{timestamp}.json",
+    "Backend: GET /api/inventory-ledger/snapshot/export - Body structure matches /snapshot response",
+    "Backend: GET /api/inventory-ledger/snapshot/export - Content-Type is application/json",
+    "Backend: GET /api/inventory-ledger/snapshot/export?include_reorders=false - Respects parameter",
+    "Backend REGRESSION: Dashboard summary still works",
+    "Backend REGRESSION: Balances endpoint still works",
+    "Backend REGRESSION: Reorder recommendations still works",
+    "Backend REGRESSION: Item Settings still works",
+    "Backend REGRESSION: CSV export still works",
+    "Frontend: Login with admin/admin successful",
+    "Frontend: Navigate to Inventory Ledger page",
+    "Frontend: Hormel Foods workspace loads with 29 items, 32 balance rows",
+    "Frontend: Export Snapshot button visible on Balances tab (data-testid='inv-export-snapshot-btn')",
+    "Frontend: Export Snapshot button text is 'Export Snapshot'",
+    "Frontend: Export CSV button visible (regression)",
+    "Frontend: Import CSV button visible (regression)",
+    "Frontend: Balance table displays with STATUS column",
+    "Frontend REGRESSION: Movements tab works",
+    "Frontend REGRESSION: Incoming tab works",
+    "Frontend REGRESSION: Reorder tab works",
+    "Frontend REGRESSION: Item Settings tab works"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_snapshot_export.py",
+    "/app/test_reports/pytest/snapshot_export_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend inventory_ledger.py Lines 612-756: _build_snapshot helper correctly reuses derive_balances and dashboard-summary logic",
+    "Backend: Balance rows cleanly strip internal flags (is_short, is_low) and expose status field (OK/LOW/SHORT)",
+    "Backend: Reorder rows include all required fields: item, warehouse, available, status, recommended_qty, reorder_threshold, safety_buffer",
+    "Backend: Export endpoint correctly sets Content-Disposition header with formatted filename: snapshot_{name}_{timestamp}.json",
+    "Backend: Empty/nonexistent customer returns valid snapshot with zeros - graceful handling",
+    "Frontend InventoryLedgerPage.js Lines 213-220: Export Snapshot button correctly opens export URL in new tab",
+    "Frontend: Button uses window.open with correct URL including customer_id and include_reorders=true parameters"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_snapshot_export.py"
+  ],
+  "success_rate": {
+    "backend": "100% (25/25 tests passed)",
+    "frontend": "100% (all UI verifications passed)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://item-master-4.preview.emergentagent.com"
+  },
+  "seed_data_used": "Used existing Hormel Foods workspace (ID: 366bfcce-4d68-4daf-b9f4-cb05a35de8c8) with 29 unique items, 32 balance rows (24 OK, 3 LOW, 5 SHORT), 5 reorder recommendations.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Snapshot Export feature fully tested. Endpoints: GET /api/inventory-ledger/snapshot (returns JSON), GET /api/inventory-ledger/snapshot/export (returns downloadable JSON file). Parameters: customer_id (required), item (optional filter), include_reorders (default true). Response structure: generated_at (ISO timestamp), context (customer_id, item_filter, include_reorders), summary (9 metrics matching dashboard-summary exactly), balances (clean rows with status field), reorders (optional array). Export adds Content-Disposition header with filename format snapshot_{name}_{timestamp}.json. Frontend: Export Snapshot button on Balances tab toolbar (data-testid='inv-export-snapshot-btn').",
+  "features_verified": {
+    "backend": {
+      "snapshot_endpoint": {
+        "method": "GET",
+        "path": "/api/inventory-ledger/snapshot",
+        "parameters": {
+          "customer_id": "string (required)",
+          "item": "string (optional filter)",
+          "include_reorders": "boolean (default true)"
+        },
+        "response_fields": {
+          "generated_at": "ISO timestamp string",
+          "context": {
+            "customer_id": "string",
+            "item_filter": "string or null",
+            "include_reorders": "boolean"
+          },
+          "summary": {
+            "total_items": "int",
+            "items_ok": "int",
+            "items_low": "int",
+            "items_short": "int",
+            "total_on_hand": "float",
+            "total_incoming": "float",
+            "total_committed": "float",
+            "total_available": "float",
+            "total_reorder_recommendations": "int"
+          },
+          "balances": "array of balance rows with status field",
+          "reorders": "array (only when include_reorders=true)"
+        },
+        "balance_row_fields": ["item", "item_description", "warehouse", "ownership_type", "on_hand", "incoming", "committed", "available", "unit_of_measure", "status"],
+        "reorder_row_fields": ["item", "warehouse", "available", "status", "recommended_qty", "reorder_threshold", "safety_buffer"]
+      },
+      "export_endpoint": {
+        "method": "GET",
+        "path": "/api/inventory-ledger/snapshot/export",
+        "parameters": "same as /snapshot",
+        "headers": {
+          "Content-Type": "application/json",
+          "Content-Disposition": "attachment; filename=\"snapshot_{name}_{timestamp}.json\""
+        },
+        "filename_format": "snapshot_{customer_name}_{YYYYMMDD_HHMMSS}.json"
+      }
+    },
+    "frontend": {
+      "export_button": {
+        "testid": "inv-export-snapshot-btn",
+        "location": "Balances tab toolbar (after Import CSV button)",
+        "action": "Opens snapshot/export URL in new tab for download",
+        "icon": "FileText"
+      }
+    }
+  }
+}

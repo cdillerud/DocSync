@@ -211,6 +211,13 @@ function CustomerWorkspace({ customer }) {
                 <Upload className="w-3.5 h-3.5 mr-1" /> Import CSV
               </Button>
             )}
+            {tab === 'balances' && (
+              <Button variant="outline" size="sm" className="h-8 text-xs"
+                onClick={() => { window.open(`${API}/api/inventory-ledger/snapshot/export?customer_id=${cid}&include_reorders=true${search ? '&item=' + encodeURIComponent(search) : ''}`, '_blank'); }}
+                data-testid="inv-export-snapshot-btn">
+                <FileText className="w-3.5 h-3.5 mr-1" /> Export Snapshot
+              </Button>
+            )}
             {tab === 'movements' && (
               <Button size="sm" className="h-8 text-xs" onClick={() => setShowMovementForm(true)} data-testid="inv-new-movement-btn">
                 <Plus className="w-3.5 h-3.5 mr-1" /> New Movement

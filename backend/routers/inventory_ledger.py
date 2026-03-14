@@ -610,6 +610,145 @@ async def api_export_balances(
 
 
 # ═══════════════════════════════════════════════════════════════
+# INVENTORY SNAPSHOT
+# ═══════════════════════════════════════════════════════════════
+
+async def _build_snapshot(db, customer_id: str, item: str = "", include_reorders: bool = True):
+    """Build a read-only snapshot of current inventory state.
+
+    Reuses derive_balances, dashboard summary logic, and reorder recommendations.
+    """
+    balances = await derive_balances(db, customer_id, item=item or None)
+
+    # Summary metrics (same logic as dashboard-summary)
+    total_items = len(set(b["item"] for b in balances))
+    items_ok = items_low = items_short = 0
+    total_on_hand = total_incoming = total_committed = total_available = 0.0
+
+    for b in balances:
+        total_on_hand += b.get("on_hand", 0)
+        total_incoming += b.get("incoming", 0)
+        total_committed += b.get("committed", 0)
+        total_available += b.get("available", 0)
+        if b.get("is_short"):
+            items_short += 1
+        elif b.get("is_low"):
+            items_low += 1
+        else:
+            items_ok += 1
+
+    # Item settings for reorder logic
+    settings_docs = await db["inv_item_settings"].find(
+        {"customer_id": customer_id}, {"_id": 0}
+    ).to_list(5000)
+    settings_map = {s["item"]: s for s in settings_docs}
+
+    # Reorder count + optional reorder rows
+    reorder_count = 0
+    reorder_rows = []
+    for b in balances:
+        avail = b.get("available", 0)
+        is_short = b.get("is_short", False)
+        s = settings_map.get(b["item"])
+        threshold = s["reorder_threshold"] if s else DEFAULT_REORDER_THRESHOLD
+        buffer = s["safety_buffer"] if s else DEFAULT_SAFETY_BUFFER
+        if avail > threshold and not is_short:
+            continue
+        reorder_count += 1
+        if include_reorders:
+            rec_qty = round(max(0, threshold - avail) + buffer, 4)
+            reorder_rows.append({
+                "item": b["item"],
+                "warehouse": b.get("warehouse", "MAIN"),
+                "available": avail,
+                "status": "SHORT" if is_short else ("LOW" if b.get("is_low") else "OK"),
+                "recommended_qty": rec_qty,
+                "reorder_threshold": threshold,
+                "safety_buffer": buffer,
+            })
+
+    # Clean balance rows for snapshot (strip internal flags)
+    balance_rows = []
+    for b in balances:
+        status = "SHORT" if b.get("is_short") else ("LOW" if b.get("is_low") else "OK")
+        balance_rows.append({
+            "item": b["item"],
+            "item_description": b.get("item_description", ""),
+            "warehouse": b.get("warehouse", ""),
+            "ownership_type": b.get("ownership_type", ""),
+            "on_hand": b.get("on_hand", 0),
+            "incoming": b.get("incoming", 0),
+            "committed": b.get("committed", 0),
+            "available": b.get("available", 0),
+            "unit_of_measure": b.get("unit_of_measure", ""),
+            "status": status,
+        })
+
+    snapshot = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "context": {
+            "customer_id": customer_id,
+            "item_filter": item or None,
+            "include_reorders": include_reorders,
+        },
+        "summary": {
+            "total_items": total_items,
+            "items_ok": items_ok,
+            "items_low": items_low,
+            "items_short": items_short,
+            "total_on_hand": round(total_on_hand, 2),
+            "total_incoming": round(total_incoming, 2),
+            "total_committed": round(total_committed, 2),
+            "total_available": round(total_available, 2),
+            "total_reorder_recommendations": reorder_count,
+        },
+        "balances": balance_rows,
+    }
+    if include_reorders:
+        snapshot["reorders"] = reorder_rows
+
+    return snapshot
+
+
+@router.get("/snapshot")
+async def api_snapshot(
+    customer_id: str = Query(..., description="Customer workspace ID"),
+    item: str = Query("", description="Filter by item"),
+    include_reorders: bool = Query(True, description="Include reorder recommendations"),
+):
+    """Generate a read-only inventory snapshot for the current workspace."""
+    db = get_db()
+    return await _build_snapshot(db, customer_id, item, include_reorders)
+
+
+@router.get("/snapshot/export")
+async def api_snapshot_export(
+    customer_id: str = Query(..., description="Customer workspace ID"),
+    item: str = Query("", description="Filter by item"),
+    include_reorders: bool = Query(True, description="Include reorder recommendations"),
+):
+    """Download inventory snapshot as a JSON file."""
+    from fastapi.responses import Response
+    import json as json_mod
+
+    db = get_db()
+    cust = await get_customer(db, customer_id)
+    cust_name = cust["name"] if cust else customer_id
+
+    snapshot = await _build_snapshot(db, customer_id, item, include_reorders)
+
+    safe_name = cust_name.replace(" ", "_").replace("/", "_")[:40]
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filename = f"snapshot_{safe_name}_{ts}.json"
+
+    return Response(
+        content=json_mod.dumps(snapshot, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ═══════════════════════════════════════════════════════════════
 # REORDER RECOMMENDATIONS
 # ═══════════════════════════════════════════════════════════════
 

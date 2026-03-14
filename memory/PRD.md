@@ -3010,6 +3010,27 @@ EMAIL_CLIENT_ID=doc-workflow-test
 ### Test Results
 - Backend: 10/10 (100%)
 - Frontend: All UI flows verified (100%)
+
+---
+
+## Session Update: March 14, 2026 - BC Purchase Order Payload Export (iteration_76)
+
+### Completed
+
+#### BC PO Payload Export
+- **Backend**: `PATCH /api/inventory-ledger/po-drafts/{id}/vendor` — assigns vendor to draft
+- **Backend**: `GET /api/inventory-ledger/po-drafts/{id}/bc-export` — generates BC-compatible JSON payload
+- Payload: `{poDraftId, vendor: {vendorId, vendorName}, documentDate, source: "GPI_Hub_PO_Draft", lines: [{itemNumber, quantity, sourceReference}]}`
+- Validation: missing vendor (422), archived (422), no lines (422), not found (404)
+- **Frontend**: Vendor assignment UI (ID/Name inputs + Save), "Export for Business Central" button, Mark as Sent prompt
+- No ledger mutations, no BC API calls
+
+### Test Results
+- Backend: 18/18 (100%)
+- Frontend: All UI flows verified (100%)
+- Test report: `/app/test_reports/iteration_76.json`
+
+*Last Updated: March 14, 2026*
 - Test report: `/app/test_reports/iteration_75.json`
 
 *Last Updated: March 14, 2026*

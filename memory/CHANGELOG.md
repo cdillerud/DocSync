@@ -271,4 +271,22 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 - Frontend: "Supply" badge in PO Drafts list table for converted drafts
 - Frontend: `onSupplyCreated` callback triggers inventory view refresh after conversion
 - Backend: 10/10 tests passed, Frontend: all UI flows verified
+---
+
+## 2026-03-14: BC Purchase Order Payload Export (iteration_76)
+
+### What Was Built
+- `PATCH /api/inventory-ledger/po-drafts/{draft_id}/vendor` — assigns vendor_id and vendor_name to a PO draft
+- `GET /api/inventory-ledger/po-drafts/{draft_id}/bc-export` — generates BC-compatible JSON payload for download
+- BC payload structure: `{poDraftId, vendor: {vendorId, vendorName}, documentDate (YYYY-MM-DD), source: "GPI_Hub_PO_Draft", lines: [{itemNumber, quantity, sourceReference}]}`
+- Validation: missing vendor → 422, archived draft → 422, no lines → 422, nonexistent → 404
+- Content-Disposition header for file download (`BC-PO-{draft_id}.json`)
+- Frontend: Vendor assignment section in PO Draft detail drawer (ID/Name inputs + Save button)
+- Frontend: "No vendor assigned — required for BC export" warning when vendor missing
+- Frontend: "Export for Business Central" button (disabled until vendor assigned, hidden for archived)
+- Frontend: Mark as Sent prompt after BC export (confirm/dismiss)
+- No ledger mutations, no BC API calls — strictly payload generation
+- Backend: 18/18 tests passed, Frontend: all UI flows verified
+- Test report: `/app/test_reports/iteration_76.json`
+
 - Test report: `/app/test_reports/iteration_75.json`

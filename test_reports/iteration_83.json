@@ -1,0 +1,134 @@
+{
+  "summary": "Comprehensive testing of Sales Order Type Awareness (Warehouse vs Drop-Ship) feature. Backend: 14/14 tests passed. Frontend: All UI elements verified. order_type field works correctly with warehouse default and drop_ship setting. PATCH endpoint validates commitments before allowing drop_ship switch. bc-shipment for drop_ship records without inventory release. bc-invoice for drop_ship only requires shipment. summary returns order_type with appropriate data. reconcile correctly rejects drop_ship. UI shows order type selector, teal drop-ship summary strip, manual line entry for drop-ship, and conditional invoice section.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed_tests": [
+    "Backend: GET /sales-orders/{id}/order-type returns 'warehouse' by default",
+    "Backend: GET /sales-orders/{id}/order-type returns 'drop_ship' for drop-ship SO",
+    "Backend: PATCH /sales-orders/{id}/order-type sets order type to drop_ship (no commitments)",
+    "Backend: PATCH /sales-orders/{id}/order-type rejects invalid order_type (422)",
+    "Backend: PATCH /sales-orders/{id}/order-type can revert to warehouse",
+    "Backend: POST /reconcile-sales-order for drop_ship returns 422",
+    "Backend: POST /sales-orders/{id}/bc-shipment for drop_ship records without inventory release (total_released=0, total_recorded>0)",
+    "Backend: POST /sales-orders/{id}/bc-shipment for warehouse without commitments returns 404",
+    "Backend: POST /sales-orders/{id}/bc-invoice for drop_ship only requires shipment (no commitment checks)",
+    "Backend: POST /sales-orders/{id}/bc-invoice for drop_ship without shipment returns 422",
+    "Backend: GET /sales-orders/{id}/summary for drop_ship returns order_type='drop_ship', 0 commitments, lines=[]",
+    "Backend: GET /sales-orders/{id}/summary for drop_ship shows operational_status (pending/shipped/complete)",
+    "Backend: GET /sales-orders/{id}/summary for warehouse returns order_type='warehouse' with commitment data",
+    "Backend: PATCH to drop_ship rejected when SO has remaining commitments",
+    "Frontend: ShipmentCaptureDialog shows order type selector after loading SO",
+    "Frontend: Order type selector shows 'Warehouse' with 'Warehouse inventory' badge for warehouse orders",
+    "Frontend: Order type selector shows 'Drop-Ship' with 'No inventory impact' badge for drop-ship orders",
+    "Frontend: Drop-ship mode shows teal 'Drop-Ship Order' summary strip",
+    "Frontend: Drop-ship mode hides commitment columns table",
+    "Frontend: Drop-ship mode shows manual line entry section for shipped items",
+    "Frontend: Warehouse mode shows commitment lines table with remaining qty",
+    "Frontend: Warehouse mode hides drop-ship specific UI elements",
+    "Frontend: Invoice section appears for drop_ship after shipment (Fulfillment Complete shown)",
+    "Frontend: Shipment History shows 'drop-ship' badges for drop-ship shipments"
+  ],
+  "skipped_tests": [],
+  "test_report_links": [
+    "/app/backend/tests/test_order_type_awareness.py",
+    "/app/test_reports/pytest/order_type_awareness_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend inventory_ledger.py Lines 2307-2367: Order type endpoints with proper validation. _get_order_type returns 'warehouse' default. PATCH validates no remaining commitments before allowing drop_ship switch",
+    "Backend inventory_ledger.py Lines 2391-2483: bc-shipment endpoint handles warehouse vs drop_ship - releases inventory for warehouse, only records for drop_ship",
+    "Backend inventory_ledger.py Lines 2508-2583: bc-invoice endpoint - warehouse requires full release + shipment, drop_ship only requires shipment",
+    "Backend inventory_ledger.py Lines 2597-2643: summary endpoint returns order_type field, empty lines for drop_ship, commitment data for warehouse",
+    "Backend inventory_ledger.py Lines 2268-2293: reconcile endpoint rejects drop_ship orders (no inventory commitments to reconcile)",
+    "Frontend InventoryLedgerPage.js Lines 727-1143: ShipmentCaptureDialog with order type selector, conditional rendering for drop_ship vs warehouse"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_order_type_awareness.py"
+  ],
+  "success_rate": {
+    "backend": "100% (14/14 passed)",
+    "frontend": "100% (all UI elements verified)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://order-type-aware.preview.emergentagent.com"
+  },
+  "seed_data_used": {
+    "drop_ship_so": "SO-TEST-DROP-001 (pre-existing drop-ship with shipments and invoices, operational_status=complete)",
+    "warehouse_so": "SO-107040 (SPAM-12OZ, Committed: 200, Released: 7, Remaining: 193, operational_status=partially_shipped)"
+  },
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Order Type Awareness feature fully tested. Backend: GET/PATCH /sales-orders/{id}/order-type manage order type (default: warehouse). Drop-ship orders skip inventory logic in bc-shipment (records only), bc-invoice (only needs shipment), and summary (empty lines). Reconcile rejects drop-ship. Frontend ShipmentCaptureDialog at Lines 727-1143 shows conditional UI based on orderType state - teal summary strip for drop-ship, commitment table for warehouse.",
+  "features_verified": {
+    "backend_endpoints": {
+      "get_order_type": {
+        "method": "GET",
+        "path": "/api/inventory-ledger/sales-orders/{sales_order_id}/order-type",
+        "response": {"sales_order_id": "string", "order_type": "warehouse|drop_ship"}
+      },
+      "patch_order_type": {
+        "method": "PATCH",
+        "path": "/api/inventory-ledger/sales-orders/{sales_order_id}/order-type",
+        "request_body": {"order_type": "warehouse|drop_ship"},
+        "validation": "Rejects drop_ship if remaining committed qty > 0"
+      },
+      "bc_shipment_drop_ship": {
+        "behavior": "Records shipment without inventory release (total_released=0)",
+        "response_includes": "order_type, total_recorded"
+      },
+      "bc_invoice_drop_ship": {
+        "behavior": "Only requires shipment log (no commitment checks)",
+        "response_includes": "order_type"
+      },
+      "summary_drop_ship": {
+        "behavior": "Returns 0 commitments, empty lines array",
+        "response_includes": "order_type=drop_ship, total_committed_qty=0, lines=[]"
+      },
+      "reconcile_drop_ship": {
+        "behavior": "Returns 422 - drop-ship has no inventory commitments"
+      }
+    },
+    "frontend_components": {
+      "order_type_section": {
+        "testid": "inv-order-type-section",
+        "visible_after": "Loading SO with Load button"
+      },
+      "order_type_select": {
+        "testid": "inv-order-type-select",
+        "options": ["Warehouse", "Drop-Ship"]
+      },
+      "order_type_badge": {
+        "testid": "inv-order-type-badge",
+        "warehouse_text": "Warehouse inventory",
+        "dropship_text": "No inventory impact"
+      },
+      "dropship_summary": {
+        "testid": "inv-dropship-summary",
+        "style": "teal border and background",
+        "content": "Drop-Ship Order, Last Ship, Invoice, operational_status"
+      },
+      "warehouse_summary": {
+        "testid": "inv-shipment-summary",
+        "content": "Committed, Released, Remaining, Last Ship, operational_status"
+      },
+      "dropship_lines": {
+        "testid": "inv-dropship-lines",
+        "visible_for": "drop_ship orders only",
+        "content": "Manual line entry for Item # and Qty"
+      },
+      "shipment_lines": {
+        "testid": "inv-shipment-lines",
+        "visible_for": "warehouse orders only",
+        "content": "Commitment table with Ship Qty input"
+      }
+    }
+  }
+}

@@ -742,6 +742,10 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
   const [invNotes, setInvNotes] = useState('');
   const [submittingInv, setSubmittingInv] = useState(false);
   const [invResult, setInvResult] = useState(null);
+  const [orderType, setOrderType] = useState('warehouse');
+  const [changingType, setChangingType] = useState(false);
+  // Drop-ship manual lines
+  const [dsLines, setDsLines] = useState([{ item: '', qty_shipped: '' }]);
 
   const loadSummary = useCallback(async () => {
     if (!soId.trim()) return;
@@ -749,15 +753,23 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
     setSummary(null);
     setResult(null);
     try {
-      const res = await fetch(`${API}/api/inventory-ledger/sales-orders/${encodeURIComponent(soId.trim())}/summary`);
-      if (res.ok) {
-        const d = await res.json();
+      const [sumRes, typeRes] = await Promise.all([
+        fetch(`${API}/api/inventory-ledger/sales-orders/${encodeURIComponent(soId.trim())}/summary`),
+        fetch(`${API}/api/inventory-ledger/sales-orders/${encodeURIComponent(soId.trim())}/order-type`),
+      ]);
+      if (typeRes.ok) {
+        const td = await typeRes.json();
+        setOrderType(td.order_type || 'warehouse');
+      }
+      if (sumRes.ok) {
+        const d = await sumRes.json();
         setSummary(d);
+        if (d.order_type) setOrderType(d.order_type);
         const qtys = {};
         d.lines?.forEach(l => { if (l.remaining_committed_qty > 0) qtys[l.item] = l.remaining_committed_qty; });
         setShippedQtys(qtys);
       } else {
-        const d = await res.json();
+        const d = await sumRes.json();
         toast.error(d.detail || 'Sales order not found');
       }
     } catch { toast.error('Failed to load SO summary'); }
@@ -778,8 +790,34 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
 
   useEffect(() => { if (soId.trim()) { loadSummary(); loadLogs(); } }, []);
 
+  const changeOrderType = async (newType) => {
+    setChangingType(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/sales-orders/${encodeURIComponent(soId.trim())}/order-type`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_type: newType }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setOrderType(data.order_type);
+        toast.success(`Order type set to ${data.order_type}`);
+        loadSummary();
+      } else {
+        toast.error(data.detail || 'Failed to change order type');
+      }
+    } catch { toast.error('Failed to change order type'); }
+    finally { setChangingType(false); }
+  };
+
+  const isDropShip = orderType === 'drop_ship';
+
   const recordShipment = async () => {
-    const lines = Object.entries(shippedQtys).filter(([, q]) => q > 0).map(([item, qty]) => ({ item, qty_shipped: qty }));
+    let lines;
+    if (isDropShip) {
+      lines = dsLines.filter(l => l.item.trim() && parseFloat(l.qty_shipped) > 0).map(l => ({ item: l.item.trim(), qty_shipped: parseFloat(l.qty_shipped) }));
+    } else {
+      lines = Object.entries(shippedQtys).filter(([, q]) => q > 0).map(([item, qty]) => ({ item, qty_shipped: qty }));
+    }
     if (!lines.length) { toast.error('No lines to ship'); return; }
     setSubmitting(true);
     try {
@@ -790,7 +828,8 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
       const data = await res.json();
       if (res.ok) {
         setResult(data);
-        toast.success(`${data.total_released} line(s) released`);
+        const msg = isDropShip ? `${data.total_recorded} line(s) recorded (drop-ship)` : `${data.total_released} line(s) released`;
+        toast.success(msg);
         loadSummary();
         loadLogs();
         onShipped?.();
@@ -829,7 +868,8 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
     finally { setSubmittingInv(false); }
   };
 
-  const hasOutstanding = summary?.lines?.some(l => l.remaining_committed_qty > 0);
+  const hasOutstanding = !isDropShip && summary?.lines?.some(l => l.remaining_committed_qty > 0);
+  const canShowInvoice = isDropShip ? shipmentLogs.length > 0 : (summary?.total_remaining_committed_qty <= 0 && shipmentLogs.length > 0);
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
@@ -852,22 +892,61 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
             </Button>
           </div>
 
+          {/* Order Type Selector — visible after load */}
+          {summary && (
+            <div className="flex items-center gap-2 text-[10px]" data-testid="inv-order-type-section">
+              <span className="text-muted-foreground font-medium">Order Type:</span>
+              <Select value={orderType} onValueChange={changeOrderType} disabled={changingType}>
+                <SelectTrigger className="h-6 w-[130px] text-[10px]" data-testid="inv-order-type-select">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="warehouse">
+                    <span className="flex items-center gap-1"><Warehouse className="w-3 h-3" /> Warehouse</span>
+                  </SelectItem>
+                  <SelectItem value="drop_ship">
+                    <span className="flex items-center gap-1"><Truck className="w-3 h-3" /> Drop-Ship</span>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <Badge variant={isDropShip ? 'secondary' : 'outline'} className="text-[8px]" data-testid="inv-order-type-badge">
+                {isDropShip ? 'No inventory impact' : 'Warehouse inventory'}
+              </Badge>
+              {changingType && <Loader2 className="w-3 h-3 animate-spin" />}
+            </div>
+          )}
+
           {/* Summary */}
           {summary && (
             <>
-              <div className="flex gap-3 text-[10px] text-muted-foreground border border-border rounded p-2" data-testid="inv-shipment-summary">
-                <span>Committed: <strong>{summary.total_committed_qty?.toLocaleString()}</strong></span>
-                <span>Released: <strong className="text-green-600">{summary.total_released_qty?.toLocaleString()}</strong></span>
-                <span>Remaining: <strong className={summary.total_remaining_committed_qty > 0 ? 'text-amber-600' : 'text-green-600'}>{summary.total_remaining_committed_qty?.toLocaleString()}</strong></span>
-                {summary.latest_bc_shipment_number && <span>Last Ship: <strong className="text-blue-600">{summary.latest_bc_shipment_number}</strong></span>}
-                {summary.latest_bc_invoice_number && <span>Invoice: <strong className="text-purple-600">{summary.latest_bc_invoice_number}</strong></span>}
-                {summary.operational_status && (
-                  <Badge variant={summary.operational_status === 'complete' ? 'default' : summary.operational_status === 'shipped' ? 'outline' : 'secondary'} className="text-[8px]" data-testid="inv-so-operational-status">{summary.operational_status}</Badge>
-                )}
-              </div>
+              {/* Warehouse summary strip */}
+              {!isDropShip && (
+                <div className="flex gap-3 text-[10px] text-muted-foreground border border-border rounded p-2" data-testid="inv-shipment-summary">
+                  <span>Committed: <strong>{summary.total_committed_qty?.toLocaleString()}</strong></span>
+                  <span>Released: <strong className="text-green-600">{summary.total_released_qty?.toLocaleString()}</strong></span>
+                  <span>Remaining: <strong className={summary.total_remaining_committed_qty > 0 ? 'text-amber-600' : 'text-green-600'}>{summary.total_remaining_committed_qty?.toLocaleString()}</strong></span>
+                  {summary.latest_bc_shipment_number && <span>Last Ship: <strong className="text-blue-600">{summary.latest_bc_shipment_number}</strong></span>}
+                  {summary.latest_bc_invoice_number && <span>Invoice: <strong className="text-purple-600">{summary.latest_bc_invoice_number}</strong></span>}
+                  {summary.operational_status && (
+                    <Badge variant={summary.operational_status === 'complete' ? 'default' : summary.operational_status === 'shipped' ? 'outline' : 'secondary'} className="text-[8px]" data-testid="inv-so-operational-status">{summary.operational_status}</Badge>
+                  )}
+                </div>
+              )}
 
-              {/* Lines */}
-              {summary.lines?.length > 0 && (
+              {/* Drop-ship summary strip */}
+              {isDropShip && (
+                <div className="flex gap-3 text-[10px] text-muted-foreground border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 rounded p-2" data-testid="inv-dropship-summary">
+                  <span className="font-medium text-teal-700 dark:text-teal-300">Drop-Ship Order</span>
+                  {summary.latest_bc_shipment_number && <span>Last Ship: <strong className="text-blue-600">{summary.latest_bc_shipment_number}</strong></span>}
+                  {summary.latest_bc_invoice_number && <span>Invoice: <strong className="text-purple-600">{summary.latest_bc_invoice_number}</strong></span>}
+                  {summary.operational_status && (
+                    <Badge variant={summary.operational_status === 'complete' ? 'default' : summary.operational_status === 'shipped' ? 'outline' : 'secondary'} className="text-[8px]" data-testid="inv-so-operational-status">{summary.operational_status}</Badge>
+                  )}
+                </div>
+              )}
+
+              {/* Warehouse: Lines table */}
+              {!isDropShip && summary.lines?.length > 0 && (
                 <div className="border border-border rounded overflow-hidden" data-testid="inv-shipment-lines">
                   <table className="w-full text-[10px]">
                     <thead className="bg-muted/30">
@@ -902,8 +981,33 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
                 </div>
               )}
 
-              {/* BC Fields */}
-              {hasOutstanding && (
+              {/* Drop-ship: Manual line entry */}
+              {isDropShip && !summary.is_fulfillment_complete && (
+                <div className="space-y-2 border border-teal-200 dark:border-teal-800 rounded p-2.5" data-testid="inv-dropship-lines">
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Shipped Items (manual entry)</p>
+                  {dsLines.map((line, i) => (
+                    <div key={i} className="flex gap-2 items-center" data-testid={`inv-ds-line-${i}`}>
+                      <Input className="h-6 text-[10px] flex-1 font-mono" placeholder="Item #" value={line.item}
+                        onChange={e => { const n = [...dsLines]; n[i] = { ...n[i], item: e.target.value }; setDsLines(n); }}
+                        data-testid={`inv-ds-item-${i}`} />
+                      <Input className="h-6 text-[10px] w-20 text-right font-mono" type="number" min={0} placeholder="Qty" value={line.qty_shipped}
+                        onChange={e => { const n = [...dsLines]; n[i] = { ...n[i], qty_shipped: e.target.value }; setDsLines(n); }}
+                        data-testid={`inv-ds-qty-${i}`} />
+                      {dsLines.length > 1 && (
+                        <Button variant="ghost" size="icon" className="h-6 w-6 text-red-500" onClick={() => setDsLines(dsLines.filter((_, j) => j !== i))}>
+                          <RotateCcw className="w-3 h-3" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                  <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={() => setDsLines([...dsLines, { item: '', qty_shipped: '' }])} data-testid="inv-ds-add-line">
+                    <Plus className="w-3 h-3 mr-1" /> Add Line
+                  </Button>
+                </div>
+              )}
+
+              {/* BC Fields — for warehouse (outstanding) or drop-ship (always when not complete) */}
+              {(hasOutstanding || (isDropShip && !summary.is_fulfillment_complete)) && (
                 <div className="space-y-2" data-testid="inv-shipment-bc-fields">
                   <div className="flex gap-2">
                     <div className="flex-1 space-y-1">
@@ -921,7 +1025,7 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
                   </div>
                   <Button size="sm" className="h-7 text-[10px] w-full bg-emerald-600 hover:bg-emerald-700 text-white" disabled={submitting} onClick={recordShipment} data-testid="inv-shipment-confirm">
                     {submitting ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Package className="w-3 h-3 mr-1" />}
-                    Record Shipment
+                    {isDropShip ? 'Record Drop-Ship' : 'Record Shipment'}
                   </Button>
                 </div>
               )}
@@ -929,9 +1033,12 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
               {/* Result */}
               {result && (
                 <div className="border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20 rounded p-2.5 text-xs space-y-1" data-testid="inv-shipment-result">
-                  <p className="font-medium text-green-700 dark:text-green-300">Shipment Recorded — {result.shipment_id}</p>
+                  <p className="font-medium text-green-700 dark:text-green-300">
+                    {isDropShip ? 'Drop-Ship Recorded' : 'Shipment Recorded'} — {result.shipment_id}
+                  </p>
                   <div className="flex gap-3 text-[10px]">
-                    <span>Released: <strong>{result.total_released}</strong></span>
+                    {!isDropShip && <span>Released: <strong>{result.total_released}</strong></span>}
+                    {isDropShip && <span>Recorded: <strong>{result.total_recorded}</strong></span>}
                     {result.total_skipped > 0 && <span>Skipped: <strong>{result.total_skipped}</strong></span>}
                     {result.total_errors > 0 && <span className="text-red-600">Errors: <strong>{result.total_errors}</strong></span>}
                   </div>
@@ -948,6 +1055,7 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
                       <div key={log.shipment_id || i} className="border-b border-border/20 last:border-b-0 p-2 text-[10px]" data-testid={`inv-shipment-log-${i}`}>
                         <div className="flex items-center gap-2">
                           <Badge variant="outline" className="text-[8px] font-mono">{log.shipment_id}</Badge>
+                          {log.order_type === 'drop_ship' && <Badge variant="secondary" className="text-[7px]">drop-ship</Badge>}
                           {log.bc_shipment_number && <span className="font-mono text-blue-600">{log.bc_shipment_number}</span>}
                           <span className="text-muted-foreground">{log.shipped_at ? new Date(log.shipped_at).toLocaleString() : '—'}</span>
                         </div>
@@ -964,7 +1072,7 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
               )}
 
               {/* Invoice Section */}
-              {summary.total_remaining_committed_qty <= 0 && shipmentLogs.length > 0 && (
+              {canShowInvoice && (
                 <div className="space-y-2" data-testid="inv-invoice-section">
                   <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Invoice Capture</p>
                   {!summary.is_fulfillment_complete && (
@@ -2143,7 +2251,7 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
                       </div>
                     )}
                   </div>
-                )}}
+                )}
               </div>
             )}
 

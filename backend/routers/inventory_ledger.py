@@ -2271,8 +2271,15 @@ async def api_reconcile_sales_order(body: ReconcileSOReq):
 
     When cancelled=true, releases all remaining net commitments.
     When cancelled=false, adjusts per-line: creates delta commitments or releases.
+    Drop-ship orders are rejected — they have no inventory commitments.
     """
     db = get_db()
+    order_type = await _get_order_type(db, body.sales_order_id)
+    if order_type == "drop_ship":
+        raise HTTPException(
+            status_code=422,
+            detail="Drop-ship orders have no inventory commitments to reconcile.",
+        )
     try:
         from services.inventory_so_integration import reconcile_sales_order
         result = await reconcile_sales_order(
@@ -2294,11 +2301,79 @@ incoming_supply_router = APIRouter(prefix="/incoming-supply", tags=["Incoming Su
 
 
 # ═══════════════════════════════════════════════════════════════
+# SO ORDER TYPE
+# ═══════════════════════════════════════════════════════════════
+
+VALID_ORDER_TYPES = ("warehouse", "drop_ship")
+
+
+async def _get_order_type(db, sales_order_id: str) -> str:
+    """Return the order type for a sales order. Default: warehouse."""
+    doc = await db[SO_ORDER_TYPES_COLL].find_one(
+        {"sales_order_id": sales_order_id}, {"_id": 0, "order_type": 1}
+    )
+    return doc["order_type"] if doc else "warehouse"
+
+
+class OrderTypeIn(BaseModel):
+    order_type: str = Field(..., description="warehouse or drop_ship")
+
+
+@router.patch("/sales-orders/{sales_order_id}/order-type")
+async def api_set_order_type(sales_order_id: str, body: OrderTypeIn):
+    """Set or update the order type for a Sales Order."""
+    if body.order_type not in VALID_ORDER_TYPES:
+        raise HTTPException(status_code=422, detail=f"Invalid order_type. Use: {', '.join(VALID_ORDER_TYPES)}")
+
+    db = get_db()
+
+    # Verify SO exists via any movement
+    sample = await db[MOVEMENTS_COLL].find_one(
+        {"reference_id": sales_order_id, "movement_type": {"$in": ["order_commitment", "order_release"]}},
+        {"_id": 0, "customer_id": 1},
+    )
+
+    # If switching TO drop_ship, check no remaining commitment
+    if body.order_type == "drop_ship" and sample:
+        pipeline = [
+            {"$match": {"reference_id": sales_order_id, "movement_type": {"$in": ["order_commitment", "order_release"]}}},
+            {"$group": {"_id": "$movement_type", "total": {"$sum": "$quantity_delta"}}},
+        ]
+        agg = await db[MOVEMENTS_COLL].aggregate(pipeline).to_list(5)
+        committed = sum(abs(a["total"]) for a in agg if a["_id"] == "order_commitment")
+        released = sum(abs(a["total"]) for a in agg if a["_id"] == "order_release")
+        remaining = round(committed - released, 4)
+        if remaining > 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Cannot change to drop_ship: {remaining} qty still committed in warehouse. Release all commitments first.",
+            )
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db[SO_ORDER_TYPES_COLL].update_one(
+        {"sales_order_id": sales_order_id},
+        {"$set": {"sales_order_id": sales_order_id, "order_type": body.order_type, "set_at": now}},
+        upsert=True,
+    )
+
+    return {"sales_order_id": sales_order_id, "order_type": body.order_type, "set_at": now}
+
+
+@router.get("/sales-orders/{sales_order_id}/order-type")
+async def api_get_order_type(sales_order_id: str):
+    """Return the order type for a sales order."""
+    db = get_db()
+    order_type = await _get_order_type(db, sales_order_id)
+    return {"sales_order_id": sales_order_id, "order_type": order_type}
+
+
+# ═══════════════════════════════════════════════════════════════
 # BC SHIPMENT CAPTURE
 # ═══════════════════════════════════════════════════════════════
 
 BC_SHIPMENT_LOGS_COLL = "bc_shipment_logs"
 BC_INVOICE_LOGS_COLL = "bc_invoice_logs"
+SO_ORDER_TYPES_COLL = "so_order_types"
 
 
 class ShipmentLineIn(BaseModel):
@@ -2317,116 +2392,94 @@ class BCShipmentIn(BaseModel):
 async def api_bc_shipment_capture(sales_order_id: str, body: BCShipmentIn):
     """Record that a BC Sales Order has been shipped.
 
-    Uses the existing release_order_commitments pipeline to clear
-    committed inventory. Supports full and partial shipment.
-    Does NOT call BC APIs or create BC records.
+    For warehouse orders: uses release_order_commitments to clear inventory.
+    For drop_ship orders: records shipment without inventory effects.
     """
     import uuid as _uuid
-    from services.inventory_so_integration import release_order_commitments
 
     db = get_db()
-
-    # Find commitments for this SO — get workspace_id and net committed per item
-    commit_pipeline = [
-        {"$match": {"movement_type": {"$in": ["order_commitment", "order_release"]}, "reference_id": sales_order_id}},
-        {"$group": {
-            "_id": {"item": "$item", "mt": "$movement_type"},
-            "total": {"$sum": "$quantity_delta"},
-            "cust": {"$first": "$customer_id"},
-        }},
-    ]
-    raw = await db[MOVEMENTS_COLL].aggregate(commit_pipeline).to_list(500)
-    if not raw:
-        raise HTTPException(status_code=404, detail=f"No order commitments found for sales order '{sales_order_id}'")
-
-    # Build per-item net committed
-    commitments = {}
-    releases = {}
-    workspace_id = None
-    for r in raw:
-        it = r["_id"]["item"]
-        mt = r["_id"]["mt"]
-        if not workspace_id:
-            workspace_id = r["cust"]
-        if mt == "order_commitment":
-            commitments[it] = commitments.get(it, 0) + abs(r["total"])
-        else:
-            releases[it] = releases.get(it, 0) + abs(r["total"])
-
-    net_committed = {}
-    for it in set(list(commitments.keys()) + list(releases.keys())):
-        net = round(commitments.get(it, 0) - releases.get(it, 0), 4)
-        if net > 0:
-            net_committed[it] = net
-
+    order_type = await _get_order_type(db, sales_order_id)
     now = datetime.now(timezone.utc).isoformat()
     results = []
     errors = []
-    release_lines = []
+    workspace_id = ""
 
-    for line in body.shipped_lines:
-        item = line.item.strip()
-        qty = line.qty_shipped
-        outstanding = net_committed.get(item, 0)
+    if order_type == "drop_ship":
+        # Drop-ship: record shipment without inventory release
+        for line in body.shipped_lines:
+            results.append({"item": line.item.strip(), "status": "recorded", "qty_shipped": line.qty_shipped, "note": "Drop-ship: no warehouse release"})
+    else:
+        # Warehouse: use existing release pipeline
+        from services.inventory_so_integration import release_order_commitments
 
-        if outstanding <= 0:
-            results.append({"item": item, "status": "skipped", "reason": "No outstanding commitment (already fully released)"})
-            continue
+        commit_pipeline = [
+            {"$match": {"movement_type": {"$in": ["order_commitment", "order_release"]}, "reference_id": sales_order_id}},
+            {"$group": {"_id": {"item": "$item", "mt": "$movement_type"}, "total": {"$sum": "$quantity_delta"}, "cust": {"$first": "$customer_id"}}},
+        ]
+        raw = await db[MOVEMENTS_COLL].aggregate(commit_pipeline).to_list(500)
+        if not raw:
+            raise HTTPException(status_code=404, detail=f"No order commitments found for warehouse sales order '{sales_order_id}'")
 
-        if qty > outstanding:
-            errors.append({"item": item, "error": f"Over-shipment: shipped {qty} > outstanding committed {outstanding}"})
-            continue
+        commitments = {}
+        releases = {}
+        for r in raw:
+            it, mt = r["_id"]["item"], r["_id"]["mt"]
+            if not workspace_id:
+                workspace_id = r["cust"]
+            if mt == "order_commitment":
+                commitments[it] = commitments.get(it, 0) + abs(r["total"])
+            else:
+                releases[it] = releases.get(it, 0) + abs(r["total"])
 
-        release_lines.append({"item": item, "qty": qty})
+        net_committed = {}
+        for it in set(list(commitments.keys()) + list(releases.keys())):
+            net = round(commitments.get(it, 0) - releases.get(it, 0), 4)
+            if net > 0:
+                net_committed[it] = net
 
-    if errors and not release_lines:
-        raise HTTPException(status_code=422, detail={"message": "Shipment capture failed", "errors": errors})
+        release_lines = []
+        for line in body.shipped_lines:
+            item, qty = line.item.strip(), line.qty_shipped
+            outstanding = net_committed.get(item, 0)
+            if outstanding <= 0:
+                results.append({"item": item, "status": "skipped", "reason": "No outstanding commitment (already fully released)"})
+                continue
+            if qty > outstanding:
+                errors.append({"item": item, "error": f"Over-shipment: shipped {qty} > outstanding committed {outstanding}"})
+                continue
+            release_lines.append({"item": item, "qty": qty})
 
-    # Use existing release pipeline
-    release_result = None
-    if release_lines:
-        try:
-            release_result = await release_order_commitments(
-                db,
-                sales_order_id=sales_order_id,
-                lines=release_lines,
-                created_by="bc_shipment_capture",
-            )
-            for i, line in enumerate(release_lines):
-                results.append({
-                    "item": line["item"],
-                    "status": "released",
-                    "qty_shipped": line["qty"],
-                    "movement_id": release_result["movement_ids"][i] if i < len(release_result.get("movement_ids", [])) else None,
-                })
-        except ValueError as e:
-            raise HTTPException(status_code=422, detail=str(e))
+        if errors and not release_lines:
+            raise HTTPException(status_code=422, detail={"message": "Shipment capture failed", "errors": errors})
+
+        if release_lines:
+            try:
+                release_result = await release_order_commitments(db, sales_order_id=sales_order_id, lines=release_lines, created_by="bc_shipment_capture")
+                for i, rl in enumerate(release_lines):
+                    results.append({"item": rl["item"], "status": "released", "qty_shipped": rl["qty"],
+                        "movement_id": release_result["movement_ids"][i] if i < len(release_result.get("movement_ids", [])) else None})
+            except ValueError as e:
+                raise HTTPException(status_code=422, detail=str(e))
 
     # Create shipment log entry
     log_entry = {
         "shipment_id": f"SHP-{_uuid.uuid4().hex[:8].upper()}",
-        "sales_order_id": sales_order_id,
-        "customer_id": workspace_id,
-        "bc_shipment_number": body.bc_shipment_number.strip(),
-        "bc_document_id": body.bc_document_id.strip(),
-        "shipped_at": now,
-        "shipment_notes": body.shipment_notes.strip(),
-        "shipped_lines": [{"item": l["item"], "qty_shipped": l["qty"]} for l in release_lines],
-        "results": results,
-        "errors": errors,
+        "sales_order_id": sales_order_id, "customer_id": workspace_id, "order_type": order_type,
+        "bc_shipment_number": body.bc_shipment_number.strip(), "bc_document_id": body.bc_document_id.strip(),
+        "shipped_at": now, "shipment_notes": body.shipment_notes.strip(),
+        "shipped_lines": [{"item": l.item.strip(), "qty_shipped": l.qty_shipped} for l in body.shipped_lines],
+        "results": results, "errors": errors,
     }
     await db[BC_SHIPMENT_LOGS_COLL].insert_one(log_entry.copy())
     log_entry.pop("_id", None)
 
     return {
-        "sales_order_id": sales_order_id,
-        "shipment_id": log_entry["shipment_id"],
+        "sales_order_id": sales_order_id, "order_type": order_type, "shipment_id": log_entry["shipment_id"],
         "bc_shipment_number": body.bc_shipment_number.strip(),
         "total_released": sum(1 for r in results if r.get("status") == "released"),
+        "total_recorded": sum(1 for r in results if r.get("status") == "recorded"),
         "total_skipped": sum(1 for r in results if r.get("status") == "skipped"),
-        "total_errors": len(errors),
-        "results": results,
-        "errors": errors,
+        "total_errors": len(errors), "results": results, "errors": errors,
     }
 
 
@@ -2458,50 +2511,66 @@ async def api_bc_invoice_capture(sales_order_id: str, body: BCInvoiceIn):
 
     Informational only. Does NOT create ledger movements,
     accounting entries, or call BC APIs.
+    For drop_ship orders: only requires shipment log (no commitment checks).
     """
     import uuid as _uuid
 
     db = get_db()
+    order_type = await _get_order_type(db, sales_order_id)
+    customer_id = ""
 
-    # Verify SO exists via commitments
-    sample = await db[MOVEMENTS_COLL].find_one(
-        {"movement_type": "order_commitment", "reference_id": sales_order_id},
-        {"_id": 0, "customer_id": 1},
-    )
-    if not sample:
-        raise HTTPException(status_code=404, detail=f"No order commitments found for '{sales_order_id}'")
-
-    # Check remaining committed qty — must be fully released to invoice
-    pipeline = [
-        {"$match": {"reference_id": sales_order_id, "movement_type": {"$in": ["order_commitment", "order_release"]}}},
-        {"$group": {"_id": "$movement_type", "total": {"$sum": "$quantity_delta"}}},
-    ]
-    agg = await db[MOVEMENTS_COLL].aggregate(pipeline).to_list(5)
-    committed = 0
-    released = 0
-    for a in agg:
-        if a["_id"] == "order_commitment":
-            committed = abs(a["total"])
-        elif a["_id"] == "order_release":
-            released = abs(a["total"])
-    remaining = round(committed - released, 4)
-
-    if remaining > 0:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Cannot invoice: {remaining} qty still committed. Ship all committed quantity first.",
+    if order_type == "drop_ship":
+        # Drop-ship: only verify shipment exists, no commitment checks
+        shipment_count = await db[BC_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
+        if shipment_count == 0:
+            raise HTTPException(status_code=422, detail="No shipment activity recorded. Record shipment before invoicing.")
+        # Try to find customer_id from shipment logs
+        ship_log = await db[BC_SHIPMENT_LOGS_COLL].find_one(
+            {"sales_order_id": sales_order_id}, {"_id": 0, "customer_id": 1}
         )
+        customer_id = ship_log.get("customer_id", "") if ship_log else ""
+    else:
+        # Warehouse: verify SO exists via commitments
+        sample = await db[MOVEMENTS_COLL].find_one(
+            {"movement_type": "order_commitment", "reference_id": sales_order_id},
+            {"_id": 0, "customer_id": 1},
+        )
+        if not sample:
+            raise HTTPException(status_code=404, detail=f"No order commitments found for '{sales_order_id}'")
+        customer_id = sample["customer_id"]
 
-    # Verify shipment activity exists
-    shipment_count = await db[BC_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
-    if shipment_count == 0:
-        raise HTTPException(status_code=422, detail="No shipment activity recorded. Record shipment before invoicing.")
+        # Check remaining committed qty — must be fully released to invoice
+        pipeline = [
+            {"$match": {"reference_id": sales_order_id, "movement_type": {"$in": ["order_commitment", "order_release"]}}},
+            {"$group": {"_id": "$movement_type", "total": {"$sum": "$quantity_delta"}}},
+        ]
+        agg = await db[MOVEMENTS_COLL].aggregate(pipeline).to_list(5)
+        committed = 0
+        released = 0
+        for a in agg:
+            if a["_id"] == "order_commitment":
+                committed = abs(a["total"])
+            elif a["_id"] == "order_release":
+                released = abs(a["total"])
+        remaining = round(committed - released, 4)
+
+        if remaining > 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Cannot invoice: {remaining} qty still committed. Ship all committed quantity first.",
+            )
+
+        # Verify shipment activity exists
+        shipment_count = await db[BC_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
+        if shipment_count == 0:
+            raise HTTPException(status_code=422, detail="No shipment activity recorded. Record shipment before invoicing.")
 
     now = datetime.now(timezone.utc).isoformat()
     log_entry = {
         "invoice_log_id": f"INV-{_uuid.uuid4().hex[:8].upper()}",
         "sales_order_id": sales_order_id,
-        "customer_id": sample["customer_id"],
+        "customer_id": customer_id,
+        "order_type": order_type,
         "bc_invoice_number": body.bc_invoice_number.strip(),
         "bc_document_id": body.bc_document_id.strip(),
         "invoice_date": body.invoice_date.strip() or now[:10],
@@ -2527,10 +2596,53 @@ async def api_list_invoice_logs(sales_order_id: str):
 
 @router.get("/sales-orders/{sales_order_id}/summary")
 async def api_sales_order_summary(sales_order_id: str):
-    """Return a summary of commitment/release status for a sales order."""
+    """Return a summary of commitment/release status for a sales order.
+
+    For drop_ship orders, returns shipment/invoice logs only (no commitment data).
+    """
     from services.inventory_so_integration import _get_net_committed
 
     db = get_db()
+    order_type = await _get_order_type(db, sales_order_id)
+
+    if order_type == "drop_ship":
+        # Drop-ship: no commitment data, just shipment/invoice log summary
+        latest_shipment = await db[BC_SHIPMENT_LOGS_COLL].find_one(
+            {"sales_order_id": sales_order_id}, {"_id": 0},
+            sort=[("shipped_at", -1)],
+        )
+        latest_invoice = await db[BC_INVOICE_LOGS_COLL].find_one(
+            {"sales_order_id": sales_order_id}, {"_id": 0},
+            sort=[("captured_at", -1)],
+        )
+        shipment_count = await db[BC_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
+        invoice_count = await db[BC_INVOICE_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
+        has_shipment = shipment_count > 0
+        has_invoice = invoice_count > 0
+        if has_invoice:
+            operational_status = "complete"
+        elif has_shipment:
+            operational_status = "shipped"
+        else:
+            operational_status = "pending"
+        customer_id = (latest_shipment or {}).get("customer_id", "")
+        return {
+            "sales_order_id": sales_order_id,
+            "customer_id": customer_id,
+            "order_type": order_type,
+            "total_committed_qty": 0,
+            "total_released_qty": 0,
+            "total_remaining_committed_qty": 0,
+            "latest_bc_shipment_number": latest_shipment.get("bc_shipment_number", "") if latest_shipment else "",
+            "latest_bc_shipped_at": latest_shipment.get("shipped_at", "") if latest_shipment else "",
+            "latest_bc_invoice_number": latest_invoice.get("bc_invoice_number", "") if latest_invoice else "",
+            "latest_bc_invoice_at": latest_invoice.get("captured_at", "") if latest_invoice else "",
+            "operational_status": operational_status,
+            "is_fulfillment_complete": operational_status == "complete",
+            "lines": [],
+        }
+
+    # Warehouse orders: existing behavior
     sample = await db[MOVEMENTS_COLL].find_one(
         {"movement_type": "order_commitment", "reference_id": sales_order_id},
         {"_id": 0, "customer_id": 1},
@@ -2606,6 +2718,7 @@ async def api_sales_order_summary(sales_order_id: str):
     return {
         "sales_order_id": sales_order_id,
         "customer_id": workspace_id,
+        "order_type": "warehouse",
         "total_committed_qty": total_committed,
         "total_released_qty": total_released,
         "total_remaining_committed_qty": total_remaining,

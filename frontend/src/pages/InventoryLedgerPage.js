@@ -301,7 +301,7 @@ function CustomerWorkspace({ customer }) {
       )}
       {/* PO Draft Detail Drawer */}
       {viewDraftId && (
-        <PODraftDetailDrawer draftId={viewDraftId} onClose={() => setViewDraftId(null)} />
+        <PODraftDetailDrawer draftId={viewDraftId} onClose={() => setViewDraftId(null)} onSupplyCreated={refresh} />
       )}
     </div>
   );
@@ -1223,7 +1223,10 @@ function PODraftsPanel({ customerId, onViewDraft }) {
                 </td>
                 <td className="py-1.5 px-3 text-muted-foreground">{d.created_at ? new Date(d.created_at).toLocaleString() : '—'}</td>
                 <td className="py-1.5 px-3 text-center">
-                  <Badge variant={d.status === 'draft' ? 'outline' : d.status === 'sent' ? 'default' : 'secondary'} className="text-[9px]">{d.status}</Badge>
+                  <div className="flex items-center justify-center gap-1">
+                    <Badge variant={d.status === 'draft' ? 'outline' : d.status === 'sent' ? 'default' : 'secondary'} className="text-[9px]">{d.status}</Badge>
+                    {d.incoming_supply_created && <Badge className="text-[8px] bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300" data-testid={`inv-po-draft-supply-badge-${i}`}><Truck className="w-2.5 h-2.5 mr-0.5" />Supply</Badge>}
+                  </div>
                 </td>
                 <td className="py-1.5 px-3 text-right font-bold">{d.total_lines}</td>
                 <td className="py-1.5 px-3 text-right font-mono">{d.total_qty?.toLocaleString()}</td>
@@ -1246,10 +1249,12 @@ function PODraftsPanel({ customerId, onViewDraft }) {
 /* PO DRAFT DETAIL DRAWER                                            */
 /* ════════════════════════════════════════════════════════════════ */
 
-function PODraftDetailDrawer({ draftId, onClose }) {
+function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
   const [draft, setDraft] = useState(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
+  const [converting, setConverting] = useState(false);
+  const [conversionResult, setConversionResult] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -1275,6 +1280,27 @@ function PODraftDetailDrawer({ draftId, onClose }) {
     finally { setUpdating(false); }
   };
 
+  const createIncomingSupply = async () => {
+    setConverting(true);
+    setConversionResult(null);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/po-drafts/${draftId}/create-incoming-supply`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        setConversionResult(data);
+        setDraft(prev => prev ? { ...prev, incoming_supply_created: true, incoming_supply_created_at: new Date().toISOString(), incoming_supply_ids: data.created_supply_ids } : prev);
+        toast.success(`Created ${data.rows_created} incoming supply record(s)`);
+        onSupplyCreated?.();
+      } else {
+        toast.error(data.detail || 'Conversion failed');
+      }
+    } catch { toast.error('Failed to create incoming supply'); }
+    finally { setConverting(false); }
+  };
+
+  const supplyAlreadyCreated = draft?.incoming_supply_created;
+  const canConvert = draft && !supplyAlreadyCreated && draft.status !== 'archived' && draft.lines?.length > 0;
+
   return (
     <Dialog open={true} onOpenChange={onClose}>
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto" data-testid="inv-po-draft-detail">
@@ -1298,7 +1324,14 @@ function PODraftDetailDrawer({ draftId, onClose }) {
               </div>
               <div className="space-y-1">
                 <p className="text-[10px] text-muted-foreground">Status</p>
-                <Badge variant={draft.status === 'draft' ? 'outline' : draft.status === 'sent' ? 'default' : 'secondary'} className="text-[9px]" data-testid="inv-po-draft-detail-status">{draft.status}</Badge>
+                <div className="flex items-center gap-1.5">
+                  <Badge variant={draft.status === 'draft' ? 'outline' : draft.status === 'sent' ? 'default' : 'secondary'} className="text-[9px]" data-testid="inv-po-draft-detail-status">{draft.status}</Badge>
+                  {supplyAlreadyCreated && (
+                    <Badge className="text-[9px] bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300" data-testid="inv-po-draft-supply-created-badge">
+                      <Truck className="w-2.5 h-2.5 mr-0.5" /> Supply Created
+                    </Badge>
+                  )}
+                </div>
               </div>
               <div className="space-y-1">
                 <p className="text-[10px] text-muted-foreground">Created</p>
@@ -1309,6 +1342,35 @@ function PODraftDetailDrawer({ draftId, onClose }) {
                 <p className="text-xs">{draft.customer_name || draft.customer_id}</p>
               </div>
             </div>
+
+            {/* Supply Created Info */}
+            {supplyAlreadyCreated && (
+              <div className="border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20 rounded p-2.5 text-xs space-y-1" data-testid="inv-po-draft-supply-info">
+                <p className="font-medium text-green-700 dark:text-green-300"><ShieldCheck className="w-3 h-3 inline mr-1" />Incoming supply has been created from this draft</p>
+                {draft.incoming_supply_created_at && <p className="text-[10px] text-green-600 dark:text-green-400">Converted: {new Date(draft.incoming_supply_created_at).toLocaleString()}</p>}
+                {draft.incoming_supply_ids?.length > 0 && <p className="text-[10px] text-green-600 dark:text-green-400">{draft.incoming_supply_ids.length} supply record(s) created</p>}
+              </div>
+            )}
+
+            {/* Conversion Result */}
+            {conversionResult && (
+              <div className="border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 rounded p-2.5 text-xs space-y-1.5" data-testid="inv-po-draft-conversion-result">
+                <p className="font-medium text-blue-700 dark:text-blue-300">Conversion Complete</p>
+                <div className="flex gap-3">
+                  <span>Processed: <strong>{conversionResult.rows_processed}</strong></span>
+                  <span>Created: <strong className="text-green-600">{conversionResult.rows_created}</strong></span>
+                  {conversionResult.rows_skipped > 0 && <span>Skipped: <strong className="text-amber-600">{conversionResult.rows_skipped}</strong></span>}
+                </div>
+                {conversionResult.messages?.map((m, i) => (
+                  <div key={i} className="flex items-center gap-2 text-[10px]">
+                    <span className="font-mono font-bold">{m.item}</span>
+                    <Badge variant={m.status === 'created' ? 'default' : 'secondary'} className="text-[8px]">{m.status}</Badge>
+                    {m.qty && <span>qty: {m.qty}</span>}
+                    {m.reason && <span className="text-muted-foreground">{m.reason}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Summary */}
             <div className="flex gap-4 text-xs border border-border rounded p-2.5">
@@ -1345,7 +1407,16 @@ function PODraftDetailDrawer({ draftId, onClose }) {
             </div>
 
             {/* Actions */}
-            <div className="flex gap-2 pt-1" data-testid="inv-po-draft-actions">
+            <div className="flex flex-wrap gap-2 pt-1" data-testid="inv-po-draft-actions">
+              {canConvert && (
+                <Button size="sm" className="h-7 text-[10px] bg-green-600 hover:bg-green-700 text-white"
+                  disabled={converting}
+                  onClick={createIncomingSupply}
+                  data-testid="inv-po-draft-create-supply">
+                  {converting ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Truck className="w-3 h-3 mr-1" />}
+                  Create Incoming Supply
+                </Button>
+              )}
               <Button variant="outline" size="sm" className="h-7 text-[10px]"
                 onClick={() => window.open(`${API}/api/inventory-ledger/po-drafts/${draftId}/export`, '_blank')}
                 data-testid="inv-po-draft-export">

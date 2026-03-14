@@ -744,8 +744,25 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
   const [invResult, setInvResult] = useState(null);
   const [orderType, setOrderType] = useState('warehouse');
   const [changingType, setChangingType] = useState(false);
-  // Drop-ship manual lines
+  // Drop-ship manual lines for BC shipment
   const [dsLines, setDsLines] = useState([{ item: '', qty_shipped: '' }]);
+  // Drop-ship PO draft state
+  const [dsPODrafts, setDsPODrafts] = useState([]);
+  const [showGenPO, setShowGenPO] = useState(false);
+  const [genPOLines, setGenPOLines] = useState([{ item: '', qty: '', description: '' }]);
+  const [genPOVendor, setGenPOVendor] = useState('');
+  const [genPONotes, setGenPONotes] = useState('');
+  const [generatingPO, setGeneratingPO] = useState(false);
+  // Drop-ship vendor shipment state
+  const [showVendorShip, setShowVendorShip] = useState(false);
+  const [vsLines, setVsLines] = useState([{ item: '', qty_shipped: '' }]);
+  const [vsPODraftId, setVsPODraftId] = useState('');
+  const [vsNumber, setVsNumber] = useState('');
+  const [vsDocId, setVsDocId] = useState('');
+  const [vsNotes, setVsNotes] = useState('');
+  const [submittingVS, setSubmittingVS] = useState(false);
+  const [vsResult, setVsResult] = useState(null);
+  const [vendorShipLogs, setVendorShipLogs] = useState([]);
 
   const loadSummary = useCallback(async () => {
     if (!soId.trim()) return;
@@ -789,6 +806,81 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
   }, [soId]);
 
   useEffect(() => { if (soId.trim()) { loadSummary(); loadLogs(); } }, []);
+
+  // Load drop-ship PO drafts and vendor shipment logs
+  const loadDSData = useCallback(async () => {
+    if (!soId.trim()) return;
+    try {
+      const [poRes, vsRes] = await Promise.all([
+        fetch(`${API}/api/inventory-ledger/sales-orders/${encodeURIComponent(soId.trim())}/drop-ship-po-drafts`),
+        fetch(`${API}/api/inventory-ledger/sales-orders/${encodeURIComponent(soId.trim())}/drop-ship-vendor-shipment-log`),
+      ]);
+      if (poRes.ok) { const d = await poRes.json(); setDsPODrafts(d.drafts || []); }
+      if (vsRes.ok) { const d = await vsRes.json(); setVendorShipLogs(d.entries || []); }
+    } catch { /* silent */ }
+  }, [soId]);
+
+  // Reload DS data when summary loads and order is drop_ship
+  useEffect(() => { if (summary && orderType === 'drop_ship') loadDSData(); }, [summary, orderType]);
+
+  const generateDSPODraft = async () => {
+    const lines = genPOLines.filter(l => l.item.trim() && parseFloat(l.qty) > 0).map(l => ({
+      item: l.item.trim(), qty: parseFloat(l.qty), description: (l.description || '').trim(),
+    }));
+    if (!lines.length) { toast.error('Add at least one line'); return; }
+    setGeneratingPO(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/sales-orders/${encodeURIComponent(soId.trim())}/generate-drop-ship-po-draft`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lines, vendor_name: genPOVendor.trim(), notes: genPONotes.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(`Drop-Ship PO ${data.po_draft_id} created (${data.total_lines} lines, ${data.total_qty} qty)`);
+        setShowGenPO(false);
+        setGenPOLines([{ item: '', qty: '', description: '' }]);
+        setGenPOVendor('');
+        setGenPONotes('');
+        loadDSData();
+        loadSummary();
+      } else {
+        toast.error(data.detail || 'Failed to generate PO draft');
+      }
+    } catch { toast.error('Failed to generate PO draft'); }
+    finally { setGeneratingPO(false); }
+  };
+
+  const recordVendorShipment = async () => {
+    const lines = vsLines.filter(l => l.item.trim() && parseFloat(l.qty_shipped) > 0).map(l => ({
+      item: l.item.trim(), qty_shipped: parseFloat(l.qty_shipped),
+    }));
+    if (!lines.length) { toast.error('Add at least one shipped line'); return; }
+    setSubmittingVS(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/sales-orders/${encodeURIComponent(soId.trim())}/drop-ship-vendor-shipment`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shipped_lines: lines,
+          po_draft_id: vsPODraftId.trim(),
+          vendor_shipment_number: vsNumber.trim(),
+          vendor_document_id: vsDocId.trim(),
+          shipment_notes: vsNotes.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setVsResult(data);
+        toast.success(`Vendor shipment ${data.vendor_shipment_number || data.vendor_shipment_id} recorded`);
+        loadDSData();
+        loadSummary();
+        loadLogs();
+        onShipped?.();
+      } else {
+        toast.error(data.detail || 'Failed to record vendor shipment');
+      }
+    } catch { toast.error('Failed to record vendor shipment'); }
+    finally { setSubmittingVS(false); }
+  };
 
   const changeOrderType = async (newType) => {
     setChangingType(true);
@@ -869,7 +961,9 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
   };
 
   const hasOutstanding = !isDropShip && summary?.lines?.some(l => l.remaining_committed_qty > 0);
-  const canShowInvoice = isDropShip ? shipmentLogs.length > 0 : (summary?.total_remaining_committed_qty <= 0 && shipmentLogs.length > 0);
+  const canShowInvoice = isDropShip
+    ? (shipmentLogs.length > 0 || vendorShipLogs.length > 0)
+    : (summary?.total_remaining_committed_qty <= 0 && shipmentLogs.length > 0);
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
@@ -935,12 +1029,193 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
 
               {/* Drop-ship summary strip */}
               {isDropShip && (
-                <div className="flex gap-3 text-[10px] text-muted-foreground border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 rounded p-2" data-testid="inv-dropship-summary">
+                <div className="flex flex-wrap gap-3 text-[10px] text-muted-foreground border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 rounded p-2" data-testid="inv-dropship-summary">
                   <span className="font-medium text-teal-700 dark:text-teal-300">Drop-Ship Order</span>
-                  {summary.latest_bc_shipment_number && <span>Last Ship: <strong className="text-blue-600">{summary.latest_bc_shipment_number}</strong></span>}
+                  {summary.linked_drop_ship_po_draft_id && <span>PO: <strong className="text-orange-600 font-mono">{summary.linked_drop_ship_po_draft_id}</strong></span>}
+                  {summary.latest_drop_ship_po_status && <span>PO Status: <strong>{summary.latest_drop_ship_po_status}</strong></span>}
+                  {summary.latest_vendor_shipment_number && <span>Vendor Ship: <strong className="text-blue-600">{summary.latest_vendor_shipment_number}</strong></span>}
+                  {summary.latest_bc_shipment_number && <span>BC Ship: <strong className="text-blue-600">{summary.latest_bc_shipment_number}</strong></span>}
                   {summary.latest_bc_invoice_number && <span>Invoice: <strong className="text-purple-600">{summary.latest_bc_invoice_number}</strong></span>}
                   {summary.operational_status && (
                     <Badge variant={summary.operational_status === 'complete' ? 'default' : summary.operational_status === 'shipped' ? 'outline' : 'secondary'} className="text-[8px]" data-testid="inv-so-operational-status">{summary.operational_status}</Badge>
+                  )}
+                </div>
+              )}
+
+              {/* ═══ DROP-SHIP PO DRAFT SECTION ═══ */}
+              {isDropShip && (
+                <div className="space-y-2" data-testid="inv-ds-po-section">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Drop-Ship PO Drafts</p>
+                    <Button variant="outline" size="sm" className="h-6 text-[10px] border-orange-300 text-orange-700 hover:bg-orange-50" onClick={() => setShowGenPO(!showGenPO)} data-testid="inv-ds-gen-po-btn">
+                      <ClipboardList className="w-3 h-3 mr-1" /> {showGenPO ? 'Cancel' : 'Generate Drop-Ship PO'}
+                    </Button>
+                  </div>
+
+                  {/* Generate PO Form */}
+                  {showGenPO && (
+                    <div className="space-y-2 border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-900/20 rounded p-2.5" data-testid="inv-ds-gen-po-form">
+                      {genPOLines.map((line, i) => (
+                        <div key={i} className="flex gap-2 items-center" data-testid={`inv-ds-po-line-${i}`}>
+                          <Input className="h-6 text-[10px] flex-1 font-mono" placeholder="Item #" value={line.item}
+                            onChange={e => { const n = [...genPOLines]; n[i] = { ...n[i], item: e.target.value }; setGenPOLines(n); }}
+                            data-testid={`inv-ds-po-item-${i}`} />
+                          <Input className="h-6 text-[10px] w-20 text-right font-mono" type="number" min={0} placeholder="Qty" value={line.qty}
+                            onChange={e => { const n = [...genPOLines]; n[i] = { ...n[i], qty: e.target.value }; setGenPOLines(n); }}
+                            data-testid={`inv-ds-po-qty-${i}`} />
+                          <Input className="h-6 text-[10px] flex-1" placeholder="Description" value={line.description}
+                            onChange={e => { const n = [...genPOLines]; n[i] = { ...n[i], description: e.target.value }; setGenPOLines(n); }}
+                            data-testid={`inv-ds-po-desc-${i}`} />
+                          {genPOLines.length > 1 && (
+                            <Button variant="ghost" size="icon" className="h-6 w-6 text-red-500" onClick={() => setGenPOLines(genPOLines.filter((_, j) => j !== i))}>
+                              <RotateCcw className="w-3 h-3" />
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                      <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={() => setGenPOLines([...genPOLines, { item: '', qty: '', description: '' }])} data-testid="inv-ds-po-add-line">
+                        <Plus className="w-3 h-3 mr-1" /> Add Line
+                      </Button>
+                      <div className="flex gap-2">
+                        <div className="flex-1 space-y-1">
+                          <Label className="text-[10px]">Vendor Name</Label>
+                          <Input className="h-6 text-[10px]" value={genPOVendor} onChange={e => setGenPOVendor(e.target.value)} placeholder="e.g. Acme Plastics" data-testid="inv-ds-po-vendor" />
+                        </div>
+                        <div className="flex-1 space-y-1">
+                          <Label className="text-[10px]">Notes</Label>
+                          <Input className="h-6 text-[10px]" value={genPONotes} onChange={e => setGenPONotes(e.target.value)} placeholder="Optional" data-testid="inv-ds-po-notes" />
+                        </div>
+                      </div>
+                      <Button size="sm" className="h-7 text-[10px] w-full bg-orange-600 hover:bg-orange-700 text-white" disabled={generatingPO} onClick={generateDSPODraft} data-testid="inv-ds-po-confirm">
+                        {generatingPO ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <ClipboardList className="w-3 h-3 mr-1" />}
+                        Generate Drop-Ship PO Draft
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Linked PO Drafts List */}
+                  {dsPODrafts.length > 0 && (
+                    <div className="border border-border rounded overflow-hidden" data-testid="inv-ds-po-list">
+                      {dsPODrafts.map((draft, i) => (
+                        <div key={draft.po_draft_id} className="border-b border-border/20 last:border-b-0 p-2 text-[10px]" data-testid={`inv-ds-po-draft-${i}`}>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge variant="outline" className="text-[8px] font-mono text-orange-600">{draft.po_draft_id}</Badge>
+                            <Badge variant={draft.status === 'draft' ? 'secondary' : draft.bc_response_status === 'created' ? 'default' : 'outline'} className="text-[7px]">{draft.bc_response_status || draft.status}</Badge>
+                            {draft.vendor_name && <span className="text-muted-foreground">{draft.vendor_name}</span>}
+                            <span className="text-muted-foreground">{draft.total_lines} lines / {draft.total_qty?.toLocaleString()} qty</span>
+                            {draft.bc_po_number && <span className="font-mono text-blue-600">BC: {draft.bc_po_number}</span>}
+                          </div>
+                          {draft.notes && <p className="mt-0.5 text-muted-foreground">{draft.notes}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ═══ DROP-SHIP VENDOR SHIPMENT SECTION ═══ */}
+              {isDropShip && (
+                <div className="space-y-2" data-testid="inv-ds-vendor-ship-section">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Vendor Shipment</p>
+                    {!summary.is_fulfillment_complete && (
+                      <Button variant="outline" size="sm" className="h-6 text-[10px] border-blue-300 text-blue-700 hover:bg-blue-50" onClick={() => setShowVendorShip(!showVendorShip)} data-testid="inv-ds-vendor-ship-btn">
+                        <Truck className="w-3 h-3 mr-1" /> {showVendorShip ? 'Cancel' : 'Record Vendor Shipment'}
+                      </Button>
+                    )}
+                  </div>
+
+                  {/* Vendor Shipment Form */}
+                  {showVendorShip && (
+                    <div className="space-y-2 border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 rounded p-2.5" data-testid="inv-ds-vendor-ship-form">
+                      {vsLines.map((line, i) => (
+                        <div key={i} className="flex gap-2 items-center" data-testid={`inv-ds-vs-line-${i}`}>
+                          <Input className="h-6 text-[10px] flex-1 font-mono" placeholder="Item #" value={line.item}
+                            onChange={e => { const n = [...vsLines]; n[i] = { ...n[i], item: e.target.value }; setVsLines(n); }}
+                            data-testid={`inv-ds-vs-item-${i}`} />
+                          <Input className="h-6 text-[10px] w-20 text-right font-mono" type="number" min={0} placeholder="Qty" value={line.qty_shipped}
+                            onChange={e => { const n = [...vsLines]; n[i] = { ...n[i], qty_shipped: e.target.value }; setVsLines(n); }}
+                            data-testid={`inv-ds-vs-qty-${i}`} />
+                          {vsLines.length > 1 && (
+                            <Button variant="ghost" size="icon" className="h-6 w-6 text-red-500" onClick={() => setVsLines(vsLines.filter((_, j) => j !== i))}>
+                              <RotateCcw className="w-3 h-3" />
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                      <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={() => setVsLines([...vsLines, { item: '', qty_shipped: '' }])} data-testid="inv-ds-vs-add-line">
+                        <Plus className="w-3 h-3 mr-1" /> Add Line
+                      </Button>
+                      <div className="flex gap-2">
+                        <div className="flex-1 space-y-1">
+                          <Label className="text-[10px]">Vendor Shipment #</Label>
+                          <Input className="h-6 text-[10px]" value={vsNumber} onChange={e => setVsNumber(e.target.value)} placeholder="e.g. VSH-8821" data-testid="inv-ds-vs-number" />
+                        </div>
+                        <div className="flex-1 space-y-1">
+                          <Label className="text-[10px]">Vendor Document ID</Label>
+                          <Input className="h-6 text-[10px]" value={vsDocId} onChange={e => setVsDocId(e.target.value)} placeholder="Optional" data-testid="inv-ds-vs-doc" />
+                        </div>
+                      </div>
+                      {dsPODrafts.length > 0 && (
+                        <div className="space-y-1">
+                          <Label className="text-[10px]">Linked PO Draft</Label>
+                          <Select value={vsPODraftId} onValueChange={setVsPODraftId}>
+                            <SelectTrigger className="h-6 text-[10px]" data-testid="inv-ds-vs-po-select">
+                              <SelectValue placeholder="Select PO draft (optional)" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value=" ">None</SelectItem>
+                              {dsPODrafts.map(d => (
+                                <SelectItem key={d.po_draft_id} value={d.po_draft_id}>
+                                  {d.po_draft_id} — {d.vendor_name || 'No vendor'} ({d.total_lines} lines)
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                      <div className="space-y-1">
+                        <Label className="text-[10px]">Notes</Label>
+                        <Input className="h-6 text-[10px]" value={vsNotes} onChange={e => setVsNotes(e.target.value)} placeholder="Optional" data-testid="inv-ds-vs-notes" />
+                      </div>
+                      <Button size="sm" className="h-7 text-[10px] w-full bg-blue-600 hover:bg-blue-700 text-white" disabled={submittingVS} onClick={recordVendorShipment} data-testid="inv-ds-vs-confirm">
+                        {submittingVS ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Truck className="w-3 h-3 mr-1" />}
+                        Record Vendor Shipment
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Vendor Shipment Result */}
+                  {vsResult && (
+                    <div className="border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 rounded p-2.5 text-xs space-y-1" data-testid="inv-ds-vs-result">
+                      <p className="font-medium text-blue-700 dark:text-blue-300">Vendor Shipment Recorded — {vsResult.vendor_shipment_id}</p>
+                      <div className="flex gap-3 text-[10px]">
+                        <span>Recorded: <strong>{vsResult.total_recorded}</strong></span>
+                        {vsResult.vendor_shipment_number && <span className="font-mono text-blue-600">{vsResult.vendor_shipment_number}</span>}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Vendor Shipment Logs */}
+                  {vendorShipLogs.length > 0 && (
+                    <div className="border border-border rounded overflow-hidden" data-testid="inv-ds-vs-log">
+                      {vendorShipLogs.map((log, i) => (
+                        <div key={log.vendor_shipment_id || i} className="border-b border-border/20 last:border-b-0 p-2 text-[10px]" data-testid={`inv-ds-vs-log-${i}`}>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge variant="outline" className="text-[8px] font-mono text-blue-600">{log.vendor_shipment_id}</Badge>
+                            {log.vendor_shipment_number && <span className="font-mono text-blue-600">{log.vendor_shipment_number}</span>}
+                            {log.po_draft_id && <span className="font-mono text-orange-600 text-[8px]">PO: {log.po_draft_id}</span>}
+                            <span className="text-muted-foreground">{log.shipped_at ? new Date(log.shipped_at).toLocaleString() : '—'}</span>
+                          </div>
+                          {log.shipment_notes && <p className="mt-0.5 text-muted-foreground">{log.shipment_notes}</p>}
+                          <div className="mt-0.5 flex gap-2">
+                            {log.shipped_lines?.map((l, j) => (
+                              <span key={j} className="font-mono">{l.item}: {l.qty_shipped}</span>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
               )}

@@ -950,6 +950,7 @@ async def api_generate_po_draft(body: PODraftIn):
         "lines": lines,
         "source": "action_center",
         "status": "draft",
+        "po_type": "warehouse_supply",
         "total_qty": sum(ln["qty"] for ln in lines),
         "total_lines": len(lines),
     }
@@ -1193,8 +1194,8 @@ async def api_update_bc_response(draft_id: str, body: BCResponseIn):
     }
     await db[PO_SUBMISSION_LOGS_COLL].insert_one(log_entry.copy())
 
-    # --- BC PO linkage to incoming supply ---
-    if body.bc_response_status == "created":
+    # --- BC PO linkage to incoming supply (warehouse_supply only) ---
+    if body.bc_response_status == "created" and doc.get("po_type") != "drop_ship":
         link_update = {"bc_po_number": body.bc_po_number.strip(), "bc_document_id": body.bc_document_id.strip(), "updated_at": now}
         # Advance planned → ordered; leave ordered/received/cancelled unchanged
         await db["inv_incoming_supply"].update_many(
@@ -1566,6 +1567,9 @@ async def api_po_draft_create_incoming_supply(draft_id: str):
 
     if doc.get("status") == "archived":
         raise HTTPException(status_code=422, detail="Cannot convert an archived draft")
+
+    if doc.get("po_type") == "drop_ship":
+        raise HTTPException(status_code=422, detail="Drop-ship PO drafts do not create incoming supply. They are operational purchasing records only.")
 
     # Duplicate protection: check if already converted
     if doc.get("incoming_supply_created"):
@@ -2368,6 +2372,181 @@ async def api_get_order_type(sales_order_id: str):
 
 
 # ═══════════════════════════════════════════════════════════════
+# DROP-SHIP PO DRAFT GENERATION
+# ═══════════════════════════════════════════════════════════════
+
+DS_VENDOR_SHIPMENT_LOGS_COLL = "ds_vendor_shipment_logs"
+
+
+class DSPODraftLineIn(BaseModel):
+    item: str = Field(..., min_length=1)
+    qty: float = Field(..., gt=0)
+    description: str = Field(default="")
+
+
+class DSPODraftIn(BaseModel):
+    lines: list[DSPODraftLineIn] = Field(..., min_length=1)
+    vendor_id: str = Field(default="")
+    vendor_name: str = Field(default="")
+    notes: str = Field(default="")
+
+
+@router.post("/sales-orders/{sales_order_id}/generate-drop-ship-po-draft")
+async def api_generate_drop_ship_po_draft(sales_order_id: str, body: DSPODraftIn):
+    """Generate a PO draft linked to a Drop-Ship Sales Order.
+
+    Validates SO exists and is drop_ship type.
+    Creates a PO draft with po_type=drop_ship and sales_order_id link.
+    Does NOT create incoming supply.
+    """
+    import uuid
+
+    db = get_db()
+    order_type = await _get_order_type(db, sales_order_id)
+    if order_type != "drop_ship":
+        raise HTTPException(
+            status_code=422,
+            detail=f"Sales order '{sales_order_id}' is type '{order_type}'. Only drop_ship orders can generate drop-ship PO drafts.",
+        )
+
+    now = datetime.now(timezone.utc)
+    draft_id = f"PO-DS-{now.strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
+
+    lines = []
+    for ln in body.lines:
+        lines.append({
+            "item": ln.item.strip(),
+            "qty": ln.qty,
+            "description": ln.description.strip(),
+            "source": "drop_ship_so",
+        })
+
+    draft = {
+        "po_draft_id": draft_id,
+        "created_at": now.isoformat(),
+        "sales_order_id": sales_order_id,
+        "po_type": "drop_ship",
+        "customer_id": "",
+        "customer_name": "",
+        "vendor_id": body.vendor_id.strip(),
+        "vendor_name": body.vendor_name.strip(),
+        "lines": lines,
+        "source": "drop_ship_so",
+        "status": "draft",
+        "total_qty": sum(ln.qty for ln in body.lines),
+        "total_lines": len(lines),
+        "notes": body.notes.strip(),
+    }
+
+    await db[PO_DRAFTS_COLL].insert_one(draft.copy())
+    draft.pop("_id", None)
+
+    return draft
+
+
+@router.get("/sales-orders/{sales_order_id}/drop-ship-po-drafts")
+async def api_list_drop_ship_po_drafts(sales_order_id: str):
+    """List PO drafts linked to a Drop-Ship Sales Order."""
+    db = get_db()
+    cursor = db[PO_DRAFTS_COLL].find(
+        {"sales_order_id": sales_order_id, "po_type": "drop_ship"}, {"_id": 0}
+    ).sort("created_at", -1)
+    docs = await cursor.to_list(length=100)
+    return {"sales_order_id": sales_order_id, "total": len(docs), "drafts": docs}
+
+
+# ═══════════════════════════════════════════════════════════════
+# DROP-SHIP VENDOR SHIPMENT CAPTURE
+# ═══════════════════════════════════════════════════════════════
+
+
+class DSVendorShipmentLineIn(BaseModel):
+    item: str = Field(..., min_length=1)
+    qty_shipped: float = Field(..., gt=0)
+
+
+class DSVendorShipmentIn(BaseModel):
+    shipped_lines: list[DSVendorShipmentLineIn] = Field(..., min_length=1)
+    po_draft_id: str = Field(default="", description="Linked drop-ship PO draft ID")
+    vendor_shipment_number: str = Field(default="", description="Vendor shipment document number")
+    vendor_document_id: str = Field(default="", description="Vendor document ID")
+    shipment_notes: str = Field(default="", description="Notes about the vendor shipment")
+
+
+@router.post("/sales-orders/{sales_order_id}/drop-ship-vendor-shipment")
+async def api_drop_ship_vendor_shipment(sales_order_id: str, body: DSVendorShipmentIn):
+    """Record a vendor shipment for a Drop-Ship Sales Order.
+
+    Traceability only. Does NOT release inventory, create ledger movements,
+    or affect warehouse balances.
+    """
+    import uuid as _uuid
+
+    db = get_db()
+    order_type = await _get_order_type(db, sales_order_id)
+    if order_type != "drop_ship":
+        raise HTTPException(
+            status_code=422,
+            detail=f"Sales order '{sales_order_id}' is type '{order_type}'. Vendor shipment capture is only for drop_ship orders.",
+        )
+
+    # Validate linked PO draft if supplied
+    if body.po_draft_id.strip():
+        draft = await db[PO_DRAFTS_COLL].find_one(
+            {"po_draft_id": body.po_draft_id.strip()}, {"_id": 0, "po_type": 1, "sales_order_id": 1}
+        )
+        if not draft:
+            raise HTTPException(status_code=404, detail=f"PO draft '{body.po_draft_id}' not found")
+        if draft.get("po_type") != "drop_ship":
+            raise HTTPException(status_code=422, detail="Linked PO draft is not a drop-ship draft")
+        if draft.get("sales_order_id") != sales_order_id:
+            raise HTTPException(status_code=422, detail="PO draft is not linked to this sales order")
+
+    now = datetime.now(timezone.utc).isoformat()
+    results = []
+    for line in body.shipped_lines:
+        results.append({
+            "item": line.item.strip(),
+            "qty_shipped": line.qty_shipped,
+            "status": "recorded",
+            "note": "Vendor shipped directly to customer (drop-ship)",
+        })
+
+    log_entry = {
+        "vendor_shipment_id": f"VSH-{_uuid.uuid4().hex[:8].upper()}",
+        "sales_order_id": sales_order_id,
+        "po_draft_id": body.po_draft_id.strip(),
+        "vendor_shipment_number": body.vendor_shipment_number.strip(),
+        "vendor_document_id": body.vendor_document_id.strip(),
+        "shipped_at": now,
+        "shipment_notes": body.shipment_notes.strip(),
+        "shipped_lines": [{"item": l.item.strip(), "qty_shipped": l.qty_shipped} for l in body.shipped_lines],
+        "results": results,
+    }
+    await db[DS_VENDOR_SHIPMENT_LOGS_COLL].insert_one(log_entry.copy())
+    log_entry.pop("_id", None)
+
+    return {
+        "sales_order_id": sales_order_id,
+        "vendor_shipment_id": log_entry["vendor_shipment_id"],
+        "vendor_shipment_number": body.vendor_shipment_number.strip(),
+        "total_recorded": len(results),
+        "results": results,
+    }
+
+
+@router.get("/sales-orders/{sales_order_id}/drop-ship-vendor-shipment-log")
+async def api_list_ds_vendor_shipment_logs(sales_order_id: str):
+    """List drop-ship vendor shipment log entries for a sales order."""
+    db = get_db()
+    cursor = db[DS_VENDOR_SHIPMENT_LOGS_COLL].find(
+        {"sales_order_id": sales_order_id}, {"_id": 0}
+    ).sort("shipped_at", -1)
+    entries = await cursor.to_list(length=200)
+    return {"sales_order_id": sales_order_id, "total": len(entries), "entries": entries}
+
+
+# ═══════════════════════════════════════════════════════════════
 # BC SHIPMENT CAPTURE
 # ═══════════════════════════════════════════════════════════════
 
@@ -2520,10 +2699,11 @@ async def api_bc_invoice_capture(sales_order_id: str, body: BCInvoiceIn):
     customer_id = ""
 
     if order_type == "drop_ship":
-        # Drop-ship: only verify shipment exists, no commitment checks
-        shipment_count = await db[BC_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
-        if shipment_count == 0:
-            raise HTTPException(status_code=422, detail="No shipment activity recorded. Record shipment before invoicing.")
+        # Drop-ship: verify shipment exists (BC shipment or vendor shipment), no commitment checks
+        bc_ship_count = await db[BC_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
+        ds_ship_count = await db[DS_VENDOR_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
+        if bc_ship_count == 0 and ds_ship_count == 0:
+            raise HTTPException(status_code=422, detail="No shipment activity recorded. Record a BC shipment or vendor shipment before invoicing.")
         # Try to find customer_id from shipment logs
         ship_log = await db[BC_SHIPMENT_LOGS_COLL].find_one(
             {"sales_order_id": sales_order_id}, {"_id": 0, "customer_id": 1}
@@ -2606,7 +2786,7 @@ async def api_sales_order_summary(sales_order_id: str):
     order_type = await _get_order_type(db, sales_order_id)
 
     if order_type == "drop_ship":
-        # Drop-ship: no commitment data, just shipment/invoice log summary
+        # Drop-ship: no commitment data, enriched with PO draft + vendor shipment info
         latest_shipment = await db[BC_SHIPMENT_LOGS_COLL].find_one(
             {"sales_order_id": sales_order_id}, {"_id": 0},
             sort=[("shipped_at", -1)],
@@ -2615,14 +2795,30 @@ async def api_sales_order_summary(sales_order_id: str):
             {"sales_order_id": sales_order_id}, {"_id": 0},
             sort=[("captured_at", -1)],
         )
-        shipment_count = await db[BC_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
+        bc_shipment_count = await db[BC_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
         invoice_count = await db[BC_INVOICE_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
-        has_shipment = shipment_count > 0
+
+        # Drop-ship PO draft info
+        ds_drafts = await db[PO_DRAFTS_COLL].find(
+            {"sales_order_id": sales_order_id, "po_type": "drop_ship"}, {"_id": 0}
+        ).sort("created_at", -1).to_list(100)
+        latest_ds_draft = ds_drafts[0] if ds_drafts else None
+
+        # Drop-ship vendor shipment info
+        latest_vendor_shipment = await db[DS_VENDOR_SHIPMENT_LOGS_COLL].find_one(
+            {"sales_order_id": sales_order_id}, {"_id": 0},
+            sort=[("shipped_at", -1)],
+        )
+        ds_vendor_shipment_count = await db[DS_VENDOR_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
+
+        has_shipment = bc_shipment_count > 0 or ds_vendor_shipment_count > 0
         has_invoice = invoice_count > 0
-        if has_invoice:
+        if has_invoice and has_shipment:
             operational_status = "complete"
         elif has_shipment:
             operational_status = "shipped"
+        elif latest_ds_draft:
+            operational_status = "po_drafted"
         else:
             operational_status = "pending"
         customer_id = (latest_shipment or {}).get("customer_id", "")
@@ -2640,6 +2836,12 @@ async def api_sales_order_summary(sales_order_id: str):
             "operational_status": operational_status,
             "is_fulfillment_complete": operational_status == "complete",
             "lines": [],
+            # Drop-ship enrichment
+            "linked_drop_ship_po_draft_count": len(ds_drafts),
+            "linked_drop_ship_po_draft_id": latest_ds_draft["po_draft_id"] if latest_ds_draft else "",
+            "latest_drop_ship_po_status": latest_ds_draft.get("bc_response_status", latest_ds_draft.get("status", "")) if latest_ds_draft else "",
+            "latest_vendor_shipment_number": latest_vendor_shipment.get("vendor_shipment_number", "") if latest_vendor_shipment else "",
+            "latest_vendor_shipped_at": latest_vendor_shipment.get("shipped_at", "") if latest_vendor_shipment else "",
         }
 
     # Warehouse orders: existing behavior

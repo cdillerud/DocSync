@@ -1,0 +1,145 @@
+{
+  "summary": "Comprehensive testing of Drop-Ship Purchase Order workflow (iteration_84). Backend: 15/15 tests passed. All drop-ship PO draft generation, vendor shipment capture, BC response handling, and invoice closeout flows working correctly. Frontend: All drop-ship UI elements verified - order type selector, teal summary strip, Generate Drop-Ship PO button, PO draft form, Record Vendor Shipment button, vendor shipment form, linked PO drafts list, vendor shipment logs, and invoice section. Regression tests from iteration_83 also pass (reconcile rejects drop_ship).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "InventoryLedgerPage", "issues": ["React hydration warnings in console due to <span> inside <tbody> - cosmetic only, no functional impact"]}
+    ]
+  },
+  "passed_tests": [
+    "Backend: POST /generate-drop-ship-po-draft creates PO with po_type=drop_ship and sales_order_id link",
+    "Backend: generate-drop-ship-po-draft rejects warehouse SO with 422",
+    "Backend: GET /drop-ship-po-drafts lists linked DS PO drafts",
+    "Backend: Drop-ship PO draft excluded from incoming supply conversion (POST create-incoming-supply returns 422)",
+    "Backend: PATCH /bc-response works for drop_ship draft (captures bc_po_number, bc_response_status) but does NOT create incoming supply",
+    "Backend: POST /drop-ship-vendor-shipment records vendor shipment",
+    "Backend: drop-ship-vendor-shipment rejects warehouse SO with 422",
+    "Backend: drop-ship-vendor-shipment validates linked PO draft if provided",
+    "Backend: GET /drop-ship-vendor-shipment-log lists vendor shipment logs",
+    "Backend: POST bc-invoice for drop-ship SO succeeds after vendor shipment (no commitment checks)",
+    "Backend: POST bc-invoice for drop-ship SO without shipment fails with 422",
+    "Backend: GET summary for drop-ship SO shows enriched fields (linked_drop_ship_po_draft_count, linked_drop_ship_po_draft_id, latest_drop_ship_po_status, latest_vendor_shipment_number, latest_vendor_shipped_at)",
+    "Backend: summary operational_status reflects ds workflow stages: pending -> po_drafted -> shipped -> complete",
+    "Backend: POST reconcile-sales-order for drop_ship still returns 422 (iteration_83 regression)",
+    "Backend: Warehouse PO draft still works normally (po_type=warehouse_supply)",
+    "Frontend: ShipmentCaptureDialog for drop-ship SO shows 'Drop-Ship' in order type selector",
+    "Frontend: Order type badge shows 'No inventory impact' for drop-ship",
+    "Frontend: Teal drop-ship summary strip displays PO, PO Status, Vendor Ship, BC Ship, Invoice, operational_status",
+    "Frontend: Generate Drop-Ship PO button visible in DROP-SHIP PO DRAFTS section",
+    "Frontend: Generate DS PO form with item/qty/description lines, vendor name, notes fields",
+    "Frontend: Linked PO drafts list appears showing draft ID, status, vendor, line count",
+    "Frontend: Record Vendor Shipment button appears in VENDOR SHIPMENT section for drop-ship",
+    "Frontend: Vendor shipment form with item/qty lines, vendor shipment #, linked PO draft select",
+    "Frontend: Vendor shipment log appears after recording",
+    "Frontend: SHIPMENT HISTORY shows 'drop-ship' badges for drop-ship shipments",
+    "Frontend: Invoice section shows 'Fulfillment Complete' message after vendor shipment for drop-ship",
+    "Frontend: INVOICE HISTORY shows invoice entries"
+  ],
+  "skipped_tests": [],
+  "test_report_links": [
+    "/app/backend/tests/test_drop_ship_po_workflow.py",
+    "/app/test_reports/pytest/drop_ship_po_workflow_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend inventory_ledger.py Lines 2378-2444: Drop-ship PO draft generation - creates PO with po_type=drop_ship and sales_order_id link",
+    "Backend inventory_ledger.py Lines 2447-2455: GET /drop-ship-po-drafts lists PO drafts linked by sales_order_id and po_type=drop_ship",
+    "Backend inventory_ledger.py Lines 1571-1572: Drop-ship PO drafts gated from incoming supply conversion (po_type=drop_ship returns 422)",
+    "Backend inventory_ledger.py Line 1198: BC response skips incoming supply linkage for drop_ship drafts",
+    "Backend inventory_ledger.py Lines 2476-2536: Drop-ship vendor shipment endpoint - validates order type and linked PO draft",
+    "Backend inventory_ledger.py Lines 2538-2546: Drop-ship vendor shipment log endpoint",
+    "Backend inventory_ledger.py Lines 2701-2706: BC invoice for drop_ship checks vendor shipment logs in addition to BC shipment logs",
+    "Backend inventory_ledger.py Lines 2788-2845: Summary endpoint enrichment with DS PO draft and vendor shipment fields",
+    "Frontend InventoryLedgerPage.js Lines 727-1200: ShipmentCaptureDialog with complete drop-ship PO and vendor shipment UI sections"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_drop_ship_po_workflow.py"
+  ],
+  "success_rate": {
+    "backend": "100% (15/15 passed)",
+    "frontend": "100% (all UI elements verified)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://order-type-aware.preview.emergentagent.com"
+  },
+  "seed_data_used": {
+    "drop_ship_so": "SO-TEST-DROP-001 (existing drop-ship with PO draft PO-DS-20260314201055-FD1734, vendor shipment VSH-8821, invoices, operational_status=complete)",
+    "test_so_ids": "SO-DS-TEST-* (dynamically created for each test run)"
+  },
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Drop-Ship PO workflow fully implemented and tested in iteration_84. Key endpoints: POST /sales-orders/{id}/generate-drop-ship-po-draft, GET /sales-orders/{id}/drop-ship-po-drafts, POST /sales-orders/{id}/drop-ship-vendor-shipment, GET /sales-orders/{id}/drop-ship-vendor-shipment-log. Existing iteration_83 order type awareness tests still pass. PO drafts now have po_type field (warehouse_supply or drop_ship) and optional sales_order_id. Drop-ship drafts are excluded from incoming supply conversion. BC response for drop_ship drafts captures bc_po_number but doesn't create incoming supply. Summary endpoint enriched with DS PO draft count/id/status and vendor shipment number/timestamp. Operational status progression for drop-ship: pending -> po_drafted -> shipped -> complete.",
+  "features_verified": {
+    "backend_endpoints": {
+      "generate_drop_ship_po_draft": {
+        "method": "POST",
+        "path": "/api/inventory-ledger/sales-orders/{sales_order_id}/generate-drop-ship-po-draft",
+        "request_body": {"lines": [{"item": "string", "qty": "number", "description": "string"}], "vendor_id": "string", "vendor_name": "string", "notes": "string"},
+        "response": {"po_draft_id": "PO-DS-...", "po_type": "drop_ship", "sales_order_id": "...", "total_lines": "number", "total_qty": "number", "status": "draft"},
+        "validation": "Rejects warehouse orders with 422"
+      },
+      "list_drop_ship_po_drafts": {
+        "method": "GET",
+        "path": "/api/inventory-ledger/sales-orders/{sales_order_id}/drop-ship-po-drafts",
+        "response": {"sales_order_id": "...", "total": "number", "drafts": []}
+      },
+      "drop_ship_vendor_shipment": {
+        "method": "POST",
+        "path": "/api/inventory-ledger/sales-orders/{sales_order_id}/drop-ship-vendor-shipment",
+        "request_body": {"shipped_lines": [{"item": "string", "qty_shipped": "number"}], "po_draft_id": "string", "vendor_shipment_number": "string", "vendor_document_id": "string", "shipment_notes": "string"},
+        "validation": "Rejects warehouse orders, validates linked PO draft"
+      },
+      "drop_ship_vendor_shipment_log": {
+        "method": "GET",
+        "path": "/api/inventory-ledger/sales-orders/{sales_order_id}/drop-ship-vendor-shipment-log",
+        "response": {"sales_order_id": "...", "total": "number", "entries": []}
+      },
+      "bc_invoice_for_drop_ship": {
+        "behavior": "Requires BC shipment OR vendor shipment, no commitment checks"
+      },
+      "summary_drop_ship_enrichment": {
+        "new_fields": ["linked_drop_ship_po_draft_count", "linked_drop_ship_po_draft_id", "latest_drop_ship_po_status", "latest_vendor_shipment_number", "latest_vendor_shipped_at"],
+        "operational_status_values": ["pending", "po_drafted", "shipped", "complete"]
+      },
+      "create_incoming_supply_gate": {
+        "behavior": "Returns 422 for po_type=drop_ship"
+      }
+    },
+    "frontend_components": {
+      "ds_po_section": {
+        "testid": "inv-ds-po-section",
+        "visible_for": "drop_ship orders"
+      },
+      "gen_po_btn": {
+        "testid": "inv-ds-gen-po-btn",
+        "text": "Generate Drop-Ship PO"
+      },
+      "gen_po_form": {
+        "testid": "inv-ds-gen-po-form",
+        "fields": ["item/qty/description lines", "vendor_name", "notes"]
+      },
+      "po_list": {
+        "testid": "inv-ds-po-list",
+        "shows": "linked PO drafts with status, vendor, lines"
+      },
+      "vendor_ship_section": {
+        "testid": "inv-ds-vendor-ship-section",
+        "visible_for": "drop_ship orders"
+      },
+      "vendor_ship_btn": {
+        "testid": "inv-ds-vendor-ship-btn",
+        "text": "Record Vendor Shipment"
+      },
+      "vendor_ship_form": {
+        "testid": "inv-ds-vendor-ship-form",
+        "fields": ["item/qty lines", "vendor_shipment_number", "vendor_document_id", "linked_po_draft_select", "notes"]
+      }
+    }
+  }
+}

@@ -1061,11 +1061,16 @@ async def api_get_po_draft(draft_id: str):
 
     # Document linkage + process checklist enrichment
     doc_count, docs_by_type, _ = await _get_document_links_summary(db, "po_draft", draft_id)
-    checklist_items, checklist_complete = _derive_po_draft_checklist(doc, doc_count, docs_by_type)
+    po_approval = await _get_latest_approval(db, "po_draft", draft_id)
+    checklist_items, checklist_complete = _derive_po_draft_checklist(doc, doc_count, docs_by_type, approval=po_approval)
     doc["linked_document_count"] = doc_count
     doc["linked_documents_by_type"] = docs_by_type
     doc["process_checklist"] = checklist_items
     doc["checklist_complete"] = checklist_complete
+
+    # Approval enrichment
+    appr_summary = await _get_approval_enrichment(db, "po_draft", draft_id)
+    doc.update(appr_summary)
 
     return doc
 
@@ -2858,6 +2863,9 @@ async def api_sales_order_summary(sales_order_id: str):
         ds_summary["linked_documents_by_type"] = docs_by_type
         ds_summary["process_checklist"] = checklist_items
         ds_summary["checklist_complete"] = checklist_complete
+        # Approval enrichment
+        appr = await _get_approval_enrichment(db, "sales_order", sales_order_id)
+        ds_summary.update(appr)
         return ds_summary
 
     # Warehouse orders: existing behavior
@@ -2955,6 +2963,9 @@ async def api_sales_order_summary(sales_order_id: str):
     wh_summary["linked_documents_by_type"] = docs_by_type
     wh_summary["process_checklist"] = checklist_items
     wh_summary["checklist_complete"] = checklist_complete
+    # Approval enrichment
+    appr = await _get_approval_enrichment(db, "sales_order", sales_order_id)
+    wh_summary.update(appr)
     return wh_summary
 
 
@@ -3048,26 +3059,27 @@ async def _derive_so_checklist(db, sales_order_id: str, order_type: str, doc_cou
     has_customer_po = docs_by_type.get("customer_po", 0) > 0
     items.append({"key": "customer_po_attached", "label": "Customer PO attached", "satisfied": has_customer_po})
 
-    # Common: approval support present
-    has_approval = docs_by_type.get("approval_backup", 0) > 0
-    items.append({"key": "approval_support_present", "label": "Approval-ready support present", "satisfied": has_approval})
-
     if order_type == "warehouse":
-        # Warehouse: warehouse agreement
+        # Warehouse: approval requested + granted + warehouse agreement
+        approval = await _get_latest_approval(db, "sales_order", sales_order_id)
+        items.append({"key": "approval_requested", "label": "Approval requested", "satisfied": approval is not None})
+        items.append({"key": "approval_granted", "label": "Approval granted", "satisfied": approval is not None and approval.get("approval_status") == "approved"})
         has_agreement = docs_by_type.get("warehouse_agreement", 0) > 0
         items.append({"key": "warehouse_agreement", "label": "Warehouse agreement attached", "satisfied": has_agreement})
     else:
-        # Drop-ship: linked DS PO draft
+        # Drop-ship: DS PO draft created + approval granted
         ds_draft_count = await db[PO_DRAFTS_COLL].count_documents(
             {"sales_order_id": sales_order_id, "po_type": "drop_ship"}
         )
         items.append({"key": "ds_po_draft_created", "label": "Drop-Ship PO draft created", "satisfied": ds_draft_count > 0})
+        approval = await _get_latest_approval(db, "sales_order", sales_order_id)
+        items.append({"key": "approval_granted", "label": "Approval granted", "satisfied": approval is not None and approval.get("approval_status") == "approved"})
 
     all_satisfied = all(i["satisfied"] for i in items)
     return items, all_satisfied
 
 
-def _derive_po_draft_checklist(draft: dict, doc_count: int, docs_by_type: dict):
+def _derive_po_draft_checklist(draft: dict, doc_count: int, docs_by_type: dict, approval=None):
     """Derive process checklist for a PO Draft."""
     items = []
 
@@ -3080,9 +3092,8 @@ def _derive_po_draft_checklist(draft: dict, doc_count: int, docs_by_type: dict):
     export_ready = has_vendor and has_lines
     items.append({"key": "export_ready", "label": "Export-ready for BC", "satisfied": export_ready})
 
-    # Supporting document present
-    has_support = doc_count > 0
-    items.append({"key": "support_doc_present", "label": "Supporting document present", "satisfied": has_support})
+    # Approval granted
+    items.append({"key": "approval_granted", "label": "Approval granted", "satisfied": approval is not None and approval.get("approval_status") == "approved"})
 
     all_satisfied = all(i["satisfied"] for i in items)
     return items, all_satisfied
@@ -3113,7 +3124,8 @@ async def api_po_draft_checklist(po_draft_id: str):
     if not draft:
         raise HTTPException(status_code=404, detail=f"PO Draft '{po_draft_id}' not found")
     doc_count, docs_by_type, _ = await _get_document_links_summary(db, "po_draft", po_draft_id)
-    items, all_satisfied = _derive_po_draft_checklist(draft, doc_count, docs_by_type)
+    po_approval = await _get_latest_approval(db, "po_draft", po_draft_id)
+    items, all_satisfied = _derive_po_draft_checklist(draft, doc_count, docs_by_type, approval=po_approval)
     return {
         "po_draft_id": po_draft_id,
         "linked_document_count": doc_count,
@@ -3122,6 +3134,137 @@ async def api_po_draft_checklist(po_draft_id: str):
         "checklist_complete": all_satisfied,
     }
 
+
+# ═══════════════════════════════════════════════════════════════
+# APPROVAL WORKFLOW TRACKING
+# ═══════════════════════════════════════════════════════════════
+
+APPROVAL_LOGS_COLL = "approval_logs"
+VALID_APPROVAL_ENTITY_TYPES = ("sales_order", "po_draft")
+VALID_APPROVAL_TYPES = ("sales_order", "purchase_order")
+VALID_APPROVAL_STATUSES = ("pending", "approved", "rejected")
+
+
+class ApprovalRequestIn(BaseModel):
+    entity_type: str = Field(...)
+    entity_id: str = Field(..., min_length=1)
+    approval_type: str = Field(...)
+    requested_by: str = Field(default="")
+    notes: str = Field(default="")
+
+
+class ApprovalDecisionIn(BaseModel):
+    approval_status: str = Field(...)
+    approved_by: str = Field(default="")
+    notes: str = Field(default="")
+
+
+async def _get_latest_approval(db, entity_type: str, entity_id: str):
+    """Return the latest approval record for an entity, or None."""
+    doc = await db[APPROVAL_LOGS_COLL].find_one(
+        {"entity_type": entity_type, "entity_id": entity_id},
+        {"_id": 0},
+        sort=[("requested_at", -1)],
+    )
+    return doc
+
+
+async def _get_approval_enrichment(db, entity_type: str, entity_id: str):
+    """Return approval enrichment fields for summary/detail responses."""
+    latest = await _get_latest_approval(db, entity_type, entity_id)
+    count = await db[APPROVAL_LOGS_COLL].count_documents({"entity_type": entity_type, "entity_id": entity_id})
+    if latest:
+        return {
+            "approval_status": latest["approval_status"],
+            "latest_approval_type": latest.get("approval_type", ""),
+            "latest_approval_at": latest.get("decided_at") or latest.get("requested_at", ""),
+            "approval_history_count": count,
+        }
+    return {
+        "approval_status": "not_requested",
+        "latest_approval_type": "",
+        "latest_approval_at": "",
+        "approval_history_count": 0,
+    }
+
+
+@router.post("/approvals/request")
+async def api_request_approval(body: ApprovalRequestIn):
+    """Create a pending approval request for a Sales Order or PO Draft."""
+    import uuid as _uuid
+
+    if body.entity_type not in VALID_APPROVAL_ENTITY_TYPES:
+        raise HTTPException(status_code=422, detail=f"Invalid entity_type '{body.entity_type}'. Must be one of: {VALID_APPROVAL_ENTITY_TYPES}")
+    if body.approval_type not in VALID_APPROVAL_TYPES:
+        raise HTTPException(status_code=422, detail=f"Invalid approval_type '{body.approval_type}'. Must be one of: {VALID_APPROVAL_TYPES}")
+
+    db = get_db()
+
+    # Validate entity exists
+    if body.entity_type == "sales_order":
+        # Check via order type collection or shipment logs
+        pass  # SOs are referenced by ID, no strict collection to validate against
+    elif body.entity_type == "po_draft":
+        draft = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": body.entity_id}, {"_id": 0, "po_draft_id": 1})
+        if not draft:
+            raise HTTPException(status_code=404, detail=f"PO Draft '{body.entity_id}' not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+    record = {
+        "approval_id": f"APPR-{_uuid.uuid4().hex[:8].upper()}",
+        "entity_type": body.entity_type,
+        "entity_id": body.entity_id.strip(),
+        "approval_type": body.approval_type,
+        "approval_status": "pending",
+        "requested_by": body.requested_by.strip(),
+        "approved_by": None,
+        "requested_at": now,
+        "decided_at": None,
+        "notes": body.notes.strip(),
+    }
+    await db[APPROVAL_LOGS_COLL].insert_one(record.copy())
+    record.pop("_id", None)
+    return record
+
+
+@router.patch("/approvals/{approval_id}")
+async def api_decide_approval(approval_id: str, body: ApprovalDecisionIn):
+    """Approve or reject an approval request."""
+    if body.approval_status not in ("approved", "rejected"):
+        raise HTTPException(status_code=422, detail="approval_status must be 'approved' or 'rejected'")
+
+    db = get_db()
+    existing = await db[APPROVAL_LOGS_COLL].find_one({"approval_id": approval_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Approval '{approval_id}' not found")
+
+    if existing["approval_status"] != "pending":
+        raise HTTPException(status_code=422, detail=f"Cannot change approval from '{existing['approval_status']}' to '{body.approval_status}'. Only pending approvals can be decided.")
+
+    now = datetime.now(timezone.utc).isoformat()
+    update = {
+        "approval_status": body.approval_status,
+        "approved_by": body.approved_by.strip(),
+        "decided_at": now,
+        "notes": body.notes.strip() if body.notes.strip() else existing.get("notes", ""),
+    }
+    await db[APPROVAL_LOGS_COLL].update_one({"approval_id": approval_id}, {"$set": update})
+
+    result = {**existing, **update}
+    return result
+
+
+@router.get("/approvals")
+async def api_list_approvals(entity_type: str, entity_id: str):
+    """List approval history for an entity."""
+    if entity_type not in VALID_APPROVAL_ENTITY_TYPES:
+        raise HTTPException(status_code=422, detail=f"Invalid entity_type '{entity_type}'.")
+    db = get_db()
+    cursor = db[APPROVAL_LOGS_COLL].find(
+        {"entity_type": entity_type, "entity_id": entity_id}, {"_id": 0}
+    ).sort("requested_at", -1)
+    entries = await cursor.to_list(length=200)
+    return {"entity_type": entity_type, "entity_id": entity_id, "total": len(entries), "approvals": entries}
 
 
 class ShortageLineReq(BaseModel):

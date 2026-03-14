@@ -1,0 +1,123 @@
+{
+  "summary": "Comprehensive testing of Approval Workflow Tracking (iteration_86). Backend: 19/19 tests passed for approval request/decide/list endpoints, SO and PO draft enrichment, and checklist integration. Frontend: ApprovalSection component verified in both ShipmentCaptureDialog (for SOs) and PODraftDetailDrawer (for PO drafts) with status badges, request forms, approve/reject controls, and history display. Regression tests pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "InventoryLedgerPage", "issues": ["React hydration warnings in console due to <span> inside <tbody> - cosmetic only, no functional impact (existing issue from previous iterations)"]}
+    ]
+  },
+  "passed_tests": [
+    "Backend: POST /api/inventory-ledger/approvals/request creates pending approval for sales_order",
+    "Backend: POST /api/inventory-ledger/approvals/request creates pending approval for po_draft",
+    "Backend: POST /api/inventory-ledger/approvals/request rejects invalid entity_type with 422",
+    "Backend: POST /api/inventory-ledger/approvals/request rejects invalid approval_type with 422",
+    "Backend: POST /api/inventory-ledger/approvals/request returns 404 for non-existent PO draft",
+    "Backend: PATCH /api/inventory-ledger/approvals/{id} approves pending request",
+    "Backend: PATCH /api/inventory-ledger/approvals/{id} rejects pending request",
+    "Backend: PATCH /api/inventory-ledger/approvals/{id} returns 422 for already-decided approval",
+    "Backend: PATCH /api/inventory-ledger/approvals/{id} returns 404 for unknown ID",
+    "Backend: GET /api/inventory-ledger/approvals lists history sorted newest first",
+    "Backend: SO summary includes approval_status, latest_approval_type, latest_approval_at, approval_history_count",
+    "Backend: SO summary shows not_requested when no approvals exist",
+    "Backend: PO draft detail includes approval_status, latest_approval_type, latest_approval_at, approval_history_count",
+    "Backend: Warehouse SO checklist includes approval_requested and approval_granted items",
+    "Backend: Drop-ship SO checklist includes approval_granted item (without approval_requested)",
+    "Backend: PO draft checklist includes approval_granted item",
+    "Backend: Checklist updates approval_granted when approval is granted",
+    "Backend: Regression - iteration_85 document linkage still works",
+    "Backend: Regression - iteration_84 drop-ship workflow still works",
+    "Frontend: ShipmentCaptureDialog shows ApprovalSection with status badge (verified Approved state)",
+    "Frontend: ApprovalSection in SO dialog shows approval history with ID, requester, approver, timestamp",
+    "Frontend: PODraftDetailDrawer shows ApprovalSection with Pending badge",
+    "Frontend: Pending approval shows Approve/Reject buttons with decision notes input",
+    "Frontend: ProcessChecklistSection shows approval_granted as unsatisfied when pending"
+  ],
+  "skipped_tests": [],
+  "test_report_links": [
+    "/app/backend/tests/test_approval_workflow.py",
+    "/app/test_reports/pytest/approval_workflow_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend inventory_ledger.py Lines 3140-3270: Approval workflow endpoints (POST /request, PATCH /{id}, GET /list)",
+    "Backend inventory_ledger.py Lines 3162-3188: Helper functions _get_latest_approval and _get_approval_enrichment",
+    "Backend inventory_ledger.py Lines 3063-3076: SO checklist now includes approval_requested (warehouse) and approval_granted (both types)",
+    "Backend inventory_ledger.py Lines 3082-3099: PO draft checklist includes approval_granted (replaces support_doc_present)",
+    "Backend inventory_ledger.py Lines 2866-2868: Drop-ship SO summary enrichment with approval fields",
+    "Backend inventory_ledger.py Lines 2966-2968: Warehouse SO summary enrichment with approval fields",
+    "Backend inventory_ledger.py Lines 1064-1073: PO draft detail enrichment with approval fields",
+    "Frontend InventoryLedgerPage.js Lines 850-980: ApprovalSection component with status badge, request form, approve/reject controls, history"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_approval_workflow.py"
+  ],
+  "success_rate": {
+    "backend": "100% (19/19 passed)",
+    "frontend": "100% (all UI elements verified)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://order-type-aware.preview.emergentagent.com"
+  },
+  "seed_data_used": {
+    "existing_so": "SO-TEST-DROP-001 (drop-ship SO with approved approval)",
+    "existing_po_draft": "PO-DRAFT-20260314203040-AF20B0 (has pending approval from testing)",
+    "test_customer": "Healthy Corp (HC-22137)"
+  },
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Approval workflow fully implemented in iteration_86. New collection: approval_logs. Entity types: sales_order, po_draft. Approval types: sales_order, purchase_order. Approval statuses: pending, approved, rejected (not_requested is derived). Checklist changes: warehouse SO now has approval_requested + approval_granted, drop-ship SO has approval_granted, PO draft has approval_granted (replaced support_doc_present). ApprovalSection component in InventoryLedgerPage.js (Lines 850-980) is used in both ShipmentCaptureDialog and PODraftDetailDrawer. All iteration_85 (document linkage) and iteration_84 (drop-ship workflow) features still work.",
+  "features_verified": {
+    "backend_endpoints": {
+      "request_approval": {
+        "method": "POST",
+        "path": "/api/inventory-ledger/approvals/request",
+        "request_body": {"entity_type": "sales_order|po_draft", "entity_id": "string", "approval_type": "sales_order|purchase_order", "requested_by": "string", "notes": "string"},
+        "response": {"approval_id": "APPR-...", "entity_type": "...", "entity_id": "...", "approval_type": "...", "approval_status": "pending", "requested_by": "...", "requested_at": "...", "notes": "..."},
+        "validation": "Rejects invalid entity_type (422), invalid approval_type (422), non-existent PO draft (404)"
+      },
+      "decide_approval": {
+        "method": "PATCH",
+        "path": "/api/inventory-ledger/approvals/{approval_id}",
+        "request_body": {"approval_status": "approved|rejected", "approved_by": "string", "notes": "string"},
+        "response": {"approval_id": "...", "approval_status": "approved|rejected", "approved_by": "...", "decided_at": "...", "notes": "..."},
+        "validation": "Returns 404 for unknown ID, 422 for already-decided approval"
+      },
+      "list_approvals": {
+        "method": "GET",
+        "path": "/api/inventory-ledger/approvals?entity_type=X&entity_id=Y",
+        "response": {"entity_type": "...", "entity_id": "...", "total": "number", "approvals": []},
+        "sorting": "newest first by requested_at"
+      },
+      "so_summary_enrichment": {
+        "new_fields": ["approval_status", "latest_approval_type", "latest_approval_at", "approval_history_count"]
+      },
+      "po_draft_detail_enrichment": {
+        "new_fields": ["approval_status", "latest_approval_type", "latest_approval_at", "approval_history_count"]
+      },
+      "checklist_changes": {
+        "warehouse_so": ["customer_po_attached", "approval_requested", "approval_granted", "warehouse_agreement"],
+        "drop_ship_so": ["customer_po_attached", "ds_po_draft_created", "approval_granted"],
+        "po_draft": ["vendor_assigned", "export_ready", "approval_granted"]
+      }
+    },
+    "frontend_components": {
+      "ApprovalSection": {
+        "testid": "approval-section",
+        "features": ["status badge (Approved/Pending/Rejected/Not Requested)", "request form", "approve/reject controls for pending", "decision notes input", "approval history list"],
+        "status_badges": {
+          "approved": "bg-green-600",
+          "pending": "bg-amber-500 text-white",
+          "rejected": "variant destructive",
+          "not_requested": "variant outline"
+        },
+        "form_fields": ["approval-request-notes", "approval-request-confirm", "approval-decision-notes", "approval-approve-btn", "approval-reject-btn"]
+      }
+    }
+  }
+}

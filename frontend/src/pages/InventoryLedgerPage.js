@@ -848,6 +848,138 @@ function ProcessChecklistSection({ checklist, complete }) {
   );
 }
 
+const APPROVAL_STATUS_STYLES = {
+  approved: { variant: 'default', label: 'Approved', className: 'bg-green-600' },
+  pending: { variant: 'secondary', label: 'Pending', className: 'bg-amber-500 text-white' },
+  rejected: { variant: 'destructive', label: 'Rejected', className: '' },
+  not_requested: { variant: 'outline', label: 'Not Requested', className: '' },
+};
+
+function ApprovalSection({ entityType, entityId, approvalType, approvalStatus: initialStatus, onChanged }) {
+  const [approvals, setApprovals] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [requesting, setRequesting] = useState(false);
+  const [deciding, setDeciding] = useState(null);
+  const [reqNotes, setReqNotes] = useState('');
+  const [decNotes, setDecNotes] = useState('');
+  const [showReqForm, setShowReqForm] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!entityId) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/approvals?entity_type=${entityType}&entity_id=${encodeURIComponent(entityId)}`);
+      if (res.ok) { const d = await res.json(); setApprovals(d.approvals || []); }
+    } catch { /* silent */ }
+    finally { setLoading(false); }
+  }, [entityType, entityId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const latestStatus = approvals.length > 0 ? approvals[0].approval_status : (initialStatus || 'not_requested');
+  const style = APPROVAL_STATUS_STYLES[latestStatus] || APPROVAL_STATUS_STYLES.not_requested;
+
+  const requestApproval = async () => {
+    setRequesting(true);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/approvals/request`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entity_type: entityType, entity_id: entityId, approval_type: approvalType, notes: reqNotes.trim() }),
+      });
+      if (res.ok) {
+        toast.success('Approval requested');
+        setShowReqForm(false); setReqNotes('');
+        load(); onChanged?.();
+      } else { const d = await res.json(); toast.error(d.detail || 'Failed'); }
+    } catch { toast.error('Failed to request approval'); }
+    finally { setRequesting(false); }
+  };
+
+  const decideApproval = async (approvalId, status) => {
+    setDeciding(approvalId);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/approvals/${approvalId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approval_status: status, notes: decNotes.trim() }),
+      });
+      if (res.ok) {
+        toast.success(`Approval ${status}`);
+        setDecNotes('');
+        load(); onChanged?.();
+      } else { const d = await res.json(); toast.error(d.detail || 'Failed'); }
+    } catch { toast.error('Failed'); }
+    finally { setDeciding(null); }
+  };
+
+  return (
+    <div className="space-y-1.5" data-testid="approval-section">
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1"><ShieldCheck className="w-3 h-3" /> Approval</p>
+        <div className="flex items-center gap-1.5">
+          <Badge className={`text-[7px] ${style.className}`} variant={style.variant} data-testid="approval-status-badge">{style.label}</Badge>
+          {latestStatus !== 'pending' && (
+            <Button variant="ghost" size="sm" className="h-5 text-[10px] px-1.5" onClick={() => setShowReqForm(!showReqForm)} data-testid="approval-request-toggle">
+              {showReqForm ? <X className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Request form */}
+      {showReqForm && (
+        <div className="space-y-1.5 border border-border rounded p-2 bg-muted/20" data-testid="approval-request-form">
+          <Input className="h-6 text-[10px]" placeholder="Notes (optional)" value={reqNotes} onChange={e => setReqNotes(e.target.value)} data-testid="approval-request-notes" />
+          <Button size="sm" className="h-6 text-[10px] w-full" disabled={requesting} onClick={requestApproval} data-testid="approval-request-confirm">
+            {requesting ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <ShieldCheck className="w-3 h-3 mr-1" />} Request Approval
+          </Button>
+        </div>
+      )}
+
+      {/* Pending approval: approve/reject controls */}
+      {latestStatus === 'pending' && approvals.length > 0 && (
+        <div className="space-y-1.5 border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 rounded p-2" data-testid="approval-decision-form">
+          <p className="text-[10px] font-medium text-amber-700 dark:text-amber-300">Approval pending — decide below</p>
+          <Input className="h-6 text-[10px]" placeholder="Decision notes (optional)" value={decNotes} onChange={e => setDecNotes(e.target.value)} data-testid="approval-decision-notes" />
+          <div className="flex gap-2">
+            <Button size="sm" className="h-6 text-[10px] flex-1 bg-green-600 hover:bg-green-700 text-white" disabled={!!deciding} onClick={() => decideApproval(approvals[0].approval_id, 'approved')} data-testid="approval-approve-btn">
+              {deciding === approvals[0].approval_id ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Check className="w-3 h-3 mr-1" />} Approve
+            </Button>
+            <Button size="sm" variant="destructive" className="h-6 text-[10px] flex-1" disabled={!!deciding} onClick={() => decideApproval(approvals[0].approval_id, 'rejected')} data-testid="approval-reject-btn">
+              <X className="w-3 h-3 mr-1" /> Reject
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Rejected indicator */}
+      {latestStatus === 'rejected' && (
+        <div className="border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 rounded p-1.5 text-[10px] text-red-700 dark:text-red-300 font-medium" data-testid="approval-rejected-indicator">
+          Approval was rejected{approvals[0]?.notes ? `: ${approvals[0].notes}` : ''}
+        </div>
+      )}
+
+      {/* History */}
+      {approvals.length > 0 && (
+        <div className="border border-border rounded overflow-hidden" data-testid="approval-history">
+          {approvals.map((a, i) => {
+            const s = APPROVAL_STATUS_STYLES[a.approval_status] || APPROVAL_STATUS_STYLES.not_requested;
+            return (
+              <div key={a.approval_id} className="flex items-center gap-2 border-b border-border/20 last:border-b-0 p-1.5 text-[10px]" data-testid={`approval-entry-${i}`}>
+                <Badge className={`text-[7px] ${s.className}`} variant={s.variant}>{s.label}</Badge>
+                <span className="font-mono text-muted-foreground text-[8px]">{a.approval_id}</span>
+                {a.requested_by && <span className="text-muted-foreground">by {a.requested_by}</span>}
+                {a.approved_by && <span className="text-muted-foreground">→ {a.approved_by}</span>}
+                <span className="text-muted-foreground ml-auto">{(a.decided_at || a.requested_at || '').slice(0, 16).replace('T', ' ')}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {loading && <div className="flex justify-center py-1"><Loader2 className="w-3 h-3 animate-spin" /></div>}
+    </div>
+  );
+}
+
 function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipped }) {
   const [soId, setSoId] = useState(initialSoId || '');
   const [summary, setSummary] = useState(null);
@@ -1171,6 +1303,7 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
               {summary.process_checklist && (
                 <ProcessChecklistSection checklist={summary.process_checklist} complete={summary.checklist_complete} />
               )}
+              <ApprovalSection entityType="sales_order" entityId={soId.trim()} approvalType="sales_order" approvalStatus={summary.approval_status} onChanged={() => loadSummary()} />
 
               {/* ═══ DROP-SHIP PO DRAFT SECTION ═══ */}
               {isDropShip && (
@@ -2464,6 +2597,7 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
             {draft.process_checklist && (
               <ProcessChecklistSection checklist={draft.process_checklist} complete={draft.checklist_complete} />
             )}
+            <ApprovalSection entityType="po_draft" entityId={draftId} approvalType="purchase_order" approvalStatus={draft.approval_status} onChanged={() => loadDraft()} />
 
             {/* Actions */}
             <div className="flex flex-wrap gap-2 pt-1" data-testid="inv-po-draft-actions">

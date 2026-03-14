@@ -361,6 +361,23 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 - Frontend: After receipt, refreshes linked supply, draft detail, and all inventory views
 - Backend: 13/13 tests passed, Frontend: all UI flows verified
 - Test report: `/app/test_reports/iteration_80.json`
+---
+
+## 2026-03-14: BC Sales Shipment Capture (iteration_81)
+
+### What Was Built
+- `POST /api/inventory-ledger/sales-orders/{id}/bc-shipment` — records BC shipment and releases committed inventory via existing `release_order_commitments` pipeline
+- Supports full and partial shipment. Over-shipment rejected (422). Idempotent for fully released SOs.
+- Shipment logs stored in `bc_shipment_logs` collection (shipment_id, bc_shipment_number, bc_document_id, shipped_at, notes, lines)
+- `GET /api/inventory-ledger/sales-orders/{id}/summary` — returns commitment/release/remaining per item with latest shipment info
+- `GET /api/inventory-ledger/sales-orders/{id}/shipment-log` — reverse chronological shipment history
+- Fixed data edge case: SO commitments across multiple customer_ids handled by aggregating from raw movements
+- Frontend: "Record Shipment" button on Demand tab toolbar
+- Frontend: ShipmentCaptureDialog — SO lookup, commitment summary, line-level ship qty inputs, BC fields, shipment result, shipment history
+- Downstream views (demand, supply coverage, exceptions, Action Center) automatically reflect reduced commitment through existing pipelines
+- Backend: 18/18 tests passed, Frontend: all UI flows verified
+- Test report: `/app/test_reports/iteration_81.json`
+
 
 
 

@@ -3105,6 +3105,25 @@ EMAIL_CLIENT_ID=doc-workflow-test
 
 *Last Updated: March 14, 2026*
 
+
+---
+
+## Session Update: March 14, 2026 - BC Sales Shipment Capture (iteration_81)
+
+### Completed
+
+#### BC Sales Shipment Capture
+- **Backend**: `POST /sales-orders/{id}/bc-shipment` releases committed inventory via `release_order_commitments`. Full + partial shipment. Over-shipment 422. Idempotent.
+- **Backend**: `GET /sales-orders/{id}/summary` (commitment/release/remaining) and `GET /sales-orders/{id}/shipment-log` (history).
+- **Frontend**: Record Shipment dialog from Demand tab — SO lookup, summary, per-line qty, BC fields, result, history.
+- All downstream views auto-refresh through existing pipelines.
+
+### Test Results
+- Backend: 18/18 (100%)
+- Frontend: All UI flows verified (100%)
+- Test report: `/app/test_reports/iteration_81.json`
+
+*Last Updated: March 14, 2026*
 *Last Updated: March 14, 2026*
 - Test report: `/app/test_reports/iteration_75.json`
 

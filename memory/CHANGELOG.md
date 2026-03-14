@@ -237,3 +237,19 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 - Bugs fixed: (1) _id:None in insert_one, (2) 'actions' used before declaration
 - Backend: 20/20 pytest tests passed, Frontend: all UI flows verified
 - Test report: `/app/test_reports/iteration_73.json`
+
+---
+
+## 2026-03-14: PO Draft Review and Export
+
+### What Was Built
+- `GET /api/inventory-ledger/po-drafts/{id}` — returns full stored PO draft detail
+- `GET /api/inventory-ledger/po-drafts/{id}/export` — downloadable JSON file with Content-Disposition header
+- Export uses stored data exactly as saved (no recalculation)
+- Frontend: PO Drafts tab with list table (ID, date, status badge, lines, total qty, items preview)
+- PODraftDetailDrawer: header (ID, status, created, customer), summary, lines table, action buttons
+- Export JSON, Mark as Sent, Archive controls in detail drawer
+- Action Center confirmation: View Draft link opens draft detail
+- Item Detail: PO draft indicator is clickable to open draft detail drawer
+- Backend: 15/15 pytest tests passed, Frontend: all UI flows verified
+- Test report: `/app/test_reports/iteration_74.json`

@@ -145,3 +145,17 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 - Frontend: Export Snapshot button on Balances tab toolbar
 - Backend: 25/25 pytest tests passed, Frontend: all UI flows verified
 - Test report: `/app/test_reports/iteration_67.json`
+
+---
+
+## 2026-03-14: Inventory Exception View
+
+### What Was Built
+- `GET /api/inventory-ledger/exceptions` — returns items needing attention with exception_types classification
+- Exception types: short (status=SHORT), low (status=LOW), reorder (in recommendations), no_incoming (SHORT/LOW with incoming=0)
+- Exception summary counts: short_count, low_count, reorder_count, no_incoming_count (short/low match dashboard metrics)
+- Supports exception_type filter parameter, sorted by available ascending (most critical first)
+- Reorder items include recommended_qty, reorder_threshold, safety_buffer
+- Frontend: Exceptions tab with 4 clickable summary cards (filter toggle) + exception table with History/Supply action buttons
+- Backend: 21/21 pytest tests passed, Frontend: all UI flows verified
+- Test report: `/app/test_reports/iteration_68.json`

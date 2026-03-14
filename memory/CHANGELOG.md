@@ -201,3 +201,20 @@ Complete admin page for vendor stability oversight, explainability, and manual c
 - ItemDetailDrawer shows Supply Coverage section with value + status badge
 - Backend: 17/17 pytest tests passed, Frontend: all UI flows verified
 - Test report: `/app/test_reports/iteration_71.json`
+
+---
+
+## 2026-03-14: Inventory Action Center
+
+### What Was Built
+- `GET /api/inventory-ledger/action-center` — unified prioritized action queue
+- Consolidates: exceptions, reorder, demand signals, supply coverage into merged action rows
+- Action types: shortage(50), coverage_risk(30), demand_gap(20), reorder(10), no_incoming(5)
+- Priority score = sum of weights, sorted by score desc, available asc for ties
+- action_summary: shortage_count, coverage_risk_count, demand_gap_count, reorder_count, no_incoming_count, total_action_items
+- Supports action_type filter parameter
+- Item detail updated: action_summary (action_types, priority_score) when applicable
+- Frontend: Action Center tab with 5 clickable summary cards (filter toggle) + action table with badges, priority scores, History/Supply buttons
+- ItemDetailDrawer shows action summary section with badges and score
+- Backend: 20/20 pytest tests passed, Frontend: all UI flows verified
+- Test report: `/app/test_reports/iteration_72.json`

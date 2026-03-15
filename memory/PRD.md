@@ -3382,3 +3382,67 @@ Documents → Classify → Extract → Resolve Entities → Match Transactions
 
 *Last Updated: March 15, 2026*
 
+
+
+---
+
+## Technical Debt Remediation Pass (Completed - March 15, 2026)
+
+### Overview
+Controlled technical debt remediation focused on consolidation and structural clarity. No new business features were added.
+
+### Changes Made
+
+#### A. Backend Entrypoint Consolidation
+- **`main.py`** is now the single authoritative FastAPI entrypoint (confirmed by supervisor config: `uvicorn main:app`)
+- **`server.py`** converted to a pure library — the `app = FastAPI(...)`, all `app.include_router()`, `app.add_middleware()`, `@app.on_event()` decorators, and the health check endpoint were removed. Only `api_router` and business logic functions remain.
+- **`server_new.py`** deleted (was unused experimental entrypoint)
+
+#### B. Routing Consolidation
+- `routes/auth.py` migrated to `routers/auth.py`
+- `routes/ap_review.py` migrated to `routers/ap_review.py` (prefix changed from `/api/ap-review` to `/ap-review`)
+- `routes/spiro.py` migrated to `routers/spiro.py` (prefix changed from `/api/spiro` to `/spiro`)
+- Unused route files deleted: `routes/config.py`, `routes/dashboard.py`, `routes/documents.py`, `routes/ingestion.py`, `routes/workflows.py`
+- `routes/__init__.py` replaced with deprecation notice
+- All 37 routers now live under `routers/` (single convention)
+- All routers included in `main.py` with `prefix="/api"` for consistent routing
+
+#### C. Canonical Document Pipeline
+- Created `services/pipeline/document_pipeline.py` with 7-stage orchestration:
+  1. classification → 2. entity_resolution → 3. transaction_match → 4. bundle_detection → 5. lifecycle_check → 6. policy_decision → 7. learning_capture
+- Each stage wraps existing service functions (no business logic rewrite)
+- Non-fatal error handling: stage failures are logged but don't abort the pipeline
+- Supports `stop_after` and `skip_stages` for partial runs
+- API endpoints: `POST /api/document-intelligence/pipeline/{doc_id}`, `GET /api/document-intelligence/pipeline/stages`
+
+#### D. Architecture Documentation
+- Created `ARCHITECTURE_CURRENT.md` at repo root documenting:
+  - Authoritative entrypoint and startup flow
+  - Routing convention
+  - Pipeline stages and API
+  - Core service domains
+  - Known follow-up refactor targets
+
+### Files Changed
+- **Modified:** `backend/main.py`, `backend/server.py`, `backend/routers/document_intelligence.py`
+- **Created:** `backend/routers/auth.py`, `backend/routers/ap_review.py`, `backend/routers/spiro.py`, `backend/services/pipeline/__init__.py`, `backend/services/pipeline/document_pipeline.py`, `ARCHITECTURE_CURRENT.md`
+- **Deleted:** `backend/server_new.py`, `backend/routes/auth.py`, `backend/routes/ap_review.py`, `backend/routes/spiro.py`, `backend/routes/config.py`, `backend/routes/dashboard.py`, `backend/routes/documents.py`, `backend/routes/ingestion.py`, `backend/routes/workflows.py`
+
+### Compatibility Shims
+- `backend/routes/__init__.py` left in place with deprecation notice (empty package)
+- No frontend changes required — all endpoint paths unchanged
+
+### Remaining Technical Debt
+- `server.py` (~9400 lines) still contains legacy business logic functions
+- `routers/document_intelligence.py` has grown to ~660 lines
+- `routers/inventory_ledger.py` remains monolithic
+- Legacy `api_router` in `server.py` still has un-extracted routes
+- `sales_module.py` is a standalone module that should be migrated to `routers/`
+- `frontend/src/components/document/DocumentIntelligencePanel.js` is very large
+
+### Test Results
+- Backend: 100% (16/16 tests passed)
+- All API contracts verified intact
+- Test report: `/app/test_reports/iteration_102.json`
+
+*Last Updated: March 15, 2026*

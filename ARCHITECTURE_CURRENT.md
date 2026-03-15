@@ -599,16 +599,16 @@ server.py is now a **utility library module**, not a router. It provides:
 |--------------|------------|----------------|
 | `routers/documents.py` | 10 | `services/document_handlers.py` |
 | `routers/workflows.py` | 15 | `services/workflow_handlers.py` |
-| `routers/reference_intelligence.py` | 7 | server.py functions |
-| **Total** | **32** | 25 extracted, 7 remaining in server.py |
+| `routers/reference_intelligence.py` | 7 | `services/reference_intelligence_handlers.py` |
+| **Total** | **32** | All 32 extracted; server.py is no longer the authoritative source for any route handler |
 
-Document and workflow handlers have been extracted to dedicated service modules. Reference intelligence handlers remain in server.py as the next extraction target.
+All handler implementations have been extracted from server.py into dedicated service modules. The three router modules import exclusively from their respective handler services.
 
 ### Known follow-up debt
 
-- **7 reference_intelligence handler implementations** still in server.py, registered via add_api_route
-- **12 router modules** still import helpers from server.py (normalize_vendor_name, get_bc_companies, etc.)
-- server.py is still large — reference_intelligence extraction is the next reduction opportunity
+- **12 router modules** still import utility helpers from server.py (normalize_vendor_name, get_bc_companies, etc.)
+- server.py retains orchestration logic (run_upload_and_link_workflow, email polling, BC integration helpers, AI classification) consumed by extracted handler modules via lazy import
+- server.py retains module-level DB connection, startup/shutdown lifecycle, and background workers
 
 ### 5d. Document Handler Extraction (March 2026)
 
@@ -670,7 +670,50 @@ These functions are still called via lazy `import server`:
 
 ---
 
-*Last updated: March 15, 2026 (Workflow Handler Extraction pass)*
+### 5f. Reference Intelligence Handler Extraction (March 2026)
+
+**7 reference-intelligence-domain handler implementations** moved from server.py to `services/reference_intelligence_handlers.py`.
+
+#### Handlers extracted
+
+| Handler | Route | Method |
+|---------|-------|--------|
+| `resolve_bc_reference` | `/api/bc/resolve-reference` | POST |
+| `resolve_document_reference` | `/api/documents/{id}/resolve-reference` | POST |
+| `resolve_document_intelligence` | `/api/documents/{id}/resolve-intelligence` | POST |
+| `get_document_reference_intelligence` | `/api/documents/{id}/reference-intelligence` | GET |
+| `trigger_auto_resolve` | `/api/documents/{id}/auto-resolve` | POST |
+| `get_matching_debug` | `/api/documents/{id}/matching-debug` | GET |
+| `rerun_matching_with_diagnostics` | `/api/documents/{id}/matching-debug/rerun` | POST |
+
+#### Dependency wiring (after)
+
+| Need | Sourced from | NOT from server.py |
+|------|-------------|-------------------|
+| `get_reference_resolver` | `services.bc_reference_resolver` | yes |
+| `get_event_service` | `services.event_service` | yes |
+| `get_reference_intelligence_service` | `services.reference_intelligence_service` | yes |
+| `get_auto_resolve_service` | `services.auto_resolution_service` | yes |
+| `get_label_correction_service` | `services.label_correction_service` | yes |
+| `get_vep_service` | `services.vendor_extraction_profile_service` | yes |
+| `get_layout_fingerprint_service` | `services.layout_fingerprint_service` | yes |
+| `get_vendor_intelligence_service` | `services.vendor_intelligence_service` | yes |
+| DB access | `deps.get_db()` | yes |
+
+**No server.py-local functions required.** This was the cleanest extraction of the three passes — all service getters were already in proper service modules.
+
+#### Milestone: All 32 add_api_route handlers extracted
+
+With this pass, all three router domains are fully extracted:
+- `services/document_handlers.py` — 10 handlers (March 2026)
+- `services/workflow_handlers.py` — 15 handlers (March 2026)
+- `services/reference_intelligence_handlers.py` — 7 handlers (March 2026)
+
+server.py no longer serves as the authoritative source for any route handler implementation.
+
+---
+
+*Last updated: March 15, 2026 (Reference Intelligence Handler Extraction pass)*
 
 ### 5e. Workflow Handler Extraction (March 2026)
 

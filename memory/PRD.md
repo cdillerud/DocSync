@@ -3446,3 +3446,62 @@ Controlled technical debt remediation focused on consolidation and structural cl
 - Test report: `/app/test_reports/iteration_102.json`
 
 *Last Updated: March 15, 2026*
+
+
+---
+
+## Technical Debt Remediation Pass #2: Reference Intelligence Consolidation (March 15, 2026)
+
+### Overview
+Consolidation of the Reference Intelligence domain. Extracted shared helpers from 4 services to eliminate duplicated normalization, matching, and BC access logic.
+
+### Changes Made
+
+#### A. Shared Normalization & Matching Helpers (`services/reference_helpers.py`)
+- `normalize_text()` — generic string normalization (from entity_resolution_service)
+- `normalize_reference()` — reference number normalization (from reference_intelligence_service)
+- `normalize_company_name()` — company name normalization (from unified_vendor_matcher)
+- `fuzzy_ratio()` — SequenceMatcher similarity (was duplicated in entity_resolution + unified_vendor_matcher)
+- `fuzzy_vendor_match()` — quick prefix/token check (from reference_intelligence_service)
+- `is_freight_carrier()` — freight keyword detection (was duplicated in reference_intelligence + unified_vendor_matcher)
+
+#### B. Shared BC Access Adapter (`services/bc_access.py`)
+- `BCAccessAdapter` — single class for OAuth token management + company ID resolution
+- Replaces duplicate implementations in `bc_reference_resolver` and `unified_vendor_matcher`
+- Shares a single token cache (50-min TTL) across all consumers
+
+#### C. Caller Updates
+- `entity_resolution_service.py` — `_normalize()` and `_fuzzy_score()` now delegate to shared helpers
+- `reference_intelligence_service.py` — `normalize_reference()`, `_fuzzy_vendor_match()`, and freight detection now delegate to shared helpers
+- `unified_vendor_matcher.py` — `_normalize_name()`, `_calculate_similarity()`, `_is_freight_name()`, `_get_bc_token()`, `_get_bc_company_id()` now delegate to shared modules
+- `bc_reference_resolver.py` — `_get_token()`, `_get_company_id()` now delegate to `bc_access.BCAccessAdapter`
+
+#### D. Architecture Documentation
+- Added "Reference Intelligence Domain" section (§4) to ARCHITECTURE_CURRENT.md
+- Documented before/after state, canonical resolution flow, shared helpers, service boundaries
+
+### Overlaps Removed
+- 3 normalization implementations → 1 shared module
+- 2 SequenceMatcher fuzzy scorers → 1 shared function
+- 2 BC OAuth token managers → 1 shared adapter
+- 2 freight keyword lists → 1 shared function
+
+### Compatibility Wrappers
+All existing per-service methods preserved as thin wrappers delegating to shared helpers. No external callers need changes.
+
+### Files Changed
+- **Created:** `services/reference_helpers.py`, `services/bc_access.py`, `tests/test_reference_helpers.py`
+- **Modified:** `services/entity_resolution_service.py`, `services/reference_intelligence_service.py`, `services/unified_vendor_matcher.py`, `services/bc_reference_resolver.py`, `ARCHITECTURE_CURRENT.md`
+- **Unchanged:** `services/vendor_intelligence_service.py`, `services/stable_vendor_service.py`, `services/bc_reference_cache_service.py`
+
+### Remaining Technical Debt
+- `reference_intelligence_service.py` (1660+ lines) — still large, candidate for splitting into sub-modules
+- `bc_reference_cache_service.py` — still loads BC config from env vars directly; could use `bc_access.py`
+- 2 pre-existing unused variables in `reference_intelligence_service.py`
+
+### Test Results
+- Unit tests: 45/45 passed (normalization, matching, freight, cross-service consistency)
+- API tests: 11/11 passed (all endpoint contracts verified)
+- Test report: `/app/test_reports/iteration_103.json`
+
+*Last Updated: March 15, 2026*

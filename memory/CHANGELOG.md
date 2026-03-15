@@ -1,5 +1,26 @@
 # GPI Document Hub - Changelog
 
+## March 15, 2026 — Reference Intelligence Consolidation (iter_103)
+
+### Shared Helpers Created
+- `services/reference_helpers.py` — normalize_text, normalize_reference, normalize_company_name, fuzzy_ratio, fuzzy_vendor_match, is_freight_carrier
+- `services/bc_access.py` — BCAccessAdapter (shared BC OAuth token + company ID management)
+
+### Overlaps Removed
+- 3 duplicate normalizers → 1 shared module
+- 2 duplicate SequenceMatcher scorers → 1 shared function
+- 2 duplicate BC OAuth token managers → 1 shared adapter
+- 2 duplicate freight keyword lists → 1 shared function
+
+### Services Updated
+- entity_resolution_service, reference_intelligence_service, unified_vendor_matcher, bc_reference_resolver — now delegate to shared helpers
+- All original method signatures preserved as thin wrappers
+
+### Testing
+- 56/56 passed (45 unit + 11 API)
+
+---
+
 ## March 15, 2026 — Technical Debt Remediation Pass (iter_102)
 
 ### Entrypoint Consolidation

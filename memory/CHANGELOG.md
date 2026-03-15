@@ -1,5 +1,25 @@
 # GPI Document Hub - Changelog
 
+## March 15, 2026 — Orchestration Logic Extraction (iter_113)
+
+### Extraction
+- Extracted 7 business orchestration functions from server.py into 2 new service modules:
+  - `services/vendor_matching.py`: `lookup_vendor_alias`, `match_vendor_in_bc`, `check_duplicate_document` (async DB/API operations)
+  - `services/ap_computation.py`: `compute_ap_validation`, `compute_ap_status`, `compute_draft_candidate_flag`, `is_eligible_for_draft_creation` (pure computation)
+- Rewired `services/document_handlers.py` to import directly from new modules
+- Left thin compatibility wrappers in server.py for internal callers
+
+### Testing
+- 24/24 orchestration extraction tests passed
+- 22/22 regression tests passed
+- 90/90 tests passed across all 4 extraction suites (0 failures, 0 regressions)
+- Route count stable at 427
+
+### Architecture update
+- Updated `ARCHITECTURE_CURRENT.md` with section 5h documenting the extraction
+
+---
+
 ## March 15, 2026 — Shared Helper Extraction (iter_112)
 
 ### Extraction

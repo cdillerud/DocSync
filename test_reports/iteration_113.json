@@ -1,0 +1,66 @@
+{
+  "summary": "Technical debt remediation test - Orchestration Extraction verification. All 46 tests passed (24 orchestration + 22 regression). Verified 7 functions extracted from server.py into vendor_matching.py (3 functions) and ap_computation.py (4 functions). document_handlers.py uses direct imports. server.py compatibility wrappers work correctly. Route count stable at 427. No import errors or circular dependencies.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_orchestration_extraction.py",
+    "/app/backend/tests/test_refactor_regression.py",
+    "/app/test_reports/pytest/orchestration_extraction_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Minor: Deprecation warnings for regex param (should use pattern) in bc_sandbox.py and pilot.py",
+    "Minor: PydanticDeprecatedSince20 warning for min_items in inventory_ledger.py (should use min_length)",
+    "Minor: on_event deprecation in main.py (should use lifespan event handlers)"
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (46/46 tests passed)",
+    "frontend": "100% (login and dashboard verified)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "None required",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Orchestration extraction refactoring complete and verified. vendor_matching.py contains lookup_vendor_alias, match_vendor_in_bc, check_duplicate_document. ap_computation.py contains compute_ap_validation, compute_ap_status, compute_draft_candidate_flag, is_eligible_for_draft_creation. All 427 routes stable.",
+  "verification_summary": {
+    "vendor_matching_module": {
+      "functions": ["lookup_vendor_alias", "match_vendor_in_bc", "check_duplicate_document"],
+      "status": "All importable and callable"
+    },
+    "ap_computation_module": {
+      "functions": ["compute_ap_validation", "compute_ap_status", "compute_draft_candidate_flag", "is_eligible_for_draft_creation"],
+      "status": "All importable and callable",
+      "validation_tests": {
+        "all_fields_valid": "PASS - draft_candidate=True",
+        "missing_vendor": "PASS - draft_candidate=False, error='Missing vendor name'",
+        "low_confidence": "PASS - draft_candidate=False, error contains 'confidence'"
+      }
+    },
+    "document_handlers_rewiring": {
+      "direct_imports": "PASS - imports directly from vendor_matching and ap_computation",
+      "classify_document": "PASS - uses _classify_with_ai",
+      "reprocess_document": "PASS - no srv = _server() calls",
+      "batch_revalidate": "PASS - no srv = _server() calls"
+    },
+    "server_compatibility_wrappers": {
+      "compute_ap_validation": "PASS - wrapper resolves correctly",
+      "is_eligible_for_draft_creation": "PASS - wrapper resolves correctly"
+    },
+    "api_endpoints": {
+      "/api/health": "200 OK",
+      "/api/documents": "200 OK",
+      "/api/workflows": "200 OK",
+      "/api/dashboard/document-types": "200 OK",
+      "/api/bc/resolve-reference": "200 OK"
+    },
+    "route_count": "427 (stable)"
+  }
+}

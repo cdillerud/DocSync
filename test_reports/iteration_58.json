@@ -61,7 +61,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://service-migration-3.preview.emergentagent.com"
+    "api_url": "https://service-refactor-7.preview.emergentagent.com"
   },
   "seed_data_used": "Each test creates unique items with UUID prefixes. Test workspaces created per test class with deactivation on teardown. Hormel Foods workspace used for frontend verification.",
   "retest_needed": false,

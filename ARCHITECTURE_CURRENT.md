@@ -484,7 +484,7 @@ Document enters system
 
 | Target | Description | Priority |
 |--------|-------------|----------|
-| **`server.py` (~9100 lines)** | Still contains legacy business-logic functions and `validate_bc_match`. Has thin wrappers for 4 extracted functions. Should continue extraction over time. | P1 |
+| **`server.py` (~7800 lines)** | Still contains legacy business-logic functions and `validate_bc_match`. Has thin wrappers for extracted functions. Should continue extraction over time. | P1 |
 | **`validate_bc_match()` in server.py** | 450-line function with 15+ module-level dependencies. Needs dedicated extraction pass. | P1 |
 | **`reference_intelligence_service.py` (~1660 lines)** | Large file covering extract, classify, score, and resolve. Candidate for splitting into sub-modules. | P2 |
 | **`routers/document_intelligence.py`** | Grew to ~660 lines. Could be split into sub-routers per pipeline stage. | P2 |
@@ -714,7 +714,48 @@ server.py no longer serves as the authoritative source for any route handler imp
 
 ---
 
-*Last updated: March 15, 2026 (Reference Intelligence Handler Extraction pass)*
+### 5h. Orchestration Logic Extraction (March 2026)
+
+**7 business orchestration functions** extracted from server.py into 2 new service modules:
+
+#### New authoritative modules
+
+| Module | Functions extracted | Nature |
+|--------|-------------------|--------|
+| `services/vendor_matching.py` | `lookup_vendor_alias`, `match_vendor_in_bc`, `check_duplicate_document` | Async DB/API operations |
+| `services/ap_computation.py` | `compute_ap_validation`, `compute_ap_status`, `compute_draft_candidate_flag`, `is_eligible_for_draft_creation` | Pure computation (no DB/API) |
+
+#### Dependency wiring (after)
+
+| Need | Sourced from | NOT from server.py |
+|------|-------------|-------------------|
+| DB access | `deps.get_db()` | yes |
+| Vendor normalization | `services.vendor_name_helpers` | yes |
+| BC vendor search | `services.bc_access` | yes |
+| Feature flag | `deps.ENABLE_CREATE_DRAFT_HEADER` | yes |
+| Draft config | `models.document_types.DRAFT_CREATION_CONFIG` | yes |
+
+#### Consumer rewiring
+
+- `services/document_handlers.py` — imports directly from `vendor_matching` and `ap_computation` (no longer via lazy `_server()` import for these functions)
+
+#### Thin compatibility wrappers left in server.py
+
+| Function | Reason |
+|----------|--------|
+| `compute_ap_validation` | Re-export from `services.ap_computation` |
+| `is_eligible_for_draft_creation` | Re-export from `services.ap_computation` |
+| `lookup_vendor_alias` | Re-export from `services.vendor_matching` |
+| `check_duplicate_document` | Re-export from `services.vendor_matching` |
+
+#### Known follow-up debt
+
+- `document_handlers.py` still uses `_server()` lazy import for ~15 remaining orchestration functions (SharePoint, BC draft creation, email orchestration)
+- `vendor_matching.py` still lazy-imports server.py config vars (`TENANT_ID`, `BC_READ_ENVIRONMENT`) — future config-module extraction target
+
+---
+
+*Last updated: March 15, 2026 (Orchestration Logic Extraction pass)*
 
 ### 5e. Workflow Handler Extraction (March 2026)
 

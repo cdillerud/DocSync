@@ -374,5 +374,11 @@ export const executeDecision = (decisionId) => api.post(`/document-intelligence/
 export const getDecision = (docId) => api.get(`/document-intelligence/decision/${docId}`);
 export const getDecisionQueue = (params) => api.get('/document-intelligence/decision-queue', { params });
 
+// Learning Loop APIs
+export const getLearningEvents = (params) => api.get('/document-intelligence/learning/events', { params });
+export const getLearningSummary = () => api.get('/document-intelligence/learning/summary');
+export const getDocumentLearningEvents = (docId) => api.get(`/document-intelligence/learning/events/${docId}`);
+
+
 
 

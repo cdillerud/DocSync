@@ -58,6 +58,11 @@ from services.decision_policy_service import (
     get_decision,
     get_decision_queue,
 )
+from services.learning_loop_service import (
+    get_learning_summary,
+    get_learning_events,
+    get_document_learning_events,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/document-intelligence", tags=["Document Intelligence"])
@@ -372,6 +377,40 @@ async def api_get_decision(doc_id: str):
     if not result:
         raise HTTPException(status_code=404, detail=f"No decision for document: {doc_id}")
     return result
+
+
+# ── Learning Loop Endpoints ───────────────────────────────────────────────────
+
+@router.get("/learning/summary")
+async def api_learning_summary():
+    """Get learning summary with metrics, alias stats, and correction rates."""
+    return await get_learning_summary()
+
+
+@router.get("/learning/events")
+async def api_learning_events(
+    event_type: Optional[str] = Query(None),
+    document_type: Optional[str] = Query(None),
+    vendor_id: Optional[str] = Query(None),
+    entity_type: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """Query learning events with filters."""
+    return await get_learning_events(
+        event_type=event_type,
+        document_type=document_type,
+        vendor_id=vendor_id,
+        entity_type=entity_type,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/learning/events/{doc_id}")
+async def api_document_learning_events(doc_id: str):
+    """Get all learning events for a specific document."""
+    return await get_document_learning_events(doc_id)
 
 
 # ── Catch-all document routes (must be LAST) ────────────────────────────────

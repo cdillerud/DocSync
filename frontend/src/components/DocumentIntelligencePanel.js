@@ -6,13 +6,13 @@ import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import {
   ScanSearch, RefreshCw, CheckCircle, AlertTriangle, XCircle, Pencil, Save, X, Loader2,
-  History, ChevronDown, ChevronUp, Zap, Copy, FileText, Link2, Users, Unlink, ArrowRight, GitMerge, Ban, Layers, PackageSearch, Activity, ShieldAlert, Brain, Play
+  History, ChevronDown, ChevronUp, Zap, Copy, FileText, Link2, Users, Unlink, ArrowRight, GitMerge, Ban, Layers, PackageSearch, Activity, ShieldAlert, Brain, Play, GraduationCap
 } from 'lucide-react';
 import {
   getDocumentIntelligence, processDocumentIntelligence, correctDocumentIntelligence,
   createAutoDraft, resolveDocumentEntities, getDocumentResolutions, correctResolution,
   matchTransactions, getTransactionMatches, autoLinkDocument, confirmTransactionMatch,
-  getBundle, validateLifecycle, evaluateDecision, executeDecision, getDecision
+  getBundle, validateLifecycle, evaluateDecision, executeDecision, getDecision, getDocumentLearningEvents
 } from '@/lib/api';
 
 const READINESS_COLORS = {
@@ -77,6 +77,10 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
   const [evaluating, setEvaluating] = useState(false);
   const [executing, setExecuting] = useState(false);
 
+  // Learning state
+  const [learningEvents, setLearningEvents] = useState([]);
+  const [showLearning, setShowLearning] = useState(false);
+
   const docId = document?.id;
 
   const fetchResult = useCallback(async () => {
@@ -116,6 +120,11 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
       const { data: decData } = await getDecision(docId);
       setDecisionData(decData);
     } catch { setDecisionData(null); }
+    // Fetch learning events
+    try {
+      const { data: levData } = await getDocumentLearningEvents(docId);
+      setLearningEvents(Array.isArray(levData) ? levData : []);
+    } catch { setLearningEvents([]); }
     setLoading(false);
   }, [docId]);
 
@@ -755,6 +764,45 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
                           </Button>
                         </div>
                       </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Learning Signals Section */}
+            {result && (result.learning_events_count > 0 || learningEvents.length > 0) && (
+              <div data-testid="learning-signals-section">
+                <div className="flex items-center justify-between p-3 cursor-pointer hover:bg-accent/30 transition-colors" onClick={() => setShowLearning(!showLearning)}>
+                  <div className="flex items-center gap-2">
+                    <GraduationCap className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Learning Signals</span>
+                    <Badge variant="secondary" className="text-[8px]">{result?.learning_events_count || learningEvents.length}</Badge>
+                    {result?.learning_flags?.map((f, i) => (
+                      <Badge key={i} variant="outline" className="text-[8px] border-purple-500/30 text-purple-400">{f}</Badge>
+                    ))}
+                  </div>
+                  {showLearning ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
+                </div>
+                {showLearning && (
+                  <div className="border-t border-border p-3 space-y-1.5" data-testid="learning-events-list">
+                    {learningEvents.map((ev, i) => (
+                      <div key={i} className="flex items-start gap-2 p-1.5 bg-accent/10 rounded text-[10px]">
+                        <div className={`w-1.5 h-1.5 rounded-full mt-1 shrink-0 ${ev.event_type === 'classification_correction' ? 'bg-purple-400' : ev.event_type === 'entity_override' ? 'bg-blue-400' : ev.event_type === 'field_correction' ? 'bg-amber-400' : 'bg-muted-foreground'}`} />
+                        <div className="flex-1 min-w-0">
+                          <span className="font-semibold">{ev.event_type?.replace(/_/g, ' ')}</span>
+                          {ev.field_name && <span className="text-muted-foreground"> on {ev.field_name}</span>}
+                          {ev.original_value && ev.corrected_value && (
+                            <p className="text-muted-foreground truncate mt-0.5">
+                              <span className="line-through">{ev.original_value}</span> <ArrowRight className="w-2 h-2 inline" /> {ev.corrected_value}
+                            </p>
+                          )}
+                        </div>
+                        <span className="text-[9px] text-muted-foreground/60 shrink-0">{ev.created_by}</span>
+                      </div>
+                    ))}
+                    {learningEvents.length === 0 && (
+                      <p className="text-[10px] text-muted-foreground italic">No learning events yet</p>
                     )}
                   </div>
                 )}

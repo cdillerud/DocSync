@@ -541,6 +541,24 @@ async def apply_correction(
     except Exception:
         pass
 
+    # Learning loop hooks
+    try:
+        from services.learning_loop_service import on_classification_correction, on_field_correction
+        if "document_type" in correction_entry["changes"]:
+            change = correction_entry["changes"]["document_type"]
+            await on_classification_correction(
+                doc_id, change["from"], change["to"],
+                existing.get("classification_confidence", 0), corrected_by,
+            )
+        if "extracted_fields" in correction_entry["changes"]:
+            await on_field_correction(
+                doc_id, doc_type,
+                correction_entry["changes"]["extracted_fields"],
+                corrected_by,
+            )
+    except Exception as e:
+        logger.warning("Learning loop hook failed: %s", e)
+
     # Return updated result
     return await db[INTELLIGENCE_COLLECTION].find_one(
         {"document_id": doc_id}, {"_id": 0}

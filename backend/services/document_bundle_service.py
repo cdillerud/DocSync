@@ -669,6 +669,18 @@ async def update_bundle(
             metadata={"changes": changes, "updated_by": updated_by},
         )
 
+    # Learning loop hooks for membership changes
+    try:
+        from services.learning_loop_service import on_bundle_membership_correction
+        if add_document_ids:
+            for did in add_document_ids:
+                await on_bundle_membership_correction(did, bundle_id, "added", updated_by)
+        if remove_document_ids:
+            for did in remove_document_ids:
+                await on_bundle_membership_correction(did, bundle_id, "removed", updated_by)
+    except Exception:
+        pass
+
     return await db[BUNDLES_COLLECTION].find_one(
         {"bundle_id": bundle_id}, {"_id": 0}
     )

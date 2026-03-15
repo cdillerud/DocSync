@@ -617,4 +617,21 @@ async def correct_resolution(
         metadata={"resolution_id": resolution_id, "original": original},
     )
 
+    # Learning loop hook
+    try:
+        from services.learning_loop_service import on_entity_override
+        await on_entity_override(
+            document_id=doc_id,
+            entity_kind=existing.get("entity_kind", ""),
+            source_value=existing.get("source_value", ""),
+            original_entity_id=original.get("matched_entity_id", ""),
+            original_entity_name=original.get("matched_entity_name", ""),
+            corrected_entity_id=updates.get("matched_entity_id", ""),
+            corrected_entity_name=updates.get("matched_entity_name", ""),
+            confidence_before=original.get("match_confidence", 0),
+            corrected_by=corrected_by,
+        )
+    except Exception as e:
+        logger.warning("Learning loop hook failed: %s", e)
+
     return updated

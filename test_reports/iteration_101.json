@@ -1,0 +1,154 @@
+{
+  "summary": "Iteration 101 - Learning Loop Engine testing complete. Backend: 30/30 tests passed. All learning loop endpoints functional: GET /api/document-intelligence/learning/summary (returns total_learning_events, corrections_by_type, top_corrected_document_types, top_corrected_vendors, vendor_aliases_created, customer_aliases_created, extraction_hints_recorded, automation_success_rate, correction_rate_by_document_type), GET /api/document-intelligence/learning/events (filterable by event_type, document_type, vendor_id, entity_type with total and events array sorted by most recent), GET /api/document-intelligence/learning/events/{doc_id} (returns plain array of events for specific document). Learning event auto-generation verified: PATCH /api/document-intelligence/{doc_id} with corrected_type creates classification_correction event, corrected_fields creates field_correction events. Document enrichment working: learning_events_count, corrections_applied, learning_flags (frequent_correction, entity_override_used, classification_corrected). Frontend: Learning Signals section in DocumentIntelligencePanel shows events count badge, learning_flags badges, expandable event list with before/after values. Regression: All iteration_100 decision policy endpoints and iteration_98-99 bundle/lifecycle endpoints still work.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed_tests": [
+    "Backend: GET /api/document-intelligence/learning/summary returns all required fields (total_learning_events, corrections_by_type, top_corrected_document_types, top_corrected_vendors, vendor_aliases_created, customer_aliases_created, extraction_hints_recorded, automation_success_rate, correction_rate_by_document_type)",
+    "Backend: GET /api/document-intelligence/learning/summary automation_success_rate is valid number between 0 and 1 (~94%)",
+    "Backend: GET /api/document-intelligence/learning/summary corrections_by_type is dictionary with event type counts",
+    "Backend: GET /api/document-intelligence/learning/summary top_corrected_document_types is list with document_type and count",
+    "Backend: GET /api/document-intelligence/learning/events returns total and events array",
+    "Backend: GET /api/document-intelligence/learning/events sorted by created_at descending (most recent first)",
+    "Backend: GET /api/document-intelligence/learning/events?event_type=classification_correction filter works",
+    "Backend: GET /api/document-intelligence/learning/events?document_type=AP_Invoice filter works",
+    "Backend: GET /api/document-intelligence/learning/events supports limit and offset pagination",
+    "Backend: Learning events have required structure (learning_event_id, document_id, event_type, created_at, field_name, original_value, corrected_value)",
+    "Backend: GET /api/document-intelligence/learning/events/{doc_id} returns plain array (not {total, events})",
+    "Backend: GET /api/document-intelligence/learning/events/TEST-BUNDLE-B returns 5 events for that document",
+    "Backend: PATCH /api/document-intelligence/{doc_id} with corrected_type creates classification_correction learning event",
+    "Backend: PATCH /api/document-intelligence/{doc_id} with corrected_fields creates field_correction learning events",
+    "Backend: Extraction hints recorded in extraction_hints collection (3 hints recorded)",
+    "Backend: Document enriched with learning_events_count after corrections",
+    "Backend: Document enriched with corrections_applied count",
+    "Backend: Document enriched with learning_flags array (frequent_correction, classification_corrected)",
+    "Backend: automation_success_rate calculated from global metrics (~94%)",
+    "Backend: correction_rate_by_document_type calculated per document type",
+    "Backend: vendor_aliases_created count returned (2 aliases)",
+    "Backend: Activity events created: learning_event_generated, extraction_hint_recorded",
+    "Backend: Regression - GET /api/document-intelligence/policies works",
+    "Backend: Regression - POST /api/document-intelligence/evaluate-decision works",
+    "Backend: Regression - GET /api/document-intelligence/decision-queue works",
+    "Backend: Regression - GET /api/document-intelligence/bundles works",
+    "Backend: Regression - POST /api/document-intelligence/detect-bundles works",
+    "Backend: Regression - GET /api/document-intelligence/lifecycle-issues works",
+    "Backend: Regression - GET /api/document-intelligence/bundle-review-queue works",
+    "Backend: Regression - GET /api/document-intelligence/review-queue works",
+    "Backend: Regression - GET /api/document-intelligence/summary works",
+    "Frontend: DocumentIntelligencePanel has learning-signals-section data-testid",
+    "Frontend: Learning Signals section shows badge with events count (5)",
+    "Frontend: Learning Signals section shows learning_flags badges (frequent_correction, classification_corrected)",
+    "Frontend: Learning Signals section expandable with event list",
+    "Frontend: Learning events list shows event_type, field_name, before/after values, created_by",
+    "Frontend: api.js has getLearningEvents(), getLearningSummary(), getDocumentLearningEvents() functions"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_learning_loop_engine.py",
+    "/app/test_reports/pytest/learning_loop_engine_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend: learning_loop_service.py well-structured with proper hook pattern for capturing corrections",
+    "Backend: Learning events capture before/after values, confidence scores, correction source",
+    "Backend: Extraction hints auto-recorded on field corrections with correction_count and confidence_score",
+    "Backend: Vendor/customer aliases auto-created on entity overrides with proper entity_kind checks",
+    "Backend: update_automation_metrics() recalculates metrics from database on each summary call",
+    "Backend: Document enrichment (_update_document_learning_enrichment) correctly updates learning_events_count, corrections_applied, learning_flags",
+    "Backend: Hooks integrated in document_intelligence_service.py (lines 544-560) for classification and field corrections",
+    "Backend router: Learning endpoints correctly placed BEFORE catch-all /{doc_id} route",
+    "Frontend: DocumentIntelligencePanel.js correctly conditionally renders Learning Signals section when learning_events_count > 0 || learningEvents.length > 0",
+    "Frontend: Learning events displayed with color-coded dots by event_type (purple for classification, amber for field, blue for entity)"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_learning_loop_engine.py"
+  ],
+  "success_rate": {
+    "backend": "100% (30/30 tests passed)",
+    "frontend": "100% (Learning Signals section verified with correct data display)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://doc-dedup-match.preview.emergentagent.com"
+  },
+  "seed_data_created": {
+    "learning_events": "5 total events (2 classification_correction, 3 field_correction) on TEST-BUNDLE-B",
+    "extraction_hints": "3 hints recorded for field corrections",
+    "vendor_aliases": "2 vendor aliases created",
+    "customer_aliases": "0 customer aliases"
+  },
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 101 - Learning Loop Engine fully tested. New endpoints: GET /api/document-intelligence/learning/summary (metrics), GET /api/document-intelligence/learning/events (filterable list), GET /api/document-intelligence/learning/events/{doc_id} (plain array). Event types: classification_correction, field_correction, entity_override, transaction_match_override, bundle_membership_correction, manual_link_override. Learning hooks integrated in: document_intelligence_service.py (classification + field), entity_resolution_service.py (entity override), transaction_matching_service.py (match override), document_bundle_service.py (bundle membership). Document enrichment fields: learning_events_count, corrections_applied, learning_flags. Learning flags: frequent_correction (>=3 events), entity_override_used, classification_corrected. Key data-testids: learning-signals-section, learning-events-list. Activity events: learning_event_generated, extraction_hint_recorded. Collections: learning_events, vendor_aliases, customer_aliases, extraction_hints, learning_metrics. Test data: TEST-BUNDLE-B has 5 learning events with flags frequent_correction + classification_corrected. Automation success rate ~94%.",
+  "features_verified": {
+    "backend_endpoints": {
+      "learning_summary": {
+        "method": "GET",
+        "path": "/api/document-intelligence/learning/summary",
+        "returns": {
+          "total_learning_events": "int",
+          "corrections_by_type": "dict {event_type: count}",
+          "top_corrected_document_types": "list of {document_type, count}",
+          "top_corrected_vendors": "list of {vendor_id, correction_count}",
+          "vendor_aliases_created": "int",
+          "customer_aliases_created": "int",
+          "extraction_hints_recorded": "int",
+          "automation_success_rate": "float 0-1",
+          "correction_rate_by_document_type": "dict {doc_type: {total, corrected, correction_rate}}"
+        }
+      },
+      "learning_events": {
+        "method": "GET",
+        "path": "/api/document-intelligence/learning/events",
+        "query_params": ["event_type", "document_type", "vendor_id", "entity_type", "limit", "offset"],
+        "returns": {"total": "int", "events": "array sorted by created_at desc"}
+      },
+      "document_learning_events": {
+        "method": "GET",
+        "path": "/api/document-intelligence/learning/events/{doc_id}",
+        "returns": "plain array of learning events for document"
+      }
+    },
+    "learning_event_structure": {
+      "learning_event_id": "LEV-{hex}",
+      "document_id": "string",
+      "event_type": "classification_correction|field_correction|entity_override|transaction_match_override|bundle_membership_correction|manual_link_override",
+      "document_type": "string",
+      "field_name": "string",
+      "original_value": "string",
+      "corrected_value": "string",
+      "confidence_before": "float",
+      "confidence_after": "float",
+      "correction_source": "manual|automated",
+      "related_entity_id": "string",
+      "related_entity_type": "string",
+      "entity_context": "string",
+      "created_at": "ISO timestamp",
+      "created_by": "string",
+      "notes": "string"
+    },
+    "document_enrichment_fields": [
+      "learning_events_count",
+      "corrections_applied", 
+      "learning_flags"
+    ],
+    "learning_flags": [
+      "frequent_correction (>=3 events)",
+      "entity_override_used",
+      "classification_corrected"
+    ],
+    "hooks_integrated": {
+      "document_intelligence_service": "on_classification_correction, on_field_correction (lines 544-560)",
+      "entity_resolution_service": "on_entity_override",
+      "transaction_matching_service": "on_transaction_match_override",
+      "document_bundle_service": "on_bundle_membership_correction"
+    },
+    "activity_events": ["learning_event_generated", "extraction_hint_recorded"]
+  },
+  "mocked_apis_note": "Business Central API operates in DEMO_MODE. Email Service is MOCKED (in-memory). SharePoint storage is MOCKED."
+}

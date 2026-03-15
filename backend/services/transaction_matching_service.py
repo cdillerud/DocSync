@@ -618,3 +618,26 @@ async def confirm_match(
     return await db[MATCHES_COLLECTION].find_one(
         {"transaction_match_id": match_id}, {"_id": 0}
     )
+
+    # Note: learning hook is called before return via the pattern below
+
+# Learning loop hook appended after confirm_match
+_original_confirm_match = confirm_match
+
+async def confirm_match(match_id, confirmed=True, selected_by="admin", notes=""):
+    result = await _original_confirm_match(match_id, confirmed, selected_by, notes)
+    try:
+        from services.learning_loop_service import on_transaction_match_override
+        if result:
+            await on_transaction_match_override(
+                document_id=result.get("document_id", ""),
+                match_id=match_id,
+                confirmed=confirmed,
+                candidate_entity_type=result.get("candidate_entity_type", ""),
+                candidate_entity_id=result.get("candidate_entity_id", ""),
+                candidate_display_name=result.get("candidate_display_name", ""),
+                corrected_by=selected_by,
+            )
+    except Exception:
+        pass
+    return result

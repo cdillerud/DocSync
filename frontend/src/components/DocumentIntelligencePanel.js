@@ -241,8 +241,8 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
             )}
 
             {/* Entity Resolution Section */}
-            <div className="border border-border rounded-lg overflow-hidden" data-testid="entity-resolution-section">
-              <button className="w-full flex items-center justify-between p-3 hover:bg-accent/30 transition-colors" onClick={() => setShowResolutions(!showResolutions)}>
+            <div data-testid="entity-resolution-section">
+              <div className="flex items-center justify-between p-3 cursor-pointer hover:bg-accent/30 transition-colors" onClick={() => setShowResolutions(!showResolutions)}>
                 <div className="flex items-center gap-2">
                   <Link2 className="w-4 h-4 text-muted-foreground" />
                   <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Entity Resolution</span>
@@ -266,7 +266,7 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
                   </Button>
                   {showResolutions ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
                 </div>
-              </button>
+              </div>
 
               {showResolutions && (
                 <div className="border-t border-border p-3 space-y-2">

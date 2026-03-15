@@ -3204,3 +3204,30 @@ EMAIL_CLIENT_ID=doc-workflow-test
 - Test report: `/app/test_reports/iteration_95.json`
 
 *Last Updated: March 15, 2026*
+
+
+---
+
+## Session Update: March 15, 2026 - Entity Resolution Engine (iteration_96)
+
+### Completed
+
+#### Entity Resolution Engine
+- **Backend:** New `services/entity_resolution_service.py` — resolves extracted field values to internal entities
+- **Backend:** Layered strategy: exact match → normalized match → fuzzy (SequenceMatcher) → reference/number lookup → ambiguous candidates
+- **Backend:** Entity kinds: customer, vendor, purchase_order, invoice
+- **Backend:** Endpoints: `POST /resolve-entities/{id}`, `GET /resolution/{id}`, `PATCH /resolution/{resolution_id}`
+- **Backend:** Manual correction preserves `original_resolution` for audit
+- **Backend:** Auto-draft gating: blocks when `entity_resolution_status=blocked`
+- **Backend:** Intelligence enrichment: entity_resolution_status, blocking_items, unresolved/ambiguous counts
+- **Frontend:** Entity Resolution section in Intelligence Panel with status badges, candidates, confirm/override controls
+- **Frontend:** Review Queue shows entity resolution indicators
+- **New collection:** `entity_resolutions`
+
+### Test Results
+- Backend: 16/16 (100%)
+- Frontend: All UI flows verified (100%)
+- Test report: `/app/test_reports/iteration_96.json`
+
+*Last Updated: March 15, 2026*
+

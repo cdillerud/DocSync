@@ -1,6 +1,23 @@
 # CHANGELOG - GPI Document Hub
 
 
+## [2026-03-15] Iteration 96 — Entity Resolution Engine — COMPLETE
+- **Backend:** New `services/entity_resolution_service.py` — layered entity resolution (exact → normalized → fuzzy → reference lookup)
+- **Backend:** `POST /api/document-intelligence/resolve-entities/{id}` — resolves customer, vendor, PO#, invoice# with confidence scoring
+- **Backend:** `GET /api/document-intelligence/resolution/{id}` — get stored resolution results
+- **Backend:** `PATCH /api/document-intelligence/resolution/{resolution_id}` — manual correction with audit trail (original_resolution preserved)
+- **Backend:** Resolution statuses: matched, ambiguous, unmatched, corrected
+- **Backend:** Auto-draft gating: blocks draft creation when entity_resolution_status=blocked (unresolved entities)
+- **Backend:** Intelligence enrichment: entity_resolution_status, blocking_items, unresolved/ambiguous counts
+- **Backend:** Activity timeline: entity_resolution_completed/issues/corrected events
+- **Frontend:** Entity Resolution section in DocumentIntelligencePanel — status badges, candidate lists with Confirm buttons, manual override inputs
+- **Frontend:** Review Queue shows entity resolution indicators (unresolved/ambiguous badges)
+- **New collection:** `entity_resolutions`
+- **Testing:** 16/16 backend, 100% frontend — all verified by testing agent
+- **Test report:** `/app/test_reports/iteration_96.json`
+
+
+
 ## [2026-03-15] Iteration 95 — Document-to-Transaction Auto-Draft Creation — COMPLETE
 - **Backend:** `POST /api/document-intelligence/auto-draft/{id}` — creates downstream draft from automation-ready documents
 - **Backend:** `GET /api/document-intelligence/auto-draft/{id}` — returns latest automation action for a document

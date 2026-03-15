@@ -6,7 +6,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator
 } from '../components/ui/dropdown-menu';
 import {
-  LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, Brain, FileSpreadsheet, ChevronRight, Users, Zap, Target, Fingerprint, ShieldCheck, ArrowLeftRight, ShoppingCart, Warehouse, ClipboardList, ScanSearch
+  LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, Brain, FileSpreadsheet, ChevronRight, Users, Zap, Target, Fingerprint, ShieldCheck, ArrowLeftRight, ShoppingCart, Warehouse, ClipboardList, ScanSearch, Layers
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
@@ -28,6 +28,7 @@ const navItems = [
   { to: '/inventory-ledger', icon: Warehouse, label: 'Inventory Ledger' },
   { to: '/operations-queue', icon: ClipboardList, label: 'Operations Queue' },
   { to: '/document-review', icon: ScanSearch, label: 'Doc Intelligence' },
+  { to: '/document-bundles', icon: Layers, label: 'Doc Bundles' },
   { to: '/bc-integration', icon: ArrowLeftRight, label: 'BC Integration' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];

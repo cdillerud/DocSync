@@ -24,6 +24,7 @@ import InventoryLedgerPage from "@/pages/InventoryLedgerPage";
 import OperationsQueuePage from "@/pages/OperationsQueuePage";
 import TemplatesPage from "@/pages/TemplatesPage";
 import DocumentReviewQueuePage from "@/pages/DocumentReviewQueuePage";
+import DocumentBundleReviewPage from "@/pages/DocumentBundleReviewPage";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -54,6 +55,7 @@ function AppRoutes() {
         <Route path="operations-queue" element={<OperationsQueuePage />} />
         <Route path="templates" element={<TemplatesPage />} />
         <Route path="document-review" element={<DocumentReviewQueuePage />} />
+        <Route path="document-bundles" element={<DocumentBundleReviewPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

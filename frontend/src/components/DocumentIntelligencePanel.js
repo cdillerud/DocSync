@@ -6,12 +6,13 @@ import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import {
   ScanSearch, RefreshCw, CheckCircle, AlertTriangle, XCircle, Pencil, Save, X, Loader2,
-  History, ChevronDown, ChevronUp, Zap, Copy, FileText, Link2, Users, Unlink, ArrowRight, GitMerge, Ban
+  History, ChevronDown, ChevronUp, Zap, Copy, FileText, Link2, Users, Unlink, ArrowRight, GitMerge, Ban, Layers, PackageSearch
 } from 'lucide-react';
 import {
   getDocumentIntelligence, processDocumentIntelligence, correctDocumentIntelligence,
   createAutoDraft, resolveDocumentEntities, getDocumentResolutions, correctResolution,
-  matchTransactions, getTransactionMatches, autoLinkDocument, confirmTransactionMatch
+  matchTransactions, getTransactionMatches, autoLinkDocument, confirmTransactionMatch,
+  getBundle
 } from '@/lib/api';
 
 const READINESS_COLORS = {
@@ -62,6 +63,10 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
   const [linkResult, setLinkResult] = useState(null);
   const [confirmingMatchId, setConfirmingMatchId] = useState(null);
 
+  // Bundle state
+  const [bundleInfo, setBundleInfo] = useState(null);
+  const [showBundle, setShowBundle] = useState(true);
+
   const docId = document?.id;
 
   const fetchResult = useCallback(async () => {
@@ -75,6 +80,15 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
       }
       if (data.auto_link_created) {
         setLinkResult({ status: 'linked', target: data.best_transaction_match });
+      }
+      // Fetch bundle info if document belongs to one
+      if (data.bundle_id) {
+        try {
+          const { data: bData } = await getBundle(data.bundle_id);
+          setBundleInfo(bData);
+        } catch { setBundleInfo(null); }
+      } else {
+        setBundleInfo(null);
       }
     } catch { setResult(null); }
     // Fetch resolutions
@@ -514,6 +528,72 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
             )}
 
             {/* Auto-Draft / Link Action Section */}
+
+            {/* Document Bundle Section */}
+            {(result?.bundle_id || bundleInfo) && (
+              <div data-testid="bundle-membership-section">
+                <div className="flex items-center justify-between p-3 cursor-pointer hover:bg-accent/30 transition-colors" onClick={() => setShowBundle(!showBundle)}>
+                  <div className="flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Document Bundle</span>
+                    {result?.bundle_completeness_status && (
+                      <Badge variant="outline" className={`text-[9px] ${result.bundle_completeness_status === 'complete' ? 'border-emerald-500/30 text-emerald-400' : result.bundle_completeness_status === 'partial' ? 'border-amber-500/30 text-amber-400' : 'border-red-500/30 text-red-400'}`}>
+                        {result.bundle_completeness_status}
+                      </Badge>
+                    )}
+                    {result?.related_document_count > 0 && (
+                      <span className="text-[10px] text-muted-foreground">{result.related_document_count} related doc{result.related_document_count !== 1 ? 's' : ''}</span>
+                    )}
+                  </div>
+                  {showBundle ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
+                </div>
+
+                {showBundle && bundleInfo && (
+                  <div className="border-t border-border p-3 space-y-2">
+                    <div className="flex items-center gap-2 p-2 bg-accent/30 rounded">
+                      <PackageSearch className="w-3.5 h-3.5 text-muted-foreground" />
+                      <div className="flex-1">
+                        <p className="text-[11px] font-semibold">{bundleInfo.bundle_id}</p>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <Badge variant="secondary" className="text-[8px]">
+                            {({'customer_order_packet':'Customer Order','purchasing_packet':'Purchasing','ap_packet':'AP Packet','warehouse_packet':'Warehouse','unknown':'Unknown'})[bundleInfo.bundle_type] || bundleInfo.bundle_type}
+                          </Badge>
+                          <Badge variant="outline" className={`text-[8px] ${bundleInfo.bundle_status === 'complete' ? 'border-emerald-500/30 text-emerald-400' : bundleInfo.bundle_status === 'needs_review' ? 'border-amber-500/30 text-amber-400' : 'border-border'}`}>
+                            {bundleInfo.bundle_status}
+                          </Badge>
+                        </div>
+                      </div>
+                      <Button variant="ghost" size="sm" className="h-6 text-[9px]" onClick={() => { navigator.clipboard.writeText(bundleInfo.bundle_id); toast.success('Copied'); }} data-testid="copy-bundle-id-btn">
+                        <Copy className="w-3 h-3" />
+                      </Button>
+                    </div>
+
+                    {/* Related docs */}
+                    {bundleInfo.member_documents?.filter(d => d.document_id !== docId).map(doc => (
+                      <div key={doc.document_id} className="flex items-center gap-2 p-1.5 bg-accent/10 rounded text-[10px]">
+                        <FileText className="w-3 h-3 text-muted-foreground shrink-0" />
+                        <span className="font-mono truncate flex-1">{doc.file_name || doc.document_id}</span>
+                        <Badge variant="secondary" className="text-[8px]">{doc.document_type}</Badge>
+                      </div>
+                    ))}
+
+                    {/* Missing docs warning */}
+                    {bundleInfo.missing_expected_documents?.length > 0 && (
+                      <div className="p-2 bg-red-500/5 border border-red-500/20 rounded" data-testid="bundle-missing-docs">
+                        <p className="text-[10px] text-red-400 font-semibold mb-1">Missing from packet:</p>
+                        {bundleInfo.missing_expected_documents.map((m, i) => (
+                          <p key={i} className="text-[10px] text-red-300 flex items-center gap-1"><XCircle className="w-2.5 h-2.5" /> {m}</p>
+                        ))}
+                      </div>
+                    )}
+
+                    {bundleInfo.suggested_next_action && (
+                      <p className="text-[10px] text-blue-400 font-medium">{bundleInfo.suggested_next_action}</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             {isReady && !editing && !hasLink && (
               <div className="border border-border rounded-lg p-3 space-y-2" data-testid="auto-draft-section">
                 {draftSuppressed && !hasDraft ? (

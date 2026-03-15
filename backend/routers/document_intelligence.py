@@ -36,6 +36,13 @@ from services.transaction_matching_service import (
     auto_link,
     confirm_match,
 )
+from services.document_bundle_service import (
+    detect_bundles,
+    get_bundle,
+    list_bundles,
+    update_bundle,
+    get_bundle_review_queue,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/document-intelligence", tags=["Document Intelligence"])
@@ -97,6 +104,105 @@ async def api_get_summary():
     """Get summary statistics for the intelligence pipeline."""
     return await get_intelligence_summary()
 
+
+# ── Document Bundle Endpoints ─────────────────────────────────────────────────
+
+class DetectBundlesRequest(BaseModel):
+    document_ids: Optional[List[str]] = None
+    days_back: int = 7
+
+
+class UpdateBundleRequest(BaseModel):
+    bundle_type: Optional[str] = None
+    bundle_status: Optional[str] = None
+    notes: Optional[str] = None
+    add_document_ids: Optional[List[str]] = None
+    remove_document_ids: Optional[List[str]] = None
+    updated_by: str = "admin"
+
+
+@router.post("/detect-bundles")
+async def api_detect_bundles(body: DetectBundlesRequest = DetectBundlesRequest()):
+    """
+    Detect document bundles from recently processed documents or specified IDs.
+    Groups related documents by shared references, entities, and transactions.
+    """
+    try:
+        result = await detect_bundles(
+            document_ids=body.document_ids,
+            days_back=body.days_back,
+        )
+        return result
+    except Exception as e:
+        logger.error("Bundle detection failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Bundle detection failed: {str(e)}")
+
+
+@router.get("/bundles")
+async def api_list_bundles(
+    bundle_type: Optional[str] = Query(None),
+    bundle_status: Optional[str] = Query(None),
+    completeness_status: Optional[str] = Query(None),
+    linked_entity_type: Optional[str] = Query(None),
+    linked_entity_id: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """List document bundles with optional filters."""
+    return await list_bundles(
+        bundle_type=bundle_type,
+        bundle_status=bundle_status,
+        completeness_status=completeness_status,
+        linked_entity_type=linked_entity_type,
+        linked_entity_id=linked_entity_id,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/bundle-review-queue")
+async def api_bundle_review_queue(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """Get bundles needing review — needs_review or incomplete."""
+    return await get_bundle_review_queue(limit=limit, offset=offset)
+
+
+@router.get("/bundles/{bundle_id}")
+async def api_get_bundle(bundle_id: str):
+    """Get full bundle detail with member documents and completeness analysis."""
+    result = await get_bundle(bundle_id)
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Bundle not found: {bundle_id}")
+    return result
+
+
+@router.patch("/bundles/{bundle_id}")
+async def api_update_bundle(bundle_id: str, body: UpdateBundleRequest):
+    """
+    Update a bundle — reclassify type, change status, add/remove documents.
+    Preserves original detection for auditability.
+    """
+    try:
+        result = await update_bundle(
+            bundle_id=bundle_id,
+            bundle_type=body.bundle_type,
+            bundle_status=body.bundle_status,
+            notes=body.notes,
+            add_document_ids=body.add_document_ids,
+            remove_document_ids=body.remove_document_ids,
+            updated_by=body.updated_by,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error("Bundle update failed for %s: %s", bundle_id, e)
+        raise HTTPException(status_code=500, detail=f"Bundle update failed: {str(e)}")
+
+
+# ── Catch-all document routes (must be LAST) ────────────────────────────────
 
 @router.get("/{doc_id}")
 async def api_get_intelligence(doc_id: str):

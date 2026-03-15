@@ -351,3 +351,11 @@ export const matchTransactions = (docId) => api.post(`/document-intelligence/mat
 export const getTransactionMatches = (docId) => api.get(`/document-intelligence/transaction-matches/${docId}`);
 export const autoLinkDocument = (docId) => api.post(`/document-intelligence/auto-link/${docId}`);
 export const confirmTransactionMatch = (matchId, data) => api.patch(`/document-intelligence/transaction-matches/${matchId}`, data);
+
+// Document Bundle APIs
+export const detectBundles = (data) => api.post('/document-intelligence/detect-bundles', data || {});
+export const listBundles = (params) => api.get('/document-intelligence/bundles', { params });
+export const getBundle = (bundleId) => api.get(`/document-intelligence/bundles/${bundleId}`);
+export const updateBundle = (bundleId, data) => api.patch(`/document-intelligence/bundles/${bundleId}`, data);
+export const getBundleReviewQueue = (params) => api.get('/document-intelligence/bundle-review-queue', { params });
+

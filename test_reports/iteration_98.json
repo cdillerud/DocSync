@@ -1,0 +1,141 @@
+{
+  "summary": "Iteration 98 - Document Bundle Detection and Transaction Grouping testing complete. Backend: 24/24 tests passed. All bundle endpoints functional: POST /api/document-intelligence/detect-bundles (scans docs, groups by PO/invoice/entity/vendor), GET /api/document-intelligence/bundles (list with filters), GET /api/document-intelligence/bundles/{bundle_id} (full detail with member_documents, suggested_next_action), PATCH /api/document-intelligence/bundles/{bundle_id} (reclassify, add/remove docs, status changes), GET /api/document-intelligence/bundle-review-queue (incomplete/needs_review bundles). Frontend: Document Bundles page at /document-bundles with summary cards (Total/Needs Review/Insufficient/Complete), filters (status/type/completeness), bundles table, and detail drawer with member docs, detected keys, notes, manual controls. DocumentIntelligencePanel shows bundle membership section when document belongs to bundle. All iteration_97 regression tests pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Document Bundles Table", "issues": ["Minor React hydration warning - <tr> inside <span> - cosmetic only, no functional impact"]},
+      {"screen": "Document Detail", "issues": ["Document preview shows HTTP 404 for test documents without actual files (expected for test data)"]}
+    ]
+  },
+  "passed_tests": [
+    "Backend: GET /api/document-intelligence/bundles returns total, bundles array, status_counts, completeness_counts",
+    "Backend: GET /api/document-intelligence/bundles?bundle_status=grouped filters correctly",
+    "Backend: GET /api/document-intelligence/bundles?bundle_type=customer_order_packet filters correctly",
+    "Backend: GET /api/document-intelligence/bundles?completeness_status=complete filters correctly",
+    "Backend: GET /api/document-intelligence/bundles/{bundle_id} returns full detail with member_documents, detected_keys, suggested_next_action",
+    "Backend: GET /api/document-intelligence/bundles/{bundle_id} returns 404 for non-existent bundle",
+    "Backend: POST /api/document-intelligence/detect-bundles scans recent docs and returns bundles_detected, bundles, documents_scanned",
+    "Backend: POST /api/document-intelligence/detect-bundles with document_ids parameter works",
+    "Backend: POST /api/document-intelligence/detect-bundles with days_back parameter works",
+    "Backend: PATCH /api/document-intelligence/bundles/{bundle_id} can reclassify bundle_type",
+    "Backend: PATCH /api/document-intelligence/bundles/{bundle_id} can change bundle_status",
+    "Backend: PATCH /api/document-intelligence/bundles/{bundle_id} can update notes",
+    "Backend: PATCH /api/document-intelligence/bundles/{bundle_id} returns 404 for non-existent bundle",
+    "Backend: GET /api/document-intelligence/bundle-review-queue returns bundles needing review with suggested_next_action",
+    "Backend: Bundle completeness_status is complete/partial/insufficient with missing_expected_documents array",
+    "Backend: Document intelligence results enriched with bundle_id, bundle_type, bundle_status when in bundle",
+    "Backend: Regression - POST /api/document-intelligence/process/{id} still works",
+    "Backend: Regression - GET /api/document-intelligence/review-queue still works",
+    "Backend: Regression - POST /api/document-intelligence/match-transactions/{id} still works",
+    "Backend: Regression - POST /api/document-intelligence/resolve-entities/{id} still works",
+    "Backend: Regression - POST /api/document-intelligence/auto-draft/{id} still works",
+    "Backend: Regression - POST /api/document-intelligence/auto-link/{id} still works",
+    "Backend: Bundle grouping_basis and grouping_confidence correctly set (PO match = 0.95)",
+    "Backend: Bundle update creates activity events",
+    "Frontend: Document Bundles page loads at /document-bundles with summary cards",
+    "Frontend: Status/Type/Completeness filters work correctly",
+    "Frontend: Bundles table shows bundle_id, type, status, completeness, docs count, missing, updated date",
+    "Frontend: Bundle detail drawer opens on row click",
+    "Frontend: Detail drawer shows bundle type with edit button",
+    "Frontend: Detail drawer shows member documents with type badges and automation readiness",
+    "Frontend: Detail drawer shows detected keys (po_number, vendor, amount, invoice_number)",
+    "Frontend: Detail drawer shows notes input and Save Notes button",
+    "Frontend: Detail drawer shows Add document input and button",
+    "Frontend: Detail drawer shows Mark Complete button for complete bundles",
+    "Frontend: Nav item 'Doc Bundles' links to /document-bundles",
+    "Frontend: DocumentIntelligencePanel has bundle-membership-section with bundle info, related docs, missing docs"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_document_bundles.py",
+    "/app/test_reports/pytest/document_bundles_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend service /app/backend/services/document_bundle_service.py well-structured with layered grouping strategy (PO 0.95 → invoice 0.92 → entity 0.88 → vendor+amount 0.65)",
+    "Backend: Completeness rules correctly implemented per bundle type (ap_packet needs invoice primary, customer_order_packet needs Sales_PO, etc.)",
+    "Backend: Document enrichment correctly adds bundle_id, bundle_type, bundle_status, bundle_completeness_status, related_document_count to intelligence results",
+    "Backend router: Bundle endpoints correctly placed BEFORE catch-all /{doc_id} to avoid route conflicts",
+    "Frontend DocumentBundleReviewPage.js has proper data-testids for testing (document-bundles-page, bundles-table, bundle-row-*, bundle-detail-drawer)",
+    "Frontend DocumentIntelligencePanel.js correctly fetches and displays bundle info when document has bundle_id"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_document_bundles.py"
+  ],
+  "success_rate": {
+    "backend": "100% (24/24 tests passed)",
+    "frontend": "100% (all UI elements and flows verified)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://doc-dedup-match.preview.emergentagent.com"
+  },
+  "seed_data_existing": {
+    "test_bundle": "BDL-B739B77E with TEST-BUNDLE-A and TEST-BUNDLE-B (shared PO-9999-SHARED)",
+    "member_docs": ["TEST-BUNDLE-A (Sales_PO, ready)", "TEST-BUNDLE-B (AP_Invoice, ready)"],
+    "detected_keys": {"po_number": "PO-9999-SHARED", "vendor": "TEST VENDOR LLC", "amount": 5000, "invoice_number": "INV-BUNDLE-001"}
+  },
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 98 - Document Bundle Detection and Grouping fully tested. New endpoints: POST /api/document-intelligence/detect-bundles (scans docs, creates bundles), GET /api/document-intelligence/bundles (list with filters), GET /api/document-intelligence/bundles/{bundle_id} (detail with member_documents, suggested_next_action), PATCH /api/document-intelligence/bundles/{bundle_id} (reclassify, add/remove docs), GET /api/document-intelligence/bundle-review-queue. Bundle types: customer_order_packet, purchasing_packet, ap_packet, warehouse_packet, unknown. Bundle statuses: grouped, needs_review, complete, incomplete. Completeness statuses: complete, partial, insufficient. Grouping confidence: PO 0.95, invoice 0.92, entity 0.88, vendor+amount 0.65. Document enrichment: bundle_id, bundle_type, bundle_status, bundle_completeness_status, related_document_count added to intelligence results. Activity events: bundle_detected, added_to_bundle, bundle_completeness_changed, bundle_manually_corrected. Key data-testids: document-bundles-page, bundle-summary-cards, bundles-table, bundle-row-{id}, bundle-detail-drawer, member-documents, missing-documents, edit-type-btn, save-notes-btn, add-doc-input, add-doc-btn, bundle-membership-section, copy-bundle-id-btn. Test bundle BDL-B739B77E exists with docs TEST-BUNDLE-A and TEST-BUNDLE-B sharing PO-9999-SHARED.",
+  "features_verified": {
+    "backend_endpoints": {
+      "detect_bundles": {
+        "method": "POST",
+        "path": "/api/document-intelligence/detect-bundles",
+        "body": {"document_ids": "optional array", "days_back": "int (default 7)"},
+        "returns": {"bundles_detected": "int", "bundles": "array", "documents_scanned": "int"}
+      },
+      "list_bundles": {
+        "method": "GET",
+        "path": "/api/document-intelligence/bundles",
+        "query_params": ["bundle_type", "bundle_status", "completeness_status", "linked_entity_type", "linked_entity_id", "limit", "offset"],
+        "returns": {"total": "int", "bundles": "array", "status_counts": "object", "completeness_counts": "object"}
+      },
+      "get_bundle": {
+        "method": "GET",
+        "path": "/api/document-intelligence/bundles/{bundle_id}",
+        "returns": {"bundle_id": "string", "bundle_type": "string", "member_documents": "array", "detected_keys": "object", "completeness_status": "string", "missing_expected_documents": "array", "suggested_next_action": "string"}
+      },
+      "update_bundle": {
+        "method": "PATCH",
+        "path": "/api/document-intelligence/bundles/{bundle_id}",
+        "body": {"bundle_type": "optional", "bundle_status": "optional", "notes": "optional", "add_document_ids": "optional array", "remove_document_ids": "optional array"},
+        "behavior": ["Reclassify type", "Change status", "Add/remove documents", "Re-evaluates completeness on doc changes", "Creates activity events"]
+      },
+      "bundle_review_queue": {
+        "method": "GET",
+        "path": "/api/document-intelligence/bundle-review-queue",
+        "returns": {"total": "int", "bundles": "array with suggested_next_action"}
+      }
+    },
+    "frontend_components": {
+      "DocumentBundleReviewPage": {
+        "route": "/document-bundles",
+        "features": ["Summary cards (Total/Needs Review/Insufficient/Complete)", "Filters (status/type/completeness)", "Bundles table with row click to detail", "Detail drawer with member docs, detected keys, manual controls"]
+      },
+      "DocumentIntelligencePanel_BundleSection": {
+        "data_testid": "bundle-membership-section",
+        "features": ["Shows bundle_id, type, status when document belongs to bundle", "Related documents list", "Missing documents warning", "Copy bundle ID button"]
+      }
+    },
+    "grouping_logic": {
+      "layer_1_po_number": {"confidence": 0.95, "basis": "shared_po_number:{value}"},
+      "layer_2_invoice_number": {"confidence": 0.92, "basis": "shared_invoice_number:{value}"},
+      "layer_3_linked_entity": {"confidence": 0.88, "basis": "shared_linked_entity:{type}:{id}"},
+      "layer_4_vendor_amount": {"confidence": 0.65, "basis": "shared_entity_amount:{vendor}"}
+    },
+    "completeness_rules": {
+      "ap_packet": "needs invoice primary + receiving support",
+      "customer_order_packet": "needs Sales_PO or customer_po primary",
+      "purchasing_packet": "needs PO support document",
+      "warehouse_packet": "needs warehouse agreement + customer PO"
+    },
+    "activity_events": ["bundle_detected", "added_to_bundle", "bundle_completeness_changed", "bundle_manually_corrected"]
+  },
+  "mocked_apis_note": "Business Central API operates in DEMO_MODE. Email Service is MOCKED (in-memory). SharePoint storage is MOCKED. Gemini AI used for real document processing but tests seed data directly in MongoDB."
+}

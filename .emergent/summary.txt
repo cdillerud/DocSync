@@ -1,53 +1,53 @@
 <analysis>**original_problem_statement:**
-Implement **Operational Escalations and Due Dates** so the Operations Queue becomes time-aware and can surface not just what needs action, but what is becoming overdue or at risk of slipping.
+The user wants to implement a **Document Classification, Extraction, and Automation Confidence Layer** (iteration_94). This feature will serve as a core document-management engine for the application. The goal is to reliably identify incoming documents, extract key fields with a confidence score, and determine if the document can be processed automatically or needs human review.
 
 PRODUCT REQUIREMENTS:
 - **Backend:**
-    - Create a new model for escalations with fields like , , etc.
-    - Provide CRUD endpoints for managing these escalation records ().
-    - Implement derived logic to automatically set status (, , ) based on the current date vs. the due date.
-    - Integrate escalation status into the  endpoint, adding new fields (, ) and updating the  based on urgency.
-    - Enrich the Sales Order and PO Draft detail endpoints with escalation information.
+    - Create a new model to store document intelligence results (, , , , , etc.).
+    - Create an endpoint () that uses an LLM to classify a document, extract fields based on its type, and derive an  status (, , ).
+    - Define extraction schemas for different document types (, , etc.).
+    - Create a  endpoint to list all documents needing human intervention.
+    - Implement a  endpoint for users to manually correct classification and extracted data.
+    - Integrate with the existing Activity Timeline to log all document processing and correction events.
 - **UI:**
-    - Add a new Operations Queue page to display all actionable items, with filters for escalation status.
-    - In the SO and PO workflow views, add UI to set/edit due dates and manually set an  status.
-    - Display color-coded badges for the escalation status in all relevant views.
-    - Update the main dashboard to show counts for , , and  items.
+    - Create a new Document Review Queue page to display documents requiring manual review.
+    - In the existing document workflow, add a new panel to display the intelligence results: detected type, confidence scores, extracted fields, and automation status.
+    - Allow users to correct the document type and extracted fields directly in the UI.
 - **Testing:**
-    - Add backend tests for creating due dates, derived status logic, and priority score updates.
-    - Add frontend tests for the new UI controls, filters, and dashboard cards.
-    - All existing tests from iteration_87 must continue to pass.
-- **Target Iteration:** .
+    - Add backend tests for document processing, readiness logic, queue population, and manual corrections.
+    - Add frontend tests for the new review queue and the document intelligence panel.
+    - Ensure all existing tests from iteration_93 continue to pass.
 
 **User's preferred language**: English
 
 **what currently exists?**
-The application is a comprehensive inventory intelligence platform. It features a full PO and SO operational lifecycle, including warehouse vs. drop-ship logic, document linkage, process checklists, and approval workflows. It also includes an Operations Queue, a unified worklist that surfaces items requiring action based on a priority scoring system. The system tracks handoffs to a mock Business Central (BC) system.
+The application is a comprehensive inventory intelligence platform. It features a full operational lifecycle for Sales Orders (SO) and Purchase Orders (PO), including an Operations Queue that provides a prioritized worklist. The queue is enhanced with due dates, escalations, assignments, activity timelines, saved views, and bulk actions. The system also supports operational templates to standardize workflows. An LLM (Gemini via Emergent LLM Key) is already integrated for some classification and extraction tasks.
 
 **Last working item**:
-- **Last item agent was working:** The agent was implementing Operational Escalations and Due Dates (iteration_88), adding time-awareness to the Operations Queue. The backend model, endpoints, and logic are complete. The frontend UI for the queue, dashboard, and individual workflow views has also been implemented.
-- **Status:** TESTING PENDING
+- **Last item agent was working:** The agent was planning the implementation of the Document Classification, Extraction, and Automation Confidence Layer (iteration_94). The user clarified that this task should be prioritized over a previously mentioned AR Release Gate feature. The agent confirmed that the existing Gemini integration and Emergent LLM Key should be used for this task.
+- **Status:** NOT STARTED
 - **Agent Testing Done:** N
 - **Which testing method agent to use?** both
 - **User Testing Done:** N
 
 **All Pending/In progress Issue list**:
-  - There are no pending issues. The current task is ready for final testing.
+- There are no pending issues. The agent is ready to begin the new task.
 
 **In progress Task List**:
-  - Task 1:  (P0) Finalize and test Operational Escalations and Due Dates (iteration_88).
+  - Task 1:  (P0) Implement Document Classification, Extraction, and Automation Confidence Layer (iteration_94).
 
  Task Detail:
   - Task 1: 
-     - **Where to resume:** The full feature has been implemented (backend and frontend). The next and final step is to run the comprehensive  to validate all changes, including the new backend logic, the Operations Queue page, the dashboard summary, and the workflow dialogs.
-     - **What will be achieved with this?** This will complete iteration_88, providing users with time-aware operational visibility, allowing them to prioritize work based on due dates and see aging tasks.
-     - **Status:**  TESTING PENDING
+     - **Where to resume:** The agent has a complete plan approved by the user. The next step is to begin the backend implementation. This involves creating a new router and models for , likely in a new file to avoid further bloating . The agent should start by defining the Pydantic models for document intelligence results and then create the  endpoint, integrating the existing Gemini service.
+     - **What will be achieved with this?** This will build a core AI-powered document processing pipeline, making the entire system smarter by automatically understanding incoming documents and flagging them for automation or manual review.
+     - **Status:**  NOT STARTED
      - **Should Test frontend/backend/both after fix?** both
      - **Blocked on something:** None
 
 **Upcoming and Future Tasks**
 **Upcoming Tasks:**
--   **P0:** Inventory Planning Horizon (Demand Forecast + Purchase Timing)
+-   **P0:** AR Release Gate (Prepay and Terms Approval) - This was the initial prompt for iter_94 but was superseded. It is now the next high-priority task.
+-   **P1:** Inventory Planning Horizon (Demand Forecast + Purchase Timing)
 
 **Future Tasks:**
 -   Build an admin UI for managing item mapping rules (CRUD).
@@ -59,74 +59,71 @@ The application is a comprehensive inventory intelligence platform. It features 
 -   Add multi-step approval routing for documents.
 
 **Completed work in this session**
-- **Operational Escalations and Due Dates (iteration_88):** Added due date tracking and escalation statuses (On Track, Due Soon, Overdue, Escalated) to SOs and POs, integrated into the Operations Queue and dashboard. (Testing Pending)
-- **Operations Queue (Unified Worklist) (iteration_87):** Implemented a new global dashboard to see all SOs and POs that require action, with priority scoring and filtering.
-- **Approval Workflow Tracking (iteration_86):** Added an approval log, status tracking (Pending, Approved, Rejected), and UI controls for SOs and PO Drafts, integrated into the process checklists.
-- **Document Linkage and Process Checklist (iteration_85):** Implemented a system to attach document metadata to SOs and POs and a derived checklist to track workflow completeness.
-- **Drop-Ship Purchase Order Workflow (iteration_84):** Built the end-to-end workflow for drop-ship orders, from generating a PO draft from an SO to tracking vendor shipments, separate from warehouse inventory.
-- **Sales Order Type Awareness (iteration_83):** Fixed and completed the implementation to differentiate between  and  sales orders.
+- **Operational Templates (iteration_93):** Implemented reusable templates for applying standard due dates, assignments, and approvals to SOs and POs, with a full management UI and bulk-apply capabilities.
+- **Bulk Actions for Operations Queue (iteration_92):** Added the ability to select multiple items in the Operations Queue and apply bulk actions like assigning an owner or setting a due date.
+- **Saved Views & Personal Presets (iteration_91):** Implemented functionality for users to save and load their preferred filter and sort configurations for the Operations Queue.
+- **Operational Notes & Activity Timeline (iteration_90):** Created a unified timeline for each SO and PO, automatically logging major workflow events (e.g., assignment, approval) and allowing manual notes.
+- **Operational Ownership & Assignment (iteration_89):** Added the ability to assign SOs and POs to specific owners, integrating this information into the Operations Queue with filters and priority scoring adjustments.
+- **Operational Escalations and Due Dates (iteration_88):** Completed and tested the feature adding time-awareness (due dates, escalation status) to the Operations Queue.
 
 **Earlier issues found/mentioned but not fixed**
-   - **Issue 1: Non-Standard Git Branch and Deployment Workflow (P2)**
-     - **Description:** The user works on temporary  branches, which is not a standard practice and could complicate deployments.
-     - **Debug checklist:** Propose a standard git workflow (e.g., feature branches from ) after a major feature set is complete.
-     - **Why to solve this issue and what will be achieved with this?** To create a more reliable and standard deployment process.
-     - **Should Test frontend/backend/both after fix:** N/A
+   - **Issue 1: Monolithic Codebase (P1)**
+     - **Description:** The files  and  are extremely large and contain logic for dozens of features. This session added five major features, making the files even more difficult to maintain.
+     - **Debug checklist:** For the next feature, create new router files (e.g., ). For the frontend, extract reusable components from  into their own files under .
+     - **Why to solve this issue and what will be achieved with this?** To improve maintainability, reduce the risk of regressions, and make the codebase scalable.
      - **Is recurring issue?** Y
 
 **Known issue recurrence from previous fork**
-  - **Issue recurrence in previous fork:** Forward reference Python error ().
-  - **Recurrence count:** 3
-  - **Status:** RESOLVED (but requires vigilance). This happened repeatedly when the agent's  on  was too broad and accidentally deleted Pydantic model class definitions. The agent successfully identified and fixed it each time, but it's a recurring pattern. The next agent should be cautious with large-scale replacements in this file.
+  - **Issue recurrence in previous fork:** Forward reference Python error.
+  - **Recurrence count:** 3+ (in this session, similar issues occurred where  corrupted files by deleting decorators or comment headers).
+  - **Status:** RESOLVED (but high risk). The agent repeatedly used broad  commands on  that removed necessary lines of code (like ). While the agent caught and fixed these errors each time, it highlights a significant risk with modifying the monolithic file. The next agent must be extremely cautious or use more precise editing tools.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
 -   **Ledger-Based Inventory:** Using an immutable log of movements to derive current balances.
--   **Operational Handoffs:** Mocking integration points (payload generation, status logging) for an external system (Business Central).
--   **Derived Work Queues:** Creating a unified Operations Queue by aggregating and scoring actionable items from different entities (SOs, POs) based on a set of business rules.
--   **Time-Awareness & Escalations:** Adding due dates to operational items and using derived logic (, , ) to influence priority and visibility.
--   **Workflow Metadata:** Tracking operational state (document links, checklists, approvals, escalations) in separate collections to enrich core entities without modifying inventory logic.
+-   **Derived Work Queues:** Aggregating actionable items from different entities into a unified Operations Queue with dynamic priority scoring.
+-   **Workflow Metadata:** Tracking operational state (assignments, escalations, activities, etc.) in separate collections to enrich core entities.
+-   **Bulk Operations:** A single API endpoint that iterates through a list of entities and applies actions by reusing single-entity business logic.
+-   **Operational Templates:** Reusable configurations that can be applied to entities to standardize setup.
+-   **Saved Views:** Storing user-defined filter/sort states to create personalized presets for data tables.
 
 **key DB schema**
--   ****: Core immutable ledger.
--   ****: Tracks planned/ordered/received supply for warehouse POs.
--   ****: Holds PO data before BC handoff; now includes  ('warehouse_supply', 'drop_ship') and .
--   ****: Links a Sales Order ID to an  ('warehouse', 'drop_ship').
--   ****: Stores metadata for documents attached to SOs or PO Drafts.
--   ****: Tracks approval history (pending, approved, rejected) for SOs and PO Drafts.
--   ****: (Newly added) Stores due dates and escalation status for SOs and PO Drafts.
--   ****: Traceability log for warehouse shipments.
--   ****: (Newly added) Traceability log for drop-ship vendor shipments.
+-   **, , , **: Core inventory and order models.
+-   **, , **: Existing workflow metadata.
+-   ****: (New) Stores owner, status for SOs/POs.
+-   ****: (New) Stores a chronological log of manual notes and system-generated workflow events.
+-   ****: (New) Stores user-defined filter/sort presets for the Operations Queue.
+-   ****: (New) Stores reusable operational configurations (due dates, assignments, etc.).
 
 **changes in tech stack**
 - None.
 
 **All files of reference**
--   : The primary file for all backend changes. All new models, endpoints, and logic were added here.
--   : The main UI file for PO and SO workflows. It was updated to include new sections for Documents, Checklists, Approvals, and Escalations.
--   : A new file created to house the unified Operations Queue.
--   : Modified to add the route for the new Operations Queue page.
+-   : The monolithic backend file, heavily modified in this session.
+-   : The frontend for the work queue, significantly rewritten to support saved views and bulk actions.
+-   : The main workflow UI, updated with new sections for Assignments, Activity Timeline, and Template Application.
+-   : A new file created to manage operational templates.
+-   : Modified to add the route for the new .
 
 **Areas that need refactoring**:
--   The frontend file  has grown even larger. The agent created reusable components (, , , ) but defined them within this monolithic file. They should be extracted into their own files under .
--   The backend router  is extremely large and difficult to maintain. It should be split into multiple routers based on functionality (e.g., , , ).
+-   **:** This file is critically oversized. The next task (Document Intelligence) presents a perfect opportunity to create a new, separate router file () instead of adding to the monolith.
+-   **:** This file contains multiple large components defined internally (, , , etc.). These should be extracted into their own files in a  directory to improve readability and reusability.
 
 **key api endpoints**
--   : Creates or updates a due date for an entity.
--   : Retrieves escalation records for an entity.
--   : Manually updates an escalation record.
--   : Retrieves the list of all actionable work items, now enriched with escalation status and filters.
--   : Request an approval.
--   : Attach a document link.
+-   : Executes a bulk action (e.g., assign owner, apply template) on multiple entities.
+-   : Applies a specific operational template to an entity.
+-   CRUD endpoints for , , , .
 
 **Critical Info for New Agent**
--   Your immediate task is to complete **iteration_88** by running comprehensive tests using . All backend and frontend code has been written.
--   Be aware of the recurring Forward reference issue in  when making large-scale changes. A broad  can accidentally delete necessary Pydantic class definitions that appear later in the file.
--   The application logic is heavily concentrated in two files:  for all backend logic and  for most workflow UI.
+-   Your immediate task is to implement the Document Classification, Extraction, and Automation Confidence Layer (iteration_94). The user has explicitly confirmed this is the priority.
+-   You **must** use the existing Gemini integration via the  library and the . Do not implement a new LLM connection. The agent has already verified its presence in the codebase.
+-   **Extreme caution is required when editing .** The previous agent repeatedly corrupted this file by using broad  commands. Consider creating a new file for the document intelligence router to avoid this risk.
+-   The monolithic file structure is a known issue. Take opportunities to create new files for new, distinct features (like this one) rather than adding to the existing large files.
 
 **documents and test reports created in this job**
+-   
 -   
 -   
 -   
@@ -136,27 +133,31 @@ The application is a comprehensive inventory intelligence platform. It features 
 -    (updated after each iteration)
 
 **Last 10 User Messages and any pending HUMAN messages**
-- The last several messages consist of the user providing a detailed prompt for a new iteration (88, 87, 86, etc.) followed by a proceed or go confirmation. The last user message was the prompt for **iteration_88**, which is the current in-progress task.
+-   User provided a prompt for AR Release Gate (iteration_94).
+-   User immediately provided a new, more detailed prompt for Document Classification, Extraction, and Automation Confidence Layer (iteration_94), stating This is the right place to refocus.
+-   User asked if an LLM key was already in use.
+-   Agent confirmed the  and Gemini integration are already active in the codebase.
+-   Agent presented a plan to implement the Document Intelligence feature using the existing LLM setup, which was approved by the user.
 
 **Project Health Check:**
--   **Broken:** No. The application is running and passed a smoke test, but the latest feature requires full testing.
--   **Mocked:** Email service.
+-   **Broken:** No. The application is fully functional, and all features implemented in the session passed comprehensive testing.
+-   **Mocked:** Email service, Business Central API.
 
 **3rd Party Integrations**
--   Dynamics 365 Business Central API (Mocked via handoff endpoints)
+-   **Gemini (via Emergent LLM Key):** Actively used for AI tasks. This is the required integration for the current task.
+-   Dynamics 365 Business Central API (Mocked)
 -   Microsoft Graph API / SharePoint
--   Gemini (via Emergent LLM Key)
 -   Spiro CRM API
 -   APScheduler
 
 **Testing status**
--   **Testing agent used after significant changes:** YES. The agent has consistently used  after completing each major iteration.
+-   **Testing agent used after significant changes:** YES. The agent correctly used  to validate every major feature (iterations 88 through 93).
 -   **Troubleshoot agent used after agent stuck in loop:** NO
--   **Test files created:** Yes, backend test coverage has been expanded with each new feature.
+-   **Test files created:** Yes, backend test coverage was expanded with each feature, and the testing agent generated comprehensive reports.
 -   **Known regressions:** None.
 
 **Credentials to test flow:**
 -   **Web UI:**  / 
 
 **What agent forgot to execute**
-- The agent has implemented the entire Operational Escalations and Due Dates feature (iteration_88) but was interrupted before it could run the final, comprehensive tests with . This is the immediate next step required to complete the task.</analysis>
+- The agent successfully completed all tasks and correctly pivoted based on user feedback. Nothing was forgotten.</analysis>

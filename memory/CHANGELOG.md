@@ -1,5 +1,24 @@
 # GPI Document Hub - Changelog
 
+## March 15, 2026 — Legacy api_router Cleanup (iter_108)
+
+### Removed
+- `api_router = APIRouter(prefix="/api")` from server.py (zero active routes)
+- `app.include_router(legacy_api_router)` from main.py (was no-op)
+- 46 commented-out `# @api_router.*` decorator lines from server.py
+- Unused `APIRouter` import from server.py
+
+### Documentation
+- main.py docstring updated: server.py is a utility library, not a route source
+- ARCHITECTURE_CURRENT.md section 5c added
+
+### Testing
+- 13/13 route cleanup tests passed (document routes, workflow routes, ref intel routes, route count = 427, api_router removed)
+- 97/97 total tests passed across all test files
+- Full API verification passed
+
+---
+
 ## March 15, 2026 — BC Validation Isolation (iter_107)
 
 ### Extraction

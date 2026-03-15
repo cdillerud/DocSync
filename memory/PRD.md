@@ -353,6 +353,15 @@ Key Principles:
 - [x] server.py retains thin compatibility wrapper
 - [x] 31 targeted tests, 84/84 total tests passed
 
+#### Legacy api_router Cleanup (COMPLETED - Mar 15, 2026)
+- [x] Removed dead `api_router` (zero active routes) from server.py
+- [x] Removed `include_router(legacy_api_router)` no-op from main.py
+- [x] Removed 46 commented-out `# @api_router.*` decorator lines
+- [x] Removed unused `APIRouter` import from server.py
+- [x] Updated main.py docstring: server.py documented as utility library
+- [x] Route count verified stable at 427
+- [x] 13 targeted tests, 97/97 total tests passed
+
 
 ### In Progress / Shadow Mode
 - [x] AP automatic workflow trigger (VERIFIED WORKING)

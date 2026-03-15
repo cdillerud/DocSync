@@ -1284,11 +1284,10 @@ def get_bc_sandbox_status() -> Dict[str, Any]:
     Returns:
         Status dict with config info (secrets masked)
     """
-    # Import the server's BC credentials which may be loaded from database settings
+    # Read the server's BC credentials from environment (may be loaded from database settings)
     try:
-        from server import BC_CLIENT_SECRET as SERVER_BC_SECRET
-        effective_secret = BC_SANDBOX_CLIENT_SECRET or SERVER_BC_SECRET
-    except ImportError:
+        effective_secret = BC_SANDBOX_CLIENT_SECRET or os.environ.get('BC_CLIENT_SECRET', '')
+    except Exception:
         effective_secret = BC_SANDBOX_CLIENT_SECRET
     
     BC_READ_ENV = os.environ.get('BC_READ_ENVIRONMENT') or os.environ.get('BC_PROD_ENVIRONMENT', 'Production')

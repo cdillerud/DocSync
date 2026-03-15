@@ -606,8 +606,9 @@ All handler implementations have been extracted from server.py into dedicated se
 
 ### Known follow-up debt
 
-- **12 router modules** still import utility helpers from server.py (normalize_vendor_name, get_bc_companies, etc.)
-- server.py retains orchestration logic (run_upload_and_link_workflow, email polling, BC integration helpers, AI classification) consumed by extracted handler modules via lazy import
+- **~8 router/service modules** still import helpers from server.py (settings config vars, email/mailbox orchestration, link_document, ensure_sharepoint_folder_exists)
+- **document_handlers.py** still uses `_server()` lazy import for ~20+ orchestration functions (dedicated extraction pass needed)
+- server.py retains orchestration logic (run_upload_and_link_workflow, email polling, BC integration helpers, AI classification)
 - server.py retains module-level DB connection, startup/shutdown lifecycle, and background workers
 
 ### 5d. Document Handler Extraction (March 2026)
@@ -756,3 +757,42 @@ Also extracted: `SetVendorRequest`, `UpdateFieldsRequest`, `BCValidationOverride
 | `normalize_vendor_name` | Vendor name normalization (used by `update_document_fields`) |
 
 ---
+
+### 5g. Shared Helper Extraction (March 2026)
+
+**6 shared utility helpers** extracted from server.py into 3 dedicated service modules, reducing router/service dependency on server.py.
+
+#### New authoritative modules
+
+| Module | Helpers extracted | Consumers rewired |
+|--------|------------------|-------------------|
+| `services/vendor_name_helpers.py` | `normalize_vendor_name`, `calculate_fuzzy_score`, `VENDOR_ALIAS_MAP` | aliases.py, workflow_handlers.py, metrics.py (fix), pilot.py (fix) |
+| `services/dashboard_helpers.py` | `aggregate_document_types_data` | dashboard.py (2 call sites) |
+| `services/bc_api_helpers.py` | `get_bc_companies`, `get_bc_sales_orders`, `MOCK_COMPANIES`, `MOCK_SALES_ORDERS` | bc_integration.py |
+
+Also fixed: `bc_sandbox_service.py` — replaced `from server import BC_CLIENT_SECRET` with direct `os.environ.get()`.
+Also fixed: latent `NameError` bugs in `routers/metrics.py` and `routers/pilot.py` (missing imports for `normalize_vendor_name` and `VENDOR_ALIAS_MAP`).
+
+#### Thin compatibility wrappers left in server.py
+
+| Function | Reason |
+|----------|--------|
+| `normalize_vendor_name` | Re-export from `services.vendor_name_helpers`. Used by ~8 internal server.py functions |
+| `calculate_fuzzy_score` | Re-export from `services.vendor_name_helpers`. Used by internal server.py matching code |
+| `get_bc_companies` | Delegates to `services.bc_api_helpers`. Used by internal server.py orchestration |
+| `get_bc_sales_orders` | Delegates to `services.bc_api_helpers`. Used by internal server.py orchestration |
+| `_aggregate_document_types_data` | Delegates to `services.dashboard_helpers`. Retained for compatibility |
+
+#### server.py imports still remaining (future pass targets)
+
+| Category | Importing modules | Helpers |
+|----------|------------------|---------|
+| Settings config | settings.py | 14 config vars, `_mask`, `_current_config`, `get_graph_token`, etc. |
+| Email/mailbox | mailbox_sources.py | `get_email_token`, `poll_mailbox_for_documents`, `_dynamic_mailbox_polling_task` |
+| SharePoint | sharepoint.py | `ensure_sharepoint_folder_exists` |
+| Document linking | workflows.py | `link_document` |
+| Deep orchestration | document_handlers.py | ~20+ functions via `_server()` lazy import |
+
+---
+
+*Last updated: March 15, 2026 (Shared Helper Extraction pass)*

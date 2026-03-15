@@ -11,7 +11,7 @@ Dependencies:
   - deps.get_db() for database access
   - services.workflow_engine for WorkflowEngine, enums
   - services.pilot_config for pilot-mode guards
-  - server.normalize_vendor_name (lazy; extraction target for future pass)
+  - services.vendor_name_helpers for normalize_vendor_name
 """
 
 import logging
@@ -74,8 +74,8 @@ def _get_workflow_deps():
 
 
 def _normalize_vendor_name(name: str) -> str:
-    """Lazy proxy for server.normalize_vendor_name (extraction target)."""
-    from server import normalize_vendor_name
+    """Delegate to vendor_name_helpers (authoritative source)."""
+    from services.vendor_name_helpers import normalize_vendor_name
     return normalize_vendor_name(name)
 
 

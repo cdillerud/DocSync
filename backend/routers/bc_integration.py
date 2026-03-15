@@ -14,7 +14,7 @@ router = APIRouter(prefix="/bc", tags=["Business Central"])
 @router.get("/companies")
 async def list_bc_companies():
     """List available Business Central companies."""
-    from server import get_bc_companies
+    from services.bc_api_helpers import get_bc_companies
     companies = await get_bc_companies()
     return {"companies": companies}
 
@@ -22,7 +22,7 @@ async def list_bc_companies():
 @router.get("/sales-orders")
 async def list_bc_sales_orders(search: str = Query(None)):
     """Search Business Central sales orders."""
-    from server import get_bc_sales_orders
+    from services.bc_api_helpers import get_bc_sales_orders
     try:
         orders = await get_bc_sales_orders(order_no=search)
         return {"orders": orders}

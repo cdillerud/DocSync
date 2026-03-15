@@ -379,8 +379,8 @@ async def get_document_types_dashboard(
     # Normalize classification filter
     classification_filter = classification if classification in ("deterministic", "ai") else None
     
-    from server import _aggregate_document_types_data
-    data = await _aggregate_document_types_data(source_system, doc_type, classification_filter)
+    from services.dashboard_helpers import aggregate_document_types_data
+    data = await aggregate_document_types_data(source_system, doc_type, classification_filter)
     
     by_type = data["by_type"]
     source_systems = data["source_systems"]
@@ -434,8 +434,8 @@ async def export_document_types_dashboard(
     # Normalize classification filter
     classification_filter = classification if classification in ("deterministic", "ai") else None
     
-    from server import _aggregate_document_types_data
-    data = await _aggregate_document_types_data(source_system, doc_type, classification_filter)
+    from services.dashboard_helpers import aggregate_document_types_data
+    data = await aggregate_document_types_data(source_system, doc_type, classification_filter)
     
     by_type = data["by_type"]
     source_system_filter = data["source_system_filter"] or "ALL"

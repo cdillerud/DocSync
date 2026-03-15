@@ -15,6 +15,7 @@ from typing import Dict, Optional, List
 from deps import get_db
 from services.pilot_config import PILOT_MODE_ENABLED, CURRENT_PILOT_PHASE, get_pilot_status
 from services.pilot_summary import DAILY_PILOT_EMAIL_ENABLED, PILOT_SUMMARY_RECIPIENTS, PILOT_SUMMARY_CRON_HOUR_UTC
+from services.vendor_name_helpers import normalize_vendor_name, VENDOR_ALIAS_MAP
 
 logger = logging.getLogger(__name__)
 

@@ -1,0 +1,102 @@
+{
+  "summary": "Shared Helper Extraction tests verified - all 90 tests passed across 4 test suites. 6 utility helpers successfully extracted from server.py into 3 dedicated service modules: vendor_name_helpers.py (normalize_vendor_name, calculate_fuzzy_score, VENDOR_ALIAS_MAP), dashboard_helpers.py (aggregate_document_types_data), bc_api_helpers.py (get_bc_companies, get_bc_sales_orders). All router consumers rewired. Route count stable at 427. No API contract changes.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/bc/companies",
+        "issue": "Returns 500 due to invalid BC credentials - PRE-EXISTING issue, not caused by this change",
+        "priority": "LOW"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_helper_extraction.py",
+    "/app/backend/tests/test_ref_intel_handler_extraction.py",
+    "/app/backend/tests/test_workflow_handler_extraction.py",
+    "/app/backend/tests/test_doc_handler_extraction.py",
+    "/app/test_reports/pytest/helper_extraction_results.xml",
+    "/app/test_reports/pytest/ref_intel_handler_extraction_results_112.xml",
+    "/app/test_reports/pytest/workflow_handler_extraction_results_112.xml",
+    "/app/test_reports/pytest/doc_handler_extraction_results_112.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "N/A (backend-only testing)"
+  },
+  "test_credentials": {
+    "username": "admin",
+    "password": "admin"
+  },
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Shared helper extraction complete. All 6 helpers extracted from server.py into 3 service modules: services/vendor_name_helpers.py (normalize_vendor_name, calculate_fuzzy_score, VENDOR_ALIAS_MAP), services/dashboard_helpers.py (aggregate_document_types_data), services/bc_api_helpers.py (get_bc_companies, get_bc_sales_orders). Route count verified at 427. All routers import from their respective service modules, not from server.py. Server.py retains thin compatibility wrappers that delegate to authoritative implementations.",
+  "test_summary": {
+    "test_helper_extraction": {
+      "passed": 33,
+      "failed": 0,
+      "coverage": [
+        "vendor_name_helpers: normalize_vendor_name basic/whitespace/suffixes, calculate_fuzzy_score exact/no-match/BC-prefix/empty, VENDOR_ALIAS_MAP importable",
+        "dashboard_helpers: aggregate_document_types_data importable, GET /api/dashboard/document-types returns 200 with by_type field",
+        "bc_api_helpers: get_bc_companies/get_bc_sales_orders importable, MOCK_COMPANIES/MOCK_SALES_ORDERS present, GET /api/bc/sales-orders returns 200",
+        "Router decoupling: aliases.py, bc_integration.py, dashboard.py, workflow_handlers.py, metrics.py, pilot.py all import from service modules not server",
+        "Server.py compatibility wrappers still work: normalize_vendor_name('Acme Corp') returns 'acme', calculate_fuzzy_score('Acme', 'Acme') returns 1.0",
+        "bc_sandbox_service.py no longer imports BC_CLIENT_SECRET from server",
+        "Route count stable at 427"
+      ]
+    },
+    "test_ref_intel_handler_extraction": {
+      "passed": 17,
+      "failed": 0
+    },
+    "test_workflow_handler_extraction": {
+      "passed": 25,
+      "failed": 0
+    },
+    "test_doc_handler_extraction": {
+      "passed": 15,
+      "failed": 0
+    }
+  },
+  "api_verification": {
+    "helper_extraction_endpoints": {
+      "GET /api/dashboard/document-types": "200 OK - returns by_type field",
+      "GET /api/bc/sales-orders": "200 OK - returns orders (empty with warning due to BC credentials)",
+      "GET /api/aliases/vendors": "200 OK - returns aliases list"
+    },
+    "pre_existing_issues": {
+      "GET /api/bc/companies": "500 - PRE-EXISTING issue due to invalid BC credentials (DEMO_MODE=false), not caused by this change"
+    },
+    "health": {
+      "GET /api/health": "200 OK - {status: 'healthy'}"
+    },
+    "route_count": "427 (stable)"
+  },
+  "module_verification": {
+    "services/vendor_name_helpers.py": {
+      "exports": ["normalize_vendor_name", "calculate_fuzzy_score", "VENDOR_ALIAS_MAP"],
+      "all_callable": true
+    },
+    "services/dashboard_helpers.py": {
+      "exports": ["aggregate_document_types_data"],
+      "all_callable": true
+    },
+    "services/bc_api_helpers.py": {
+      "exports": ["get_bc_companies", "get_bc_sales_orders", "MOCK_COMPANIES", "MOCK_SALES_ORDERS"],
+      "all_callable": true
+    },
+    "server.py_compatibility": {
+      "normalize_vendor_name_wrapper": "delegates to vendor_name_helpers",
+      "calculate_fuzzy_score_wrapper": "delegates to vendor_name_helpers (imported at line 2376)"
+    }
+  }
+}

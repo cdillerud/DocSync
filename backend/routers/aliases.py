@@ -36,7 +36,7 @@ async def get_vendor_aliases():
 @router.post("/vendors")
 async def create_vendor_alias(alias: VendorAlias):
     """Create a new vendor alias mapping."""
-    from server import normalize_vendor_name, VENDOR_ALIAS_MAP
+    from services.vendor_name_helpers import normalize_vendor_name, VENDOR_ALIAS_MAP
 
     db = get_db()
     alias_id = str(uuid.uuid4())
@@ -96,7 +96,7 @@ async def suggest_alias_creation(
     Called when user manually resolves a vendor match.
     Returns suggestion to save as alias.
     """
-    from server import normalize_vendor_name
+    from services.vendor_name_helpers import normalize_vendor_name
 
     db = get_db()
     normalized = normalize_vendor_name(vendor_name)

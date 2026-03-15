@@ -10,6 +10,7 @@ from typing import Optional
 from datetime import datetime, timezone, timedelta
 from deps import get_db, ENABLE_CREATE_DRAFT_HEADER, DEMO_MODE
 from models.document_types import DEFAULT_JOB_TYPES, TransactionAction
+from services.vendor_name_helpers import normalize_vendor_name
 
 router = APIRouter(tags=["Metrics"])
 

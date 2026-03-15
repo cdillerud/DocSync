@@ -1,5 +1,14 @@
 # CHANGELOG - GPI Document Hub
 
+## [2026-03-15] Iteration 91 — Saved Views and Personal Queue Presets — COMPLETE
+- **Backend:** Saved view CRUD endpoints (POST/GET/PATCH/DELETE /api/inventory-ledger/saved-views) with view_type validation and default uniqueness per view_type+created_by
+- **Backend:** Operations Queue response enriched with saved_views_count and default_view_name
+- **Frontend:** Operations Queue: "Save View" button + dialog (name, notes, default toggle, filter summary), "Views" button with dropdown panel (list, apply, set default, overwrite, delete), active view badge in header, auto-load default on mount
+- **Frontend:** Dashboard summary strip: Saved Views card showing count and default view name
+- **Testing:** 15/15 backend tests passed, all frontend UI elements verified (100% pass rate)
+- **Test report:** /app/test_reports/iteration_91.json
+
+
 ## [2026-03-14] Iteration 90 — Operational Notes and Activity Timeline — COMPLETE
 - **Backend:** Activity model + CRUD endpoints (POST/GET /api/inventory-ledger/activities) with 11 activity types (note, assignment, approval, document, bc_export, bc_response, shipment, invoice, receipt, escalation, system)
 - **Backend:** System auto-generation of activities for all major workflow events (approvals, documents, escalations, assignments, BC export/response, shipments, invoices, incoming supply creation)

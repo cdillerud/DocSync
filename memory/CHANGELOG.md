@@ -1,5 +1,27 @@
 # GPI Document Hub - Changelog
 
+## March 15, 2026 — Decisioning & Automation Consolidation (iter_104)
+
+### Shared Helpers Created
+- `services/automation_helpers.py` — utcnow(), create_activity(), build_document_update(), apply_document_update(), EligibilityCheck, EligibilityResult
+
+### Overlaps Removed
+- ~30 inline datetime timestamp calls → 1 shared utcnow()
+- Activity record pattern → 1 shared create_activity()
+- Unprotected document $set dicts → build_document_update() with enforced updated_utc
+
+### Services Updated
+- decision_policy_service, automation_rules_service, auto_resolution_service, auto_clear_service, auto_post_service — all now use shared helpers
+- workflow_engine — unchanged (no overlapping logic)
+
+### Boundaries Documented
+- decision_policy = WHAT to do, automation_rules = WHERE to route, auto_resolution = ORCHESTRATE, workflow_engine = STATE MACHINE, auto_clear = ARCHIVE, auto_post = BC EXECUTE
+
+### Testing
+- 78/78 passed (68 pytest + 10 API), grep verified 0 raw datetime calls
+
+---
+
 ## March 15, 2026 — Reference Intelligence Consolidation (iter_103)
 
 ### Shared Helpers Created

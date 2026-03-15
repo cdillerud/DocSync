@@ -3505,3 +3505,64 @@ All existing per-service methods preserved as thin wrappers delegating to shared
 - Test report: `/app/test_reports/iteration_103.json`
 
 *Last Updated: March 15, 2026*
+
+
+---
+
+## Technical Debt Remediation Pass #3: Decisioning & Automation Consolidation (March 15, 2026)
+
+### Overview
+Consolidation of the Decisioning and Automation domain. Extracted shared helpers from 5 services to eliminate duplicated timestamp generation, activity logging, and document mutation patterns.
+
+### Changes Made
+
+#### A. Shared Automation Helpers (`services/automation_helpers.py`)
+- `utcnow()` — canonical UTC timestamp (replaces ~30 inline `datetime.now(timezone.utc).isoformat()` calls)
+- `create_activity()` — canonical activity record insertion (extracted from decision_policy_service)
+- `build_document_update()` — `$set` dict builder with enforced `updated_utc`
+- `apply_document_update()` — build + execute document write
+- `EligibilityCheck` / `EligibilityResult` — shared dataclasses for eligibility evaluation patterns
+
+#### B. Services Updated
+- `decision_policy_service.py` — uses `utcnow()`, delegates `_create_activity()` to shared helper
+- `automation_rules_service.py` — uses `utcnow()` for all timestamps
+- `auto_resolution_service.py` — uses `utcnow()` and `build_document_update()`
+- `auto_clear_service.py` — uses `utcnow()`
+- `auto_post_service.py` — uses `utcnow()` and `apply_document_update()`
+- `workflow_engine.py` — NOT modified (no duplicated logic with other services)
+
+#### C. Boundary Clarification
+- decision_policy_service = WHAT to do (policy → action recommendation)
+- automation_rules_service = WHERE to route (rule → queue/priority)
+- auto_resolution_service = WHEN & ORCHESTRATE (background resolution + chain)
+- workflow_engine = STATE MACHINE (deterministic transitions)
+- auto_clear_service = ARCHIVE decision (threshold checks)
+- auto_post_service = BC EXECUTION (API calls for posting)
+
+#### D. Architecture Documentation
+- Added "Decisioning and Automation Domain" section (§4b) to ARCHITECTURE_CURRENT.md
+- Documented canonical decision-to-execution flow, service boundaries, shared helpers
+
+### Overlaps Removed
+- ~30 inline datetime timestamp calls → 1 shared `utcnow()` function
+- Activity record construction pattern → 1 shared `create_activity()` function
+- Document $set dict patterns without `updated_utc` protection → `build_document_update()`
+
+### Files Changed
+- **Created:** `services/automation_helpers.py`, `tests/test_automation_helpers.py`
+- **Modified:** `services/decision_policy_service.py`, `services/automation_rules_service.py`, `services/auto_resolution_service.py`, `services/auto_clear_service.py`, `services/auto_post_service.py`, `ARCHITECTURE_CURRENT.md`
+- **Unchanged:** `services/workflow_engine.py`
+
+### Remaining Technical Debt
+- `workflow_engine.py` (1433 lines) — largest file, candidate for splitting workflow defs into config
+- `auto_resolution_service.py` post-processing chain — candidate for pipeline pattern
+- `auto_clear_service`/`auto_post_service` eligibility checks could adopt `EligibilityCheck`/`EligibilityResult`
+- `decision_policy_service` and `automation_rules_service` condition checking could share operator library
+
+### Test Results
+- Unit tests: 68/68 passed (23 automation_helpers + 45 reference_helpers)
+- API tests: 10/10 passed
+- Grep checks: 0 raw datetime calls in target services
+- Test report: `/app/test_reports/iteration_104.json`
+
+*Last Updated: March 15, 2026*

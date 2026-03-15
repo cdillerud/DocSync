@@ -18,8 +18,13 @@ from models.document_types import DEFAULT_JOB_TYPES
 
 logger = logging.getLogger(__name__)
 
-# Collection for storing intelligence results
+# Collections
 INTELLIGENCE_COLLECTION = "document_intelligence_results"
+AUTOMATION_ACTIONS_COLLECTION = "automation_actions"
+SO_DRAFTS_COLLECTION = "so_drafts"
+AP_INTAKE_DRAFTS_COLLECTION = "ap_intake_drafts"
+PO_DRAFTS_COLLECTION = "po_drafts"
+ACTIVITIES_COLLECTION = "activities"
 
 # Automation readiness levels
 READINESS_READY = "ready"
@@ -589,3 +594,390 @@ async def get_intelligence_summary() -> Dict[str, Any]:
         ],
         "total_corrections": corrections,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AUTO-DRAFT CREATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Document type → target entity mapping
+DOC_TYPE_DRAFT_MAP = {
+    "Sales_PO": {"target_entity_type": "sales_order_draft", "action_type": "create_sales_order_draft"},
+    "customer_po": {"target_entity_type": "sales_order_draft", "action_type": "create_sales_order_draft"},
+    "AP_Invoice": {"target_entity_type": "ap_intake_draft", "action_type": "create_ap_intake_draft"},
+    "invoice": {"target_entity_type": "ap_intake_draft", "action_type": "create_ap_intake_draft"},
+    "Freight_Document": {"target_entity_type": "po_draft", "action_type": "create_po_draft"},
+    "Shipping_Document": {"target_entity_type": "po_draft", "action_type": "create_po_draft"},
+    "vendor_po_support": {"target_entity_type": "po_draft", "action_type": "create_po_draft"},
+}
+
+
+async def _create_activity_record(
+    db, entity_type: str, entity_id: str, activity_type: str,
+    title: str, body_text: str = "", created_by: str = "system", metadata: dict = None,
+):
+    """Create an activity record for audit logging."""
+    now = datetime.now(timezone.utc).isoformat()
+    record = {
+        "activity_id": f"ACT-{uuid.uuid4().hex[:8].upper()}",
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "activity_type": activity_type,
+        "title": title,
+        "body": body_text,
+        "created_by": created_by,
+        "created_at": now,
+        "metadata": metadata or {},
+    }
+    await db[ACTIVITIES_COLLECTION].insert_one(record.copy())
+    record.pop("_id", None)
+    return record
+
+
+def _resolve_draft_mapping(document_type: str) -> Optional[Dict[str, str]]:
+    """Resolve document type to target draft mapping."""
+    mapping = DOC_TYPE_DRAFT_MAP.get(document_type)
+    if mapping:
+        return mapping
+    # Try case-insensitive / normalized matching
+    norm = document_type.upper().replace(" ", "_").replace("-", "_")
+    for key, val in DOC_TYPE_DRAFT_MAP.items():
+        if key.upper().replace(" ", "_").replace("-", "_") == norm:
+            return val
+    # Check for keywords
+    if any(kw in norm for kw in ["SALES", "CUSTOMER", "PO"]) and "AP" not in norm:
+        return {"target_entity_type": "sales_order_draft", "action_type": "create_sales_order_draft"}
+    if any(kw in norm for kw in ["AP", "INVOICE", "BILL"]):
+        return {"target_entity_type": "ap_intake_draft", "action_type": "create_ap_intake_draft"}
+    return None
+
+
+async def _create_so_draft(db, doc: Dict, intel: Dict, fields: Dict) -> Dict[str, Any]:
+    """Create a Sales Order draft from extracted document fields."""
+    now = datetime.now(timezone.utc).isoformat()
+    draft_id = f"SO-DRAFT-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
+
+    customer = fields.get("customer") or fields.get("consignee") or fields.get("customer_name") or ""
+    po_number = fields.get("po_number") or fields.get("order_number") or fields.get("customer_po") or ""
+    order_date = fields.get("order_date") or fields.get("date") or now[:10]
+
+    line_items = fields.get("line_items", [])
+    if isinstance(line_items, str):
+        line_items = []
+    lines = []
+    for i, li in enumerate(line_items if isinstance(line_items, list) else []):
+        if isinstance(li, dict):
+            lines.append({
+                "line_no": i + 1,
+                "item": li.get("item") or li.get("description") or li.get("product") or f"Line {i+1}",
+                "quantity": li.get("quantity") or li.get("qty") or 0,
+                "unit_price": li.get("unit_price") or li.get("price") or 0,
+                "description": li.get("description") or li.get("item") or "",
+            })
+
+    draft = {
+        "so_draft_id": draft_id,
+        "source_document_id": doc.get("id"),
+        "source_file_name": doc.get("file_name", ""),
+        "customer_name": customer,
+        "customer_po_number": po_number,
+        "order_date": order_date,
+        "lines": lines,
+        "total_lines": len(lines),
+        "total_amount": sum(l.get("quantity", 0) * l.get("unit_price", 0) for l in lines),
+        "status": "draft",
+        "created_at": now,
+        "created_by": "auto_draft",
+        "notes": f"Auto-generated from document {doc.get('id', '')}",
+        "classification_confidence": intel.get("classification_confidence", 0),
+    }
+
+    await db[SO_DRAFTS_COLLECTION].insert_one(draft.copy())
+    draft.pop("_id", None)
+    return draft
+
+
+async def _create_po_draft(db, doc: Dict, intel: Dict, fields: Dict) -> Dict[str, Any]:
+    """Create a PO draft from extracted document fields."""
+    now = datetime.now(timezone.utc).isoformat()
+    draft_id = f"PO-DRAFT-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
+
+    vendor = fields.get("vendor") or fields.get("shipper") or fields.get("carrier") or ""
+    source_ref = fields.get("po_number") or fields.get("bol_number") or fields.get("pro_number") or ""
+
+    line_items = fields.get("line_items", [])
+    if isinstance(line_items, str):
+        line_items = []
+    lines = []
+    for li in (line_items if isinstance(line_items, list) else []):
+        if isinstance(li, dict):
+            lines.append({
+                "item": li.get("item") or li.get("description") or "Unknown",
+                "qty": li.get("quantity") or li.get("qty") or 0,
+                "source": "auto_draft",
+            })
+
+    # If no line items extracted, create a placeholder from item-level fields
+    if not lines:
+        item = fields.get("item") or fields.get("product") or fields.get("description") or ""
+        qty = fields.get("quantity") or fields.get("pieces") or 0
+        if item:
+            lines.append({"item": item, "qty": qty, "source": "auto_draft"})
+
+    draft = {
+        "po_draft_id": draft_id,
+        "source_document_id": doc.get("id"),
+        "source_file_name": doc.get("file_name", ""),
+        "vendor_name": vendor,
+        "vendor_id": "",
+        "source_reference": source_ref,
+        "customer_id": "",
+        "customer_name": "",
+        "lines": lines,
+        "total_lines": len(lines),
+        "total_qty": sum(l.get("qty", 0) for l in lines),
+        "po_type": "auto_draft",
+        "status": "draft",
+        "source": "auto_draft",
+        "created_at": now,
+        "notes": f"Auto-generated from document {doc.get('id', '')}",
+    }
+
+    await db[PO_DRAFTS_COLLECTION].insert_one(draft.copy())
+    draft.pop("_id", None)
+    return draft
+
+
+async def _create_ap_intake_draft(db, doc: Dict, intel: Dict, fields: Dict) -> Dict[str, Any]:
+    """Create an AP Intake draft from extracted invoice fields."""
+    now = datetime.now(timezone.utc).isoformat()
+    draft_id = f"AP-DRAFT-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
+
+    vendor = fields.get("vendor") or fields.get("vendor_name") or ""
+    invoice_number = fields.get("invoice_number") or ""
+    invoice_date = fields.get("invoice_date") or fields.get("date") or ""
+    amount = fields.get("amount") or fields.get("invoice_amount") or fields.get("total") or 0
+    po_number = fields.get("po_number") or ""
+
+    if isinstance(amount, str):
+        try:
+            amount = float(amount.replace(",", "").replace("$", "").strip())
+        except (ValueError, AttributeError):
+            amount = 0
+
+    line_items = fields.get("line_items", [])
+    if isinstance(line_items, str):
+        line_items = []
+    lines = []
+    for li in (line_items if isinstance(line_items, list) else []):
+        if isinstance(li, dict):
+            lines.append({
+                "description": li.get("description") or li.get("item") or "",
+                "amount": li.get("amount") or li.get("total") or 0,
+                "quantity": li.get("quantity") or li.get("qty") or 0,
+                "unit_price": li.get("unit_price") or li.get("price") or 0,
+            })
+
+    draft = {
+        "ap_draft_id": draft_id,
+        "source_document_id": doc.get("id"),
+        "source_file_name": doc.get("file_name", ""),
+        "vendor_name": vendor,
+        "invoice_number": invoice_number,
+        "invoice_date": invoice_date,
+        "invoice_amount": amount,
+        "po_reference": po_number,
+        "lines": lines,
+        "total_lines": len(lines),
+        "status": "draft",
+        "created_at": now,
+        "created_by": "auto_draft",
+        "notes": f"Auto-generated from document {doc.get('id', '')}",
+        "classification_confidence": intel.get("classification_confidence", 0),
+    }
+
+    await db[AP_INTAKE_DRAFTS_COLLECTION].insert_one(draft.copy())
+    draft.pop("_id", None)
+    return draft
+
+
+async def create_auto_draft(doc_id: str) -> Dict[str, Any]:
+    """
+    Create a downstream draft record from an automation-ready document.
+
+    Validates readiness, maps doc type → draft type, creates draft,
+    stores automation action, logs activity.
+    Returns the action record with embedded draft data.
+    """
+    db = get_db()
+
+    # 1) Validate document exists
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise ValueError(f"Document not found: {doc_id}")
+
+    # 2) Validate intelligence result exists
+    intel = await db[INTELLIGENCE_COLLECTION].find_one({"document_id": doc_id}, {"_id": 0})
+    if not intel:
+        raise ValueError(f"No intelligence result for document: {doc_id}. Run processing first.")
+
+    # 3) Validate automation readiness
+    readiness = intel.get("automation_readiness")
+    if readiness != READINESS_READY:
+        raise PermissionError(
+            f"Document automation_readiness is '{readiness}', not 'ready'. "
+            f"Score: {intel.get('automation_readiness_score', 0)}, "
+            f"Reasons: {intel.get('automation_readiness_reasons', [])}"
+        )
+
+    # 4) Resolve draft mapping
+    document_type = intel.get("document_type", "")
+    mapping = _resolve_draft_mapping(document_type)
+    if not mapping:
+        raise ValueError(
+            f"No auto-draft mapping for document type: '{document_type}'. "
+            f"Supported types: {list(DOC_TYPE_DRAFT_MAP.keys())}"
+        )
+
+    target_entity_type = mapping["target_entity_type"]
+    action_type = mapping["action_type"]
+
+    # 5) Duplicate prevention
+    existing_action = await db[AUTOMATION_ACTIONS_COLLECTION].find_one(
+        {
+            "document_id": doc_id,
+            "target_entity_type": target_entity_type,
+            "action_status": "draft_created",
+        },
+        {"_id": 0},
+    )
+    if existing_action:
+        raise DuplicateDraftError(
+            f"A {target_entity_type} was already created from this document.",
+            existing_action=existing_action,
+        )
+
+    # 6) Create the appropriate draft
+    fields = intel.get("extracted_fields", {})
+    now = datetime.now(timezone.utc)
+    action_id = f"AA-{uuid.uuid4().hex[:8].upper()}"
+
+    try:
+        if target_entity_type == "sales_order_draft":
+            draft = await _create_so_draft(db, doc, intel, fields)
+            target_entity_id = draft["so_draft_id"]
+        elif target_entity_type == "po_draft":
+            draft = await _create_po_draft(db, doc, intel, fields)
+            target_entity_id = draft["po_draft_id"]
+        elif target_entity_type == "ap_intake_draft":
+            draft = await _create_ap_intake_draft(db, doc, intel, fields)
+            target_entity_id = draft["ap_draft_id"]
+        else:
+            raise ValueError(f"Unsupported target entity type: {target_entity_type}")
+
+        action_status = "draft_created"
+    except Exception as e:
+        if isinstance(e, (ValueError, DuplicateDraftError)):
+            raise
+        # Draft creation failed
+        action_status = "failed"
+        target_entity_id = ""
+        draft = {"error": str(e)}
+        logger.error("Auto-draft creation failed for %s: %s", doc_id, e)
+
+    # 7) Store automation action record
+    action_record = {
+        "automation_action_id": action_id,
+        "document_id": doc_id,
+        "source_document_type": document_type,
+        "target_entity_type": target_entity_type,
+        "target_entity_id": target_entity_id,
+        "action_type": action_type,
+        "action_status": action_status,
+        "created_at": now.isoformat(),
+        "created_by": "auto_draft",
+        "notes": f"Auto-draft from document intelligence pipeline",
+    }
+    await db[AUTOMATION_ACTIONS_COLLECTION].insert_one(action_record.copy())
+    action_record.pop("_id", None)
+
+    # 8) Update intelligence result with draft info
+    intel_update = {
+        "auto_draft_available": True,
+        "auto_draft_created": action_status == "draft_created",
+        "target_entity_type": target_entity_type,
+        "target_entity_id": target_entity_id,
+        "last_automation_action_id": action_id,
+        "last_automation_action_status": action_status,
+    }
+    await db[INTELLIGENCE_COLLECTION].update_one(
+        {"document_id": doc_id}, {"$set": intel_update}
+    )
+
+    # 9) Update hub_documents
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "auto_draft_created": action_status == "draft_created",
+            "target_entity_type": target_entity_type,
+            "target_entity_id": target_entity_id,
+            "updated_utc": now.isoformat(),
+        }},
+    )
+
+    # 10) Create activity
+    if action_status == "draft_created":
+        await _create_activity_record(
+            db, "document", doc_id, "auto_draft_created",
+            f"Auto-draft created: {target_entity_type}",
+            f"Created {target_entity_id} from document intelligence pipeline. "
+            f"Confidence: {intel.get('classification_confidence', 0):.0%}",
+            metadata={"target_entity_type": target_entity_type, "target_entity_id": target_entity_id},
+        )
+    else:
+        await _create_activity_record(
+            db, "document", doc_id, "auto_draft_failed",
+            f"Auto-draft creation failed: {target_entity_type}",
+            f"Error: {draft.get('error', 'Unknown')}",
+            metadata={"action_id": action_id},
+        )
+
+    # 11) Emit event
+    try:
+        from services.event_service import get_event_service
+        event_service = get_event_service()
+        if event_service:
+            await event_service.emit(
+                f"document_intelligence.auto_draft.{action_status}",
+                {
+                    "document_id": doc_id,
+                    "action_id": action_id,
+                    "target_entity_type": target_entity_type,
+                    "target_entity_id": target_entity_id,
+                },
+            )
+    except Exception:
+        pass
+
+    return {
+        **action_record,
+        "draft": draft,
+    }
+
+
+async def get_automation_action(doc_id: str) -> Optional[Dict[str, Any]]:
+    """Get the latest automation action for a document."""
+    db = get_db()
+    action = await db[AUTOMATION_ACTIONS_COLLECTION].find_one(
+        {"document_id": doc_id},
+        {"_id": 0},
+        sort=[("created_at", -1)],
+    )
+    return action
+
+
+class DuplicateDraftError(Exception):
+    """Raised when a duplicate draft already exists."""
+    def __init__(self, message: str, existing_action: Dict = None):
+        super().__init__(message)
+        self.existing_action = existing_action or {}

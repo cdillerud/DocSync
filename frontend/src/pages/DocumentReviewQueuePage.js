@@ -6,11 +6,18 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import {
-  ScanSearch, AlertTriangle, ShieldCheck, ShieldX, RefreshCw, ChevronRight, ArrowUpDown, FileText, Loader2
+  ScanSearch, AlertTriangle, ShieldCheck, ShieldX, RefreshCw, ChevronRight, ArrowUpDown,
+  FileText, Loader2, Zap, CheckCircle
 } from 'lucide-react';
 import {
-  getIntelligenceReviewQueue, getIntelligenceSummary, processDocumentIntelligence
+  getIntelligenceReviewQueue, getIntelligenceSummary, processDocumentIntelligence, createAutoDraft
 } from '@/lib/api';
+
+const DRAFT_TYPE_LABELS = {
+  sales_order_draft: 'Create SO Draft',
+  po_draft: 'Create PO Draft',
+  ap_intake_draft: 'Create AP Draft',
+};
 
 const readinessBadge = (status) => {
   const map = {
@@ -36,6 +43,8 @@ export default function DocumentReviewQueuePage() {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState(null);
+  const [draftingId, setDraftingId] = useState(null);
+  const [draftResults, setDraftResults] = useState({});
 
   // Filters
   const [statusFilter, setStatusFilter] = useState('all');
@@ -63,9 +72,7 @@ export default function DocumentReviewQueuePage() {
     try {
       const { data } = await getIntelligenceSummary();
       setSummary(data);
-    } catch {
-      // non-critical
-    }
+    } catch { /* non-critical */ }
   }, []);
 
   useEffect(() => { fetchQueue(); }, [fetchQueue]);
@@ -81,6 +88,27 @@ export default function DocumentReviewQueuePage() {
       toast.error('Re-processing failed');
     } finally {
       setProcessingId(null);
+    }
+  };
+
+  const handleCreateDraft = async (e, docId) => {
+    e.stopPropagation();
+    setDraftingId(docId);
+    try {
+      const { data } = await createAutoDraft(docId);
+      if (data.status === 'duplicate') {
+        setDraftResults(prev => ({ ...prev, [docId]: { status: 'duplicate', id: data.existing_action?.target_entity_id } }));
+        toast.info('Draft already exists');
+      } else {
+        setDraftResults(prev => ({ ...prev, [docId]: { status: 'created', id: data.target_entity_id, type: data.target_entity_type } }));
+        toast.success('Draft created successfully');
+      }
+      fetchQueue();
+      fetchSummary();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Auto-draft failed');
+    } finally {
+      setDraftingId(null);
     }
   };
 
@@ -202,85 +230,114 @@ export default function DocumentReviewQueuePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((item) => (
-                    <tr
-                      key={item.document_id}
-                      className="border-b border-border/50 hover:bg-accent/50 cursor-pointer transition-colors"
-                      onClick={() => navigate(`/documents/${item.document_id}`)}
-                      data-testid={`review-row-${item.document_id}`}
-                    >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5">
-                          {readinessIcon(item.automation_readiness)}
-                          {readinessBadge(item.automation_readiness)}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div>
-                          <p className="font-medium text-sm truncate max-w-[200px]">{item.file_name || item.document_id}</p>
-                          {item.email_sender && (
-                            <p className="text-[11px] text-muted-foreground truncate max-w-[200px]">{item.email_sender}</p>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge variant="secondary" className="text-[10px] font-mono">{item.document_type}</Badge>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <div className="w-12 h-1.5 bg-muted rounded-full overflow-hidden">
-                            <div
-                              className={`h-full rounded-full ${
-                                item.classification_confidence >= 0.9 ? 'bg-emerald-500' :
-                                item.classification_confidence >= 0.75 ? 'bg-amber-500' : 'bg-red-500'
-                              }`}
-                              style={{ width: `${(item.classification_confidence || 0) * 100}%` }}
-                            />
+                  {items.map((item) => {
+                    const dr = draftResults[item.document_id];
+                    const isReady = item.automation_readiness === 'ready';
+                    const hasDraft = item.auto_draft_created || (dr && (dr.status === 'created' || dr.status === 'duplicate'));
+
+                    return (
+                      <tr
+                        key={item.document_id}
+                        className="border-b border-border/50 hover:bg-accent/50 cursor-pointer transition-colors"
+                        onClick={() => navigate(`/documents/${item.document_id}`)}
+                        data-testid={`review-row-${item.document_id}`}
+                      >
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1.5">
+                            {readinessIcon(item.automation_readiness)}
+                            {readinessBadge(item.automation_readiness)}
                           </div>
-                          <span className="text-xs font-mono text-muted-foreground">
-                            {((item.classification_confidence || 0) * 100).toFixed(0)}%
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`text-xs font-bold font-mono ${
-                          item.automation_readiness_score >= 75 ? 'text-emerald-400' :
-                          item.automation_readiness_score >= 40 ? 'text-amber-400' : 'text-red-400'
-                        }`}>
-                          {item.automation_readiness_score ?? '—'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap gap-1 max-w-[200px]">
-                          {(item.automation_readiness_reasons || []).slice(0, 3).map((r, i) => (
-                            <Badge key={i} variant="outline" className="text-[9px] font-mono border-muted-foreground/30">{r}</Badge>
-                          ))}
-                          {(item.automation_readiness_reasons || []).length > 3 && (
-                            <Badge variant="outline" className="text-[9px]">+{item.automation_readiness_reasons.length - 3}</Badge>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 text-xs"
-                            onClick={(e) => { e.stopPropagation(); handleReprocess(item.document_id); }}
-                            disabled={processingId === item.document_id}
-                            data-testid={`reprocess-btn-${item.document_id}`}
-                          >
-                            {processingId === item.document_id ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                            ) : (
-                              <RefreshCw className="w-3 h-3" />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div>
+                            <p className="font-medium text-sm truncate max-w-[200px]">{item.file_name || item.document_id}</p>
+                            {item.email_sender && (
+                              <p className="text-[11px] text-muted-foreground truncate max-w-[200px]">{item.email_sender}</p>
                             )}
-                          </Button>
-                          <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge variant="secondary" className="text-[10px] font-mono">{item.document_type}</Badge>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-12 h-1.5 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${
+                                  item.classification_confidence >= 0.9 ? 'bg-emerald-500' :
+                                  item.classification_confidence >= 0.75 ? 'bg-amber-500' : 'bg-red-500'
+                                }`}
+                                style={{ width: `${(item.classification_confidence || 0) * 100}%` }}
+                              />
+                            </div>
+                            <span className="text-xs font-mono text-muted-foreground">
+                              {((item.classification_confidence || 0) * 100).toFixed(0)}%
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`text-xs font-bold font-mono ${
+                            item.automation_readiness_score >= 75 ? 'text-emerald-400' :
+                            item.automation_readiness_score >= 40 ? 'text-amber-400' : 'text-red-400'
+                          }`}>
+                            {item.automation_readiness_score ?? '—'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-1 max-w-[200px]">
+                            {(item.automation_readiness_reasons || []).slice(0, 3).map((r, i) => (
+                              <Badge key={i} variant="outline" className="text-[9px] font-mono border-muted-foreground/30">{r}</Badge>
+                            ))}
+                            {(item.automation_readiness_reasons || []).length > 3 && (
+                              <Badge variant="outline" className="text-[9px]">+{item.automation_readiness_reasons.length - 3}</Badge>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            {isReady && !hasDraft && (
+                              <Button
+                                variant="default"
+                                size="sm"
+                                className="h-7 text-[10px] bg-emerald-600 hover:bg-emerald-700 text-white"
+                                onClick={(e) => handleCreateDraft(e, item.document_id)}
+                                disabled={draftingId === item.document_id}
+                                data-testid={`create-draft-btn-${item.document_id}`}
+                              >
+                                {draftingId === item.document_id ? (
+                                  <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                                ) : (
+                                  <Zap className="w-3 h-3 mr-1" />
+                                )}
+                                {DRAFT_TYPE_LABELS[item.target_entity_type] || 'Create Draft'}
+                              </Button>
+                            )}
+                            {hasDraft && (
+                              <Badge className="text-[9px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                <CheckCircle className="w-3 h-3 mr-1" />
+                                {dr?.id || item.target_entity_id || 'Draft'}
+                              </Badge>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={(e) => { e.stopPropagation(); handleReprocess(item.document_id); }}
+                              disabled={processingId === item.document_id}
+                              data-testid={`reprocess-btn-${item.document_id}`}
+                            >
+                              {processingId === item.document_id ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <RefreshCw className="w-3 h-3" />
+                              )}
+                            </Button>
+                            <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

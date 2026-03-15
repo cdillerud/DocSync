@@ -21,6 +21,9 @@ from services.document_intelligence_service import (
     get_review_queue,
     apply_correction,
     get_intelligence_summary,
+    create_auto_draft,
+    get_automation_action,
+    DuplicateDraftError,
 )
 
 logger = logging.getLogger(__name__)
@@ -113,3 +116,41 @@ async def api_correct_intelligence(doc_id: str, body: CorrectionRequest):
     except Exception as e:
         logger.error("Correction failed for %s: %s", doc_id, e)
         raise HTTPException(status_code=500, detail=f"Correction failed: {str(e)}")
+
+
+# ── Auto-Draft Endpoints ─────────────────────────────────────────────────────
+
+@router.post("/auto-draft/{doc_id}")
+async def api_create_auto_draft(doc_id: str):
+    """
+    Create a downstream draft record from an automation-ready document.
+
+    Validates readiness, maps doc type → draft type, creates draft only.
+    Does NOT finalize, submit, or call BC APIs.
+    Returns 409 if a draft was already created from this document.
+    """
+    try:
+        result = await create_auto_draft(doc_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except DuplicateDraftError as e:
+        return {
+            "status": "duplicate",
+            "message": str(e),
+            "existing_action": e.existing_action,
+        }
+    except Exception as e:
+        logger.error("Auto-draft creation failed for %s: %s", doc_id, e)
+        raise HTTPException(status_code=500, detail=f"Auto-draft failed: {str(e)}")
+
+
+@router.get("/auto-draft/{doc_id}")
+async def api_get_automation_action(doc_id: str):
+    """Get the latest automation action for a document."""
+    action = await get_automation_action(doc_id)
+    if not action:
+        raise HTTPException(status_code=404, detail=f"No automation action for document: {doc_id}")
+    return action

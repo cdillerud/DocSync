@@ -1,0 +1,129 @@
+{
+  "summary": "Iteration 95 - Document-to-Transaction Auto-Draft feature testing complete. Backend: 29/30 tests passed (1 skipped - no AP docs without drafts left). All auto-draft endpoints functional: POST /api/document-intelligence/auto-draft/{id} creates drafts (AP_Invoice -> ap_intake_draft, Freight_Document -> po_draft, Shipping_Document -> po_draft), GET /api/document-intelligence/auto-draft/{id} returns automation action, duplicate prevention returns status=duplicate. Frontend: DocumentIntelligencePanel shows 'Draft Created' state with draft type label and ID, blocked docs correctly hide Create Draft button.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Document Review Queue", "issues": ["Minor console warning about <tr>/<span> hydration - cosmetic only"]}
+    ]
+  },
+  "passed_tests": [
+    "Backend: POST /api/document-intelligence/auto-draft/{id} returns 404 for non-existent document",
+    "Backend: POST /api/document-intelligence/auto-draft/{id} returns 404 for document with no intelligence result",
+    "Backend: POST /api/document-intelligence/auto-draft/{id} returns 422 for blocked document (automation_readiness != ready)",
+    "Backend: POST /api/document-intelligence/auto-draft/{id} returns status=duplicate for document with existing draft",
+    "Backend: POST /api/document-intelligence/auto-draft/{id} creates ap_intake_draft from AP_Invoice document",
+    "Backend: POST /api/document-intelligence/auto-draft/{id} creates po_draft from Freight_Document",
+    "Backend: POST /api/document-intelligence/auto-draft/{id} creates po_draft from Shipping_Document",
+    "Backend: GET /api/document-intelligence/auto-draft/{id} returns 404 for document with no automation action",
+    "Backend: GET /api/document-intelligence/auto-draft/{id} returns latest automation action for document",
+    "Backend: Intelligence result enriched with auto_draft_available, auto_draft_created, target_entity_type, target_entity_id",
+    "Backend: Review queue items show draft status and target_entity_id for items with drafts",
+    "Backend: Activity records created for auto-draft events (timeline shows draft creation)",
+    "Backend: Draft records stored in correct collections (ap_intake_drafts, po_drafts)",
+    "Backend: Draft records contain source_document_id and vendor/customer info from extracted fields",
+    "Frontend: DocumentIntelligencePanel shows auto-draft section for ready documents",
+    "Frontend: Panel shows 'Draft Created' state with draft type label (AP Intake Draft, PO Draft)",
+    "Frontend: Panel displays draft ID (AP-DRAFT-*, PO-DRAFT-*)",
+    "Frontend: Copy Draft ID button (data-testid='copy-draft-id-btn') present",
+    "Frontend: Blocked documents correctly hide Create Draft button and auto-draft section",
+    "Backend: All iteration_94 tests still pass (process, review-queue, corrections, summary endpoints)"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_document_intelligence.py",
+    "/app/backend/tests/test_auto_draft.py",
+    "/app/test_reports/pytest/auto_draft_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend: Auto-draft service at /app/backend/services/document_intelligence_service.py (lines 599-984) - well-structured with DOC_TYPE_DRAFT_MAP, duplicate prevention via DuplicateDraftError, activity logging",
+    "Backend: Router at /app/backend/routers/document_intelligence.py - DuplicateDraftError returns HTTP 200 with status=duplicate (not 409) per spec",
+    "Frontend: DocumentIntelligencePanel.js - proper handling of draft states (created, duplicate, existing), good use of data-testids",
+    "Frontend: DocumentReviewQueuePage.js - Create Draft buttons in queue actions column, draft ID badges for items with drafts"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_document_intelligence.py",
+    "/app/backend/tests/test_auto_draft.py"
+  ],
+  "success_rate": {
+    "backend": "100% (29 passed, 1 skipped - no AP docs without drafts)",
+    "frontend": "100% (all UI elements verified)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://doc-auto-review.preview.emergentagent.com"
+  },
+  "seed_data_created": {
+    "drafts_created": [
+      "AP-DRAFT-20260315014359-E600F4 (from 80c7ab51 AP_Invoice)",
+      "PO-DRAFT-20260315014430-3DF2B2 (from d15cc289 Freight_Document)",
+      "PO-DRAFT-20260315014431-FD5279 (from b31207c3 Shipping_Document)",
+      "AP-DRAFT-20260315014733-E73D81 (from e4624c82 AP_Invoice - created during testing)"
+    ],
+    "automation_actions_created": "4 automation_actions records in MongoDB",
+    "activities_created": "auto_draft_created activity records for each draft"
+  },
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 95 - Auto-Draft feature fully tested. New endpoints: POST /api/document-intelligence/auto-draft/{id} (creates draft), GET /api/document-intelligence/auto-draft/{id} (gets automation action). Draft type mapping: AP_Invoice/invoice -> ap_intake_draft, Freight_Document/Shipping_Document/vendor_po_support -> po_draft, Sales_PO/customer_po -> sales_order_draft. Duplicate prevention returns status=duplicate (HTTP 200, not 409). Intelligence results enriched with auto_draft_available, auto_draft_created, target_entity_type, target_entity_id. Collections: document_intelligence_results, automation_actions, ap_intake_drafts, po_drafts, so_drafts, activities. Key data-testids: create-draft-btn, auto-draft-section, copy-draft-id-btn, create-draft-btn-{doc_id}.",
+  "features_verified": {
+    "backend_endpoints": {
+      "create_auto_draft": {
+        "method": "POST",
+        "path": "/api/document-intelligence/auto-draft/{doc_id}",
+        "behavior": [
+          "Returns 404 if document not found or no intelligence result",
+          "Returns 422 if automation_readiness != 'ready'",
+          "Returns 200 with status=duplicate if draft already exists",
+          "On success: creates draft, stores automation_action, updates intelligence result, creates activity"
+        ],
+        "returns": {
+          "automation_action_id": "string (AA-XXXXXXXX)",
+          "document_id": "string",
+          "target_entity_type": "ap_intake_draft|po_draft|sales_order_draft",
+          "target_entity_id": "string (AP-DRAFT-*, PO-DRAFT-*, SO-DRAFT-*)",
+          "action_type": "string",
+          "action_status": "draft_created|failed",
+          "draft": "object (full draft record)"
+        }
+      },
+      "get_automation_action": {
+        "method": "GET",
+        "path": "/api/document-intelligence/auto-draft/{doc_id}",
+        "returns": "Latest automation action for document",
+        "errors": {"404": "No automation action for document"}
+      }
+    },
+    "frontend_components": {
+      "DocumentIntelligencePanel_AutoDraft": {
+        "data_testid": "auto-draft-section",
+        "features": [
+          "Shows 'Create Draft' button when automation_readiness=ready and no draft exists",
+          "Shows 'Draft Created' state with draft type label and ID after creation",
+          "Copy Draft ID button (data-testid='copy-draft-id-btn')",
+          "Shows duplicate message when draft already exists"
+        ]
+      },
+      "DocumentReviewQueuePage_AutoDraft": {
+        "features": [
+          "Create Draft button in actions column (data-testid='create-draft-btn-{doc_id}')",
+          "Draft ID badge for items with existing drafts"
+        ]
+      }
+    },
+    "draft_type_mapping": {
+      "AP_Invoice": "ap_intake_draft",
+      "invoice": "ap_intake_draft",
+      "Freight_Document": "po_draft",
+      "Shipping_Document": "po_draft",
+      "vendor_po_support": "po_draft",
+      "Sales_PO": "sales_order_draft",
+      "customer_po": "sales_order_draft"
+    }
+  },
+  "mocked_apis_note": "Business Central API (BC sandbox) operates in DEMO MODE. Email service is MOCKED (in-memory)."
+}

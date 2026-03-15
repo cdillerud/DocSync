@@ -342,3 +342,5 @@ export const getDocumentIntelligence = (docId) => api.get(`/document-intelligenc
 export const getIntelligenceReviewQueue = (params) => api.get('/document-intelligence/review-queue', { params });
 export const correctDocumentIntelligence = (docId, data) => api.patch(`/document-intelligence/${docId}`, data);
 export const getIntelligenceSummary = () => api.get('/document-intelligence/summary');
+export const createAutoDraft = (docId) => api.post(`/document-intelligence/auto-draft/${docId}`);
+export const getAutomationAction = (docId) => api.get(`/document-intelligence/auto-draft/${docId}`);

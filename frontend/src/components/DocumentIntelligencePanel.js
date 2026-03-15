@@ -3,19 +3,26 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import {
-  ScanSearch, RefreshCw, CheckCircle, AlertTriangle, XCircle, Pencil, Save, X, Loader2, History, ChevronDown, ChevronUp
+  ScanSearch, RefreshCw, CheckCircle, AlertTriangle, XCircle, Pencil, Save, X, Loader2,
+  History, ChevronDown, ChevronUp, Zap, ExternalLink, Copy, FileText
 } from 'lucide-react';
 import {
-  getDocumentIntelligence, processDocumentIntelligence, correctDocumentIntelligence
+  getDocumentIntelligence, processDocumentIntelligence, correctDocumentIntelligence,
+  createAutoDraft, getAutomationAction
 } from '@/lib/api';
 
 const READINESS_COLORS = {
   ready: { bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-400', icon: CheckCircle },
   needs_review: { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400', icon: AlertTriangle },
   blocked: { bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-400', icon: XCircle },
+};
+
+const DRAFT_TYPE_LABELS = {
+  sales_order_draft: 'Sales Order Draft',
+  po_draft: 'PO Draft',
+  ap_intake_draft: 'AP Intake Draft',
 };
 
 export default function DocumentIntelligencePanel({ document, onUpdate }) {
@@ -27,6 +34,8 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
   const [editFields, setEditFields] = useState({});
   const [saving, setSaving] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [creatingDraft, setCreatingDraft] = useState(false);
+  const [draftResult, setDraftResult] = useState(null);
 
   const docId = document?.id;
 
@@ -36,6 +45,14 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
     try {
       const { data } = await getDocumentIntelligence(docId);
       setResult(data);
+      // Check for existing draft
+      if (data.auto_draft_created && data.target_entity_id) {
+        setDraftResult({
+          status: 'existing',
+          target_entity_type: data.target_entity_type,
+          target_entity_id: data.target_entity_id,
+        });
+      }
     } catch {
       setResult(null);
     } finally {
@@ -50,12 +67,45 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
     try {
       const { data } = await processDocumentIntelligence(docId);
       setResult(data);
+      setDraftResult(null); // Reset draft state on re-process
       toast.success('Document intelligence processed');
       onUpdate?.();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Processing failed');
     } finally {
       setProcessing(false);
+    }
+  };
+
+  const handleCreateDraft = async () => {
+    setCreatingDraft(true);
+    try {
+      const { data } = await createAutoDraft(docId);
+      if (data.status === 'duplicate') {
+        setDraftResult({
+          status: 'duplicate',
+          target_entity_type: data.existing_action?.target_entity_type,
+          target_entity_id: data.existing_action?.target_entity_id,
+          message: data.message,
+        });
+        toast.info('Draft already exists for this document');
+      } else {
+        setDraftResult({
+          status: 'created',
+          target_entity_type: data.target_entity_type,
+          target_entity_id: data.target_entity_id,
+          action_id: data.automation_action_id,
+        });
+        toast.success(`${DRAFT_TYPE_LABELS[data.target_entity_type] || 'Draft'} created successfully`);
+        fetchResult(); // Refresh to get updated intel
+      }
+      onUpdate?.();
+    } catch (err) {
+      const detail = err.response?.data?.detail || 'Auto-draft creation failed';
+      toast.error(detail);
+      setDraftResult({ status: 'failed', message: detail });
+    } finally {
+      setCreatingDraft(false);
     }
   };
 
@@ -76,20 +126,16 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
     try {
       const payload = { corrected_by: 'admin', notes: 'Manual correction from UI' };
       if (editType && editType !== result?.document_type) payload.corrected_type = editType;
-
-      // Only send changed fields
       const changedFields = {};
       for (const [k, v] of Object.entries(editFields)) {
         if (v !== (result?.extracted_fields?.[k] ?? '')) changedFields[k] = v;
       }
       if (Object.keys(changedFields).length > 0) payload.corrected_fields = changedFields;
-
       if (!payload.corrected_type && !payload.corrected_fields) {
         toast.info('No changes to save');
         cancelEditing();
         return;
       }
-
       const { data } = await correctDocumentIntelligence(docId, payload);
       setResult(data);
       setEditing(false);
@@ -111,9 +157,10 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
   const readiness = result?.automation_readiness || 'unknown';
   const rc = READINESS_COLORS[readiness] || { bg: 'bg-muted', border: 'border-border', text: 'text-muted-foreground', icon: ScanSearch };
   const ReadinessIcon = rc.icon;
-
   const schema = result?.extraction_schema || { required: [], optional: [] };
   const allFields = [...new Set([...schema.required, ...schema.optional, ...Object.keys(result?.extracted_fields || {})])];
+  const isReady = readiness === 'ready';
+  const hasDraft = draftResult && (draftResult.status === 'created' || draftResult.status === 'existing' || draftResult.status === 'duplicate');
 
   return (
     <Card className={`border ${rc.border}`} data-testid="document-intelligence-panel">
@@ -131,14 +178,7 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
                 <Pencil className="w-3 h-3 mr-1" /> Edit
               </Button>
             )}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 text-xs"
-              onClick={handleProcess}
-              disabled={processing}
-              data-testid="process-intelligence-btn"
-            >
+            <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={handleProcess} disabled={processing} data-testid="process-intelligence-btn">
               {processing ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}
               {result ? 'Re-process' : 'Process'}
             </Button>
@@ -187,6 +227,75 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
               </div>
             )}
 
+            {/* Auto-Draft Action Section */}
+            {isReady && !editing && (
+              <div className="border border-border rounded-lg p-3 space-y-2" data-testid="auto-draft-section">
+                {!hasDraft ? (
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold">Automation Available</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Create {DRAFT_TYPE_LABELS[result.target_entity_type] || 'draft'} from extracted fields
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={handleCreateDraft}
+                      disabled={creatingDraft}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                      data-testid="create-draft-btn"
+                    >
+                      {creatingDraft ? (
+                        <Loader2 className="w-3 h-3 animate-spin mr-1.5" />
+                      ) : (
+                        <Zap className="w-3 h-3 mr-1.5" />
+                      )}
+                      Create Draft
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="w-4 h-4 text-emerald-500" />
+                      <span className="text-xs font-semibold text-emerald-400">
+                        {draftResult.status === 'duplicate' ? 'Draft Already Exists' : 'Draft Created'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 p-2 bg-accent/30 rounded">
+                      <FileText className="w-3.5 h-3.5 text-muted-foreground" />
+                      <div className="flex-1">
+                        <p className="text-xs font-medium">
+                          {DRAFT_TYPE_LABELS[draftResult.target_entity_type] || draftResult.target_entity_type}
+                        </p>
+                        <p className="text-[10px] font-mono text-muted-foreground">{draftResult.target_entity_id}</p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 text-xs"
+                        onClick={() => {
+                          navigator.clipboard.writeText(draftResult.target_entity_id || '');
+                          toast.success('Copied draft ID');
+                        }}
+                        data-testid="copy-draft-id-btn"
+                      >
+                        <Copy className="w-3 h-3" />
+                      </Button>
+                    </div>
+                    {draftResult.message && draftResult.status === 'duplicate' && (
+                      <p className="text-[10px] text-amber-400">{draftResult.message}</p>
+                    )}
+                  </div>
+                )}
+
+                {draftResult?.status === 'failed' && (
+                  <div className="p-2 bg-red-500/10 border border-red-500/30 rounded text-[11px] text-red-400">
+                    {draftResult.message}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Classification */}
             <div className="space-y-2">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Classification</p>
@@ -194,12 +303,7 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
                 <div className="p-2 bg-accent/30 rounded">
                   <p className="text-[10px] text-muted-foreground">Type</p>
                   {editing ? (
-                    <Input
-                      value={editType}
-                      onChange={e => setEditType(e.target.value)}
-                      className="h-7 text-xs mt-1"
-                      data-testid="edit-doc-type-input"
-                    />
+                    <Input value={editType} onChange={e => setEditType(e.target.value)} className="h-7 text-xs mt-1" data-testid="edit-doc-type-input" />
                   ) : (
                     <p className="text-xs font-mono font-semibold">{result.document_type}</p>
                   )}

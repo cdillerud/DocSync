@@ -336,6 +336,15 @@ Key Principles:
 - [ ] Remove sales_module.py (integrate into main)
 - [ ] Database collection cleanup
 
+#### Pipeline Hardening & Observability (COMPLETED - Mar 15, 2026)
+- [x] Output safety: `_sanitize_output()` caps strings (500 chars), lists (25 items), keys (25) in stage outputs
+- [x] Error messages bounded at 500 chars in StageResult serialisation
+- [x] Status semantics formalized: `ok` / `skipped` / `error` with canonical definitions
+- [x] New endpoint: `GET /api/document-intelligence/pipeline/runs/{doc_id}?limit=N`
+- [x] Trace persistence to `pipeline_runs` collection (bounded payloads, no raw doc data)
+- [x] ARCHITECTURE_CURRENT.md updated with hardening section
+- [x] 31 targeted tests + 22 regression tests, 100% pass rate
+
 
 ### In Progress / Shadow Mode
 - [x] AP automatic workflow trigger (VERIFIED WORKING)

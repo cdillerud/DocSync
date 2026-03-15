@@ -1,5 +1,12 @@
 # CHANGELOG - GPI Document Hub
 
+## [2026-03-15] Iteration 92 — Bulk Actions for Operations Queue — COMPLETE
+- **Backend:** POST /api/inventory-ledger/operations-queue/bulk-action with 5 actions (assign_owner, update_assignment_status, set_due_date, set_escalation_status, request_approval), structured per-entity results, partial success handling, activity auto-generation
+- **Frontend:** Operations Queue: checkbox per row, select all toggle, bulk action toolbar (5 buttons + clear), per-action dialogs with validation, result summary panel, queue refresh, selection clear on success
+- **Testing:** 22/22 backend tests passed, all frontend UI elements verified (100% pass rate)
+- **Test report:** /app/test_reports/iteration_92.json
+
+
 ## [2026-03-15] Iteration 91 — Saved Views and Personal Queue Presets — COMPLETE
 - **Backend:** Saved view CRUD endpoints (POST/GET/PATCH/DELETE /api/inventory-ledger/saved-views) with view_type validation and default uniqueness per view_type+created_by
 - **Backend:** Operations Queue response enriched with saved_views_count and default_view_name

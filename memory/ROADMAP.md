@@ -7,6 +7,7 @@
 - ~~Document Handler Extraction~~ (2026-03-15, iter_109)
 - ~~Workflow Handler Extraction~~ (2026-03-15, iter_110) — 25 of 32 handlers extracted
 - ~~Reference Intelligence Handler Extraction~~ (2026-03-15, iter_111) — ALL 32 handlers extracted from server.py
+- ~~Shared Helper Extraction~~ (2026-03-15, iter_112) — 6 utilities extracted, 6 consumers rewired
 - ~~Document Layout Fingerprinting~~ (2026-03-10)
 - ~~Stable Vendor Auto-Ready Rules~~ (2026-03-11)
 - ~~Stable Vendor Admin Page~~ (2026-03-11)

@@ -1,5 +1,23 @@
 # GPI Document Hub - Changelog
 
+## March 15, 2026 — Shared Helper Extraction (iter_112)
+
+### Extraction
+- Extracted 6 shared utility helpers from server.py into 3 dedicated service modules:
+  - `services/vendor_name_helpers.py`: `normalize_vendor_name`, `calculate_fuzzy_score`, `VENDOR_ALIAS_MAP`
+  - `services/dashboard_helpers.py`: `aggregate_document_types_data`
+  - `services/bc_api_helpers.py`: `get_bc_companies`, `get_bc_sales_orders`, `MOCK_COMPANIES`, `MOCK_SALES_ORDERS`
+- Rewired 6 consumer modules: aliases.py, bc_integration.py, dashboard.py, workflow_handlers.py, metrics.py, pilot.py
+- Fixed bc_sandbox_service.py: replaced `from server import BC_CLIENT_SECRET` with direct `os.environ.get()`
+- Fixed latent `NameError` bugs in metrics.py and pilot.py (missing imports)
+- Left thin compatibility wrappers in server.py for internal callers
+
+### Testing
+- 90/90 tests passed across 4 regression suites (0 failures, 0 regressions)
+- Route count stable at 427
+
+---
+
 ## March 15, 2026 — Reference Intelligence Handler Extraction (iter_111)
 
 ### Extraction

@@ -1,6 +1,23 @@
 # CHANGELOG - GPI Document Hub
 
 
+## [2026-03-15] Iteration 101 — Learning Loop Engine — COMPLETE
+- **Backend:** New `services/learning_loop_service.py` — learning events capture, vendor/customer alias auto-creation, extraction hints, automation confidence metrics
+- **Backend:** Hooks wired into existing correction endpoints: document_intelligence_service (classification + field), entity_resolution_service (entity override), transaction_matching_service (match override), document_bundle_service (bundle membership)
+- **Backend:** `GET /api/document-intelligence/learning/summary` — total events, corrections by type, top vendors/doc types, alias stats, automation success rate, correction rates
+- **Backend:** `GET /api/document-intelligence/learning/events` — filterable by event_type, document_type, vendor_id, entity_type
+- **Backend:** `GET /api/document-intelligence/learning/events/{doc_id}` — per-document learning events
+- **Backend:** Auto-create vendor/customer aliases on entity overrides with confidence increment
+- **Backend:** Auto-record extraction hints on field corrections with pattern tracking
+- **Backend:** Document enrichment: learning_events_count, corrections_applied, learning_flags (frequent_correction, entity_override_used, classification_corrected)
+- **Backend:** Activity events: learning_event_generated, extraction_hint_recorded, vendor/customer_alias_created
+- **Frontend:** Learning Signals section in DocumentIntelligencePanel — event count badge, flags badges, expandable event list with before/after values
+- **New collections:** `learning_events`, `vendor_aliases`, `customer_aliases`, `extraction_hints`, `learning_metrics`
+- **Testing:** Backend 100% (30/30 passed), Frontend 100% — all verified, all regression tests pass
+- **Test report:** `/app/test_reports/iteration_101.json`
+
+
+
 ## [2026-03-15] Iteration 100 — Document Automation Decision Policy Engine — COMPLETE
 - **Backend:** New `services/decision_policy_service.py` — policy-driven decision engine with 9 default policies, priority-based evaluation, MongoDB-style condition operators, explainable reasons (human-readable + machine-readable codes)
 - **Backend:** Policy CRUD: `POST/GET/PATCH/DELETE /api/document-intelligence/policies` — 9 auto-seeded defaults (block critical P1, block duplicate P2, auto-link P5, auto-draft P10, hold review P15, hold ambiguous P20)

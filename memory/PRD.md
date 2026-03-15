@@ -3315,6 +3315,36 @@ EMAIL_CLIENT_ID=doc-workflow-test
 
 *Last Updated: March 15, 2026*
 
+---
+
+## Session Update: March 15, 2026 - Learning Loop Engine (iteration_101)
+
+### Completed
+
+#### Learning Loop Engine
+- **Backend:** New `services/learning_loop_service.py` — correction capture, alias learning, extraction hints, confidence metrics
+- **Backend:** Hooks into 4 existing correction endpoints (classification, field, entity, transaction match, bundle)
+- **Backend:** 3 new API endpoints: learning/summary, learning/events, learning/events/{doc_id}
+- **Backend:** Auto-creates vendor/customer aliases, extraction hints on corrections
+- **Frontend:** Learning Signals section in DocumentIntelligencePanel
+- **New collections:** `learning_events`, `vendor_aliases`, `customer_aliases`, `extraction_hints`, `learning_metrics`
+
+### Architecture Update — Complete Intelligence Pipeline
+```
+Documents → Classify → Extract → Resolve Entities → Match Transactions
+    → Bundle → Lifecycle Validate → Decide (Policy Engine) → Execute
+    → Learn (Learning Loop captures corrections → aliases, hints, metrics)
+```
+
+### Test Results
+- Backend: 100% (30/30 passed)
+- Frontend: 100% — all regression tests pass
+- Test report: `/app/test_reports/iteration_101.json`
+
+*Last Updated: March 15, 2026*
+
+
+
 
 
 *Last Updated: March 15, 2026*

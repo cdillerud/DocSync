@@ -102,23 +102,17 @@ from services.ap_computation import (
 from services.bc_api_helpers import get_bc_companies as _get_bc_companies
 
 # ---------------------------------------------------------------------------
-# Server.py functions still needed (remaining extraction targets)
-# Used for: run_upload_and_link_workflow, classify_document_type
-# ---------------------------------------------------------------------------
-
-def _server():
-    """Lazy import of server module for functions not yet extracted."""
-    import server
-    return server
-
-# ---------------------------------------------------------------------------
-# Direct imports from newly extracted modules
+# Direct imports from extracted service modules
 # ---------------------------------------------------------------------------
 from services.sharepoint_helpers import (
     upload_to_sharepoint as _upload_to_sharepoint,
     create_sharing_link as _create_sharing_link,
 )
-from services.document_linking import link_document_to_bc as _link_document_to_bc
+from services.document_linking import (
+    link_document_to_bc as _link_document_to_bc,
+    run_upload_and_link_workflow as _run_upload_and_link_workflow,
+)
+from services.document_classification import classify_document_type as _classify_document_type
 from services.bc_draft_service import (
     check_duplicate_purchase_invoice as _check_dup_purchase_invoice,
     create_purchase_invoice_header as _create_pi_header,
@@ -140,7 +134,6 @@ async def upload_document(
     source: str = Form("manual_upload"),
 ):
     db = get_db()
-    srv = _server()
     DocType, SourceSystem, CaptureChannel, WorkflowStatus, WorkflowEvent, DocumentClassifier = _get_workflow_enums()
 
     file_content = await file.read()
@@ -203,7 +196,7 @@ async def upload_document(
             len(file_content), correlation_id,
         )
 
-    workflow_id, final_status = await srv.run_upload_and_link_workflow(
+    workflow_id, final_status = await _run_upload_and_link_workflow(
         doc_id, file_content, file.filename, document_type, bc_record_id, bc_document_no,
     )
 
@@ -218,7 +211,6 @@ async def upload_document(
 
 async def retry_document(doc_id: str):
     db = get_db()
-    srv = _server()
 
     from services.square9_workflow import (
         should_retry, increment_retry, DEFAULT_WORKFLOW_CONFIG,
@@ -255,7 +247,7 @@ async def retry_document(doc_id: str):
 
     file_content = file_path.read_bytes()
 
-    workflow_id, final_status = await srv.run_upload_and_link_workflow(
+    workflow_id, final_status = await _run_upload_and_link_workflow(
         doc_id, file_content, doc["file_name"],
         doc.get("document_type", "Other"),
         doc.get("bc_record_id"), doc.get("bc_document_no"),
@@ -278,7 +270,6 @@ async def retry_document(doc_id: str):
 
 async def resubmit_document(doc_id: str):
     db = get_db()
-    srv = _server()
 
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
@@ -297,7 +288,7 @@ async def resubmit_document(doc_id: str):
         "updated_utc": datetime.now(timezone.utc).isoformat(),
     }})
 
-    workflow_id, final_status = await srv.run_upload_and_link_workflow(
+    workflow_id, final_status = await _run_upload_and_link_workflow(
         doc_id, file_content, doc["file_name"],
         doc.get("document_type", "Other"),
         doc.get("bc_record_id"), doc.get("bc_document_no"),
@@ -309,7 +300,6 @@ async def resubmit_document(doc_id: str):
 
 async def link_document(doc_id: str, bc_record_id: str):
     db = get_db()
-    srv = _server()
 
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
@@ -353,7 +343,6 @@ async def intake_document(
     email_received_utc: Optional[str] = Form(None),
 ):
     db = get_db()
-    srv = _server()
     DocType, SourceSystem, CaptureChannel, WorkflowStatus, WorkflowEvent, _DC = _get_workflow_enums()
     TransactionAction = _get_transaction_action()
     DEFAULT_JOB_TYPES = _get_default_job_types()
@@ -422,7 +411,7 @@ async def intake_document(
     extracted_fields = classification.get("extracted_fields", {})
 
     # Deterministic-first classification
-    classification_result = await srv.classify_document_type(
+    classification_result = await _classify_document_type(
         document=doc, extracted_fields=extracted_fields,
         suggested_type=suggested_type, confidence=confidence,
         metadata={
@@ -768,7 +757,6 @@ async def classify_document(doc_id: str):
 async def resolve_and_link_document(doc_id: str, resolve: ResolveRequest):
     """Resolve a NeedsReview document and link to BC."""
     db = get_db()
-    srv = _server()
     DEFAULT_JOB_TYPES = _get_default_job_types()
 
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})

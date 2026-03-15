@@ -1,0 +1,100 @@
+{
+  "summary": "Final Orchestration Extraction Pass - All 30 guardrail tests pass. Verified 3 new service modules (document_classification, mailbox_polling, run_upload_and_link_workflow in document_linking) are importable and callable. document_handlers.py is FULLY DECOUPLED from server.py. Only 2 files import server.py (mailbox_sources.py, mailbox_polling.py - both in allowlist). Route count stable at 427. server.py reduced from 7831 to 7467 lines.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_architecture_guardrails.py",
+    "/app/test_reports/pytest/architecture_guardrails_results_115.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Minor: Deprecation warnings for regex param (should use pattern) in bc_sandbox.py and pilot.py - non-blocking",
+    "Minor: PydanticDeprecatedSince20 warning for min_items in inventory_ledger.py (should use min_length) - non-blocking",
+    "Minor: on_event deprecation in main.py (should use lifespan event handlers) - non-blocking"
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (30/30 guardrail tests passed)",
+    "frontend": "100% (login and dashboard verified)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "None required",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Final orchestration extraction complete. 3 new orchestration functions extracted: classify_document_type (document_classification.py), poll_mailbox_for_documents (mailbox_polling.py), run_upload_and_link_workflow (document_linking.py). document_handlers.py is now FULLY decoupled from server.py - no _server() lazy import, no srv.* calls. Only 2 files still import from server.py (both documented in allowlist). server.py is now ~7467 lines (down from 7831).",
+  "verification_summary": {
+    "guardrail_tests": {
+      "total": 30,
+      "passed": 30,
+      "categories": {
+        "no_router_imports_server": "PASS - only mailbox_sources.py (allowed)",
+        "no_service_imports_server": "PASS - only mailbox_polling.py (allowed)", 
+        "new_modules_importable": "11/11 PASS (including 3 new)",
+        "settings_uses_deps_not_server": "PASS",
+        "document_handlers_fully_decoupled": "6/6 PASS",
+        "vendor_matching_uses_deps": "PASS",
+        "endpoints_still_work": "8/8 PASS",
+        "route_count_stable": "427 PASS"
+      }
+    },
+    "new_orchestration_modules_verified": {
+      "document_classification.py": {
+        "functions": ["classify_document_type", "get_category_for_doc_type"],
+        "status": "importable and callable"
+      },
+      "mailbox_polling.py": {
+        "functions": ["poll_mailbox_for_documents"],
+        "status": "importable and callable"
+      },
+      "document_linking.py (extended)": {
+        "functions": ["run_upload_and_link_workflow"],
+        "status": "importable and callable"
+      }
+    },
+    "document_handlers_decoupling": {
+      "has_server_import": false,
+      "has_server_lazy_import": false,
+      "has_srv_calls": false,
+      "uses_sharepoint_helpers": true,
+      "uses_document_linking": true,
+      "uses_document_classification": true,
+      "uses_bc_draft_service": true,
+      "FULLY_DECOUPLED": true
+    },
+    "server_py_import_count": {
+      "routers_importing_server": ["mailbox_sources.py"],
+      "services_importing_server": ["mailbox_polling.py"],
+      "total": 2,
+      "expected": 2
+    },
+    "server_py_line_count": {
+      "previous": 7831,
+      "current": 7467,
+      "reduction": 364
+    },
+    "endpoints_verified": {
+      "/api/health": "200 OK",
+      "/api/settings/status": "200 OK - returns connections",
+      "/api/settings/config": "200 OK - returns masked secrets",
+      "/api/documents": "200 OK",
+      "/api/workflows": "200 OK",
+      "/api/dashboard/document-types": "200 OK",
+      "/api/settings/mailbox-sources": "200 OK",
+      "/api/settings/email-watcher": "200 OK",
+      "/api/auth/login": "200 OK with admin/admin"
+    },
+    "frontend_verified": {
+      "login_page": "Working - credentials accepted",
+      "dashboard": "Loads with all metrics (79 docs, 2.5% validation rate, 51.9% vendor match rate)"
+    },
+    "route_count": "427 (stable)"
+  },
+  "mocked_apis_note": "Microsoft Graph email API, BC write operations, and JWT Auth (Entra ID) are MOCKED in demo mode"
+}

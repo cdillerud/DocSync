@@ -2,11 +2,13 @@
 GPI Document Hub - Document Linking Service
 
 Link documents to Business Central records via the documentAttachments API.
-Extracted from server.py during Architecture Hardening pass.
+Upload-and-link workflow orchestration for SharePoint + BC.
+Extracted from server.py during Architecture Hardening and Final Orchestration passes.
 
 Dependencies:
-  - deps: config vars, get_db(), UPLOAD_DIR
+  - deps: config vars, get_db(), UPLOAD_DIR, FOLDER_MAP
   - services.bc_api_helpers: get_bc_companies, get_bc_sales_orders
+  - services.sharepoint_helpers: upload_to_sharepoint, create_sharing_link
 """
 
 import logging
@@ -280,4 +282,139 @@ async def link_document(doc_id: str) -> dict:
         await db.hub_workflow_runs.insert_one(workflow)
 
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+
+
+async def run_upload_and_link_workflow(
+    doc_id: str, file_content: bytes, file_name: str, doc_type: str,
+    bc_record_id: str = None, bc_document_no: str = None
+):
+    """
+    Upload a document to SharePoint and optionally link it to a BC record.
+
+    Steps:
+      1. Upload to SharePoint (using doc_type-based folder)
+      2. Create a sharing link
+      3. Validate BC record and attach document (if bc_record_id/bc_document_no provided)
+      4. Update document status and create workflow audit trail
+
+    Returns:
+      (workflow_id, final_status) tuple
+    """
+    from services.sharepoint_helpers import upload_to_sharepoint, create_sharing_link
+
+    db = deps.get_db()
+    workflow_id = str(uuid.uuid4())
+    correlation_id = str(uuid.uuid4())
+    started = datetime.now(timezone.utc).isoformat()
+    steps = []
+
+    # Determine BC entity from document type
+    doc_type_to_bc_entity = {
+        "SalesOrder": "salesOrders",
+        "SalesInvoice": "salesInvoices",
+        "PurchaseInvoice": "purchaseInvoices",
+        "PurchaseOrder": "purchaseOrders"
+    }
+    bc_entity = doc_type_to_bc_entity.get(doc_type, "salesOrders")
+
+    try:
+        # Step 1: Upload to SharePoint
+        folder = deps.FOLDER_MAP.get(doc_type, "Incoming")
+        step1_start = datetime.now(timezone.utc).isoformat()
+        steps.append({"step": "upload_to_sharepoint", "status": "running", "started": step1_start})
+        sp_result = await upload_to_sharepoint(file_content, file_name, folder)
+        steps[-1]["status"] = "completed"
+        steps[-1]["ended"] = datetime.now(timezone.utc).isoformat()
+        steps[-1]["result"] = {"drive_id": sp_result["drive_id"], "item_id": sp_result["item_id"], "folder": folder}
+
+        # Step 2: Create sharing link
+        step2_start = datetime.now(timezone.utc).isoformat()
+        steps.append({"step": "create_sharing_link", "status": "running", "started": step2_start})
+        share_link = await create_sharing_link(sp_result["drive_id"], sp_result["item_id"])
+        steps[-1]["status"] = "completed"
+        steps[-1]["ended"] = datetime.now(timezone.utc).isoformat()
+        steps[-1]["result"] = {"share_link": share_link}
+
+        # Step 3: Validate and link BC record
+        bc_linked = False
+        bc_error = None
+        if bc_record_id or bc_document_no:
+            step3_start = datetime.now(timezone.utc).isoformat()
+            steps.append({"step": "validate_bc_record", "status": "running", "started": step3_start})
+            try:
+                orders = await _get_bc_sales_orders(order_no=bc_document_no)
+                if orders:
+                    steps[-1]["status"] = "completed"
+                    steps[-1]["ended"] = datetime.now(timezone.utc).isoformat()
+                    steps[-1]["result"] = {"found": True, "order_number": orders[0]["number"], "customer": orders[0]["customerName"]}
+
+                    step4_start = datetime.now(timezone.utc).isoformat()
+                    steps.append({"step": "link_to_bc", "status": "running", "started": step4_start})
+                    link_result = await link_document_to_bc(
+                        bc_record_id=bc_record_id or orders[0]["id"],
+                        share_link=share_link,
+                        file_name=file_name,
+                        file_content=file_content,
+                        bc_entity=bc_entity
+                    )
+                    if link_result.get("success"):
+                        steps[-1]["status"] = "completed"
+                        steps[-1]["ended"] = datetime.now(timezone.utc).isoformat()
+                        steps[-1]["result"] = link_result
+                        bc_linked = True
+                    else:
+                        steps[-1]["status"] = "failed"
+                        steps[-1]["ended"] = datetime.now(timezone.utc).isoformat()
+                        steps[-1]["error"] = link_result.get("error", "Unknown error attaching to BC")
+                        bc_error = link_result.get("error", "Unknown error attaching to BC")
+                else:
+                    steps[-1]["status"] = "warning"
+                    steps[-1]["ended"] = datetime.now(timezone.utc).isoformat()
+                    steps[-1]["result"] = {"found": False, "note": "BC record not found"}
+                    bc_error = "BC record not found"
+            except Exception as bc_exc:
+                steps[-1]["status"] = "failed"
+                steps[-1]["ended"] = datetime.now(timezone.utc).isoformat()
+                steps[-1]["error"] = str(bc_exc)
+                bc_error = str(bc_exc)
+
+        # Determine final status — SharePoint success is preserved even if BC fails
+        if bc_record_id or bc_document_no:
+            new_status = "LinkedToBC" if bc_linked else "Classified"
+        else:
+            new_status = "Classified"
+
+        await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+            "sharepoint_drive_id": sp_result["drive_id"],
+            "sharepoint_item_id": sp_result["item_id"],
+            "sharepoint_web_url": sp_result["web_url"],
+            "sharepoint_share_link_url": share_link,
+            "status": new_status,
+            "updated_utc": datetime.now(timezone.utc).isoformat(),
+            "last_error": bc_error
+        }})
+
+        workflow = {
+            "id": workflow_id, "document_id": doc_id, "workflow_name": "upload_and_link",
+            "started_utc": started, "ended_utc": datetime.now(timezone.utc).isoformat(),
+            "status": "Completed" if bc_linked else ("CompletedWithWarnings" if not bc_error else "PartialSuccess"),
+            "steps": steps, "correlation_id": correlation_id,
+            "error": bc_error
+        }
+        await db.hub_workflow_runs.insert_one(workflow)
+        return workflow_id, new_status
+
+    except Exception as e:
+        steps.append({"step": "error", "status": "failed", "error": str(e), "ended": datetime.now(timezone.utc).isoformat()})
+        workflow = {
+            "id": workflow_id, "document_id": doc_id, "workflow_name": "upload_and_link",
+            "started_utc": started, "ended_utc": datetime.now(timezone.utc).isoformat(),
+            "status": "Failed", "steps": steps, "correlation_id": correlation_id, "error": str(e)
+        }
+        await db.hub_workflow_runs.insert_one(workflow)
+        await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+            "status": "Exception", "last_error": str(e), "updated_utc": datetime.now(timezone.utc).isoformat()
+        }})
+        return workflow_id, "Exception"
+
     return {"document": doc, "workflow_id": workflow_id}

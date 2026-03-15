@@ -26,11 +26,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 # Allowed exceptions: files that may still import from server.py, with reason
 # ---------------------------------------------------------------------------
 ALLOWED_ROUTER_SERVER_IMPORTS = {
-    "routers/mailbox_sources.py",  # Background task state + poll_mailbox_for_documents (lifecycle)
+    "routers/mailbox_sources.py",  # Background task state (lifecycle: _dynamic_mailbox_polling_task, _mailbox_last_poll_times)
 }
 
 ALLOWED_SERVICE_SERVER_IMPORTS = {
-    "services/document_handlers.py",  # run_upload_and_link_workflow + classify_document_type (deep orchestration)
+    "services/mailbox_polling.py",  # Calls server._internal_intake_document (next extraction target)
 }
 
 
@@ -124,6 +124,20 @@ class TestNewModulesImportable:
         assert callable(subscribe_to_mailbox_notifications)
 
 
+    def test_document_classification(self):
+        from services.document_classification import classify_document_type, get_category_for_doc_type
+        assert callable(classify_document_type)
+        assert callable(get_category_for_doc_type)
+
+    def test_mailbox_polling(self):
+        from services.mailbox_polling import poll_mailbox_for_documents
+        assert callable(poll_mailbox_for_documents)
+
+    def test_document_linking_workflow(self):
+        from services.document_linking import run_upload_and_link_workflow
+        assert callable(run_upload_and_link_workflow)
+
+
 class TestSettingsUsesDepNotServer:
     """settings.py imports config from deps, not from server."""
 
@@ -147,8 +161,15 @@ class TestSettingsUsesDepNotServer:
         assert "from services.settings_helpers import" in content
 
 
-class TestDocumentHandlersRewiring:
-    """document_handlers.py uses extracted modules for SP/BC/linking."""
+class TestDocumentHandlersFullyDecoupled:
+    """document_handlers.py is fully decoupled from server.py."""
+
+    def test_no_server_import(self):
+        import pathlib
+        dh_path = pathlib.Path(__file__).parent.parent / "services" / "document_handlers.py"
+        content = dh_path.read_text()
+        assert "import server" not in content, "document_handlers.py still imports server"
+        assert "_server()" not in content, "document_handlers.py still uses _server() lazy import"
 
     def test_uses_sharepoint_helpers(self):
         import pathlib
@@ -161,6 +182,13 @@ class TestDocumentHandlersRewiring:
         dh_path = pathlib.Path(__file__).parent.parent / "services" / "document_handlers.py"
         content = dh_path.read_text()
         assert "from services.document_linking import" in content
+        assert "run_upload_and_link_workflow" in content
+
+    def test_uses_document_classification(self):
+        import pathlib
+        dh_path = pathlib.Path(__file__).parent.parent / "services" / "document_handlers.py"
+        content = dh_path.read_text()
+        assert "from services.document_classification import" in content
 
     def test_uses_bc_draft_service(self):
         import pathlib
@@ -168,7 +196,7 @@ class TestDocumentHandlersRewiring:
         content = dh_path.read_text()
         assert "from services.bc_draft_service import" in content
 
-    def test_no_srv_sharepoint_calls(self):
+    def test_no_srv_calls_remain(self):
         import pathlib
         dh_path = pathlib.Path(__file__).parent.parent / "services" / "document_handlers.py"
         content = dh_path.read_text()
@@ -178,6 +206,8 @@ class TestDocumentHandlersRewiring:
         assert "srv.check_duplicate_purchase_invoice" not in content
         assert "srv.create_purchase_invoice_header" not in content
         assert "srv.get_bc_token" not in content
+        assert "srv.run_upload_and_link_workflow" not in content
+        assert "srv.classify_document_type" not in content
 
 
 class TestVendorMatchingUsesDepNotServer:

@@ -199,7 +199,7 @@ async def test_mailbox_connection(mailbox_id: str):
 @router.post("/{mailbox_id}/poll-now")
 async def poll_mailbox_now(mailbox_id: str):
     """Manually trigger polling for a specific mailbox."""
-    from server import poll_mailbox_for_documents  # Remains in server.py (deep orchestration)
+    from services.mailbox_polling import poll_mailbox_for_documents
 
     db = get_db()
     source = await db.mailbox_sources.find_one({"mailbox_id": mailbox_id}, {"_id": 0})

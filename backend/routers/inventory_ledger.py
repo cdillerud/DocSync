@@ -3794,6 +3794,123 @@ async def api_list_activities(
     return {"total": total, "offset": offset, "limit": limit, "entries": entries}
 
 
+# ═══════════════════════════════════════════════════════════════
+# SAVED VIEWS & PERSONAL QUEUE PRESETS
+# ═══════════════════════════════════════════════════════════════
+
+SAVED_VIEWS_COLL = "saved_views"
+VALID_VIEW_TYPES = ("operations_queue", "sales_orders", "po_drafts")
+
+
+class SavedViewIn(BaseModel):
+    view_type: str = Field(...)
+    name: str = Field(..., min_length=1)
+    is_default: bool = Field(default=False)
+    created_by: str = Field(default="user")
+    filters: dict = Field(default_factory=dict)
+    sort: dict = Field(default_factory=dict)
+    notes: str = Field(default="")
+
+
+class SavedViewUpdateIn(BaseModel):
+    name: str = Field(default="")
+    is_default: bool = Field(default=None)
+    filters: dict = Field(default=None)
+    sort: dict = Field(default=None)
+    notes: str = Field(default=None)
+
+
+@router.post("/saved-views")
+async def api_create_saved_view(body: SavedViewIn):
+    """Create a saved view."""
+    import uuid as _uuid
+
+    if body.view_type not in VALID_VIEW_TYPES:
+        raise HTTPException(status_code=422, detail=f"view_type must be one of: {VALID_VIEW_TYPES}")
+
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+
+    # If setting as default, unset previous default for same view_type + created_by
+    if body.is_default:
+        await db[SAVED_VIEWS_COLL].update_many(
+            {"view_type": body.view_type, "created_by": body.created_by.strip(), "is_default": True},
+            {"$set": {"is_default": False, "updated_at": now}},
+        )
+
+    record = {
+        "saved_view_id": f"SV-{_uuid.uuid4().hex[:8].upper()}",
+        "view_type": body.view_type,
+        "name": body.name.strip(),
+        "is_default": body.is_default,
+        "created_by": body.created_by.strip(),
+        "created_at": now,
+        "updated_at": now,
+        "filters": body.filters,
+        "sort": body.sort,
+        "notes": body.notes.strip(),
+    }
+    await db[SAVED_VIEWS_COLL].insert_one(record.copy())
+    record.pop("_id", None)
+    return record
+
+
+@router.get("/saved-views")
+async def api_list_saved_views(view_type: str = "", created_by: str = ""):
+    """List saved views, optionally filtered."""
+    db = get_db()
+    query = {}
+    if view_type:
+        query["view_type"] = view_type
+    if created_by:
+        query["created_by"] = created_by
+    cursor = db[SAVED_VIEWS_COLL].find(query, {"_id": 0}).sort("updated_at", -1)
+    entries = await cursor.to_list(length=100)
+    return {"total": len(entries), "entries": entries}
+
+
+@router.patch("/saved-views/{saved_view_id}")
+async def api_update_saved_view(saved_view_id: str, body: SavedViewUpdateIn):
+    """Update a saved view."""
+    db = get_db()
+    existing = await db[SAVED_VIEWS_COLL].find_one({"saved_view_id": saved_view_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Saved view '{saved_view_id}' not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+    update = {"updated_at": now}
+    if body.name and body.name.strip():
+        update["name"] = body.name.strip()
+    if body.is_default is not None:
+        update["is_default"] = body.is_default
+        if body.is_default:
+            await db[SAVED_VIEWS_COLL].update_many(
+                {"view_type": existing["view_type"], "created_by": existing.get("created_by", "user"),
+                 "is_default": True, "saved_view_id": {"$ne": saved_view_id}},
+                {"$set": {"is_default": False, "updated_at": now}},
+            )
+    if body.filters is not None:
+        update["filters"] = body.filters
+    if body.sort is not None:
+        update["sort"] = body.sort
+    if body.notes is not None:
+        update["notes"] = body.notes.strip() if body.notes else ""
+
+    await db[SAVED_VIEWS_COLL].update_one({"saved_view_id": saved_view_id}, {"$set": update})
+    result = {**existing, **update}
+    return result
+
+
+@router.delete("/saved-views/{saved_view_id}")
+async def api_delete_saved_view(saved_view_id: str):
+    """Delete a saved view."""
+    db = get_db()
+    result = await db[SAVED_VIEWS_COLL].delete_one({"saved_view_id": saved_view_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail=f"Saved view '{saved_view_id}' not found")
+    return {"deleted": saved_view_id}
+
+
 async def _build_so_queue_items(db, limit: int = 200):
     """Build queue items for Sales Orders that need attention."""
     items = []
@@ -4065,6 +4182,12 @@ async def api_operations_queue(
     recent_activity_today = sum(1 for i in all_items if i.get("latest_activity_at", "") >= today_start)
     no_recent_activity_7d = sum(1 for i in all_items if not i.get("latest_activity_at") or i["latest_activity_at"] < stale_cutoff)
 
+    # Saved views counts
+    sv_total = await db[SAVED_VIEWS_COLL].count_documents({"view_type": "operations_queue"})
+    sv_default = await db[SAVED_VIEWS_COLL].find_one(
+        {"view_type": "operations_queue", "is_default": True}, {"_id": 0, "name": 1}
+    )
+
     return {
         "total": total,
         "high_priority_count": high_priority,
@@ -4076,6 +4199,8 @@ async def api_operations_queue(
         "waiting_count": waiting_count,
         "recent_activity_today": recent_activity_today,
         "no_recent_activity_7d": no_recent_activity_7d,
+        "saved_views_count": sv_total,
+        "default_view_name": sv_default["name"] if sv_default else "",
         "offset": offset,
         "limit": limit,
         "items": page,

@@ -48,6 +48,16 @@ from services.document_lifecycle_service import (
     get_lifecycle,
     get_lifecycle_issues,
 )
+from services.decision_policy_service import (
+    create_policy,
+    list_policies,
+    update_policy,
+    delete_policy,
+    evaluate_decision,
+    execute_decision,
+    get_decision,
+    get_decision_queue,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/document-intelligence", tags=["Document Intelligence"])
@@ -245,6 +255,122 @@ async def api_get_lifecycle(entity_type: str, entity_id: str):
     result = await get_lifecycle(entity_type=entity_type, entity_id=entity_id)
     if not result:
         raise HTTPException(status_code=404, detail=f"No lifecycle validation for {entity_type}/{entity_id}")
+    return result
+
+
+# ── Decision Policy Endpoints ─────────────────────────────────────────────────
+
+class CreatePolicyRequest(BaseModel):
+    name: str
+    document_type: Optional[str] = None
+    bundle_type: Optional[str] = None
+    target_entity_type: Optional[str] = None
+    is_active: bool = True
+    priority: int = 50
+    conditions: Dict[str, Any] = {}
+    decision_action: str = "hold_for_review"
+    automation_level: str = "human_confirm"
+    reason_template: str = ""
+    created_by: str = "admin"
+
+
+class UpdatePolicyRequest(BaseModel):
+    name: Optional[str] = None
+    document_type: Optional[str] = None
+    bundle_type: Optional[str] = None
+    target_entity_type: Optional[str] = None
+    is_active: Optional[bool] = None
+    priority: Optional[int] = None
+    conditions: Optional[Dict[str, Any]] = None
+    decision_action: Optional[str] = None
+    automation_level: Optional[str] = None
+    reason_template: Optional[str] = None
+
+
+@router.post("/policies")
+async def api_create_policy(body: CreatePolicyRequest):
+    """Create a new automation decision policy."""
+    return await create_policy(body.dict(exclude_none=False))
+
+
+@router.get("/policies")
+async def api_list_policies(
+    document_type: Optional[str] = Query(None),
+    target_entity_type: Optional[str] = Query(None),
+    is_active: Optional[bool] = Query(None),
+):
+    """List automation policies with optional filters."""
+    return await list_policies(
+        document_type=document_type,
+        target_entity_type=target_entity_type,
+        is_active=is_active,
+    )
+
+
+@router.patch("/policies/{policy_id}")
+async def api_update_policy(policy_id: str, body: UpdatePolicyRequest):
+    """Update an automation policy."""
+    try:
+        return await update_policy(policy_id, body.dict(exclude_none=True))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.delete("/policies/{policy_id}")
+async def api_delete_policy(policy_id: str):
+    """Soft-delete an automation policy (deactivates it)."""
+    try:
+        return await delete_policy(policy_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/evaluate-decision/{doc_id}")
+async def api_evaluate_decision(doc_id: str):
+    """
+    Evaluate the best automation decision for a document.
+    The authoritative decision endpoint — collects all engine outputs
+    and applies policies to determine what to do next.
+    """
+    try:
+        return await evaluate_decision(doc_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error("Decision evaluation failed for %s: %s", doc_id, e)
+        raise HTTPException(status_code=500, detail=f"Decision evaluation failed: {str(e)}")
+
+
+@router.post("/execute-decision/{decision_id}")
+async def api_execute_decision(decision_id: str):
+    """
+    Execute a previously evaluated decision.
+    Only executes 'ready' decisions. Hold/block return informative responses.
+    """
+    try:
+        return await execute_decision(decision_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error("Decision execution failed for %s: %s", decision_id, e)
+        raise HTTPException(status_code=500, detail=f"Decision execution failed: {str(e)}")
+
+
+@router.get("/decision-queue")
+async def api_decision_queue(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """Get documents with review_required or blocked decisions."""
+    return await get_decision_queue(limit=limit, offset=offset)
+
+
+@router.get("/decision/{doc_id}")
+async def api_get_decision(doc_id: str):
+    """Get the latest decision for a document."""
+    result = await get_decision(doc_id)
+    if not result:
+        raise HTTPException(status_code=404, detail=f"No decision for document: {doc_id}")
     return result
 
 

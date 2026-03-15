@@ -6,13 +6,13 @@ import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import {
   ScanSearch, RefreshCw, CheckCircle, AlertTriangle, XCircle, Pencil, Save, X, Loader2,
-  History, ChevronDown, ChevronUp, Zap, Copy, FileText, Link2, Users, Unlink, ArrowRight, GitMerge, Ban, Layers, PackageSearch, Activity, ShieldAlert
+  History, ChevronDown, ChevronUp, Zap, Copy, FileText, Link2, Users, Unlink, ArrowRight, GitMerge, Ban, Layers, PackageSearch, Activity, ShieldAlert, Brain, Play
 } from 'lucide-react';
 import {
   getDocumentIntelligence, processDocumentIntelligence, correctDocumentIntelligence,
   createAutoDraft, resolveDocumentEntities, getDocumentResolutions, correctResolution,
   matchTransactions, getTransactionMatches, autoLinkDocument, confirmTransactionMatch,
-  getBundle, validateLifecycle
+  getBundle, validateLifecycle, evaluateDecision, executeDecision, getDecision
 } from '@/lib/api';
 
 const READINESS_COLORS = {
@@ -71,6 +71,12 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
   const [showLifecycle, setShowLifecycle] = useState(true);
   const [lifecycleValidating, setLifecycleValidating] = useState(false);
 
+  // Decision state
+  const [decisionData, setDecisionData] = useState(null);
+  const [showDecision, setShowDecision] = useState(true);
+  const [evaluating, setEvaluating] = useState(false);
+  const [executing, setExecuting] = useState(false);
+
   const docId = document?.id;
 
   const fetchResult = useCallback(async () => {
@@ -105,6 +111,11 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
       const { data: tmData } = await getTransactionMatches(docId);
       setTxMatches(tmData.matches || []);
     } catch { setTxMatches([]); }
+    // Fetch latest decision
+    try {
+      const { data: decData } = await getDecision(docId);
+      setDecisionData(decData);
+    } catch { setDecisionData(null); }
     setLoading(false);
   }, [docId]);
 
@@ -645,6 +656,104 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
                             <CheckCircle className="w-3 h-3" /> Lifecycle is valid — no issues detected
                           </div>
                         )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Decision Engine Section */}
+            {result && (
+              <div data-testid="decision-engine-section">
+                <div className="flex items-center justify-between p-3 cursor-pointer hover:bg-accent/30 transition-colors" onClick={() => setShowDecision(!showDecision)}>
+                  <div className="flex items-center gap-2">
+                    <Brain className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Decision Engine</span>
+                    {result.latest_decision_action && (
+                      <Badge variant="outline" className={`text-[9px] ${result.latest_decision_action === 'create_draft' ? 'border-emerald-500/30 text-emerald-400' : result.latest_decision_action === 'link_existing' ? 'border-blue-500/30 text-blue-400' : result.latest_decision_action === 'hold_for_review' ? 'border-amber-500/30 text-amber-400' : 'border-red-500/30 text-red-400'}`}>
+                        {result.latest_decision_action === 'create_draft' ? 'Create Draft' : result.latest_decision_action === 'link_existing' ? 'Link Existing' : result.latest_decision_action === 'hold_for_review' ? 'Hold' : result.latest_decision_action === 'block' ? 'Blocked' : result.latest_decision_action || '—'}
+                      </Badge>
+                    )}
+                    {result.latest_automation_level && (
+                      <Badge variant="secondary" className="text-[8px]">{result.latest_automation_level}</Badge>
+                    )}
+                  </div>
+                  {showDecision ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
+                </div>
+
+                {showDecision && (
+                  <div className="border-t border-border p-3 space-y-2">
+                    {!decisionData ? (
+                      <div className="flex items-center justify-between">
+                        <p className="text-[10px] text-muted-foreground italic">No decision evaluated yet</p>
+                        <Button variant="outline" size="sm" className="h-6 text-[10px]" onClick={async () => {
+                          setEvaluating(true);
+                          try { const { data } = await evaluateDecision(docId); setDecisionData(data); fetchResult(); toast.success(`Decision: ${data.decision_action}`); }
+                          catch (err) { toast.error(err.response?.data?.detail || 'Evaluation failed'); }
+                          finally { setEvaluating(false); }
+                        }} disabled={evaluating} data-testid="evaluate-decision-btn">
+                          {evaluating ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Brain className="w-3 h-3 mr-1" />} Evaluate
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Status + Target */}
+                        <div className={`p-2 rounded border ${decisionData.decision_status === 'ready' ? 'bg-emerald-500/5 border-emerald-500/30' : decisionData.decision_status === 'executed' ? 'bg-blue-500/5 border-blue-500/30' : decisionData.decision_status === 'blocked' ? 'bg-red-500/5 border-red-500/30' : 'bg-amber-500/5 border-amber-500/30'}`}>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className={`text-[9px] ${decisionData.decision_status === 'ready' ? 'border-emerald-500/30 text-emerald-400' : decisionData.decision_status === 'executed' ? 'border-blue-500/30 text-blue-400' : decisionData.decision_status === 'blocked' ? 'border-red-500/30 text-red-400' : 'border-amber-500/30 text-amber-400'}`}>
+                              {decisionData.decision_status}
+                            </Badge>
+                            <span className="text-[10px] font-mono">{decisionData.policy_name}</span>
+                          </div>
+                          {decisionData.target_summary && (
+                            <p className="text-[10px] mt-1 text-muted-foreground">{decisionData.target_summary}</p>
+                          )}
+                        </div>
+
+                        {/* Reasons */}
+                        {decisionData.decision_reasons?.length > 0 && (
+                          <div data-testid="decision-reasons">
+                            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold mb-1">Reasons</p>
+                            {decisionData.decision_reasons.map((r, i) => (
+                              <div key={i} className="flex items-start gap-1.5 mt-0.5">
+                                <ArrowRight className="w-2.5 h-2.5 text-muted-foreground mt-0.5 shrink-0" />
+                                <span className="text-[10px] text-muted-foreground">{r.message}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Action Buttons */}
+                        <div className="flex items-center gap-2 pt-1">
+                          {decisionData.decision_status === 'ready' && (
+                            <Button size="sm" className={`h-6 text-[10px] ${decisionData.decision_action === 'create_draft' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-blue-600 hover:bg-blue-700'} text-white`} onClick={async () => {
+                              setExecuting(true);
+                              try { const { data } = await executeDecision(decisionData.decision_id); if (data.executed) { toast.success(`Executed: ${data.decision_action}`); fetchResult(); } else { toast.info(data.reason); } }
+                              catch (err) { toast.error(err.response?.data?.detail || 'Execution failed'); }
+                              finally { setExecuting(false); }
+                            }} disabled={executing} data-testid="execute-decision-btn">
+                              {executing ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Play className="w-3 h-3 mr-1" />}
+                              {decisionData.decision_action === 'create_draft' ? 'Execute: Create Draft' : decisionData.decision_action === 'link_existing' ? 'Execute: Link Existing' : 'Execute'}
+                            </Button>
+                          )}
+                          {(decisionData.decision_status === 'review_required' || decisionData.decision_status === 'blocked') && (
+                            <p className="text-[10px] text-amber-400 italic">
+                              {decisionData.decision_status === 'blocked' ? 'Blocked — resolve issues to proceed' : 'Awaiting human review'}
+                            </p>
+                          )}
+                          {decisionData.decision_status === 'executed' && (
+                            <p className="text-[10px] text-emerald-400 flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Decision executed</p>
+                          )}
+                          <Button variant="ghost" size="sm" className="h-6 text-[10px] ml-auto" onClick={async () => {
+                            setEvaluating(true);
+                            try { const { data } = await evaluateDecision(docId); setDecisionData(data); fetchResult(); toast.success(`Re-evaluated: ${data.decision_action}`); }
+                            catch (err) { toast.error(err.response?.data?.detail || 'Re-evaluation failed'); }
+                            finally { setEvaluating(false); }
+                          }} disabled={evaluating} data-testid="re-evaluate-btn">
+                            {evaluating ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                          </Button>
+                        </div>
                       </>
                     )}
                   </div>

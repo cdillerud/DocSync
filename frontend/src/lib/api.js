@@ -364,4 +364,15 @@ export const validateLifecycle = (entityType, entityId) => api.post(`/document-i
 export const getLifecycle = (entityType, entityId) => api.get(`/document-intelligence/lifecycle/${entityType}/${entityId}`);
 export const getLifecycleIssues = (params) => api.get('/document-intelligence/lifecycle-issues', { params });
 
+// Decision Policy APIs
+export const createPolicy = (data) => api.post('/document-intelligence/policies', data);
+export const listPolicies = (params) => api.get('/document-intelligence/policies', { params });
+export const updatePolicy = (policyId, data) => api.patch(`/document-intelligence/policies/${policyId}`, data);
+export const deletePolicy = (policyId) => api.delete(`/document-intelligence/policies/${policyId}`);
+export const evaluateDecision = (docId) => api.post(`/document-intelligence/evaluate-decision/${docId}`);
+export const executeDecision = (decisionId) => api.post(`/document-intelligence/execute-decision/${decisionId}`);
+export const getDecision = (docId) => api.get(`/document-intelligence/decision/${docId}`);
+export const getDecisionQueue = (params) => api.get('/document-intelligence/decision-queue', { params });
+
+
 

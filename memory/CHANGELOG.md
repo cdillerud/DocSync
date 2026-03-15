@@ -1,5 +1,26 @@
 # GPI Document Hub - Changelog
 
+## March 15, 2026 — Reference Intelligence Handler Extraction (iter_111)
+
+### Extraction
+- Moved 7 reference-intelligence-domain handler implementations from server.py to `services/reference_intelligence_handlers.py`
+- `routers/reference_intelligence.py` now imports from `services.reference_intelligence_handlers` (no longer from `server`)
+- **Milestone: All 32 `add_api_route` handlers fully extracted from server.py**
+
+### Handlers extracted (7)
+- `resolve_bc_reference`, `resolve_document_reference`, `resolve_document_intelligence`, `get_document_reference_intelligence`, `trigger_auto_resolve`, `get_matching_debug`, `rerun_matching_with_diagnostics`
+
+### Dependencies rewired (away from server.py)
+- 8 service getters sourced directly from their proper service modules (bc_reference_resolver, event_service, reference_intelligence_service, auto_resolution_service, label_correction_service, vendor_extraction_profile_service, layout_fingerprint_service, vendor_intelligence_service)
+- DB → `deps.get_db()`
+- **Zero server.py-local functions required** — cleanest extraction of the three passes
+
+### Testing
+- 96/96 tests passed across 5 regression suites (0 failures, 0 regressions)
+- Route count stable at 427
+
+---
+
 ## March 15, 2026 — Workflow Handler Extraction (iter_110)
 
 ### Extraction

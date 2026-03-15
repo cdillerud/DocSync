@@ -6,6 +6,7 @@
 - ~~Refactor server.py monolith~~ (2026-03-11)
 - ~~Document Handler Extraction~~ (2026-03-15, iter_109)
 - ~~Workflow Handler Extraction~~ (2026-03-15, iter_110) — 25 of 32 handlers extracted
+- ~~Reference Intelligence Handler Extraction~~ (2026-03-15, iter_111) — ALL 32 handlers extracted from server.py
 - ~~Document Layout Fingerprinting~~ (2026-03-10)
 - ~~Stable Vendor Auto-Ready Rules~~ (2026-03-11)
 - ~~Stable Vendor Admin Page~~ (2026-03-11)
@@ -17,7 +18,8 @@
 
 ### P2 — Medium Priority
 - **Git Branch/Deployment Cleanup** — Standardize on main branch, resolve `conflict_020326_1424` branch issues
-- **Reference Intelligence Handler Extraction** — Final extraction pass: 7 remaining handlers from server.py to `services/reference_intelligence_handlers.py`
+- **Reference Intelligence Handler Extraction** — Final extraction pass: 7 remaining handlers from server.py to `services/reference_intelligence_handlers.py` ~~DONE~~
+- **Utility helper extraction** — Extract shared helpers (normalize_vendor_name, get_bc_companies, etc.) still imported from server.py by 12 router modules
 - **Refactor monolithic files** — `backend/routers/inventory_ledger.py` and `frontend/src/pages/InventoryLedgerPage.js`
 
 ### P3 — Future/Backlog

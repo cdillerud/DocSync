@@ -67,17 +67,21 @@ routers/
 
 A canonical pipeline module at **`services/pipeline/document_pipeline.py`** defines the standard processing sequence for any ingested document.
 
-### Stages
+### Pipeline stages (updated — 9 stages)
 
 | # | Stage | Service | What it does |
 |---|-------|---------|--------------|
-| 1 | `classification` | `document_intelligence_service` | AI doc-type classification + field extraction |
-| 2 | `entity_resolution` | `entity_resolution_service` | Match extracted names/IDs to DB entities (customers, vendors, POs) |
-| 3 | `transaction_match` | `transaction_matching_service` | Link document to existing draft transactions |
-| 4 | `bundle_detection` | `document_bundle_service` | Group related documents into packets |
-| 5 | `lifecycle_check` | `document_lifecycle_service` | Validate document set completeness for an entity |
-| 6 | `policy_decision` | `decision_policy_service` | Evaluate automation rules and decide action |
-| 7 | `learning_capture` | `learning_loop_service` | Update aggregated automation metrics |
+| 1 | `classification` | `document_intelligence_service` → `document_intel_helpers` | AI doc-type classification + field extraction |
+| 2 | `extraction` | (surfaces output from classification) | Expose extracted-field summary explicitly |
+| 3 | `layout` | `layout_fingerprint_service` | Layout detection / structural signals / family ID |
+| 4 | `entity_resolution` | `entity_resolution_service` | Match extracted names/IDs to DB entities |
+| 5 | `transaction_match` | `transaction_matching_service` | Link document to existing draft transactions |
+| 6 | `bundle_detection` | `document_bundle_service` | Group related documents into packets |
+| 7 | `lifecycle_check` | `document_lifecycle_service` | Validate document set completeness for an entity |
+| 8 | `policy_decision` | `decision_policy_service` | Evaluate automation rules and decide action |
+| 9 | `learning_capture` | `learning_loop_service` | Update aggregated automation metrics |
+
+> `STAGE_ORDER_V1` (7 stages without extraction/layout) is retained for backward compatibility.
 
 ### API
 
@@ -96,6 +100,67 @@ GET  /api/document-intelligence/pipeline/stages
 - **Non-fatal errors.** A stage failure is logged and recorded but does not abort the pipeline.
 - **Structured output.** `PipelineResult` contains per-stage status, duration, and output keys.
 - **Partial runs.** `stop_after` and `skip_stages` allow callers to run subsets.
+
+---
+
+## 3b. Document Intelligence Domain (Consolidated)
+
+### Before-state: server.py dependency
+
+`document_intelligence_service.py` imported 4 functions directly from `server.py`:
+
+| Function | Lines in server.py | Purpose |
+|----------|-------------------|---------|
+| `classify_document_with_ai()` | ~200 | Gemini AI classification + field extraction |
+| `normalize_extracted_fields()` | ~40 | Amount/date/string normalization |
+| `compute_ap_normalized_fields()` | ~100 | AP-specific flat field computation |
+| `make_automation_decision()` | ~70 | Decision matrix (manual/review/auto_link/auto_create) |
+| `validate_bc_match()` | ~450 | BC validation + extraction quality scoring |
+
+### After-state: decoupled
+
+```
+services/
+  document_intel_helpers.py       ← NEW: extracted logic from server.py
+    classify_document_with_ai()     (fully extracted, no server.py dependency)
+    normalize_extracted_fields()    (fully extracted, pure function)
+    compute_ap_normalized_fields()  (fully extracted, pure function)
+    make_automation_decision()      (fully extracted, pure function)
+    validate_bc_match()             (thin adapter → server.py, too entangled for full extraction)
+
+  document_intelligence_service.py  — orchestration facade (imports helpers, NOT server.py)
+  ai_classifier.py                  — alternative classification (threshold-based, no AI)
+  invoice_extractor.py              — structured extraction adapters
+  layout_fingerprint_service.py     — layout detection / structural signals
+  document_bundle_service.py        — bundle grouping logic
+  document_lifecycle_service.py     — lifecycle derivation/validation
+```
+
+### Service boundaries
+
+| Service | Boundary |
+|---------|----------|
+| `document_intel_helpers` | Pure business logic: classification, normalization, decision matrix |
+| `document_intelligence_service` | **Orchestration facade only** — calls helpers, assembles readiness, stores results |
+| `ai_classifier` | Alternative threshold-based classifier (no AI) |
+| `invoice_extractor` | Structured extraction adapters |
+| `layout_fingerprint_service` | Layout detection / structural signals / family ID |
+| `document_bundle_service` | Bundle grouping logic |
+| `document_lifecycle_service` | Lifecycle derivation / validation |
+
+### Compatibility wrappers
+
+`server.py` retains thin wrappers for all 4 extracted functions so that any other callers in the monolith continue to work without changes:
+- `classify_document_with_ai()` → delegates to `document_intel_helpers`
+- `normalize_extracted_fields()` → delegates to `document_intel_helpers`
+- `compute_ap_normalized_fields()` → delegates to `document_intel_helpers`
+- `make_automation_decision()` → delegates to `document_intel_helpers`
+
+### Known follow-up debt
+
+- `validate_bc_match()` remains in server.py (15+ module-level dependencies). Needs deeper extraction in a dedicated pass.
+- `document_intelligence_service.py` still has some mixed formatting/readiness logic that could be further split.
+- `ai_classifier.py` and the AI classification in `document_intel_helpers` are two separate classification paths — could be unified under a common interface.
 
 ---
 
@@ -311,7 +376,7 @@ Document enters system
 
 | Domain | Key Services | DB Collections |
 |--------|-------------|----------------|
-| **Document Intelligence** | `document_intelligence_service`, `ai_classifier` | `document_intelligence` |
+| **Document Intelligence** | `document_intelligence_service` (facade), `document_intel_helpers`, `ai_classifier`, `invoice_extractor`, `layout_fingerprint_service` | `document_intelligence_results` |
 | **Entity Resolution** | `entity_resolution_service`, `unified_vendor_matcher` | `entity_resolutions`, `vendor_aliases`, `customer_aliases` |
 | **Transaction Matching** | `transaction_matching_service` | `transaction_matches` |
 | **Document Bundling** | `document_bundle_service` | `document_bundles` |
@@ -331,7 +396,8 @@ Document enters system
 
 | Target | Description | Priority |
 |--------|-------------|----------|
-| **`server.py` (~9400 lines)** | Still contains all legacy business-logic functions (upload, BC calls, email polling, etc.). Should be broken into focused service/utility modules over time. | P1 |
+| **`server.py` (~9100 lines)** | Still contains legacy business-logic functions and `validate_bc_match`. Has thin wrappers for 4 extracted functions. Should continue extraction over time. | P1 |
+| **`validate_bc_match()` in server.py** | 450-line function with 15+ module-level dependencies. Needs dedicated extraction pass. | P1 |
 | **`reference_intelligence_service.py` (~1660 lines)** | Large file covering extract, classify, score, and resolve. Candidate for splitting into sub-modules. | P2 |
 | **`routers/document_intelligence.py`** | Grew to ~660 lines. Could be split into sub-routers per pipeline stage. | P2 |
 | **`routers/inventory_ledger.py`** | Large monolithic router. Candidate for splitting. | P2 |

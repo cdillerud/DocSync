@@ -77,6 +77,19 @@ class PipelineResult:
 
 STAGE_ORDER = [
     "classification",
+    "extraction",
+    "layout",
+    "entity_resolution",
+    "transaction_match",
+    "bundle_detection",
+    "lifecycle_check",
+    "policy_decision",
+    "learning_capture",
+]
+
+# Backward compat: the original 7-stage list
+STAGE_ORDER_V1 = [
+    "classification",
     "entity_resolution",
     "transaction_match",
     "bundle_detection",
@@ -87,7 +100,12 @@ STAGE_ORDER = [
 
 
 async def _run_classification(doc_id: str, ctx: Dict) -> StageResult:
-    """Stage 1: Classify document and extract fields."""
+    """Stage 1: Classify document type and extract fields.
+
+    This calls the full process_document() which performs classification +
+    extraction in one AI call.  The extraction stage below exposes the
+    extracted-fields summary separately.
+    """
     from services.document_intelligence_service import process_document
 
     result = await process_document(doc_id)
@@ -98,6 +116,73 @@ async def _run_classification(doc_id: str, ctx: Dict) -> StageResult:
         "automation_readiness": result.get("automation_readiness", {}).get("status"),
     }
     return StageResult(stage="classification", status="ok", output=summary)
+
+
+async def _run_extraction(doc_id: str, ctx: Dict) -> StageResult:
+    """Stage 2: Expose extracted-field summary from classification.
+
+    Extraction is currently performed inside the classification AI call.
+    This stage surfaces the extraction outputs explicitly rather than
+    re-running the AI.
+    """
+    intel = ctx.get("intel", {})
+    extracted = intel.get("extracted_fields", {})
+
+    if not extracted:
+        return StageResult(
+            stage="extraction", status="skipped",
+            output={"reason": "no extracted fields from classification"},
+        )
+
+    field_names = [k for k in extracted.keys() if extracted[k] is not None]
+    summary = {
+        "fields_extracted": len(field_names),
+        "field_names": field_names[:15],
+        "has_line_items": bool(extracted.get("line_items")),
+    }
+    ctx["extracted_fields"] = extracted
+    return StageResult(stage="extraction", status="ok", output=summary)
+
+
+async def _run_layout(doc_id: str, ctx: Dict) -> StageResult:
+    """Stage 3: Layout fingerprinting — structural signal generation.
+
+    Identifies document family and layout features for downstream matching
+    and routing.
+    """
+    from deps import get_db
+
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        return StageResult(stage="layout", status="skipped",
+                           error="document not found")
+
+    # Check if layout fingerprint already exists on the doc
+    layout = doc.get("layout_fingerprint")
+    if layout:
+        summary = {
+            "family_id": layout.get("family_id"),
+            "page_count": layout.get("page_count"),
+            "layout_type": layout.get("layout_type"),
+        }
+        ctx["layout"] = layout
+        return StageResult(stage="layout", status="ok", output=summary)
+
+    # If not present, try to run the fingerprinting service
+    try:
+        from services.layout_fingerprint_service import get_layout_fingerprint_service
+        svc = get_layout_fingerprint_service(db)
+        fp = await svc.fingerprint_document(doc_id)
+        ctx["layout"] = fp
+        summary = {
+            "family_id": fp.get("family_id") if fp else None,
+            "newly_fingerprinted": True,
+        }
+        return StageResult(stage="layout", status="ok", output=summary)
+    except Exception as exc:
+        return StageResult(stage="layout", status="skipped",
+                           output={"reason": f"fingerprinting unavailable: {exc}"})
 
 
 async def _run_entity_resolution(doc_id: str, ctx: Dict) -> StageResult:
@@ -211,6 +296,8 @@ async def _run_learning_capture(doc_id: str, ctx: Dict) -> StageResult:
 # Map stage names to runner functions
 _STAGE_RUNNERS = {
     "classification": _run_classification,
+    "extraction": _run_extraction,
+    "layout": _run_layout,
     "entity_resolution": _run_entity_resolution,
     "transaction_match": _run_transaction_match,
     "bundle_detection": _run_bundle_detection,

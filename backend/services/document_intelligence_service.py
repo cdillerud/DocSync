@@ -4,7 +4,8 @@ GPI Document Hub - Document Intelligence Service
 Centralizes the document processing pipeline into a single orchestrator:
   classify → extract → validate → derive automation readiness → store → emit events
 
-Reuses existing functions from server.py and ai_classifier.py.
+Imports intelligence logic from document_intel_helpers (extracted from server.py)
+and ai_classifier.
 """
 
 import os
@@ -15,6 +16,7 @@ from typing import Dict, Any, Optional, List
 
 from deps import get_db
 from models.document_types import DEFAULT_JOB_TYPES
+from services.automation_helpers import utcnow, create_activity
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +26,6 @@ AUTOMATION_ACTIONS_COLLECTION = "automation_actions"
 SO_DRAFTS_COLLECTION = "so_drafts"
 AP_INTAKE_DRAFTS_COLLECTION = "ap_intake_drafts"
 PO_DRAFTS_COLLECTION = "po_drafts"
-ACTIVITIES_COLLECTION = "activities"
 
 # Automation readiness levels
 READINESS_READY = "ready"
@@ -186,7 +187,7 @@ async def process_document(doc_id: str) -> Dict[str, Any]:
     ai_result = None
     if file_path and os.path.exists(str(file_path)):
         try:
-            from server import classify_document_with_ai
+            from services.document_intel_helpers import classify_document_with_ai
             ai_result = await classify_document_with_ai(str(file_path), file_name)
             if ai_result and not ai_result.get("error"):
                 document_type = ai_result.get("suggested_job_type", document_type)
@@ -217,7 +218,7 @@ async def process_document(doc_id: str) -> Dict[str, Any]:
     # 3) Validation
     validation_results = doc.get("validation_results")
     try:
-        from server import validate_bc_match, normalize_extracted_fields
+        from services.document_intel_helpers import validate_bc_match, normalize_extracted_fields
         job_config = DEFAULT_JOB_TYPES.get(document_type)
         if not job_config:
             # Map doc_type variants
@@ -239,7 +240,7 @@ async def process_document(doc_id: str) -> Dict[str, Any]:
     automation_decision = doc.get("automation_decision", "manual")
     automation_reasoning = ""
     try:
-        from server import make_automation_decision
+        from services.document_intel_helpers import make_automation_decision
         if not job_config:
             job_config = DEFAULT_JOB_TYPES.get("AP_Invoice", {})
         decision, reasoning, _ = make_automation_decision(
@@ -440,7 +441,7 @@ async def apply_correction(
     if not existing:
         raise ValueError(f"No intelligence result for document: {doc_id}")
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = utcnow()
 
     # Build correction history entry
     correction_entry = {
@@ -634,22 +635,12 @@ async def _create_activity_record(
     db, entity_type: str, entity_id: str, activity_type: str,
     title: str, body_text: str = "", created_by: str = "system", metadata: dict = None,
 ):
-    """Create an activity record for audit logging."""
-    now = datetime.now(timezone.utc).isoformat()
-    record = {
-        "activity_id": f"ACT-{uuid.uuid4().hex[:8].upper()}",
-        "entity_type": entity_type,
-        "entity_id": entity_id,
-        "activity_type": activity_type,
-        "title": title,
-        "body": body_text,
-        "created_by": created_by,
-        "created_at": now,
-        "metadata": metadata or {},
-    }
-    await db[ACTIVITIES_COLLECTION].insert_one(record.copy())
-    record.pop("_id", None)
-    return record
+    """Create an activity record — delegates to shared automation_helpers."""
+    return await create_activity(
+        db, entity_id=entity_id, entity_type=entity_type,
+        activity_type=activity_type, title=title, body=body_text,
+        metadata=metadata, created_by=created_by,
+    )
 
 
 def _resolve_draft_mapping(document_type: str) -> Optional[Dict[str, str]]:
@@ -672,7 +663,7 @@ def _resolve_draft_mapping(document_type: str) -> Optional[Dict[str, str]]:
 
 async def _create_so_draft(db, doc: Dict, intel: Dict, fields: Dict) -> Dict[str, Any]:
     """Create a Sales Order draft from extracted document fields."""
-    now = datetime.now(timezone.utc).isoformat()
+    now = utcnow()
     draft_id = f"SO-DRAFT-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
 
     customer = fields.get("customer") or fields.get("consignee") or fields.get("customer_name") or ""
@@ -717,7 +708,7 @@ async def _create_so_draft(db, doc: Dict, intel: Dict, fields: Dict) -> Dict[str
 
 async def _create_po_draft(db, doc: Dict, intel: Dict, fields: Dict) -> Dict[str, Any]:
     """Create a PO draft from extracted document fields."""
-    now = datetime.now(timezone.utc).isoformat()
+    now = utcnow()
     draft_id = f"PO-DRAFT-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
 
     vendor = fields.get("vendor") or fields.get("shipper") or fields.get("carrier") or ""
@@ -768,7 +759,7 @@ async def _create_po_draft(db, doc: Dict, intel: Dict, fields: Dict) -> Dict[str
 
 async def _create_ap_intake_draft(db, doc: Dict, intel: Dict, fields: Dict) -> Dict[str, Any]:
     """Create an AP Intake draft from extracted invoice fields."""
-    now = datetime.now(timezone.utc).isoformat()
+    now = utcnow()
     draft_id = f"AP-DRAFT-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
 
     vendor = fields.get("vendor") or fields.get("vendor_name") or ""
@@ -932,7 +923,7 @@ async def create_auto_draft(doc_id: str) -> Dict[str, Any]:
         "action_status": action_status,
         "created_at": now.isoformat(),
         "created_by": "auto_draft",
-        "notes": f"Auto-draft from document intelligence pipeline",
+        "notes": "Auto-draft from document intelligence pipeline",
     }
     await db[AUTOMATION_ACTIONS_COLLECTION].insert_one(action_record.copy())
     action_record.pop("_id", None)

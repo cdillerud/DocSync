@@ -1,0 +1,76 @@
+{
+  "summary": "Iteration 105 - Technical Debt Remediation Pass #4 complete. All 103 pytest tests passed (35 document_intel_helpers + 23 automation_helpers + 45 reference_helpers). All API endpoints verified. Pipeline now has 9 stages (extraction, layout added). document_intelligence_service has ZERO 'from server import' statements. server.py has thin compatibility wrappers for all 4 extracted functions.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed_tests": [
+    "35/35 pytest tests in test_document_intel_helpers.py passed",
+    "23/23 pytest tests in test_automation_helpers.py passed",
+    "45/45 pytest tests in test_reference_helpers.py passed",
+    "GET /api/health returns status=healthy",
+    "POST /api/auth/login with admin/admin returns token (length: 133)",
+    "GET /api/document-intelligence/pipeline/stages returns exactly 9 stages including extraction and layout",
+    "POST /api/document-intelligence/pipeline/test-id?stop_after=layout returns 3 stages (classification, extraction, layout)",
+    "GET /api/document-intelligence/policies returns list with 13 policies",
+    "GET /api/document-intelligence/learning/summary returns data",
+    "GET /api/documents returns 45 documents",
+    "GET /api/dashboard/stats returns data",
+    "GET /api/bc-sandbox/status returns demo_mode field"
+  ],
+  "grep_checks_verified": {
+    "document_intelligence_service.py": "ZERO 'from server import' statements - DECOUPLED",
+    "server.py_classify_document_with_ai": "4-line thin wrapper delegating to document_intel_helpers",
+    "server.py_normalize_extracted_fields": "4-line thin wrapper delegating to document_intel_helpers",
+    "server.py_compute_ap_normalized_fields": "4-line thin wrapper delegating to document_intel_helpers",
+    "server.py_make_automation_decision": "4-line thin wrapper delegating to document_intel_helpers"
+  },
+  "pipeline_stages": {
+    "v2_9_stages": ["classification", "extraction", "layout", "entity_resolution", "transaction_match", "bundle_detection", "lifecycle_check", "policy_decision", "learning_capture"],
+    "v1_7_stages_backward_compat": ["classification", "entity_resolution", "transaction_match", "bundle_detection", "lifecycle_check", "policy_decision", "learning_capture"],
+    "new_stages_added": ["extraction", "layout"]
+  },
+  "document_intel_helpers_consolidation": {
+    "classify_document_with_ai": "AI classification + extraction using Gemini",
+    "normalize_extracted_fields": "Amount/date/string field normalization",
+    "compute_ap_normalized_fields": "AP-specific flat field computation",
+    "make_automation_decision": "Decision matrix for automation level",
+    "validate_bc_match": "Thin adapter to server.py (too entangled for full extraction)"
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_document_intel_helpers.py",
+    "/app/backend/tests/test_automation_helpers.py",
+    "/app/backend/tests/test_reference_helpers.py",
+    "/app/test_reports/pytest/test_document_intel_helpers_results.xml",
+    "/app/test_reports/pytest/test_automation_helpers_results.xml",
+    "/app/test_reports/pytest/test_reference_helpers_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "document_intel_helpers.py successfully extracts 4 business-logic functions from server.py",
+    "document_intelligence_service.py correctly imports from document_intel_helpers instead of server.py",
+    "server.py retains thin compatibility wrappers (4 lines each) for backward compatibility",
+    "Pipeline now has 9 stages with explicit extraction and layout stages",
+    "STAGE_ORDER_V1 preserved for backward compatibility (7 stages)",
+    "All services preserve original API contracts - purely structural consolidation"
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (103/103 pytest tests + 12/12 API tests passed)",
+    "frontend": "N/A (backend only testing requested)"
+  },
+  "test_credentials": {
+    "auth": "admin / admin",
+    "api_url": "https://arch-remediation.preview.emergentagent.com"
+  },
+  "seed_data_created": {},
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 105 - Technical debt remediation pass #4 complete (Document Intelligence domain). Verified: 1) document_intel_helpers.py consolidates classify_document_with_ai, normalize_extracted_fields, compute_ap_normalized_fields, make_automation_decision, 2) document_intelligence_service.py has ZERO 'from server import' statements - fully decoupled, 3) server.py has 4-line thin wrappers for all 4 extracted functions, 4) Pipeline now has 9 stages (extraction, layout added), 5) All 103 unit tests pass (35+23+45), 6) All 12 API endpoint tests pass. BC/Graph/SharePoint APIs remain mocked in demo mode. Previous passes: #1 (entrypoint consolidation), #2 (reference intelligence), #3 (decisioning/automation).",
+  "mocked_apis_note": "BC/Graph/SharePoint APIs are mocked in demo mode. No new mocks added."
+}

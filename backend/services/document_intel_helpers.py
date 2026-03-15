@@ -1,0 +1,485 @@
+"""
+GPI Document Hub - Document Intelligence Helpers
+
+Functions extracted from server.py to decouple document_intelligence_service
+from the monolithic server module.
+
+Contents:
+  - classify_document_with_ai() — Gemini-based doc classification + extraction
+  - normalize_extracted_fields() — amount/date/string field normalization
+  - compute_ap_normalized_fields() — AP-specific flat field computation
+  - make_automation_decision() — decision matrix for automation level
+  - validate_bc_match() — thin adapter to server.py (too entangled to extract)
+
+Consumers:
+  - document_intelligence_service  (primary)
+  - server.py retains compatibility wrappers for other callers
+"""
+
+import os
+import re
+import uuid
+import json
+import logging
+from datetime import datetime, timezone
+from typing import Dict, Any, Optional, List, Tuple
+
+from dateutil import parser as date_parser
+
+logger = logging.getLogger(__name__)
+
+EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
+
+
+# ---------------------------------------------------------------------------
+# 1. AI Classification + Extraction
+# ---------------------------------------------------------------------------
+
+async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
+    """
+    Use Gemini to analyze a document and extract structured data.
+    Returns classification and extracted fields.
+
+    Extracted from server.py — same prompt, same return format.
+    """
+    if not EMERGENT_LLM_KEY:
+        return {
+            "error": "EMERGENT_LLM_KEY not configured",
+            "suggested_job_type": "Unknown",
+            "confidence": 0.0,
+            "extracted_fields": {},
+        }
+
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
+
+        ext = file_name.lower().split(".")[-1] if "." in file_name else ""
+        mime_map = {
+            "pdf": "application/pdf",
+            "png": "image/png",
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "tiff": "image/tiff",
+            "gif": "image/gif",
+            "txt": "text/plain",
+            "csv": "text/csv",
+            "html": "text/html",
+            "json": "application/json",
+            "xml": "application/xml",
+        }
+        mime_type = mime_map.get(ext, "text/plain")
+
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"classify-{uuid.uuid4()}",
+            system_message=_CLASSIFY_SYSTEM_PROMPT,
+        ).with_model("gemini", "gemini-3-flash-preview")
+
+        file_content = FileContentWithMimeType(file_path=file_path, mime_type=mime_type)
+        user_message = UserMessage(
+            text="Please analyze this business document. Classify it and extract all relevant fields. Respond with JSON only.",
+            file_contents=[file_content],
+        )
+
+        response = await chat.send_message(user_message)
+
+        response_text = response.strip()
+        if response_text.startswith("```"):
+            lines = response_text.split("\n")
+            json_lines = []
+            in_json = False
+            for line in lines:
+                if line.startswith("```json"):
+                    in_json = True
+                    continue
+                if line.startswith("```") and in_json:
+                    break
+                if in_json:
+                    json_lines.append(line)
+            response_text = "\n".join(json_lines)
+
+        result = json.loads(response_text)
+
+        extracted = result.get("extracted_fields", {})
+        logger.info(
+            "AI Classification result - doc_type: %s, confidence: %s",
+            result.get("document_type"),
+            result.get("confidence"),
+        )
+        logger.info("AI extracted invoice_date: %s", extracted.get("invoice_date"))
+
+        return {
+            "suggested_job_type": result.get("document_type", "Unknown"),
+            "confidence": float(result.get("confidence", 0.0)),
+            "extracted_fields": result.get("extracted_fields", {}),
+            "reasoning": result.get("reasoning", ""),
+            "model": "gemini-3-flash-preview",
+        }
+
+    except Exception as e:
+        logger.error("AI classification failed: %s", str(e))
+        return {
+            "error": str(e),
+            "suggested_job_type": "Unknown",
+            "confidence": 0.0,
+            "extracted_fields": {},
+            "reasoning": f"Classification failed: {str(e)}",
+        }
+
+
+# ---------------------------------------------------------------------------
+# 2. Field Normalization
+# ---------------------------------------------------------------------------
+
+def normalize_extracted_fields(fields: dict) -> dict:
+    """
+    Normalize extracted fields before BC validation.
+
+    - Convert amounts to decimal
+    - Convert dates to ISO format
+    - Clean up strings
+
+    Extracted from server.py — identical behavior.
+    """
+    normalized = {}
+
+    for key, value in fields.items():
+        if value is None:
+            continue
+
+        if key in ("amount", "payment_amount", "total", "subtotal"):
+            clean_amount = re.sub(r"[^\d.-]", "", str(value))
+            try:
+                normalized[key] = float(clean_amount) if clean_amount else None
+                normalized[f"{key}_raw"] = value
+            except ValueError:
+                normalized[key] = None
+                normalized[f"{key}_raw"] = value
+
+        elif key in (
+            "due_date", "invoice_date", "order_date", "payment_date",
+            "ship_date", "delivery_date", "document_date",
+        ):
+            try:
+                parsed_date = date_parser.parse(str(value))
+                normalized[key] = parsed_date.strftime("%Y-%m-%d")
+                normalized[f"{key}_raw"] = value
+            except Exception:
+                normalized[key] = None
+                normalized[f"{key}_raw"] = value
+
+        elif isinstance(value, str):
+            normalized[key] = value.strip()
+        else:
+            normalized[key] = value
+
+    return normalized
+
+
+def compute_ap_normalized_fields(extracted_fields: dict) -> dict:
+    """
+    Compute normalized fields for AP_Invoice documents.
+
+    Returns flat fields: vendor_raw/normalized, invoice_number_raw/clean,
+    amount_raw/float, due_date_raw/iso, po_number_raw/clean, invoice_date,
+    line_items.
+
+    Extracted from server.py — identical behavior.
+    """
+    result = {}
+    if not extracted_fields:
+        return result
+
+    # Vendor normalization
+    vendor = extracted_fields.get("vendor")
+    if vendor:
+        vendor_str = str(vendor).strip()
+        result["vendor_raw"] = vendor_str
+        normalized = re.sub(r"\s+", " ", vendor_str.lower().strip())
+        result["vendor_normalized"] = normalized
+    else:
+        result["vendor_raw"] = None
+        result["vendor_normalized"] = None
+
+    # Invoice number normalization
+    invoice_num = extracted_fields.get("invoice_number")
+    if invoice_num:
+        inv_str = str(invoice_num).strip()
+        result["invoice_number_raw"] = inv_str
+        clean = re.sub(r"[\s,]+", "", inv_str).upper()
+        result["invoice_number_clean"] = clean
+    else:
+        result["invoice_number_raw"] = None
+        result["invoice_number_clean"] = None
+
+    # Amount parsing to float
+    amount = extracted_fields.get("amount")
+    if amount is not None:
+        result["amount_raw"] = str(amount)
+        try:
+            clean_amount = re.sub(r"[^\d.-]", "", str(amount))
+            result["amount_float"] = float(clean_amount) if clean_amount else None
+        except (ValueError, TypeError):
+            result["amount_float"] = None
+    else:
+        result["amount_raw"] = None
+        result["amount_float"] = None
+
+    # Due date to ISO
+    due_date = extracted_fields.get("due_date")
+    if due_date:
+        result["due_date_raw"] = str(due_date)
+        try:
+            parsed_date = date_parser.parse(str(due_date))
+            result["due_date_iso"] = parsed_date.strftime("%Y-%m-%d")
+        except Exception:
+            result["due_date_iso"] = None
+    else:
+        result["due_date_raw"] = None
+        result["due_date_iso"] = None
+
+    # PO number normalization
+    po_number = extracted_fields.get("po_number")
+    if po_number:
+        po_str = str(po_number).strip()
+        result["po_number_raw"] = po_str
+        result["po_number_clean"] = re.sub(r"[\s,]+", "", po_str).upper()
+    else:
+        result["po_number_raw"] = None
+        result["po_number_clean"] = None
+
+    # Invoice date to ISO
+    invoice_date = extracted_fields.get("invoice_date")
+    if invoice_date:
+        result["invoice_date_raw"] = str(invoice_date)
+        try:
+            parsed_date = date_parser.parse(str(invoice_date))
+            result["invoice_date"] = parsed_date.strftime("%Y-%m-%d")
+        except Exception:
+            result["invoice_date"] = None
+    else:
+        result["invoice_date_raw"] = None
+        result["invoice_date"] = None
+
+    # Line items normalization
+    line_items = extracted_fields.get("line_items")
+    if line_items and isinstance(line_items, list):
+        normalized_items = []
+        for item in line_items:
+            if isinstance(item, dict):
+                normalized_items.append({
+                    "description": item.get("description", ""),
+                    "quantity": float(item.get("quantity", 1) or 1),
+                    "unit_price": float(item.get("unit_price", 0) or 0),
+                    "total": float(item.get("total", 0) or 0),
+                })
+        result["line_items"] = normalized_items
+    else:
+        result["line_items"] = []
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 3. Automation Decision Matrix
+# ---------------------------------------------------------------------------
+
+def make_automation_decision(
+    job_config: dict,
+    ai_confidence: float,
+    validation_results: dict,
+) -> Tuple[str, str, dict]:
+    """
+    Decision matrix for automation level.
+
+    Returns ``(decision, reasoning, metadata)`` where decision is one of:
+    manual, needs_review, auto_link, auto_create.
+
+    Extracted from server.py — identical behavior.
+    """
+    automation_level = job_config.get("automation_level", 0)
+    link_threshold = job_config.get("min_confidence_to_auto_link", 0.85)
+    create_threshold = job_config.get("min_confidence_to_auto_create_draft", 0.95)
+    requires_review = job_config.get("requires_human_review_if_exception", True)
+
+    metadata = {
+        "vendor_candidates": validation_results.get("vendor_candidates", []),
+        "customer_candidates": validation_results.get("customer_candidates", []),
+        "warnings": validation_results.get("warnings", []),
+    }
+
+    if automation_level == 0:
+        return "manual", "Job type configured for manual processing only", metadata
+
+    if not validation_results.get("all_passed", False):
+        failed_checks = [
+            c["check_name"]
+            for c in validation_results.get("checks", [])
+            if not c["passed"] and c.get("required", True)
+        ]
+        has_candidates = (
+            len(validation_results.get("vendor_candidates", [])) > 0
+            or len(validation_results.get("customer_candidates", [])) > 0
+        )
+        reason_suffix = " (candidates available for quick resolution)" if has_candidates else ""
+        if requires_review:
+            return "needs_review", f"Validation failed: {', '.join(failed_checks)}{reason_suffix}", metadata
+        return "manual", f"Validation failed but review not required: {', '.join(failed_checks)}", metadata
+
+    warning_notes = ""
+    if validation_results.get("warnings"):
+        warning_notes = f" (with {len(validation_results['warnings'])} warning(s))"
+
+    if ai_confidence < link_threshold:
+        return "needs_review", f"Confidence {ai_confidence:.2%} below link threshold {link_threshold:.2%}", metadata
+
+    if automation_level == 1:
+        if ai_confidence >= link_threshold:
+            return "auto_link", f"Confidence {ai_confidence:.2%} meets link threshold, auto-linking to existing BC record{warning_notes}", metadata
+        return "needs_review", f"Confidence {ai_confidence:.2%} below threshold", metadata
+
+    if automation_level >= 2:
+        if ai_confidence >= create_threshold:
+            return "auto_create", f"Confidence {ai_confidence:.2%} meets create threshold, creating draft BC document{warning_notes}", metadata
+        elif ai_confidence >= link_threshold:
+            return "auto_link", f"Confidence {ai_confidence:.2%} meets link threshold only, auto-linking{warning_notes}", metadata
+        return "needs_review", f"Confidence {ai_confidence:.2%} below thresholds", metadata
+
+    return "needs_review", "Default fallback to review", metadata
+
+
+# ---------------------------------------------------------------------------
+# 4. BC Validation — thin adapter (too entangled to fully extract)
+# ---------------------------------------------------------------------------
+
+async def validate_bc_match(
+    job_type: str, extracted_fields: dict, job_config: dict
+) -> dict:
+    """Validate extracted fields against BC.
+
+    This is a thin adapter that delegates to the implementation in server.py.
+    The function has deep dependencies on server.py module-level state (DB,
+    token helpers, vendor/customer matchers) that make a full extraction too
+    risky for this pass.  Marked as a follow-up target.
+    """
+    from server import validate_bc_match as _server_validate_bc_match
+
+    return await _server_validate_bc_match(job_type, extracted_fields, job_config)
+
+
+# ---------------------------------------------------------------------------
+# System prompt (extracted from server.py classify_document_with_ai)
+# ---------------------------------------------------------------------------
+
+_CLASSIFY_SYSTEM_PROMPT = """You are a document classification and data extraction AI for Gamer Packaging, Inc.'s document management system.
+
+IMPORTANT CONTEXT:
+- Our company is "Gamer Packaging, Inc." (also known as "Gamer Packaging" or "GPI")
+- Documents come from BOTH our Accounts Payable inbox AND Sales mailboxes
+- You must classify documents into the correct category: AP (accounts payable) or Sales
+
+DOCUMENT CATEGORIES AND TYPES:
+
+== AP (Accounts Payable) Category ==
+AP_Invoice: Vendor invoices we RECEIVE
+- The VENDOR is the company sending us the invoice (NOT Gamer Packaging)
+- If "Gamer Packaging" appears as Bill To/Customer, this is an AP_Invoice we received
+- Extract: vendor name (the sender), invoice_number, invoice_date, amount, po_number (if present), due_date
+- CRITICAL: Always extract invoice_date (the date on the invoice itself)
+- CRITICAL: Extract ALL line items with description, quantity, unit_price, and total
+
+AR_Invoice: Invoices we send to customers (outgoing)
+- Our company name appears as the sender
+- Extract: customer name, invoice_number, invoice_date, amount, due_date
+
+Remittance: Payment confirmations
+- Extract: vendor/customer, payment_amount, payment_date, invoice_references
+- Look for "Remittance Advice", "Payment", check numbers
+
+Freight_Document: Shipping/freight documents
+- Extract: shipper, consignee, tracking_number, carrier, origin, destination
+- Look for "Bill of Lading", "BOL", "HAWB", tracking numbers
+
+== Sales Category ==
+Sales_Order: Customer purchase orders to us
+- Extract: customer name, po_number, order_date, amount, ship_to address
+- Look for "Purchase Order", "PO#", "Order", quantity, ship to
+
+Sales_Quote: Price quotes or proposals to customers
+- Extract: customer, amount, valid_until
+- Look for "Quote", "Quotation", "Proposal", "Estimate"
+
+Order_Confirmation: Order acknowledgments
+- Extract: order_number, customer, amount
+- Look for "Confirmation", "Acknowledged", "Order Acknowledgment"
+
+Inventory_Report: Stock/inventory status reports
+- Extract: warehouse, items, quantities
+- Look for "Inventory", "Stock", "On Hand", "Available"
+
+Shipping_Document: Shipping documents, BOLs, Bills of Lading
+- Extract: bol_number, ship_date, po_number, shipper, consignee, carrier, tracking_number, pro_number, weight, pieces
+- Look for "Ship", "Delivery", "Dispatch", "Bill of Lading", "BOL", "Straight Bill", "Shipper", "Consignee"
+- BOL Number is the primary document identifier (often labeled "B/L No" or "BOL#")
+- Pro Number is the carrier's tracking/reference number
+
+Quality_Issue: Quality complaints or issues
+- Extract: customer, item, description
+- Look for "Quality", "Defect", "Complaint", "NCR", "Claim"
+
+Return_Request: Return requests / RMAs
+- Extract: customer, amount, reason
+- Look for "Return", "RMA", "Credit", "Refund"
+
+Unknown_Document: Cannot determine type confidently
+
+Always respond with valid JSON in this exact format:
+{
+    "document_type": "AP_Invoice|AR_Invoice|Remittance|Freight_Document|Sales_Order|Sales_Quote|Order_Confirmation|Inventory_Report|Shipping_Document|Quality_Issue|Return_Request|Unknown_Document",
+    "confidence": 0.0-1.0,
+    "extracted_fields": {
+        "vendor": "...",
+        "customer": "...",
+        "invoice_number": "...",
+        "invoice_date": "YYYY-MM-DD format",
+        "po_number": "...",
+        "order_number": "...",
+        "amount": "...",
+        "due_date": "YYYY-MM-DD format",
+        "order_date": "...",
+        "ship_date": "...",
+        "payment_date": "...",
+        "payment_amount": "...",
+        "tracking_number": "...",
+        "bol_number": "...",
+        "pro_number": "...",
+        "shipper": "...",
+        "consignee": "...",
+        "carrier": "...",
+        "weight": "...",
+        "pieces": "...",
+        "warehouse": "...",
+        "items": "...",
+        "ship_to": "...",
+        "line_items": [
+            {
+                "description": "Item/service description",
+                "quantity": 1.0,
+                "unit_price": 0.00,
+                "total": 0.00
+            }
+        ]
+    },
+    "reasoning": "Brief explanation of classification"
+}
+
+IMPORTANT: For invoices (AP_Invoice, AR_Invoice), you MUST extract:
+- invoice_date: The date the invoice was issued (NOT due_date)
+- line_items: ALL line items showing what was purchased/charged
+
+For freight/transportation invoices, line items may include:
+- Weight, distance, rate, charges
+- Fuel surcharges, accessorial charges
+- Extract these as line items with appropriate descriptions
+
+Only include fields that you can actually extract from the document. Leave out fields that are not present."""

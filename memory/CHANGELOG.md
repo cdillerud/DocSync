@@ -1,5 +1,22 @@
 # CHANGELOG - GPI Document Hub
 
+
+## [2026-03-15] Iteration 95 — Document-to-Transaction Auto-Draft Creation — COMPLETE
+- **Backend:** `POST /api/document-intelligence/auto-draft/{id}` — creates downstream draft from automation-ready documents
+- **Backend:** `GET /api/document-intelligence/auto-draft/{id}` — returns latest automation action for a document
+- **Backend:** Draft type mappings: AP_Invoice → ap_intake_draft, Freight/Shipping_Document → po_draft, Sales_PO/customer_po → sales_order_draft
+- **Backend:** Duplicate prevention: blocks re-creation of same draft type from same document, returns existing action
+- **Backend:** Automation readiness gate: only creates drafts when automation_readiness = ready
+- **Backend:** Document intelligence enrichment: auto_draft_available, auto_draft_created, target_entity_type, target_entity_id, last_automation_action_status
+- **Backend:** Activity timeline integration: logs auto_draft_created and auto_draft_failed events
+- **Backend:** New collections: `automation_actions`, `so_drafts`, `ap_intake_drafts`
+- **Frontend:** DocumentIntelligencePanel extended with auto-draft section: "Create Draft" button, "Draft Created" success state with draft ID, duplicate message
+- **Frontend:** DocumentReviewQueuePage extended with "Create Draft" action column for ready documents, draft ID badges for existing drafts
+- **Safeguards:** Drafts only — no BC API calls, no inventory mutations, no auto-finalization, human review preserved
+- **Testing:** 29/30 backend tests passed (1 skipped), 100% frontend verification
+- **Test report:** `/app/test_reports/iteration_95.json`
+
+
 ## [2026-03-15] Iteration 94 — Document Intelligence Engine — COMPLETE
 - **Backend:** New `routers/document_intelligence.py` + `services/document_intelligence_service.py` (separate from monolith)
 - **Backend:** `POST /api/document-intelligence/process/{id}` — full pipeline: classify → extract → validate → derive automation readiness → store

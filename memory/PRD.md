@@ -3178,3 +3178,29 @@ EMAIL_CLIENT_ID=doc-workflow-test
 - Test report: `/app/test_reports/iteration_94.json`
 
 *Last Updated: March 15, 2026*
+
+
+---
+
+## Session Update: March 15, 2026 - Document-to-Transaction Auto-Draft (iteration_95)
+
+### Completed
+
+#### Document-to-Transaction Auto-Draft Creation
+- **Backend:** `POST /api/document-intelligence/auto-draft/{id}` — orchestrates: validate document → validate intelligence → check readiness → map doc type → create draft → store action → log activity → emit events
+- **Backend:** `GET /api/document-intelligence/auto-draft/{id}` — retrieves latest automation action for a document
+- **Backend:** Draft mappings: AP_Invoice → `ap_intake_drafts`, Freight/Shipping_Document → `po_drafts`, Sales_PO/customer_po → `so_drafts`
+- **Backend:** Duplicate prevention, readiness gate (422 for non-ready), 404 for missing doc/intelligence
+- **Backend:** Intelligence result enrichment: `auto_draft_available`, `auto_draft_created`, `target_entity_type`, `target_entity_id`, `last_automation_action_status`
+- **Backend:** Activity timeline: `auto_draft_created`, `auto_draft_failed` events
+- **Backend:** New collections: `automation_actions`, `so_drafts`, `ap_intake_drafts`
+- **Frontend:** DocumentIntelligencePanel: "Create Draft" button (ready docs), "Draft Created" success state, duplicate handling
+- **Frontend:** DocumentReviewQueuePage: "Create Draft" action column, draft ID badges
+- **Safeguards:** Drafts only — no BC API calls, no inventory mutations, no auto-finalization
+
+### Test Results
+- Backend: 29/30 (100%, 1 skipped)
+- Frontend: All UI flows verified (100%)
+- Test report: `/app/test_reports/iteration_95.json`
+
+*Last Updated: March 15, 2026*

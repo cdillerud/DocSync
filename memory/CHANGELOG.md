@@ -1,6 +1,23 @@
 # CHANGELOG - GPI Document Hub
 
 
+## [2026-03-15] Iteration 99 — Document Lifecycle Validation Engine — COMPLETE
+- **Backend:** New `services/document_lifecycle_service.py` — lifecycle templates (Sales Order, Purchasing, AP), stage detection, duplicate detection (invoice+vendor, PO+vendor), inconsistency detection (mismatched refs, lifecycle gaps)
+- **Backend:** `POST /api/document-intelligence/validate-lifecycle/{entity_type}/{entity_id}` — full lifecycle validation with stage/duplicate/inconsistency analysis
+- **Backend:** `GET /api/document-intelligence/lifecycle/{entity_type}/{entity_id}` — stored validation with enriched document list
+- **Backend:** `GET /api/document-intelligence/lifecycle-issues` — queue of entities with issues (filters: issue_type, entity_type)
+- **Backend:** Bundle enrichment: lifecycle_validation_status, lifecycle_stage, lifecycle_missing_documents
+- **Backend:** Document enrichment: lifecycle_status, lifecycle_stage, lifecycle_missing_documents, lifecycle_duplicate_flags
+- **Backend:** Activity events: lifecycle_validated, missing_document_detected, duplicate_detected
+- **Frontend:** New `/document-lifecycle` page — 5 summary cards, 2 filter dropdowns, issues table, detail drawer with stage progress, missing docs, duplicates, inconsistencies, re-validate button
+- **Frontend:** Lifecycle Status section in DocumentIntelligencePanel — stage badge, validation status, missing docs, duplicate warnings
+- **Frontend:** Nav item "Lifecycle" added to sidebar
+- **New collection:** `lifecycle_validations`
+- **Testing:** Backend 100% (24/24 passed), Frontend 100% — all verified by testing agent, all regression tests pass
+- **Test report:** `/app/test_reports/iteration_99.json`
+
+
+
 ## [2026-03-15] Iteration 98 — Document Bundle Detection & Transaction Grouping — COMPLETE
 - **Backend:** New `services/document_bundle_service.py` — layered grouping (PO 0.95 → invoice 0.92 → linked entity 0.88 → vendor+amount fuzzy 0.65)
 - **Backend:** `POST /api/document-intelligence/detect-bundles` — scans recent docs or specific IDs, groups by shared references

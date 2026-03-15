@@ -344,3 +344,6 @@ export const correctDocumentIntelligence = (docId, data) => api.patch(`/document
 export const getIntelligenceSummary = () => api.get('/document-intelligence/summary');
 export const createAutoDraft = (docId) => api.post(`/document-intelligence/auto-draft/${docId}`);
 export const getAutomationAction = (docId) => api.get(`/document-intelligence/auto-draft/${docId}`);
+export const resolveDocumentEntities = (docId) => api.post(`/document-intelligence/resolve-entities/${docId}`);
+export const getDocumentResolutions = (docId) => api.get(`/document-intelligence/resolution/${docId}`);
+export const correctResolution = (resolutionId, data) => api.patch(`/document-intelligence/resolution/${resolutionId}`, data);

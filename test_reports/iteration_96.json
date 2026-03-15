@@ -1,0 +1,145 @@
+{
+  "summary": "Iteration 96 - Entity Resolution Engine testing complete. Backend: 16/16 tests passed. All entity resolution endpoints functional: POST /api/document-intelligence/resolve-entities/{id} (resolves customer, vendor, PO#, invoice# from extracted fields), GET /api/document-intelligence/resolution/{id} (returns stored resolutions), PATCH /api/document-intelligence/resolution/{resolution_id} (manual override with original_resolution preservation). Entity resolution enrichment in GET /api/document-intelligence/{id} returns entity_resolution_status, blocking_items, unresolved/ambiguous counts. Auto-draft gating blocks when entity_resolution_status=blocked. Frontend: Entity Resolution section displays in DocumentIntelligencePanel with status badges, candidate lists, confirm buttons, and manual override inputs.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "DocumentIntelligencePanel", "issue": "Nested button inside button in Entity Resolution section (button inside onClick handler button)", "selector": "[data-testid='resolve-entities-btn']", "priority": "LOW - cosmetic hydration warning only"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Document Review Queue", "issues": ["Minor console warning about <tr>/<span> hydration - cosmetic only"]}
+    ]
+  },
+  "passed_tests": [
+    "Backend: POST /api/document-intelligence/resolve-entities/{id} returns 404 when no intelligence result exists",
+    "Backend: POST /api/document-intelligence/resolve-entities/{id} returns resolutions array and summary with status, blocking_items, unresolved_count, ambiguous_count",
+    "Backend: GET /api/document-intelligence/resolution/{id} returns all stored resolution results for a document",
+    "Backend: GET /api/document-intelligence/resolution/{id} returns empty list for document without entity resolution",
+    "Backend: PATCH /api/document-intelligence/resolution/{resolution_id} returns 404 for non-existent resolution_id",
+    "Backend: PATCH /api/document-intelligence/resolution/{resolution_id} preserves original_resolution for audit",
+    "Backend: GET /api/document-intelligence/{id} returns entity_resolution_status, entity_resolution_blocking_items, unresolved_entity_count, ambiguous_entity_count",
+    "Backend: POST /api/document-intelligence/auto-draft/{id} blocks when entity_resolution_status=blocked",
+    "Backend: Review queue includes entity_resolution_status, unresolved_entity_count, ambiguous_entity_count fields",
+    "Backend: Resolution statuses are valid (matched, ambiguous, unmatched, corrected)",
+    "Backend: Confidence values are in valid range [0, 1] and corrected resolutions have confidence=1.0",
+    "Backend: Ambiguous resolutions have multiple candidate matches",
+    "Backend: Iteration 95 - Auto-draft endpoint still works",
+    "Backend: Iteration 95 - Process endpoint still works",
+    "Backend: Iteration 95 - Review queue endpoint still works",
+    "Backend: Iteration 95 - Summary endpoint still works",
+    "Frontend: Document Intelligence Review Queue page loads with summary cards (7 processed, 6 ready, 0 needs review, 1 blocked)",
+    "Frontend: DocumentIntelligencePanel shows Entity Resolution section with resolve/re-resolve button",
+    "Frontend: Entity Resolution section shows resolution status badges (Matched/Ambiguous/Unmatched/Corrected)",
+    "Frontend: Ambiguous resolutions show candidate list with Confirm buttons",
+    "Frontend: Unmatched resolutions show manual override input fields (Entity ID, Name)",
+    "Frontend: Auto-Draft Blocked notice shows blocking items when entity_resolution_status=blocked",
+    "Frontend: Draft Created section shows created draft type and ID"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_entity_resolution.py",
+    "/app/test_reports/pytest/entity_resolution_results.xml"
+  ],
+  "action_items": [
+    "Optional: Fix nested button warning in DocumentIntelligencePanel.js Entity Resolution section (button inside button causing hydration warning)"
+  ],
+  "critical_code_review_comments": [
+    "Backend service: /app/backend/services/entity_resolution_service.py - Well-structured with layered resolution strategy (exact -> normalized -> fuzzy -> reference lookup)",
+    "Backend: _compute_resolution_summary properly computes overall status (blocked if unresolved, needs_review if ambiguous, resolved otherwise)",
+    "Backend: correct_resolution preserves original_resolution for audit trail and re-computes document-level entity_resolution_status",
+    "Backend: Auto-draft gating in document_intelligence_service.py create_auto_draft() step 4 correctly blocks when entity_resolution_status=blocked",
+    "Frontend: DocumentIntelligencePanel.js Entity Resolution section has proper data-testid attributes for testing",
+    "Frontend: DocumentReviewQueuePage.js correctly shows entity resolution badges in Reasons column"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_entity_resolution.py"
+  ],
+  "success_rate": {
+    "backend": "100% (16/16 tests passed)",
+    "frontend": "100% (all UI elements and flows verified)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://doc-auto-review.preview.emergentagent.com"
+  },
+  "seed_data_created": {
+    "entity_resolutions": "4 resolutions for doc 80c7ab51 (customer ambiguous, vendor unmatched, PO matched, invoice ambiguous), 3 resolutions for doc e4624c82 (customer matched, vendor unmatched, invoice ambiguous)",
+    "activities": "entity_resolution_issues activity records created for documents with resolution issues"
+  },
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 96 - Entity Resolution Engine fully tested. New endpoints: POST /api/document-intelligence/resolve-entities/{id} (resolves entities), GET /api/document-intelligence/resolution/{id} (get resolutions), PATCH /api/document-intelligence/resolution/{resolution_id} (manual correction). Resolution statuses: matched, ambiguous, unmatched, corrected. Entity kinds: customer, vendor, purchase_order, invoice. Intelligence result enriched with entity_resolution_status, entity_resolution_blocking_items, unresolved_entity_count, ambiguous_entity_count. Auto-draft gating blocks when entity_resolution_status=blocked. Key data-testids: entity-resolution-section, resolve-entities-btn, resolution-{id}, confirm-candidate-{id}-{index}, manual-id-{id}, manual-name-{id}, manual-resolve-btn-{id}, er-blocked-notice. Documents with entity resolution: 80c7ab51 (4 resolutions), e4624c82 (3 resolutions, blocked status). Collections: entity_resolutions, document_intelligence_results, activities.",
+  "features_verified": {
+    "backend_endpoints": {
+      "resolve_entities": {
+        "method": "POST",
+        "path": "/api/document-intelligence/resolve-entities/{doc_id}",
+        "returns": {
+          "document_id": "string",
+          "resolutions": "array of resolution objects",
+          "summary": {
+            "status": "resolved|needs_review|blocked",
+            "blocking_items": "array of strings",
+            "unresolved_count": "int",
+            "ambiguous_count": "int",
+            "total_resolved": "int"
+          }
+        },
+        "errors": {"404": "No intelligence result for document"}
+      },
+      "get_resolutions": {
+        "method": "GET",
+        "path": "/api/document-intelligence/resolution/{doc_id}",
+        "returns": {
+          "document_id": "string",
+          "resolutions": "array",
+          "total": "int"
+        }
+      },
+      "correct_resolution": {
+        "method": "PATCH",
+        "path": "/api/document-intelligence/resolution/{resolution_id}",
+        "body": {
+          "matched_entity_id": "optional string",
+          "matched_entity_name": "optional string",
+          "corrected_by": "string (default 'admin')",
+          "notes": "string",
+          "mark_unmatched": "boolean"
+        },
+        "behavior": [
+          "Sets resolution_status to 'corrected'",
+          "Sets match_confidence to 1.0",
+          "Preserves original_resolution for audit",
+          "Re-computes document-level entity_resolution_status"
+        ],
+        "errors": {"404": "Resolution not found"}
+      }
+    },
+    "frontend_components": {
+      "EntityResolutionSection": {
+        "data_testid": "entity-resolution-section",
+        "features": [
+          "Header with status badge (resolved/needs_review/blocked)",
+          "Resolve/Re-resolve button (data-testid='resolve-entities-btn')",
+          "Resolution items with status badges (Matched/Ambiguous/Unmatched/Corrected)",
+          "Candidate list with Confirm buttons for ambiguous resolutions",
+          "Manual override inputs (Entity ID, Name) for unmatched resolutions",
+          "Auto-Draft Blocked notice when entity_resolution_status=blocked"
+        ]
+      },
+      "ReviewQueueEntityResolution": {
+        "features": [
+          "'entities unresolved' badge in Reasons column",
+          "'entities ambiguous' badge in Reasons column",
+          "N unresolved/N ambiguous count badges"
+        ]
+      }
+    },
+    "resolution_statuses": ["matched", "ambiguous", "unmatched", "corrected"],
+    "entity_kinds": ["customer", "vendor", "purchase_order", "invoice"],
+    "confidence_thresholds": {"HIGH": 0.90, "MEDIUM": 0.70, "LOW": 0.50}
+  },
+  "mocked_apis_note": "Business Central API (BC sandbox) operates in DEMO MODE. Email service is MOCKED (in-memory)."
+}

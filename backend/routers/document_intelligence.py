@@ -25,6 +25,11 @@ from services.document_intelligence_service import (
     get_automation_action,
     DuplicateDraftError,
 )
+from services.entity_resolution_service import (
+    resolve_entities,
+    get_resolutions,
+    correct_resolution,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/document-intelligence", tags=["Document Intelligence"])
@@ -154,3 +159,59 @@ async def api_get_automation_action(doc_id: str):
     if not action:
         raise HTTPException(status_code=404, detail=f"No automation action for document: {doc_id}")
     return action
+
+
+# ── Entity Resolution Endpoints ──────────────────────────────────────────────
+
+class ResolutionCorrectionRequest(BaseModel):
+    matched_entity_id: Optional[str] = None
+    matched_entity_name: Optional[str] = None
+    corrected_by: str = "admin"
+    notes: str = ""
+    mark_unmatched: bool = False
+
+
+@router.post("/resolve-entities/{doc_id}")
+async def api_resolve_entities(doc_id: str):
+    """
+    Resolve extracted entities (customer, vendor, PO#, invoice#) for a document.
+    Returns resolution results with confidence and candidate matches.
+    """
+    try:
+        result = await resolve_entities(doc_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error("Entity resolution failed for %s: %s", doc_id, e)
+        raise HTTPException(status_code=500, detail=f"Entity resolution failed: {str(e)}")
+
+
+@router.get("/resolution/{doc_id}")
+async def api_get_resolutions(doc_id: str):
+    """Get all stored entity resolution results for a document."""
+    results = await get_resolutions(doc_id)
+    return {"document_id": doc_id, "resolutions": results, "total": len(results)}
+
+
+@router.patch("/resolution/{resolution_id}")
+async def api_correct_resolution(resolution_id: str, body: ResolutionCorrectionRequest):
+    """
+    Manually correct an entity resolution result.
+    Choose a different match, confirm a candidate, or mark unmatched.
+    """
+    try:
+        result = await correct_resolution(
+            resolution_id=resolution_id,
+            matched_entity_id=body.matched_entity_id,
+            matched_entity_name=body.matched_entity_name,
+            corrected_by=body.corrected_by,
+            notes=body.notes,
+            mark_unmatched=body.mark_unmatched,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error("Resolution correction failed for %s: %s", resolution_id, e)
+        raise HTTPException(status_code=500, detail=f"Correction failed: {str(e)}")

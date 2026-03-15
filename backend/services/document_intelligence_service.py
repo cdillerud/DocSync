@@ -830,7 +830,16 @@ async def create_auto_draft(doc_id: str) -> Dict[str, Any]:
             f"Reasons: {intel.get('automation_readiness_reasons', [])}"
         )
 
-    # 4) Resolve draft mapping
+    # 4) Check entity resolution — block if required entities unresolved
+    er_status = intel.get("entity_resolution_status")
+    if er_status == "blocked":
+        blocking = intel.get("entity_resolution_blocking_items", [])
+        raise PermissionError(
+            f"Auto-draft blocked by unresolved entities: {blocking}. "
+            f"Run entity resolution and resolve before creating drafts."
+        )
+
+    # 6) Resolve draft mapping
     document_type = intel.get("document_type", "")
     mapping = _resolve_draft_mapping(document_type)
     if not mapping:
@@ -842,7 +851,7 @@ async def create_auto_draft(doc_id: str) -> Dict[str, Any]:
     target_entity_type = mapping["target_entity_type"]
     action_type = mapping["action_type"]
 
-    # 5) Duplicate prevention
+    # 7) Duplicate prevention
     existing_action = await db[AUTOMATION_ACTIONS_COLLECTION].find_one(
         {
             "document_id": doc_id,

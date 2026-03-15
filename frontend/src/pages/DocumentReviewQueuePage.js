@@ -291,6 +291,18 @@ export default function DocumentReviewQueuePage() {
                             {(item.automation_readiness_reasons || []).length > 3 && (
                               <Badge variant="outline" className="text-[9px]">+{item.automation_readiness_reasons.length - 3}</Badge>
                             )}
+                            {item.entity_resolution_status === 'blocked' && (
+                              <Badge variant="outline" className="text-[9px] font-mono border-red-500/30 text-red-400">entities unresolved</Badge>
+                            )}
+                            {item.entity_resolution_status === 'needs_review' && (
+                              <Badge variant="outline" className="text-[9px] font-mono border-amber-500/30 text-amber-400">entities ambiguous</Badge>
+                            )}
+                            {item.unresolved_entity_count > 0 && (
+                              <Badge variant="outline" className="text-[9px] border-red-500/30 text-red-400">{item.unresolved_entity_count} unresolved</Badge>
+                            )}
+                            {item.ambiguous_entity_count > 0 && (
+                              <Badge variant="outline" className="text-[9px] border-amber-500/30 text-amber-400">{item.ambiguous_entity_count} ambiguous</Badge>
+                            )}
                           </div>
                         </td>
                         <td className="px-4 py-3 text-right">

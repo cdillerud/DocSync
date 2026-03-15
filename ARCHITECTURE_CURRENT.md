@@ -201,6 +201,112 @@ Document received
 
 ---
 
+## 4b. Decisioning and Automation Domain (Consolidated)
+
+### Before-state
+
+Six services with overlapping patterns for timestamps, activity logging, and document mutation:
+
+| Service | Lines | Responsibility |
+|---------|-------|---------------|
+| `decision_policy_service` | 744 | Policy evaluation → action recommendation (create_draft / link / hold / block) |
+| `automation_rules_service` | 474 | Rule evaluation → workflow routing (queue / priority / flags / auto-ready) |
+| `auto_resolution_service` | 775 | Background orchestrator — reference resolution + post-processing chain |
+| `workflow_engine` | 1433 | Deterministic state machine for document workflows |
+| `auto_clear_service` | 420 | Threshold-based auto-archiving |
+| `auto_post_service` | 675 | BC API execution for posting / creating |
+
+**Overlaps removed:**
+- ~30 inline `datetime.now(timezone.utc).isoformat()` calls across 5 services → `utcnow()`
+- Activity record creation pattern (from decision_policy_service) → `create_activity()`
+- Document `$set` dict construction without `updated_utc` protection → `build_document_update()` / `apply_document_update()`
+
+### Service boundaries (after)
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                     DECISIONING & AUTOMATION                         │
+│                                                                      │
+│  automation_helpers.py  ← shared: utcnow(), create_activity(),       │
+│                           build_document_update(), EligibilityResult  │
+│                                                                      │
+│  ┌──────────────────┐  ┌─────────────────────┐  ┌────────────────┐  │
+│  │ decision_policy   │  │ automation_rules     │  │ workflow_engine │  │
+│  │ WHAT to do        │  │ WHERE to route       │  │ STATE MACHINE  │  │
+│  │ (policy → action) │  │ (rule → queue/prio)  │  │ (transitions)  │  │
+│  └──────────────────┘  └─────────────────────┘  └────────────────┘  │
+│                                                                      │
+│  ┌────────────────────────────────────────────────────────────────┐  │
+│  │ auto_resolution_service                                        │  │
+│  │ WHEN & ORCHESTRATE (background: resolve → validate → route)    │  │
+│  └────────────────────────────────────────────────────────────────┘  │
+│                                                                      │
+│  ┌──────────────────┐  ┌─────────────────────┐                      │
+│  │ auto_clear        │  │ auto_post            │                      │
+│  │ ARCHIVE decision  │  │ BC EXECUTION         │                      │
+│  │ (threshold check) │  │ (API calls)          │                      │
+│  └──────────────────┘  └─────────────────────┘                      │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### Canonical decision-to-execution flow
+
+```
+Document enters system
+  │
+  ├─ 1. GATHER CONTEXT
+  │     auto_resolution_service runs reference intelligence,
+  │     vendor intel update, layout fingerprinting, AP validation
+  │
+  ├─ 2. EVALUATE POLICY
+  │     decision_policy_service.evaluate_decision()
+  │     → action recommendation (create_draft / link / hold / block)
+  │
+  ├─ 3. EVALUATE RULES
+  │     automation_rules_service.evaluate_document()
+  │     → routing decision (queue, priority, flags, auto-ready)
+  │
+  ├─ 4. CHECK ELIGIBILITY
+  │     auto_clear_service.evaluate_auto_clear()
+  │     → threshold checks per doc type → cleared / needs_review
+  │     auto_post_service.check_auto_post_eligibility()
+  │     → field-present checks for BC API readiness
+  │
+  ├─ 5. EXECUTE
+  │     auto_clear_service → archive high-confidence docs
+  │     auto_post_service → post AP invoices / create SOs in BC
+  │
+  └─ 6. RECORD
+        workflow_engine → state transition + history
+        automation_helpers.create_activity() → audit trail
+```
+
+### Shared helpers (`automation_helpers.py`)
+
+| Function | Purpose | Used by |
+|----------|---------|---------|
+| `utcnow()` | ISO-8601 UTC timestamp | All 5 automation services |
+| `create_activity()` | Canonical activity record insertion | decision_policy (+ available to others) |
+| `build_document_update(fields)` | `$set` dict with enforced `updated_utc` | auto_resolution, auto_post |
+| `apply_document_update(db, doc_id, fields)` | Build + execute document update | auto_post |
+| `EligibilityCheck` | Single check result dataclass | (available for adoption) |
+| `EligibilityResult` | Aggregate eligibility result | (available for adoption) |
+
+### What remains intentionally separate
+
+- **`decision_policy_service`** evaluates *configurable policies* with MongoDB-style operators (`$in`, `$gte`, etc.). **`automation_rules_service`** evaluates *routing rules* with a different condition format (`_gte` suffix, bool matching). These serve different configuration audiences and cannot easily be unified.
+- **`auto_clear_service`** and **`auto_post_service`** both execute automation but against different targets (queue archival vs. BC API posting). They share the `utcnow()` helper but their eligibility checks and execution logic are domain-specific.
+- **`workflow_engine`** is a deterministic state machine — it does not make decisions; it validates and records transitions. It was not modified in this pass because it has no duplicated logic with the other services.
+
+### Known follow-up debt
+
+- `workflow_engine.py` (1433 lines) is the largest file in the domain — candidate for splitting the workflow definitions (per doc type) into a config file.
+- `auto_resolution_service.py` post-processing chain (lines 350-650) calls ~8 services sequentially — candidate for making this an explicit pipeline similar to `document_pipeline.py`.
+- `auto_clear_service` and `auto_post_service` eligibility checks could adopt the shared `EligibilityCheck`/`EligibilityResult` types for consistent reporting.
+- `decision_policy_service` condition checking and `automation_rules_service` condition matching could share a base operator library in a future pass.
+
+---
+
 ## 5. Core Service Domains
 
 | Domain | Key Services | DB Collections |
@@ -210,7 +316,8 @@ Document received
 | **Transaction Matching** | `transaction_matching_service` | `transaction_matches` |
 | **Document Bundling** | `document_bundle_service` | `document_bundles` |
 | **Lifecycle Validation** | `document_lifecycle_service` | `lifecycle_validations` |
-| **Decision Policy** | `decision_policy_service` | `decision_policies`, `decision_results` |
+| **Decision Policy** | `decision_policy_service`, `automation_helpers` | `automation_policies`, `automation_decisions`, `activities` |
+| **Automation & Execution** | `automation_rules_service`, `auto_resolution_service`, `auto_clear_service`, `auto_post_service`, `workflow_engine` | `hub_documents` (status fields), `automation_rules` |
 | **Learning Loop** | `learning_loop_service` | `learning_events`, `extraction_hints`, `learning_metrics` |
 | **Reference Intelligence** | `reference_intelligence_service`, `bc_reference_resolver`, `bc_reference_cache_service`, `reference_helpers`, `bc_access` | `matching_diagnostics`, `bc_reference_cache` |
 | **Vendor Intelligence** | `vendor_intelligence_service`, `stable_vendor_service`, `vendor_extraction_profile_service` | `vendor_intelligence_profiles`, `vendor_extraction_profiles` |

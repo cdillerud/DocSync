@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 
 from deps import get_db
+from services.automation_helpers import utcnow, create_activity, build_document_update
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,6 @@ DECISIONS_COLLECTION = "automation_decisions"
 INTELLIGENCE_COLLECTION = "document_intelligence_results"
 BUNDLES_COLLECTION = "document_bundles"
 VALIDATIONS_COLLECTION = "lifecycle_validations"
-ACTIVITIES_COLLECTION = "activities"
 
 # Decision actions
 ACTION_CREATE_DRAFT = "create_draft"
@@ -46,20 +46,8 @@ DS_SKIPPED = "skipped"
 
 
 async def _create_activity(db, entity_id, entity_type, activity_type, title, body="", metadata=None):
-    now = datetime.now(timezone.utc).isoformat()
-    record = {
-        "activity_id": f"ACT-{uuid.uuid4().hex[:8].upper()}",
-        "entity_type": entity_type,
-        "entity_id": entity_id,
-        "activity_type": activity_type,
-        "title": title,
-        "body": body,
-        "created_by": "system",
-        "created_at": now,
-        "metadata": metadata or {},
-    }
-    await db[ACTIVITIES_COLLECTION].insert_one(record.copy())
-    record.pop("_id", None)
+    """Delegates to shared automation_helpers.create_activity."""
+    await create_activity(db, entity_id, entity_type, activity_type, title, body, metadata)
 
 
 # ── Default Policies (seeded on first use) ───────────────────────────────────
@@ -200,7 +188,7 @@ async def _seed_default_policies(db):
     count = await db[POLICIES_COLLECTION].count_documents({})
     if count > 0:
         return
-    now = datetime.now(timezone.utc).isoformat()
+    now = utcnow()
     for p in DEFAULT_POLICIES:
         record = {
             "policy_id": f"POL-{uuid.uuid4().hex[:8].upper()}",
@@ -218,7 +206,7 @@ async def _seed_default_policies(db):
 
 async def create_policy(data: Dict[str, Any]) -> Dict[str, Any]:
     db = get_db()
-    now = datetime.now(timezone.utc).isoformat()
+    now = utcnow()
     record = {
         "policy_id": f"POL-{uuid.uuid4().hex[:8].upper()}",
         "name": data.get("name", ""),
@@ -265,7 +253,7 @@ async def update_policy(policy_id: str, updates: Dict[str, Any]) -> Dict[str, An
     existing = await db[POLICIES_COLLECTION].find_one({"policy_id": policy_id}, {"_id": 0})
     if not existing:
         raise ValueError(f"Policy not found: {policy_id}")
-    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    updates["updated_at"] = utcnow()
     updates.pop("policy_id", None)
     updates.pop("_id", None)
     await db[POLICIES_COLLECTION].update_one(
@@ -281,7 +269,7 @@ async def delete_policy(policy_id: str) -> Dict[str, Any]:
         raise ValueError(f"Policy not found: {policy_id}")
     await db[POLICIES_COLLECTION].update_one(
         {"policy_id": policy_id},
-        {"$set": {"is_active": False, "updated_at": datetime.now(timezone.utc).isoformat()}},
+        {"$set": {"is_active": False, "updated_at": utcnow()}},
     )
     return {"deleted": True, "policy_id": policy_id}
 
@@ -427,7 +415,7 @@ async def evaluate_decision(doc_id: str, evaluated_by: str = "system") -> Dict[s
     """
     db = get_db()
     await _seed_default_policies(db)
-    now = datetime.now(timezone.utc).isoformat()
+    now = utcnow()
 
     # Load intelligence result
     intel = await db[INTELLIGENCE_COLLECTION].find_one(
@@ -586,7 +574,7 @@ async def execute_decision(decision_id: str, executed_by: str = "admin") -> Dict
     Only executes 'ready' decisions. Hold/block decisions are not executable.
     """
     db = get_db()
-    now = datetime.now(timezone.utc).isoformat()
+    now = utcnow()
 
     decision = await db[DECISIONS_COLLECTION].find_one(
         {"decision_id": decision_id}, {"_id": 0}

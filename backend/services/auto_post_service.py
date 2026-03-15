@@ -17,6 +17,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
+from services.automation_helpers import utcnow, apply_document_update
+
 logger = logging.getLogger(__name__)
 
 # Configuration
@@ -44,7 +46,7 @@ class AutoPostResult:
         self.bc_document_number = bc_document_number
         self.error = error
         self.reason = reason
-        self.timestamp = datetime.now(timezone.utc).isoformat()
+        self.timestamp = utcnow()
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -235,8 +237,8 @@ async def attempt_auto_post(doc_id: str, doc: Dict[str, Any], db, bc_service) ->
             {"$set": {
                 "bc_posting_status": "auto_posting",
                 "auto_post_attempted": True,
-                "auto_post_attempted_at": datetime.now(timezone.utc).isoformat(),
-                "updated_utc": datetime.now(timezone.utc).isoformat()
+                "auto_post_attempted_at": utcnow(),
+                "updated_utc": utcnow()
             }}
         )
         
@@ -277,8 +279,8 @@ async def attempt_auto_post(doc_id: str, doc: Dict[str, Any], db, bc_service) ->
                     "status": "Posted",
                     "workflow_status": "posted",
                     "auto_post_success": True,
-                    "posted_to_bc_utc": datetime.now(timezone.utc).isoformat(),
-                    "updated_utc": datetime.now(timezone.utc).isoformat()
+                    "posted_to_bc_utc": utcnow(),
+                    "updated_utc": utcnow()
                 }}
             )
             
@@ -303,7 +305,7 @@ async def attempt_auto_post(doc_id: str, doc: Dict[str, Any], db, bc_service) ->
                     "bc_posting_error": error_msg,
                     "review_status": "needs_review",
                     "auto_post_success": False,
-                    "updated_utc": datetime.now(timezone.utc).isoformat()
+                    "updated_utc": utcnow()
                 }}
             )
             
@@ -328,7 +330,7 @@ async def attempt_auto_post(doc_id: str, doc: Dict[str, Any], db, bc_service) ->
                 "bc_posting_error": error_msg,
                 "review_status": "needs_review",
                 "auto_post_success": False,
-                "updated_utc": datetime.now(timezone.utc).isoformat()
+                "updated_utc": utcnow()
             }}
         )
         
@@ -470,7 +472,7 @@ async def attempt_auto_create_sales_order(doc_id: str, doc: Dict[str, Any], db, 
                 "auto_create_attempted": True,
                 "auto_create_error": f"Customer '{customer_name}' not found in BC",
                 "review_status": "needs_review",
-                "updated_utc": datetime.now(timezone.utc).isoformat()
+                "updated_utc": utcnow()
             }}
         )
         return AutoPostResult(
@@ -498,8 +500,8 @@ async def attempt_auto_create_sales_order(doc_id: str, doc: Dict[str, Any], db, 
             {"$set": {
                 "bc_posting_status": "auto_creating",
                 "auto_create_attempted": True,
-                "auto_create_attempted_at": datetime.now(timezone.utc).isoformat(),
-                "updated_utc": datetime.now(timezone.utc).isoformat()
+                "auto_create_attempted_at": utcnow(),
+                "updated_utc": utcnow()
             }}
         )
         
@@ -524,8 +526,8 @@ async def attempt_auto_create_sales_order(doc_id: str, doc: Dict[str, Any], db, 
                     "status": "Created",
                     "workflow_status": "exported",
                     "auto_create_success": True,
-                    "created_in_bc_utc": datetime.now(timezone.utc).isoformat(),
-                    "updated_utc": datetime.now(timezone.utc).isoformat()
+                    "created_in_bc_utc": utcnow(),
+                    "updated_utc": utcnow()
                 }}
             )
             
@@ -549,7 +551,7 @@ async def attempt_auto_create_sales_order(doc_id: str, doc: Dict[str, Any], db, 
                     "bc_posting_error": error_msg,
                     "review_status": "needs_review",
                     "auto_create_success": False,
-                    "updated_utc": datetime.now(timezone.utc).isoformat()
+                    "updated_utc": utcnow()
                 }}
             )
             
@@ -574,7 +576,7 @@ async def attempt_auto_create_sales_order(doc_id: str, doc: Dict[str, Any], db, 
                 "bc_posting_error": error_msg,
                 "review_status": "needs_review",
                 "auto_create_success": False,
-                "updated_utc": datetime.now(timezone.utc).isoformat()
+                "updated_utc": utcnow()
             }}
         )
         

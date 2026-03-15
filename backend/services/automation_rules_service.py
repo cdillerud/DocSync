@@ -16,8 +16,9 @@ Events: automation.rule.triggered, .skipped, .failed
 
 import logging
 import uuid
-from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
+
+from services.automation_helpers import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -157,8 +158,8 @@ class AutomationRulesService:
             "conditions": rule_data.get("conditions", {}),
             "actions": rule_data.get("actions", {}),
             "priority": rule_data.get("priority", 100),
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": utcnow(),
+            "updated_at": utcnow(),
         }
         await self.collection.insert_one(rule)
         rule.pop("_id", None)
@@ -175,7 +176,7 @@ class AutomationRulesService:
 
     async def update_rule(self, rule_id: str, updates: Dict) -> Optional[Dict]:
         """Update an existing rule."""
-        updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+        updates["updated_at"] = utcnow()
         updates.pop("rule_id", None)
         updates.pop("_id", None)
 
@@ -332,8 +333,8 @@ class AutomationRulesService:
         if updates:
             updates["automation_rule_applied"] = rule.get("rule_id")
             updates["automation_rule_name"] = rule.get("rule_name")
-            updates["automation_rule_applied_at"] = datetime.now(timezone.utc).isoformat()
-            updates["updated_utc"] = datetime.now(timezone.utc).isoformat()
+            updates["automation_rule_applied_at"] = utcnow()
+            updates["updated_utc"] = utcnow()
             await self.db.hub_documents.update_one({"id": doc_id}, {"$set": updates})
 
         return result

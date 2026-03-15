@@ -27,6 +27,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
+from services.automation_helpers import utcnow, build_document_update
+
 logger = logging.getLogger(__name__)
 
 # Auto-resolution configuration
@@ -241,7 +243,7 @@ class AutoResolutionService:
             {"id": doc_id},
             {"$set": {
                 "reference_intelligence_status": "pending",
-                "updated_utc": datetime.now(timezone.utc).isoformat()
+                "updated_utc": utcnow()
             }}
         )
         await self._emit("reference.resolve.started", doc_id, payload={
@@ -287,14 +289,14 @@ class AutoResolutionService:
                 {"id": doc_id},
                 {"$set": {
                     "reference_intelligence_status": status_map.get(outcome, "completed"),
-                    "reference_intelligence_last_run": datetime.now(timezone.utc).isoformat(),
+                    "reference_intelligence_last_run": utcnow(),
                     "reference_intelligence_version": RESOLVER_VERSION,
                     "reference_intelligence_hash": resolution_hash,
                     "reference_intelligence_outcome": outcome,
                     "reference_intelligence_best_score": (
                         resolution.best_match.match_score if resolution.best_match else None
                     ),
-                    "updated_utc": datetime.now(timezone.utc).isoformat()
+                    "updated_utc": utcnow()
                 }}
             )
 
@@ -426,7 +428,7 @@ class AutoResolutionService:
                                 "vendor_score": sv_result.get("vendor_stability", {}).get("stable_vendor_score", 0),
                                 "checks": sv_result.get("checks", []),
                             },
-                            "updated_utc": datetime.now(timezone.utc).isoformat(),
+                            "updated_utc": utcnow(),
                         }
                         # If auto_ready, update workflow signals
                         if routing == "auto_ready":
@@ -454,7 +456,7 @@ class AutoResolutionService:
                     {"$set": {
                         "reference_intelligence_status": "retry_scheduled",
                         "reference_intelligence_retry_count": retry_count + 1,
-                        "updated_utc": datetime.now(timezone.utc).isoformat()
+                        "updated_utc": utcnow()
                     }}
                 )
                 await self._emit("reference.resolve.retry_scheduled", doc_id, payload={
@@ -471,7 +473,7 @@ class AutoResolutionService:
                     {"$set": {
                         "reference_intelligence_status": "failed",
                         "reference_intelligence_error": str(e),
-                        "updated_utc": datetime.now(timezone.utc).isoformat()
+                        "updated_utc": utcnow()
                     }}
                 )
                 await self._emit("reference.resolve.failed", doc_id, status="error", payload={
@@ -655,10 +657,10 @@ class AutoResolutionService:
                 "validation_warnings": [w.get("details", str(w)) if isinstance(w, dict) else str(w) for w in result_dict.get("warnings", [])],
                 "validation_summary": self._build_validation_summary(result_dict),
                 "validation_version": self.VALIDATION_VERSION,
-                "validation_last_run": datetime.now(timezone.utc).isoformat(),
+                "validation_last_run": utcnow(),
                 "derived_workflow_state": workflow_state,
                 "derived_automation_state": automation_state,
-                "updated_utc": datetime.now(timezone.utc).isoformat(),
+                "updated_utc": utcnow(),
             }
             
             await self.db.hub_documents.update_one({"id": doc_id}, {"$set": update})

@@ -13,6 +13,8 @@ from typing import Dict, Any, Optional, Tuple
 from datetime import datetime, timezone
 from enum import Enum
 
+from services.automation_helpers import utcnow
+
 logger = logging.getLogger(__name__)
 
 
@@ -127,7 +129,7 @@ def evaluate_auto_clear(
     details = {
         "doc_id": doc.get("id"),
         "doc_type": doc_type,
-        "evaluated_at": datetime.now(timezone.utc).isoformat(),
+        "evaluated_at": utcnow(),
         "checks": [],
         "threshold_config": type_config
     }
@@ -348,7 +350,7 @@ def get_auto_clear_update(
     
     Returns the $set dictionary to apply to the document.
     """
-    now = datetime.now(timezone.utc).isoformat()
+    now = utcnow()
     
     if decision == AutoClearDecision.CLEARED:
         return {

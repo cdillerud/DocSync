@@ -19,7 +19,7 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 # Create router
-ap_review_router = APIRouter(prefix="/api/ap-review", tags=["AP Review"])
+ap_review_router = APIRouter(prefix="/ap-review", tags=["AP Review"])
 
 # Upload directory for document files
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")

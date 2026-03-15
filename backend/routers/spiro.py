@@ -18,7 +18,7 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 # Create router
-spiro_router = APIRouter(prefix="/api/spiro", tags=["Spiro Integration"])
+spiro_router = APIRouter(prefix="/spiro", tags=["Spiro Integration"])
 
 # Database reference (set during app startup)
 db = None

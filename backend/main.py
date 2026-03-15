@@ -1,11 +1,10 @@
 """
-GPI Document Hub - Main Application Entry Point
+GPI Document Hub - Main Application Entry Point (Authoritative)
 
-This is the clean, modular entry point for the application.
-It composes the app from:
-  1. Modular routers in /routers/  (cleanly extracted domain modules)
-  2. Legacy api_router from server.py  (routes not yet extracted)
-  3. Additional module routers (sales, ap_review, spiro)
+Single entry point for the application. Composes the app from:
+  1. Modular routers in /routers/  (all domain modules)
+  2. Legacy api_router from server.py  (routes not yet fully extracted)
+  3. Sales module router
 
 server.py is imported as a library — its startup/shutdown functions
 handle all service initialization and teardown.
@@ -31,13 +30,11 @@ import server
 # Legacy api_router — contains all document/workflow routes still in server.py
 from server import api_router as legacy_api_router
 
-# Additional routers defined outside of /routers/
+# Sales module router (standalone)
 from sales_module import sales_router
-from routes.ap_review import ap_review_router, set_dependencies as set_ap_review_deps
-from routes.spiro import spiro_router
 
 # ---------------------------------------------------------------------------
-# Modular routers (extracted from the monolith into /routers/)
+# All routers live under /routers/ (single convention)
 # ---------------------------------------------------------------------------
 from routers.automation_rules import router as automation_rules_router
 from routers.freight_routing import router as freight_routing_router
@@ -74,7 +71,9 @@ from routers.documents import router as documents_router, register_server_routes
 from routers.workflows import router as workflows_router, register_server_routes as register_wf_routes
 from routers.reference_intelligence import router as ref_intel_router, register_server_routes as register_ri_routes
 from routers.document_intelligence import router as document_intelligence_router
-from routes.auth import router as auth_router
+from routers.auth import router as auth_router
+from routers.ap_review import ap_review_router, set_dependencies as set_ap_review_deps
+from routers.spiro import spiro_router
 
 # ==================== APP ====================
 app = FastAPI(title="GPI Document Hub API")
@@ -87,7 +86,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ==================== MODULAR ROUTERS (prefix /api) ====================
+# ==================== ALL ROUTERS (prefix /api) ====================
 app.include_router(automation_rules_router, prefix="/api")
 app.include_router(freight_routing_router, prefix="/api")
 app.include_router(label_corrections_router, prefix="/api")
@@ -125,16 +124,14 @@ app.include_router(workflows_router, prefix="/api")
 app.include_router(ref_intel_router, prefix="/api")
 app.include_router(document_intelligence_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
+app.include_router(ap_review_router, prefix="/api")
+app.include_router(spiro_router, prefix="/api")
 
 # ==================== LEGACY ROUTERS ====================
 # api_router has prefix="/api" — document, workflow, alias, BC, sales-file-import routes
 app.include_router(legacy_api_router)
 # Sales Module (Phase 0)
 app.include_router(sales_router)
-# AP Review Module
-app.include_router(ap_review_router)
-# Spiro Integration Module
-app.include_router(spiro_router)
 
 
 # ==================== HEALTH CHECK ====================

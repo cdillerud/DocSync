@@ -75,7 +75,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://doc-dedup-match.preview.emergentagent.com"
+    "api_url": "https://arch-remediation.preview.emergentagent.com"
   },
   "seed_data_used": {
     "existing_saved_view": "My High Priority Unassigned (SV-C66BD1B6) - set as default",

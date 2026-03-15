@@ -609,3 +609,52 @@ async def api_confirm_match(match_id: str, body: MatchConfirmRequest):
     except Exception as e:
         logger.error("Match confirmation failed for %s: %s", match_id, e)
         raise HTTPException(status_code=500, detail=f"Confirmation failed: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# Canonical pipeline endpoint
+# ---------------------------------------------------------------------------
+
+@router.post("/pipeline/{doc_id}",
+             summary="Run the canonical document processing pipeline")
+async def run_document_pipeline(
+    doc_id: str,
+    stop_after: Optional[str] = Query(
+        None,
+        description="Stop after this stage (e.g. 'entity_resolution')",
+    ),
+    skip_stages: Optional[str] = Query(
+        None,
+        description="Comma-separated stages to skip",
+    ),
+):
+    """Execute the full (or partial) document processing pipeline.
+
+    Stages in order: classification, entity_resolution, transaction_match,
+    bundle_detection, lifecycle_check, policy_decision, learning_capture.
+    """
+    from services.pipeline.document_pipeline import run_pipeline, STAGE_ORDER
+
+    if stop_after and stop_after not in STAGE_ORDER:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid stop_after stage '{stop_after}'. "
+                   f"Valid: {STAGE_ORDER}",
+        )
+
+    skip = [s.strip() for s in skip_stages.split(",") if s.strip()] if skip_stages else None
+
+    try:
+        result = await run_pipeline(doc_id, stop_after=stop_after, skip_stages=skip)
+        return result.to_dict()
+    except Exception as e:
+        logger.error("Pipeline failed for %s: %s", doc_id, e)
+        raise HTTPException(status_code=500, detail=f"Pipeline error: {str(e)}")
+
+
+@router.get("/pipeline/stages",
+            summary="List available pipeline stages in order")
+async def list_pipeline_stages():
+    """Return the ordered list of pipeline stage names."""
+    from services.pipeline.document_pipeline import STAGE_ORDER
+    return {"stages": STAGE_ORDER}

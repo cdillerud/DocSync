@@ -212,7 +212,11 @@ SHAREPOINT_SITE_PATH = os.environ.get('SHAREPOINT_SITE_PATH', '/sites/GPI-Docume
 SHAREPOINT_LIBRARY_NAME = os.environ.get('SHAREPOINT_LIBRARY_NAME', 'Documents')
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 
-app = FastAPI(title="GPI Document Hub API")
+# ---------------------------------------------------------------------------
+# server.py is used as a LIBRARY by main.py, not as a served app.
+# The FastAPI app instance lives in main.py.
+# api_router below collects legacy routes not yet extracted to /routers/.
+# ---------------------------------------------------------------------------
 api_router = APIRouter(prefix="/api")
 
 # Global polling task references
@@ -221,11 +225,11 @@ _sales_polling_task = None
 _pilot_summary_task = None
 
 # ==================== AUTH ====================
-# NOTE: Auth endpoints moved to routes/auth.py
-from routes.auth import router as auth_router
+# NOTE: Auth endpoints are in routers/auth.py, registered by main.py
+from routers.auth import router as auth_router
 
 # ==================== AP REVIEW ====================
-from routes.ap_review import ap_review_router, set_dependencies as set_ap_review_deps
+from routers.ap_review import ap_review_router, set_dependencies as set_ap_review_deps
 from services.business_central_service import BusinessCentralService, get_bc_service
 
 # ==================== AUTO-POST SERVICE ====================
@@ -240,15 +244,12 @@ from services.auto_post_service import (
 )
 
 # ==================== SHAREPOINT MIGRATION ====================
-try:
-    from routes.sharepoint_migration import router as sharepoint_migration_router
-    import routes.sharepoint_migration as sharepoint_migration_module
-except ImportError:
-    sharepoint_migration_router = None
-    sharepoint_migration_module = None
+# Module does not currently exist; kept as None for forward-compatibility.
+sharepoint_migration_router = None
+sharepoint_migration_module = None
 
 # ==================== SPIRO INTEGRATION ====================
-from routes.spiro import spiro_router, set_spiro_routes_db
+from routers.spiro import spiro_router, set_spiro_routes_db
 from services.spiro.spiro_sync import set_spiro_db
 
 import jwt as pyjwt
@@ -9142,81 +9143,11 @@ async def reingest_single_document(doc_id: str):
 
 # Sales file import routes moved to routers/file_import.py — REMOVED (Domain 4)
 
-
-# ==================== APP SETUP ====================
-
-# --- Modular routers (extracted from server.py) ---
-from routers.automation_rules import router as automation_rules_router
-from routers.freight_routing import router as freight_routing_router
-from routers.label_corrections import router as label_corrections_router
-from routers.alerts import router as alerts_router
-from routers.vendor_extraction_profiles import router as vep_router
-from routers.layout_fingerprints import router as layout_fp_router
-from routers.vendor_intelligence import router as vendor_intel_router
-from routers.cache import router as cache_router
-from routers.metrics import router as metrics_router
-from routers.bc_sandbox import router as bc_sandbox_router
-from routers.ap_validation import router as ap_validation_router
-from routers.pilot import router as pilot_router
-from routers.events import router as events_router
-from routers.settings import router as settings_router
-from routers.admin import router as admin_router
-from routers.auto_clear import router as auto_clear_router
-from routers.dashboard import router as dashboard_router
-from routers.sharepoint import router as sharepoint_admin_router
-from routers.square9 import router as square9_router
-from routers.email_polling import router as email_polling_router
-from routers.vendors import router as vendors_router
-from routers.migration_routes import router as migration_routes_router
-from routers.sales_dashboard import router as sales_dashboard_router
-from routers.inventory_ledger import router as inventory_ledger_router
-
-app.include_router(automation_rules_router, prefix="/api")
-app.include_router(freight_routing_router, prefix="/api")
-app.include_router(label_corrections_router, prefix="/api")
-app.include_router(alerts_router, prefix="/api")
-app.include_router(vep_router, prefix="/api")
-app.include_router(layout_fp_router, prefix="/api")
-app.include_router(vendor_intel_router, prefix="/api")
-app.include_router(cache_router, prefix="/api")
-app.include_router(metrics_router, prefix="/api")
-app.include_router(bc_sandbox_router, prefix="/api")
-app.include_router(ap_validation_router, prefix="/api")
-app.include_router(pilot_router, prefix="/api")
-app.include_router(events_router, prefix="/api")
-app.include_router(settings_router, prefix="/api")
-app.include_router(admin_router, prefix="/api")
-app.include_router(auto_clear_router, prefix="/api")
-app.include_router(dashboard_router, prefix="/api")
-app.include_router(sharepoint_admin_router, prefix="/api")
-app.include_router(square9_router, prefix="/api")
-app.include_router(email_polling_router, prefix="/api")
-app.include_router(vendors_router, prefix="/api")
-app.include_router(migration_routes_router, prefix="/api")
-app.include_router(sales_dashboard_router, prefix="/api")
-app.include_router(inventory_ledger_router, prefix="/api")
-
-# --- Legacy api_router (remaining document + workflow routes) ---
-app.include_router(api_router)
-# Sales Module (Phase 0 - BC disconnected)
-app.include_router(sales_router)
-# AP Review Module
-app.include_router(ap_review_router)
-# Spiro Integration Module
-app.include_router(spiro_router)
-
-@app.get("/api/health")
-async def health_check():
-    """Health check endpoint for Docker/Kubernetes probes."""
-    return {"status": "healthy", "service": "gpi-document-hub"}
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# ---------------------------------------------------------------------------
+# NOTE: Router imports and app.include_router() calls that used to live here
+# have been removed.  All router wiring is now in main.py (the single
+# authoritative FastAPI app).  server.py is a library only.
+# ---------------------------------------------------------------------------
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -9292,7 +9223,9 @@ async def dynamic_mailbox_polling_worker():
             await asyncio.sleep(60)  # Wait before retrying
 
 
-@app.on_event("startup")
+# ---------------------------------------------------------------------------
+# Startup / shutdown are called explicitly by main.py, not via app events.
+# ---------------------------------------------------------------------------
 async def startup():
     global _email_polling_task
     await db.hub_documents.create_index("id", unique=True)
@@ -9510,7 +9443,6 @@ async def startup():
     
     logger.info("GPI Document Hub started. Demo mode: %s, Loaded %d vendor aliases", DEMO_MODE, len(aliases))
 
-@app.on_event("shutdown")
 async def shutdown_db_client():
     global _email_polling_task, _sales_polling_task, _dynamic_mailbox_polling_task, _pilot_summary_task
     # Cancel dynamic mailbox polling worker

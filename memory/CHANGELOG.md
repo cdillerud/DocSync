@@ -1,5 +1,16 @@
 # CHANGELOG - GPI Document Hub
 
+## [2026-03-15] Iteration 93 — Operational Templates — COMPLETE
+- **Backend:** Template CRUD (POST/GET/PATCH/DELETE /api/inventory-ledger/templates) with entity_type/order_type validation, soft-delete
+- **Backend:** Apply-template endpoint (POST /api/inventory-ledger/templates/{id}/apply) with safe-skip behavior (won't overwrite existing assignments/due dates/approvals), order type compatibility check, activity auto-generation
+- **Backend:** Bulk apply_template action added to operations-queue/bulk-action endpoint
+- **Frontend:** TemplatesPage at /templates — create/edit dialog, toggle active, filter by type, template cards
+- **Frontend:** TemplateApplySection in SO and PO workflow views — compatible template buttons with applied/skipped result display
+- **Frontend:** Operations Queue bulk toolbar: "Apply Template" button with template dropdown
+- **Testing:** 22/22 backend tests passed, all frontend UI elements verified (100% pass rate)
+- **Test report:** /app/test_reports/iteration_93.json
+
+
 ## [2026-03-15] Iteration 92 — Bulk Actions for Operations Queue — COMPLETE
 - **Backend:** POST /api/inventory-ledger/operations-queue/bulk-action with 5 actions (assign_owner, update_assignment_status, set_due_date, set_escalation_status, request_approval), structured per-entity results, partial success handling, activity auto-generation
 - **Frontend:** Operations Queue: checkbox per row, select all toggle, bulk action toolbar (5 buttons + clear), per-action dialogs with validation, result summary panel, queue refresh, selection clear on success

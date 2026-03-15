@@ -6,11 +6,12 @@ import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import {
   ScanSearch, RefreshCw, CheckCircle, AlertTriangle, XCircle, Pencil, Save, X, Loader2,
-  History, ChevronDown, ChevronUp, Zap, Copy, FileText, Link2, Users, Unlink
+  History, ChevronDown, ChevronUp, Zap, Copy, FileText, Link2, Users, Unlink, ArrowRight, GitMerge, Ban
 } from 'lucide-react';
 import {
   getDocumentIntelligence, processDocumentIntelligence, correctDocumentIntelligence,
-  createAutoDraft, resolveDocumentEntities, getDocumentResolutions, correctResolution
+  createAutoDraft, resolveDocumentEntities, getDocumentResolutions, correctResolution,
+  matchTransactions, getTransactionMatches, autoLinkDocument, confirmTransactionMatch
 } from '@/lib/api';
 
 const READINESS_COLORS = {
@@ -53,6 +54,14 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
   const [correctingId, setCorrectingId] = useState(null);
   const [correctionInput, setCorrectionInput] = useState({ id: '', name: '' });
 
+  // Transaction matching state
+  const [txMatches, setTxMatches] = useState([]);
+  const [matching, setMatching] = useState(false);
+  const [showMatches, setShowMatches] = useState(true);
+  const [linking, setLinking] = useState(false);
+  const [linkResult, setLinkResult] = useState(null);
+  const [confirmingMatchId, setConfirmingMatchId] = useState(null);
+
   const docId = document?.id;
 
   const fetchResult = useCallback(async () => {
@@ -64,12 +73,20 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
       if (data.auto_draft_created && data.target_entity_id) {
         setDraftResult({ status: 'existing', target_entity_type: data.target_entity_type, target_entity_id: data.target_entity_id });
       }
+      if (data.auto_link_created) {
+        setLinkResult({ status: 'linked', target: data.best_transaction_match });
+      }
     } catch { setResult(null); }
     // Fetch resolutions
     try {
       const { data: resData } = await getDocumentResolutions(docId);
       setResolutions(resData.resolutions || []);
     } catch { setResolutions([]); }
+    // Fetch transaction matches
+    try {
+      const { data: tmData } = await getTransactionMatches(docId);
+      setTxMatches(tmData.matches || []);
+    } catch { setTxMatches([]); }
     setLoading(false);
   }, [docId]);
 
@@ -132,6 +149,53 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
     finally { setCorrectingId(null); }
   };
 
+  const handleMatchTransactions = async () => {
+    setMatching(true);
+    try {
+      const { data } = await matchTransactions(docId);
+      setTxMatches(data.matches || []);
+      setResult(prev => prev ? { ...prev, transaction_match_status: data.overall_status, auto_link_available: data.auto_link_available, matched_transaction_count: data.total_candidates, best_transaction_match: data.best_match } : prev);
+      toast.success(`${data.total_candidates} transaction candidate${data.total_candidates !== 1 ? 's' : ''} found`);
+      onUpdate?.();
+    } catch (err) { toast.error(err.response?.data?.detail || 'Matching failed'); }
+    finally { setMatching(false); }
+  };
+
+  const handleAutoLink = async () => {
+    setLinking(true);
+    try {
+      const { data } = await autoLinkDocument(docId);
+      if (data.linked) {
+        setLinkResult({ status: 'linked', target: { entity_type: data.target_entity_type, entity_id: data.target_entity_id, display_name: data.target_display_name, confidence: data.match_confidence } });
+        toast.success(`Linked to ${data.target_display_name}`);
+        fetchResult();
+      }
+      onUpdate?.();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Auto-link failed');
+    } finally { setLinking(false); }
+  };
+
+  const handleConfirmTxMatch = async (matchId) => {
+    setConfirmingMatchId(matchId);
+    try {
+      await confirmTransactionMatch(matchId, { confirmed: true, selected_by: 'admin', notes: 'Confirmed from UI' });
+      toast.success('Match confirmed');
+      fetchResult();
+    } catch (err) { toast.error(err.response?.data?.detail || 'Confirmation failed'); }
+    finally { setConfirmingMatchId(null); }
+  };
+
+  const handleRejectTxMatch = async (matchId) => {
+    setConfirmingMatchId(matchId);
+    try {
+      await confirmTransactionMatch(matchId, { confirmed: false, selected_by: 'admin', notes: 'Rejected from UI' });
+      toast.success('Match rejected');
+      fetchResult();
+    } catch (err) { toast.error(err.response?.data?.detail || 'Rejection failed'); }
+    finally { setConfirmingMatchId(null); }
+  };
+
   const handleCreateDraft = async () => {
     setCreatingDraft(true);
     try {
@@ -186,6 +250,10 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
   const erStatus = result?.entity_resolution_status;
   const erBlocked = erStatus === 'blocked';
   const erNeedsReview = erStatus === 'needs_review';
+  const tmStatus = result?.transaction_match_status;
+  const hasLink = linkResult?.status === 'linked' || result?.auto_link_created;
+  const canAutoLink = result?.auto_link_available && !hasLink;
+  const draftSuppressed = result?.auto_draft_suppressed_due_to_match && !hasLink;
 
   return (
     <Card className={`border ${rc.border}`} data-testid="document-intelligence-panel">
@@ -358,13 +426,108 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
               )}
             </div>
 
-            {/* Auto-Draft Action Section */}
-            {isReady && !editing && (
+            {/* Transaction Matching Section */}
+            {result && !editing && (
+              <div className="border border-border rounded-lg overflow-hidden" data-testid="transaction-matching-section">
+                <div className="flex items-center justify-between p-3 cursor-pointer hover:bg-accent/30 transition-colors" onClick={() => setShowMatches(!showMatches)}>
+                  <div className="flex items-center gap-2">
+                    <GitMerge className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Transaction Matching</span>
+                    {tmStatus && (
+                      <Badge variant="outline" className={`text-[9px] ${tmStatus === 'matched' || tmStatus === 'confirmed' ? 'border-emerald-500/30 text-emerald-400' : tmStatus === 'ambiguous' ? 'border-amber-500/30 text-amber-400' : 'border-muted-foreground/30'}`}>
+                        {tmStatus}
+                      </Badge>
+                    )}
+                    {result.matched_transaction_count > 0 && <span className="text-[10px] text-muted-foreground">{result.matched_transaction_count} candidate{result.matched_transaction_count !== 1 ? 's' : ''}</span>}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={(e) => { e.stopPropagation(); handleMatchTransactions(); }} disabled={matching} data-testid="match-transactions-btn">
+                      {matching ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <GitMerge className="w-3 h-3 mr-1" />}
+                      {txMatches.length > 0 ? 'Re-match' : 'Match'}
+                    </Button>
+                    {showMatches ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
+                  </div>
+                </div>
+
+                {showMatches && (
+                  <div className="border-t border-border p-3 space-y-2">
+                    {/* Linked state */}
+                    {hasLink && (
+                      <div className="flex items-center gap-2 p-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-md" data-testid="linked-transaction">
+                        <Link2 className="w-4 h-4 text-emerald-400" />
+                        <div className="flex-1">
+                          <p className="text-xs font-semibold text-emerald-400">Linked to Existing Transaction</p>
+                          <p className="text-[10px] font-mono text-muted-foreground">{linkResult?.target?.display_name || result?.best_transaction_match?.display_name || result?.best_transaction_match?.entity_id}</p>
+                        </div>
+                        <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => { navigator.clipboard.writeText(linkResult?.target?.entity_id || result?.best_transaction_match?.entity_id || ''); toast.success('Copied'); }} data-testid="copy-link-id-btn"><Copy className="w-3 h-3" /></Button>
+                      </div>
+                    )}
+
+                    {/* Candidates */}
+                    {!hasLink && txMatches.length === 0 && <p className="text-[11px] text-muted-foreground text-center py-2">No transaction matches yet. Click "Match" to search.</p>}
+
+                    {!hasLink && txMatches.map((m) => {
+                      const isHigh = m.match_confidence >= 0.90;
+                      const isConfirmed = m.match_status === 'confirmed';
+                      const isRejected = m.match_status === 'rejected';
+                      const isProcessing = confirmingMatchId === m.transaction_match_id;
+
+                      return (
+                        <div key={m.transaction_match_id} className={`p-2.5 rounded-md border ${isConfirmed ? 'border-emerald-500/30 bg-emerald-500/10' : isRejected ? 'border-red-500/20 bg-red-500/5 opacity-50' : isHigh ? 'border-emerald-500/20 bg-accent/30' : 'border-border bg-accent/20'}`} data-testid={`tx-match-${m.transaction_match_id}`}>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5 mb-1">
+                                {isConfirmed ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> : isRejected ? <Ban className="w-3.5 h-3.5 text-red-400 shrink-0" /> : <FileText className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
+                                <Badge variant="secondary" className="text-[8px] font-mono">{m.candidate_entity_type}</Badge>
+                                <span className={`text-[9px] font-mono font-bold ${isHigh ? 'text-emerald-400' : m.match_confidence >= 0.70 ? 'text-amber-400' : 'text-muted-foreground'}`}>{(m.match_confidence * 100).toFixed(0)}%</span>
+                                {isConfirmed && <Badge variant="outline" className="text-[8px] border-emerald-500/30 text-emerald-400">Confirmed</Badge>}
+                                {isRejected && <Badge variant="outline" className="text-[8px] border-red-500/30 text-red-400">Rejected</Badge>}
+                              </div>
+                              <p className="text-[11px] font-medium truncate">{m.candidate_display_name}</p>
+                              <p className="text-[9px] text-muted-foreground font-mono mt-0.5">Basis: {m.match_basis}</p>
+                            </div>
+                            {!isConfirmed && !isRejected && (
+                              <div className="flex items-center gap-1 shrink-0">
+                                <Button variant="ghost" size="sm" className="h-6 text-[9px] text-emerald-400 hover:text-emerald-300" onClick={() => handleConfirmTxMatch(m.transaction_match_id)} disabled={isProcessing} data-testid={`confirm-tx-${m.transaction_match_id}`}>
+                                  {isProcessing ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <CheckCircle className="w-2.5 h-2.5 mr-0.5" />} Confirm
+                                </Button>
+                                <Button variant="ghost" size="sm" className="h-6 text-[9px] text-red-400 hover:text-red-300" onClick={() => handleRejectTxMatch(m.transaction_match_id)} disabled={isProcessing} data-testid={`reject-tx-${m.transaction_match_id}`}>
+                                  <Ban className="w-2.5 h-2.5 mr-0.5" /> Reject
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {/* Auto-link button */}
+                    {canAutoLink && !hasLink && (
+                      <Button size="sm" onClick={handleAutoLink} disabled={linking} className="w-full bg-blue-600 hover:bg-blue-700 text-white" data-testid="auto-link-btn">
+                        {linking ? <Loader2 className="w-3 h-3 animate-spin mr-1.5" /> : <Link2 className="w-3 h-3 mr-1.5" />}
+                        Link to Existing Transaction
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Auto-Draft / Link Action Section */}
+            {isReady && !editing && !hasLink && (
               <div className="border border-border rounded-lg p-3 space-y-2" data-testid="auto-draft-section">
-                {!hasDraft ? (
+                {draftSuppressed && !hasDraft ? (
+                  <div className="flex items-center gap-2 p-2 bg-blue-500/10 border border-blue-500/30 rounded">
+                    <GitMerge className="w-4 h-4 text-blue-400" />
+                    <div className="flex-1">
+                      <p className="text-xs font-semibold text-blue-400">Existing Match Found</p>
+                      <p className="text-[10px] text-muted-foreground">Draft creation suppressed — use "Link to Existing Transaction" above</p>
+                    </div>
+                  </div>
+                ) : !hasDraft ? (
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-semibold">Automation Available</p>
+                      <p className="text-xs font-semibold">Create New Draft</p>
                       <p className="text-[11px] text-muted-foreground">Create {DRAFT_TYPE_LABELS[result.target_entity_type] || 'draft'} from extracted fields</p>
                       {erNeedsReview && <p className="text-[10px] text-amber-400 mt-0.5">Some entities need review — draft will use extracted values</p>}
                     </div>

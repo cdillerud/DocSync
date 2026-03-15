@@ -1,53 +1,64 @@
 <analysis>**original_problem_statement:**
-The user wants to implement a **Document Classification, Extraction, and Automation Confidence Layer** (iteration_94). This feature will serve as a core document-management engine for the application. The goal is to reliably identify incoming documents, extract key fields with a confidence score, and determine if the document can be processed automatically or needs human review.
+The user's goal is to build a sophisticated document processing pipeline within the GPI Hub application. This started with a **Document Intelligence Engine** (classification, extraction, readiness scoring), followed by **Auto-Draft Creation** from processed documents, an **Entity Resolution Engine** to match extracted data to internal entities (customers, vendors), and finally, **Document-to-Existing-Transaction Matching** to prevent duplicate work by linking documents to existing records instead of always creating new ones.
 
-PRODUCT REQUIREMENTS:
+The most recent request was to implement **Document-to-Existing-Transaction Matching and Auto-Linking (iteration_97)**. This feature enables the system to intelligently decide whether an incoming document corresponds to an existing transaction (like a Sales Order or PO Draft) and link it, or if it should create a new draft. This is a critical step to improve automation quality and reduce manual data entry.
+
+PRODUCT REQUIREMENTS (for last task, iteration_97):
 - **Backend:**
-    - Create a new model to store document intelligence results (, , , , , etc.).
-    - Create an endpoint () that uses an LLM to classify a document, extract fields based on its type, and derive an  status (, , ).
-    - Define extraction schemas for different document types (, , etc.).
-    - Create a  endpoint to list all documents needing human intervention.
-    - Implement a  endpoint for users to manually correct classification and extracted data.
-    - Integrate with the existing Activity Timeline to log all document processing and correction events.
+    - Create a model to store transaction match results ().
+    - Create a  endpoint to find potential matching transactions for a document.
+    - Implement matching logic based on PO numbers, invoice numbers, and other resolved entities.
+    - Create a  endpoint to link a document to a high-confidence matched transaction.
+    - Create a  endpoint for manual user overrides.
+    - Integrate this logic into the main automation flow: prefer linking over creating new drafts if a confident match exists.
+    - Suppress draft creation if a document is successfully linked.
+    - Generate activity timeline events for all matching and linking actions.
 - **UI:**
-    - Create a new Document Review Queue page to display documents requiring manual review.
-    - In the existing document workflow, add a new panel to display the intelligence results: detected type, confidence scores, extracted fields, and automation status.
-    - Allow users to correct the document type and extracted fields directly in the UI.
+    - Add a Transaction Matching section to the .
+    - Display candidate matches, confidence scores, and allow users to confirm or reject matches.
+    - Update the primary action button to Link Existing or Create Draft based on the matching status.
+    - Update the Document Review Queue to show transaction matching status and provide clear next actions.
 - **Testing:**
-    - Add backend tests for document processing, readiness logic, queue population, and manual corrections.
-    - Add frontend tests for the new review queue and the document intelligence panel.
-    - Ensure all existing tests from iteration_93 continue to pass.
+    - Add backend tests for matching, linking, suppression, and manual overrides.
+    - Add frontend tests for the new UI panel and review queue updates.
+    - Ensure all tests from previous iterations continue to pass.
 
 **User's preferred language**: English
 
 **what currently exists?**
-The application is a comprehensive inventory intelligence platform. It features a full operational lifecycle for Sales Orders (SO) and Purchase Orders (PO), including an Operations Queue that provides a prioritized worklist. The queue is enhanced with due dates, escalations, assignments, activity timelines, saved views, and bulk actions. The system also supports operational templates to standardize workflows. An LLM (Gemini via Emergent LLM Key) is already integrated for some classification and extraction tasks.
+The application now has a robust, multi-stage document intelligence pipeline. This engine is capable of:
+1.  **Classification & Extraction (iter_94):** Classifying documents (Invoice, PO, etc.) and extracting key fields using an LLM (Gemini).
+2.  **Auto-Drafting (iter_95):** Automatically creating draft records (SO Draft, PO Draft, AP Intake Draft) from documents marked as .
+3.  **Entity Resolution (iter_96):** Matching extracted text like Cargo Modules to internal database entities like the Cargo Modules LLC vendor record, with confidence scoring.
+4.  **Transaction Matching (iter_97):** Identifying if a document belongs to an existing transaction to avoid creating duplicates.
+
+This entire pipeline is exposed via a dedicated API at  and is visible to users through a Doc Intelligence page and a detailed panel on each document's page.
 
 **Last working item**:
-- **Last item agent was working:** The agent was planning the implementation of the Document Classification, Extraction, and Automation Confidence Layer (iteration_94). The user clarified that this task should be prioritized over a previously mentioned AR Release Gate feature. The agent confirmed that the existing Gemini integration and Emergent LLM Key should be used for this task.
-- **Status:** NOT STARTED
-- **Agent Testing Done:** N
+- **Last item agent was working:** Implementing the Document-to-Existing-Transaction Matching and Auto-Linking feature (iteration_97). The agent created the backend service, extended the router and main document service, and built the corresponding frontend components. During self-testing, the agent found and fixed two bugs: one syntax error in the router caused by a faulty , and a logical error where the  endpoint was not correctly respecting a rejected match status.
+- **Status:** USER VERIFICATION PENDING
+- **Agent Testing Done:** Y
 - **Which testing method agent to use?** both
 - **User Testing Done:** N
 
 **All Pending/In progress Issue list**:
-- There are no pending issues. The agent is ready to begin the new task.
+- There are no pending issues. The last feature is implemented and self-tested.
 
 **In progress Task List**:
-  - Task 1:  (P0) Implement Document Classification, Extraction, and Automation Confidence Layer (iteration_94).
+  - Task 1:  (P0) Verify and finalize Document-to-Existing-Transaction Matching and Auto-Linking (iteration_97).
 
  Task Detail:
   - Task 1: 
-     - **Where to resume:** The agent has a complete plan approved by the user. The next step is to begin the backend implementation. This involves creating a new router and models for , likely in a new file to avoid further bloating . The agent should start by defining the Pydantic models for document intelligence results and then create the  endpoint, integrating the existing Gemini service.
-     - **What will be achieved with this?** This will build a core AI-powered document processing pipeline, making the entire system smarter by automatically understanding incoming documents and flagging them for automation or manual review.
-     - **Status:**  NOT STARTED
+     - **Where to resume:** The feature is fully coded and has passed the agent's initial  tests and UI smoke tests via screenshots. The next step is to run the comprehensive testing agent to ensure full functionality and no regressions, then present the completed work to the user for final approval.
+     - **What will be achieved with this?** This will complete the core document lifecycle from ingestion to linking/drafting, making the system significantly more automated and intelligent.
+     - **Status:**  TESTING PENDING
      - **Should Test frontend/backend/both after fix?** both
      - **Blocked on something:** None
 
 **Upcoming and Future Tasks**
 **Upcoming Tasks:**
--   **P0:** AR Release Gate (Prepay and Terms Approval) - This was the initial prompt for iter_94 but was superseded. It is now the next high-priority task.
--   **P1:** Inventory Planning Horizon (Demand Forecast + Purchase Timing)
+-   **P0:** AR Release Gate (Prepay and Terms Approval) - This was the initial prompt for iter_94 but has been superseded by the document intelligence work. It remains a high-priority business feature.
+-   **P1:** Inventory Planning Horizon (Demand Forecast + Purchase Timing) - Another major business feature that was previously discussed.
 
 **Future Tasks:**
 -   Build an admin UI for managing item mapping rules (CRUD).
@@ -59,105 +70,146 @@ The application is a comprehensive inventory intelligence platform. It features 
 -   Add multi-step approval routing for documents.
 
 **Completed work in this session**
-- **Operational Templates (iteration_93):** Implemented reusable templates for applying standard due dates, assignments, and approvals to SOs and POs, with a full management UI and bulk-apply capabilities.
-- **Bulk Actions for Operations Queue (iteration_92):** Added the ability to select multiple items in the Operations Queue and apply bulk actions like assigning an owner or setting a due date.
-- **Saved Views & Personal Presets (iteration_91):** Implemented functionality for users to save and load their preferred filter and sort configurations for the Operations Queue.
-- **Operational Notes & Activity Timeline (iteration_90):** Created a unified timeline for each SO and PO, automatically logging major workflow events (e.g., assignment, approval) and allowing manual notes.
-- **Operational Ownership & Assignment (iteration_89):** Added the ability to assign SOs and POs to specific owners, integrating this information into the Operations Queue with filters and priority scoring adjustments.
-- **Operational Escalations and Due Dates (iteration_88):** Completed and tested the feature adding time-awareness (due dates, escalation status) to the Operations Queue.
+- **Document-to-Existing-Transaction Matching and Auto-Linking (iter_97):** Implemented the final layer of the intelligence pipeline to find and link documents to existing transactions, preventing duplicate draft creation.
+- **Entity Resolution Engine (iter_96):** Built a service to match extracted text (e.g., customer names, PO numbers) to specific internal database entities with confidence scoring and a manual review/override UI.
+- **Document-to-Transaction Auto-Draft Creation (iter_95):** Enabled the system to automatically create , , and  from documents with high-confidence intelligence results.
+- **Document Intelligence Engine (iter_94):** Established the core backend and frontend for classifying documents, extracting fields, and determining an  score. Created the Document Review Queue.
 
 **Earlier issues found/mentioned but not fixed**
    - **Issue 1: Monolithic Codebase (P1)**
-     - **Description:** The files  and  are extremely large and contain logic for dozens of features. This session added five major features, making the files even more difficult to maintain.
-     - **Debug checklist:** For the next feature, create new router files (e.g., ). For the frontend, extract reusable components from  into their own files under .
+     - **Description:** The files  and  remain very large.
+     - **Debug checklist:** While the agent correctly avoided adding new logic to these files by creating a new  router and service, the original files have not been refactored. Future work related to the core ledger should consider breaking these files down.
      - **Why to solve this issue and what will be achieved with this?** To improve maintainability, reduce the risk of regressions, and make the codebase scalable.
      - **Is recurring issue?** Y
 
 **Known issue recurrence from previous fork**
-  - **Issue recurrence in previous fork:** Forward reference Python error.
-  - **Recurrence count:** 3+ (in this session, similar issues occurred where  corrupted files by deleting decorators or comment headers).
-  - **Status:** RESOLVED (but high risk). The agent repeatedly used broad  commands on  that removed necessary lines of code (like ). While the agent caught and fixed these errors each time, it highlights a significant risk with modifying the monolithic file. The next agent must be extremely cautious or use more precise editing tools.
+  - **Issue recurrence in previous fork:** Forward reference Python error /  file corruption.
+  - **Recurrence count:** 4+ (The agent in this session also corrupted the  router file by using a  that broke a  block, requiring a manual fix. This pattern of file corruption from broad edits is a persistent risk).
+  - **Status:** RESOLVED (for the specific instance, but the underlying risk remains).
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
--   **Ledger-Based Inventory:** Using an immutable log of movements to derive current balances.
--   **Derived Work Queues:** Aggregating actionable items from different entities into a unified Operations Queue with dynamic priority scoring.
--   **Workflow Metadata:** Tracking operational state (assignments, escalations, activities, etc.) in separate collections to enrich core entities.
--   **Bulk Operations:** A single API endpoint that iterates through a list of entities and applies actions by reusing single-entity business logic.
--   **Operational Templates:** Reusable configurations that can be applied to entities to standardize setup.
--   **Saved Views:** Storing user-defined filter/sort states to create personalized presets for data tables.
+- **Multi-Stage Document AI Pipeline:** A chained sequence of services (Classification -> Extraction -> Resolution -> Matching) that progressively enriches a document to make an automated decision.
+- **Entity Resolution:** The process of matching unstructured text from a document (e.g., Mega Corp) to a structured entity in a database (e.g., ).
+- **Transaction Matching:** A step beyond entity resolution to determine if a document corresponds to an existing transactional record (like a PO or SO draft), used to prevent creating duplicates.
+- **Orchestration Services:** Using separate service files (, ) to manage complex business logic and keep API routers clean.
 
 **key DB schema**
--   **, , , **: Core inventory and order models.
--   **, , **: Existing workflow metadata.
--   ****: (New) Stores owner, status for SOs/POs.
--   ****: (New) Stores a chronological log of manual notes and system-generated workflow events.
--   ****: (New) Stores user-defined filter/sort presets for the Operations Queue.
--   ****: (New) Stores reusable operational configurations (due dates, assignments, etc.).
+- **** (New): Stores classification, extraction, and readiness results for a document.
+- **** (New): Tracks auto-draft creation events.
+- **** (New): Stores the results of matching extracted fields to internal entities.
+- **** (New): Stores candidate matches between a document and existing transactions.
 
 **changes in tech stack**
 - None.
 
 **All files of reference**
--   : The monolithic backend file, heavily modified in this session.
--   : The frontend for the work queue, significantly rewritten to support saved views and bulk actions.
--   : The main workflow UI, updated with new sections for Assignments, Activity Timeline, and Template Application.
--   : A new file created to manage operational templates.
--   : Modified to add the route for the new .
+-  (Created & heavily modified)
+-  (Created & heavily modified)
+-  (Created & heavily modified)
+-  (Created)
+-  (Updated to include new router)
+-  (Created & heavily modified)
+-  (Created & heavily modified)
+-  (Updated with new API functions)
+-  (Updated with new route)
+-  (Updated to include the panel)
 
 **Areas that need refactoring**:
--   **:** This file is critically oversized. The next task (Document Intelligence) presents a perfect opportunity to create a new, separate router file () instead of adding to the monolith.
--   **:** This file contains multiple large components defined internally (, , , etc.). These should be extracted into their own files in a  directory to improve readability and reusability.
+- **** and ****: These files remain critically oversized and are a source of technical debt. The agent successfully avoided adding to them, but they will need to be broken down in the future.
 
 **key api endpoints**
--   : Executes a bulk action (e.g., assign owner, apply template) on multiple entities.
--   : Applies a specific operational template to an entity.
--   CRUD endpoints for , , , .
+- : Runs the full classification/extraction pipeline.
+- : Fetches documents needing manual review.
+- : Creates a new draft from a document.
+- : Runs entity resolution on a document.
+- : Manually corrects an entity match.
+- : Finds matching existing transactions for a document.
+- : Links a document to a high-confidence transaction match.
+- : Manually confirms or rejects a transaction match.
 
 **Critical Info for New Agent**
--   Your immediate task is to implement the Document Classification, Extraction, and Automation Confidence Layer (iteration_94). The user has explicitly confirmed this is the priority.
--   You **must** use the existing Gemini integration via the  library and the . Do not implement a new LLM connection. The agent has already verified its presence in the codebase.
--   **Extreme caution is required when editing .** The previous agent repeatedly corrupted this file by using broad  commands. Consider creating a new file for the document intelligence router to avoid this risk.
--   The monolithic file structure is a known issue. Take opportunities to create new files for new, distinct features (like this one) rather than adding to the existing large files.
+- Your immediate task is to run the testing agent for the recently completed Document-to-Existing-Transaction Matching feature (iteration_97) to ensure its stability and check for regressions.
+- The document intelligence engine is now the most advanced part of the application. The user has consistently prioritized building it out. The next logical features will likely build on this foundation.
+- **BE EXTREMELY CAUTIOUS WITH **. This tool has repeatedly corrupted files in this project across multiple forks. The last agent had to manually fix a broken  block in the router. Prefer creating new files or using very precise, line-number-based edits.
 
 **documents and test reports created in this job**
--   
--   
--   
--   
--   
--   
--    (updated after each iteration)
--    (updated after each iteration)
+- 
+- 
+- 
+-  (Updated after each iteration)
+-  (Updated after each iteration)
 
 **Last 10 User Messages and any pending HUMAN messages**
--   User provided a prompt for AR Release Gate (iteration_94).
--   User immediately provided a new, more detailed prompt for Document Classification, Extraction, and Automation Confidence Layer (iteration_94), stating This is the right place to refocus.
--   User asked if an LLM key was already in use.
--   Agent confirmed the  and Gemini integration are already active in the codebase.
--   Agent presented a plan to implement the Document Intelligence feature using the existing LLM setup, which was approved by the user.
+1. User provided prompt for Document-to-Existing-Transaction Matching and Auto-Linking (iteration_97).
+2. Agent requested to audit existing linking infrastructure.
+3. Agent presented a plan to implement iteration_97.
+4. User approved the plan with the message: Yes, proceed.
+5. Agent implemented the feature, including backend services, router updates, and frontend components. This involved numerous file creations and edits.
+6. Agent self-tested with , discovered a bug in the auto-link logic (not respecting rejections), and fixed it.
+7. Agent took screenshots to verify the final UI state, which looked correct.
+8. No pending user messages.
 
 **Project Health Check:**
--   **Broken:** No. The application is fully functional, and all features implemented in the session passed comprehensive testing.
--   **Mocked:** Email service, Business Central API.
+- **Broken:** No. The application is functional and the latest feature has passed initial agent testing.
+- **Mocked:** Email service, Business Central API.
 
 **3rd Party Integrations**
--   **Gemini (via Emergent LLM Key):** Actively used for AI tasks. This is the required integration for the current task.
--   Dynamics 365 Business Central API (Mocked)
--   Microsoft Graph API / SharePoint
--   Spiro CRM API
--   APScheduler
+- **Gemini (via Emergent LLM Key):** Actively used for the document intelligence pipeline.
+- Dynamics 365 Business Central API (Mocked)
+- Microsoft Graph API / SharePoint
+- Spiro CRM API
+- APScheduler
 
 **Testing status**
--   **Testing agent used after significant changes:** YES. The agent correctly used  to validate every major feature (iterations 88 through 93).
--   **Troubleshoot agent used after agent stuck in loop:** NO
--   **Test files created:** Yes, backend test coverage was expanded with each feature, and the testing agent generated comprehensive reports.
--   **Known regressions:** None.
+- **Testing agent used after significant changes:** YES, for iterations 94, 95, and 96. NO, for the most recent iteration (97).
+- **Troubleshoot agent used after agent stuck in loop:** NO
+- **Test files created:** Yes, the testing agent created backend test files in previous steps. The main agent created new backend services and routers but did not add new ============================= test session starts ==============================
+platform linux -- Python 3.11.14, pytest-9.0.2, pluggy-1.6.0
+rootdir: /app
+plugins: asyncio-1.3.0, anyio-4.12.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 1782 items / 3 errors
+
+==================================== ERRORS ====================================
+___________ ERROR collecting backend/tests/test_dashboard_summary.py ___________
+backend/tests/test_dashboard_summary.py:13: in <module>
+    BASE_URL = os.environ.get('REACT_APP_BACKEND_URL').rstrip('/')
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'NoneType' object has no attribute 'rstrip'
+_________ ERROR collecting backend/tests/test_matching_diagnostics.py __________
+backend/tests/test_matching_diagnostics.py:19: in <module>
+    assert BASE_URL, "REACT_APP_BACKEND_URL environment variable must be set"
+E   AssertionError: REACT_APP_BACKEND_URL environment variable must be set
+E   assert ''
+___________ ERROR collecting backend/tests/test_spiro_integration.py ___________
+ImportError while importing test module '/app/backend/tests/test_spiro_integration.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/local/lib/python3.11/importlib/__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/tests/test_spiro_integration.py:14: in <module>
+    from services.spiro.spiro_client import (
+E   ImportError: cannot import name 'normalize_company_name' from 'services.spiro.spiro_client' (/app/backend/services/spiro/spiro_client.py)
+=============================== warnings summary ===============================
+../root/.venv/lib/python3.11/site-packages/starlette/formparsers.py:12
+  /root/.venv/lib/python3.11/site-packages/starlette/formparsers.py:12: PendingDeprecationWarning: Please use `import python_multipart` instead.
+    import multipart
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+ERROR backend/tests/test_dashboard_summary.py - AttributeError: 'NoneType' ob...
+ERROR backend/tests/test_matching_diagnostics.py - AssertionError: REACT_APP_...
+ERROR backend/tests/test_spiro_integration.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 3 errors during collection !!!!!!!!!!!!!!!!!!!!
+========================= 1 warning, 3 errors in 1.80s ========================= files.
+- **Known regressions:** None identified, but full regression testing for iteration_97 is pending.
 
 **Credentials to test flow:**
--   **Web UI:**  / 
+- **Web UI:**  / 
 
 **What agent forgot to execute**
-- The agent successfully completed all tasks and correctly pivoted based on user feedback. Nothing was forgotten.</analysis>
+- The agent did not run the  after completing the final feature (iteration_97) and fixing bugs found during self-testing. This is the most important next step.</analysis>

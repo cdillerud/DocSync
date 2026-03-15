@@ -839,6 +839,15 @@ async def create_auto_draft(doc_id: str) -> Dict[str, Any]:
             f"Run entity resolution and resolve before creating drafts."
         )
 
+    # 5) Check transaction matching — suppress draft if confident existing match
+    if intel.get("auto_draft_suppressed_due_to_match") and intel.get("auto_link_available"):
+        best = intel.get("best_transaction_match", {})
+        raise PermissionError(
+            f"Draft creation suppressed: confident match found to existing "
+            f"{best.get('entity_type', 'transaction')} '{best.get('display_name', best.get('entity_id', ''))}' "
+            f"(confidence: {best.get('confidence', 0):.0%}). Use auto-link instead."
+        )
+
     # 6) Resolve draft mapping
     document_type = intel.get("document_type", "")
     mapping = _resolve_draft_mapping(document_type)

@@ -347,3 +347,7 @@ export const getAutomationAction = (docId) => api.get(`/document-intelligence/au
 export const resolveDocumentEntities = (docId) => api.post(`/document-intelligence/resolve-entities/${docId}`);
 export const getDocumentResolutions = (docId) => api.get(`/document-intelligence/resolution/${docId}`);
 export const correctResolution = (resolutionId, data) => api.patch(`/document-intelligence/resolution/${resolutionId}`, data);
+export const matchTransactions = (docId) => api.post(`/document-intelligence/match-transactions/${docId}`);
+export const getTransactionMatches = (docId) => api.get(`/document-intelligence/transaction-matches/${docId}`);
+export const autoLinkDocument = (docId) => api.post(`/document-intelligence/auto-link/${docId}`);
+export const confirmTransactionMatch = (matchId, data) => api.patch(`/document-intelligence/transaction-matches/${matchId}`, data);

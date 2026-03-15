@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import {
   ScanSearch, AlertTriangle, ShieldCheck, ShieldX, RefreshCw, ChevronRight, ArrowUpDown,
-  FileText, Loader2, Zap, CheckCircle
+  FileText, Loader2, Zap, CheckCircle, Link2, GitMerge
 } from 'lucide-react';
 import {
   getIntelligenceReviewQueue, getIntelligenceSummary, processDocumentIntelligence, createAutoDraft
@@ -303,11 +303,20 @@ export default function DocumentReviewQueuePage() {
                             {item.ambiguous_entity_count > 0 && (
                               <Badge variant="outline" className="text-[9px] border-amber-500/30 text-amber-400">{item.ambiguous_entity_count} ambiguous</Badge>
                             )}
+                            {item.transaction_match_status === 'matched' && (
+                              <Badge variant="outline" className="text-[9px] font-mono border-blue-500/30 text-blue-400"><GitMerge className="w-2.5 h-2.5 mr-0.5 inline" />tx match</Badge>
+                            )}
+                            {item.transaction_match_status === 'ambiguous' && (
+                              <Badge variant="outline" className="text-[9px] font-mono border-amber-500/30 text-amber-400"><GitMerge className="w-2.5 h-2.5 mr-0.5 inline" />tx ambiguous</Badge>
+                            )}
+                            {item.transaction_match_status === 'confirmed' && (
+                              <Badge variant="outline" className="text-[9px] font-mono border-emerald-500/30 text-emerald-400"><Link2 className="w-2.5 h-2.5 mr-0.5 inline" />linked</Badge>
+                            )}
                           </div>
                         </td>
                         <td className="px-4 py-3 text-right">
                           <div className="flex items-center justify-end gap-1">
-                            {isReady && !hasDraft && (
+                            {isReady && !hasDraft && !item.auto_link_created && !item.auto_draft_suppressed_due_to_match && (
                               <Button
                                 variant="default"
                                 size="sm"
@@ -323,6 +332,18 @@ export default function DocumentReviewQueuePage() {
                                 )}
                                 {DRAFT_TYPE_LABELS[item.target_entity_type] || 'Create Draft'}
                               </Button>
+                            )}
+                            {isReady && item.auto_link_available && !item.auto_link_created && (
+                              <Badge className="text-[9px] bg-blue-500/15 text-blue-400 border border-blue-500/30">
+                                <Link2 className="w-3 h-3 mr-1" />
+                                Link Available
+                              </Badge>
+                            )}
+                            {item.auto_link_created && (
+                              <Badge className="text-[9px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                <Link2 className="w-3 h-3 mr-1" />
+                                Linked
+                              </Badge>
                             )}
                             {hasDraft && (
                               <Badge className="text-[9px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">

@@ -30,6 +30,12 @@ from services.entity_resolution_service import (
     get_resolutions,
     correct_resolution,
 )
+from services.transaction_matching_service import (
+    match_transactions,
+    get_transaction_matches,
+    auto_link,
+    confirm_match,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/document-intelligence", tags=["Document Intelligence"])
@@ -215,3 +221,74 @@ async def api_correct_resolution(resolution_id: str, body: ResolutionCorrectionR
     except Exception as e:
         logger.error("Resolution correction failed for %s: %s", resolution_id, e)
         raise HTTPException(status_code=500, detail=f"Correction failed: {str(e)}")
+
+
+# ── Transaction Matching Endpoints ────────────────────────────────────────────
+
+class MatchConfirmRequest(BaseModel):
+    confirmed: bool = True
+    selected_by: str = "admin"
+    notes: str = ""
+
+
+@router.post("/match-transactions/{doc_id}")
+async def api_match_transactions(doc_id: str):
+    """
+    Search existing drafts/transactions for matches to this document.
+    Returns candidates ranked by confidence.
+    """
+    try:
+        result = await match_transactions(doc_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error("Transaction matching failed for %s: %s", doc_id, e)
+        raise HTTPException(status_code=500, detail=f"Matching failed: {str(e)}")
+
+
+@router.get("/transaction-matches/{doc_id}")
+async def api_get_transaction_matches(doc_id: str):
+    """Get all stored transaction match candidates for a document."""
+    matches = await get_transaction_matches(doc_id)
+    return {"document_id": doc_id, "matches": matches, "total": len(matches)}
+
+
+@router.post("/auto-link/{doc_id}")
+async def api_auto_link(doc_id: str):
+    """
+    Auto-link document to the best matched transaction.
+    Only works with a single high-confidence match or a manually confirmed one.
+    Ambiguous matches are rejected — must be confirmed first.
+    """
+    try:
+        result = await auto_link(doc_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.error("Auto-link failed for %s: %s", doc_id, e)
+        raise HTTPException(status_code=500, detail=f"Auto-link failed: {str(e)}")
+
+
+@router.patch("/transaction-matches/{match_id}")
+async def api_confirm_match(match_id: str, body: MatchConfirmRequest):
+    """
+    Manually confirm or reject a transaction match candidate.
+    Confirming a match deselects all other candidates.
+    """
+    try:
+        result = await confirm_match(
+            match_id=match_id,
+            confirmed=body.confirmed,
+            selected_by=body.selected_by,
+            notes=body.notes,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error("Match confirmation failed for %s: %s", match_id, e)
+        raise HTTPException(status_code=500, detail=f"Confirmation failed: {str(e)}")

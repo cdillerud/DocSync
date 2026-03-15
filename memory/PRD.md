@@ -370,6 +370,15 @@ Key Principles:
 - [x] 15 server.py functions remain as lazy imports (extraction targets for next passes)
 - [x] 15 targeted tests, 112/112 total tests passed
 
+#### Architecture Hardening Pass (COMPLETED - Mar 15, 2026)
+- [x] Reduced server.py import sites from 37 → 4 across routers/services (89% reduction)
+- [x] Fully decoupled: `routers/settings.py`, `routers/sharepoint.py`, `routers/workflows.py`, `services/vendor_matching.py`
+- [x] Created 6 new extracted modules: settings_helpers, graph_access, email_helpers, sharepoint_helpers, bc_draft_service, document_linking
+- [x] Added FOLDER_MAP and UPLOAD_DIR to deps.py (config centralization)
+- [x] Created architecture guardrail tests (25 tests, allowlist enforcement)
+- [x] 161 total tests passed, route count stable at 427
+- [x] Documented remaining server.py role and dependency direction rules in ARCHITECTURE_CURRENT.md
+
 
 ### In Progress / Shadow Mode
 - [x] AP automatic workflow trigger (VERIFIED WORKING)

@@ -9,13 +9,14 @@
 - ~~Reference Intelligence Handler Extraction~~ (2026-03-15, iter_111) — ALL 32 handlers extracted
 - ~~Shared Helper Extraction~~ (2026-03-15, iter_112) — 6 utilities extracted, 6 consumers rewired
 - ~~Orchestration Logic Extraction~~ (2026-03-15, iter_113) — 7 orchestration functions into vendor_matching.py + ap_computation.py
+- ~~Architecture Hardening Pass~~ (2026-03-15, iter_114) — 89% reduction in server.py imports, 6 new modules, guardrail tests
 - ~~Document Layout Fingerprinting~~ (2026-03-10)
 - ~~Stable Vendor Auto-Ready Rules~~ (2026-03-11)
 - ~~Stable Vendor Admin Page~~ (2026-03-11)
 - ~~Remove SharePoint Migration Module~~ (2026-03-11)
 
 ### P1 — Next Up
-- **Final server.py Cleanup Pass** — Extract remaining orchestration logic (email polling, draft creation coordination), separate app lifecycle/startup code
+- **Final server.py Cleanup** — Extract remaining deep orchestration: `run_upload_and_link_workflow`, `classify_document_type`, `poll_mailbox_for_documents`. Remove thin compatibility wrappers.
 - **Package and Publish BC (AL) Extension** — Updated `.app` file in `/app/BC_extension/` needs publishing to BC Sandbox
 - **Add "Create BC Sales Order" Button to UI** — Frontend button to trigger BC sales order creation
 

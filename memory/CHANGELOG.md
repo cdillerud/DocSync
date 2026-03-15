@@ -1,5 +1,44 @@
 # GPI Document Hub - Changelog
 
+## March 15, 2026 — Architecture Hardening Pass (iter_114)
+
+### Dependency cleanup
+- Reduced server.py import sites from 37 → 4 across routers/services (89% reduction)
+- **Fully decoupled** from server.py: `routers/settings.py`, `routers/sharepoint.py`, `routers/workflows.py`, `services/vendor_matching.py`
+- **Partially decoupled**: `routers/mailbox_sources.py` (2 of 4), `services/document_handlers.py` (6 of 8)
+
+### New modules extracted from server.py
+- `services/settings_helpers.py`: Settings admin utilities (SECRET_KEYS, mask_secret, current_config)
+- `services/graph_access.py`: Microsoft Graph API token acquisition (get_graph_token, get_email_token)
+- `services/email_helpers.py`: Email watcher configuration and subscription management
+- `services/sharepoint_helpers.py`: SharePoint file upload, folder creation, sharing links
+- `services/bc_draft_service.py`: BC Purchase Invoice duplicate checking and header creation
+- `services/document_linking.py`: BC document attachment linking workflow
+
+### Consumer rewiring
+- `routers/settings.py` → deps + settings_helpers + graph_access + email_helpers
+- `routers/sharepoint.py` → sharepoint_helpers
+- `routers/workflows.py` → document_linking
+- `routers/mailbox_sources.py` → graph_access (get_email_token)
+- `services/document_handlers.py` → sharepoint_helpers + document_linking + bc_draft_service
+- `services/vendor_matching.py` → deps + vendor_name_helpers
+
+### Architecture guardrails
+- Created `tests/test_architecture_guardrails.py` (25 tests)
+- Allowlist enforcement prevents new server.py imports in routers/services
+- Route count stable at 427
+
+### Config centralization
+- Added `FOLDER_MAP` and `UPLOAD_DIR` to `deps.py`
+- `settings.py` now mutates `deps.*` attributes (not module-local globals) for runtime config updates
+
+### Testing
+- 25/25 architecture guardrail tests passed
+- 136/136 tests across all extraction suites (0 regressions)
+- Route count stable at 427
+
+---
+
 ## March 15, 2026 — Orchestration Logic Extraction (iter_113)
 
 ### Extraction

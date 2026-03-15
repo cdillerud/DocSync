@@ -7,18 +7,13 @@ from datetime import datetime, timezone
 import httpx
 import logging
 
+import deps
 from deps import get_db, DEMO_MODE
 from models.document_types import DEFAULT_JOB_TYPES, DRAFT_CREATION_CONFIG
 
-# Import configuration variables and helper functions from server
-from server import (
-    TENANT_ID, BC_ENVIRONMENT, BC_COMPANY_NAME, BC_CLIENT_ID, BC_CLIENT_SECRET,
-    GRAPH_CLIENT_ID, GRAPH_CLIENT_SECRET, SHAREPOINT_SITE_HOSTNAME, 
-    SHAREPOINT_SITE_PATH, SHAREPOINT_LIBRARY_NAME, FOLDER_MAP,
-    ENABLE_CREATE_DRAFT_HEADER, SECRET_KEYS, _mask, _current_config,
-    get_graph_token, get_bc_token, get_email_watcher_config,
-    subscribe_to_mailbox_notifications
-)
+from services.settings_helpers import SECRET_KEYS, mask_secret, current_config
+from services.graph_access import get_graph_token
+from services.email_helpers import get_email_watcher_config, subscribe_to_mailbox_notifications
 
 logger = logging.getLogger(__name__)
 
@@ -73,30 +68,30 @@ class JobTypeConfig(BaseModel):
 @router.get("/status")
 async def get_settings_status():
     return {
-        "demo_mode": DEMO_MODE,
+        "demo_mode": deps.DEMO_MODE,
         "connections": {
             "mongodb": {"status": "connected", "detail": "Configured"},
             "sharepoint": {
-                "status": "configured" if (GRAPH_CLIENT_ID and not DEMO_MODE) else ("demo" if DEMO_MODE else "not_configured"),
-                "site": SHAREPOINT_SITE_HOSTNAME or "Not set",
-                "path": SHAREPOINT_SITE_PATH or "Not set",
-                "library": SHAREPOINT_LIBRARY_NAME
+                "status": "configured" if (deps.GRAPH_CLIENT_ID and not deps.DEMO_MODE) else ("demo" if deps.DEMO_MODE else "not_configured"),
+                "site": deps.SHAREPOINT_SITE_HOSTNAME or "Not set",
+                "path": deps.SHAREPOINT_SITE_PATH or "Not set",
+                "library": deps.SHAREPOINT_LIBRARY_NAME
             },
             "business_central": {
-                "status": "configured" if (BC_CLIENT_ID and not DEMO_MODE) else ("demo" if DEMO_MODE else "not_configured"),
-                "environment": BC_ENVIRONMENT or "Not set",
-                "company": BC_COMPANY_NAME or "Not set"
+                "status": "configured" if (deps.BC_CLIENT_ID and not deps.DEMO_MODE) else ("demo" if deps.DEMO_MODE else "not_configured"),
+                "environment": deps.BC_ENVIRONMENT or "Not set",
+                "company": deps.BC_COMPANY_NAME or "Not set"
             },
             "entra_id": {
-                "status": "configured" if (TENANT_ID and not DEMO_MODE) else ("demo" if DEMO_MODE else "not_configured"),
-                "tenant_id": (TENANT_ID[:8] + "...") if TENANT_ID else "Not set"
+                "status": "configured" if (deps.TENANT_ID and not deps.DEMO_MODE) else ("demo" if deps.DEMO_MODE else "not_configured"),
+                "tenant_id": (deps.TENANT_ID[:8] + "...") if deps.TENANT_ID else "Not set"
             }
         },
-        "sharepoint_folders": list(set(FOLDER_MAP.values())),
+        "sharepoint_folders": list(set(deps.FOLDER_MAP.values())),
         # Phase 4: Draft creation feature flag
         "features": {
             "create_draft_header": {
-                "enabled": ENABLE_CREATE_DRAFT_HEADER,
+                "enabled": deps.ENABLE_CREATE_DRAFT_HEADER,
                 "description": "Phase 4: Create Purchase Invoice draft headers for high-confidence AP Invoice matches",
                 "safety_thresholds": DRAFT_CREATION_CONFIG
             }
@@ -107,10 +102,10 @@ async def get_settings_status():
 @router.get("/config")
 async def get_settings_config():
     """Return current config with secrets masked."""
-    raw = _current_config()
+    raw = current_config()
     masked = {}
     for k, v in raw.items():
-        masked[k] = _mask(v) if k in SECRET_KEYS else v
+        masked[k] = mask_secret(v) if k in SECRET_KEYS else v
     return {"config": masked}
 
 
@@ -118,9 +113,6 @@ async def get_settings_config():
 async def update_settings_config(update: ConfigUpdate):
     db = get_db()
     """Save config to MongoDB and reload in-memory. No .env write = no server restart."""
-    global DEMO_MODE, TENANT_ID, BC_ENVIRONMENT, BC_COMPANY_NAME
-    global BC_CLIENT_ID, BC_CLIENT_SECRET, GRAPH_CLIENT_ID, GRAPH_CLIENT_SECRET
-    global SHAREPOINT_SITE_HOSTNAME, SHAREPOINT_SITE_PATH, SHAREPOINT_LIBRARY_NAME
 
     # Load current saved config from DB
     saved = await db.hub_config.find_one({"_key": "credentials"}, {"_id": 0}) or {"_key": "credentials"}
@@ -138,24 +130,24 @@ async def update_settings_config(update: ConfigUpdate):
         upsert=True
     )
 
-    # Reload in-memory immediately
-    TENANT_ID = saved.get("TENANT_ID", TENANT_ID)
-    BC_ENVIRONMENT = saved.get("BC_ENVIRONMENT", BC_ENVIRONMENT)
-    BC_COMPANY_NAME = saved.get("BC_COMPANY_NAME", BC_COMPANY_NAME)
-    BC_CLIENT_ID = saved.get("BC_CLIENT_ID", BC_CLIENT_ID)
-    BC_CLIENT_SECRET = saved.get("BC_CLIENT_SECRET", BC_CLIENT_SECRET)
-    GRAPH_CLIENT_ID = saved.get("GRAPH_CLIENT_ID", GRAPH_CLIENT_ID)
-    GRAPH_CLIENT_SECRET = saved.get("GRAPH_CLIENT_SECRET", GRAPH_CLIENT_SECRET)
-    SHAREPOINT_SITE_HOSTNAME = saved.get("SHAREPOINT_SITE_HOSTNAME", SHAREPOINT_SITE_HOSTNAME)
-    SHAREPOINT_SITE_PATH = saved.get("SHAREPOINT_SITE_PATH", SHAREPOINT_SITE_PATH)
-    SHAREPOINT_LIBRARY_NAME = saved.get("SHAREPOINT_LIBRARY_NAME", SHAREPOINT_LIBRARY_NAME)
-    DEMO_MODE = str(saved.get("DEMO_MODE", "true")).lower() == "true"
+    # Reload in-memory on deps module
+    deps.TENANT_ID = saved.get("TENANT_ID", deps.TENANT_ID)
+    deps.BC_ENVIRONMENT = saved.get("BC_ENVIRONMENT", deps.BC_ENVIRONMENT)
+    deps.BC_COMPANY_NAME = saved.get("BC_COMPANY_NAME", deps.BC_COMPANY_NAME)
+    deps.BC_CLIENT_ID = saved.get("BC_CLIENT_ID", deps.BC_CLIENT_ID)
+    deps.BC_CLIENT_SECRET = saved.get("BC_CLIENT_SECRET", deps.BC_CLIENT_SECRET)
+    deps.GRAPH_CLIENT_ID = saved.get("GRAPH_CLIENT_ID", deps.GRAPH_CLIENT_ID)
+    deps.GRAPH_CLIENT_SECRET = saved.get("GRAPH_CLIENT_SECRET", deps.GRAPH_CLIENT_SECRET)
+    deps.SHAREPOINT_SITE_HOSTNAME = saved.get("SHAREPOINT_SITE_HOSTNAME", deps.SHAREPOINT_SITE_HOSTNAME)
+    deps.SHAREPOINT_SITE_PATH = saved.get("SHAREPOINT_SITE_PATH", deps.SHAREPOINT_SITE_PATH)
+    deps.SHAREPOINT_LIBRARY_NAME = saved.get("SHAREPOINT_LIBRARY_NAME", deps.SHAREPOINT_LIBRARY_NAME)
+    deps.DEMO_MODE = str(saved.get("DEMO_MODE", "true")).lower() == "true"
 
-    logger.info("Configuration updated via UI. Demo mode: %s", DEMO_MODE)
+    logger.info("Configuration updated via UI. Demo mode: %s", deps.DEMO_MODE)
 
     # Return fresh masked config
-    raw = _current_config()
-    masked = {k: (_mask(v) if k in SECRET_KEYS else v) for k, v in raw.items()}
+    raw = current_config()
+    masked = {k: (mask_secret(v) if k in SECRET_KEYS else v) for k, v in raw.items()}
     return {"message": "Configuration saved successfully", "config": masked}
 
 
@@ -170,7 +162,7 @@ async def test_connection(service: str = Query(...)):
             # Test site resolution (format: sites/{hostname}:/{server-relative-path}:)
             async with httpx.AsyncClient(timeout=15.0) as c:
                 site_resp = await c.get(
-                    f"https://graph.microsoft.com/v1.0/sites/{SHAREPOINT_SITE_HOSTNAME}:{SHAREPOINT_SITE_PATH}:",
+                    f"https://graph.microsoft.com/v1.0/sites/{deps.SHAREPOINT_SITE_HOSTNAME}:{deps.SHAREPOINT_SITE_PATH}:",
                     headers={"Authorization": f"Bearer {token}"})
                 if site_resp.status_code == 200:
                     site_data = site_resp.json()
@@ -180,7 +172,7 @@ async def test_connection(service: str = Query(...)):
                         "detail": f"Permission denied (HTTP {site_resp.status_code}). Your app registration needs 'Sites.ReadWrite.All' (Application permission, NOT Delegated). Go to Azure Portal > App Registrations > API Permissions > Add permission > Microsoft Graph > Application > Sites.ReadWrite.All > then click 'Grant admin consent'."}
                 elif site_resp.status_code == 404:
                     return {"service": "graph", "status": "error",
-                        "detail": f"Site not found (HTTP 404). Verify hostname='{SHAREPOINT_SITE_HOSTNAME}' and path='{SHAREPOINT_SITE_PATH}'. The path should be like '/sites/YourSiteName' (not a full URL)."}
+                        "detail": f"Site not found (HTTP 404). Verify hostname='{deps.SHAREPOINT_SITE_HOSTNAME}' and path='{deps.SHAREPOINT_SITE_PATH}'. The path should be like '/sites/YourSiteName' (not a full URL)."}
                 else:
                     error_body = site_resp.text[:500]
                     try:
@@ -194,17 +186,32 @@ async def test_connection(service: str = Query(...)):
                     return {"service": "graph", "status": "error",
                         "detail": f"HTTP {site_resp.status_code}: {error_msg}",
                         "error_code": error_code,
-                        "hint": f"URL tried: https://graph.microsoft.com/v1.0/sites/{SHAREPOINT_SITE_HOSTNAME}:{SHAREPOINT_SITE_PATH}:"}
+                        "hint": f"URL tried: https://graph.microsoft.com/v1.0/sites/{deps.SHAREPOINT_SITE_HOSTNAME}:{deps.SHAREPOINT_SITE_PATH}:"}
         except Exception as e:
             return {"service": "graph", "status": "error", "detail": str(e)}
     elif service == "bc":
         try:
-            token = await get_bc_token()
+            from services.graph_access import get_graph_token as _gt  # noqa: F811
+            # Use BC token logic directly from deps
+            if deps.DEMO_MODE or not deps.BC_CLIENT_ID:
+                token = "mock-bc-token"
+            else:
+                async with httpx.AsyncClient() as hc:
+                    resp = await hc.post(
+                        f"https://login.microsoftonline.com/{deps.TENANT_ID}/oauth2/v2.0/token",
+                        data={"grant_type": "client_credentials", "client_id": deps.BC_CLIENT_ID,
+                              "client_secret": deps.BC_CLIENT_SECRET,
+                              "scope": "https://api.businesscentral.dynamics.com/.default"})
+                    data = resp.json()
+                    if "access_token" not in data:
+                        error_desc = data.get("error_description", data.get("error", "Unknown auth error"))
+                        raise Exception(f"BC token error: {error_desc}")
+                    token = data["access_token"]
             if token == "mock-bc-token":
                 return {"service": "bc", "status": "demo", "detail": "Running in demo mode"}
             async with httpx.AsyncClient(timeout=15.0) as c:
                 resp = await c.get(
-                    f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies",
+                    f"https://api.businesscentral.dynamics.com/v2.0/{deps.TENANT_ID}/{deps.BC_ENVIRONMENT}/api/v2.0/companies",
                     headers={"Authorization": f"Bearer {token}"})
                 if resp.status_code == 200:
                     try:
@@ -216,7 +223,7 @@ async def test_connection(service: str = Query(...)):
                 elif resp.status_code == 404:
                     if "NoEnvironment" in resp.text:
                         return {"service": "bc", "status": "error",
-                            "detail": f"Environment '{BC_ENVIRONMENT}' does not exist. Check the exact name in BC admin center (it's case-sensitive)."}
+                            "detail": f"Environment '{deps.BC_ENVIRONMENT}' does not exist. Check the exact name in BC admin center (it's case-sensitive)."}
                     return {"service": "bc", "status": "error", "detail": f"BC API not found (404): {resp.text[:200]}"}
                 elif resp.status_code in (401, 403):
                     return {"service": "bc", "status": "error",
@@ -239,23 +246,21 @@ async def toggle_draft_creation_feature(toggle: DraftFeatureToggle):
     
     IMPORTANT: This is a safety-critical feature. Only enable in sandbox environment.
     """
-    global ENABLE_CREATE_DRAFT_HEADER
-    
-    old_value = ENABLE_CREATE_DRAFT_HEADER
-    ENABLE_CREATE_DRAFT_HEADER = toggle.enabled
+    old_value = deps.ENABLE_CREATE_DRAFT_HEADER
+    deps.ENABLE_CREATE_DRAFT_HEADER = toggle.enabled
     
     # Log the change
     logger.info(
         "CREATE_DRAFT_HEADER feature toggled: %s -> %s (by UI toggle)",
-        old_value, ENABLE_CREATE_DRAFT_HEADER
+        old_value, deps.ENABLE_CREATE_DRAFT_HEADER
     )
     
     return {
         "feature": "create_draft_header",
         "previous_value": old_value,
-        "current_value": ENABLE_CREATE_DRAFT_HEADER,
-        "message": f"Draft creation feature {'enabled' if ENABLE_CREATE_DRAFT_HEADER else 'disabled'}",
-        "safety_thresholds": DRAFT_CREATION_CONFIG if ENABLE_CREATE_DRAFT_HEADER else None
+        "current_value": deps.ENABLE_CREATE_DRAFT_HEADER,
+        "message": f"Draft creation feature {'enabled' if deps.ENABLE_CREATE_DRAFT_HEADER else 'disabled'}",
+        "safety_thresholds": DRAFT_CREATION_CONFIG if deps.ENABLE_CREATE_DRAFT_HEADER else None
     }
 
 
@@ -266,7 +271,7 @@ async def get_draft_creation_feature_status():
     """
     return {
         "feature": "create_draft_header",
-        "enabled": ENABLE_CREATE_DRAFT_HEADER,
+        "enabled": deps.ENABLE_CREATE_DRAFT_HEADER,
         "safety_thresholds": DRAFT_CREATION_CONFIG,
         "eligible_match_methods": DRAFT_CREATION_CONFIG["eligible_match_methods"],
         "min_match_score": DRAFT_CREATION_CONFIG["min_match_score_for_draft"],

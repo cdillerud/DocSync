@@ -445,7 +445,7 @@ async def retry_workflow(wf_id: str):
     if not doc:
         raise HTTPException(status_code=404, detail="Associated document not found")
     if doc.get("sharepoint_share_link_url") and (doc.get("bc_record_id") or doc.get("bc_document_no")):
-        from server import link_document
+        from services.document_linking import link_document
         result = await link_document(doc_id)
         return {"message": "Retry completed", "result": result}
     return {"message": "Cannot retry - document missing SharePoint link or BC reference"}

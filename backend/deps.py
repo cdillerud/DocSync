@@ -62,3 +62,14 @@ GRAPH_CLIENT_SECRET = os.environ.get('GRAPH_CLIENT_SECRET', '')
 SHAREPOINT_SITE_HOSTNAME = os.environ.get('SHAREPOINT_SITE_HOSTNAME', 'gamerpackaging.sharepoint.com')
 SHAREPOINT_SITE_PATH = os.environ.get('SHAREPOINT_SITE_PATH', '/sites/GPI-DocumentHub-Test')
 SHAREPOINT_LIBRARY_NAME = os.environ.get('SHAREPOINT_LIBRARY_NAME', 'Documents')
+
+# Document type → SharePoint folder mapping
+FOLDER_MAP = {
+    "SalesOrder": "Sales", "SalesInvoice": "Sales",
+    "PurchaseInvoice": "Purchase", "PurchaseOrder": "Purchase",
+    "Shipment": "Warehouse", "Receipt": "Warehouse",
+    "Other": "Incoming",
+}
+
+# Upload directory
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")

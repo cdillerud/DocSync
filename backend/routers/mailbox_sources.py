@@ -45,6 +45,7 @@ async def list_mailbox_sources():
 @router.get("/polling-status")
 async def get_mailbox_polling_status():
     """Get the status of the dynamic mailbox polling worker."""
+    # Background task state remains in server.py (lifecycle/runtime)
     import server
     from deps import EMAIL_POLLING_ENABLED, SALES_EMAIL_POLLING_ENABLED
 
@@ -157,7 +158,7 @@ async def delete_mailbox_source(mailbox_id: str):
 @router.post("/{mailbox_id}/test-connection")
 async def test_mailbox_connection(mailbox_id: str):
     """Test connection to a mailbox source."""
-    from server import get_email_token
+    from services.graph_access import get_email_token
 
     db = get_db()
     source = await db.mailbox_sources.find_one({"mailbox_id": mailbox_id}, {"_id": 0})
@@ -198,7 +199,7 @@ async def test_mailbox_connection(mailbox_id: str):
 @router.post("/{mailbox_id}/poll-now")
 async def poll_mailbox_now(mailbox_id: str):
     """Manually trigger polling for a specific mailbox."""
-    from server import poll_mailbox_for_documents
+    from server import poll_mailbox_for_documents  # Remains in server.py (deep orchestration)
 
     db = get_db()
     source = await db.mailbox_sources.find_one({"mailbox_id": mailbox_id}, {"_id": 0})

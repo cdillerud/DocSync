@@ -484,7 +484,7 @@ Document enters system
 
 | Target | Description | Priority |
 |--------|-------------|----------|
-| **`server.py` (~7800 lines)** | Still contains legacy business-logic functions and `validate_bc_match`. Has thin wrappers for extracted functions. Should continue extraction over time. | P1 |
+| **`server.py` (~7800 lines)** | Lifecycle/startup hub. Remaining non-lifecycle residue: `run_upload_and_link_workflow`, `classify_document_type`, `poll_mailbox_for_documents`, plus thin compatibility wrappers. | P1 |
 | **`validate_bc_match()` in server.py** | 450-line function with 15+ module-level dependencies. Needs dedicated extraction pass. | P1 |
 | **`reference_intelligence_service.py` (~1660 lines)** | Large file covering extract, classify, score, and resolve. Candidate for splitting into sub-modules. | P2 |
 | **`routers/document_intelligence.py`** | Grew to ~660 lines. Could be split into sub-routers per pipeline stage. | P2 |
@@ -756,6 +756,69 @@ server.py no longer serves as the authoritative source for any route handler imp
 ---
 
 *Last updated: March 15, 2026 (Orchestration Logic Extraction pass)*
+
+### 5i. Architecture Hardening Pass (March 2026)
+
+Systematic elimination of server.py as a dependency hub for routers and services.
+
+#### Dependency direction target
+
+```
+main.py -> routers -> handlers -> services -> helpers
+                                        └-> deps (config, DB)
+```
+
+#### Before/After: server.py imports in routers/services
+
+| File | Before (symbols) | After | Change |
+|------|----------|-------|--------|
+| `routers/settings.py` | 20 symbols (config, helpers, functions) | 0 | **Fully decoupled** → deps, settings_helpers, graph_access, email_helpers |
+| `routers/sharepoint.py` | 1 (`ensure_sharepoint_folder_exists`) | 0 | **Fully decoupled** → sharepoint_helpers |
+| `routers/workflows.py` | 1 (`link_document`) | 0 | **Fully decoupled** → document_linking |
+| `routers/mailbox_sources.py` | 4 (polling state, email fns) | 2 | Reduced — `get_email_token` moved to graph_access. Background task state + `poll_mailbox_for_documents` remain (lifecycle/deep orchestration) |
+| `services/document_handlers.py` | 8 via lazy `_server()` | 2 | Reduced — SP/BC/linking moved to dedicated modules. `run_upload_and_link_workflow` + `classify_document_type` remain |
+| `services/vendor_matching.py` | 3 config vars via `import server` | 0 | **Fully decoupled** → deps + vendor_name_helpers |
+
+**Total:** 37 import sites → 4 import sites (89% reduction)
+
+#### New modules created
+
+| Module | Responsibility | Source |
+|--------|---------------|--------|
+| `services/settings_helpers.py` | Settings admin: `SECRET_KEYS`, `mask_secret()`, `current_config()` | server.py |
+| `services/graph_access.py` | Graph API token: `get_graph_token()`, `get_email_token()` | server.py |
+| `services/email_helpers.py` | Email watcher config: `get_email_watcher_config()`, `subscribe_to_mailbox_notifications()` | server.py |
+| `services/sharepoint_helpers.py` | SharePoint: `upload_to_sharepoint()`, `create_sharing_link()`, `ensure_sharepoint_folder_exists()` | server.py |
+| `services/bc_draft_service.py` | BC drafts: `check_duplicate_purchase_invoice()`, `create_purchase_invoice_header()` | server.py |
+| `services/document_linking.py` | BC linking: `link_document_to_bc()`, `link_document()` | server.py |
+
+#### Remaining server.py imports (documented exceptions)
+
+| File | Symbol | Reason to stay |
+|------|--------|---------------|
+| `routers/mailbox_sources.py` | `_dynamic_mailbox_polling_task`, `_mailbox_last_poll_times` | Background task runtime state (lifecycle) |
+| `routers/mailbox_sources.py` | `poll_mailbox_for_documents` | 147-line deep orchestration with runtime state |
+| `services/document_handlers.py` | `run_upload_and_link_workflow` | 115-line multi-step orchestration |
+| `services/document_handlers.py` | `classify_document_type` | 113-line classification with inline rules |
+
+#### Architecture guardrails
+
+Test file: `tests/test_architecture_guardrails.py` (25 tests)
+- Allowlist enforcement: any new router/service importing server.py will fail CI
+- Module importability: all new extracted modules verified
+- Dependency direction: settings uses deps not server, handlers use extracted modules
+- Endpoint regression: key endpoints verified post-hardening
+- Route count stable at 427
+
+#### server.py remaining role (post-hardening)
+
+| Category | Examples | Status |
+|----------|---------|--------|
+| Startup/shutdown lifecycle | `startup()`, `shutdown_db_client()` | **Keep** — shell responsibility |
+| Background worker bootstrap | Email polling worker, scheduler tasks | **Keep** — lifecycle |
+| Environment/app-shell glue | Config vars (module-level), DB init | **Keep** — lifecycle |
+| Deep orchestration (residue) | `run_upload_and_link_workflow`, `classify_document_type`, `poll_mailbox_for_documents` | **Next extraction target** |
+| Compatibility wrappers | ~15 thin re-exports of extracted functions | **Remove when all callers migrated** |
 
 ### 5e. Workflow Handler Extraction (March 2026)
 

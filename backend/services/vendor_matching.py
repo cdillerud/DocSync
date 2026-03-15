@@ -40,9 +40,10 @@ def _bc_search():
 
 
 def _server_config():
-    """Read mutable config vars from server.py (future: centralized config module)."""
-    import server
-    return server.TENANT_ID, server.BC_READ_ENVIRONMENT, server.VENDOR_ALIAS_MAP
+    """Read mutable config vars from deps (centralized config)."""
+    import deps
+    from services.vendor_name_helpers import VENDOR_ALIAS_MAP
+    return deps.TENANT_ID, deps.BC_READ_ENVIRONMENT, VENDOR_ALIAS_MAP
 
 
 # ---------------------------------------------------------------------------

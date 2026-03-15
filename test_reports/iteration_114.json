@@ -1,0 +1,84 @@
+{
+  "summary": "Architecture Hardening Pass - All 25 guardrail tests pass. Verified 6 new extracted modules are importable, settings endpoints use deps not server, route count stable at 427, and all key endpoints work correctly. Frontend login and settings page render properly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/settings/test-connection?service=graph", "issue": "Returns 'Graph token error' when testing with invalid tenant - expected behavior since DEMO_MODE was toggled off during testing"},
+      {"endpoint": "/api/settings/test-connection?service=bc", "issue": "Returns 'BC token error' when testing with invalid tenant - expected behavior"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_architecture_guardrails.py",
+    "/app/test_reports/pytest/architecture_guardrails_results_114.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Minor: Deprecation warnings for regex param (should use pattern) in bc_sandbox.py and pilot.py - non-blocking",
+    "Minor: PydanticDeprecatedSince20 warning for min_items in inventory_ledger.py (should use min_length) - non-blocking",
+    "Minor: on_event deprecation in main.py (should use lifespan event handlers) - non-blocking"
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (25/25 guardrail tests passed)",
+    "frontend": "100% (login and settings page verified)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "None required",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Architecture hardening complete. 6 new modules extracted: graph_access.py, settings_helpers.py, sharepoint_helpers.py, bc_draft_service.py, document_linking.py, email_helpers.py. Routers no longer import server.py except mailbox_sources.py (allowed). Services no longer import server.py except document_handlers.py (allowed). Route count stable at 427.",
+  "verification_summary": {
+    "guardrail_tests": {
+      "total": 25,
+      "passed": 25,
+      "categories": {
+        "no_router_imports_server": "PASS",
+        "no_service_imports_server": "PASS", 
+        "new_modules_importable": "6/6 PASS",
+        "settings_uses_deps_not_server": "PASS",
+        "document_handlers_rewiring": "PASS",
+        "vendor_matching_uses_deps": "PASS",
+        "endpoints_still_work": "8/8 PASS",
+        "route_count_stable": "427 PASS"
+      }
+    },
+    "new_modules_verified": {
+      "settings_helpers": {"functions": ["SECRET_KEYS", "mask_secret", "current_config"], "status": "importable"},
+      "graph_access": {"functions": ["get_graph_token", "get_email_token"], "status": "importable"},
+      "sharepoint_helpers": {"functions": ["upload_to_sharepoint", "create_sharing_link", "ensure_sharepoint_folder_exists"], "status": "importable"},
+      "bc_draft_service": {"functions": ["check_duplicate_purchase_invoice", "create_purchase_invoice_header"], "status": "importable"},
+      "document_linking": {"functions": ["link_document_to_bc", "link_document"], "status": "importable"},
+      "email_helpers": {"functions": ["get_email_watcher_config", "subscribe_to_mailbox_notifications"], "status": "importable"}
+    },
+    "settings_endpoints_verified": {
+      "/api/settings/status": "200 OK - returns connections, features, demo_mode",
+      "/api/settings/config": "200 OK - returns masked secrets",
+      "/api/settings/config PUT": "200 OK - updates deps module attributes",
+      "/api/settings/test-connection graph": "Returns response (token error expected with invalid tenant)",
+      "/api/settings/test-connection bc": "Returns response (token error expected with invalid tenant)",
+      "/api/settings/features/create-draft-header GET": "200 OK - returns feature status",
+      "/api/settings/features/create-draft-header POST": "200 OK - toggles feature flag"
+    },
+    "other_endpoints_verified": {
+      "/api/documents": "200 OK",
+      "/api/workflows": "200 OK",
+      "/api/dashboard/document-types": "200 OK",
+      "/api/settings/mailbox-sources": "200 OK",
+      "/api/settings/email-watcher": "200 OK",
+      "/api/sharepoint/folder-structure": "200 OK",
+      "/api/auth/login": "200 OK with admin/admin"
+    },
+    "frontend_verified": {
+      "login_page": "Renders correctly, form working",
+      "dashboard": "Loads after login with all metrics",
+      "settings_page": "Displays connection status, folder structure, Demo Mode Active banner"
+    },
+    "route_count": "427 (stable)"
+  },
+  "mocked_apis_note": "Microsoft Graph email API, BC write operations, and JWT Auth (Entra ID) are MOCKED in demo mode"
+}

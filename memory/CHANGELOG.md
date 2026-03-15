@@ -1,5 +1,33 @@
 # GPI Document Hub - Changelog
 
+## March 15, 2026 — Workflow Handler Extraction (iter_110)
+
+### Extraction
+- Moved 15 workflow-domain handler implementations from server.py to `services/workflow_handlers.py`
+- Moved `SetVendorRequest`, `UpdateFieldsRequest`, `BCValidationOverrideRequest`, `ApprovalActionRequest` Pydantic models to new module
+- `routers/workflows.py` now imports from `services.workflow_handlers` (no longer from `server`)
+
+### Handlers extracted (15)
+- AP Invoice mutations: `set_vendor_for_document`, `update_document_fields`, `override_bc_validation`, `start_approval`, `approve_document`, `reject_document`
+- Generic mutations: `mark_ready_for_review`, `mark_reviewed`, `start_approval_generic`, `approve_generic`, `reject_generic`, `complete_triage`, `link_credit_to_invoice`, `tag_quality_doc`, `export_document`
+
+### Dependencies rewired (away from server.py)
+- `WorkflowEngine`, `WorkflowStatus`, `WorkflowEvent`, `DocType` → `services.workflow_engine`
+- `is_export_blocked` → `services.pilot_config`
+- DB → `deps.get_db()`
+- Remaining: `normalize_vendor_name` still lazy-imported from server.py (future extraction target)
+
+### Testing
+- 25/25 new workflow handler extraction tests passed
+- 89/89 total tests passed across 4 regression suites (0 failures, 0 regressions)
+- Route count stable at 427
+
+### Architecture update
+- Updated `ARCHITECTURE_CURRENT.md` with section 5e documenting the extraction
+- 25 of 32 total `add_api_route` handlers now extracted (only 7 reference_intelligence handlers remain)
+
+---
+
 ## March 15, 2026 — Document Handler Extraction (iter_109)
 
 ### Extraction

@@ -4,6 +4,8 @@
 
 ### P0 — Completed
 - ~~Refactor server.py monolith~~ (2026-03-11)
+- ~~Document Handler Extraction~~ (2026-03-15, iter_109)
+- ~~Workflow Handler Extraction~~ (2026-03-15, iter_110) — 25 of 32 handlers extracted
 - ~~Document Layout Fingerprinting~~ (2026-03-10)
 - ~~Stable Vendor Auto-Ready Rules~~ (2026-03-11)
 - ~~Stable Vendor Admin Page~~ (2026-03-11)
@@ -15,7 +17,8 @@
 
 ### P2 — Medium Priority
 - **Git Branch/Deployment Cleanup** — Standardize on main branch, resolve `conflict_020326_1424` branch issues
-- **Continue server.py Route Extraction** — Incrementally extract remaining routes from legacy api_router into new modular routers (documents, workflows, aliases, sales-file-import, etc.)
+- **Reference Intelligence Handler Extraction** — Final extraction pass: 7 remaining handlers from server.py to `services/reference_intelligence_handlers.py`
+- **Refactor monolithic files** — `backend/routers/inventory_ledger.py` and `frontend/src/pages/InventoryLedgerPage.js`
 
 ### P3 — Future/Backlog
 - Implement Outbound Document Delivery module

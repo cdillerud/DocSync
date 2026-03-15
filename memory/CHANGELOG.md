@@ -1,5 +1,34 @@
 # GPI Document Hub - Changelog
 
+## March 15, 2026 — Final Orchestration Extraction (iter_115)
+
+### Extraction
+- Extracted 3 deep orchestration functions + 1 helper from server.py:
+  - `classify_document_type` + `_get_category_for_doc_type` → `services/document_classification.py` (new)
+  - `run_upload_and_link_workflow` → `services/document_linking.py` (extended)
+  - `poll_mailbox_for_documents` → `services/mailbox_polling.py` (new)
+- Added `AI_CLASSIFICATION_ENABLED`, `AI_CLASSIFICATION_THRESHOLD` to deps.py
+
+### Consumer rewiring
+- `services/document_handlers.py` — **FULLY DECOUPLED** from server.py (removed `_server()` lazy import, all `srv.*` calls replaced)
+- `routers/mailbox_sources.py` — `poll_mailbox_for_documents` now imported from `services.mailbox_polling`
+
+### Architecture state
+- server.py import sites: **4 → 2** (only background task state + `_internal_intake_document` pipeline call)
+- server.py: 7831 → 7467 lines (3 functions replaced with thin wrappers)
+- Cumulative: **37 → 2 import sites** (95% reduction across entire hardening program)
+
+### Guardrail tests updated
+- `test_architecture_guardrails.py`: 25 → 30 tests (added document_classification, mailbox_polling, run_upload_and_link_workflow importability + document_handlers full decoupling checks)
+
+### Testing
+- 30/30 architecture guardrail tests passed
+- 136/136 regression tests passed
+- Testing agent: 100% pass rate, zero action items
+- Route count stable at 427
+
+---
+
 ## March 15, 2026 — Architecture Hardening Pass (iter_114)
 
 ### Dependency cleanup

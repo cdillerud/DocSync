@@ -755,7 +755,56 @@ server.py no longer serves as the authoritative source for any route handler imp
 
 ---
 
-*Last updated: March 15, 2026 (Orchestration Logic Extraction pass)*
+### 5j. Final Orchestration Extraction Pass (March 2026)
+
+Extracted the last 3 deep orchestration functions from server.py. Combined with pass 5i, this completes the server.py decoupling program.
+
+#### Functions extracted
+
+| Function | Lines | New home | Nature |
+|----------|-------|----------|--------|
+| `classify_document_type` | 113 | `services/document_classification.py` | Deterministic-first classification pipeline |
+| `_get_category_for_doc_type` | 10 | `services/document_classification.py` | Pure mapping helper |
+| `run_upload_and_link_workflow` | 115 | `services/document_linking.py` (extended) | SP upload + BC link orchestration |
+| `poll_mailbox_for_documents` | 147 | `services/mailbox_polling.py` | Email polling + doc ingestion |
+
+#### Consumer rewiring
+
+| Consumer | Before | After |
+|----------|--------|-------|
+| `services/document_handlers.py` | Lazy `_server()` for 2 functions | Direct imports from `document_classification` + `document_linking` — **FULLY DECOUPLED** |
+| `routers/mailbox_sources.py` | `from server import poll_mailbox_for_documents` | `from services.mailbox_polling import poll_mailbox_for_documents` |
+
+#### Remaining server.py imports (final state)
+
+| File | Symbol | Reason |
+|------|--------|--------|
+| `routers/mailbox_sources.py` | `server._dynamic_mailbox_polling_task`, `server._mailbox_last_poll_times` | True lifecycle/bootstrap state (background worker management) |
+| `services/mailbox_polling.py` | `server._internal_intake_document` | Core 450-line intake pipeline — next extraction target |
+
+#### server.py final role (post-extraction)
+
+| Category | Contents | Line estimate |
+|----------|---------|--------------|
+| Startup/shutdown lifecycle | `startup()`, `shutdown_db_client()`, scheduler setup | ~200 |
+| Background worker bootstrap | Email polling worker, task management | ~150 |
+| Core intake pipeline | `_internal_intake_document` + sub-functions | ~3500 |
+| Environment/config (duplicate) | Module-level env vars (also in deps.py) | ~100 |
+| Thin compatibility wrappers | ~18 re-exports of extracted functions | ~80 |
+| Legacy handler residue | Functions still referenced by internal pipeline | ~3400 |
+
+#### Architecture hardening cumulative results
+
+| Metric | Before (start of session) | After |
+|--------|--------------------------|-------|
+| server.py lines | ~9100 | ~7467 |
+| Files importing server.py | 8 files, 37 import sites | 2 files, 2 import sites |
+| Extracted modules created | 0 | 12 |
+| Architecture guardrail tests | 0 | 30 |
+| All handler modules decoupled | No | Yes |
+| Route count | 427 | 427 (stable) |
+
+*Last updated: March 15, 2026 (Final Orchestration Extraction pass)*
 
 ### 5i. Architecture Hardening Pass (March 2026)
 

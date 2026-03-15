@@ -379,6 +379,15 @@ Key Principles:
 - [x] 161 total tests passed, route count stable at 427
 - [x] Documented remaining server.py role and dependency direction rules in ARCHITECTURE_CURRENT.md
 
+#### Final Orchestration Extraction (COMPLETED - Mar 15, 2026)
+- [x] Extracted classify_document_type → `services/document_classification.py`
+- [x] Extracted run_upload_and_link_workflow → `services/document_linking.py` (extended)
+- [x] Extracted poll_mailbox_for_documents → `services/mailbox_polling.py`
+- [x] **document_handlers.py FULLY DECOUPLED from server.py** — zero _server() or srv.* references
+- [x] server.py import sites: 37 → 2 (95% cumulative reduction)
+- [x] 30 architecture guardrail tests + 136 regression tests pass
+- [x] Route count stable at 427
+
 
 ### In Progress / Shadow Mode
 - [x] AP automatic workflow trigger (VERIFIED WORKING)

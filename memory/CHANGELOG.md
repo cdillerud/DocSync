@@ -1,6 +1,26 @@
 # CHANGELOG - GPI Document Hub
 
 
+## [2026-03-15] Iteration 98 — Document Bundle Detection & Transaction Grouping — COMPLETE
+- **Backend:** New `services/document_bundle_service.py` — layered grouping (PO 0.95 → invoice 0.92 → linked entity 0.88 → vendor+amount fuzzy 0.65)
+- **Backend:** `POST /api/document-intelligence/detect-bundles` — scans recent docs or specific IDs, groups by shared references
+- **Backend:** `GET /api/document-intelligence/bundles` — list with filters (type, status, completeness, entity)
+- **Backend:** `GET /api/document-intelligence/bundles/{id}` — full detail with member_documents, detected_keys, completeness, suggested_next_action
+- **Backend:** `PATCH /api/document-intelligence/bundles/{id}` — reclassify, add/remove docs, change status, notes; re-evaluates completeness
+- **Backend:** `GET /api/document-intelligence/bundle-review-queue` — bundles needing review or incomplete
+- **Backend:** Completeness rules per bundle type: ap_packet (invoice+receiving), customer_order_packet (customer PO), purchasing_packet (PO support), warehouse_packet (agreement+PO)
+- **Backend:** Document enrichment: intelligence results gain bundle_id, bundle_type, bundle_status, bundle_completeness_status, related_document_count
+- **Backend:** Activity events: bundle_detected, added_to_bundle, bundle_completeness_changed, bundle_manually_corrected
+- **Frontend:** New `/document-bundles` page — summary cards, 3 filter dropdowns, bundle table, detail drawer with member docs, detected keys, manual controls
+- **Frontend:** Bundle membership section in DocumentIntelligencePanel — shows bundle info, related docs, missing docs, completeness badge
+- **Frontend:** Nav item "Doc Bundles" added to sidebar
+- **New collection:** `document_bundles`
+- **Router fix:** Bundle endpoints placed before catch-all `/{doc_id}` to avoid route conflicts
+- **Testing:** Backend 100% (24/24 passed), Frontend 100% — all verified by testing agent, all regression tests pass
+- **Test report:** `/app/test_reports/iteration_98.json`
+
+
+
 ## [2026-03-15] Iteration 97 — Document-to-Existing-Transaction Matching & Auto-Linking — COMPLETE
 - **Backend:** New `services/transaction_matching_service.py` — multi-strategy matching (PO exact → entity+reference → vendor+amount → linked doc cross-reference)
 - **Backend:** `POST /api/document-intelligence/match-transactions/{id}` — finds candidate matches with confidence scoring (HIGH=0.90, MEDIUM=0.70)

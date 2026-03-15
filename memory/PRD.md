@@ -3235,6 +3235,31 @@ EMAIL_CLIENT_ID=doc-workflow-test
 
 ---
 
+## Session Update: March 15, 2026 - Document Bundle Detection & Transaction Grouping (iteration_98)
+
+### Completed
+
+#### Document Bundle Detection and Transaction Grouping
+- **Backend:** New `services/document_bundle_service.py` — layered grouping algorithm
+- **Backend:** Bundle endpoints: detect-bundles, bundles (list/detail/update), bundle-review-queue
+- **Backend:** Completeness rules per bundle type (ap_packet, customer_order_packet, purchasing_packet, warehouse_packet)
+- **Backend:** Document enrichment with bundle_id, bundle_type, bundle_status, completeness
+- **Backend:** Activity events for all bundle lifecycle actions
+- **Frontend:** New DocumentBundleReviewPage at /document-bundles — summary cards, filters, table, detail drawer
+- **Frontend:** Bundle membership section in DocumentIntelligencePanel
+- **New collection:** `document_bundles`
+
+### Test Results
+- Backend: 100% (24/24 passed)
+- Frontend: 100% — all UI flows verified, all regression tests pass
+- Test report: `/app/test_reports/iteration_98.json`
+
+*Last Updated: March 15, 2026*
+
+
+
+---
+
 ## Session Update: March 15, 2026 - Transaction Matching & Auto-Linking (iteration_97)
 
 ### Completed

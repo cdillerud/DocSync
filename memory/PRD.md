@@ -3231,3 +3231,31 @@ EMAIL_CLIENT_ID=doc-workflow-test
 
 *Last Updated: March 15, 2026*
 
+
+
+---
+
+## Session Update: March 15, 2026 - Transaction Matching & Auto-Linking (iteration_97)
+
+### Completed
+
+#### Document-to-Existing-Transaction Matching and Auto-Linking
+- **Backend:** New `services/transaction_matching_service.py` — multi-strategy transaction matching
+- **Backend:** `POST /api/document-intelligence/match-transactions/{id}` — finds candidates from SO drafts, PO drafts, AP drafts, linked documents
+- **Backend:** `GET /api/document-intelligence/transaction-matches/{id}` — stored candidates with confidence scoring
+- **Backend:** `POST /api/document-intelligence/auto-link/{id}` — links to high-confidence/confirmed match, rejects ambiguous (422)
+- **Backend:** `PATCH /api/document-intelligence/transaction-matches/{match_id}` — manual confirm/reject
+- **Backend:** Auto-draft suppression when match found, activity timeline events
+- **Backend:** Hub documents enriched with linked_transaction_type/id/display
+- **Frontend:** Transaction Matching section in DocumentIntelligencePanel
+- **Frontend:** Review Queue transaction matching status badges
+- **New collection:** `transaction_matches`
+- **Bug fix:** Removed duplicate orphaned except blocks in router
+
+### Test Results
+- Backend: 100% (19/21 passed, 2 skipped)
+- Frontend: 100% — all UI flows verified
+- Test report: `/app/test_reports/iteration_97.json`
+
+*Last Updated: March 15, 2026*
+

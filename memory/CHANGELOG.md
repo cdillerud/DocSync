@@ -1,6 +1,24 @@
 # CHANGELOG - GPI Document Hub
 
 
+## [2026-03-15] Iteration 97 — Document-to-Existing-Transaction Matching & Auto-Linking — COMPLETE
+- **Backend:** New `services/transaction_matching_service.py` — multi-strategy matching (PO exact → entity+reference → vendor+amount → linked doc cross-reference)
+- **Backend:** `POST /api/document-intelligence/match-transactions/{id}` — finds candidate matches with confidence scoring (HIGH=0.90, MEDIUM=0.70)
+- **Backend:** `GET /api/document-intelligence/transaction-matches/{id}` — returns stored match candidates
+- **Backend:** `POST /api/document-intelligence/auto-link/{id}` — links document to high-confidence/confirmed match, rejects ambiguous (422)
+- **Backend:** `PATCH /api/document-intelligence/transaction-matches/{match_id}` — manual confirm/reject with re-evaluation
+- **Backend:** Auto-draft suppression: `auto_draft_suppressed_due_to_match=true` prevents duplicate drafts when a match is found
+- **Backend:** Activity timeline events: transaction_match_found, transaction_match_ambiguous, transaction_match_none, transaction_auto_linked, transaction_match_confirmed, transaction_match_rejected
+- **Backend:** Hub documents enriched with `linked_transaction_type/id/display` on successful linking
+- **Frontend:** Transaction Matching section in DocumentIntelligencePanel — candidate list with confidence bars, confirm/reject buttons, auto-link button
+- **Frontend:** Review Queue shows transaction matching status badges (tx match, tx ambiguous, linked, Link Available)
+- **New collection:** `transaction_matches`
+- **Bug fix:** Removed duplicate orphaned except blocks in router (lines 296-300)
+- **Testing:** Backend 100% (19/21 passed, 2 skipped), Frontend 100% — all verified by testing agent
+- **Test report:** `/app/test_reports/iteration_97.json`
+
+
+
 ## [2026-03-15] Iteration 96 — Entity Resolution Engine — COMPLETE
 - **Backend:** New `services/entity_resolution_service.py` — layered entity resolution (exact → normalized → fuzzy → reference lookup)
 - **Backend:** `POST /api/document-intelligence/resolve-entities/{id}` — resolves customer, vendor, PO#, invoice# with confidence scoring

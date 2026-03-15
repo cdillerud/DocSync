@@ -25,6 +25,7 @@ import OperationsQueuePage from "@/pages/OperationsQueuePage";
 import TemplatesPage from "@/pages/TemplatesPage";
 import DocumentReviewQueuePage from "@/pages/DocumentReviewQueuePage";
 import DocumentBundleReviewPage from "@/pages/DocumentBundleReviewPage";
+import DocumentLifecyclePage from "@/pages/DocumentLifecyclePage";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -56,6 +57,7 @@ function AppRoutes() {
         <Route path="templates" element={<TemplatesPage />} />
         <Route path="document-review" element={<DocumentReviewQueuePage />} />
         <Route path="document-bundles" element={<DocumentBundleReviewPage />} />
+        <Route path="document-lifecycle" element={<DocumentLifecyclePage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

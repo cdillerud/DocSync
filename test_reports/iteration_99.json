@@ -1,0 +1,155 @@
+{
+  "summary": "Iteration 99 - Document Lifecycle Validation Engine testing complete. Backend: 24/24 tests passed. All lifecycle endpoints functional: POST /api/document-intelligence/validate-lifecycle/{entity_type}/{entity_id} (validates lifecycle, detects stage/duplicates/inconsistencies), GET /api/document-intelligence/lifecycle/{entity_type}/{entity_id} (returns stored validation with enriched documents), GET /api/document-intelligence/lifecycle-issues (returns non-valid entities with filters). Frontend: /document-lifecycle page with summary cards (Total/Valid/Incomplete/Duplicates/Inconsistent), filters (issue_type/entity_type), issues table, detail drawer with stage progress, missing docs, duplicates, inconsistencies, documents list, re-validate button. DocumentIntelligencePanel shows lifecycle-status-section with validation status, stage, missing documents, duplicate flags. All iteration_98 bundle endpoints and iteration_97 core endpoints still work (regression tested).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Lifecycle Issues Table", "issues": ["Minor React hydration warning - <tr> inside <span> - cosmetic only, no functional impact (same as iteration 98)"]}
+    ]
+  },
+  "passed_tests": [
+    "Backend: GET /api/document-intelligence/lifecycle-issues returns total, issues array, status_counts",
+    "Backend: GET /api/document-intelligence/lifecycle-issues supports issue_type filter",
+    "Backend: GET /api/document-intelligence/lifecycle-issues supports entity_type filter",
+    "Backend: GET /api/document-intelligence/lifecycle-issues excludes valid status from issues array",
+    "Backend: POST /api/document-intelligence/validate-lifecycle returns validation_status, detected_stage, expected_next_stage, missing_documents, duplicate_documents, inconsistent_references, validation_messages, recommended_next_action",
+    "Backend: GET /api/document-intelligence/lifecycle returns stored validation with enriched documents array",
+    "Backend: GET /api/document-intelligence/lifecycle returns 404 for non-existent entity",
+    "Backend: Sales Order flow template correctly applied for so_draft and customer_order_packet",
+    "Backend: Purchasing flow template correctly applied for po_draft and purchasing_packet",
+    "Backend: AP flow template correctly applied for ap_intake_draft and ap_packet",
+    "Backend: Valid status returned when all required documents present",
+    "Backend: Incomplete status returned when required documents missing (with missing_documents array)",
+    "Backend: Duplicate_detected status returned when same invoice_number+vendor or PO+vendor found across multiple docs",
+    "Backend: Inconsistent status returned when multiple different customer/vendor references found",
+    "Backend: Bundle enriched with lifecycle_validation_status, lifecycle_stage, lifecycle_missing_documents after validation",
+    "Backend: Document intelligence results enriched with lifecycle_status, lifecycle_stage after validation",
+    "Backend: Activity events created: lifecycle_validated, missing_document_detected, duplicate_detected",
+    "Backend: Regression - POST /api/document-intelligence/detect-bundles still works",
+    "Backend: Regression - GET /api/document-intelligence/bundles still works",
+    "Backend: Regression - GET /api/document-intelligence/bundles/{id} still works",
+    "Backend: Regression - GET /api/document-intelligence/bundle-review-queue still works",
+    "Backend: Regression - POST /api/document-intelligence/process/{id} still works",
+    "Backend: Regression - GET /api/document-intelligence/review-queue still works",
+    "Backend: Regression - POST /api/document-intelligence/match-transactions/{id} still works",
+    "Backend: Regression - POST /api/document-intelligence/resolve-entities/{id} still works",
+    "Backend: Regression - POST /api/document-intelligence/auto-draft/{id} still works",
+    "Frontend: Document Lifecycle page loads at /document-lifecycle with data-testid",
+    "Frontend: Summary cards show Total Validated, Valid, Incomplete, Duplicates, Inconsistent counts",
+    "Frontend: Status filter (issue_type) works with All/Incomplete/Duplicates/Inconsistent/Needs Review options",
+    "Frontend: Entity type filter works with so_draft/po_draft/ap_intake_draft/packet types",
+    "Frontend: Issues table shows entity_id, type badge, status badge, stage, docs count, issue preview",
+    "Frontend: Row click opens detail drawer with lifecycle-detail-drawer data-testid",
+    "Frontend: Drawer shows lifecycle stage section with current stage badge and next stage",
+    "Frontend: Drawer shows completed stages badges",
+    "Frontend: Drawer shows recommended action section",
+    "Frontend: Drawer shows missing documents section with amber styling",
+    "Frontend: Drawer shows duplicate documents section with red styling",
+    "Frontend: Drawer shows inconsistencies section with orange styling",
+    "Frontend: Drawer shows validation messages",
+    "Frontend: Drawer shows documents list with document_type badges",
+    "Frontend: Re-validate Lifecycle button works and updates drawer",
+    "Frontend: Nav item 'Lifecycle' links to /document-lifecycle",
+    "Frontend: DocumentIntelligencePanel has lifecycle-status-section showing status badge, stage, missing docs, duplicate flags"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_document_lifecycle.py",
+    "/app/test_reports/pytest/document_lifecycle_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend service /app/backend/services/document_lifecycle_service.py well-structured with lifecycle templates (SALES_ORDER_STAGES, PURCHASING_STAGES, AP_STAGES)",
+    "Backend: _detect_stage() correctly identifies completed stages and expected next stage",
+    "Backend: _detect_duplicates() correctly identifies invoice_number+vendor and PO+vendor collisions",
+    "Backend: _check_inconsistencies() correctly identifies mismatched_customer, mismatched_vendor, lifecycle_gap",
+    "Backend: validate_lifecycle() correctly handles bundle entities (entity_type ending in _packet) vs non-bundle entities",
+    "Backend: Bundle enrichment adds lifecycle_validation_status, lifecycle_stage, lifecycle_missing_documents",
+    "Backend: Document enrichment adds lifecycle_status, lifecycle_stage, lifecycle_missing_documents, lifecycle_duplicate_flags",
+    "Backend router: Lifecycle endpoints correctly placed BEFORE catch-all /{doc_id} to avoid route conflicts",
+    "Frontend DocumentLifecyclePage.js has proper data-testids (document-lifecycle-page, lifecycle-summary-cards, lifecycle-issues-table, lifecycle-row-{id}, lifecycle-detail-drawer)",
+    "Frontend DocumentIntelligencePanel.js correctly displays lifecycle-status-section when lifecycle_status is present"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_document_lifecycle.py"
+  ],
+  "success_rate": {
+    "backend": "100% (24/24 tests passed)",
+    "frontend": "100% (all UI elements and flows verified)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://doc-dedup-match.preview.emergentagent.com"
+  },
+  "seed_data_created": {
+    "existing_valid_bundle": "BDL-B739B77E (customer_order_packet with TEST-BUNDLE-A and TEST-BUNDLE-B) - status: valid",
+    "duplicate_scenario": "TEST-DUPPO-1267A3BC (so_draft with 2 Sales_PO docs sharing same PO-DUP-TEST-888 + vendor) - status: duplicate_detected",
+    "inconsistent_scenario": "TEST-INC-D838DD86 (so_draft with Sales_PO and Shipping_Document having different customer refs) - status: inconsistent",
+    "incomplete_scenarios": ["EMPTY-ENTITY-8c8eb81f (no docs)", "test-ap-packet-123 (missing invoice)", "test-so-draft-123 (missing customer PO)"]
+  },
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 99 - Document Lifecycle Validation Engine fully tested. New endpoints: POST /api/document-intelligence/validate-lifecycle/{entity_type}/{entity_id} (validates lifecycle), GET /api/document-intelligence/lifecycle/{entity_type}/{entity_id} (stored validation), GET /api/document-intelligence/lifecycle-issues (non-valid entities). Validation statuses: valid, incomplete, duplicate_detected, inconsistent, needs_review. Lifecycle templates: so_draft/customer_order_packet -> Sales Order (stages: order_received, order_created, proofing, shipped, invoiced), po_draft/purchasing_packet -> Purchasing (stages: po_created, po_drafted, received, vendor_invoiced), ap_intake_draft/ap_packet -> AP (stages: invoice_received, receiving_support, ap_drafted). Key data-testids: document-lifecycle-page, lifecycle-summary-cards, lifecycle-issues-table, lifecycle-row-{entity_id}, lifecycle-detail-drawer, lifecycle-stage-section, lifecycle-next-action, lifecycle-missing-docs, lifecycle-duplicates, lifecycle-inconsistencies, lifecycle-messages, lifecycle-documents, revalidate-btn, lifecycle-status-section (in panel), lifecycle-panel-missing, lifecycle-panel-duplicates. Activity events: lifecycle_validated, missing_document_detected, duplicate_detected. Test data: BDL-B739B77E (valid), TEST-DUPPO-1267A3BC (duplicate), TEST-INC-D838DD86 (inconsistent).",
+  "features_verified": {
+    "backend_endpoints": {
+      "validate_lifecycle": {
+        "method": "POST",
+        "path": "/api/document-intelligence/validate-lifecycle/{entity_type}/{entity_id}",
+        "returns": {
+          "validation_status": "valid|incomplete|duplicate_detected|inconsistent|needs_review",
+          "detected_stage": "string",
+          "expected_next_stage": "string or null",
+          "completed_stages": "array",
+          "missing_documents": "array of {stage, label, expected_types, message}",
+          "duplicate_documents": "array of {type, reference, vendor, document_ids, message}",
+          "inconsistent_references": "array of {type, message, values}",
+          "validation_messages": "array of strings",
+          "recommended_next_action": "string",
+          "document_count": "int",
+          "document_ids": "array",
+          "lifecycle_template": "string"
+        }
+      },
+      "get_lifecycle": {
+        "method": "GET",
+        "path": "/api/document-intelligence/lifecycle/{entity_type}/{entity_id}",
+        "returns": "validation record + documents array with document_id, file_name, document_type, automation_readiness, status",
+        "errors": {"404": "No lifecycle validation for entity"}
+      },
+      "lifecycle_issues": {
+        "method": "GET",
+        "path": "/api/document-intelligence/lifecycle-issues",
+        "query_params": ["issue_type (validation_status)", "entity_type", "limit", "offset"],
+        "returns": {"total": "int (non-valid count)", "issues": "array", "status_counts": "object (all statuses)"}
+      }
+    },
+    "lifecycle_templates": {
+      "sales_order": {
+        "entity_types": ["so_draft", "sales_order", "customer_order_packet"],
+        "stages": ["order_received (Sales_PO required)", "order_created (Sales_Order)", "proofing (Quality_Issue)", "shipped (Shipping_Document)", "invoiced (AP_Invoice)"]
+      },
+      "purchasing": {
+        "entity_types": ["po_draft", "purchasing_packet"],
+        "stages": ["po_created (Freight_Document required)", "po_drafted (Sales_PO)", "received (Shipping_Document)", "vendor_invoiced (AP_Invoice)"]
+      },
+      "accounts_payable": {
+        "entity_types": ["ap_intake_draft", "ap_packet"],
+        "stages": ["invoice_received (AP_Invoice required)", "receiving_support (Shipping_Document)", "ap_drafted"]
+      }
+    },
+    "validation_rules": {
+      "duplicate_detection": "Same invoice_number+vendor or PO+vendor across multiple docs",
+      "inconsistency_detection": "Multiple different customer/vendor references, lifecycle gaps between completed stages",
+      "missing_detection": "Required stages missing from completed stages"
+    },
+    "enrichment": {
+      "bundle": ["lifecycle_validation_status", "lifecycle_stage", "lifecycle_missing_documents"],
+      "document_intelligence": ["lifecycle_status", "lifecycle_stage", "lifecycle_missing_documents", "lifecycle_duplicate_flags"]
+    },
+    "activity_events": ["lifecycle_validated", "missing_document_detected", "duplicate_detected"]
+  },
+  "mocked_apis_note": "Business Central API operates in DEMO_MODE. Email Service is MOCKED (in-memory). SharePoint storage is MOCKED. Tests seed data directly in MongoDB."
+}

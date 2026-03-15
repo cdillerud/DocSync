@@ -359,3 +359,9 @@ export const getBundle = (bundleId) => api.get(`/document-intelligence/bundles/$
 export const updateBundle = (bundleId, data) => api.patch(`/document-intelligence/bundles/${bundleId}`, data);
 export const getBundleReviewQueue = (params) => api.get('/document-intelligence/bundle-review-queue', { params });
 
+// Document Lifecycle APIs
+export const validateLifecycle = (entityType, entityId) => api.post(`/document-intelligence/validate-lifecycle/${entityType}/${entityId}`);
+export const getLifecycle = (entityType, entityId) => api.get(`/document-intelligence/lifecycle/${entityType}/${entityId}`);
+export const getLifecycleIssues = (params) => api.get('/document-intelligence/lifecycle-issues', { params });
+
+

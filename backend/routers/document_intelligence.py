@@ -43,6 +43,11 @@ from services.document_bundle_service import (
     update_bundle,
     get_bundle_review_queue,
 )
+from services.document_lifecycle_service import (
+    validate_lifecycle,
+    get_lifecycle,
+    get_lifecycle_issues,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/document-intelligence", tags=["Document Intelligence"])
@@ -200,6 +205,47 @@ async def api_update_bundle(bundle_id: str, body: UpdateBundleRequest):
     except Exception as e:
         logger.error("Bundle update failed for %s: %s", bundle_id, e)
         raise HTTPException(status_code=500, detail=f"Bundle update failed: {str(e)}")
+
+
+# ── Lifecycle Validation Endpoints ────────────────────────────────────────────
+
+@router.post("/validate-lifecycle/{entity_type}/{entity_id}")
+async def api_validate_lifecycle(entity_type: str, entity_id: str):
+    """
+    Run lifecycle validation for an entity. Collects linked documents,
+    applies lifecycle rules, detects missing docs / duplicates / inconsistencies.
+    """
+    try:
+        result = await validate_lifecycle(entity_type=entity_type, entity_id=entity_id)
+        return result
+    except Exception as e:
+        logger.error("Lifecycle validation failed for %s/%s: %s", entity_type, entity_id, e)
+        raise HTTPException(status_code=500, detail=f"Lifecycle validation failed: {str(e)}")
+
+
+@router.get("/lifecycle-issues")
+async def api_lifecycle_issues(
+    issue_type: Optional[str] = Query(None),
+    entity_type: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """Get entities with lifecycle issues (not valid)."""
+    return await get_lifecycle_issues(
+        issue_type=issue_type,
+        entity_type=entity_type,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/lifecycle/{entity_type}/{entity_id}")
+async def api_get_lifecycle(entity_type: str, entity_id: str):
+    """Get the latest lifecycle validation for an entity."""
+    result = await get_lifecycle(entity_type=entity_type, entity_id=entity_id)
+    if not result:
+        raise HTTPException(status_code=404, detail=f"No lifecycle validation for {entity_type}/{entity_id}")
+    return result
 
 
 # ── Catch-all document routes (must be LAST) ────────────────────────────────

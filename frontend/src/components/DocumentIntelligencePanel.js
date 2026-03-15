@@ -6,13 +6,13 @@ import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import {
   ScanSearch, RefreshCw, CheckCircle, AlertTriangle, XCircle, Pencil, Save, X, Loader2,
-  History, ChevronDown, ChevronUp, Zap, Copy, FileText, Link2, Users, Unlink, ArrowRight, GitMerge, Ban, Layers, PackageSearch
+  History, ChevronDown, ChevronUp, Zap, Copy, FileText, Link2, Users, Unlink, ArrowRight, GitMerge, Ban, Layers, PackageSearch, Activity, ShieldAlert
 } from 'lucide-react';
 import {
   getDocumentIntelligence, processDocumentIntelligence, correctDocumentIntelligence,
   createAutoDraft, resolveDocumentEntities, getDocumentResolutions, correctResolution,
   matchTransactions, getTransactionMatches, autoLinkDocument, confirmTransactionMatch,
-  getBundle
+  getBundle, validateLifecycle
 } from '@/lib/api';
 
 const READINESS_COLORS = {
@@ -66,6 +66,10 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
   // Bundle state
   const [bundleInfo, setBundleInfo] = useState(null);
   const [showBundle, setShowBundle] = useState(true);
+
+  // Lifecycle state
+  const [showLifecycle, setShowLifecycle] = useState(true);
+  const [lifecycleValidating, setLifecycleValidating] = useState(false);
 
   const docId = document?.id;
 
@@ -594,6 +598,60 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
                 )}
               </div>
             )}
+
+            {/* Lifecycle Status Section */}
+            {result && (
+              <div data-testid="lifecycle-status-section">
+                <div className="flex items-center justify-between p-3 cursor-pointer hover:bg-accent/30 transition-colors" onClick={() => setShowLifecycle(!showLifecycle)}>
+                  <div className="flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Lifecycle Status</span>
+                    {result.lifecycle_status && (
+                      <Badge variant="outline" className={`text-[9px] ${result.lifecycle_status === 'valid' ? 'border-emerald-500/30 text-emerald-400' : result.lifecycle_status === 'duplicate_detected' ? 'border-red-500/30 text-red-400' : result.lifecycle_status === 'inconsistent' ? 'border-orange-500/30 text-orange-400' : result.lifecycle_status === 'incomplete' ? 'border-amber-500/30 text-amber-400' : 'border-blue-500/30 text-blue-400'}`}>
+                        {result.lifecycle_status === 'valid' ? 'Valid' : result.lifecycle_status === 'duplicate_detected' ? 'Duplicate' : result.lifecycle_status === 'inconsistent' ? 'Inconsistent' : result.lifecycle_status === 'incomplete' ? 'Incomplete' : result.lifecycle_status || 'Not Validated'}
+                      </Badge>
+                    )}
+                    {result.lifecycle_stage && result.lifecycle_stage !== 'unknown' && (
+                      <span className="text-[10px] text-muted-foreground">Stage: {result.lifecycle_stage}</span>
+                    )}
+                  </div>
+                  {showLifecycle ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
+                </div>
+
+                {showLifecycle && (
+                  <div className="border-t border-border p-3 space-y-2">
+                    {!result.lifecycle_status ? (
+                      <p className="text-[10px] text-muted-foreground italic">Lifecycle not yet validated for this document's entity</p>
+                    ) : (
+                      <>
+                        {result.lifecycle_missing_documents?.length > 0 && (
+                          <div className="p-2 bg-amber-500/5 border border-amber-500/20 rounded" data-testid="lifecycle-panel-missing">
+                            <p className="text-[10px] text-amber-400 font-semibold mb-1">Missing from lifecycle:</p>
+                            {result.lifecycle_missing_documents.map((m, i) => (
+                              <p key={i} className="text-[10px] text-amber-300 flex items-center gap-1"><AlertTriangle className="w-2.5 h-2.5" /> {m}</p>
+                            ))}
+                          </div>
+                        )}
+                        {result.lifecycle_duplicate_flags?.length > 0 && (
+                          <div className="p-2 bg-red-500/5 border border-red-500/20 rounded" data-testid="lifecycle-panel-duplicates">
+                            <p className="text-[10px] text-red-400 font-semibold mb-1">Duplicates detected:</p>
+                            {result.lifecycle_duplicate_flags.map((d, i) => (
+                              <p key={i} className="text-[10px] text-red-300 flex items-center gap-1"><XCircle className="w-2.5 h-2.5" /> {d}</p>
+                            ))}
+                          </div>
+                        )}
+                        {result.lifecycle_status === 'valid' && (
+                          <div className="flex items-center gap-1.5 text-[10px] text-emerald-400">
+                            <CheckCircle className="w-3 h-3" /> Lifecycle is valid — no issues detected
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {isReady && !editing && !hasLink && (
               <div className="border border-border rounded-lg p-3 space-y-2" data-testid="auto-draft-section">
                 {draftSuppressed && !hasDraft ? (

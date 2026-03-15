@@ -23,6 +23,7 @@ import APValidationPanel from '../components/APValidationPanel';
 import MatchingDebugPanel from '../components/MatchingDebugPanel';
 import CreateBCSalesOrderPanel from '../components/CreateBCSalesOrderPanel';
 import CreateBCPurchaseInvoicePanel from '../components/CreateBCPurchaseInvoicePanel';
+import DocumentIntelligencePanel from '../components/DocumentIntelligencePanel';
 
 const STATUS_CLASSES = {
   Received: 'status-received',
@@ -470,6 +471,12 @@ export default function DocumentDetailPage() {
               </CardContent>
             </Card>
           )}
+
+          {/* BC Sales Order Panel - for eligible document types */}
+          <DocumentIntelligencePanel
+            document={doc}
+            onUpdate={() => fetchDoc()}
+          />
 
           {/* BC Sales Order Panel - for eligible document types */}
           <CreateBCSalesOrderPanel 

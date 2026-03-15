@@ -334,3 +334,11 @@ export const reconcileSalesOrder = (salesOrderId, lines, cancelled = false) => {
     cancelled,
   });
 };
+
+
+// Document Intelligence
+export const processDocumentIntelligence = (docId) => api.post(`/document-intelligence/process/${docId}`);
+export const getDocumentIntelligence = (docId) => api.get(`/document-intelligence/${docId}`);
+export const getIntelligenceReviewQueue = (params) => api.get('/document-intelligence/review-queue', { params });
+export const correctDocumentIntelligence = (docId, data) => api.patch(`/document-intelligence/${docId}`, data);
+export const getIntelligenceSummary = () => api.get('/document-intelligence/summary');

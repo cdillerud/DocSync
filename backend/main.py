@@ -73,6 +73,7 @@ from routers.gpi_integration import router as gpi_integration_router
 from routers.documents import router as documents_router, register_server_routes as register_doc_routes
 from routers.workflows import router as workflows_router, register_server_routes as register_wf_routes
 from routers.reference_intelligence import router as ref_intel_router, register_server_routes as register_ri_routes
+from routers.document_intelligence import router as document_intelligence_router
 from routes.auth import router as auth_router
 
 # ==================== APP ====================
@@ -122,6 +123,7 @@ app.include_router(gpi_integration_router, prefix="/api")
 app.include_router(documents_router, prefix="/api")
 app.include_router(workflows_router, prefix="/api")
 app.include_router(ref_intel_router, prefix="/api")
+app.include_router(document_intelligence_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 
 # ==================== LEGACY ROUTERS ====================

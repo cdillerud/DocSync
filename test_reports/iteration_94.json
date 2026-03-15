@@ -1,0 +1,174 @@
+{
+  "summary": "Iteration 94 - Document Intelligence endpoints and frontend components testing completed. Backend: 18/18 tests passed for all 5 endpoints (POST /api/document-intelligence/process/{id}, GET /api/document-intelligence/{id}, GET /api/document-intelligence/review-queue, PATCH /api/document-intelligence/{id}, GET /api/document-intelligence/summary). Frontend: All UI elements verified - Document Review Queue page at /document-review with summary cards, filter dropdowns, review queue table, and By Document Type section. Document Intelligence Panel on document detail page with readiness banner, classification section, extracted fields list, edit/re-process buttons, correction history toggle.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Document Review Queue", "issues": ["Minor console warning about <tr>/<span> hydration - cosmetic only, doesn't affect functionality"]}
+    ]
+  },
+  "passed_tests": [
+    "Backend: GET /api/document-intelligence/summary returns 200 with total_processed, by_readiness, by_document_type, total_corrections",
+    "Backend: GET /api/document-intelligence/review-queue returns 200 with total, items, status_counts, limit, offset",
+    "Backend: GET /api/document-intelligence/review-queue?status=ready filters by ready status",
+    "Backend: GET /api/document-intelligence/review-queue?status=needs_review filters by needs_review status",
+    "Backend: GET /api/document-intelligence/review-queue?status=blocked filters by blocked status",
+    "Backend: GET /api/document-intelligence/review-queue items enriched with file_name, doc_status, email_sender",
+    "Backend: GET /api/document-intelligence/{id} returns 200 with document_type, classification_confidence, automation_readiness, score",
+    "Backend: GET /api/document-intelligence/{id} returns 404 for unprocessed document",
+    "Backend: POST /api/document-intelligence/process/{id} returns 404 for non-existent doc_id",
+    "Backend: POST /api/document-intelligence/process/{id} returns result with all required fields (result_id, document_type, classification_confidence, extracted_fields, automation_readiness, automation_readiness_score, automation_readiness_reasons, model_name, prompt_version, processing_duration_ms)",
+    "Backend: POST /api/document-intelligence/process/{id} can re-process same document multiple times",
+    "Backend: PATCH /api/document-intelligence/{id} returns 404 for unprocessed document",
+    "Backend: PATCH /api/document-intelligence/{id} applies type correction and sets classification_confidence to 1.0",
+    "Backend: PATCH /api/document-intelligence/{id} applies field corrections and adds to correction_history",
+    "Backend: PATCH /api/document-intelligence/{id} re-derives automation_readiness after correction",
+    "Backend: PATCH /api/document-intelligence/{id} records corrected_by, notes, changes in correction_history",
+    "Backend: Integration flow: process -> get -> correct works end-to-end",
+    "Backend: Full data assertions on response structure and field values",
+    "Frontend: Document Review Queue page loads at /document-review",
+    "Frontend: Summary cards show Total Processed (7), Ready (6), Needs Review (0), Blocked (1)",
+    "Frontend: Status filter dropdown (data-testid='filter-status') works",
+    "Frontend: Doc type filter dropdown (data-testid='filter-doc-type') present",
+    "Frontend: Sort toggle button (data-testid='toggle-sort') present",
+    "Frontend: Refresh button (data-testid='refresh-queue-btn') present",
+    "Frontend: Review queue table (data-testid='review-queue-table') with columns: Status, Document, Type, Confidence, Score, Reasons, Actions",
+    "Frontend: By Document Type section shows AP_Invoice (5, 99%), Shipping_Document (1, 95%), Freight_Document (1, 95%)",
+    "Frontend: Document Intelligence Panel (data-testid='document-intelligence-panel') renders on document detail page",
+    "Frontend: Readiness banner shows status (BLOCKED/READY/NEEDS_REVIEW), score, reasons, and 'Corrected' badge if manually corrected",
+    "Frontend: Classification section shows Type and Confidence with progress bar",
+    "Frontend: Model info displays (gemini-3-flash-preview v1.0 processing_duration_ms)",
+    "Frontend: Extracted Fields section lists all fields with required (*) markers and missing indicators",
+    "Frontend: Edit button (data-testid='edit-intelligence-btn') enables inline editing",
+    "Frontend: Edit mode shows type input (data-testid='edit-doc-type-input') and field inputs (data-testid='edit-field-{name}')",
+    "Frontend: Save Corrections (data-testid='save-corrections-btn') and Cancel (data-testid='cancel-edit-btn') buttons in edit mode",
+    "Frontend: Re-process button (data-testid='process-intelligence-btn') triggers pipeline",
+    "Frontend: Correction History toggle (data-testid='toggle-correction-history') shows N corrections, expands to show history entries"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_document_intelligence.py",
+    "/app/test_reports/pytest/document_intelligence_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend: Router at /app/backend/routers/document_intelligence.py - clean REST API design with proper error handling (404 for not found, 500 for processing errors)",
+    "Backend: Service at /app/backend/services/document_intelligence_service.py - comprehensive pipeline orchestration with AI classification, validation, automation readiness derivation",
+    "Backend: _derive_automation_readiness function (lines 61-154) properly computes score based on confidence, extraction completeness, validation results",
+    "Backend: apply_correction (lines 420-542) properly re-derives readiness after corrections and maintains correction_history",
+    "Frontend: DocumentReviewQueuePage.js - good use of data-testid attributes, proper filter state management, good UX with loading states",
+    "Frontend: DocumentIntelligencePanel.js - well-structured component with edit mode, correction history, proper loading/error states",
+    "Minor: Console hydration warning about <tr>/<span> nesting in DocumentReviewQueuePage - cosmetic issue, doesn't affect functionality"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_document_intelligence.py"
+  ],
+  "success_rate": {
+    "backend": "100% (18/18 tests passed)",
+    "frontend": "100% (all UI elements and flows verified)"
+  },
+  "test_credentials": {
+    "web_ui": "admin / admin",
+    "api_url": "https://doc-auto-review.preview.emergentagent.com"
+  },
+  "seed_data_created": {
+    "intelligence_results": "7 documents processed with intelligence results in document_intelligence_results collection",
+    "test_corrections": "Multiple TEST_* corrections applied during testing (test_field: TEST_VALUE_12345, type corrections by test_agent)"
+  },
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 94 - Document Intelligence feature fully tested. Backend endpoints: POST /api/document-intelligence/process/{id} (runs full pipeline), GET /api/document-intelligence/{id} (get result), GET /api/document-intelligence/review-queue (items needing review with filters), PATCH /api/document-intelligence/{id} (corrections), GET /api/document-intelligence/summary (stats). Results stored in 'document_intelligence_results' MongoDB collection. Frontend: /document-review route shows review queue page with summary cards, filters, table. DocumentIntelligencePanel component on document detail page shows readiness banner, classification, extracted fields, edit mode, correction history. Key data-testids: document-review-queue-page, summary-total/ready/needs-review/blocked, filter-status, filter-doc-type, review-queue-table, document-intelligence-panel, readiness-banner, process-intelligence-btn, edit-intelligence-btn, save-corrections-btn, cancel-edit-btn, toggle-correction-history. Automation readiness levels: ready (score >= 75), needs_review (40-74), blocked (< 40 or missing required fields).",
+  "features_verified": {
+    "backend_endpoints": {
+      "process_document": {
+        "method": "POST",
+        "path": "/api/document-intelligence/process/{doc_id}",
+        "returns": {
+          "result_id": "string",
+          "document_id": "string",
+          "document_type": "string",
+          "classification_confidence": "float (0-1)",
+          "extracted_fields": "dict",
+          "extraction_schema": {"required": ["list"], "optional": ["list"]},
+          "validation_results": "dict",
+          "automation_decision": "string",
+          "automation_reasoning": "string",
+          "automation_readiness": "ready|needs_review|blocked",
+          "automation_readiness_score": "int (0-100)",
+          "automation_readiness_reasons": ["list of reason strings"],
+          "model_name": "string (e.g., gemini-3-flash-preview)",
+          "prompt_version": "string",
+          "processing_duration_ms": "int"
+        },
+        "errors": {"404": "Document not found", "500": "Processing failed"}
+      },
+      "get_result": {
+        "method": "GET",
+        "path": "/api/document-intelligence/{doc_id}",
+        "returns": "Same as process_document + manually_corrected, correction_history",
+        "errors": {"404": "No intelligence result for document"}
+      },
+      "review_queue": {
+        "method": "GET",
+        "path": "/api/document-intelligence/review-queue",
+        "params": {
+          "status": "optional (needs_review|blocked|ready, default: needs_review+blocked)",
+          "doc_type": "optional filter by document type",
+          "sort_by": "default readiness_score",
+          "sort_order": "1=asc, -1=desc",
+          "limit": "default 50",
+          "offset": "default 0"
+        },
+        "returns": {
+          "total": "int",
+          "items": "list (enriched with file_name, doc_status, email_sender, etc.)",
+          "status_counts": "dict {ready: N, needs_review: N, blocked: N}",
+          "limit": "int",
+          "offset": "int"
+        }
+      },
+      "apply_correction": {
+        "method": "PATCH",
+        "path": "/api/document-intelligence/{doc_id}",
+        "body": {
+          "corrected_type": "optional string",
+          "corrected_fields": "optional dict",
+          "corrected_by": "string (default 'admin')",
+          "notes": "string"
+        },
+        "behavior": [
+          "If corrected_type provided, sets classification_confidence to 1.0",
+          "Re-derives automation_readiness after correction",
+          "Adds entry to correction_history with corrected_at, corrected_by, notes, changes"
+        ],
+        "errors": {"404": "No intelligence result for document"}
+      },
+      "summary": {
+        "method": "GET",
+        "path": "/api/document-intelligence/summary",
+        "returns": {
+          "total_processed": "int",
+          "by_readiness": "dict {ready: {count, avg_score, avg_confidence}, ...}",
+          "by_document_type": "list [{type, count, avg_confidence}, ...]",
+          "total_corrections": "int"
+        }
+      }
+    },
+    "frontend_components": {
+      "DocumentReviewQueuePage": {
+        "route": "/document-review",
+        "features": ["Summary cards (Total/Ready/Needs Review/Blocked)", "Status filter", "Doc type filter", "Sort toggle", "Refresh", "Review queue table", "By Document Type section"],
+        "data_testids": ["document-review-queue-page", "summary-total", "summary-ready", "summary-needs-review", "summary-blocked", "filter-status", "filter-doc-type", "toggle-sort", "refresh-queue-btn", "review-queue-table", "summary-by-type"]
+      },
+      "DocumentIntelligencePanel": {
+        "location": "Document Detail page",
+        "features": ["Readiness banner with status/score/reasons/corrected badge", "Classification section (type, confidence, model info)", "Extracted Fields list with required markers", "Edit mode with type/field inputs", "Save/Cancel buttons", "Correction history toggle"],
+        "data_testids": ["document-intelligence-panel", "readiness-banner", "process-intelligence-btn", "initial-process-btn", "edit-intelligence-btn", "edit-doc-type-input", "edit-field-{name}", "save-corrections-btn", "cancel-edit-btn", "toggle-correction-history"]
+      }
+    }
+  },
+  "mocked_apis_note": "Business Central API (BC sandbox) operates in DEMO MODE. Email service is MOCKED (in-memory)."
+}

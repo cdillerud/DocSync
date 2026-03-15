@@ -44,6 +44,7 @@ export default function OperationsQueuePage() {
   const [bulkPayload, setBulkPayload] = useState({});
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkResult, setBulkResult] = useState(null);
+  const [bulkTemplates, setBulkTemplates] = useState([]);
 
   // Saved views
   const [savedViews, setSavedViews] = useState([]);
@@ -140,6 +141,13 @@ export default function OperationsQueuePage() {
 
   const activeView = savedViews.find(v => v.saved_view_id === activeViewId);
 
+  const loadBulkTemplates = async () => {
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/templates?is_active=true`);
+      if (res.ok) { const d = await res.json(); setBulkTemplates(d.entries || []); }
+    } catch {}
+  };
+
   return (
     <div className="p-6 max-w-[1400px] mx-auto space-y-5" data-testid="operations-queue-page">
       {/* Header */}
@@ -214,6 +222,7 @@ export default function OperationsQueuePage() {
             <Button size="sm" variant="outline" className="h-7 text-[10px] gap-1" onClick={() => { setBulkAction('set_due_date'); setBulkPayload({}); }} data-testid="bulk-duedate-btn"><Calendar className="w-3 h-3" /> Set Due Date</Button>
             <Button size="sm" variant="outline" className="h-7 text-[10px] gap-1" onClick={() => { setBulkAction('set_escalation_status'); setBulkPayload({}); }} data-testid="bulk-escalation-btn"><AlertTriangle className="w-3 h-3" /> Set Escalation</Button>
             <Button size="sm" variant="outline" className="h-7 text-[10px] gap-1" onClick={() => { setBulkAction('request_approval'); setBulkPayload({}); }} data-testid="bulk-approval-btn"><ShieldCheck className="w-3 h-3" /> Request Approval</Button>
+            <Button size="sm" variant="outline" className="h-7 text-[10px] gap-1 border-violet-300 text-violet-700" onClick={() => { setBulkAction('apply_template'); setBulkPayload({}); loadBulkTemplates(); }} data-testid="bulk-template-btn"><FileText className="w-3 h-3" /> Apply Template</Button>
           </div>
           <Button size="sm" variant="ghost" className="h-7 text-[10px] ml-auto" onClick={() => setSelected(new Set())} data-testid="bulk-clear-btn"><X className="w-3 h-3 mr-1" /> Clear</Button>
         </div>
@@ -263,6 +272,22 @@ export default function OperationsQueuePage() {
                   </SelectContent>
                 </Select>
               )}
+              {bulkAction === 'apply_template' && (
+                <div className="space-y-1">
+                  {bulkTemplates.length === 0 ? (
+                    <p className="text-[10px] text-muted-foreground italic">No active templates available</p>
+                  ) : (
+                    <Select value={bulkPayload.template_id || ''} onValueChange={v => setBulkPayload({ ...bulkPayload, template_id: v })}>
+                      <SelectTrigger className="h-8 text-xs" data-testid="bulk-template-select"><SelectValue placeholder="Select template..." /></SelectTrigger>
+                      <SelectContent>
+                        {bulkTemplates.map(t => (
+                          <SelectItem key={t.template_id} value={t.template_id}>{t.name} ({t.entity_type === 'sales_order' ? 'SO' : 'PO'})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+              )}
               <Input className="h-8 text-xs" placeholder="Notes (optional)..." value={bulkPayload.notes || ''} onChange={e => setBulkPayload({ ...bulkPayload, notes: e.target.value })} data-testid="bulk-notes-input" />
             </div>
             <div className="text-[9px] text-muted-foreground">
@@ -271,7 +296,7 @@ export default function OperationsQueuePage() {
             </div>
             <div className="flex gap-2 justify-end">
               <Button variant="outline" size="sm" className="h-7 text-[10px]" onClick={() => setBulkAction(null)}>Cancel</Button>
-              <Button size="sm" className="h-7 text-[10px]" disabled={bulkRunning || (bulkAction === 'assign_owner' && !bulkPayload.assigned_to?.trim()) || (bulkAction === 'update_assignment_status' && !bulkPayload.assignment_status) || (bulkAction === 'set_due_date' && !bulkPayload.due_date) || (bulkAction === 'set_escalation_status' && !bulkPayload.escalation_status)} onClick={runBulkAction} data-testid="bulk-confirm-btn">
+              <Button size="sm" className="h-7 text-[10px]" disabled={bulkRunning || (bulkAction === 'assign_owner' && !bulkPayload.assigned_to?.trim()) || (bulkAction === 'update_assignment_status' && !bulkPayload.assignment_status) || (bulkAction === 'set_due_date' && !bulkPayload.due_date) || (bulkAction === 'set_escalation_status' && !bulkPayload.escalation_status) || (bulkAction === 'apply_template' && !bulkPayload.template_id)} onClick={runBulkAction} data-testid="bulk-confirm-btn">
                 {bulkRunning ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <CheckSquare className="w-3 h-3 mr-1" />} Apply to {selected.size} items
               </Button>
             </div>

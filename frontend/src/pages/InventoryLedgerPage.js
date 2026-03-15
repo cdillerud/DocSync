@@ -1157,6 +1157,66 @@ function ActivityTimelineSection({ entityType, entityId }) {
   );
 }
 
+function TemplateApplySection({ entityType, entityId, orderType, onChanged }) {
+  const [templates, setTemplates] = useState([]);
+  const [applying, setApplying] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const load = useCallback(async () => {
+    try {
+      const params = new URLSearchParams({ entity_type: entityType, is_active: 'true' });
+      const res = await fetch(`${API}/api/inventory-ledger/templates?${params}`);
+      if (res.ok) { const d = await res.json(); setTemplates(d.entries || []); }
+    } catch {}
+  }, [entityType]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const compatible = templates.filter(t => !t.applies_to_order_type || t.applies_to_order_type === orderType);
+
+  const applyTemplate = async (tmpl) => {
+    setApplying(true); setResult(null);
+    try {
+      const res = await fetch(`${API}/api/inventory-ledger/templates/${tmpl.template_id}/apply`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entity_type: entityType, entity_id: entityId }),
+      });
+      if (res.ok) {
+        const d = await res.json();
+        setResult(d);
+        const applied = d.actions_applied?.length || 0;
+        const skipped = d.actions_skipped?.length || 0;
+        toast.success(`Template applied: ${applied} actions, ${skipped} skipped`);
+        onChanged?.();
+      } else { const d = await res.json(); toast.error(d.detail || 'Failed'); }
+    } catch { toast.error('Failed to apply template'); }
+    finally { setApplying(false); }
+  };
+
+  if (compatible.length === 0) return null;
+
+  return (
+    <div className="space-y-1.5" data-testid="template-apply-section">
+      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+        <FileText className="w-3 h-3" /> Templates
+      </p>
+      <div className="flex gap-1 flex-wrap">
+        {compatible.map(t => (
+          <Button key={t.template_id} size="sm" variant="outline" className="h-6 text-[9px] px-2 gap-1" disabled={applying} onClick={() => applyTemplate(t)} data-testid={`apply-template-${t.template_id}`}>
+            {applying ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />} {t.name}
+          </Button>
+        ))}
+      </div>
+      {result && (
+        <div className="text-[9px] bg-muted/30 rounded p-1.5 space-y-0.5" data-testid="template-apply-result">
+          {result.actions_applied?.length > 0 && <p className="text-green-600">Applied: {result.actions_applied.join(', ')}</p>}
+          {result.actions_skipped?.length > 0 && <p className="text-amber-600">Skipped: {result.actions_skipped.join(', ')}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const APPROVAL_STATUS_STYLES = {
   approved: { variant: 'default', label: 'Approved', className: 'bg-green-600' },
   pending: { variant: 'secondary', label: 'Pending', className: 'bg-amber-500 text-white' },
@@ -1616,6 +1676,7 @@ function ShipmentCaptureDialog({ customerId, soId: initialSoId, onClose, onShipp
               <EscalationSection entityType="sales_order" entityId={soId.trim()} dueDate={summary.due_date} escalationStatus={summary.escalation_status} onChanged={() => loadSummary()} />
               <AssignmentSection entityType="sales_order" entityId={soId.trim()} currentOwner={summary.current_owner} assignmentStatus={summary.assignment_status} onChanged={() => loadSummary()} />
               <ActivityTimelineSection entityType="sales_order" entityId={soId.trim()} />
+              <TemplateApplySection entityType="sales_order" entityId={soId.trim()} orderType={summary.order_type} onChanged={() => loadSummary()} />
 
               {/* ═══ DROP-SHIP PO DRAFT SECTION ═══ */}
               {isDropShip && (
@@ -2913,6 +2974,7 @@ function PODraftDetailDrawer({ draftId, onClose, onSupplyCreated }) {
             <EscalationSection entityType="po_draft" entityId={draftId} dueDate={draft.due_date} escalationStatus={draft.escalation_status} onChanged={() => loadDraft()} />
             <AssignmentSection entityType="po_draft" entityId={draftId} currentOwner={draft.current_owner} assignmentStatus={draft.assignment_status} onChanged={() => loadDraft()} />
             <ActivityTimelineSection entityType="po_draft" entityId={draftId} />
+            <TemplateApplySection entityType="po_draft" entityId={draftId} orderType={draft.po_type} onChanged={() => loadDraft()} />
 
             {/* Actions */}
             <div className="flex flex-wrap gap-2 pt-1" data-testid="inv-po-draft-actions">

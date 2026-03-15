@@ -4211,7 +4211,7 @@ async def api_operations_queue(
 # BULK ACTIONS
 # ═══════════════════════════════════════════════════════════════
 
-VALID_BULK_ACTIONS = ("assign_owner", "update_assignment_status", "set_due_date", "set_escalation_status", "request_approval")
+VALID_BULK_ACTIONS = ("assign_owner", "update_assignment_status", "set_due_date", "set_escalation_status", "request_approval", "apply_template")
 
 
 class BulkActionIn(BaseModel):
@@ -4355,6 +4355,21 @@ async def api_bulk_action(body: BulkActionIn):
                                        f"Bulk approval requested ({approval_type})", notes, "bulk_action")
                 results.append({"entity_id": eid, "status": "success", "message": f"Approval requested ({approval_type})"})
 
+            elif body.action == "apply_template":
+                tmpl_id = body.payload.get("template_id", "").strip()
+                if not tmpl_id:
+                    results.append({"entity_id": eid, "status": "failed", "message": "template_id is required"})
+                    continue
+                tmpl = await db[TEMPLATES_COLL].find_one({"template_id": tmpl_id, "is_active": True}, {"_id": 0})
+                if not tmpl:
+                    results.append({"entity_id": eid, "status": "failed", "message": f"Template '{tmpl_id}' not found or inactive"})
+                    continue
+                if tmpl["entity_type"] != body.entity_type:
+                    results.append({"entity_id": eid, "status": "failed", "message": f"Template entity_type mismatch"})
+                    continue
+                apply_res = await _apply_template_to_entity(db, tmpl, body.entity_type, eid)
+                results.append({"entity_id": eid, "status": "success", "message": f"Template applied: {', '.join(apply_res['actions_applied'])} | skipped: {', '.join(apply_res['actions_skipped'])}"})
+
         except Exception as e:
             results.append({"entity_id": eid, "status": "failed", "message": str(e)})
 
@@ -4369,6 +4384,254 @@ async def api_bulk_action(body: BulkActionIn):
         "failed_count": failed,
         "results": results,
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+# OPERATIONAL TEMPLATES
+# ═══════════════════════════════════════════════════════════════
+
+TEMPLATES_COLL = "operational_templates"
+VALID_TEMPLATE_ENTITY_TYPES = ("sales_order", "po_draft")
+VALID_ORDER_TYPES = ("warehouse", "drop_ship")
+
+
+class TemplateIn(BaseModel):
+    name: str = Field(..., min_length=1)
+    entity_type: str = Field(...)
+    applies_to_order_type: str = Field(default="")
+    description: str = Field(default="")
+    default_assignment_to: str = Field(default="")
+    default_due_days: int = Field(default=0)
+    default_escalation_status: str = Field(default="")
+    auto_request_approval: bool = Field(default=False)
+    notes: str = Field(default="")
+    is_active: bool = Field(default=True)
+    created_by: str = Field(default="user")
+
+
+class TemplateUpdateIn(BaseModel):
+    name: str = Field(default=None)
+    description: str = Field(default=None)
+    applies_to_order_type: str = Field(default=None)
+    default_assignment_to: str = Field(default=None)
+    default_due_days: int = Field(default=None)
+    default_escalation_status: str = Field(default=None)
+    auto_request_approval: bool = Field(default=None)
+    notes: str = Field(default=None)
+    is_active: bool = Field(default=None)
+
+
+class TemplateApplyIn(BaseModel):
+    entity_type: str = Field(...)
+    entity_id: str = Field(..., min_length=1)
+
+
+@router.post("/templates")
+async def api_create_template(body: TemplateIn):
+    """Create an operational template."""
+    import uuid as _uuid
+    if body.entity_type not in VALID_TEMPLATE_ENTITY_TYPES:
+        raise HTTPException(status_code=422, detail=f"entity_type must be one of: {VALID_TEMPLATE_ENTITY_TYPES}")
+    if body.applies_to_order_type and body.applies_to_order_type not in VALID_ORDER_TYPES:
+        raise HTTPException(status_code=422, detail=f"applies_to_order_type must be one of: {VALID_ORDER_TYPES}")
+
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+    record = {
+        "template_id": f"TMPL-{_uuid.uuid4().hex[:8].upper()}",
+        "name": body.name.strip(),
+        "entity_type": body.entity_type,
+        "applies_to_order_type": body.applies_to_order_type.strip() if body.applies_to_order_type else "",
+        "description": body.description.strip(),
+        "default_assignment_to": body.default_assignment_to.strip(),
+        "default_due_days": body.default_due_days,
+        "default_escalation_status": body.default_escalation_status.strip(),
+        "auto_request_approval": body.auto_request_approval,
+        "notes": body.notes.strip(),
+        "is_active": body.is_active,
+        "created_by": body.created_by.strip(),
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db[TEMPLATES_COLL].insert_one(record.copy())
+    record.pop("_id", None)
+    return record
+
+
+@router.get("/templates")
+async def api_list_templates(entity_type: str = "", applies_to_order_type: str = "", is_active: str = ""):
+    """List templates, optionally filtered."""
+    db = get_db()
+    query = {}
+    if entity_type:
+        query["entity_type"] = entity_type
+    if applies_to_order_type:
+        query["applies_to_order_type"] = applies_to_order_type
+    if is_active.lower() in ("true", "1"):
+        query["is_active"] = True
+    elif is_active.lower() in ("false", "0"):
+        query["is_active"] = False
+    cursor = db[TEMPLATES_COLL].find(query, {"_id": 0}).sort("updated_at", -1)
+    entries = await cursor.to_list(length=100)
+    return {"total": len(entries), "entries": entries}
+
+
+@router.patch("/templates/{template_id}")
+async def api_update_template(template_id: str, body: TemplateUpdateIn):
+    """Update an operational template."""
+    db = get_db()
+    existing = await db[TEMPLATES_COLL].find_one({"template_id": template_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
+    now = datetime.now(timezone.utc).isoformat()
+    update = {"updated_at": now}
+    if body.name is not None and body.name.strip():
+        update["name"] = body.name.strip()
+    if body.description is not None:
+        update["description"] = body.description.strip() if body.description else ""
+    if body.applies_to_order_type is not None:
+        update["applies_to_order_type"] = body.applies_to_order_type.strip() if body.applies_to_order_type else ""
+    if body.default_assignment_to is not None:
+        update["default_assignment_to"] = body.default_assignment_to.strip() if body.default_assignment_to else ""
+    if body.default_due_days is not None:
+        update["default_due_days"] = body.default_due_days
+    if body.default_escalation_status is not None:
+        update["default_escalation_status"] = body.default_escalation_status.strip() if body.default_escalation_status else ""
+    if body.auto_request_approval is not None:
+        update["auto_request_approval"] = body.auto_request_approval
+    if body.notes is not None:
+        update["notes"] = body.notes.strip() if body.notes else ""
+    if body.is_active is not None:
+        update["is_active"] = body.is_active
+    await db[TEMPLATES_COLL].update_one({"template_id": template_id}, {"$set": update})
+    return {**existing, **update}
+
+
+@router.delete("/templates/{template_id}")
+async def api_delete_template(template_id: str):
+    """Delete (or deactivate) a template."""
+    db = get_db()
+    existing = await db[TEMPLATES_COLL].find_one({"template_id": template_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
+    now = datetime.now(timezone.utc).isoformat()
+    await db[TEMPLATES_COLL].update_one(
+        {"template_id": template_id},
+        {"$set": {"is_active": False, "updated_at": now}},
+    )
+    return {"deactivated": template_id}
+
+
+async def _apply_template_to_entity(db, tmpl: dict, entity_type: str, entity_id: str):
+    """Apply a template to an entity. Returns actions_applied, actions_skipped, messages."""
+    import uuid as _uuid
+    now = datetime.now(timezone.utc).isoformat()
+    applied = []
+    skipped = []
+    messages = []
+
+    # Assignment
+    if tmpl.get("default_assignment_to"):
+        existing_asgn = await db[ASSIGNMENTS_COLL].find_one(
+            {"entity_type": entity_type, "entity_id": entity_id, "assignment_status": {"$ne": "completed"}}, {"_id": 0}
+        )
+        if existing_asgn:
+            skipped.append("assignment")
+            messages.append(f"Assignment already exists ({existing_asgn.get('assigned_to', '')})")
+        else:
+            await db[ASSIGNMENTS_COLL].insert_one({
+                "assignment_id": f"ASGN-{_uuid.uuid4().hex[:8].upper()}",
+                "entity_type": entity_type, "entity_id": entity_id,
+                "assigned_to": tmpl["default_assignment_to"],
+                "assigned_by": "template", "assigned_at": now,
+                "assignment_status": "assigned", "notes": f"From template: {tmpl['name']}",
+                "updated_at": now,
+            })
+            await _create_activity(db, entity_type, entity_id, "assignment",
+                                   f"Template assigned to {tmpl['default_assignment_to']}", f"Template: {tmpl['name']}", "template")
+            applied.append("assignment")
+            messages.append(f"Assigned to {tmpl['default_assignment_to']}")
+
+    # Due date / escalation
+    if tmpl.get("default_due_days", 0) > 0:
+        existing_esc = await db[ESCALATIONS_COLL].find_one(
+            {"entity_type": entity_type, "entity_id": entity_id}, {"_id": 0}
+        )
+        if existing_esc:
+            skipped.append("due_date")
+            messages.append(f"Due date already set ({existing_esc.get('due_date', '')})")
+        else:
+            due_date = (datetime.now(timezone.utc) + timedelta(days=tmpl["default_due_days"])).isoformat()
+            esc_status = tmpl.get("default_escalation_status", "") or _derive_escalation_status(due_date)
+            await db[ESCALATIONS_COLL].insert_one({
+                "escalation_id": f"ESC-{_uuid.uuid4().hex[:8].upper()}",
+                "entity_type": entity_type, "entity_id": entity_id,
+                "due_date": due_date, "escalation_status": esc_status,
+                "notes": f"From template: {tmpl['name']}", "created_at": now, "updated_at": now,
+            })
+            await _create_activity(db, entity_type, entity_id, "escalation",
+                                   f"Template due date: +{tmpl['default_due_days']} days", f"Template: {tmpl['name']}", "template")
+            applied.append("due_date")
+            messages.append(f"Due date set to +{tmpl['default_due_days']} days")
+
+    # Approval
+    if tmpl.get("auto_request_approval"):
+        existing_apr = await db[APPROVAL_LOGS_COLL].find_one(
+            {"entity_type": entity_type, "entity_id": entity_id, "approval_status": "pending"}, {"_id": 0}
+        )
+        if existing_apr:
+            skipped.append("approval")
+            messages.append("Pending approval already exists")
+        else:
+            await db[APPROVAL_LOGS_COLL].insert_one({
+                "approval_id": f"APR-{_uuid.uuid4().hex[:8].upper()}",
+                "entity_type": entity_type, "entity_id": entity_id,
+                "approval_type": "manager_review", "approval_status": "pending",
+                "requested_by": "template", "requested_at": now,
+                "decided_by": "", "decided_at": "",
+                "notes": f"From template: {tmpl['name']}",
+            })
+            await _create_activity(db, entity_type, entity_id, "approval",
+                                   f"Template approval requested (manager_review)", f"Template: {tmpl['name']}", "template")
+            applied.append("approval")
+            messages.append("Approval requested (manager_review)")
+
+    # Activity for template applied
+    await _create_activity(db, entity_type, entity_id, "system",
+                           f"Template applied: {tmpl['name']}", f"Applied: {', '.join(applied) or 'none'}, Skipped: {', '.join(skipped) or 'none'}", "template")
+
+    return {"template_id": tmpl["template_id"], "entity_type": entity_type, "entity_id": entity_id,
+            "actions_applied": applied, "actions_skipped": skipped, "messages": messages}
+
+
+@router.post("/templates/{template_id}/apply")
+async def api_apply_template(template_id: str, body: TemplateApplyIn):
+    """Apply a template to a single entity."""
+    if body.entity_type not in VALID_TEMPLATE_ENTITY_TYPES:
+        raise HTTPException(status_code=422, detail=f"entity_type must be one of: {VALID_TEMPLATE_ENTITY_TYPES}")
+
+    db = get_db()
+    tmpl = await db[TEMPLATES_COLL].find_one({"template_id": template_id, "is_active": True}, {"_id": 0})
+    if not tmpl:
+        raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found or inactive")
+    if tmpl["entity_type"] != body.entity_type:
+        raise HTTPException(status_code=422, detail=f"Template entity_type '{tmpl['entity_type']}' does not match '{body.entity_type}'")
+
+    # Validate entity exists
+    if body.entity_type == "po_draft":
+        draft = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": body.entity_id.strip()}, {"_id": 0, "po_draft_id": 1})
+        if not draft:
+            raise HTTPException(status_code=404, detail=f"PO Draft '{body.entity_id}' not found")
+
+    # Validate order type compatibility for SOs
+    if body.entity_type == "sales_order" and tmpl.get("applies_to_order_type"):
+        ot_doc = await db["so_order_types"].find_one({"sales_order_id": body.entity_id.strip()}, {"_id": 0})
+        actual_ot = ot_doc.get("order_type", "warehouse") if ot_doc else "warehouse"
+        if actual_ot != tmpl["applies_to_order_type"]:
+            raise HTTPException(status_code=422, detail=f"Template requires order type '{tmpl['applies_to_order_type']}' but SO is '{actual_ot}'")
+
+    result = await _apply_template_to_entity(db, tmpl, body.entity_type, body.entity_id.strip())
+    return result
 
 
 class ShortageLineReq(BaseModel):

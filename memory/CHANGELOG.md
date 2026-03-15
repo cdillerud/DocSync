@@ -1,5 +1,26 @@
 # GPI Document Hub - Changelog
 
+## March 15, 2026 — Document Intelligence Consolidation (iter_105)
+
+### Legacy Logic Extracted from server.py
+- `services/document_intel_helpers.py` — classify_document_with_ai, normalize_extracted_fields, compute_ap_normalized_fields, make_automation_decision
+- validate_bc_match → thin adapter (too entangled for full extraction)
+- server.py retains 4-line compatibility wrappers
+
+### document_intelligence_service Decoupled
+- ZERO `from server import` statements remaining
+- Now imports from document_intel_helpers + automation_helpers
+- Uses shared utcnow() and create_activity()
+
+### Pipeline Expanded (7 → 9 stages)
+- Added `extraction` (stage 2) and `layout` (stage 3)
+- STAGE_ORDER_V1 retained for backward compatibility
+
+### Testing
+- 115/115 passed (103 pytest + 12 API)
+
+---
+
 ## March 15, 2026 — Decisioning & Automation Consolidation (iter_104)
 
 ### Shared Helpers Created

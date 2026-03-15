@@ -3566,3 +3566,43 @@ Consolidation of the Decisioning and Automation domain. Extracted shared helpers
 - Test report: `/app/test_reports/iteration_104.json`
 
 *Last Updated: March 15, 2026*
+
+
+---
+
+## Technical Debt Remediation Pass #4: Document Intelligence Consolidation (March 15, 2026)
+
+### Overview
+Decoupled Document Intelligence from server.py. Extracted 4 business-logic functions into `document_intel_helpers.py`, wired `document_intelligence_service.py` to use new helpers, and added extraction + layout as explicit pipeline stages (9 total).
+
+### Legacy Dependencies Removed
+- `document_intelligence_service.py` now has **ZERO** `from server import` statements
+- `classify_document_with_ai()` — fully extracted to helpers (Gemini AI classification)
+- `normalize_extracted_fields()` — fully extracted (pure function)
+- `compute_ap_normalized_fields()` — fully extracted (pure function)
+- `make_automation_decision()` — fully extracted (pure function)
+- `validate_bc_match()` — thin adapter in helpers (delegates to server.py; too entangled for full extraction)
+
+### Pipeline Updated (7 → 9 stages)
+1. classification → 2. **extraction** (NEW) → 3. **layout** (NEW) → 4. entity_resolution → 5. transaction_match → 6. bundle_detection → 7. lifecycle_check → 8. policy_decision → 9. learning_capture
+- `STAGE_ORDER_V1` (original 7 stages) retained for backward compatibility
+
+### Files Changed
+- **Created:** `services/document_intel_helpers.py`, `tests/test_document_intel_helpers.py`
+- **Modified:** `services/document_intelligence_service.py`, `services/pipeline/document_pipeline.py`, `server.py` (4 functions → thin wrappers), `ARCHITECTURE_CURRENT.md`
+
+### Compatibility Wrappers
+- server.py retains 4-line thin wrappers for: classify_document_with_ai, normalize_extracted_fields, compute_ap_normalized_fields, make_automation_decision
+
+### Remaining Technical Debt
+- `validate_bc_match()` still in server.py (450 lines, 15+ module-level dependencies)
+- `ai_classifier.py` and `document_intel_helpers.classify_document_with_ai` are two separate classification paths
+- `document_intelligence_service.py` still mixes some orchestration with formatting/readiness logic
+
+### Test Results
+- Unit tests: 103/103 passed (35 doc_intel + 23 automation + 45 reference)
+- API tests: 12/12 passed
+- Grep verified: 0 server.py imports in document_intelligence_service
+- Test report: `/app/test_reports/iteration_105.json`
+
+*Last Updated: March 15, 2026*

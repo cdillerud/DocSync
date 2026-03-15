@@ -1,5 +1,27 @@
 # GPI Document Hub - Changelog
 
+## March 15, 2026 — Pipeline Hardening & Observability (iter_106)
+
+### Output Safety
+- `_sanitize_output()` caps string values (500 chars), list values (25 items), and key count (25 keys) in stage outputs
+- Error messages capped at 500 chars in `StageResult.to_dict()`
+- Persisted traces bounded; no raw document data stored
+
+### Status Semantics Documented
+- `ok` = stage executed successfully
+- `skipped` = stage did not execute (explicit skip or dependency-based)
+- `error` = stage attempted work and failed
+- Added inline docblock in `document_pipeline.py` formalizing the contract
+
+### New API Endpoint
+- `GET /api/document-intelligence/pipeline/runs/{doc_id}?limit=20` — retrieve persisted pipeline run traces, newest first
+
+### Testing
+- 31/31 new tests passed (5 sanitize, 5 StageResult, 2 PipelineResult, 3 timing, 3 status, 2 failure, 3 skip, 3 persistence, 4 API endpoint)
+- 22/22 regression tests passed
+
+---
+
 ## March 15, 2026 — Document Intelligence Consolidation (iter_105)
 
 ### Legacy Logic Extracted from server.py

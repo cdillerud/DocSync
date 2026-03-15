@@ -1,0 +1,85 @@
+{
+  "summary": "Iteration 106 - Pipeline Hardening & Observability validation complete. All 53 pytest tests passed (31 pipeline hardening + 22 refactor regression). All new GET /api/document-intelligence/pipeline/runs/{doc_id} endpoint features verified. All 9 regression endpoints confirmed working.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed_tests": [
+    "31/31 pytest tests in test_pipeline_hardening.py passed",
+    "22/22 pytest tests in test_refactor_regression.py passed",
+    "GET /api/health returns 200 with {status: 'healthy'}",
+    "POST /api/auth/login returns 200 with token",
+    "GET /api/documents returns 200 with 45 documents",
+    "GET /api/document-intelligence/pipeline/stages returns 9 stages in correct order",
+    "GET /api/document-intelligence/pipeline/runs/{doc_id} returns 200 with {document_id, runs, count}",
+    "GET /api/document-intelligence/pipeline/runs/{doc_id}?limit=5 accepts limit param (1-100)",
+    "GET /api/document-intelligence/pipeline/runs/{doc_id}?limit=0 returns 422 validation error",
+    "GET /api/document-intelligence/pipeline/runs/{doc_id}?limit=200 returns 422 validation error",
+    "POST /api/document-intelligence/pipeline/{doc_id} returns run_id, pipeline_version, started_at, finished_at, total_duration_ms"
+  ],
+  "new_features_tested": {
+    "pipeline_runs_endpoint": {
+      "endpoint": "GET /api/document-intelligence/pipeline/runs/{doc_id}",
+      "response_shape": {"document_id": "string", "runs": "array", "count": "number"},
+      "limit_param": {"valid_range": "1-100", "default": 20},
+      "validation": {
+        "limit_0": "returns 422",
+        "limit_200": "returns 422"
+      }
+    },
+    "output_safety": {
+      "_sanitize_output": "caps keys at 25, strings at 500 chars, lists at 25 items",
+      "StageResult.to_dict": "applies sanitization to output dict",
+      "PipelineResult.to_dict": "serializes all stages with sanitized output"
+    },
+    "status_semantics": {
+      "ok": "stage executed successfully and produced output",
+      "skipped": "stage did not execute (explicit or dependency-based)",
+      "error": "stage attempted work and failed"
+    },
+    "timing_fields": {
+      "started_at": "ISO timestamp when stage/pipeline started",
+      "finished_at": "ISO timestamp when stage/pipeline finished",
+      "duration_ms": "execution time in milliseconds"
+    }
+  },
+  "regression_verified": {
+    "9_stages_in_order": ["classification", "extraction", "layout", "entity_resolution", "transaction_match", "bundle_detection", "lifecycle_check", "policy_decision", "learning_capture"],
+    "post_pipeline_endpoint": "POST /api/document-intelligence/pipeline/{doc_id} returns run_id, pipeline_version, timing fields",
+    "health_endpoint": "GET /api/health returns 200",
+    "auth_login": "POST /api/auth/login returns token",
+    "documents_list": "GET /api/documents returns list"
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_pipeline_hardening.py",
+    "/app/backend/tests/test_refactor_regression.py",
+    "/app/test_reports/pytest/pipeline_hardening_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "StageResult and PipelineResult dataclasses correctly implement to_dict() with sanitization",
+    "_sanitize_output properly caps keys, strings, and lists to prevent oversized trace payloads",
+    "Status semantics (ok/skipped/error) are well-documented and correctly applied",
+    "GET /api/document-intelligence/pipeline/runs/{doc_id} endpoint correctly validates limit param (ge=1, le=100)",
+    "Pipeline version v2 with 9 stages is correctly implemented with backward compatibility for v1 (7 stages)"
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (53/53 pytest tests + 11/11 API curl tests passed)",
+    "frontend": "N/A (backend only testing requested)"
+  },
+  "test_credentials": {
+    "auth": "admin / admin",
+    "api_url": "https://stage-audit.preview.emergentagent.com"
+  },
+  "seed_data_created": {},
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 106 - Pipeline Hardening & Observability validation complete. All new GET /api/document-intelligence/pipeline/runs/{doc_id} endpoint features verified including limit param validation (1-100), response shape {document_id, runs, count}, and 422 errors for invalid limits. All 9 pipeline stages confirmed in correct order. POST /api/document-intelligence/pipeline/{doc_id} continues to work and returns run_id, pipeline_version, timing fields. All regression tests pass (health, auth, documents). BC/Graph/SharePoint APIs remain mocked in demo mode.",
+  "mocked_apis_note": "BC/Graph/SharePoint APIs are mocked in demo mode. No new mocks added."
+}

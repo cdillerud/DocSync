@@ -652,6 +652,19 @@ async def run_document_pipeline(
         raise HTTPException(status_code=500, detail=f"Pipeline error: {str(e)}")
 
 
+@router.get("/pipeline/runs/{doc_id}",
+            summary="Retrieve pipeline run traces for a document")
+async def get_document_pipeline_runs(
+    doc_id: str,
+    limit: int = Query(20, ge=1, le=100, description="Max runs to return"),
+):
+    """Return persisted pipeline run traces for the given document, newest first."""
+    from services.pipeline.document_pipeline import get_pipeline_runs
+
+    runs = await get_pipeline_runs(doc_id, limit=limit)
+    return {"document_id": doc_id, "runs": runs, "count": len(runs)}
+
+
 @router.get("/pipeline/stages",
             summary="List available pipeline stages in order")
 async def list_pipeline_stages():

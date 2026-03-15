@@ -37,8 +37,46 @@ logger = logging.getLogger("pipeline")
 PIPELINE_VERSION = "v2"
 
 # ---------------------------------------------------------------------------
+# Output safety — cap serialised output to prevent oversized trace payloads
+# ---------------------------------------------------------------------------
+
+_MAX_OUTPUT_KEYS = 25
+_MAX_STRING_LEN = 500
+_MAX_LIST_ITEMS = 25
+
+
+def _sanitize_output(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a bounded copy of a stage output dict.
+
+    Rules (applied one level deep):
+    - At most ``_MAX_OUTPUT_KEYS`` keys.
+    - String values truncated to ``_MAX_STRING_LEN`` chars.
+    - List values capped to ``_MAX_LIST_ITEMS`` entries.
+    """
+    out: Dict[str, Any] = {}
+    for i, (k, v) in enumerate(raw.items()):
+        if i >= _MAX_OUTPUT_KEYS:
+            out["_truncated_keys"] = len(raw) - _MAX_OUTPUT_KEYS
+            break
+        if isinstance(v, str) and len(v) > _MAX_STRING_LEN:
+            out[k] = v[:_MAX_STRING_LEN] + "…"
+        elif isinstance(v, list) and len(v) > _MAX_LIST_ITEMS:
+            out[k] = v[:_MAX_LIST_ITEMS]
+            out[f"_{k}_truncated"] = len(v) - _MAX_LIST_ITEMS
+        else:
+            out[k] = v
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Stage result container
 # ---------------------------------------------------------------------------
+
+# Status semantics (canonical):
+#   "ok"      — stage executed successfully and produced output
+#   "skipped" — stage did not execute: either explicitly skipped by caller,
+#               or a dependency-based precondition was not met (no work attempted)
+#   "error"   — stage attempted work and failed (exception or domain-level failure)
 
 @dataclass
 class StageResult:
@@ -58,10 +96,10 @@ class StageResult:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "duration_ms": round(self.duration_ms, 1),
-            "output": self.output,
+            "output": _sanitize_output(self.output),
         }
         if self.error is not None:
-            d["error"] = self.error
+            d["error"] = self.error[:_MAX_STRING_LEN] if len(self.error) > _MAX_STRING_LEN else self.error
         return d
 
 

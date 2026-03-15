@@ -92,6 +92,10 @@ POST /api/document-intelligence/pipeline/{doc_id}
 
 GET  /api/document-intelligence/pipeline/stages
      -> { "stages": ["classification", ...] }
+
+GET  /api/document-intelligence/pipeline/runs/{doc_id}
+     ?limit=20                            (optional: 1-100, default 20)
+     -> { "document_id": "...", "runs": [...], "count": N }
 ```
 
 ### Key design decisions
@@ -100,6 +104,89 @@ GET  /api/document-intelligence/pipeline/stages
 - **Non-fatal errors.** A stage failure is logged and recorded but does not abort the pipeline.
 - **Structured output.** `PipelineResult` contains per-stage status, duration, and output keys.
 - **Partial runs.** `stop_after` and `skip_stages` allow callers to run subsets.
+
+### 3a. Pipeline Hardening & Observability (March 2026)
+
+#### Stage-level instrumentation
+
+Every executed stage records:
+
+| Field | Type | Populated when |
+|-------|------|---------------|
+| `started_at` | ISO-8601 UTC string | Stage begins execution |
+| `finished_at` | ISO-8601 UTC string | Stage completes (success or failure) |
+| `duration_ms` | float (rounded to 0.1ms) | Always (computed from monotonic clock) |
+| `output` | bounded dict | Stage produces summary output |
+| `error` | string (max 500 chars) | Stage status is `error` only |
+
+#### Status semantics (canonical)
+
+| Status | Meaning | Example |
+|--------|---------|---------|
+| `ok` | Stage executed successfully and produced output | Classification returned a doc type |
+| `skipped` | Stage did **not execute** — either explicitly skipped by caller (`skip_stages`) or a dependency-based precondition was not met (no work attempted) | Extraction skipped because classification returned no fields; lifecycle_check skipped because no high-confidence entity was resolved |
+| `error` | Stage **attempted work and failed** (unhandled exception or domain-level failure) | Layout fingerprinting threw an exception; document not found in DB during a lookup |
+
+**Key distinction:** `skipped` means "nothing was attempted", `error` means "work was attempted and it failed".
+
+#### Pipeline-level metadata
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `run_id` | `RUN-{12 hex chars}` | Unique per pipeline execution |
+| `document_id` | string | The processed document |
+| `pipeline_version` | `v2` | Schema version for trace format |
+| `started_at` / `finished_at` | ISO-8601 UTC | Pipeline wall-clock bounds |
+| `total_duration_ms` | float | End-to-end monotonic duration |
+| `status` | `ok` / `partial` / `pending` | `ok` = all stages ok/skipped, `partial` = at least one error |
+| `stages_run` | int | Count of stages with status `ok` |
+| `stages_skipped` | int | Count of stages with status `skipped` |
+| `stages_errored` | int | Count of stages with status `error` |
+
+#### Output safety
+
+All stage outputs pass through `_sanitize_output()` before serialisation:
+
+- String values capped at **500 characters**
+- List values capped at **25 items** (with `_<key>_truncated` count)
+- Maximum **25 keys** per output dict (with `_truncated_keys` count)
+- Error messages capped at **500 characters**
+
+This ensures persisted trace payloads remain bounded regardless of service output size.
+
+#### Trace persistence
+
+Every pipeline run is persisted to the **`pipeline_runs`** MongoDB collection (unless `persist=False`).
+
+```
+pipeline_runs document shape:
+{
+  "run_id":            "RUN-A1B2C3D4E5F6",
+  "document_id":       "DOC-abc123",
+  "pipeline_version":  "v2",
+  "started_at":        "2026-03-15T14:00:00.000Z",
+  "finished_at":       "2026-03-15T14:00:02.500Z",
+  "total_duration_ms": 2500.0,
+  "status":            "ok",
+  "stages_run":        7,
+  "stages_skipped":    2,
+  "stages_errored":    0,
+  "stages": [
+    {
+      "stage": "classification",
+      "status": "ok",
+      "started_at": "...",
+      "finished_at": "...",
+      "duration_ms": 350.0,
+      "output": { "document_type": "AP_INVOICE", "confidence": 0.95, ... }
+    },
+    ...
+  ],
+  "_persisted_at": "2026-03-15T14:00:02.510Z"
+}
+```
+
+Traces are retrieved via `GET /api/document-intelligence/pipeline/runs/{doc_id}` (newest first, default limit 20).
 
 ---
 
@@ -418,4 +505,4 @@ Document enters system
 
 ---
 
-*Last updated: March 15, 2026*
+*Last updated: March 15, 2026 (Pipeline Hardening & Observability pass)*

@@ -1,0 +1,77 @@
+{
+  "summary": "Iteration 103 - Technical Debt Remediation Pass #2 complete. All 56 tests passed (45 unit + 11 API). Verified consolidation of shared normalization, fuzzy matching, and BC access adapter. All API contracts preserved.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed_tests": [
+    "45/45 pytest tests in test_reference_helpers.py passed",
+    "GET /api/health returns status=healthy",
+    "POST /api/auth/login with admin/admin returns token",
+    "GET /api/documents returns data",
+    "GET /api/document-intelligence/pipeline/stages returns 7 stages",
+    "POST /api/document-intelligence/pipeline/test-id?stop_after=classification returns structured result with stages array",
+    "GET /api/document-intelligence/learning/summary returns data",
+    "GET /api/document-intelligence/policies returns list",
+    "GET /api/bc-sandbox/status returns demo_mode field",
+    "GET /api/dashboard/stats returns data",
+    "GET /api/spiro/status returns enabled field",
+    "GET /api/inventory-ledger/dashboard-summary?customer_id=test returns total_items"
+  ],
+  "import_checks_verified": [
+    "entity_resolution_service imports from reference_helpers (line 23)",
+    "unified_vendor_matcher imports from reference_helpers (line 21)",
+    "unified_vendor_matcher imports from bc_access (line 22)",
+    "bc_reference_resolver imports from bc_access (line 30)"
+  ],
+  "shared_helpers_consolidation": {
+    "reference_helpers.py": {
+      "normalize_text": "Used by entity_resolution_service",
+      "normalize_reference": "Used by reference_intelligence_service, bc_reference_cache_service",
+      "normalize_company_name": "Used by unified_vendor_matcher",
+      "fuzzy_ratio": "Used by entity_resolution_service, unified_vendor_matcher",
+      "fuzzy_vendor_match": "Used by reference_intelligence_service",
+      "is_freight_carrier": "Used by unified_vendor_matcher"
+    },
+    "bc_access.py": {
+      "BCAccessAdapter.get_token": "Shared OAuth token management",
+      "BCAccessAdapter.get_company_id": "Shared company ID resolution",
+      "get_bc_adapter": "Singleton accessor for shared adapter"
+    }
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_reference_helpers.py",
+    "/app/backend/tests/test_tech_debt_pass2_api.py",
+    "/app/test_reports/pytest/tech_debt_pass2_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "reference_helpers.py provides canonical normalization functions preventing code duplication",
+    "bc_access.py provides shared token caching (50 min) and company ID resolution",
+    "entity_resolution_service correctly delegates to normalize_text and fuzzy_ratio",
+    "unified_vendor_matcher correctly delegates to normalize_company_name, fuzzy_ratio, is_freight_carrier, get_bc_adapter",
+    "bc_reference_resolver correctly delegates to get_bc_adapter for token/company management",
+    "All services preserve original method signatures as thin wrappers for backward compatibility"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_tech_debt_pass2_api.py"
+  ],
+  "success_rate": {
+    "backend": "100% (56/56 tests passed: 45 unit + 11 API)",
+    "frontend": "N/A (backend only testing requested)"
+  },
+  "test_credentials": {
+    "auth": "admin / admin",
+    "api_url": "https://arch-remediation.preview.emergentagent.com"
+  },
+  "seed_data_created": {},
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 103 - Technical debt remediation pass #2 complete. Verified: 1) reference_helpers.py consolidates normalize_text, normalize_reference, normalize_company_name, fuzzy_ratio, fuzzy_vendor_match, is_freight_carrier, 2) bc_access.py consolidates BC token/company management with 50-min caching, 3) entity_resolution_service/unified_vendor_matcher/bc_reference_resolver all correctly import and delegate to shared helpers, 4) All 45 unit tests for reference_helpers pass, 5) All 11 API endpoint tests pass. BC/Graph/SharePoint APIs remain mocked in demo mode.",
+  "mocked_apis_note": "BC/Graph/SharePoint APIs are mocked in demo mode. No new mocks added."
+}

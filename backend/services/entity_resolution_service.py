@@ -18,9 +18,9 @@ import uuid
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
-from difflib import SequenceMatcher
 
 from deps import get_db
+from services.reference_helpers import normalize_text, fuzzy_ratio
 
 logger = logging.getLogger(__name__)
 
@@ -53,20 +53,13 @@ RESOLUTION_FIELDS = {
 
 
 def _normalize(value: str) -> str:
-    """Normalize a string for matching: lowercase, strip, collapse whitespace, remove punctuation."""
-    if not value:
-        return ""
-    s = str(value).lower().strip()
-    s = re.sub(r'[^\w\s]', ' ', s)
-    s = re.sub(r'\s+', ' ', s).strip()
-    return s
+    """Normalize a string for matching — delegates to shared helper."""
+    return normalize_text(value)
 
 
 def _fuzzy_score(a: str, b: str) -> float:
-    """Calculate fuzzy similarity between two strings."""
-    if not a or not b:
-        return 0.0
-    return SequenceMatcher(None, _normalize(a), _normalize(b)).ratio()
+    """Calculate fuzzy similarity — delegates to shared helper."""
+    return fuzzy_ratio(a, b, normalizer=normalize_text)
 
 
 async def _resolve_customer(db, source_value: str) -> Dict[str, Any]:

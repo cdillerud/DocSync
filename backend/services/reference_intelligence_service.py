@@ -20,6 +20,12 @@ from typing import Dict, Any, Optional, List, Tuple
 from enum import Enum
 from dataclasses import dataclass, field, asdict
 
+from services.reference_helpers import (
+    normalize_reference as _shared_normalize_reference,
+    fuzzy_vendor_match as _shared_fuzzy_vendor_match,
+    is_freight_carrier as _shared_is_freight_carrier,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -416,61 +422,8 @@ class ReferenceResolutionResult:
 # =============================================================================
 
 def normalize_reference(raw_value: str, return_trace: bool = False):
-    """
-    Normalize a reference value for BC lookup.
-    
-    If return_trace=True, returns (normalized, trace_steps[]).
-    """
-    if not raw_value:
-        return ("", []) if return_trace else ""
-    
-    trace = []
-    normalized = raw_value.strip()
-    trace.append({"step": "input", "value": normalized})
-    
-    # Convert to uppercase
-    upper = normalized.upper()
-    if upper != normalized:
-        trace.append({"step": "uppercase", "value": upper})
-    normalized = upper
-    
-    # Remove common prefixes
-    prefixes = [
-        (r'^BOL[\s\-#:\.]*', 'strip_bol_prefix'),
-        (r'^B/L[\s\-#:\.]*', 'strip_bl_prefix'),
-        (r'^P\.?O\.?[\s\-#:\.]*', 'strip_po_prefix'),
-        (r'^REF[\s\-#:\.]*', 'strip_ref_prefix'),
-        (r'^ORDER[\s\-#:\.]*', 'strip_order_prefix'),
-        (r'^SO[\s\-#:\.]*', 'strip_so_prefix'),
-        (r'^SHIP[\s\-#:\.]*', 'strip_ship_prefix'),
-        (r'^LOAD[\s\-#:\.]*', 'strip_load_prefix'),
-        (r'^PRO[\s\-#:\.]*', 'strip_pro_prefix'),
-        (r'^INV[\s\-#:\.]*', 'strip_inv_prefix'),
-        (r'^PU[\s\-#:\.]*', 'strip_pu_prefix'),
-        (r'^#', 'strip_hash_prefix'),
-    ]
-    
-    for prefix_re, step_name in prefixes:
-        before = normalized
-        normalized = re.sub(prefix_re, '', normalized, flags=re.IGNORECASE)
-        if normalized != before:
-            trace.append({"step": step_name, "value": normalized})
-    
-    # Remove remaining punctuation and spaces
-    clean = re.sub(r'[\s\-\.\#\:\,]+', '', normalized)
-    if clean != normalized:
-        trace.append({"step": "strip_punctuation", "value": clean})
-    normalized = clean
-    
-    # Strip leading zeros (but keep at least one digit)
-    stripped = normalized.lstrip('0') or '0'
-    if stripped != normalized:
-        trace.append({"step": "strip_leading_zeros", "value": stripped})
-    normalized = stripped
-    
-    if return_trace:
-        return normalized, trace
-    return normalized
+    """Normalize a reference value for BC lookup — delegates to shared helper."""
+    return _shared_normalize_reference(raw_value, return_trace=return_trace)
 
 
 def extract_references_from_text(text: str) -> List[ReferenceCandidate]:
@@ -893,9 +846,7 @@ def score_bc_match(
         uvm = document.get("unified_vendor_match") or {}
         is_freight_carrier = uvm.get("is_freight_carrier", False)
         if not is_freight_carrier:
-            doc_vendor_lower = (document.get("vendor_raw") or "").lower()
-            freight_kws = ["freight", "trucking", "logistics", "transport", "carrier", "shipping", "ltl"]
-            is_freight_carrier = any(kw in doc_vendor_lower for kw in freight_kws)
+            is_freight_carrier = _shared_is_freight_carrier(document.get("vendor_raw") or "")
         if (is_freight_doc or is_freight_carrier) and "shipment" in entity_type.lower():
             breakdown["freight_vendor_boost"] = 0.10
     
@@ -946,21 +897,8 @@ def score_bc_match(
 
 
 def _fuzzy_vendor_match(a: str, b: str) -> bool:
-    """Simple fuzzy vendor match — checks if significant portions overlap."""
-    if not a or not b:
-        return False
-    # Check if first N chars match (handles abbreviations)
-    min_len = min(len(a), len(b))
-    if min_len >= 6 and a[:6] == b[:6]:
-        return True
-    # Check token overlap
-    tokens_a = set(a.replace(",", " ").split())
-    tokens_b = set(b.replace(",", " ").split())
-    if tokens_a and tokens_b:
-        overlap = len(tokens_a & tokens_b)
-        if overlap >= 2 or (overlap >= 1 and min(len(tokens_a), len(tokens_b)) <= 2):
-            return True
-    return False
+    """Simple fuzzy vendor match — delegates to shared helper."""
+    return _shared_fuzzy_vendor_match(a, b)
 
 
 def determine_match_outcome(
@@ -1139,10 +1077,7 @@ class ReferenceIntelligenceService:
         
         # Also check vendor name for freight indicators
         if not is_freight_carrier:
-            vendor_lower = (vendor_name or "").lower()
-            freight_kws = ["freight", "trucking", "logistics", "transport", "carrier",
-                          "shipping", "ltl", "truckload", "drayage", "express"]
-            is_freight_carrier = any(kw in vendor_lower for kw in freight_kws)
+            is_freight_carrier = _shared_is_freight_carrier(vendor_name or "")
         
         if doc_type in FREIGHT_DOC_TYPES or is_freight_carrier or has_bol:
             effective_strategy = FREIGHT_STRATEGY_KEY

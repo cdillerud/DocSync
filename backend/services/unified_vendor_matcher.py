@@ -16,8 +16,10 @@ import os
 import httpx
 from typing import Dict, Any, Optional, List, Tuple
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from difflib import SequenceMatcher
 from datetime import datetime, timezone
+
+from services.reference_helpers import normalize_company_name, fuzzy_ratio, is_freight_carrier
+from services.bc_access import get_bc_adapter
 
 logger = logging.getLogger(__name__)
 
@@ -35,14 +37,13 @@ class UnifiedVendorMatcher:
     def __init__(self, db: AsyncIOMotorDatabase):
         self.db = db
         self._cache = {}
-        self._bc_token = None
-        self._bc_token_expires = None
+        self._bc_adapter = get_bc_adapter()
         
-        # BC Production credentials from env
-        self.bc_tenant_id = os.environ.get("BC_PROD_TENANT_ID", "")
-        self.bc_environment = os.environ.get("BC_PROD_ENVIRONMENT", "Production")
-        self.bc_client_id = os.environ.get("BC_PROD_CLIENT_ID", "")
-        self.bc_client_secret = os.environ.get("BC_PROD_CLIENT_SECRET", "")
+        # BC Production credentials from env (kept for backward compat)
+        self.bc_tenant_id = self._bc_adapter.tenant_id
+        self.bc_environment = self._bc_adapter.environment
+        self.bc_client_id = self._bc_adapter.client_id
+        self.bc_client_secret = self._bc_adapter.client_secret
         self.bc_company_id = None
         
         # SharePoint credentials
@@ -426,122 +427,28 @@ class UnifiedVendorMatcher:
             logger.warning("Failed to store vendor match: %s", str(e))
     
     async def _get_bc_token(self) -> Optional[str]:
-        """Get BC OAuth token with caching."""
-        
-        now = datetime.now(timezone.utc)
-        if self._bc_token and self._bc_token_expires and self._bc_token_expires > now:
-            return self._bc_token
-        
-        if not self.bc_client_id or not self.bc_client_secret:
-            return None
-        
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.post(
-                    f"https://login.microsoftonline.com/{self.bc_tenant_id}/oauth2/v2.0/token",
-                    data={
-                        "client_id": self.bc_client_id,
-                        "client_secret": self.bc_client_secret,
-                        "scope": "https://api.businesscentral.dynamics.com/.default",
-                        "grant_type": "client_credentials"
-                    }
-                )
-                
-                if resp.status_code == 200:
-                    data = resp.json()
-                    self._bc_token = data.get("access_token")
-                    # Token usually valid for 1 hour, refresh at 50 min
-                    from datetime import timedelta
-                    self._bc_token_expires = now + timedelta(minutes=50)
-                    return self._bc_token
-        
-        except Exception as e:
-            logger.warning("BC token error: %s", str(e))
-        
-        return None
+        """Get BC OAuth token — delegates to shared adapter."""
+        return await self._bc_adapter.get_token()
     
     async def _get_bc_company_id(self, token: str) -> Optional[str]:
-        """Get BC company ID - finds Gamer Packaging company."""
-        
+        """Get BC company ID — delegates to shared adapter."""
         if self.bc_company_id:
             return self.bc_company_id
-        
-        # Preferred company name
-        target_company = os.environ.get("BC_COMPANY_NAME", "Gamer Packaging")
-        
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.get(
-                    f"https://api.businesscentral.dynamics.com/v2.0/{self.bc_tenant_id}/{self.bc_environment}/api/v2.0/companies",
-                    headers={"Authorization": f"Bearer {token}"}
-                )
-                
-                if resp.status_code == 200:
-                    companies = resp.json().get("value", [])
-                    
-                    # Find target company by name
-                    for company in companies:
-                        if target_company.lower() in company.get("displayName", "").lower():
-                            self.bc_company_id = company.get("id")
-                            logger.info("BC Company found: %s (%s)", company.get("displayName"), self.bc_company_id[:8])
-                            return self.bc_company_id
-                    
-                    # Fallback to first non-test company
-                    for company in companies:
-                        name = company.get("displayName", "").lower()
-                        if "test" not in name and "blank" not in name and name.strip():
-                            self.bc_company_id = company.get("id")
-                            logger.info("BC Company fallback: %s (%s)", company.get("displayName"), self.bc_company_id[:8])
-                            return self.bc_company_id
-                    
-                    # Last resort - first company
-                    if companies:
-                        self.bc_company_id = companies[0].get("id")
-                        return self.bc_company_id
-        
-        except Exception as e:
-            logger.warning("BC company lookup error: %s", str(e))
-        
-        return None
+        cid = await self._bc_adapter.get_company_id(token)
+        self.bc_company_id = cid
+        return cid
     
     def _normalize_name(self, name: str) -> str:
-        """Normalize company name for matching."""
-        if not name:
-            return ""
-        
-        normalized = name.lower().strip()
-        
-        # Remove common suffixes
-        for suffix in [" inc", " inc.", " llc", " corp", " corp.", " corporation", 
-                      " co", " co.", " company", " ltd", " ltd.", " lp", " lp."]:
-            if normalized.endswith(suffix):
-                normalized = normalized[:-len(suffix)]
-        
-        # Remove special characters
-        normalized = re.sub(r'[^\w\s]', '', normalized)
-        normalized = re.sub(r'\s+', ' ', normalized).strip()
-        
-        return normalized
+        """Normalize company name — delegates to shared helper."""
+        return normalize_company_name(name)
     
     def _calculate_similarity(self, s1: str, s2: str) -> float:
-        """Calculate similarity between strings."""
-        if not s1 or not s2:
-            return 0.0
-        
-        n1 = self._normalize_name(s1)
-        n2 = self._normalize_name(s2)
-        
-        return SequenceMatcher(None, n1, n2).ratio()
+        """Calculate similarity — delegates to shared helper."""
+        return fuzzy_ratio(s1, s2, normalizer=normalize_company_name)
     
     def _is_freight_name(self, name: str) -> bool:
-        """Check if name suggests freight carrier."""
-        name_lower = name.lower()
-        freight_keywords = [
-            "freight", "transport", "trucking", "logistics", "carrier",
-            "shipping", "express", "delivery", "ltl", "truckload",
-            "moving", "hauling", "drayage"
-        ]
-        return any(kw in name_lower for kw in freight_keywords)
+        """Check if name suggests freight carrier — delegates to shared helper."""
+        return is_freight_carrier(name)
     
     def _empty_result(self, reason: str) -> Dict:
         """Return empty result."""

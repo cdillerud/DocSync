@@ -26,9 +26,8 @@ import httpx
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List
 from enum import Enum
-from dotenv import load_dotenv
 
-load_dotenv()
+from services.bc_access import get_bc_adapter, BC_API_BASE
 
 logger = logging.getLogger(__name__)
 
@@ -88,45 +87,16 @@ class ReferenceResolutionResult:
         }
 
 
-# =============================================================================
-# CONFIGURATION - Use same creds as sandbox, target Production environment
-# =============================================================================
-
-# Use existing BC credentials (same for sandbox and production)
-BC_TENANT_ID = os.environ.get('TENANT_ID', '')
-BC_CLIENT_ID = os.environ.get('BC_CLIENT_ID') or os.environ.get('BC_SANDBOX_CLIENT_ID', '')
-BC_CLIENT_SECRET = os.environ.get('BC_CLIENT_SECRET') or os.environ.get('BC_SANDBOX_CLIENT_SECRET', '')
-
-# Target PRODUCTION environment for reference resolution (read-only)
-BC_PROD_ENVIRONMENT = os.environ.get('BC_PROD_ENVIRONMENT', 'Production')
-
-BC_API_BASE = "https://api.businesscentral.dynamics.com/v2.0"
-
-logger.info(
-    "[BC Reference Resolver] Config: tenant=%s, client=%s, env=%s",
-    BC_TENANT_ID[:8] + "..." if BC_TENANT_ID else "NOT SET",
-    BC_CLIENT_ID[:8] + "..." if BC_CLIENT_ID else "NOT SET",
-    BC_PROD_ENVIRONMENT
-)
-
-
 class BCReferenceResolver:
     """
     BC Reference Resolver - resolves reference numbers against BC Production tables.
     
-    Uses same credentials as sandbox but targets Production environment.
+    Uses shared BCAccessAdapter for token/company management.
     Checks local cache first, falls back to direct BC API.
     """
     
     def __init__(self):
-        self.tenant_id = BC_TENANT_ID
-        self.client_id = BC_CLIENT_ID
-        self.client_secret = BC_CLIENT_SECRET
-        self.environment = BC_PROD_ENVIRONMENT
-        
-        self._token = None
-        self._token_expires = None
-        self._company_id = None
+        self._bc = get_bc_adapter()
         self._cache_service = None
     
     def set_cache_service(self, cache_service):
@@ -135,90 +105,12 @@ class BCReferenceResolver:
         logger.info("[BC Reference Resolver] Cache service attached")
     
     async def _get_token(self) -> Optional[str]:
-        """Get BC access token."""
-        if not self.client_id or not self.client_secret or not self.tenant_id:
-            logger.error(
-                "[BC Reference Resolver] Missing credentials: tenant=%s, client=%s, secret=%s",
-                bool(self.tenant_id), bool(self.client_id), bool(self.client_secret)
-            )
-            return None
-        
-        # Check if token is still valid
-        if self._token and self._token_expires and datetime.now(timezone.utc) < self._token_expires:
-            return self._token
-        
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(
-                    f"https://login.microsoftonline.com/{self.tenant_id}/oauth2/v2.0/token",
-                    data={
-                        "grant_type": "client_credentials",
-                        "client_id": self.client_id,
-                        "client_secret": self.client_secret,
-                        "scope": "https://api.businesscentral.dynamics.com/.default"
-                    }
-                )
-                
-                if resp.status_code == 200:
-                    data = resp.json()
-                    self._token = data["access_token"]
-                    self._token_expires = datetime.now(timezone.utc) + timedelta(minutes=50)
-                    logger.info("[BC Reference Resolver] Token obtained successfully")
-                    return self._token
-                else:
-                    logger.error(
-                        "[BC Reference Resolver] Token error: %d - %s",
-                        resp.status_code, resp.text[:200]
-                    )
-                    return None
-        except Exception as e:
-            logger.error("[BC Reference Resolver] Token error: %s", str(e))
-            return None
+        """Get BC access token — delegates to shared adapter."""
+        return await self._bc.get_token()
     
     async def _get_company_id(self, token: str) -> Optional[str]:
-        """Get BC company ID for Gamer Packaging."""
-        if self._company_id:
-            return self._company_id
-        
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                url = f"{BC_API_BASE}/{self.tenant_id}/{self.environment}/api/v2.0/companies"
-                resp = await client.get(
-                    url,
-                    headers={"Authorization": f"Bearer {token}"}
-                )
-                
-                if resp.status_code == 200:
-                    companies = resp.json().get("value", [])
-                    logger.info("[BC Reference Resolver] Found %d companies", len(companies))
-                    
-                    # Look for Gamer Packaging
-                    for company in companies:
-                        if "gamer" in company.get("name", "").lower():
-                            self._company_id = company["id"]
-                            logger.info(
-                                "[BC Reference Resolver] Using company: %s (%s)",
-                                company.get("name"), self._company_id
-                            )
-                            return self._company_id
-                    
-                    # Fall back to first company
-                    if companies:
-                        self._company_id = companies[0]["id"]
-                        logger.info(
-                            "[BC Reference Resolver] Using first company: %s (%s)",
-                            companies[0].get("name"), self._company_id
-                        )
-                        return self._company_id
-                else:
-                    logger.error(
-                        "[BC Reference Resolver] Company lookup error: %d - %s",
-                        resp.status_code, resp.text[:200]
-                    )
-        except Exception as e:
-            logger.error("[BC Reference Resolver] Company lookup error: %s", str(e))
-        
-        return None
+        """Get BC company ID — delegates to shared adapter."""
+        return await self._bc.get_company_id(token)
     
     async def resolve_reference(
         self,
@@ -300,7 +192,7 @@ class BCReferenceResolver:
                 "id": best.get("bc_record_id"),
                 "number": best.get("bc_document_no"),
                 "table": table,
-                "environment": self.environment,
+                "environment": self._bc.environment,
                 "vendor_name": best.get("bc_vendor_name"),
                 "vendor_number": best.get("bc_vendor_no"),
                 "customer_name": best.get("bc_customer_name"),
@@ -444,7 +336,7 @@ class BCReferenceResolver:
     ) -> Optional[ReferenceResolutionResult]:
         """Check a single BC table for a matching reference."""
         try:
-            url = f"{BC_API_BASE}/{self.tenant_id}/{self.environment}/api/v2.0/companies({company_id})/{table}"
+            url = f"{BC_API_BASE}/{self._bc.tenant_id}/{self._bc.environment}/api/v2.0/companies({company_id})/{table}"
             
             resp = await client.get(
                 url,
@@ -486,7 +378,7 @@ class BCReferenceResolver:
             "id": record.get("id"),
             "number": record.get("number"),
             "table": table,
-            "environment": self.environment
+            "environment": self._bc.environment
         }
         
         if table == "purchaseOrders":

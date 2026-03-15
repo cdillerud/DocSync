@@ -1,6 +1,22 @@
 # CHANGELOG - GPI Document Hub
 
 
+## [2026-03-15] Iteration 100 — Document Automation Decision Policy Engine — COMPLETE
+- **Backend:** New `services/decision_policy_service.py` — policy-driven decision engine with 9 default policies, priority-based evaluation, MongoDB-style condition operators, explainable reasons (human-readable + machine-readable codes)
+- **Backend:** Policy CRUD: `POST/GET/PATCH/DELETE /api/document-intelligence/policies` — 9 auto-seeded defaults (block critical P1, block duplicate P2, auto-link P5, auto-draft P10, hold review P15, hold ambiguous P20)
+- **Backend:** `POST /api/document-intelligence/evaluate-decision/{doc_id}` — authoritative decision endpoint. Loads all engine outputs, evaluates policies in priority order, returns action, level, reasons, target
+- **Backend:** `POST /api/document-intelligence/execute-decision/{decision_id}` — separates deciding from doing. Calls existing auto-draft/auto-link. Hold/block return informative non-executable response
+- **Backend:** `GET /api/document-intelligence/decision/{doc_id}` — latest decision for a document
+- **Backend:** `GET /api/document-intelligence/decision-queue` — blocked + review_required decisions with file_name, reason_summary, status_counts
+- **Backend:** Document enrichment: latest_decision_action, latest_automation_level, latest_decision_status, latest_decision_reasons, decision_executable, decision_target_summary
+- **Backend:** Activity events: decision_evaluated, decision_executed, decision_blocked, decision_held
+- **Frontend:** Decision Engine section in DocumentIntelligencePanel — action badge, automation level, reasons, evaluate/execute buttons, blocked/review states
+- **New collections:** `automation_policies`, `automation_decisions`
+- **Testing:** Backend 100% (31/31 passed), Frontend 95% (code verified), all regression tests pass
+- **Test report:** `/app/test_reports/iteration_100.json`
+
+
+
 ## [2026-03-15] Iteration 99 — Document Lifecycle Validation Engine — COMPLETE
 - **Backend:** New `services/document_lifecycle_service.py` — lifecycle templates (Sales Order, Purchasing, AP), stage detection, duplicate detection (invoice+vendor, PO+vendor), inconsistency detection (mismatched refs, lifecycle gaps)
 - **Backend:** `POST /api/document-intelligence/validate-lifecycle/{entity_type}/{entity_id}` — full lifecycle validation with stage/duplicate/inconsistency analysis

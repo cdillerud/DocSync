@@ -3283,6 +3283,40 @@ EMAIL_CLIENT_ID=doc-workflow-test
 - Frontend: 100% — all UI flows verified, all regression tests pass
 - Test report: `/app/test_reports/iteration_99.json`
 
+---
+
+## Session Update: March 15, 2026 - Decision Policy Engine (iteration_100)
+
+### Completed
+
+#### Document Automation Decision Policy Engine
+- **Backend:** New `services/decision_policy_service.py` — policy-driven decision engine
+- **Backend:** Policy CRUD, evaluate-decision, execute-decision, decision-queue endpoints
+- **Backend:** 9 default policies covering block/hold/auto-draft/auto-link scenarios
+- **Backend:** Document enrichment with decision data
+- **Frontend:** Decision Engine section in DocumentIntelligencePanel
+- **New collections:** `automation_policies`, `automation_decisions`
+
+### Architecture Update
+```
+/app/backend/services/
+├── document_intelligence_service.py  # Classification/extraction
+├── entity_resolution_service.py      # Entity matching
+├── transaction_matching_service.py   # Transaction matching
+├── document_bundle_service.py        # Bundle detection
+├── document_lifecycle_service.py     # Lifecycle validation
+└── decision_policy_service.py        # (New) Decision policy engine
+```
+
+### Test Results
+- Backend: 100% (31/31 passed)
+- Frontend: 95% — code verified, all regression tests pass
+- Test report: `/app/test_reports/iteration_100.json`
+
+*Last Updated: March 15, 2026*
+
+
+
 *Last Updated: March 15, 2026*
 
 

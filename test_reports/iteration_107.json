@@ -1,0 +1,104 @@
+{
+  "summary": "BC Validation Isolation refactoring verified - all 84 tests passed. Technical debt remediation pass extracting validate_bc_match() from server.py into services/bc_validation_service.py with thin compatibility wrappers preserved. No behavior changes, all API contracts preserved.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_bc_validation_isolation.py",
+    "/app/backend/tests/test_pipeline_hardening.py",
+    "/app/backend/tests/test_refactor_regression.py",
+    "/app/test_reports/pytest/bc_validation_isolation_results.xml",
+    "/app/test_reports/pytest/pipeline_hardening_results_107.xml",
+    "/app/test_reports/pytest/refactor_regression_results_107.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "N/A (backend-only testing)"
+  },
+  "test_credentials": {
+    "username": "admin",
+    "password": "admin"
+  },
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "BC Validation Isolation refactoring complete. validate_bc_match() now lives in services/bc_validation_service.py with thin wrappers in server.py (line 2981) and document_intel_helpers.py (line 365). All 84 tests (31 BC validation + 31 pipeline + 22 regression) pass. Key verification points: import chain integrity, demo mode behavior, error handling, wrapper delegation.",
+  "test_summary": {
+    "test_bc_validation_isolation": {
+      "passed": 31,
+      "failed": 0,
+      "coverage": [
+        "Unit tests: _normalize_vendor_name (9 tests)",
+        "Unit tests: _calculate_fuzzy_score (5 tests)",
+        "Unit tests: _compute_extraction_quality (6 tests)",
+        "Integration: validate_bc_match demo mode (3 tests)",
+        "Integration: validate_bc_match error handling (3 tests)",
+        "Compatibility: server.py wrapper (1 test)",
+        "Compatibility: document_intel_helpers adapter (1 test)",
+        "API regression (3 tests)"
+      ]
+    },
+    "test_pipeline_hardening": {
+      "passed": 31,
+      "failed": 0,
+      "coverage": [
+        "Unit tests: _sanitize_output (5 tests)",
+        "Unit tests: StageResult.to_dict (5 tests)",
+        "Unit tests: PipelineResult.to_dict (2 tests)",
+        "Integration: pipeline timing instrumentation (3 tests)",
+        "Integration: pipeline status semantics (3 tests)",
+        "Integration: pipeline failure propagation (2 tests)",
+        "Integration: pipeline skip behaviour (3 tests)",
+        "Integration: pipeline trace persistence (3 tests)",
+        "API: pipeline runs endpoint (4 tests)",
+        "API: pipeline stages endpoint (1 test)"
+      ]
+    },
+    "test_refactor_regression": {
+      "passed": 22,
+      "failed": 0,
+      "coverage": [
+        "Health check",
+        "Authentication (login, /me)",
+        "Documents list",
+        "Dashboard stats + workflow intelligence",
+        "AP workflow status counts",
+        "Layout fingerprints",
+        "Vendor aliases",
+        "Automation rules",
+        "Vendor intelligence",
+        "Label corrections",
+        "Alerts",
+        "Pilot status",
+        "Migration stats",
+        "Mailbox sources + settings status",
+        "Vendor match stats",
+        "Square9 config",
+        "Freight routing",
+        "Events",
+        "Cache status"
+      ]
+    }
+  },
+  "api_verification": {
+    "health": "200 OK - {status: 'healthy', service: 'gpi-document-hub'}",
+    "auth_login": "200 OK - token returned",
+    "documents": "200 OK - 45 total documents",
+    "dashboard_stats": "200 OK - 79 total documents",
+    "ap_workflow_status_counts": "200 OK - 56 total in AP workflow",
+    "vendor_intelligence_stats": "200 OK",
+    "pipeline_stages": "200 OK - 9 stages returned",
+    "pipeline_runs_nonexistent": "200 OK - empty runs list",
+    "mailbox_sources": "200 OK - 2 mailbox sources",
+    "events_recent": "200 OK - events returned"
+  }
+}

@@ -472,6 +472,7 @@ Document enters system
 | **Automation & Execution** | `automation_rules_service`, `auto_resolution_service`, `auto_clear_service`, `auto_post_service`, `workflow_engine` | `hub_documents` (status fields), `automation_rules` |
 | **Learning Loop** | `learning_loop_service` | `learning_events`, `extraction_hints`, `learning_metrics` |
 | **Reference Intelligence** | `reference_intelligence_service`, `bc_reference_resolver`, `bc_reference_cache_service`, `reference_helpers`, `bc_access` | `matching_diagnostics`, `bc_reference_cache` |
+| **BC Validation** | `bc_validation_service` (authoritative), `bc_access` (adapter) | (external BC API via adapter) |
 | **Vendor Intelligence** | `vendor_intelligence_service`, `stable_vendor_service`, `vendor_extraction_profile_service` | `vendor_intelligence_profiles`, `vendor_extraction_profiles` |
 | **Inventory Ledger** | `inventory_ledger_service` | `inventory_movements`, `inv_item_settings` |
 | **Business Central** | `business_central_service`, `bc_sandbox_service`, `bc_write_safety_guard` | (external API) |
@@ -501,8 +502,75 @@ Document enters system
 - **`server.py`** no longer creates a `FastAPI` instance or registers routers. It is purely a library imported by `main.py`.
 - All API endpoint paths are unchanged. No frontend modifications were required.
 - **Reference helpers:** All existing per-service methods (`_normalize`, `_fuzzy_score`, `_normalize_name`, `_calculate_similarity`, `_is_freight_name`, `_fuzzy_vendor_match`, `normalize_reference`) are preserved as thin wrappers that delegate to `reference_helpers.py`. No external caller needs changes.
-- **BC adapter:** `bc_reference_resolver` and `unified_vendor_matcher` token/company methods are wrappers around `bc_access.BCAccessAdapter`. The adapter shares a single token cache across both services.
+- **BC adapter:** `bc_reference_resolver`, `unified_vendor_matcher`, and `bc_validation_service` token/company methods are wrappers around `bc_access.BCAccessAdapter`. The adapter shares a single token cache across all three services.
+- **`validate_bc_match()` wrapper:** `server.py` retains a 3-line wrapper that delegates to `services.bc_validation_service.validate_bc_match()`. All 6 internal call sites in server.py continue to work. `document_intel_helpers.validate_bc_match()` now imports from `bc_validation_service` directly (no longer imports from `server`).
 
 ---
 
-*Last updated: March 15, 2026 (Pipeline Hardening & Observability pass)*
+## 5b. BC Validation Domain (Isolated — March 2026)
+
+### Before-state
+
+`validate_bc_match()` was a 450-line function in `server.py` with 15+ module-level dependencies:
+
+| Dependency type | From server.py | Count |
+|----------------|----------------|-------|
+| Config globals | `DEMO_MODE`, `BC_CLIENT_ID`, `TENANT_ID`, `BC_READ_ENVIRONMENT` | 4 |
+| BC auth functions | `get_bc_token()`, `get_bc_companies()` | 2 |
+| Normalization | `normalize_extracted_fields()`, `normalize_vendor_name()` | 2 |
+| Matching | `match_vendor_unified()`, `match_customer_in_bc()`, `calculate_fuzzy_score()` | 3 |
+| Validation helpers | `_validate_po()` | 1 |
+| DB access | `db` (module-level) | 1 |
+| HTTP client | `httpx` | 1 |
+
+### After-state
+
+```
+services/bc_validation_service.py   — Authoritative BC validation logic (NEW)
+  ├─ validate_bc_match()            — Main orchestrator (public)
+  ├─ _match_customer_in_bc()        — Customer matching against BC API (private)
+  ├─ _validate_po()                 — PO validation against BC API (private)
+  ├─ _compute_extraction_quality()  — Extraction completeness scoring (private)
+  ├─ _normalize_vendor_name()       — BC-specific regex-based name normalization (private)
+  └─ _calculate_fuzzy_score()       — BC-aware token overlap scoring (private)
+```
+
+### Dependency wiring (after)
+
+| Need | Provided by | Replaces |
+|------|------------|----------|
+| Config (`DEMO_MODE`, `BC_CLIENT_ID`) | `deps` module | server.py globals |
+| DB access | `deps.get_db()` | server.py module-level `db` |
+| BC token + company ID | `bc_access.BCAccessAdapter` | server.py `get_bc_token()` / `get_bc_companies()` |
+| BC API URL construction | `BCAccessAdapter.api_url()` | Hardcoded URL templates in server.py |
+| Field normalization | `document_intel_helpers.normalize_extracted_fields()` | server.py `normalize_extracted_fields()` |
+| Vendor matching | `unified_vendor_matcher.match_vendor_unified()` | Same (was already imported in server.py) |
+
+### Compatibility wrappers retained
+
+| Location | Wrapper | Reason |
+|----------|---------|--------|
+| `server.py:validate_bc_match()` | 3-line delegation to `bc_validation_service` | 6 internal call sites in server.py still reference it |
+| `server.py:match_customer_in_bc()` | Delegation to `bc_validation_service._match_customer_in_bc()` | Called from within server.py scope |
+
+### Why `_normalize_vendor_name` was NOT merged into `reference_helpers.normalize_company_name`
+
+The two functions differ in suffix-removal approach:
+- **`reference_helpers.normalize_company_name()`**: Uses simple `str.endswith()` check after lowercasing, removing punctuation last.
+- **`_normalize_vendor_name()`**: Uses regex patterns with optional commas/dots (e.g., `r'\s*,?\s*(inc\.?|incorporated)$'`) *before* removing punctuation.
+
+For input `"Acme, Inc."`:
+- `normalize_company_name` → `"acme inc"` (comma removed, but suffix check runs before punct removal)
+- `_normalize_vendor_name` → `"acme"` (regex matches `, Inc.` including comma and dot)
+
+Merging would change validation outcomes for existing documents. Both are preserved.
+
+### Known follow-up debt
+
+- `server.py` still has ~6 call sites to the wrapper; these could migrate to importing from `bc_validation_service` directly in a future pass.
+- `_match_customer_in_bc` creates its own `httpx.AsyncClient` per call; could share a session with the parent `validate_bc_match` call.
+- `normalize_vendor_name()` and `reference_helpers.normalize_company_name()` should eventually be unified with a migration plan that verifies match outcomes don't change.
+
+---
+
+*Last updated: March 15, 2026 (BC Validation Isolation pass)*

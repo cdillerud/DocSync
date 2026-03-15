@@ -357,14 +357,11 @@ async def validate_bc_match(
 ) -> dict:
     """Validate extracted fields against BC.
 
-    This is a thin adapter that delegates to the implementation in server.py.
-    The function has deep dependencies on server.py module-level state (DB,
-    token helpers, vendor/customer matchers) that make a full extraction too
-    risky for this pass.  Marked as a follow-up target.
+    Delegates to the authoritative implementation in bc_validation_service.
     """
-    from server import validate_bc_match as _server_validate_bc_match
+    from services.bc_validation_service import validate_bc_match as _bc_validate
 
-    return await _server_validate_bc_match(job_type, extracted_fields, job_config)
+    return await _bc_validate(job_type, extracted_fields, job_config)
 
 
 # ---------------------------------------------------------------------------

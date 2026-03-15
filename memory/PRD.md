@@ -345,6 +345,14 @@ Key Principles:
 - [x] ARCHITECTURE_CURRENT.md updated with hardening section
 - [x] 31 targeted tests + 22 regression tests, 100% pass rate
 
+#### BC Validation Isolation (COMPLETED - Mar 15, 2026)
+- [x] Extracted `validate_bc_match()` from server.py → `services/bc_validation_service.py`
+- [x] Extracted helpers: `_match_customer_in_bc`, `_validate_po`, `_normalize_vendor_name`, `_calculate_fuzzy_score`, `_compute_extraction_quality`
+- [x] Dependencies rewired to `deps`, `bc_access`, `document_intel_helpers`, `unified_vendor_matcher`
+- [x] `document_intel_helpers` no longer imports from `server.py`
+- [x] server.py retains thin compatibility wrapper
+- [x] 31 targeted tests, 84/84 total tests passed
+
 
 ### In Progress / Shadow Mode
 - [x] AP automatic workflow trigger (VERIFIED WORKING)

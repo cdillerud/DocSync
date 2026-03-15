@@ -1,5 +1,23 @@
 # GPI Document Hub - Changelog
 
+## March 15, 2026 — BC Validation Isolation (iter_107)
+
+### Extraction
+- Moved `validate_bc_match()` (450 lines, 15+ deps) from `server.py` to new `services/bc_validation_service.py`
+- Extracted: `_match_customer_in_bc`, `_validate_po`, `_compute_extraction_quality`, `_normalize_vendor_name`, `_calculate_fuzzy_score`
+- Dependencies rewired: `deps.py` (config/DB), `bc_access.BCAccessAdapter` (token/company/URL), `document_intel_helpers` (normalization), `unified_vendor_matcher` (vendor matching)
+
+### Compatibility
+- `server.py` retains thin 3-line wrapper (6 internal call sites)
+- `document_intel_helpers.validate_bc_match()` now imports from `bc_validation_service` (no longer from `server`)
+
+### Testing
+- 31/31 new BC validation tests passed (9 normalize, 5 fuzzy, 6 quality, 3 demo, 3 error, 2 compat, 3 API regression)
+- 84/84 total tests passed across all test files
+- Full API verification passed (health, auth, documents, dashboard, workflow, pipeline, events)
+
+---
+
 ## March 15, 2026 — Pipeline Hardening & Observability (iter_106)
 
 ### Output Safety

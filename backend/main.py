@@ -3,11 +3,11 @@ GPI Document Hub - Main Application Entry Point (Authoritative)
 
 Single entry point for the application. Composes the app from:
   1. Modular routers in /routers/  (all domain modules)
-  2. Legacy api_router from server.py  (routes not yet fully extracted)
-  3. Sales module router
+  2. Sales module router
 
-server.py is imported as a library — its startup/shutdown functions
-handle all service initialization and teardown.
+server.py is imported as a utility library — it provides startup/shutdown
+lifecycle hooks, helper functions, and handler implementations consumed
+by router modules.  It does NOT register any routes itself.
 """
 
 from fastapi import FastAPI
@@ -23,12 +23,9 @@ logger = logging.getLogger("main")
 
 # ---------------------------------------------------------------------------
 # Import server module (runs module-level code: DB connection, imports, etc.)
-# We treat server.py as a library, NOT as the served app.
+# We treat server.py as a utility library, NOT as a served app or router.
 # ---------------------------------------------------------------------------
 import server
-
-# Legacy api_router — contains all document/workflow routes still in server.py
-from server import api_router as legacy_api_router
 
 # Sales module router (standalone)
 from sales_module import sales_router
@@ -127,10 +124,7 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(ap_review_router, prefix="/api")
 app.include_router(spiro_router, prefix="/api")
 
-# ==================== LEGACY ROUTERS ====================
-# api_router has prefix="/api" — document, workflow, alias, BC, sales-file-import routes
-app.include_router(legacy_api_router)
-# Sales Module (Phase 0)
+# ==================== SALES MODULE ====================
 app.include_router(sales_router)
 
 

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, UploadFile, File, Form, HTTPException, Query, Request, BackgroundTasks, Body
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Request, BackgroundTasks, Body
 from fastapi.responses import Response
 from dotenv import load_dotenv
 load_dotenv()  # Load .env file before any os.environ calls
@@ -215,9 +215,9 @@ EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 # ---------------------------------------------------------------------------
 # server.py is used as a LIBRARY by main.py, not as a served app.
 # The FastAPI app instance lives in main.py.
-# api_router below collects legacy routes not yet extracted to /routers/.
+# Route handler functions are defined here and registered by router modules
+# in /routers/ via add_api_route().
 # ---------------------------------------------------------------------------
-api_router = APIRouter(prefix="/api")
 
 # Global polling task references
 _email_polling_task = None
@@ -271,8 +271,6 @@ def create_token(username: str) -> str:
     return pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 # Auth endpoints moved to routes/auth.py — registered in main.py
-# @api_router.post("/auth/login") — REMOVED (Domain 1)
-# @api_router.get("/auth/me") — REMOVED (Domain 1)
 
 # ==================== MICROSOFT SERVICES (MOCK/REAL) ====================
 
@@ -1218,7 +1216,6 @@ async def upload_document(
 
 
 # Moved to routers/reference_intelligence.py (Domain 9)
-# @api_router.post("/bc/resolve-reference")
 async def resolve_bc_reference(
     reference_number: str = Query(..., description="Reference number to resolve"),
     tables: Optional[str] = Query(None, description="Comma-separated tables to check")
@@ -1250,7 +1247,6 @@ async def resolve_bc_reference(
 
 
 # Moved to routers/reference_intelligence.py (Domain 9)
-# @api_router.post("/documents/{doc_id}/resolve-reference")
 async def resolve_document_reference(doc_id: str):
     """
     Resolve PO/Order reference for a specific document.
@@ -1310,7 +1306,6 @@ async def resolve_document_reference(doc_id: str):
 # =============================================================================
 
 # Moved to routers/reference_intelligence.py (Domain 9)
-# @api_router.post("/documents/{doc_id}/resolve-intelligence")
 async def resolve_document_intelligence(doc_id: str):
     """
     Full AI-Assisted Reference Intelligence resolution for a document.
@@ -1356,7 +1351,6 @@ async def resolve_document_intelligence(doc_id: str):
 
 
 # Moved to routers/reference_intelligence.py (Domain 9)
-# @api_router.get("/documents/{doc_id}/reference-intelligence")
 async def get_document_reference_intelligence(doc_id: str):
     """
     Get stored reference intelligence data for a document.
@@ -1382,7 +1376,6 @@ async def get_document_reference_intelligence(doc_id: str):
 
 
 # Moved to routers/reference_intelligence.py (Domain 9)
-# @api_router.post("/documents/{doc_id}/auto-resolve")
 async def trigger_auto_resolve(doc_id: str):
     """Manually enqueue a document for auto-resolution (re-run)."""
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
@@ -1430,7 +1423,6 @@ async def trigger_auto_resolve(doc_id: str):
 
 
 # Moved to routers/reference_intelligence.py (Domain 9)
-# @api_router.get("/documents/{doc_id}/matching-debug")
 async def get_matching_debug(doc_id: str):
     """
     Get full matching diagnostics for a document.
@@ -1511,7 +1503,6 @@ async def get_matching_debug(doc_id: str):
 
 
 # Moved to routers/reference_intelligence.py (Domain 9)
-# @api_router.post("/documents/{doc_id}/matching-debug/rerun")
 async def rerun_matching_with_diagnostics(doc_id: str):
     """
     Rerun reference resolution with full diagnostics capture.
@@ -1679,7 +1670,6 @@ async def retry_document(doc_id: str, reason: str = "Manual retry"):
     }
 
 
-# @api_router.post("/documents/{doc_id}/reset-retries")  # Moved to routers/documents.py
 async def reset_document_retries(doc_id: str, reason: str = "Manual reset"):
     """Reset retry counter for a document (after manual intervention)."""
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
@@ -1703,7 +1693,6 @@ async def reset_document_retries(doc_id: str, reason: str = "Manual reset"):
 
 
 # Moved to routers/documents.py — resubmit_document
-# @api_router.post("/documents/{doc_id}/resubmit")
 async def resubmit_document(doc_id: str):
     """Re-submit a failed document: re-run the full workflow using the stored file."""
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
@@ -1740,7 +1729,6 @@ async def resubmit_document(doc_id: str):
     return {"document": updated_doc, "workflow_id": workflow_id}
 
 # Moved to routers/documents.py — link_document
-# @api_router.post("/documents/{doc_id}/link")
 async def link_document(doc_id: str):
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
@@ -1836,7 +1824,6 @@ async def link_document(doc_id: str):
 # ==================== WORKFLOW ENDPOINTS ====================
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.get("/workflows")
 async def list_workflows(skip: int = Query(0), limit: int = Query(50), status: str = Query(None)):
     fq = {}
     if status:
@@ -1846,7 +1833,6 @@ async def list_workflows(skip: int = Query(0), limit: int = Query(50), status: s
     return {"workflows": workflows, "total": total}
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.get("/workflows/{wf_id}")
 async def get_workflow(wf_id: str):
     wf = await db.hub_workflow_runs.find_one({"id": wf_id}, {"_id": 0})
     if not wf:
@@ -1854,7 +1840,6 @@ async def get_workflow(wf_id: str):
     return wf
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.post("/workflows/{wf_id}/retry")
 async def retry_workflow(wf_id: str):
     wf = await db.hub_workflow_runs.find_one({"id": wf_id}, {"_id": 0})
     if not wf:
@@ -4330,7 +4315,6 @@ async def _emit_intake_events(
 
 
 # Moved to routers/documents.py (Domain 7)
-# @api_router.post("/documents/intake")
 async def intake_document(
     file: UploadFile = File(...),
     source: str = Form("email"),
@@ -4766,7 +4750,6 @@ async def intake_document(
     }
 
 # Moved to routers/documents.py (Domain 7)
-# @api_router.post("/documents/{doc_id}/classify")
 async def classify_document(doc_id: str):
     """Re-run AI classification on an existing document."""
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
@@ -4832,7 +4815,6 @@ class ResolveRequest(BaseModel):
     notes: Optional[str] = None
 
 # Moved to routers/documents.py (Domain 7)
-# @api_router.post("/documents/{doc_id}/resolve")
 async def resolve_and_link_document(doc_id: str, resolve: ResolveRequest):
     """
     Resolve a NeedsReview document by selecting vendor/customer from candidates.
@@ -4956,7 +4938,6 @@ async def resolve_and_link_document(doc_id: str, resolve: ResolveRequest):
 # ==================== SAFE REPROCESS ENDPOINT ====================
 
 # Moved to routers/documents.py (Domain 7)
-# @api_router.post("/documents/{doc_id}/reprocess")
 async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
     """
     Safe reprocess endpoint - re-runs validation + vendor match only.
@@ -5143,7 +5124,6 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
 # =============================================================================
 
 # Moved to routers/documents.py (Domain 7)
-# @api_router.post("/documents/batch-revalidate")
 async def batch_revalidate_documents(
     doc_types: List[str] = Query(default=["AP_Invoice", "AP_INVOICE", "Remittance"]),
     limit: int = Query(default=500, le=1000),
@@ -5275,7 +5255,6 @@ class DryRunPreviewRequest(BaseModel):
 
 
 # Moved to routers/documents.py (Domain 7)
-# @api_router.post("/documents/{doc_id}/preview-post")
 async def preview_post_to_bc(doc_id: str, request: DryRunPreviewRequest = None):
     """
     DRY-RUN PREVIEW: Shows exactly what would be posted to BC without actually posting.
@@ -6380,7 +6359,6 @@ class ApprovalActionRequest(BaseModel):
 
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.get("/workflows/ap_invoice/status-counts")
 async def get_ap_workflow_status_counts():
     """Get counts of AP_INVOICE documents by workflow status."""
     pipeline = [
@@ -6406,7 +6384,6 @@ async def get_ap_workflow_status_counts():
 
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.get("/workflows/ap_invoice/vendor-pending")
 async def get_vendor_pending_queue(
     skip: int = Query(0),
     limit: int = Query(50),
@@ -6446,7 +6423,6 @@ async def get_vendor_pending_queue(
 
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.get("/workflows/ap_invoice/bc-validation-pending")
 async def get_bc_validation_pending_queue(
     skip: int = Query(0),
     limit: int = Query(50),
@@ -6480,7 +6456,6 @@ async def get_bc_validation_pending_queue(
 
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.get("/workflows/ap_invoice/bc-validation-failed")
 async def get_bc_validation_failed_queue(
     skip: int = Query(0),
     limit: int = Query(50),
@@ -6511,7 +6486,6 @@ async def get_bc_validation_failed_queue(
 
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.get("/workflows/ap_invoice/data-correction-pending")
 async def get_data_correction_pending_queue(
     skip: int = Query(0),
     limit: int = Query(50)
@@ -6535,7 +6509,6 @@ async def get_data_correction_pending_queue(
 
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.get("/workflows/ap_invoice/ready-for-approval")
 async def get_ready_for_approval_queue(
     skip: int = Query(0),
     limit: int = Query(50),
@@ -6571,7 +6544,6 @@ async def get_ready_for_approval_queue(
 # ==================== GENERIC WORKFLOW QUEUE API ====================
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.get("/workflows/generic/queue")
 async def get_workflow_queue(
     doc_type: str = Query(..., description="Document type (required): AP_INVOICE, SALES_INVOICE, PURCHASE_ORDER, etc."),
     status: Optional[str] = Query(None, description="Workflow status filter"),
@@ -6622,7 +6594,6 @@ async def get_workflow_queue(
 
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.get("/workflows/generic/status-counts-by-type")
 async def get_status_counts_by_doc_type():
     """
     Get document counts grouped by doc_type and workflow_status.
@@ -6661,7 +6632,6 @@ async def get_status_counts_by_doc_type():
 
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.get("/workflows/generic/metrics-by-type")
 async def get_workflow_metrics_by_doc_type(
     days: int = Query(30, description="Number of days for metrics"),
     doc_type: Optional[str] = Query(None, description="Filter by specific doc_type")
@@ -6743,7 +6713,6 @@ async def get_workflow_metrics_by_doc_type(
 # ==================== AP INVOICE WORKFLOW MUTATIONS ====================
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.post("/workflows/ap_invoice/{doc_id}/set-vendor")
 async def set_vendor_for_document(doc_id: str, request: SetVendorRequest):
     """
     Manually set/resolve vendor for a document in vendor_pending status.
@@ -6825,7 +6794,6 @@ async def set_vendor_for_document(doc_id: str, request: SetVendorRequest):
 
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.post("/workflows/ap_invoice/{doc_id}/update-fields")
 async def update_document_fields(doc_id: str, request: UpdateFieldsRequest):
     """
     Manually update/correct fields on a document.
@@ -6916,7 +6884,6 @@ async def update_document_fields(doc_id: str, request: UpdateFieldsRequest):
 
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.post("/workflows/ap_invoice/{doc_id}/override-bc-validation")
 async def override_bc_validation(doc_id: str, request: BCValidationOverrideRequest):
     """
     Override a failed BC validation and move document to ready_for_approval.
@@ -6979,7 +6946,6 @@ async def override_bc_validation(doc_id: str, request: BCValidationOverrideReque
 # ==================== AP INVOICE APPROVAL WORKFLOW ====================
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.post("/workflows/ap_invoice/{doc_id}/start-approval")
 async def start_approval(doc_id: str, request: ApprovalActionRequest):
     """
     Start the approval process for a document.
@@ -7030,7 +6996,6 @@ async def start_approval(doc_id: str, request: ApprovalActionRequest):
 
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.post("/workflows/ap_invoice/{doc_id}/approve")
 async def approve_document(doc_id: str, request: ApprovalActionRequest):
     """
     Approve a document. Moves to 'approved' status.
@@ -7087,7 +7052,6 @@ async def approve_document(doc_id: str, request: ApprovalActionRequest):
 
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.post("/workflows/ap_invoice/{doc_id}/reject")
 async def reject_document(doc_id: str, request: ApprovalActionRequest):
     """
     Reject a document. Moves to 'rejected' status.
@@ -7149,7 +7113,6 @@ async def reject_document(doc_id: str, request: ApprovalActionRequest):
 # ==================== GENERIC WORKFLOW MUTATION ENDPOINTS ====================
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.post("/workflows/{doc_id}/mark-ready-for-review")
 async def mark_ready_for_review(
     doc_id: str,
     reason: Optional[str] = None,
@@ -7201,7 +7164,6 @@ async def mark_ready_for_review(
 
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.post("/workflows/{doc_id}/mark-reviewed")
 async def mark_reviewed(
     doc_id: str,
     reason: Optional[str] = None,
@@ -7253,7 +7215,6 @@ async def mark_reviewed(
 
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.post("/workflows/{doc_id}/start-approval")
 async def start_approval_generic(
     doc_id: str,
     reason: Optional[str] = None,
@@ -7312,7 +7273,6 @@ async def start_approval_generic(
 
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.post("/workflows/{doc_id}/approve")
 async def approve_generic(
     doc_id: str,
     reason: Optional[str] = None,
@@ -7371,7 +7331,6 @@ async def approve_generic(
 
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.post("/workflows/{doc_id}/reject")
 async def reject_generic(
     doc_id: str,
     reason: str = Query(..., description="Reason for rejection (required)"),
@@ -7430,7 +7389,6 @@ async def reject_generic(
 
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.post("/workflows/{doc_id}/complete-triage")
 async def complete_triage(
     doc_id: str,
     reason: Optional[str] = None,
@@ -7488,7 +7446,6 @@ async def complete_triage(
 
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.post("/workflows/{doc_id}/link-credit-to-invoice")
 async def link_credit_to_invoice(
     doc_id: str,
     invoice_id: str = Query(..., description="ID of the original invoice"),
@@ -7554,7 +7511,6 @@ async def link_credit_to_invoice(
 
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.post("/workflows/{doc_id}/tag-quality")
 async def tag_quality_doc(
     doc_id: str,
     tags: List[str] = Query(..., description="Quality tags to apply"),
@@ -7619,7 +7575,6 @@ async def tag_quality_doc(
 
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.post("/workflows/{doc_id}/export")
 async def export_document(
     doc_id: str,
     export_destination: Optional[str] = None,
@@ -7706,7 +7661,6 @@ class MigrationRequest(BaseModel):
 # ==================== WORKFLOW METRICS ====================
 
 # Moved to routers/workflows.py (Domain 8)
-# @api_router.get("/workflows/ap_invoice/metrics")
 async def get_ap_workflow_metrics(days: int = Query(30)):
     """
     Get workflow metrics for AP_Invoice documents.

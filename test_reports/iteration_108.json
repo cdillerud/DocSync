@@ -1,0 +1,105 @@
+{
+  "summary": "Legacy api_router cleanup verified - all 97 tests passed. Dead code removal: api_router removed from server.py, 46 commented-out route decorators removed, include_router(legacy_api_router) removed from main.py. Route count stable at 427, all endpoints accessible.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_route_cleanup.py",
+    "/app/backend/tests/test_bc_validation_isolation.py",
+    "/app/backend/tests/test_pipeline_hardening.py",
+    "/app/backend/tests/test_refactor_regression.py",
+    "/app/test_reports/pytest/route_cleanup_results_108.xml",
+    "/app/test_reports/pytest/bc_validation_isolation_results_108.xml",
+    "/app/test_reports/pytest/pipeline_hardening_results_108.xml",
+    "/app/test_reports/pytest/refactor_regression_results_108.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "N/A (backend-only testing)"
+  },
+  "test_credentials": {
+    "username": "admin",
+    "password": "admin"
+  },
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Legacy api_router dead code cleanup complete. server.py no longer exports api_router (was empty, never had routes). 46 commented decorators removed. Route count verified at 427. All routes registered via add_api_route() in /routers/ modules remain functional.",
+  "test_summary": {
+    "test_route_cleanup": {
+      "passed": 13,
+      "failed": 0,
+      "coverage": [
+        "Document routes via add_api_route (upload, intake, batch-revalidate)",
+        "Workflow routes via add_api_route (ap_invoice, generic queues)",
+        "Reference Intelligence routes via add_api_route",
+        "Route count stability (427 routes)",
+        "api_router removed from server.py exports"
+      ]
+    },
+    "test_bc_validation_isolation": {
+      "passed": 31,
+      "failed": 0
+    },
+    "test_pipeline_hardening": {
+      "passed": 31,
+      "failed": 0
+    },
+    "test_refactor_regression": {
+      "passed": 22,
+      "failed": 0,
+      "coverage": [
+        "Health check",
+        "Authentication (login, /me)",
+        "Documents list",
+        "Dashboard stats + workflow intelligence",
+        "AP workflow status counts",
+        "Layout fingerprints",
+        "Vendor aliases",
+        "Automation rules",
+        "Vendor intelligence",
+        "Label corrections",
+        "Alerts",
+        "Pilot status",
+        "Migration stats",
+        "Mailbox sources + settings status",
+        "Vendor match stats",
+        "Square9 config",
+        "Freight routing",
+        "Events",
+        "Cache status"
+      ]
+    }
+  },
+  "api_verification": {
+    "health": "200 OK - {status: 'healthy', service: 'gpi-document-hub'}",
+    "auth_login": "200 OK - token returned",
+    "documents": "200 OK - 45 total documents",
+    "dashboard_stats": "200 OK - 79 total documents",
+    "workflows_ap_invoice_status_counts": "200 OK - 56 total in AP workflow",
+    "workflows_ap_invoice_vendor_pending": "200 OK",
+    "workflows_generic_queue": "200 OK",
+    "workflows_generic_status_counts_by_type": "200 OK",
+    "workflows_ap_invoice_metrics": "200 OK",
+    "vendor_intelligence_stats": "200 OK",
+    "pipeline_stages": "200 OK - 1 stage returned (9 sub-stages)",
+    "pipeline_runs_nonexistent": "200 OK - empty runs list",
+    "mailbox_sources": "200 OK - 2 mailbox sources",
+    "events_recent": "200 OK - events returned",
+    "documents_upload": "422 (expected - missing file param)",
+    "documents_intake": "422 (expected - missing required fields)",
+    "documents_batch_revalidate": "200 OK - 16 documents revalidated",
+    "bc_resolve_reference": "422 (expected - missing query param)",
+    "matching_debug_nonexistent": "404 (expected - doc not found)",
+    "reference_intelligence_nonexistent": "404 (expected - doc not found)"
+  }
+}

@@ -573,4 +573,43 @@ Merging would change validation outcomes for existing documents. Both are preser
 
 ---
 
-*Last updated: March 15, 2026 (BC Validation Isolation pass)*
+## 5c. Legacy api_router Cleanup (March 2026)
+
+### What was done
+
+- **Removed** `api_router = APIRouter(prefix="/api")` from server.py — it had zero active route registrations.
+- **Removed** `app.include_router(legacy_api_router)` from main.py — it was a no-op.
+- **Removed** 46 commented-out `# @api_router.*` decorator lines from server.py.
+- **Removed** unused `APIRouter` import from server.py.
+- **Updated** main.py docstring: server.py is documented as a utility library, not a route source.
+- Route count verified stable at 427 (before and after).
+
+### Current role of server.py
+
+server.py is now a **utility library module**, not a router. It provides:
+
+1. **Module-level startup side effects**: DB connection, scheduler, service initialization
+2. **Handler function implementations**: 32 async handler functions consumed by router modules via `add_api_route()`
+3. **Compatibility wrappers**: thin delegation functions for extracted services (`validate_bc_match`, etc.)
+4. **Config globals**: `DEMO_MODE`, `TENANT_ID`, `BC_CLIENT_ID`, etc. (many also available in `deps.py`)
+
+### Routes registered via add_api_route (still coupled)
+
+| Router module | Route count | Handler source |
+|--------------|------------|----------------|
+| `routers/documents.py` | 10 | server.py functions |
+| `routers/workflows.py` | 15 | server.py functions |
+| `routers/reference_intelligence.py` | 7 | server.py functions |
+| **Total** | **32** | All in server.py |
+
+These routes use `app.add_api_route()` to register handler functions that are defined in server.py. Moving the handler implementations out of server.py requires extracting their deep dependencies (DB queries, service calls, config), which is a larger follow-up effort.
+
+### Known follow-up debt
+
+- **32 handler implementations** still in server.py, registered via add_api_route
+- **12 router modules** still import helpers from server.py (normalize_vendor_name, get_bc_companies, etc.)
+- server.py is still ~8,470 lines — handler extraction is the next major reduction opportunity
+
+---
+
+*Last updated: March 15, 2026 (Legacy api_router Cleanup pass)*

@@ -1,5 +1,23 @@
 # CHANGELOG - GPI Document Hub
 
+## [2026-03-15] Iteration 94 — Document Intelligence Engine — COMPLETE
+- **Backend:** New `routers/document_intelligence.py` + `services/document_intelligence_service.py` (separate from monolith)
+- **Backend:** `POST /api/document-intelligence/process/{id}` — full pipeline: classify → extract → validate → derive automation readiness → store
+- **Backend:** `GET /api/document-intelligence/review-queue` — human-in-the-loop queue with status/type filters, enriched with doc metadata
+- **Backend:** `PATCH /api/document-intelligence/{id}` — manual corrections with re-derivation of readiness, correction history tracking
+- **Backend:** `GET /api/document-intelligence/summary` — stats by readiness and document type
+- **Backend:** Automation readiness engine: score 0-100 based on classification confidence (40pts), extraction completeness (40pts), validation (10pts), optional fields (10pts)
+- **Backend:** Readiness reasons: `missing_po_number`, `low_classification_confidence`, `validation_failed_bc_error`, etc.
+- **Backend:** Model metadata tracking: model_name, model_provider, prompt_version, processing_duration_ms
+- **Frontend:** DocumentReviewQueuePage at /document-review — summary cards, status/type filters, sort, review queue table with confidence bars and reason badges
+- **Frontend:** DocumentIntelligencePanel component on Document Detail page — readiness banner, classification section, extracted fields with required/optional markers, inline edit mode, correction history
+- **Frontend:** Edit/Re-process capabilities for on-demand re-processing and manual corrections
+- **Key architectural improvement:** Centralized scattered AI pipeline into a formal Document Intelligence Engine that's re-runnable, user-correctable, and auditable
+- **Testing:** 18/18 backend tests passed, 100% frontend verification (test_reports/iteration_94.json)
+- **New MongoDB collection:** `document_intelligence_results`
+
+
+
 ## [2026-03-15] Iteration 93 — Operational Templates — COMPLETE
 - **Backend:** Template CRUD (POST/GET/PATCH/DELETE /api/inventory-ledger/templates) with entity_type/order_type validation, soft-delete
 - **Backend:** Apply-template endpoint (POST /api/inventory-ledger/templates/{id}/apply) with safe-skip behavior (won't overwrite existing assignments/due dates/approvals), order type compatibility check, activity auto-generation

@@ -3151,3 +3151,30 @@ EMAIL_CLIENT_ID=doc-workflow-test
 - Test report: `/app/test_reports/iteration_75.json`
 
 *Last Updated: March 14, 2026*
+
+
+---
+
+## Session Update: March 15, 2026 - Document Intelligence Engine (iteration_94)
+
+### Completed
+
+#### Document Classification, Extraction, and Automation Confidence Layer
+- **Backend:** New modular router (`routers/document_intelligence.py`) + service (`services/document_intelligence_service.py`) — clean separation from monolith
+- **Backend:** `POST /api/document-intelligence/process/{id}` — orchestrates full pipeline: classify → extract → validate → derive automation readiness → store → emit events. Re-runnable on demand.
+- **Backend:** `GET /api/document-intelligence/review-queue` — returns documents needing human review (needs_review or blocked), with filters by status and doc type, enriched with document metadata
+- **Backend:** `PATCH /api/document-intelligence/{id}` — manual corrections to type/fields, re-derives readiness, maintains correction history with audit trail
+- **Backend:** `GET /api/document-intelligence/summary` — pipeline statistics by readiness status and document type
+- **Backend:** Automation readiness scoring (0-100): classification confidence (40pts), extraction completeness (40pts), validation (10pts), optional fields (10pts)
+- **Backend:** Readiness reasons: `missing_po_number`, `low_classification_confidence`, `validation_failed_bc_error`, etc.
+- **Backend:** Model metadata: model_name, model_provider, prompt_version, processing_duration_ms
+- **Frontend:** DocumentReviewQueuePage at /document-review — summary cards, filters, review queue table
+- **Frontend:** DocumentIntelligencePanel on Document Detail — readiness banner, classification, extracted fields (required/optional), inline edit, correction history
+- **New collection:** `document_intelligence_results`
+
+### Test Results
+- Backend: 18/18 (100%)
+- Frontend: All UI flows verified (100%)
+- Test report: `/app/test_reports/iteration_94.json`
+
+*Last Updated: March 15, 2026*

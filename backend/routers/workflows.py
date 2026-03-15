@@ -1,8 +1,7 @@
 """GPI Document Hub - Workflows Router (Domain 8)
 
-Extracted from server.py using thin wrapper pattern.
-Complex mutation routes (set-vendor, approve, reject, etc.) remain as functions
-in server.py and are registered here via add_api_route.
+Mutation routes (set-vendor, approve, reject, etc.) are sourced from
+services.workflow_handlers (authoritative) and registered via add_api_route.
 Simple query routes are implemented directly using deps.get_db().
 """
 
@@ -25,8 +24,10 @@ _routes_registered = False
 
 
 def register_server_routes(app=None):
-    """Register complex server.py workflow handlers directly on the app.
-    Called from main.py during startup after server module is fully loaded.
+    """Register workflow-domain handler functions on the app.
+
+    Handlers are sourced from services.workflow_handlers (authoritative).
+    Called from main.py during startup.
     """
     global _routes_registered
     if _routes_registered:
@@ -37,69 +38,85 @@ def register_server_routes(app=None):
         logger.warning("No app provided to register_server_routes (workflows)")
         return
 
-    import server
+    from services.workflow_handlers import (
+        set_vendor_for_document,
+        update_document_fields,
+        override_bc_validation,
+        start_approval,
+        approve_document,
+        reject_document,
+        mark_ready_for_review,
+        mark_reviewed,
+        start_approval_generic,
+        approve_generic,
+        reject_generic,
+        complete_triage,
+        link_credit_to_invoice,
+        tag_quality_doc,
+        export_document,
+    )
 
     # AP Invoice mutation routes
     app.add_api_route(
-        "/api/workflows/ap_invoice/{doc_id}/set-vendor", server.set_vendor_for_document,
+        "/api/workflows/ap_invoice/{doc_id}/set-vendor", set_vendor_for_document,
         methods=["POST"], tags=["Workflows"]
     )
     app.add_api_route(
-        "/api/workflows/ap_invoice/{doc_id}/update-fields", server.update_document_fields,
+        "/api/workflows/ap_invoice/{doc_id}/update-fields", update_document_fields,
         methods=["POST"], tags=["Workflows"]
     )
     app.add_api_route(
-        "/api/workflows/ap_invoice/{doc_id}/override-bc-validation", server.override_bc_validation,
+        "/api/workflows/ap_invoice/{doc_id}/override-bc-validation", override_bc_validation,
         methods=["POST"], tags=["Workflows"]
     )
     app.add_api_route(
-        "/api/workflows/ap_invoice/{doc_id}/start-approval", server.start_approval,
+        "/api/workflows/ap_invoice/{doc_id}/start-approval", start_approval,
         methods=["POST"], tags=["Workflows"]
     )
     app.add_api_route(
-        "/api/workflows/ap_invoice/{doc_id}/approve", server.approve_document,
+        "/api/workflows/ap_invoice/{doc_id}/approve", approve_document,
         methods=["POST"], tags=["Workflows"]
     )
     app.add_api_route(
-        "/api/workflows/ap_invoice/{doc_id}/reject", server.reject_document,
+        "/api/workflows/ap_invoice/{doc_id}/reject", reject_document,
         methods=["POST"], tags=["Workflows"]
     )
 
     # Generic workflow mutation routes
     app.add_api_route(
-        "/api/workflows/{doc_id}/mark-ready-for-review", server.mark_ready_for_review,
+        "/api/workflows/{doc_id}/mark-ready-for-review", mark_ready_for_review,
         methods=["POST"], tags=["Workflows"]
     )
     app.add_api_route(
-        "/api/workflows/{doc_id}/mark-reviewed", server.mark_reviewed,
+        "/api/workflows/{doc_id}/mark-reviewed", mark_reviewed,
         methods=["POST"], tags=["Workflows"]
     )
     app.add_api_route(
-        "/api/workflows/{doc_id}/start-approval", server.start_approval_generic,
+        "/api/workflows/{doc_id}/start-approval", start_approval_generic,
         methods=["POST"], tags=["Workflows"]
     )
     app.add_api_route(
-        "/api/workflows/{doc_id}/approve", server.approve_generic,
+        "/api/workflows/{doc_id}/approve", approve_generic,
         methods=["POST"], tags=["Workflows"]
     )
     app.add_api_route(
-        "/api/workflows/{doc_id}/reject", server.reject_generic,
+        "/api/workflows/{doc_id}/reject", reject_generic,
         methods=["POST"], tags=["Workflows"]
     )
     app.add_api_route(
-        "/api/workflows/{doc_id}/complete-triage", server.complete_triage,
+        "/api/workflows/{doc_id}/complete-triage", complete_triage,
         methods=["POST"], tags=["Workflows"]
     )
     app.add_api_route(
-        "/api/workflows/{doc_id}/link-credit-to-invoice", server.link_credit_to_invoice,
+        "/api/workflows/{doc_id}/link-credit-to-invoice", link_credit_to_invoice,
         methods=["POST"], tags=["Workflows"]
     )
     app.add_api_route(
-        "/api/workflows/{doc_id}/tag-quality", server.tag_quality_doc,
+        "/api/workflows/{doc_id}/tag-quality", tag_quality_doc,
         methods=["POST"], tags=["Workflows"]
     )
     app.add_api_route(
-        "/api/workflows/{doc_id}/export", server.export_document,
+        "/api/workflows/{doc_id}/export", export_document,
         methods=["POST"], tags=["Workflows"]
     )
 

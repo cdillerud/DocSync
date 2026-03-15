@@ -597,18 +597,18 @@ server.py is now a **utility library module**, not a router. It provides:
 
 | Router module | Route count | Handler source |
 |--------------|------------|----------------|
-| `routers/documents.py` | 10 | server.py functions |
-| `routers/workflows.py` | 15 | server.py functions |
+| `routers/documents.py` | 10 | `services/document_handlers.py` |
+| `routers/workflows.py` | 15 | `services/workflow_handlers.py` |
 | `routers/reference_intelligence.py` | 7 | server.py functions |
-| **Total** | **32** | All in server.py |
+| **Total** | **32** | 25 extracted, 7 remaining in server.py |
 
-These routes use `app.add_api_route()` to register handler functions that are defined in server.py. Moving the handler implementations out of server.py requires extracting their deep dependencies (DB queries, service calls, config), which is a larger follow-up effort.
+Document and workflow handlers have been extracted to dedicated service modules. Reference intelligence handlers remain in server.py as the next extraction target.
 
 ### Known follow-up debt
 
-- **32 handler implementations** still in server.py, registered via add_api_route
+- **7 reference_intelligence handler implementations** still in server.py, registered via add_api_route
 - **12 router modules** still import helpers from server.py (normalize_vendor_name, get_bc_companies, etc.)
-- server.py is still ~8,470 lines — handler extraction is the next major reduction opportunity
+- server.py is still large — reference_intelligence extraction is the next reduction opportunity
 
 ### 5d. Document Handler Extraction (March 2026)
 
@@ -670,4 +670,46 @@ These functions are still called via lazy `import server`:
 
 ---
 
-*Last updated: March 15, 2026 (Document Handler Extraction pass)*
+*Last updated: March 15, 2026 (Workflow Handler Extraction pass)*
+
+### 5e. Workflow Handler Extraction (March 2026)
+
+**15 workflow-domain handler implementations** moved from server.py to `services/workflow_handlers.py`.
+
+#### Handlers extracted
+
+| Handler | Route | Category |
+|---------|-------|----------|
+| `set_vendor_for_document` | `POST /api/workflows/ap_invoice/{id}/set-vendor` | AP mutation |
+| `update_document_fields` | `POST /api/workflows/ap_invoice/{id}/update-fields` | AP mutation |
+| `override_bc_validation` | `POST /api/workflows/ap_invoice/{id}/override-bc-validation` | AP mutation |
+| `start_approval` | `POST /api/workflows/ap_invoice/{id}/start-approval` | AP approval |
+| `approve_document` | `POST /api/workflows/ap_invoice/{id}/approve` | AP approval |
+| `reject_document` | `POST /api/workflows/ap_invoice/{id}/reject` | AP approval |
+| `mark_ready_for_review` | `POST /api/workflows/{id}/mark-ready-for-review` | Generic |
+| `mark_reviewed` | `POST /api/workflows/{id}/mark-reviewed` | Generic |
+| `start_approval_generic` | `POST /api/workflows/{id}/start-approval` | Generic |
+| `approve_generic` | `POST /api/workflows/{id}/approve` | Generic |
+| `reject_generic` | `POST /api/workflows/{id}/reject` | Generic |
+| `complete_triage` | `POST /api/workflows/{id}/complete-triage` | Generic |
+| `link_credit_to_invoice` | `POST /api/workflows/{id}/link-credit-to-invoice` | Generic |
+| `tag_quality_doc` | `POST /api/workflows/{id}/tag-quality` | Generic |
+| `export_document` | `POST /api/workflows/{id}/export` | Generic |
+
+Also extracted: `SetVendorRequest`, `UpdateFieldsRequest`, `BCValidationOverrideRequest`, `ApprovalActionRequest` Pydantic models.
+
+#### Dependency wiring (after)
+
+| Need | Sourced from | NOT from server.py |
+|------|-------------|-------------------|
+| `WorkflowEngine`, `WorkflowStatus`, `WorkflowEvent`, `DocType` | `services.workflow_engine` | yes |
+| `is_export_blocked` | `services.pilot_config` | yes |
+| DB access | `deps.get_db()` | yes |
+
+#### Remaining server.py imports (next-pass extraction targets)
+
+| Function | Domain |
+|----------|--------|
+| `normalize_vendor_name` | Vendor name normalization (used by `update_document_fields`) |
+
+---

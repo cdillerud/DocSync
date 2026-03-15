@@ -1,0 +1,111 @@
+{
+  "summary": "Workflow Handler Extraction verified - all 89 tests passed. 15 workflow mutation handlers successfully moved from server.py to services/workflow_handlers.py. Route count stable at 427, all endpoints accessible at identical paths. No API contract changes.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_workflow_handler_extraction.py",
+    "/app/backend/tests/test_doc_handler_extraction.py",
+    "/app/backend/tests/test_router_refactor_endpoints.py",
+    "/app/backend/tests/test_refactor_regression.py",
+    "/app/test_reports/pytest/workflow_handler_extraction_results.xml",
+    "/app/test_reports/pytest/doc_handler_extraction_results_110.xml",
+    "/app/test_reports/pytest/router_refactor_endpoints_results.xml",
+    "/app/test_reports/pytest/refactor_regression_results_110.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "N/A (backend-only testing)"
+  },
+  "test_credentials": {
+    "username": "admin",
+    "password": "admin"
+  },
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Workflow handler extraction complete. 15 handler functions (set_vendor_for_document, update_document_fields, override_bc_validation, start_approval, approve_document, reject_document, mark_ready_for_review, mark_reviewed, start_approval_generic, approve_generic, reject_generic, complete_triage, link_credit_to_invoice, tag_quality_doc, export_document) plus 4 Pydantic models (SetVendorRequest, UpdateFieldsRequest, BCValidationOverrideRequest, ApprovalActionRequest) moved to services/workflow_handlers.py. routers/workflows.py imports from new module. Route count verified at 427.",
+  "test_summary": {
+    "test_workflow_handler_extraction": {
+      "passed": 25,
+      "failed": 0,
+      "coverage": [
+        "All 6 AP Invoice mutation routes available (set-vendor, update-fields, override-bc-validation, start-approval, approve, reject)",
+        "All 9 generic workflow mutation routes available (mark-ready-for-review, mark-reviewed, start-approval, approve, reject, complete-triage, link-credit-to-invoice, tag-quality, export)",
+        "All 6 query routes work (workflows list, status-counts, vendor-pending, metrics, generic/queue, generic/status-counts-by-type)",
+        "15 handler functions importable from services.workflow_handlers",
+        "4 Pydantic models importable from services.workflow_handlers",
+        "routers/workflows.py imports from services.workflow_handlers (not server)",
+        "Route count stable at 427"
+      ]
+    },
+    "test_doc_handler_extraction": {
+      "passed": 15,
+      "failed": 0
+    },
+    "test_router_refactor_endpoints": {
+      "passed": 27,
+      "failed": 0
+    },
+    "test_refactor_regression": {
+      "passed": 22,
+      "failed": 0
+    }
+  },
+  "api_verification": {
+    "ap_invoice_mutation_routes": {
+      "POST /api/workflows/ap_invoice/{id}/set-vendor": "404 (expected - doc not found)",
+      "POST /api/workflows/ap_invoice/{id}/update-fields": "404 (expected - doc not found)",
+      "POST /api/workflows/ap_invoice/{id}/override-bc-validation": "404 (expected - doc not found)",
+      "POST /api/workflows/ap_invoice/{id}/start-approval": "404 (expected - doc not found)",
+      "POST /api/workflows/ap_invoice/{id}/approve": "404 (expected - doc not found)",
+      "POST /api/workflows/ap_invoice/{id}/reject": "404 (expected - doc not found)"
+    },
+    "generic_workflow_mutation_routes": {
+      "POST /api/workflows/{id}/mark-ready-for-review": "404 (expected - doc not found)",
+      "POST /api/workflows/{id}/mark-reviewed": "404 (expected - doc not found)",
+      "POST /api/workflows/{id}/start-approval": "404 (expected - doc not found)",
+      "POST /api/workflows/{id}/approve": "404 (expected - doc not found)",
+      "POST /api/workflows/{id}/reject": "404 (expected - doc not found)",
+      "POST /api/workflows/{id}/complete-triage": "404 (expected - doc not found)",
+      "POST /api/workflows/{id}/link-credit-to-invoice": "404 (expected - doc not found)",
+      "POST /api/workflows/{id}/tag-quality": "404 (expected - doc not found)",
+      "POST /api/workflows/{id}/export": "404 (expected - doc not found)"
+    },
+    "query_routes": {
+      "GET /api/workflows": "200 OK - 202 workflows",
+      "GET /api/workflows/ap_invoice/status-counts": "200 OK - 57 total",
+      "GET /api/workflows/ap_invoice/vendor-pending": "200 OK",
+      "GET /api/workflows/ap_invoice/metrics": "200 OK",
+      "GET /api/workflows/generic/queue": "200 OK"
+    },
+    "document_routes": {
+      "GET /api/documents": "200 OK",
+      "POST /api/documents/upload": "422 (expected - missing file)"
+    },
+    "health": {
+      "GET /api/health": "200 OK - {status: 'healthy'}"
+    },
+    "route_count": "427 (stable)"
+  },
+  "module_verification": {
+    "services/workflow_handlers.py": {
+      "15_handlers_exported": true,
+      "4_pydantic_models_exported": true,
+      "all_handlers_callable": true
+    },
+    "routers/workflows.py": {
+      "imports_from_workflow_handlers": true,
+      "no_server_import_for_handlers": true
+    }
+  }
+}

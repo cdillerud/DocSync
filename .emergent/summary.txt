@@ -1,35 +1,31 @@
 <analysis>**original_problem_statement:**
-The user has been guiding the agent through a series of controlled technical debt remediation passes to improve the codebase's structure and maintainability after a rapid phase of feature development. So far, three passes have been completed:
-1.  **Entrypoint & Routing Consolidation:** Merged multiple server entrypoints and routing directories.
-2.  **Reference Intelligence Consolidation:** Refactored overlapping entity/vendor matching logic into shared helpers.
-3.  **Decisioning & Automation Consolidation:** Clarified boundaries and extracted shared logic for decision and automation services.
-4.  **Document Intelligence Decoupling:** Extracted legacy business logic from  into dedicated service helpers and aligned the canonical pipeline.
+The user is continuing a series of controlled technical debt remediation passes to dismantle a monolithic  file by extracting its route handler implementations into dedicated service-layer modules. Several passes have been completed successfully (pipeline observability, BC validation, document handlers).
 
-The current task is the next remediation pass, focused on **Pipeline Hardening and Observability**.
+The current task is the next remediation pass, focused on **extracting the 15 workflow-domain handler implementations out of server.py**.
 
 **PRODUCT REQUIREMENTS (for the current task):**
--   Make the canonical document pipeline easier to observe, debug, and trust.
--   Add explicit stage-level timing, status reporting, and failure logging (traceability).
--   Clarify and formalize the input/output contracts for each pipeline stage.
--   Improve failure handling to make it more explicit and consistent.
--   Persist a summary of each pipeline run for later diagnosis.
--   Do NOT add new end-user features or break existing API contracts.
+-   Remove the workflow-domain handler implementations from  as the authoritative source.
+-   Reduce the  module's dependence on .
+-   Reuse the successful extraction pattern established in the previous pass (e.g., creating a ).
+-   Do NOT add new product features or change existing API contracts (paths, request/response shapes, auth behavior).
+-   Preserve all current endpoint behavior, verified by extensive testing.
+-   Update architecture documentation to reflect the changes.
 
 **User's preferred language**: English
 
 **what currently exists?**
-The application is a sophisticated document intelligence platform (GPI Hub). The codebase has undergone significant refactoring. Key structures include:
--   A single, authoritative backend entrypoint at .
+The application is a document intelligence platform (GPI Hub) that has undergone significant refactoring. The current architecture features:
+-   A single backend entrypoint at .
 -   A consolidated routing structure under .
--   A canonical document processing pipeline defined in .
--   Shared helper modules for Reference Intelligence (), Automation (), and Document Intelligence ().
--   A dedicated adapter for Business Central API access ().
--   An architecture document () that is updated with each pass.
--   A comprehensive suite of backend tests that verify the refactored logic.
+-   A series of dedicated service modules for different domains:  (for processing),  (for Business Central validation), and  (for document API logic).
+-   The legacy  file has been stripped of its routing responsibilities but still contains 22 handler implementations that are imported by the router modules. These are divided into:
+    -   15  handlers.
+    -   7  handlers.
+-   Comprehensive backend test suites exist to validate each refactoring pass.
 
 **Last working item**:
-- **Last item agent was working:** The agent was at the beginning of the Pipeline Hardening and Observability technical debt remediation pass. It completed a thorough investigation of the target files (, related services, and API endpoints) and presented a detailed plan to the user, which was approved with specific constraints and priorities.
-- **Status:** NOT STARTED
+- **Last item agent was working:** The agent began the Workflow Handler Extraction pass. It successfully identified the 15 target handlers listed in  and started the investigation phase by viewing the source code of these handlers within  to map their dependencies.
+- **Status:** IN PROGRESS
 - **Agent Testing Done:** N
 - **Which testing method agent to use?** both
 - **User Testing Done:** N
@@ -38,39 +34,33 @@ The application is a sophisticated document intelligence platform (GPI Hub). The
 There are no outstanding bugs. The work is defined by the user-approved plan for the current task.
 
 **In progress Task List**:
-- **Task 1: (P0) Technical Debt Remediation Pass: Pipeline Hardening and Observability**
-    - **Where to resume:** Begin implementation of the user-approved plan. The agent has already investigated the code and has a clear set of steps.
-    - **What will be achieved with this?** The document processing pipeline will become more robust, observable, and trustworthy, with explicit stage contracts, timing/status instrumentation, and persisted run traces for easier debugging.
-    - **Status:** IN PROGRESS (Planning is complete, implementation is next).
+- **Task 1: (P0) Technical Debt Remediation Pass: Workflow Handler Extraction**
+    - **Where to resume:** The agent has listed the 15 workflow handlers. The immediate next step is to complete the dependency analysis for all 15 handlers within . After mapping dependencies (local helpers, globals, service calls), the agent should propose a plan to the user for extracting the logic into a new  module before implementation.
+    - **What will be achieved with this?** The 15 workflow-related API handlers will be moved out of , significantly reducing its size and complexity. The  module will import from the new, focused service instead, improving code organization.
+    - **Status:** IN PROGRESS
     - **Should Test frontend/backend/both after fix?** both
     - **Blocked on something:** None
 
 **Upcoming and Future Tasks**
-**Upcoming Tasks (from the approved plan):**
--   **P0:** Enrich  with  and  timestamps.
--   **P0:** Enrich  with , stage counts, and a version number.
--   **P0:** Fix the pipeline's  method to expose safe output summaries and metadata.
--   **P0:** Normalize status semantics (, ).
--   **P0:** Persist pipeline run traces to a new  collection.
--   **P0:** Add a new endpoint  to retrieve trace data.
--   **P0:** Update  with the new pipeline hardening details.
--   **P0:** Add targeted backend tests for timing, failure propagation, persistence, and skip behavior.
+**Upcoming Tasks:**
+-   **P0:** Complete the current Workflow Handler Extraction pass.
+-   **P1:** Perform the final handler extraction pass for the 7 remaining  handlers in .
 
-**Future Tasks (from backlog):**
+**Future Tasks:**
 -   **P1:** AR Release Gate (Prepay and Terms Approval).
 -   **P2:** Inventory Planning Horizon (Demand Forecast + Purchase Timing).
 -   Build an admin UI for managing item mapping rules.
 -   Decommission the legacy Zetadocs system.
 -   Implement a production-ready email service to replace the mock.
 -   Implement Entra ID SSO to replace mock JWT auth.
+-   Refactor monolithic files:  and .
 
 **Completed work in this session**
-- **Document Intelligence Decoupling:** Extracted legacy logic (, , etc.) from  into a new  module. The  no longer imports from . Aligned the canonical pipeline to include explicit  and  stages.
-- **Decisioning & Automation Consolidation:** Created a shared  module for common logic like activity logging and timestamping. Refactored all six target services (, , etc.) to use the shared helpers, reducing code duplication.
-- **Reference Intelligence Consolidation:** Created a  module for shared normalization and scoring logic, and a  to centralize Business Central API interactions. Refactored seven target services to use these shared modules.
-- **Entrypoint & Routing Consolidation:** Consolidated three backend entrypoints (, , ) into a single authoritative . Migrated all active routes from the legacy  directory to  and deleted the legacy directory.
-- **Comprehensive Testing:** After each remediation pass, the agent successfully ran targeted unit tests and a full regression suite using the , ensuring no API contracts were broken. All tests passed.
-- **Documentation:** Created  and updated it after each pass to reflect the new, cleaner architecture. Updated  and  to track progress.
+- **Workflow Handler Extraction (Investigation Started):** Identified the 15 target workflow handlers in  and began inspecting their implementations in .
+- **Document Handler Extraction (DONE):** Extracted 10 document-domain handlers from  into a new . Updated  to use the new service, removing its direct dependency on . Validated with 112 passing tests and the testing agent.
+- **Legacy Route Scaffolding Removal (DONE):** Removed the dead  and all commented-out route decorator lines from , simplifying the file. Verified with 97 passing tests.
+- **BC Validation Logic Extraction (DONE):** Extracted  and related logic from  into a new . Validated with 84 passing tests and the testing agent.
+- **Pipeline Hardening & Observability (DONE):** Instrumented the document pipeline with timing and status, persisted run traces to MongoDB, and added a new API endpoint () to retrieve them. Validated with 53 passing tests and the testing agent.
 
 **Earlier issues found/mentioned but not fixed**
 -   **Issue 1: Monolithic Codebase (P2)**
@@ -82,59 +72,60 @@ There are no outstanding bugs. The work is defined by the user-approved plan for
 **Known issue recurrence from previous fork**
 - **Issue recurrence in previous fork:** Forward reference Python error /  file corruption.
 - **Recurrence count:** 4+
-- **Status:** RESOLVED (for specific instances). This remains a risk during large refactoring, requiring careful use of  and verification.
+- **Status:** RESOLVED (for specific instances). This remains a risk during large refactoring, requiring careful use of  and post-edit verification.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
-- **Pipeline Hardening & Observability:** The current focus. This involves adding instrumentation (timing, status), formalizing stage contracts, improving failure handling, and adding traceability to the document processing pipeline.
-- **Progressive Refactoring:** The core methodology of this multi-pass effort, improving the codebase in controlled, verifiable steps without breaking functionality.
-- **Dependency Inversion:** A key pattern used, for example, by creating a  to decouple services from the specifics of the BC API.
+- **Progressive Refactoring:** The core methodology of dismantling  in controlled, verifiable steps without breaking functionality.
+- **Handler Extraction:** The specific pattern being used, moving API handler logic from  into dedicated, domain-focused service modules (e.g., , ).
+- **Dependency Inversion:** Router modules are being refactored to depend on service abstractions rather than the monolithic  implementation.
 
 **key DB schema**
-- **** (New - Planned): Will store a summary of each document processing pipeline execution, including stage timings, statuses, and outcomes for observability.
+- ****: Stores a summary of each document processing pipeline execution, including stage timings, statuses, and outcomes for observability.
 
 **changes in tech stack**
 - None.
 
 **All files of reference**
-- **Pipeline Hardening Targets:**
-    -  (primary target)
-    -  (for the API endpoint)
-    -  (for activity/event logging)
+- **Current Task Targets:**
+    -  (source of the handlers)
+    -  (consumer of the handlers)
+    -  (potential dependency)
+    -  (potential dependency)
     -  (for documentation)
-    - Associated service files called by the pipeline.
 
 **Areas that need refactoring**:
-- **Pipeline Observability:** The current focus of the approved refactoring plan.
-- **Monolithic Files:**  and  are known large files that are candidates for a future refactoring pass.
+- **:** This is the primary target. The goal is to extract the 15 workflow handlers.
+- ** & :** These are known large files that are candidates for a future refactoring pass.
 
 **key api endpoints**
-- **Planned:**  - To retrieve the persisted trace and observability data for a pipeline run on a specific document.
+- No new endpoints are being added. The work focuses on refactoring the implementation of the 15 existing workflow API endpoints.
 
 **Critical Info for New Agent**
-- **Your task is to implement the approved plan for Pipeline Hardening and Observability.** Do not deviate or add features.
-- **Follow the user's constraints strictly:**
-    1.  Do not break existing API contracts. Add new fields, but preserve old ones.
-    2.  Persist trace summaries, but keep them bounded in size (no raw document data).
-    3.  Follow the user-defined priority order for implementation.
-- **The investigation is complete.** You should start directly with implementation based on the approved plan.
-- **Testing is mandatory.** After implementing the changes, you must create new targeted tests for the observability features and run the full regression suite via the  to ensure no regressions were introduced.
+- **Your task is to continue the investigation for the Workflow Handler Extraction pass.** You have already identified the 15 handlers. Your next step is to finish mapping their dependencies within .
+- **Follow the established pattern:**
+    1.  Finish the investigation and dependency mapping.
+    2.  Propose a plan to the user: create , move the logic, update  to use it.
+    3.  Once approved, implement the changes.
+    4.  Create a new targeted test file ().
+    5.  Run all existing and new tests to ensure no regressions.
+    6.  Call the  for a final comprehensive validation.
+- **Do not deviate from the plan or introduce new features.** This is a pure technical debt remediation task.
 
 **documents and test reports created in this job**
 - 
--  (updated)
--  (updated)
--  (multiple reports from testing agent runs)
--  (multiple new test files created)
+- 
+- 
+- 
+- 
 
 **Last 10 User Messages and any pending HUMAN messages**
-1. **User:** Initiated the Pipeline Hardening and Observability remediation pass with a detailed prompt. (COMPLETED)
-2. **Agent:** Acknowledged the task and began investigating the target files. (COMPLETED)
-3. **Agent:** Completed investigation of  and the pipeline API endpoint. (COMPLETED)
-4. **Agent:** Presented a detailed, multi-step plan for the user's approval. (COMPLETED)
-5. **User:** Approved the plan with specific constraints and a clear priority order for the implementation steps. (PENDING - This is the starting point for the new agent).
+1.  **User:** Initiated the Workflow Handler Extraction pass with a detailed prompt, specifying the 15 handlers to be moved from . (COMPLETED)
+2.  **Agent:** Acknowledged the task and began investigating  to confirm the list of handlers. (COMPLETED)
+3.  **Agent:** Successfully listed the 15 handler function names from the router file. (COMPLETED)
+4.  **Agent:** Began inspecting the source code of the handlers within  to map dependencies. (IN PROGRESS)
 
 **Project Health Check:**
 - **Broken:** No. The application is functional.
@@ -142,18 +133,18 @@ There are no outstanding bugs. The work is defined by the user-approved plan for
 
 **3rd Party Integrations**
 - **Gemini (via Emergent LLM Key):** Used for document classification and extraction.
-- **Dynamics 365 Business Central API:** Mocked. Read-only for catalog sync, write is disabled.
-- **Microsoft Graph API:** Mocked. Used for email ingestion.
+- **Dynamics 365 Business Central API:** Read-only access is live; write operations are mocked.
+- **Microsoft Graph API:** Mocked for email ingestion.
 - **APScheduler:** Used for background tasks.
 
 **Testing status**
-- **Testing agent used after significant changes:** YES. The agent ran comprehensive regression tests using  after each of the four completed refactoring passes. All tests passed, confirming API contracts were preserved.
+- **Testing agent used after significant changes:** YES. The agent has successfully used  after every completed refactoring pass, ensuring no API contract regressions.
 - **Troubleshoot agent used after agent stuck in loop:** NO
-- **Test files created:** Yes, new test files () were created in  to validate each refactoring pass.
+- **Test files created:** Yes, multiple  files exist, one for each completed pass. A new one is expected for the current task.
 - **Known regressions:** None.
 
 **Credentials to test flow:**
 - **Web UI:**  / 
 
 **What agent forgot to execute**
-- Nothing. The agent is correctly positioned to start the implementation of the next user-approved task.</analysis>
+- Nothing. The agent is correctly following the user's instructions and is in the middle of the investigation phase for the current task.</analysis>

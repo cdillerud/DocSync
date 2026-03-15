@@ -72,7 +72,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://stage-audit.preview.emergentagent.com"
+    "api_url": "https://service-migration-3.preview.emergentagent.com"
   },
   "seed_data_existing": {
     "test_bundle": "BDL-B739B77E with TEST-BUNDLE-A and TEST-BUNDLE-B (shared PO-9999-SHARED)",

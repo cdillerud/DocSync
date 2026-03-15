@@ -1,5 +1,28 @@
 # GPI Document Hub - Changelog
 
+## March 15, 2026 — Document Handler Extraction (iter_109)
+
+### Extraction
+- Moved 10 document-domain handler implementations from server.py to `services/document_handlers.py`
+- Moved `ResolveRequest` and `DryRunPreviewRequest` Pydantic models to new module
+- `routers/documents.py` now imports from `services.document_handlers` (no longer from `server`)
+
+### Dependencies rewired (away from server.py)
+- Enums/classes → `services.workflow_engine`, `models.document_types`
+- Square9/retry helpers → `services.square9_workflow`
+- Event service → `services.event_service`
+- Pilot config → `services.pilot_config`
+- BC validation → `services.bc_validation_service`
+- Vendor matching → `services.unified_vendor_matcher`
+- Folder routing → `services.folder_routing_service`
+- DB → `deps.get_db()`
+
+### Testing
+- 15/15 new handler extraction tests passed (10 route availability, 2 response shape, 2 decoupling, 1 route count)
+- 112/112 total tests passed across all test files
+
+---
+
 ## March 15, 2026 — Legacy api_router Cleanup (iter_108)
 
 ### Removed

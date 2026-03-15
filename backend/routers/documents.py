@@ -40,10 +40,10 @@ class DocumentUpdate(BaseModel):
 _routes_registered = False
 
 def register_server_routes(app=None):
-    """Register complex server.py handler functions directly on the app.
-    Called from main.py during startup after server module is fully loaded.
-    Must receive the FastAPI app instance since include_router copies routes
-    at registration time, not dynamically.
+    """Register document-domain handler functions on the app.
+
+    Handlers are sourced from services.document_handlers (authoritative).
+    Called from main.py during startup.
     """
     global _routes_registered
     if _routes_registered:
@@ -54,46 +54,57 @@ def register_server_routes(app=None):
         logger.warning("No app provided to register_server_routes")
         return
 
-    import server
+    from services.document_handlers import (
+        upload_document,
+        retry_document,
+        resubmit_document,
+        link_document,
+        intake_document,
+        classify_document,
+        resolve_and_link_document,
+        reprocess_document,
+        batch_revalidate_documents,
+        preview_post_to_bc,
+    )
 
     app.add_api_route(
-        "/api/documents/upload", server.upload_document, methods=["POST"],
+        "/api/documents/upload", upload_document, methods=["POST"],
         tags=["Documents"], summary="Upload a document"
     )
     app.add_api_route(
-        "/api/documents/{doc_id}/retry", server.retry_document, methods=["POST"],
+        "/api/documents/{doc_id}/retry", retry_document, methods=["POST"],
         tags=["Documents"], summary="Retry document workflow"
     )
     app.add_api_route(
-        "/api/documents/{doc_id}/resubmit", server.resubmit_document, methods=["POST"],
+        "/api/documents/{doc_id}/resubmit", resubmit_document, methods=["POST"],
         tags=["Documents"], summary="Resubmit failed document"
     )
     app.add_api_route(
-        "/api/documents/{doc_id}/link", server.link_document, methods=["POST"],
+        "/api/documents/{doc_id}/link", link_document, methods=["POST"],
         tags=["Documents"], summary="Link document to BC"
     )
     app.add_api_route(
-        "/api/documents/intake", server.intake_document, methods=["POST"],
+        "/api/documents/intake", intake_document, methods=["POST"],
         tags=["Documents"], summary="Document intake from email/API"
     )
     app.add_api_route(
-        "/api/documents/{doc_id}/classify", server.classify_document, methods=["POST"],
+        "/api/documents/{doc_id}/classify", classify_document, methods=["POST"],
         tags=["Documents"], summary="Classify document with AI"
     )
     app.add_api_route(
-        "/api/documents/{doc_id}/resolve", server.resolve_and_link_document, methods=["POST"],
+        "/api/documents/{doc_id}/resolve", resolve_and_link_document, methods=["POST"],
         tags=["Documents"], summary="Resolve and link document"
     )
     app.add_api_route(
-        "/api/documents/{doc_id}/reprocess", server.reprocess_document, methods=["POST"],
+        "/api/documents/{doc_id}/reprocess", reprocess_document, methods=["POST"],
         tags=["Documents"], summary="Reprocess document"
     )
     app.add_api_route(
-        "/api/documents/batch-revalidate", server.batch_revalidate_documents, methods=["POST"],
+        "/api/documents/batch-revalidate", batch_revalidate_documents, methods=["POST"],
         tags=["Documents"], summary="Batch revalidate documents"
     )
     app.add_api_route(
-        "/api/documents/{doc_id}/preview-post", server.preview_post_to_bc, methods=["POST"],
+        "/api/documents/{doc_id}/preview-post", preview_post_to_bc, methods=["POST"],
         tags=["Documents"], summary="Preview document posting"
     )
 

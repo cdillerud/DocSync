@@ -362,6 +362,14 @@ Key Principles:
 - [x] Route count verified stable at 427
 - [x] 13 targeted tests, 97/97 total tests passed
 
+#### Document Handler Extraction (COMPLETED - Mar 15, 2026)
+- [x] Moved 10 document handler implementations from server.py → `services/document_handlers.py`
+- [x] Moved `ResolveRequest`, `DryRunPreviewRequest` models to new module
+- [x] `routers/documents.py` no longer imports from server.py for handler functions
+- [x] Dependencies rewired to proper service modules (workflow_engine, event_service, bc_validation_service, etc.)
+- [x] 15 server.py functions remain as lazy imports (extraction targets for next passes)
+- [x] 15 targeted tests, 112/112 total tests passed
+
 
 ### In Progress / Shadow Mode
 - [x] AP automatic workflow trigger (VERIFIED WORKING)

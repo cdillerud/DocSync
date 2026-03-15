@@ -610,6 +610,64 @@ These routes use `app.add_api_route()` to register handler functions that are de
 - **12 router modules** still import helpers from server.py (normalize_vendor_name, get_bc_companies, etc.)
 - server.py is still ~8,470 lines — handler extraction is the next major reduction opportunity
 
+### 5d. Document Handler Extraction (March 2026)
+
+**10 document-domain handler implementations** moved from server.py to `services/document_handlers.py`.
+
+#### Handlers extracted
+
+| Handler | Route | Lines |
+|---------|-------|-------|
+| `upload_document` | `POST /api/documents/upload` | ~75 |
+| `retry_document` | `POST /api/documents/{id}/retry` | ~55 |
+| `resubmit_document` | `POST /api/documents/{id}/resubmit` | ~30 |
+| `link_document` | `POST /api/documents/{id}/link` | ~35 |
+| `intake_document` | `POST /api/documents/intake` | ~350 |
+| `classify_document` | `POST /api/documents/{id}/classify` | ~55 |
+| `resolve_and_link_document` | `POST /api/documents/{id}/resolve` | ~100 |
+| `reprocess_document` | `POST /api/documents/{id}/reprocess` | ~120 |
+| `batch_revalidate_documents` | `POST /api/documents/batch-revalidate` | ~90 |
+| `preview_post_to_bc` | `POST /api/documents/{id}/preview-post` | ~200 |
+
+Also extracted: `ResolveRequest` and `DryRunPreviewRequest` Pydantic models.
+
+#### Dependency wiring (after)
+
+| Need | Sourced from | NOT from server.py |
+|------|-------------|-------------------|
+| `DocType`, `WorkflowStatus`, `WorkflowEvent`, `SourceSystem`, `CaptureChannel`, `DocumentClassifier` | `services.workflow_engine` | ✓ |
+| `TransactionAction`, `DEFAULT_JOB_TYPES` | `models.document_types` | ✓ |
+| `DEFAULT_WORKFLOW_CONFIG`, `should_retry`, `increment_retry`, `initialize_retry_state`, `determine_square9_stage` | `services.square9_workflow` | ✓ |
+| `get_event_service`, `emit_document_received` | `services.event_service` | ✓ |
+| `get_derived_state_service` | `services.derived_state_service` | ✓ |
+| `PILOT_MODE_ENABLED`, `get_pilot_metadata`, `get_pilot_capture_channel` | `services.pilot_config` | ✓ |
+| `validate_bc_match` | `services.bc_validation_service` | ✓ |
+| `match_vendor_unified` | `services.unified_vendor_matcher` | ✓ |
+| `determine_folder_path` | `services.folder_routing_service` | ✓ |
+| DB access | `deps.get_db()` | ✓ |
+
+#### Remaining server.py imports (next-pass extraction targets)
+
+These functions are still called via lazy `import server`:
+
+| Function | Domain | Lines in server.py |
+|----------|--------|-------------------|
+| `run_upload_and_link_workflow` | Document orchestration | ~130 |
+| `classify_document_with_ai` | AI/Gemini classification | ~20 |
+| `classify_document_type` | Deterministic classification | ~50 |
+| `upload_to_sharepoint` | SharePoint integration | ~80 |
+| `create_sharing_link` | SharePoint integration | ~30 |
+| `link_document_to_bc` | BC linking | ~60 |
+| `get_bc_token` / `get_bc_companies` | BC auth | ~40 |
+| `check_duplicate_purchase_invoice` | BC duplicate check | ~40 |
+| `create_purchase_invoice_header` | BC draft creation | ~60 |
+| `is_eligible_for_draft_creation` | Draft eligibility | ~50 |
+| `compute_ap_normalized_fields` | AP normalization | ~20 |
+| `lookup_vendor_alias` | Alias resolution | ~30 |
+| `check_duplicate_document` | Document dedup | ~40 |
+| `compute_ap_validation` | AP validation | ~50 |
+| `make_automation_decision` | Decision matrix | ~40 |
+
 ---
 
-*Last updated: March 15, 2026 (Legacy api_router Cleanup pass)*
+*Last updated: March 15, 2026 (Document Handler Extraction pass)*

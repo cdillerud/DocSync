@@ -4207,6 +4207,169 @@ async def api_operations_queue(
     }
 
 
+# ═══════════════════════════════════════════════════════════════
+# BULK ACTIONS
+# ═══════════════════════════════════════════════════════════════
+
+VALID_BULK_ACTIONS = ("assign_owner", "update_assignment_status", "set_due_date", "set_escalation_status", "request_approval")
+
+
+class BulkActionIn(BaseModel):
+    entity_type: str = Field(...)
+    entity_ids: list = Field(..., min_length=1)
+    action: str = Field(...)
+    payload: dict = Field(default_factory=dict)
+
+
+@router.post("/operations-queue/bulk-action")
+async def api_bulk_action(body: BulkActionIn):
+    """Apply a bulk action to multiple entities."""
+    import uuid as _uuid
+
+    if body.entity_type not in ("sales_order", "po_draft"):
+        raise HTTPException(status_code=422, detail="entity_type must be sales_order or po_draft")
+    if body.action not in VALID_BULK_ACTIONS:
+        raise HTTPException(status_code=422, detail=f"Invalid action. Must be one of: {VALID_BULK_ACTIONS}")
+    if not body.entity_ids:
+        raise HTTPException(status_code=422, detail="entity_ids must not be empty")
+
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+    results = []
+
+    for eid in body.entity_ids:
+        eid = str(eid).strip()
+        try:
+            # Validate entity exists
+            if body.entity_type == "po_draft":
+                draft = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": eid}, {"_id": 0, "po_draft_id": 1})
+                if not draft:
+                    results.append({"entity_id": eid, "status": "failed", "message": f"PO Draft '{eid}' not found"})
+                    continue
+
+            if body.action == "assign_owner":
+                assigned_to = body.payload.get("assigned_to", "").strip()
+                notes = body.payload.get("notes", "").strip()
+                if not assigned_to:
+                    results.append({"entity_id": eid, "status": "failed", "message": "assigned_to is required"})
+                    continue
+                existing = await db[ASSIGNMENTS_COLL].find_one(
+                    {"entity_type": body.entity_type, "entity_id": eid, "assignment_status": {"$ne": "completed"}}, {"_id": 0}
+                )
+                if existing:
+                    await db[ASSIGNMENTS_COLL].update_one(
+                        {"assignment_id": existing["assignment_id"]},
+                        {"$set": {"assigned_to": assigned_to, "assignment_status": "assigned", "notes": notes, "updated_at": now}},
+                    )
+                else:
+                    await db[ASSIGNMENTS_COLL].insert_one({
+                        "assignment_id": f"ASGN-{_uuid.uuid4().hex[:8].upper()}",
+                        "entity_type": body.entity_type, "entity_id": eid,
+                        "assigned_to": assigned_to, "assigned_by": "bulk_action",
+                        "assigned_at": now, "assignment_status": "assigned",
+                        "notes": notes, "updated_at": now,
+                    })
+                await _create_activity(db, body.entity_type, eid, "assignment",
+                                       f"Bulk assigned to {assigned_to}", notes, "bulk_action")
+                results.append({"entity_id": eid, "status": "success", "message": f"Assigned to {assigned_to}"})
+
+            elif body.action == "update_assignment_status":
+                new_status = body.payload.get("assignment_status", "").strip()
+                if new_status not in VALID_ASSIGNMENT_STATUSES:
+                    results.append({"entity_id": eid, "status": "failed", "message": f"Invalid status: {new_status}"})
+                    continue
+                existing = await db[ASSIGNMENTS_COLL].find_one(
+                    {"entity_type": body.entity_type, "entity_id": eid, "assignment_status": {"$ne": "completed"}}, {"_id": 0}
+                )
+                if not existing:
+                    results.append({"entity_id": eid, "status": "failed", "message": "No active assignment found"})
+                    continue
+                await db[ASSIGNMENTS_COLL].update_one(
+                    {"assignment_id": existing["assignment_id"]},
+                    {"$set": {"assignment_status": new_status, "updated_at": now}},
+                )
+                await _create_activity(db, body.entity_type, eid, "assignment",
+                                       f"Bulk status update: {new_status}", "", "bulk_action")
+                results.append({"entity_id": eid, "status": "success", "message": f"Status updated to {new_status}"})
+
+            elif body.action == "set_due_date":
+                due_date = body.payload.get("due_date", "").strip()
+                notes = body.payload.get("notes", "").strip()
+                if not due_date:
+                    results.append({"entity_id": eid, "status": "failed", "message": "due_date is required"})
+                    continue
+                derived_status = _derive_escalation_status(due_date)
+                existing = await db[ESCALATIONS_COLL].find_one(
+                    {"entity_type": body.entity_type, "entity_id": eid}, {"_id": 0}
+                )
+                if existing:
+                    await db[ESCALATIONS_COLL].update_one(
+                        {"entity_type": body.entity_type, "entity_id": eid},
+                        {"$set": {"due_date": due_date, "escalation_status": derived_status, "notes": notes, "updated_at": now}},
+                    )
+                else:
+                    await db[ESCALATIONS_COLL].insert_one({
+                        "escalation_id": f"ESC-{_uuid.uuid4().hex[:8].upper()}",
+                        "entity_type": body.entity_type, "entity_id": eid,
+                        "due_date": due_date, "escalation_status": derived_status,
+                        "notes": notes, "created_at": now, "updated_at": now,
+                    })
+                await _create_activity(db, body.entity_type, eid, "escalation",
+                                       f"Bulk due date set: {due_date}", notes, "bulk_action")
+                results.append({"entity_id": eid, "status": "success", "message": f"Due date set to {due_date} ({derived_status})"})
+
+            elif body.action == "set_escalation_status":
+                esc_status = body.payload.get("escalation_status", "").strip()
+                if esc_status not in ("on_track", "due_soon", "overdue", "escalated"):
+                    results.append({"entity_id": eid, "status": "failed", "message": f"Invalid escalation_status: {esc_status}"})
+                    continue
+                existing = await db[ESCALATIONS_COLL].find_one(
+                    {"entity_type": body.entity_type, "entity_id": eid}, {"_id": 0}
+                )
+                if not existing:
+                    results.append({"entity_id": eid, "status": "failed", "message": "No escalation record found. Set a due date first."})
+                    continue
+                await db[ESCALATIONS_COLL].update_one(
+                    {"entity_type": body.entity_type, "entity_id": eid},
+                    {"$set": {"escalation_status": esc_status, "updated_at": now}},
+                )
+                await _create_activity(db, body.entity_type, eid, "escalation",
+                                       f"Bulk escalation: {esc_status}", "", "bulk_action")
+                results.append({"entity_id": eid, "status": "success", "message": f"Escalation set to {esc_status}"})
+
+            elif body.action == "request_approval":
+                approval_type = body.payload.get("approval_type", "manager_review")
+                notes = body.payload.get("notes", "").strip()
+                requested_by = body.payload.get("requested_by", "bulk_action").strip()
+                record = {
+                    "approval_id": f"APR-{_uuid.uuid4().hex[:8].upper()}",
+                    "entity_type": body.entity_type, "entity_id": eid,
+                    "approval_type": approval_type,
+                    "approval_status": "pending",
+                    "requested_by": requested_by,
+                    "requested_at": now,
+                    "decided_by": "", "decided_at": "", "notes": notes,
+                }
+                await db[APPROVAL_LOGS_COLL].insert_one(record.copy())
+                await _create_activity(db, body.entity_type, eid, "approval",
+                                       f"Bulk approval requested ({approval_type})", notes, "bulk_action")
+                results.append({"entity_id": eid, "status": "success", "message": f"Approval requested ({approval_type})"})
+
+        except Exception as e:
+            results.append({"entity_id": eid, "status": "failed", "message": str(e)})
+
+    succeeded = sum(1 for r in results if r["status"] == "success")
+    failed = sum(1 for r in results if r["status"] == "failed")
+
+    return {
+        "action": body.action,
+        "entity_type": body.entity_type,
+        "processed_count": len(results),
+        "succeeded_count": succeeded,
+        "failed_count": failed,
+        "results": results,
+    }
+
 
 class ShortageLineReq(BaseModel):
     item: str

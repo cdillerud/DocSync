@@ -5,29 +5,36 @@ Orchestrates the multi-stage document intelligence pipeline by sequencing
 existing services.  Each stage is independently callable and produces a
 typed result dict so callers can inspect partial progress.
 
-Pipeline stages (in order):
+Pipeline stages (v2, 9 stages):
   1. classification    - AI-driven doc type + field extraction
-  2. entity_resolution - match extracted names/IDs to internal DB entities
-  3. transaction_match  - link document to existing transaction records
-  4. bundle_detection   - group related documents into packets
-  5. lifecycle_check    - analyse document set completeness
-  6. policy_decision    - evaluate automation rules and decide action
-  7. learning_capture   - update automation metrics from outcome
+  2. extraction        - surface extracted-field summary
+  3. layout            - layout fingerprinting / structural signals
+  4. entity_resolution - match extracted names/IDs to internal DB entities
+  5. transaction_match - link document to existing transaction records
+  6. bundle_detection  - group related documents into packets
+  7. lifecycle_check   - analyse document set completeness
+  8. policy_decision   - evaluate automation rules and decide action
+  9. learning_capture  - update automation metrics from outcome
 
 Usage:
-    from services.pipeline.document_pipeline import DocumentPipeline, run_pipeline
+    from services.pipeline.document_pipeline import run_pipeline
 
-    result = await run_pipeline(doc_id)          # run all stages
-    result = await run_pipeline(doc_id, stop_after="entity_resolution")  # partial
+    result = await run_pipeline(doc_id)
+    result = await run_pipeline(doc_id, stop_after="entity_resolution")
+    result = await run_pipeline(doc_id, skip_stages=["bundle_detection"])
 """
 
 import logging
 import time
+import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from services.automation_helpers import utcnow
+
 logger = logging.getLogger("pipeline")
+
+PIPELINE_VERSION = "v2"
 
 # ---------------------------------------------------------------------------
 # Stage result container
@@ -37,37 +44,55 @@ logger = logging.getLogger("pipeline")
 class StageResult:
     """Outcome of a single pipeline stage."""
     stage: str
-    status: str            # "ok", "skipped", "error"
+    status: str                          # "ok", "skipped", "error"
+    started_at: str = ""
+    finished_at: str = ""
     duration_ms: float = 0
     output: Dict[str, Any] = field(default_factory=dict)
     error: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        d: Dict[str, Any] = {
+            "stage": self.stage,
+            "status": self.status,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "duration_ms": round(self.duration_ms, 1),
+            "output": self.output,
+        }
+        if self.error is not None:
+            d["error"] = self.error
+        return d
 
 
 @dataclass
 class PipelineResult:
     """Aggregate outcome of a full (or partial) pipeline run."""
-    document_id: str
+    run_id: str = ""
+    document_id: str = ""
+    pipeline_version: str = PIPELINE_VERSION
     started_at: str = ""
     finished_at: str = ""
-    status: str = "pending"  # "ok", "partial", "error"
+    total_duration_ms: float = 0
+    status: str = "pending"              # "ok", "partial", "error"
+    stages_run: int = 0
+    stages_skipped: int = 0
+    stages_errored: int = 0
     stages: List[StageResult] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "run_id": self.run_id,
             "document_id": self.document_id,
+            "pipeline_version": self.pipeline_version,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
+            "total_duration_ms": round(self.total_duration_ms, 1),
             "status": self.status,
-            "stages": [
-                {
-                    "stage": s.stage,
-                    "status": s.status,
-                    "duration_ms": round(s.duration_ms, 1),
-                    "error": s.error,
-                    "output_keys": list(s.output.keys()),
-                }
-                for s in self.stages
-            ],
+            "stages_run": self.stages_run,
+            "stages_skipped": self.stages_skipped,
+            "stages_errored": self.stages_errored,
+            "stages": [s.to_dict() for s in self.stages],
         }
 
 
@@ -100,12 +125,7 @@ STAGE_ORDER_V1 = [
 
 
 async def _run_classification(doc_id: str, ctx: Dict) -> StageResult:
-    """Stage 1: Classify document type and extract fields.
-
-    This calls the full process_document() which performs classification +
-    extraction in one AI call.  The extraction stage below exposes the
-    extracted-fields summary separately.
-    """
+    """Stage 1: Classify document type and extract fields."""
     from services.document_intelligence_service import process_document
 
     result = await process_document(doc_id)
@@ -119,12 +139,7 @@ async def _run_classification(doc_id: str, ctx: Dict) -> StageResult:
 
 
 async def _run_extraction(doc_id: str, ctx: Dict) -> StageResult:
-    """Stage 2: Expose extracted-field summary from classification.
-
-    Extraction is currently performed inside the classification AI call.
-    This stage surfaces the extraction outputs explicitly rather than
-    re-running the AI.
-    """
+    """Stage 2: Expose extracted-field summary from classification."""
     intel = ctx.get("intel", {})
     extracted = intel.get("extracted_fields", {})
 
@@ -145,20 +160,16 @@ async def _run_extraction(doc_id: str, ctx: Dict) -> StageResult:
 
 
 async def _run_layout(doc_id: str, ctx: Dict) -> StageResult:
-    """Stage 3: Layout fingerprinting — structural signal generation.
-
-    Identifies document family and layout features for downstream matching
-    and routing.
-    """
+    """Stage 3: Layout fingerprinting — structural signal generation."""
     from deps import get_db
 
     db = get_db()
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
-        return StageResult(stage="layout", status="skipped",
-                           error="document not found")
+        # Attempted work (DB lookup) and failed → "error"
+        return StageResult(stage="layout", status="error",
+                           error="document not found in hub_documents")
 
-    # Check if layout fingerprint already exists on the doc
     layout = doc.get("layout_fingerprint")
     if layout:
         summary = {
@@ -169,7 +180,6 @@ async def _run_layout(doc_id: str, ctx: Dict) -> StageResult:
         ctx["layout"] = layout
         return StageResult(stage="layout", status="ok", output=summary)
 
-    # If not present, try to run the fingerprinting service
     try:
         from services.layout_fingerprint_service import get_layout_fingerprint_service
         svc = get_layout_fingerprint_service(db)
@@ -181,12 +191,13 @@ async def _run_layout(doc_id: str, ctx: Dict) -> StageResult:
         }
         return StageResult(stage="layout", status="ok", output=summary)
     except Exception as exc:
-        return StageResult(stage="layout", status="skipped",
-                           output={"reason": f"fingerprinting unavailable: {exc}"})
+        # Attempted fingerprinting and it failed → "error"
+        return StageResult(stage="layout", status="error",
+                           error=f"fingerprinting failed: {exc}")
 
 
 async def _run_entity_resolution(doc_id: str, ctx: Dict) -> StageResult:
-    """Stage 2: Resolve extracted entities against internal DB."""
+    """Stage 4: Resolve extracted entities against internal DB."""
     from services.entity_resolution_service import resolve_entities
 
     result = await resolve_entities(doc_id)
@@ -200,7 +211,7 @@ async def _run_entity_resolution(doc_id: str, ctx: Dict) -> StageResult:
 
 
 async def _run_transaction_match(doc_id: str, ctx: Dict) -> StageResult:
-    """Stage 3: Find and score candidate transaction matches."""
+    """Stage 5: Find and score candidate transaction matches."""
     from services.transaction_matching_service import match_transactions
 
     result = await match_transactions(doc_id)
@@ -214,7 +225,7 @@ async def _run_transaction_match(doc_id: str, ctx: Dict) -> StageResult:
 
 
 async def _run_bundle_detection(doc_id: str, ctx: Dict) -> StageResult:
-    """Stage 4: Detect document bundles containing this document."""
+    """Stage 6: Detect document bundles containing this document."""
     from services.document_bundle_service import detect_bundles
 
     result = await detect_bundles(document_ids=[doc_id])
@@ -228,21 +239,17 @@ async def _run_bundle_detection(doc_id: str, ctx: Dict) -> StageResult:
 
 
 async def _run_lifecycle_check(doc_id: str, ctx: Dict) -> StageResult:
-    """Stage 5: Validate lifecycle completeness for the related entity.
-
-    Requires entity resolution to have found a high-confidence match so we
-    know which entity to check.  Skipped when no entity is resolved.
-    """
+    """Stage 7: Validate lifecycle completeness for the related entity."""
     from services.document_lifecycle_service import validate_lifecycle
     from deps import get_db
 
     db = get_db()
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
-        return StageResult(stage="lifecycle_check", status="skipped",
-                           error="document not found")
+        # Attempted DB lookup and failed → "error"
+        return StageResult(stage="lifecycle_check", status="error",
+                           error="document not found in hub_documents")
 
-    # Determine entity to validate from document context
     entity_type = None
     entity_id = None
     resolutions = ctx.get("resolutions", [])
@@ -253,6 +260,7 @@ async def _run_lifecycle_check(doc_id: str, ctx: Dict) -> StageResult:
             break
 
     if not entity_type or not entity_id:
+        # Dependency-based non-execution → "skipped"
         return StageResult(stage="lifecycle_check", status="skipped",
                            output={"reason": "no high-confidence entity resolved"})
 
@@ -268,7 +276,7 @@ async def _run_lifecycle_check(doc_id: str, ctx: Dict) -> StageResult:
 
 
 async def _run_policy_decision(doc_id: str, ctx: Dict) -> StageResult:
-    """Stage 6: Evaluate automation decision policies."""
+    """Stage 8: Evaluate automation decision policies."""
     from services.decision_policy_service import evaluate_decision
 
     result = await evaluate_decision(doc_id)
@@ -282,7 +290,7 @@ async def _run_policy_decision(doc_id: str, ctx: Dict) -> StageResult:
 
 
 async def _run_learning_capture(doc_id: str, ctx: Dict) -> StageResult:
-    """Stage 7: Update aggregated automation metrics."""
+    """Stage 9: Update aggregated automation metrics."""
     from services.learning_loop_service import update_automation_metrics
 
     result = await update_automation_metrics()
@@ -308,6 +316,36 @@ _STAGE_RUNNERS = {
 
 
 # ---------------------------------------------------------------------------
+# Trace persistence
+# ---------------------------------------------------------------------------
+
+PIPELINE_RUNS_COLLECTION = "pipeline_runs"
+
+
+async def _persist_trace(result: PipelineResult) -> None:
+    """Store a pipeline run trace for later inspection."""
+    try:
+        from deps import get_db
+        db = get_db()
+        record = result.to_dict()
+        record["_persisted_at"] = utcnow()
+        await db[PIPELINE_RUNS_COLLECTION].insert_one(record)
+    except Exception as exc:
+        logger.warning("[Pipeline] Trace persistence failed: %s", exc)
+
+
+async def get_pipeline_runs(doc_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+    """Retrieve historical pipeline runs for a document."""
+    from deps import get_db
+    db = get_db()
+    cursor = db[PIPELINE_RUNS_COLLECTION].find(
+        {"document_id": doc_id},
+        {"_id": 0},
+    ).sort("started_at", -1).limit(limit)
+    return await cursor.to_list(length=limit)
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -316,6 +354,7 @@ async def run_pipeline(
     *,
     stop_after: Optional[str] = None,
     skip_stages: Optional[List[str]] = None,
+    persist: bool = True,
 ) -> PipelineResult:
     """Run the canonical document processing pipeline.
 
@@ -323,53 +362,76 @@ async def run_pipeline(
         doc_id:      The document to process.
         stop_after:  Stop after this stage completes (inclusive).
         skip_stages: List of stage names to skip.
+        persist:     Store the trace in pipeline_runs (default True).
 
     Returns:
-        PipelineResult with per-stage outcomes.
+        PipelineResult with per-stage outcomes, timing, and aggregate metadata.
     """
     pipeline = PipelineResult(
+        run_id=f"RUN-{uuid.uuid4().hex[:12].upper()}",
         document_id=doc_id,
-        started_at=datetime.now(timezone.utc).isoformat(),
+        started_at=utcnow(),
     )
     ctx: Dict[str, Any] = {}
     skip = set(skip_stages or [])
+    t_pipeline_start = time.monotonic()
 
-    logger.info("[Pipeline] Starting for doc=%s  stop_after=%s  skip=%s",
-                doc_id, stop_after, skip)
+    logger.info("[Pipeline] Starting run=%s doc=%s stop_after=%s skip=%s",
+                pipeline.run_id, doc_id, stop_after, skip)
 
     for stage_name in STAGE_ORDER:
         if stage_name in skip:
-            pipeline.stages.append(
-                StageResult(stage=stage_name, status="skipped",
-                            output={"reason": "explicitly skipped"})
+            sr = StageResult(
+                stage=stage_name, status="skipped",
+                output={"reason": "explicitly skipped"},
             )
+            pipeline.stages.append(sr)
+            pipeline.stages_skipped += 1
             if stop_after and stage_name == stop_after:
                 break
             continue
 
-        runner = _STAGE_RUNNERS[stage_name]
+        stage_start = utcnow()
         t0 = time.monotonic()
+        runner = _STAGE_RUNNERS[stage_name]
         try:
             result = await runner(doc_id, ctx)
-            result.duration_ms = (time.monotonic() - t0) * 1000
+            elapsed = (time.monotonic() - t0) * 1000
+            result.started_at = stage_start
+            result.finished_at = utcnow()
+            result.duration_ms = elapsed
             pipeline.stages.append(result)
-            logger.info("[Pipeline] doc=%s  stage=%s  status=%s  %.0fms",
-                        doc_id, stage_name, result.status, result.duration_ms)
+
+            if result.status == "ok":
+                pipeline.stages_run += 1
+            elif result.status == "skipped":
+                pipeline.stages_skipped += 1
+            elif result.status == "error":
+                pipeline.stages_errored += 1
+
+            logger.info("[Pipeline] run=%s stage=%s status=%s %.0fms",
+                        pipeline.run_id, stage_name, result.status, elapsed)
         except Exception as exc:
             elapsed = (time.monotonic() - t0) * 1000
             err_result = StageResult(
                 stage=stage_name, status="error",
-                duration_ms=elapsed, error=str(exc),
+                started_at=stage_start,
+                finished_at=utcnow(),
+                duration_ms=elapsed,
+                error=str(exc),
             )
             pipeline.stages.append(err_result)
-            logger.error("[Pipeline] doc=%s  stage=%s  ERROR: %s  %.0fms",
-                         doc_id, stage_name, exc, elapsed)
-            # Continue to next stage; non-fatal
+            pipeline.stages_errored += 1
+            logger.error("[Pipeline] run=%s stage=%s ERROR: %s %.0fms",
+                         pipeline.run_id, stage_name, exc, elapsed)
 
         if stop_after and stage_name == stop_after:
             break
 
-    # Determine overall status
+    # Finalize aggregate metadata
+    pipeline.total_duration_ms = (time.monotonic() - t_pipeline_start) * 1000
+    pipeline.finished_at = utcnow()
+
     statuses = [s.status for s in pipeline.stages]
     if all(s in ("ok", "skipped") for s in statuses):
         pipeline.status = "ok"
@@ -378,7 +440,14 @@ async def run_pipeline(
     else:
         pipeline.status = "ok"
 
-    pipeline.finished_at = datetime.now(timezone.utc).isoformat()
-    logger.info("[Pipeline] Finished doc=%s  status=%s  stages=%d",
-                doc_id, pipeline.status, len(pipeline.stages))
+    logger.info(
+        "[Pipeline] Finished run=%s doc=%s status=%s total=%.0fms "
+        "ran=%d skipped=%d errored=%d",
+        pipeline.run_id, doc_id, pipeline.status, pipeline.total_duration_ms,
+        pipeline.stages_run, pipeline.stages_skipped, pipeline.stages_errored,
+    )
+
+    if persist:
+        await _persist_trace(pipeline)
+
     return pipeline

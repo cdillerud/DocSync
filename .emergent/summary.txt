@@ -1,205 +1,159 @@
 <analysis>**original_problem_statement:**
-The user initially requested the completion and verification of the Document-to-Existing-Transaction Matching feature. Following that, the user guided the agent through a series of major feature implementations, building out a comprehensive document intelligence platform. The sequence of implemented features was:
-1.  **Iteration 97 (Verification):** Document-to-Existing-Transaction Matching and Auto-Linking.
-2.  **Iteration 98:** Document Bundle Detection and Transaction Grouping.
-3.  **Iteration 99:** Document Lifecycle Validation Engine.
-4.  **Iteration 100:** Document Automation Decision Policy Engine.
-5.  **Iteration 101:** Learning Loop Engine.
+The user has been guiding the agent through a series of controlled technical debt remediation passes to improve the codebase's structure and maintainability after a rapid phase of feature development. So far, three passes have been completed:
+1.  **Entrypoint & Routing Consolidation:** Merged multiple server entrypoints and routing directories.
+2.  **Reference Intelligence Consolidation:** Refactored overlapping entity/vendor matching logic into shared helpers.
+3.  **Decisioning & Automation Consolidation:** Clarified boundaries and extracted shared logic for decision and automation services.
+4.  **Document Intelligence Decoupling:** Extracted legacy business logic from  into dedicated service helpers and aligned the canonical pipeline.
 
-After completing this extensive feature work, the user has now requested a **controlled technical debt remediation pass** to consolidate and clean up the codebase.
+The current task is the next remediation pass, focused on **Pipeline Hardening and Observability**.
 
 **PRODUCT REQUIREMENTS (for the current task):**
--   **No new business features.**
--   **Consolidate backend entrypoints** (, , ) into a single authoritative .
--   **Consolidate routing structure** by migrating logic from  to .
--   **Create a canonical document processing pipeline** in a new module () to orchestrate the existing services.
--   **Create an architecture note** () documenting the refactored structure.
--   Preserve all API contracts and ensure existing tests pass.
+-   Make the canonical document pipeline easier to observe, debug, and trust.
+-   Add explicit stage-level timing, status reporting, and failure logging (traceability).
+-   Clarify and formalize the input/output contracts for each pipeline stage.
+-   Improve failure handling to make it more explicit and consistent.
+-   Persist a summary of each pipeline run for later diagnosis.
+-   Do NOT add new end-user features or break existing API contracts.
 
 **User's preferred language**: English
 
 **what currently exists?**
-The application is a sophisticated, AI-driven document processing platform named GPI Hub. It features a multi-stage pipeline that ingests documents and performs:
-1.  **Intelligence:** Classification and field extraction.
-2.  **Entity Resolution:** Matching extracted text to internal DB entities.
-3.  **Transaction Matching:** Linking documents to existing transaction records.
-4.  **Bundling:** Grouping related documents into packets.
-5.  **Lifecycle Validation:** Analyzing a transaction's document set for business logic completeness.
-6.  **Decision Policies:** An engine to make and explain automation decisions (e.g., create draft, link, hold for review).
-7.  **Learning Loop:** A system to capture user corrections as learning signals to improve future accuracy.
-
-However, the rapid development has introduced technical debt, including multiple redundant backend entrypoints (, , ) and duplicated routing directories (, ).
+The application is a sophisticated document intelligence platform (GPI Hub). The codebase has undergone significant refactoring. Key structures include:
+-   A single, authoritative backend entrypoint at .
+-   A consolidated routing structure under .
+-   A canonical document processing pipeline defined in .
+-   Shared helper modules for Reference Intelligence (), Automation (), and Document Intelligence ().
+-   A dedicated adapter for Business Central API access ().
+-   An architecture document () that is updated with each pass.
+-   A comprehensive suite of backend tests that verify the refactored logic.
 
 **Last working item**:
-- **Last item agent was working:** The agent was in the initial investigation phase of the Technical Debt Remediation task. It has successfully listed directory structures and inspected file contents for , , and the  and  directories to understand the duplicated structures before starting the consolidation.
-- **Status:** IN PROGRESS
+- **Last item agent was working:** The agent was at the beginning of the Pipeline Hardening and Observability technical debt remediation pass. It completed a thorough investigation of the target files (, related services, and API endpoints) and presented a detailed plan to the user, which was approved with specific constraints and priorities.
+- **Status:** NOT STARTED
 - **Agent Testing Done:** N
 - **Which testing method agent to use?** both
 - **User Testing Done:** N
 
 **All Pending/In progress Issue list**:
--   **Issue 1: Multiple Backend Entrypoints (P0)**
-    -   **Description:** There are three files (, , ) that define a FastAPI app instance, leading to confusion and duplicated middleware/router registration. The agent's investigation confirmed that  and  both register routers, while  seems unused.
-    -   **Attempted fixes:** None yet. The agent is in the investigation phase.
-    -   **Next debug checklist:**
-        1.  Determine the authoritative entrypoint used by the runtime environment.
-        2.  Merge all necessary router includes and middleware from  and  into a single, canonical .
-        3.  Remove or convert the other files (, ) into simple shims or delete them.
-        4.  Verify the application starts and all endpoints are registered correctly.
-    -   **Why fix this issue and what will be achieved with the fix?** To establish a single source of truth for application startup, simplify configuration, and eliminate bugs caused by inconsistent middleware or router registration.
-    -   **Status:** NOT STARTED
-    -   **Is recurring issue?** N
-    -   **Should Test frontend/backend/both after fix?** backend
-    -   **Blocked on other issue:** None
-
--   **Issue 2: Duplicate Routing Directories (P0)**
-    -   **Description:** The codebase contains two routing directories:  and . The investigation shows that  contains the modern document intelligence endpoints, while  contains older, possibly legacy or overlapping routes.
-    -   **Attempted fixes:** None yet.
-    -   **Next debug checklist:**
-        1.  Identify which routes in  are still active and necessary.
-        2.  Migrate the logic for any active routes into the appropriate modules within .
-        3.  Update the main application entrypoint to remove the inclusion of the legacy router from .
-        4.  Delete the  directory.
-    -   **Why fix this issue and what will be achieved with the fix?** To create a single, consistent convention for API routing, making the codebase easier to navigate and maintain.
-    -   **Status:** NOT STARTED
-    -   **Is recurring issue?** N
-    -   **Should Test frontend/backend/both after fix?** backend
-    -   **Blocked on other issue:** Issue 1
+There are no outstanding bugs. The work is defined by the user-approved plan for the current task.
 
 **In progress Task List**:
-  - Task 1:  (P0) Technical Debt Remediation Pass
-
- Task Detail:
-  - Task 1: 
-     - **Where to resume:** The agent has completed its investigation of the duplicate entrypoints and routing directories. The next step is to begin the consolidation work, starting with consolidating the backend entrypoints into .
-     - **What will be achieved with this?** A cleaner, more maintainable, and less error-prone codebase with clear conventions for application startup and routing.
-     - **Status:**  IN PROGRESS
-     - **Should Test frontend/backend/both after fix?** both
-     - **Blocked on something:** None
+- **Task 1: (P0) Technical Debt Remediation Pass: Pipeline Hardening and Observability**
+    - **Where to resume:** Begin implementation of the user-approved plan. The agent has already investigated the code and has a clear set of steps.
+    - **What will be achieved with this?** The document processing pipeline will become more robust, observable, and trustworthy, with explicit stage contracts, timing/status instrumentation, and persisted run traces for easier debugging.
+    - **Status:** IN PROGRESS (Planning is complete, implementation is next).
+    - **Should Test frontend/backend/both after fix?** both
+    - **Blocked on something:** None
 
 **Upcoming and Future Tasks**
-**Upcoming Tasks:**
--   **P0:** Create a canonical document processing pipeline in .
--   **P0:** Create an architecture note at .
--   **P1:** AR Release Gate (Prepay and Terms Approval) - A major business feature from the original backlog.
--   **P2:** Inventory Planning Horizon (Demand Forecast + Purchase Timing) - Another major business feature.
+**Upcoming Tasks (from the approved plan):**
+-   **P0:** Enrich  with  and  timestamps.
+-   **P0:** Enrich  with , stage counts, and a version number.
+-   **P0:** Fix the pipeline's  method to expose safe output summaries and metadata.
+-   **P0:** Normalize status semantics (, ).
+-   **P0:** Persist pipeline run traces to a new  collection.
+-   **P0:** Add a new endpoint  to retrieve trace data.
+-   **P0:** Update  with the new pipeline hardening details.
+-   **P0:** Add targeted backend tests for timing, failure propagation, persistence, and skip behavior.
 
-**Future Tasks:**
+**Future Tasks (from backlog):**
+-   **P1:** AR Release Gate (Prepay and Terms Approval).
+-   **P2:** Inventory Planning Horizon (Demand Forecast + Purchase Timing).
 -   Build an admin UI for managing item mapping rules.
 -   Decommission the legacy Zetadocs system.
 -   Implement a production-ready email service to replace the mock.
 -   Implement Entra ID SSO to replace mock JWT auth.
--   Add a nightly scheduler to refresh the BC catalog.
--   Add multi-step approval routing for documents.
 
 **Completed work in this session**
-- **Learning Loop Engine (iter_101):** Implemented a system to capture user corrections on documents (classification, fields, entity overrides) and convert them into structured learning signals (vendor aliases, extraction hints) to improve future automation.
-- **Document Automation Decision Policy Engine (iter_100):** Created a rule-based engine to centralize, execute, and explain automation decisions (e.g., , , ), replacing scattered ad-hoc logic.
-- **Document Lifecycle Validation Engine (iter_99):** Built a service to analyze a transaction's document set against predefined templates (e.g., Sales Order, AP) to detect missing documents, duplicates, and inconsistencies.
-- **Document Bundle Detection and Transaction Grouping (iter_98):** Implemented logic to group related documents into bundles or packets and assess their completeness.
-- **Document-to-Existing-Transaction Matching Verification (iter_97):** Successfully ran comprehensive tests on the previously built feature, ensuring its stability and correctness.
+- **Document Intelligence Decoupling:** Extracted legacy logic (, , etc.) from  into a new  module. The  no longer imports from . Aligned the canonical pipeline to include explicit  and  stages.
+- **Decisioning & Automation Consolidation:** Created a shared  module for common logic like activity logging and timestamping. Refactored all six target services (, , etc.) to use the shared helpers, reducing code duplication.
+- **Reference Intelligence Consolidation:** Created a  module for shared normalization and scoring logic, and a  to centralize Business Central API interactions. Refactored seven target services to use these shared modules.
+- **Entrypoint & Routing Consolidation:** Consolidated three backend entrypoints (, , ) into a single authoritative . Migrated all active routes from the legacy  directory to  and deleted the legacy directory.
+- **Comprehensive Testing:** After each remediation pass, the agent successfully ran targeted unit tests and a full regression suite using the , ensuring no API contracts were broken. All tests passed.
+- **Documentation:** Created  and updated it after each pass to reflect the new, cleaner architecture. Updated  and  to track progress.
 
 **Earlier issues found/mentioned but not fixed**
-   - **Issue 1: Monolithic Codebase (P1)**
-     - **Description:** The files  and  remain very large.
-     - **Why to solve this issue and what will be achieved with this?** To improve maintainability and scalability. This is related to the current refactoring task but is a larger effort focused on specific large files rather than just structural duplication.
-     - **Is recurring issue?** Y
+-   **Issue 1: Monolithic Codebase (P2)**
+    -   **Debug checklist:** Examine  and  to identify logical sections that can be broken out into smaller, more focused modules/components.
+    -   **Why to solve this issue and what will be achieved with this?** To improve maintainability, testability, and developer velocity by reducing the cognitive load required to work with these large files.
+    -   **Should Test frontend/backend/both after fix:** both
+    -   **Is recurring issue?** Y
 
 **Known issue recurrence from previous fork**
-  - **Issue recurrence in previous fork:** Forward reference Python error /  file corruption.
-  - **Recurrence count:** 4+
-  - **Status:** RESOLVED (for specific instances). The agent has been more careful, but this remains a risk during the refactoring process.
+- **Issue recurrence in previous fork:** Forward reference Python error /  file corruption.
+- **Recurrence count:** 4+
+- **Status:** RESOLVED (for specific instances). This remains a risk during large refactoring, requiring careful use of  and verification.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
-- **AI-Driven Document Pipeline:** A multi-stage orchestration of services for document understanding and processing.
-- **Technical Debt Remediation:** The current focus, aimed at consolidating code, removing duplication, and improving architectural clarity.
-- **Progressive Feature Layering:** The development methodology used, where each new feature (Bundling, Lifecycle, Policy, Learning) was built as a new analytical layer on top of the previous ones.
+- **Pipeline Hardening & Observability:** The current focus. This involves adding instrumentation (timing, status), formalizing stage contracts, improving failure handling, and adding traceability to the document processing pipeline.
+- **Progressive Refactoring:** The core methodology of this multi-pass effort, improving the codebase in controlled, verifiable steps without breaking functionality.
+- **Dependency Inversion:** A key pattern used, for example, by creating a  to decouple services from the specifics of the BC API.
 
 **key DB schema**
-- **** (New): Stores records of user corrections for future analysis.
-- **** (New): Stores mappings from observed vendor names to canonical vendor records.
-- **** (New): Stores mappings for customer names.
-- **** (New): Records patterns in field corrections.
-- **** (New): Stores aggregated stats on correction/automation rates.
-- **** (New): Stores the rules for the decision engine.
-- **** (New): Records the outcome of a policy evaluation for a document.
-- **** (New): Stores the results of lifecycle analysis for an entity.
-- **** (New): Stores metadata for grouped document packets.
-- ****: Stores candidate matches between a document and existing transactions.
-- ****: Stores results of matching extracted text to internal entities.
-- ****: Stores classification, extraction, and readiness results.
+- **** (New - Planned): Will store a summary of each document processing pipeline execution, including stage timings, statuses, and outcomes for observability.
 
 **changes in tech stack**
 - None.
 
 **All files of reference**
-- **Refactoring Targets:** , , , and the contents of  and .
-- **Learning Loop (iter_101):** ,  (updated),  (updated).
-- **Decision Policy (iter_100):** ,  (updated).
-- **Lifecycle Validation (iter_99):** , .
-- **Document Bundling (iter_98):** , .
+- **Pipeline Hardening Targets:**
+    -  (primary target)
+    -  (for the API endpoint)
+    -  (for activity/event logging)
+    -  (for documentation)
+    - Associated service files called by the pipeline.
 
 **Areas that need refactoring**:
-- **Backend Entrypoints:** , ,  must be consolidated into one.
-- **Routing Structure:**  and  must be merged into a single convention.
-- **:** This file has grown very large and is becoming a monolith. The creation of a canonical pipeline service will help, but this file itself is a candidate for being split up.
-- **:** This component now contains the UI for all 6+ stages of the intelligence pipeline and is extremely large and complex. It should be broken down into sub-components for each section (Classification, Matching, Bundling, Lifecycle, etc.).
+- **Pipeline Observability:** The current focus of the approved refactoring plan.
+- **Monolithic Files:**  and  are known large files that are candidates for a future refactoring pass.
 
 **key api endpoints**
-- **Learning Loop:** , 
-- **Decision Policy:** , , 
-- **Lifecycle Validation:** , 
-- **Document Bundling:** , , 
+- **Planned:**  - To retrieve the persisted trace and observability data for a pipeline run on a specific document.
 
 **Critical Info for New Agent**
-- **Your primary task is technical debt remediation, not feature development.** The user has provided very specific constraints: consolidate entrypoints and routers, create a canonical pipeline service, and document the new architecture. Do not add or change business logic.
-- **Investigation is complete.** You have the file listings and  results showing the duplicate structures. The next step is to start the consolidation, likely beginning with the backend entrypoints (, ).
-- **Preserve API contracts.** The refactor must not break the frontend or any external consumers. All existing endpoints must function identically after the consolidation.
-- **Testing is critical.** After each major consolidation step (e.g., merging entrypoints, merging routers), you must run the backend tests to ensure no regressions have been introduced.
+- **Your task is to implement the approved plan for Pipeline Hardening and Observability.** Do not deviate or add features.
+- **Follow the user's constraints strictly:**
+    1.  Do not break existing API contracts. Add new fields, but preserve old ones.
+    2.  Persist trace summaries, but keep them bounded in size (no raw document data).
+    3.  Follow the user-defined priority order for implementation.
+- **The investigation is complete.** You should start directly with implementation based on the approved plan.
+- **Testing is mandatory.** After implementing the changes, you must create new targeted tests for the observability features and run the full regression suite via the  to ensure no regressions were introduced.
 
 **documents and test reports created in this job**
 - 
-- 
-- 
-- 
-- 
--  (Updated after each iteration)
--  (Updated after each iteration)
+-  (updated)
+-  (updated)
+-  (multiple reports from testing agent runs)
+-  (multiple new test files created)
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **User:** Provided prompt for **Iteration 101: Learning Loop Engine**. (COMPLETED)
-2.  **Agent:** Asked for user confirmation to start. (COMPLETED)
-3.  **User:** go (COMPLETED)
-4.  **Agent:** Implemented the Learning Loop Engine, including service, router hooks, and UI updates. Fixed a bug in the test payload during self-testing. (COMPLETED)
-5.  **Agent:** Ran the testing agent, which passed all tests for Iteration 101. (COMPLETED)
-6.  **Agent:** Updated documentation (, ) and finished the task. (COMPLETED)
-7.  **User:** Provided prompt for **Technical Debt Remediation Pass**. (IN PROGRESS)
-8.  **Agent:** Acknowledged the task and proposed a plan to investigate first. (COMPLETED)
-9.  **User:** go (COMPLETED)
-10. **Agent:** Performed investigation by listing files and directories and -ing for app instances and router includes, confirming the duplicate structures. (COMPLETED)
+1. **User:** Initiated the Pipeline Hardening and Observability remediation pass with a detailed prompt. (COMPLETED)
+2. **Agent:** Acknowledged the task and began investigating the target files. (COMPLETED)
+3. **Agent:** Completed investigation of  and the pipeline API endpoint. (COMPLETED)
+4. **Agent:** Presented a detailed, multi-step plan for the user's approval. (COMPLETED)
+5. **User:** Approved the plan with specific constraints and a clear priority order for the implementation steps. (PENDING - This is the starting point for the new agent).
 
 **Project Health Check:**
-- **Broken:** No. The application is functional and all features have passed testing.
-- **Mocked:** Email service (Microsoft Graph), Business Central (BC) API, JWT Auth (Entra ID). The lack of a real BC write connection is a significant limitation.
+- **Broken:** No. The application is functional.
+- **Mocked:** Email service (Microsoft Graph), Business Central (BC) API (write operations), JWT Auth (Entra ID).
 
 **3rd Party Integrations**
 - **Gemini (via Emergent LLM Key):** Used for document classification and extraction.
 - **Dynamics 365 Business Central API:** Mocked. Read-only for catalog sync, write is disabled.
 - **Microsoft Graph API:** Mocked. Used for email ingestion.
-- **Spiro CRM API:** Present but seemingly unused in recent work.
 - **APScheduler:** Used for background tasks.
 
 **Testing status**
-- **Testing agent used after significant changes:** YES. The agent has diligently used the testing agent after completing each of the last five major features (iter 97-101), resulting in a stable codebase.
+- **Testing agent used after significant changes:** YES. The agent ran comprehensive regression tests using  after each of the four completed refactoring passes. All tests passed, confirming API contracts were preserved.
 - **Troubleshoot agent used after agent stuck in loop:** NO
-- **Test files created:** Yes, the testing agent created numerous backend test files in  for all new features.
+- **Test files created:** Yes, new test files () were created in  to validate each refactoring pass.
 - **Known regressions:** None.
 
 **Credentials to test flow:**
 - **Web UI:**  / 
 
 **What agent forgot to execute**
-- Nothing. The agent is at the beginning of the newly assigned refactoring task and has correctly started with an investigation phase.</analysis>
+- Nothing. The agent is correctly positioned to start the implementation of the next user-approved task.</analysis>

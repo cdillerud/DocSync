@@ -1,150 +1,186 @@
 <analysis>**original_problem_statement:**
-The user is continuing a series of controlled technical debt remediation passes to dismantle a monolithic  file by extracting its route handler implementations into dedicated service-layer modules. Several passes have been completed successfully (pipeline observability, BC validation, document handlers).
+The user's initial goal was to refactor a monolithic  file. This was superseded by a series of high-priority feature requests to build a more intelligent document processing pipeline. The agent successfully implemented four major features in sequence:
+1.  **Autonomous Document Routing (Auto-Clear Gate):** To automatically categorize documents as , , or .
+2.  **Vendor Alias Learning System:** To automatically learn vendor name variations from human approvals to improve matching rates.
+3.  **Vendor Resolution Improvement:** To enhance vendor matching using  for fuzzy matching and bootstrap the alias table from existing ERP data.
+4.  **Vendor Resolution Observability & Negative Feedback:** To create detailed resolution logs, analytics, and a rejection memory to prevent the system from repeating bad fuzzy auto-matches.
+5.  **Document Readiness Engine:** To create a final, authoritative readiness status for each document, determining if it's ready for automated processing, requires manual review, or is blocked.
 
-The current task is the next remediation pass, focused on **extracting the 15 workflow-domain handler implementations out of server.py**.
+The last user interaction involved debugging the user's local Docker environment, which was failing after they pulled the latest changes. The agent identified that the  was pointing to the wrong entry point ( instead of ) and guided the user to fix it and rebuild their Docker image.
 
-**PRODUCT REQUIREMENTS (for the current task):**
--   Remove the workflow-domain handler implementations from  as the authoritative source.
--   Reduce the  module's dependence on .
--   Reuse the successful extraction pattern established in the previous pass (e.g., creating a ).
--   Do NOT add new product features or change existing API contracts (paths, request/response shapes, auth behavior).
--   Preserve all current endpoint behavior, verified by extensive testing.
--   Update architecture documentation to reflect the changes.
+**PRODUCT REQUIREMENTS (for the most recent task):**
+- Implement a  as a single authoritative workflow-state evaluator.
+- Add a structured  object to each document with fields like , , , , etc.
+- Create a readiness evaluation service that consumes signals like vendor resolution, policy checks, duplicate risks, and reviewer overrides.
+- Add a  endpoint for analytics.
+- Enhance UI queues and the document detail page with a Readiness panel to display the evaluation results.
 
 **User's preferred language**: English
 
 **what currently exists?**
-The application is a document intelligence platform (GPI Hub) that has undergone significant refactoring. The current architecture features:
--   A single backend entrypoint at .
--   A consolidated routing structure under .
--   A series of dedicated service modules for different domains:  (for processing),  (for Business Central validation), and  (for document API logic).
--   The legacy  file has been stripped of its routing responsibilities but still contains 22 handler implementations that are imported by the router modules. These are divided into:
-    -   15  handlers.
-    -   7  handlers.
--   Comprehensive backend test suites exist to validate each refactoring pass.
+The application is a full-featured document intelligence platform (GPI Hub) with a FastAPI backend and React frontend. The codebase has been significantly enhanced with several new intelligent services. The core document processing pipeline now includes:
+- **Document Routing:** Categorizes documents based on a set of rules.
+- **Vendor Resolution:** An advanced system that uses exact matching, alias matching (with an auto-learning feedback loop), and fuzzy matching () to identify vendors. It includes a rejection memory to avoid repeating incorrect auto-matches.
+- **Document Readiness Engine:** A final evaluation service that produces a canonical readiness object for each document, determining the next logical step in the workflow.
+
+The backend includes dedicated services, routers, and tests for each of these features. The frontend dashboard and document detail pages have been updated to display the new analytics and status information.
 
 **Last working item**:
-- **Last item agent was working:** The agent began the Workflow Handler Extraction pass. It successfully identified the 15 target handlers listed in  and started the investigation phase by viewing the source code of these handlers within  to map their dependencies.
-- **Status:** IN PROGRESS
-- **Agent Testing Done:** N
+- **Last item agent was working:** The agent finished implementing the **Document Readiness Engine**. This included creating the backend service and endpoints, integrating the evaluation into the document processing pipeline in , adding a new  to the frontend , and writing comprehensive unit and API tests.
+- **Status:** USER VERIFICATION PENDING
+- **Agent Testing Done:** Y (Unit tests, API tests, and comprehensive testing via  all passed).
 - **Which testing method agent to use?** both
 - **User Testing Done:** N
 
 **All Pending/In progress Issue list**:
-There are no outstanding bugs. The work is defined by the user-approved plan for the current task.
+- **Issue 1: User's Local Deployment Environment Instability (P0 - CRITICAL)**
+  - **Description:** The user experienced significant frustration and downtime () after pulling the latest code. The root cause was that their local  was outdated and pointed to  instead of . Although the agent successfully guided the user to a fix ( command on Dockerfile and ), this indicates a fragility in the user's deployment process. The user's final message (up. finally. fuck.) highlights their frustration.
+  - **Attempted fixes:** The agent correctly identified the Dockerfile issue and provided commands to fix it and rebuild the image.
+  - **Next debug checklist:**
+    - Proactively ask the user if the deployment is stable and if they have any lingering concerns before starting new work.
+    - Check the user's No local changes to save to ensure the previous manual edit didn't leave any conflicting state.
+    - Recommend a standard workflow for the user to follow after pulling changes: No local changes to save, , .
+  - **Why fix this issue and what will be achieved with the fix?** To restore user confidence and ensure a smooth development/deployment workflow. Preventing this issue is critical for project velocity and user satisfaction.
+  - **Status:** RESOLVED (but requires immediate follow-up to ensure user confidence and process improvement).
+  - **Is recurring issue?** Y (This type of environment desync can happen again).
+  - **Should Test frontend/backend/both after fix?** both (by user on their environment).
+  - **Blocked on other issue:** None.
 
 **In progress Task List**:
-- **Task 1: (P0) Technical Debt Remediation Pass: Workflow Handler Extraction**
-    - **Where to resume:** The agent has listed the 15 workflow handlers. The immediate next step is to complete the dependency analysis for all 15 handlers within . After mapping dependencies (local helpers, globals, service calls), the agent should propose a plan to the user for extracting the logic into a new  module before implementation.
-    - **What will be achieved with this?** The 15 workflow-related API handlers will be moved out of , significantly reducing its size and complexity. The  module will import from the new, focused service instead, improving code organization.
-    - **Status:** IN PROGRESS
-    - **Should Test frontend/backend/both after fix?** both
-    - **Blocked on something:** None
+- None.
 
 **Upcoming and Future Tasks**
 **Upcoming Tasks:**
--   **P0:** Complete the current Workflow Handler Extraction pass.
--   **P1:** Perform the final handler extraction pass for the 7 remaining  handlers in .
+- **P1:** Refactor the frontend dashboard to display document counts based on the new  and  fields.
+- **P1:** Build an admin UI for managing item mapping rules.
+- **P1:** AR Release Gate (Prepay and Terms Approval).
 
 **Future Tasks:**
--   **P1:** AR Release Gate (Prepay and Terms Approval).
--   **P2:** Inventory Planning Horizon (Demand Forecast + Purchase Timing).
--   Build an admin UI for managing item mapping rules.
--   Decommission the legacy Zetadocs system.
--   Implement a production-ready email service to replace the mock.
--   Implement Entra ID SSO to replace mock JWT auth.
--   Refactor monolithic files:  and .
+- **P1:** Complete the Orchestration Logic Extraction from  (this was paused).
+- **P2:** Inventory Planning Horizon (Demand Forecast + Purchase Timing).
+- **P2:** Refactor monolithic files:  and .
+- **P2:** Future extensions for the routing engine (stable_vendor auto-approval, layout family trust scoring, dynamic policy thresholds).
+- **P2:** Decommission the legacy Zetadocs system.
+- **P2:** Implement a production-ready email service to replace the mock.
+- **P2:** Implement Entra ID SSO to replace mock JWT auth.
 
 **Completed work in this session**
-- **Workflow Handler Extraction (Investigation Started):** Identified the 15 target workflow handlers in  and began inspecting their implementations in .
-- **Document Handler Extraction (DONE):** Extracted 10 document-domain handlers from  into a new . Updated  to use the new service, removing its direct dependency on . Validated with 112 passing tests and the testing agent.
-- **Legacy Route Scaffolding Removal (DONE):** Removed the dead  and all commented-out route decorator lines from , simplifying the file. Verified with 97 passing tests.
-- **BC Validation Logic Extraction (DONE):** Extracted  and related logic from  into a new . Validated with 84 passing tests and the testing agent.
-- **Pipeline Hardening & Observability (DONE):** Instrumented the document pipeline with timing and status, persisted run traces to MongoDB, and added a new API endpoint () to retrieve them. Validated with 53 passing tests and the testing agent.
+- **Document Readiness Engine (DONE):** Implemented a comprehensive readiness evaluation service, API, and UI component to provide a canonical status for each document.
+- **Vendor Resolution Observability & Negative Feedback Loop (DONE):** Built a system to track resolution metrics, analyze fuzzy matching performance, and learn from manual corrections to prevent bad auto-matches from repeating.
+- **Vendor Resolution Improvements (DONE):** Integrated  for high-performance fuzzy matching and added a startup process to bootstrap the vendor alias table from existing Business Central data.
+- **Vendor Alias Learning System (DONE):** Created a service that automatically learns vendor name variations based on user approvals, improving future match rates.
+- **Autonomous Document Routing (Auto-Clear Gate) (DONE):** Implemented the initial routing engine to categorize documents for automated processing, manual review, or blocking.
+- **Critical Debugging (DONE):** Diagnosed and resolved a critical 502 Bad Gateway error on the user's local deployment caused by an outdated  entrypoint.
 
 **Earlier issues found/mentioned but not fixed**
--   **Issue 1: Monolithic Codebase (P2)**
-    -   **Debug checklist:** Examine  and  to identify logical sections that can be broken out into smaller, more focused modules/components.
-    -   **Why to solve this issue and what will be achieved with this?** To improve maintainability, testability, and developer velocity by reducing the cognitive load required to work with these large files.
-    -   **Should Test frontend/backend/both after fix:** both
-    -   **Is recurring issue?** Y
+- **Issue 1: Monolithic Codebase (P2)**
+    - **Debug checklist:** Examine  and  to identify logical sections that can be broken out into smaller, more focused modules/components.
+    - **Why to solve this issue and what will be achieved with this?** To improve maintainability, testability, and developer velocity.
+    - **Should Test frontend/backend/both after fix:** both
+    - **Is recurring issue?** Y
 
 **Known issue recurrence from previous fork**
-- **Issue recurrence in previous fork:** Forward reference Python error /  file corruption.
-- **Recurrence count:** 4+
-- **Status:** RESOLVED (for specific instances). This remains a risk during large refactoring, requiring careful use of  and post-edit verification.
+- **Issue recurrence in previous fork:** Outdated Dockerfile configuration causing deployment failure.
+- **Recurrence count:** 1
+- **Status:** RESOLVED (but requires proactive user communication). This is a new critical issue that surfaced in this session. The agent has now corrected the  in the main repository, which should prevent this specific recurrence.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
-- **Progressive Refactoring:** The core methodology of dismantling  in controlled, verifiable steps without breaking functionality.
-- **Handler Extraction:** The specific pattern being used, moving API handler logic from  into dedicated, domain-focused service modules (e.g., , ).
-- **Dependency Inversion:** Router modules are being refactored to depend on service abstractions rather than the monolithic  implementation.
+- **Service-Oriented Architecture:** The backend is organized into distinct services responsible for specific business logic (routing, readiness, vendor resolution).
+- **Fuzzy Matching:** Using  library for efficient and accurate string similarity comparison to match vendor names.
+- **Feedback Loops:** The system incorporates both positive (alias learning) and negative (rejection memory) feedback loops to improve autonomously over time.
+- **State Machines:** The  and  objects act as state indicators, driving documents through the workflow.
+- **Docker-based Deployment:** The user runs the application via , and it's critical that the Docker images are rebuilt correctly after code changes.
 
 **key DB schema**
-- ****: Stores a summary of each document processing pipeline execution, including stage timings, statuses, and outcomes for observability.
+- ****: Extended with  (object),  (object), and  (object).
+- ****: { , , , ,  }
+- ****: { , , ,  }
 
 **changes in tech stack**
-- None.
+- **Added:**  for high-performance fuzzy string matching.
 
 **All files of reference**
-- **Current Task Targets:**
-    -  (source of the handlers)
-    -  (consumer of the handlers)
-    -  (potential dependency)
-    -  (potential dependency)
-    -  (for documentation)
+- **New Backend Services:**
+    - 
+    - 
+    - 
+    - 
+- **New Backend Routers:**
+    - 
+    - 
+- **New Tests:**
+    - 
+    - 
+    - 
+    - 
+    - 
+- **Key Modified Files:**
+    -  (to integrate new service calls into the pipeline)
+    -  (updated with  and guardrails)
+    -  (to hook in feedback loops)
+    -  (to add the )
+    -  (to add new metrics)
+    -  (to register new routers)
+    -  (to fix the CMD entrypoint)
 
 **Areas that need refactoring**:
-- **:** This is the primary target. The goal is to extract the 15 workflow handlers.
-- ** & :** These are known large files that are candidates for a future refactoring pass.
+- : Still contains business orchestration logic.
+-  & : Known large monolithic files.
 
 **key api endpoints**
-- No new endpoints are being added. The work focuses on refactoring the implementation of the 15 existing workflow API endpoints.
+- 
+- 
+- 
+- 
+-  & admin endpoints
+- 
 
 **Critical Info for New Agent**
-- **Your task is to continue the investigation for the Workflow Handler Extraction pass.** You have already identified the 15 handlers. Your next step is to finish mapping their dependencies within .
-- **Follow the established pattern:**
-    1.  Finish the investigation and dependency mapping.
-    2.  Propose a plan to the user: create , move the logic, update  to use it.
-    3.  Once approved, implement the changes.
-    4.  Create a new targeted test file ().
-    5.  Run all existing and new tests to ensure no regressions.
-    6.  Call the  for a final comprehensive validation.
-- **Do not deviate from the plan or introduce new features.** This is a pure technical debt remediation task.
+- **Start by addressing the user's deployment issues.** The user was very frustrated with their local environment breaking. Your first action should be to check in, confirm their environment is stable, and perhaps recommend a standardized command sequence for them to use after pulling changes (No local changes to save). Restoring confidence is paramount.
+- **The application's intelligence has significantly increased.** Four major, interconnected features have been added. Understand how they work together: Routing -> Vendor Resolution -> Readiness Evaluation.
+- **The Docker entrypoint was a major bug.** The fix was to change the  in  from  to . This is now committed, but be aware of this if any similar deployment issues arise. The user's local changes had to be stashed to pull the fix.
 
 **documents and test reports created in this job**
-- 
-- 
-- 
-- 
-- 
+-  (updated)
+-  (updated)
+- Multiple test reports under , with the last being .
+- Multiple pytest result files, e.g., .
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **User:** Initiated the Workflow Handler Extraction pass with a detailed prompt, specifying the 15 handlers to be moved from . (COMPLETED)
-2.  **Agent:** Acknowledged the task and began investigating  to confirm the list of handlers. (COMPLETED)
-3.  **Agent:** Successfully listed the 15 handler function names from the router file. (COMPLETED)
-4.  **Agent:** Began inspecting the source code of the handlers within  to map dependencies. (IN PROGRESS)
+1.  **User:** Requests Document Readiness Engine feature. (COMPLETED)
+2.  **User:**  (approving agent's plan).
+3.  **User:**  (approving agent's plan).
+4.  **User:**  (approving agent's plan).
+5.  **User:**  fails due to local changes in . (RESOLVED)
+6.  **Agent:** Advises user to No local changes to save.
+7.  **User:** Reports successful pull.
+8.  **Agent:** Advises user to rebuild docker container.
+9.  **User:** Requests Vendor Resolution Observability feature. (COMPLETED)
+10. **User:**  with a screenshot of 502 error after agent's previous fix. (RESOLVED)
+11. **User:**  (Confirms app is working but expresses frustration).
 
 **Project Health Check:**
-- **Broken:** No. The application is functional.
-- **Mocked:** Email service (Microsoft Graph), Business Central (BC) API (write operations), JWT Auth (Entra ID).
+- **Broken:** No. The application is functional in the agent's environment. The user's local environment is now reportedly working but should be considered fragile.
+- **Mocked:** Email service (Microsoft Graph), Business Central (BC) API write operations, and JWT Auth (Entra ID).
 
 **3rd Party Integrations**
-- **Gemini (via Emergent LLM Key):** Used for document classification and extraction.
-- **Dynamics 365 Business Central API:** Read-only access is live; write operations are mocked.
+- **Gemini (via Emergent LLM Key):** Used for document classification and data extraction.
+- **Dynamics 365 Business Central API:** Live for read-only access; write operations are mocked.
 - **Microsoft Graph API:** Mocked for email ingestion.
 - **APScheduler:** Used for background tasks.
+- **rapidfuzz:** Used for high-performance fuzzy string matching.
 
 **Testing status**
-- **Testing agent used after significant changes:** YES. The agent has successfully used  after every completed refactoring pass, ensuring no API contract regressions.
+- **Testing agent used after significant changes:** YES. The agent ran  after every major feature implementation, and all tests passed successfully.
 - **Troubleshoot agent used after agent stuck in loop:** NO
-- **Test files created:** Yes, multiple  files exist, one for each completed pass. A new one is expected for the current task.
+- **Test files created:** Yes, extensive unit and API tests were created for all new services and routers.
 - **Known regressions:** None.
 
 **Credentials to test flow:**
 - **Web UI:**  / 
 
 **What agent forgot to execute**
-- Nothing. The agent is correctly following the user's instructions and is in the middle of the investigation phase for the current task.</analysis>
+- Nothing. The agent successfully pivoted to the user's new feature requests and completed them all. The paused refactoring task ( orchestration) was an intentional decision based on user priority.</analysis>

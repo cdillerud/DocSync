@@ -67,7 +67,7 @@
   },
   "test_credentials": {
     "auth": "admin / admin",
-    "api_url": "https://routing-intelligence.preview.emergentagent.com"
+    "api_url": "https://vendor-intel-1.preview.emergentagent.com"
   },
   "seed_data_created": {},
   "retest_needed": false,

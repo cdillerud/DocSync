@@ -1891,6 +1891,15 @@ class VendorMatchMethod:
     ALIAS = "alias"                 # Alias lookup table
     FUZZY = "fuzzy"                 # Fuzzy match with score
 
+def _build_vendor_resolution(vendor_raw: str, match_result: dict) -> dict:
+    """Build per-document vendor_resolution object for observability."""
+    try:
+        from services.vendor_resolution_service import build_resolution_object
+        return build_resolution_object(vendor_raw=vendor_raw, match_result=match_result)
+    except Exception:
+        return {"status": "unresolved", "method": "none", "raw": vendor_raw or ""}
+
+
 VENDOR_ALIAS_MAP = {
     # "Alias on Invoice": "Vendor Name in BC"
     # Add company-specific aliases here
@@ -3405,6 +3414,11 @@ async def _internal_intake_document(
         # Phase 7: Vendor alias results
         "vendor_canonical": vendor_alias_result.get("vendor_canonical"),
         "vendor_match_method": vendor_alias_result.get("vendor_match_method"),
+        # Phase 7: Vendor resolution observability
+        "vendor_resolution": _build_vendor_resolution(
+            vendor_raw=normalized_fields.get("vendor_raw", ""),
+            match_result=vendor_alias_result,
+        ),
         # Phase 7: Duplicate detection
         "possible_duplicate": duplicate_result.get("possible_duplicate", False),
         "duplicate_of_document_id": duplicate_result.get("duplicate_of_document_id"),
@@ -3884,6 +3898,11 @@ async def intake_document(
         # Phase 7: Vendor alias results
         "vendor_canonical": vendor_alias_result.get("vendor_canonical"),
         "vendor_match_method": vendor_alias_result.get("vendor_match_method"),
+        # Phase 7: Vendor resolution observability
+        "vendor_resolution": _build_vendor_resolution(
+            vendor_raw=normalized_fields.get("vendor_raw", ""),
+            match_result=vendor_alias_result,
+        ),
         # Phase 7: Duplicate detection
         "possible_duplicate": duplicate_result.get("possible_duplicate", False),
         "duplicate_of_document_id": duplicate_result.get("duplicate_of_document_id"),
@@ -7622,6 +7641,17 @@ async def startup():
     await db.vendor_aliases.create_index("canonical_vendor_id")
     try:
         await db.vendor_aliases.create_index("vendor_id")
+    except Exception:
+        pass
+    # Vendor match rejections indexes
+    try:
+        await db.vendor_match_rejections.create_index(
+            [("normalized_raw", 1), ("proposed_vendor_id", 1)],
+            unique=True,
+        )
+        await db.vendor_match_rejections.create_index("last_rejected_at")
+        await db.hub_documents.create_index("vendor_resolution.status")
+        await db.hub_documents.create_index("vendor_resolution.method")
     except Exception:
         pass
     # Phase C1: Mail intake log indexes

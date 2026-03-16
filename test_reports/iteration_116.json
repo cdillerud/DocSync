@@ -1,0 +1,123 @@
+{
+  "summary": "Vendor Resolution Observability + Negative Feedback Loop testing complete. All 71 unit and API tests pass. Both new endpoints (/api/vendor-resolution/metrics and /api/vendor-resolution/rejections) return correct structure. Existing endpoints unaffected.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_vendor_resolution_observability.py",
+    "/app/backend/tests/test_vendor_resolution_observability_api.py",
+    "/app/backend/tests/test_vendor_resolution.py",
+    "/app/backend/tests/test_vendor_alias_learning.py",
+    "/app/test_reports/pytest/vendor_resolution_observability_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_vendor_resolution_observability_api.py"
+  ],
+  "success_rate": {
+    "backend": "100% (71/71 tests)",
+    "frontend": "100% (Dashboard and Vendor Intel page load correctly)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "No documents have vendor_resolution field yet (populated only during new pipeline processing). vendor_match_rejections collection is empty (no rejections captured yet).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Vendor Resolution Observability tests confirmed working. Key points: (1) GET /api/vendor-resolution/metrics returns all required fields (total_documents, resolved_count, unresolved_count, ambiguous_count, needs_review_count, resolution_rate, by_method, fuzzy_score_buckets, top_unresolved, top_corrected, total_rejections), (2) GET /api/vendor-resolution/rejections returns rejections array with count and supports limit/skip pagination, (3) build_resolution_object correctly sets status based on match method and score (alias_match/bc_exact_match -> resolved, fuzzy_match >= 0.95 -> resolved, fuzzy_match < 0.95 -> needs_review, no match -> unresolved), (4) capture_rejection creates new or increments existing rejection records, (5) check_rejection_guardrail blocks previously rejected matches, (6) set_vendor_for_document in workflow_handlers.py captures negative feedback when reviewer overrides auto-matched vendor and sets reviewed_override=true, (7) vendor_matching.py lookup_vendor_alias checks guardrail before returning fuzzy matches (lines 148-162), (8) No breaking changes to existing endpoints.",
+  "verified_features": {
+    "metrics_endpoint": {
+      "status": "PASS",
+      "endpoint": "GET /api/vendor-resolution/metrics",
+      "response_fields": ["total_documents", "resolved_count", "unresolved_count", "ambiguous_count", "needs_review_count", "resolution_rate", "by_method", "fuzzy_score_buckets", "top_unresolved", "top_corrected", "total_rejections"]
+    },
+    "rejections_endpoint": {
+      "status": "PASS",
+      "endpoint": "GET /api/vendor-resolution/rejections",
+      "response_fields": ["rejections", "count"],
+      "pagination": "limit/skip supported"
+    },
+    "build_resolution_object": {
+      "status": "PASS",
+      "tests": [
+        "alias_match -> resolved",
+        "bc_exact_match -> resolved",
+        "fuzzy_match >= 0.95 -> resolved",
+        "fuzzy_match < 0.95 -> needs_review",
+        "no match -> unresolved",
+        "explicit status override works"
+      ]
+    },
+    "capture_rejection": {
+      "status": "PASS",
+      "tests": ["creates new rejection", "increments existing rejection count"]
+    },
+    "check_rejection_guardrail": {
+      "status": "PASS",
+      "tests": ["returns rejection record for blocked matches", "returns None for safe matches", "handles empty inputs"]
+    },
+    "negative_feedback_in_set_vendor": {
+      "status": "PASS",
+      "location": "workflow_handlers.py lines 156-178",
+      "behavior": "Calls capture_rejection when reviewer overrides fuzzy_match/bc_exact_match"
+    },
+    "reviewed_override_flag": {
+      "status": "PASS",
+      "location": "workflow_handlers.py lines 180-201",
+      "behavior": "Sets vendor_resolution.reviewed_override=true when vendor changed"
+    },
+    "guardrail_in_vendor_matching": {
+      "status": "PASS",
+      "location": "vendor_matching.py lines 148-162",
+      "behavior": "Checks rejection history before returning fuzzy match, adds guardrail_downgraded and resolution_status fields"
+    },
+    "existing_endpoints_non_regression": {
+      "status": "PASS",
+      "verified": ["/api/dashboard/stats", "/api/aliases/metrics", "/api/health"]
+    }
+  },
+  "tests_executed": {
+    "unit_tests": {
+      "test_vendor_resolution_observability.py": {
+        "passed": 14,
+        "failed": 0,
+        "coverage": ["BuildResolutionObject (7 tests)", "CaptureRejection (2 tests)", "Guardrail (3 tests)", "ResolutionInMatchPipeline (2 tests)"]
+      },
+      "test_vendor_resolution.py": {
+        "passed": 25,
+        "failed": 0,
+        "coverage": ["Normalization (14 tests)", "RapidfuzzScoring (10 tests)", "MatchMethodStandardization (1 test)"]
+      },
+      "test_vendor_alias_learning.py": {
+        "passed": 21,
+        "failed": 0,
+        "coverage": ["Normalization (12 tests)", "AliasLearning (6 tests)", "AliasLookup (3 tests)"]
+      }
+    },
+    "api_tests": {
+      "test_vendor_resolution_observability_api.py": {
+        "passed": 11,
+        "failed": 0,
+        "coverage": [
+          "MetricsEndpoint (3 tests: returns 200, response structure, numeric values)",
+          "RejectionsEndpoint (4 tests: returns 200, structure, limit/skip params)",
+          "ExistingEndpoints (3 tests: dashboard/stats, aliases/metrics, health)",
+          "StatusLogic (1 test: no_resolution_data count)"
+        ]
+      }
+    }
+  },
+  "current_state": {
+    "total_documents": 79,
+    "resolved_count": 0,
+    "unresolved_count": 0,
+    "no_resolution_data": 79,
+    "total_rejections": 0,
+    "note": "All counts are 0 because existing documents were not processed through the new pipeline that writes vendor_resolution"
+  }
+}

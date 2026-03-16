@@ -142,8 +142,27 @@ async def lookup_vendor_alias(vendor_normalized: str) -> dict:
                 best_match = bv
 
         if best_match and best_score >= 0.90:
+            proposed_vendor_id = best_match.get("number") or best_match.get("id")
+
+            # Guardrail: check if this match was previously rejected
+            try:
+                from services.vendor_resolution_service import check_rejection_guardrail
+                rejection = await check_rejection_guardrail(vendor_normalized, proposed_vendor_id)
+                if rejection:
+                    return {
+                        "vendor_canonical": proposed_vendor_id,
+                        "vendor_match_method": "fuzzy_match",
+                        "vendor_name": best_match.get("displayName"),
+                        "vendor_no": best_match.get("number"),
+                        "match_score": round(best_score, 3),
+                        "guardrail_downgraded": True,
+                        "resolution_status": "needs_review",
+                    }
+            except Exception:
+                pass
+
             return {
-                "vendor_canonical": best_match.get("number") or best_match.get("id"),
+                "vendor_canonical": proposed_vendor_id,
                 "vendor_match_method": "fuzzy_match",
                 "vendor_name": best_match.get("displayName"),
                 "vendor_no": best_match.get("number"),

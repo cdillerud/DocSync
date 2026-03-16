@@ -152,6 +152,54 @@ async def set_vendor_for_document(doc_id: str, request: SetVendorRequest):
     except Exception as e:
         logger.warning("[VendorAlias] Learning failed in set_vendor: %s", e)
 
+    # Negative feedback: capture rejection if reviewer overrides an auto-match
+    prev_method = doc.get("vendor_match_method") or (doc.get("vendor_resolution") or {}).get("method")
+    prev_vendor = doc.get("vendor_canonical")
+    if (
+        prev_method in ("fuzzy_match", "bc_exact_match", "fuzzy_bc", "fuzzy")
+        and prev_vendor
+        and prev_vendor != request.vendor_id
+    ):
+        try:
+            from services.vendor_resolution_service import capture_rejection
+            await capture_rejection(
+                doc_id=doc_id,
+                vendor_raw=doc.get("vendor_raw") or doc.get("extracted_vendor") or "",
+                proposed_vendor_id=prev_vendor,
+                proposed_vendor_name=doc.get("vendor_resolved_name") or prev_vendor,
+                proposed_method=prev_method,
+                proposed_score=float(doc.get("vendor_match_score") or (doc.get("vendor_resolution") or {}).get("score") or 0),
+                corrected_vendor_id=request.vendor_id,
+                corrected_vendor_name=request.vendor_name or request.vendor_id,
+                actor="reviewer",
+            )
+        except Exception as e:
+            logger.warning("[VendorRejection] Capture failed in set_vendor: %s", e)
+
+    # Mark resolution as reviewed_override if vendor changed
+    if prev_vendor and prev_vendor != request.vendor_id:
+        update_data["vendor_resolution"] = {
+            **(doc.get("vendor_resolution") or {}),
+            "status": "resolved",
+            "method": "manual_match",
+            "matched_vendor_name": request.vendor_name or request.vendor_id,
+            "matched_vendor_no": request.vendor_id,
+            "score": 1.0,
+            "reason": "Reviewer override",
+            "reviewed_override": True,
+        }
+    else:
+        update_data["vendor_resolution"] = {
+            **(doc.get("vendor_resolution") or {}),
+            "status": "resolved",
+            "method": "manual_match",
+            "matched_vendor_name": request.vendor_name or request.vendor_id,
+            "matched_vendor_no": request.vendor_id,
+            "score": 1.0,
+            "reason": "Vendor manually confirmed",
+            "reviewed_override": False,
+        }
+
     doc.update(update_data)
     _, history_entry, success = WorkflowEngine.advance_workflow(
         doc,

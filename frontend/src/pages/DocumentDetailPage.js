@@ -12,7 +12,8 @@ import {
   ArrowLeft, ExternalLink, Link, RefreshCw, FileText,
   CheckCircle2, AlertCircle, Clock, Loader2, Copy, RotateCcw, 
   ShieldCheck, ShieldAlert, Building2, FileSearch, Receipt,
-  Zap, User, Cpu, Eye, Inbox, Check, XCircle, AlertTriangle
+  Zap, User, Cpu, Eye, Inbox, Check, XCircle, AlertTriangle,
+  Gauge, CircleDot
 } from 'lucide-react';
 import { Square9WorkflowTracker } from '../components/Square9WorkflowTracker';
 import APReviewPanel from '../components/APReviewPanel';
@@ -24,6 +25,117 @@ import MatchingDebugPanel from '../components/MatchingDebugPanel';
 import CreateBCSalesOrderPanel from '../components/CreateBCSalesOrderPanel';
 import CreateBCPurchaseInvoicePanel from '../components/CreateBCPurchaseInvoicePanel';
 import DocumentIntelligencePanel from '../components/DocumentIntelligencePanel';
+
+const READINESS_CONFIG = {
+  ready_auto_draft: { label: 'Ready (Auto-Draft)', color: 'bg-emerald-500', textColor: 'text-emerald-500', icon: CheckCircle2 },
+  ready_auto_link: { label: 'Ready (Auto-Link)', color: 'bg-cyan-500', textColor: 'text-cyan-500', icon: Link },
+  needs_review: { label: 'Needs Review', color: 'bg-amber-500', textColor: 'text-amber-500', icon: Eye },
+  blocked: { label: 'Blocked', color: 'bg-red-500', textColor: 'text-red-500', icon: XCircle },
+  ambiguous: { label: 'Ambiguous', color: 'bg-purple-500', textColor: 'text-purple-500', icon: AlertTriangle },
+};
+
+const ACTION_LABELS = {
+  auto_draft: 'Auto-draft to BC',
+  auto_link: 'Auto-link to existing record',
+  review: 'Route to reviewer',
+  hold: 'Hold for investigation',
+};
+
+function ReadinessPanel({ readiness }) {
+  if (!readiness) return null;
+
+  const cfg = READINESS_CONFIG[readiness.status] || READINESS_CONFIG.needs_review;
+  const StatusIcon = cfg.icon;
+  const confidencePct = Math.round((readiness.confidence || 0) * 100);
+
+  return (
+    <Card className={`border-l-4`} style={{ borderLeftColor: `var(--${readiness.status === 'blocked' ? 'destructive' : readiness.status === 'ready_auto_draft' ? 'primary' : 'warning'})` }} data-testid="readiness-panel">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Gauge className="w-5 h-5 text-primary" />
+            <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Readiness</CardTitle>
+          </div>
+          <Badge className={`${cfg.color} text-white`} data-testid="readiness-status-badge">
+            <StatusIcon className="w-3 h-3 mr-1" />
+            {cfg.label}
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        {/* Action + Confidence */}
+        <div className="flex items-center justify-between">
+          <div>
+            <span className="text-muted-foreground text-xs">Recommended: </span>
+            <span className="font-semibold">{ACTION_LABELS[readiness.recommended_action] || readiness.recommended_action}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
+              <div className={`h-full ${cfg.color} rounded-full`} style={{ width: `${confidencePct}%` }} />
+            </div>
+            <span className={`text-xs font-bold ${cfg.textColor}`} data-testid="readiness-confidence">{confidencePct}%</span>
+          </div>
+        </div>
+
+        {/* Blocking reasons */}
+        {readiness.blocking_reasons?.length > 0 && (
+          <div data-testid="readiness-blockers">
+            <div className="text-xs font-semibold text-red-500 mb-1">Blocking</div>
+            {readiness.blocking_reasons.map((r, i) => (
+              <div key={i} className="flex items-start gap-1.5 text-xs text-red-600 dark:text-red-400">
+                <XCircle className="w-3 h-3 mt-0.5 shrink-0" />
+                <span>{r.replace(/_/g, ' ')}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Warnings */}
+        {readiness.warning_reasons?.length > 0 && (
+          <div data-testid="readiness-warnings">
+            <div className="text-xs font-semibold text-amber-500 mb-1">Warnings</div>
+            {readiness.warning_reasons.map((r, i) => (
+              <div key={i} className="flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
+                <span>{r.replace(/_/g, ' ')}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Reviewer actions */}
+        {readiness.required_reviewer_actions?.length > 0 && (
+          <div data-testid="readiness-actions">
+            <div className="text-xs font-semibold text-blue-500 mb-1">Next Steps</div>
+            {readiness.required_reviewer_actions.map((a, i) => (
+              <div key={i} className="flex items-start gap-1.5 text-xs">
+                <CircleDot className="w-3 h-3 mt-0.5 shrink-0 text-blue-500" />
+                <span>{a}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Signals summary */}
+        {readiness.signals && (
+          <div className="pt-2 border-t" data-testid="readiness-signals">
+            <div className="text-xs text-muted-foreground mb-1">Signals</div>
+            <div className="flex flex-wrap gap-1.5">
+              {Object.entries(readiness.signals).map(([key, val]) => (
+                <span key={key} className={`inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full ${
+                  val ? 'bg-emerald-500/10 text-emerald-600' : 'bg-red-500/10 text-red-500'
+                }`}>
+                  {val ? <Check className="w-2.5 h-2.5" /> : <XCircle className="w-2.5 h-2.5" />}
+                  {key.replace(/_/g, ' ')}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 const STATUS_CLASSES = {
   Received: 'status-received',
@@ -471,6 +583,9 @@ export default function DocumentDetailPage() {
               </CardContent>
             </Card>
           )}
+
+          {/* Readiness Panel */}
+          <ReadinessPanel readiness={doc.readiness} />
 
           {/* BC Sales Order Panel - for eligible document types */}
           <DocumentIntelligencePanel

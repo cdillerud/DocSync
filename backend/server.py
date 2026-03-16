@@ -3586,6 +3586,19 @@ async def _internal_intake_document(
     except Exception as e:
         logger.error("[Routing] Error routing document %s: %s", doc_id, str(e))
 
+    # =================================================================
+    # DOCUMENT READINESS EVALUATION
+    # =================================================================
+    readiness_result = None
+    try:
+        from services.document_readiness_service import evaluate_and_persist
+        readiness_result = await evaluate_and_persist(doc_id)
+        logger.info("[Readiness] Document %s: status=%s confidence=%.2f action=%s",
+                     doc_id, readiness_result.get("status"), readiness_result.get("confidence", 0),
+                     readiness_result.get("recommended_action"))
+    except Exception as e:
+        logger.error("[Readiness] Error evaluating document %s: %s", doc_id, str(e))
+
     # Emit workflow events (Phase 1)
     try:
         await _emit_intake_events(
@@ -3612,7 +3625,8 @@ async def _internal_intake_document(
         "automation_decision": decision,
         "sharepoint": sp_result,
         "auto_clear": auto_clear_result,
-        "routing": routing_result
+        "routing": routing_result,
+        "readiness": readiness_result
     }
 
 

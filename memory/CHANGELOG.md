@@ -305,3 +305,14 @@
 - Updated VendorIntelligenceCard in DashboardPage.js with alias learning metrics section
 - Fixed Dockerfile CMD: server:app → main:app (was breaking Docker deployments)
 - 21 unit tests + 13 API integration tests, all passing
+
+## March 16, 2026 — Vendor Resolution Pipeline Improvements (iter_115)
+
+- Upgraded fuzzy matching to use `rapidfuzz` (token_sort_ratio + partial_ratio) replacing simple token overlap
+- Auto-match threshold: >=90% similarity triggers automatic vendor resolution
+- Added rapidfuzz-based fuzzy step in `lookup_vendor_alias` against cached BC vendors (hub_bc_vendors)
+- Added BC vendor alias bootstrap on startup: normalizes all BC vendor names and seeds vendor_aliases
+- Standardized match_method values: `alias_match`, `fuzzy_match`, `bc_exact_match`, `manual_match`
+- Added `vendor_resolution_rate` to `/api/aliases/metrics` and workflow-intelligence dashboard
+- Updated VendorIntelligenceCard to show vendor resolution rate
+- 25 unit tests for normalization + rapidfuzz + 9 API tests, all passing (55 total)

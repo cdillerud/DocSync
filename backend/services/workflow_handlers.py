@@ -140,6 +140,18 @@ async def set_vendor_for_document(doc_id: str, request: SetVendorRequest):
             upsert=True,
         )
 
+    # Auto-learn vendor alias from this approval
+    try:
+        from services.vendor_alias_learning_service import learn_alias_from_approval
+        await learn_alias_from_approval(
+            doc,
+            vendor_id=request.vendor_id,
+            vendor_name=request.vendor_name or request.vendor_id,
+            actor="reviewer",
+        )
+    except Exception as e:
+        logger.warning("[VendorAlias] Learning failed in set_vendor: %s", e)
+
     doc.update(update_data)
     _, history_entry, success = WorkflowEngine.advance_workflow(
         doc,
@@ -395,6 +407,19 @@ async def approve_document(doc_id: str, request: ApprovalActionRequest):
     doc["updated_utc"] = datetime.now(timezone.utc).isoformat()
     doc["approved_utc"] = datetime.now(timezone.utc).isoformat()
     doc["approved_by"] = request.approver or "system"
+
+    # Auto-learn vendor alias from approval (if vendor is resolved)
+    if doc.get("vendor_canonical") and doc.get("vendor_raw"):
+        try:
+            from services.vendor_alias_learning_service import learn_alias_from_approval
+            await learn_alias_from_approval(
+                doc,
+                vendor_id=doc.get("vendor_canonical"),
+                vendor_name=doc.get("vendor_resolved_name") or doc.get("vendor_canonical"),
+                actor=request.approver or "system",
+            )
+        except Exception as e:
+            logger.warning("[VendorAlias] Learning failed in approve_document: %s", e)
 
     _, history_entry, success = WorkflowEngine.advance_workflow(
         doc,

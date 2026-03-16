@@ -26,10 +26,23 @@ class VendorAlias(BaseModel):
 
 
 @router.get("/vendors")
-async def get_vendor_aliases():
-    """Get all vendor aliases."""
+async def get_vendor_aliases(
+    vendor_id: Optional[str] = Query(None),
+    source: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+):
+    """Get all vendor aliases, optionally filtered by vendor_id or source."""
     db = get_db()
-    aliases = await db.vendor_aliases.find({}, {"_id": 0}).to_list(500)
+    query = {}
+    if vendor_id:
+        query["$or"] = [
+            {"vendor_id": vendor_id},
+            {"canonical_vendor_id": vendor_id},
+            {"vendor_no": vendor_id},
+        ]
+    if source:
+        query["source"] = source
+    aliases = await db.vendor_aliases.find(query, {"_id": 0}).sort("usage_count", -1).limit(limit).to_list(limit)
     return {"aliases": aliases, "count": len(aliases)}
 
 
@@ -137,3 +150,27 @@ async def record_alias_usage(alias_string: str):
             "$set": {"last_used_at": datetime.now(timezone.utc).isoformat()}
         }
     )
+
+
+@router.get("/metrics")
+async def get_alias_metrics():
+    """Get vendor alias learning metrics for the dashboard."""
+    from services.vendor_alias_learning_service import get_alias_metrics as _get_metrics
+    return await _get_metrics()
+
+
+@router.delete("/vendors/by-alias/{alias}")
+async def delete_vendor_alias_by_name(alias: str):
+    """Delete a vendor alias by its normalized alias string."""
+    from services.vendor_name_helpers import normalize_vendor_name
+    db = get_db()
+    normalized = normalize_vendor_name(alias)
+    result = await db.vendor_aliases.delete_one({
+        "$or": [
+            {"normalized_alias": normalized},
+            {"alias_string": alias},
+        ]
+    })
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail=f"Alias '{alias}' not found")
+    return {"message": f"Alias '{alias}' deleted"}

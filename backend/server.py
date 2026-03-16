@@ -7620,6 +7620,10 @@ async def startup():
     await db.vendor_aliases.create_index("normalized_alias")
     await db.vendor_aliases.create_index("vendor_no")
     await db.vendor_aliases.create_index("canonical_vendor_id")
+    try:
+        await db.vendor_aliases.create_index("vendor_id")
+    except Exception:
+        pass
     # Phase C1: Mail intake log indexes
     await db.mail_intake_log.create_index("internet_message_id")
     await db.mail_intake_log.create_index("attachment_hash")

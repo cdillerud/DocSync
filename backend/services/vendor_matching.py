@@ -15,6 +15,7 @@ Dependencies:
 
 import logging
 import re
+from datetime import datetime, timezone
 
 import httpx
 
@@ -82,9 +83,24 @@ async def lookup_vendor_alias(vendor_normalized: str) -> dict:
             or alias_doc.get("vendor_no")
             or alias_doc.get("vendor_name")
         )
+        # Track alias usage
+        try:
+            await db.vendor_aliases.update_one(
+                {"$or": [
+                    {"normalized": vendor_normalized},
+                    {"normalized_alias": vendor_normalized},
+                ]},
+                {
+                    "$inc": {"usage_count": 1},
+                    "$set": {"last_used_at": datetime.now(timezone.utc).isoformat()},
+                },
+            )
+        except Exception:
+            pass
+        match_method = "learned_alias" if alias_doc.get("source") == "auto_learned" else "alias"
         return {
             "vendor_canonical": canonical_id,
-            "vendor_match_method": "alias",
+            "vendor_match_method": match_method,
             "vendor_name": alias_doc.get("vendor_name"),
             "vendor_no": alias_doc.get("vendor_no"),
         }

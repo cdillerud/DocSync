@@ -226,6 +226,40 @@ function VendorIntelligenceCard({ data }) {
           <span className="font-bold">{data.freight_carriers_detected || 0}</span>
         </div>
 
+        {/* Alias Learning Metrics */}
+        {data.alias_metrics && data.alias_metrics.total_aliases > 0 && (
+          <div className="pt-2 border-t space-y-2" data-testid="alias-metrics-section">
+            <h4 className="text-sm font-semibold flex items-center gap-2">
+              <Link2Off className="w-3 h-3 text-cyan-500" /> Alias Learning
+            </h4>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="bg-cyan-500/10 rounded-lg p-2 text-center">
+                <div className="text-lg font-bold text-cyan-500">{data.alias_metrics.total_aliases}</div>
+                <div className="text-[10px] text-muted-foreground">Total Aliases</div>
+              </div>
+              <div className="bg-emerald-500/10 rounded-lg p-2 text-center">
+                <div className="text-lg font-bold text-emerald-500">{data.alias_metrics.auto_learned || 0}</div>
+                <div className="text-[10px] text-muted-foreground">Auto-Learned</div>
+              </div>
+              <div className="bg-purple-500/10 rounded-lg p-2 text-center">
+                <div className="text-lg font-bold text-purple-500">{data.alias_metrics.alias_match_rate || 0}%</div>
+                <div className="text-[10px] text-muted-foreground">Alias Match Rate</div>
+              </div>
+            </div>
+            {data.alias_metrics.top_aliases && data.alias_metrics.top_aliases.length > 0 && (
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Top Learned Aliases</div>
+                {data.alias_metrics.top_aliases.slice(0, 3).map((a, i) => (
+                  <div key={i} className="flex items-center justify-between text-xs">
+                    <span className="truncate max-w-[60%] text-muted-foreground">{a.normalized_alias || a.alias}</span>
+                    <span className="font-mono text-cyan-500">{a.usage_count}x → {a.vendor_name}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Spiro Integration */}
         <div className="flex items-center justify-between text-sm text-muted-foreground">
           <span>Spiro CRM Companies</span>

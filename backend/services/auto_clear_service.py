@@ -395,9 +395,10 @@ def evaluate_auto_clear(
             )
     
     # =================================================================
-    # CHECK 6: SharePoint Upload (if required globally)
+    # CHECK 6: SharePoint Upload (only for AP invoices and types that need BC posting)
     # =================================================================
-    if config.get("require_sharepoint_upload"):
+    requires_sp = type_config.get("auto_post_if_cleared") or type_config.get("auto_create_if_cleared")
+    if config.get("require_sharepoint_upload") and requires_sp:
         sp_uploaded = bool(
             doc.get("sharepoint_item_id")
             or doc.get("sharepoint_web_url")

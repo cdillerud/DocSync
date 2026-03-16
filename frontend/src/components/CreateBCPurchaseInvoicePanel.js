@@ -306,6 +306,21 @@ function SuccessDisplay({ data }) {
         {data.vendor_invoice_no && (
           <FieldRow icon={<Receipt className="w-3.5 h-3.5" />} label="Invoice No" value={data.vendor_invoice_no} />
         )}
+        {(data.lines_added != null || data.lines_total != null) && (
+          <FieldRow
+            icon={<Package className="w-3.5 h-3.5" />}
+            label="Lines"
+            value={`${data.lines_added || 0} / ${data.lines_total || 0} added`}
+          />
+        )}
+        {data.line_errors && data.line_errors.length > 0 && (
+          <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md p-2">
+            <p className="text-[10px] font-medium text-amber-700 dark:text-amber-300 mb-0.5">Line Errors</p>
+            {data.line_errors.map((e, i) => (
+              <p key={i} className="text-[10px] text-amber-600 dark:text-amber-400">{e.error || JSON.stringify(e)}</p>
+            ))}
+          </div>
+        )}
         {data.status && (
           <FieldRow
             icon={<CheckCircle2 className="w-3.5 h-3.5" />}

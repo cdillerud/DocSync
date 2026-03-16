@@ -262,6 +262,91 @@ async def add_sales_order_lines(
     return {"added": added, "total": len(lines), "errors": errors}
 
 
+# Fallback defaults for purchase invoice lines
+BC_PI_FALLBACK_GL_ACCOUNT = os.environ.get('BC_PI_FALLBACK_GL_ACCOUNT', '')
+BC_PI_FALLBACK_ITEM_CODE = os.environ.get('BC_PI_FALLBACK_ITEM_CODE', os.environ.get('BC_DEFAULT_ITEM_CODE', ''))
+
+
+async def add_purchase_invoice_lines(
+    invoice_system_id: str,
+    lines: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Add line items to an existing Purchase Invoice using the standard BC API.
+
+    Each line dict should have:
+      lineType: "Item" | "Account" | "Comment"
+      lineObjectNumber: item number or G/L account number
+      description: text
+      quantity: number
+      unitCost: number
+    """
+    _check_write_protection("add_purchase_invoice_lines")
+    if not HAS_CREDENTIALS:
+        raise ValueError("BC credentials not configured")
+
+    token = await _get_token()
+    company_id = await _get_company_id_standard_api()
+    url = f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/{BC_STANDARD_API}/companies({company_id})/purchaseInvoices({invoice_system_id})/purchaseInvoiceLines"
+
+    added = 0
+    errors = []
+
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        for idx, line in enumerate(lines):
+            line_type = line.get("lineType", "")
+            line_obj = line.get("lineObjectNumber", "")
+
+            # Resolve line type and object number
+            if not line_type:
+                if line_obj:
+                    line_type = "Item"
+                elif BC_PI_FALLBACK_GL_ACCOUNT:
+                    line_type = "Account"
+                    line_obj = BC_PI_FALLBACK_GL_ACCOUNT
+                elif BC_PI_FALLBACK_ITEM_CODE:
+                    line_type = "Item"
+                    line_obj = BC_PI_FALLBACK_ITEM_CODE
+                else:
+                    # Default to Comment if no item/account available
+                    line_type = "Comment"
+
+            line_payload = {
+                "lineType": line_type,
+                "quantity": float(line.get("quantity", 1) or 1),
+            }
+            if line_obj and line_type != "Comment":
+                line_payload["lineObjectNumber"] = line_obj
+            if line.get("description"):
+                line_payload["description"] = str(line["description"])[:100]
+            if line.get("unitCost") is not None and float(line.get("unitCost", 0)) > 0:
+                line_payload["unitCost"] = float(line["unitCost"])
+
+            logger.info("Adding PI line %d/%d: type=%s obj=%s qty=%s cost=$%s desc=%s",
+                        idx + 1, len(lines), line_payload.get("lineType"),
+                        line_payload.get("lineObjectNumber", "N/A"),
+                        line_payload["quantity"], line_payload.get("unitCost", 0),
+                        line_payload.get("description", "")[:40])
+
+            resp = await client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                json=line_payload,
+            )
+
+            if resp.status_code in (200, 201):
+                added += 1
+            else:
+                error_text = resp.text[:300]
+                logger.warning("Failed to add PI line %d: HTTP %d - %s", idx + 1, resp.status_code, error_text)
+                errors.append({"line": idx + 1, "status": resp.status_code, "error": error_text})
+
+    return {"added": added, "total": len(lines), "errors": errors}
+
+
 async def create_purchase_invoice(
     vendor_no: str,
     vendor_invoice_no: str = "",

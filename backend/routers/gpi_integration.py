@@ -32,6 +32,7 @@ from services.gpi_integration_service import (
     create_sales_order,
     add_sales_order_lines,
     create_purchase_invoice,
+    add_purchase_invoice_lines,
     create_customer,
     create_vendor,
     list_integration_logs,
@@ -1062,7 +1063,7 @@ async def purchase_invoice_preflight(doc_id: str):
 @router.post("/purchase-invoices/from-document/{doc_id}")
 async def create_purchase_invoice_from_document(doc_id: str, vendor_no_override: str = Query("", description="Override vendor number")):
     """Create a BC Purchase Invoice from a GPI Hub document.
-    Performs preflight, creates the invoice, and writes back to the document graph.
+    Performs preflight, creates the invoice header, adds line items, and writes back to the document graph.
     """
     if not HAS_CREDENTIALS:
         raise HTTPException(status_code=503, detail="BC credentials not configured")
@@ -1110,6 +1111,7 @@ async def create_purchase_invoice_from_document(doc_id: str, vendor_no_override:
     idempotency_key = _build_pi_idempotency_key(doc_id)
     transaction_id = f"TXN_{uuid.uuid4().hex[:12]}"
 
+    # Step 1: Create the Purchase Invoice header
     try:
         result = await create_purchase_invoice(
             vendor_no=vendor_no,
@@ -1123,6 +1125,37 @@ async def create_purchase_invoice_from_document(doc_id: str, vendor_no_override:
     except Exception as e:
         logger.error("Failed to create purchase invoice from doc %s: %s", doc_id, str(e))
         raise HTTPException(status_code=502, detail=f"BC API error: {str(e)}")
+
+    # Step 2: Add line items if the header was created and we have lines
+    line_results = None
+    if result.get("success") and result.get("bc_system_id"):
+        line_items = ef.get("line_items") or nf.get("line_items") or []
+        if line_items:
+            try:
+                bc_lines = []
+                for li in line_items:
+                    bc_line = {
+                        "description": li.get("description", ""),
+                        "quantity": float(li.get("quantity", 1) or 1),
+                        "unitCost": float(li.get("unit_price", 0) or li.get("unitCost", 0) or 0),
+                    }
+                    # If line has an item number, use it
+                    if li.get("item_number") or li.get("lineObjectNumber"):
+                        bc_line["lineObjectNumber"] = li.get("item_number") or li["lineObjectNumber"]
+                        bc_line["lineType"] = "Item"
+                    elif li.get("gl_account") or li.get("account_number"):
+                        bc_line["lineObjectNumber"] = li.get("gl_account") or li["account_number"]
+                        bc_line["lineType"] = "Account"
+                    bc_lines.append(bc_line)
+
+                line_results = await add_purchase_invoice_lines(
+                    invoice_system_id=result["bc_system_id"],
+                    lines=bc_lines,
+                )
+                logger.info("PI %s: added %d/%d lines", result["bc_record_no"], line_results["added"], line_results["total"])
+            except Exception as e:
+                logger.error("Failed to add lines to PI %s from doc %s: %s", result.get("bc_record_no"), doc_id, str(e))
+                line_results = {"added": 0, "total": len(line_items), "errors": [{"error": str(e)}]}
 
     # Graph writeback
     now = datetime.now(timezone.utc).isoformat()
@@ -1141,6 +1174,9 @@ async def create_purchase_invoice_from_document(doc_id: str, vendor_no_override:
         "created_at": now,
         "created_by": "gpi_hub",
         "error_message": result.get("error_message", ""),
+        "lines_added": line_results["added"] if line_results else 0,
+        "lines_total": line_results["total"] if line_results else 0,
+        "line_errors": line_results.get("errors", []) if line_results else [],
     }
 
     await db.hub_documents.update_one(
@@ -1183,6 +1219,9 @@ async def create_purchase_invoice_from_document(doc_id: str, vendor_no_override:
         "message": "Purchase Invoice created successfully" if result.get("success") else result.get("error_message", "Creation failed"),
         "error_message": result.get("error_message", ""),
         "created_at": now,
+        "lines_added": line_results["added"] if line_results else 0,
+        "lines_total": line_results["total"] if line_results else 0,
+        "line_errors": line_results.get("errors", []) if line_results else [],
     }
 
 

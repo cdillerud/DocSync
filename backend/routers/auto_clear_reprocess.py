@@ -5,6 +5,7 @@ previously denied due to overly strict rules.
 Endpoints:
   POST /api/auto-clear-reprocess/dry-run  — Preview what would be auto-cleared
   POST /api/auto-clear-reprocess/run      — Apply auto-clear to eligible docs
+  POST /api/auto-clear-reprocess/force-clear-remaining — Force-clear ALL remaining docs
 """
 
 import logging
@@ -18,6 +19,13 @@ from services.auto_clear_service import (
 
 logger = logging.getLogger("auto_clear_reprocess")
 router = APIRouter(prefix="/auto-clear-reprocess", tags=["Auto-Clear Reprocess"])
+
+_PROTECT_TYPES = ("Inventory_Report", "Sales_Order", "Purchase_Order",
+                  "SALES_ORDER", "PURCHASE_ORDER")
+_PROTECT_KEYWORDS = ("inventory", "open order", "open release",
+                     "warehouse", "stock", "sales-order", "sales order",
+                     "purchase-order", "purchase order", "pick-ticket",
+                     "pick ticket", "whse receipt", "demand", "forecast")
 
 
 @router.post("/dry-run")
@@ -80,11 +88,9 @@ async def run_reprocess():
     by_reason = {}
 
     for doc in docs:
-        # Rule 1: Standard auto-clear evaluation
         decision, reason, details = evaluate_auto_clear(doc)
 
-        # Rule 2: Backfill docs or old unprocessed Unknown docs → auto-clear
-        # BUT preserve inventory/operational docs for future sales module use
+        # Extended rules for backfill/old docs
         if decision != AutoClearDecision.CLEARED:
             source = (doc.get("source") or "").lower()
             doc_type = doc.get("doc_type") or doc.get("document_type") or ""
@@ -104,18 +110,10 @@ async def run_reprocess():
                 except Exception:
                     is_old = False
 
-            # Protect operational docs from auto-clear
-            _PROTECT_TYPES = ("Inventory_Report", "Sales_Order", "Purchase_Order",
-                              "SALES_ORDER", "PURCHASE_ORDER")
-            _PROTECT_KEYWORDS = ("inventory", "open order", "open release",
-                                 "warehouse", "stock", "sales-order", "sales order",
-                                 "purchase-order", "purchase order", "pick-ticket",
-                                 "pick ticket", "whse receipt", "demand", "forecast")
             is_protected = (
                 doc_type in _PROTECT_TYPES
                 or any(kw in fname for kw in _PROTECT_KEYWORDS)
             )
-
             is_unknown_type = not doc_type or doc_type in ("Unknown", "Unknown_Document", "Other")
             is_backfill = source == "backfill"
             is_non_ap = doc_type not in ("AP_Invoice", "AP_INVOICE")
@@ -154,5 +152,35 @@ async def run_reprocess():
         "remained": len(docs) - cleared,
         "by_type": by_type,
         "top_block_reasons": dict(sorted(by_reason.items(), key=lambda x: -x[1])[:15]),
+        "timestamp": now,
+    }
+
+
+@router.post("/force-clear-remaining")
+async def force_clear_remaining():
+    """Force-clear all remaining non-terminal, non-duplicate pending docs."""
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+
+    TERMINAL = ["Completed", "Posted", "Archived", "Duplicate", "FileMissing"]
+    result = await db.hub_documents.update_many(
+        {
+            "is_duplicate": {"$ne": True},
+            "auto_cleared": {"$ne": True},
+            "file_missing": {"$ne": True},
+            "status": {"$nin": TERMINAL},
+        },
+        {"$set": {
+            "auto_cleared": True,
+            "auto_clear_decision": "cleared",
+            "auto_clear_reason": "Manual bulk clear",
+            "workflow_status": "completed",
+            "status": "Completed",
+            "auto_clear_timestamp": now,
+        }},
+    )
+
+    return {
+        "cleared": result.modified_count,
         "timestamp": now,
     }

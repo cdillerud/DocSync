@@ -10,7 +10,7 @@ sys.path.insert(0, '/app/backend')
 
 
 # Test configuration
-API_BASE_URL = "https://query-collision-fix.preview.emergentagent.com"
+API_BASE_URL = "https://doc-dedup-final.preview.emergentagent.com"
 
 
 @pytest.fixture

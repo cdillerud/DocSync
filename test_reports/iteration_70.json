@@ -69,7 +69,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://query-collision-fix.preview.emergentagent.com"
+    "api_url": "https://doc-dedup-final.preview.emergentagent.com"
   },
   "seed_data_used": "Used existing Hormel Foods workspace (customer_id: 366bfcce-4d68-4daf-b9f4-cb05a35de8c8). Items with demand: TEST-ITEM-WARN (committed=5000, gap=10000), SPAM-LITE (committed=999, gap=1798), TEST-WARNONLY-732C83 (committed=100, gap=90), TEST-COMMIT-7CC683 (committed=25, gap=-50), SPAM-12OZ (committed=200, gap=-500). Item without demand: IMPORT-ITEM-B (committed=0, demand=null).",
   "retest_needed": false,

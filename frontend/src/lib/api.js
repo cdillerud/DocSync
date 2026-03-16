@@ -103,6 +103,17 @@ export const applyVendorOverride = (vendorNo, data) => api.post(`/stable-vendor/
 export const clearVendorOverride = (vendorNo, data) => api.post(`/stable-vendor/vendors/${encodeURIComponent(vendorNo)}/clear-override`, data);
 export const getVendorOverrideHistory = (vendorNo) => api.get(`/stable-vendor/vendors/${encodeURIComponent(vendorNo)}/history`);
 
+// Stable Vendor Config & Diagnostics
+export const getStableVendorConfig = () => api.get('/stable-vendor/config');
+export const updateStableVendorConfig = (data) => api.put('/stable-vendor/config', data);
+export const diagnoseStableVendors = () => api.get('/stable-vendor/diagnose');
+export const applySuggestedThresholds = () => api.post('/stable-vendor/apply-suggested-thresholds');
+
+// Auto-Approve
+export const diagnoseApprovalBacklog = () => api.get('/auto-approve/diagnose');
+export const dryRunAutoApprove = (params) => api.post('/auto-approve/dry-run', null, { params });
+export const runAutoApprove = (params) => api.post('/auto-approve/run', null, { params });
+
 // Bulk operations
 export const bulkRetryDocuments = async (docIds, reason = 'Bulk retry') => {
   const results = { success: [], failed: [] };

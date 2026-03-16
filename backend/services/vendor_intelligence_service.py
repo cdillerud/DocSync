@@ -19,10 +19,10 @@ from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
 
-# Stable vendor thresholds
-STABLE_VENDOR_MIN_INVOICES = 50
-STABLE_VENDOR_MIN_AUTOMATION_RATE = 0.90
-STABLE_VENDOR_MIN_CONSISTENCY = 0.70
+# Stable vendor thresholds (legacy constants - actual thresholds now in stable_vendor_config)
+STABLE_VENDOR_MIN_INVOICES = 10
+STABLE_VENDOR_MIN_AUTOMATION_RATE = 0.50
+STABLE_VENDOR_MIN_CONSISTENCY = 0.50
 
 # Vendor behavior weight in match scoring
 VENDOR_BEHAVIOR_WEIGHT = 0.15

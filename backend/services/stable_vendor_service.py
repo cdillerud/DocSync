@@ -30,27 +30,27 @@ DEFAULT_STABLE_VENDOR_CONFIG = {
     "config_id": "stable_vendor_defaults",
 
     # --- Vendor stability thresholds ---
-    "min_documents_processed": 50,
-    "min_automation_success_rate": 0.90,
-    "min_reference_resolution_rate": 0.90,
-    "max_correction_rate": 0.10,
-    "min_validation_pass_rate": 0.85,
+    "min_documents_processed": 10,
+    "min_automation_success_rate": 0.50,
+    "min_reference_resolution_rate": 0.70,
+    "max_correction_rate": 0.20,
+    "min_validation_pass_rate": 0.05,
 
     # --- Document auto-ready thresholds ---
-    "resolver_confidence_auto_ready": 0.90,
-    "resolver_confidence_low_priority": 0.70,
+    "resolver_confidence_auto_ready": 0.85,
+    "resolver_confidence_low_priority": 0.60,
 
     # --- Amount anomaly detection ---
     "amount_anomaly_enabled": True,
-    "amount_anomaly_std_multiplier": 3.0,  # flag if > 3 std devs from mean
+    "amount_anomaly_std_multiplier": 3.0,
 
     # --- Layout family guards ---
     "block_new_layout_families": True,
-    "min_layout_family_automation_rate": 0.60,
+    "min_layout_family_automation_rate": 0.50,
 
     # --- Drift / regression thresholds ---
-    "drift_correction_rate_ceiling": 0.15,
-    "drift_validation_fail_rate_ceiling": 0.20,
+    "drift_correction_rate_ceiling": 0.25,
+    "drift_validation_fail_rate_ceiling": 0.30,
 
     # --- Feature toggle ---
     "enabled": True,

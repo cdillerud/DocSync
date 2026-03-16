@@ -178,13 +178,19 @@ async def classify_doc_type_with_ai(
         system_message = """You are a document classification expert for a business document management system.
 Your task is to classify business documents into the correct document type.
 
+MULTI-PAGE BUNDLE HANDLING:
+- PDFs often contain MULTIPLE related documents bundled together (e.g., a PO + Bill of Lading + Freight Bill)
+- ALWAYS classify based on the PRIMARY/LEAD document, which is typically on the FIRST page
+- Supporting documents (BOLs, freight bills, packing slips) after the primary document do NOT change the classification
+- Example: PO Confirmation + BOL + Freight Bill → PURCHASE_ORDER (the PO is the primary doc)
+
 You MUST respond with ONLY a JSON object in this exact format:
 {"doc_type": "TYPE", "confidence": 0.XX}
 
 Where TYPE must be EXACTLY one of these values:
 - AP_INVOICE: Vendor invoices/bills we receive and need to pay
 - SALES_INVOICE: Invoices we send to our customers
-- PURCHASE_ORDER: Purchase orders we send to vendors
+- PURCHASE_ORDER: Purchase orders, PO confirmations, warehouse receipts
 - SALES_CREDIT_MEMO: Credit memos/returns we issue to customers
 - PURCHASE_CREDIT_MEMO: Credit memos we receive from vendors
 - STATEMENT: Account statements from vendors or to customers
@@ -202,9 +208,10 @@ The confidence should be between 0.0 and 1.0, where:
 Classification guidelines:
 - AP_INVOICE: Documents from vendors requesting payment, includes "invoice", "bill", vendor names
 - SALES_INVOICE: Documents we send for payment, addressed to customers
-- PURCHASE_ORDER: PO documents with line items, sent to vendors
+- PURCHASE_ORDER: PO documents, PO confirmations, warehouse receipts with line items
 - STATEMENT: Summary of account activity, not a single transaction
 - Look at sender/recipient context to distinguish AP vs Sales documents
+- For multi-page PDFs, focus on the FIRST page to determine the primary document type
 
 RESPOND ONLY WITH THE JSON OBJECT, NO OTHER TEXT."""
 

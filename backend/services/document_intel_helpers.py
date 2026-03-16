@@ -375,6 +375,17 @@ IMPORTANT CONTEXT:
 - Documents come from BOTH our Accounts Payable inbox AND Sales mailboxes
 - You must classify documents into the correct category: AP (accounts payable) or Sales
 
+MULTI-PAGE BUNDLE HANDLING:
+- PDFs often contain MULTIPLE related documents bundled together (e.g., a PO Confirmation + Bill of Lading + Freight Bill)
+- ALWAYS classify based on the PRIMARY/LEAD document, which is typically the FIRST page
+- Supporting documents (BOLs, freight bills, packing slips) attached after the primary document do NOT change the classification
+- Examples of bundles:
+  * PO Confirmation + BOL + Freight Bill → classify as Sales_Order (the PO is the primary doc)
+  * Warehouse Receipt + BOL → classify as Inventory_Report or Order_Confirmation (the receipt is primary)
+  * Invoice + Packing Slip → classify as AP_Invoice (the invoice is primary)
+  * Bill of Lading ONLY (no other lead doc) → classify as Shipping_Document
+- Key rule: If page 1 is a PO, order, receipt, or invoice, classify based on THAT — not the supporting shipping docs that follow
+
 DOCUMENT CATEGORIES AND TYPES:
 
 == AP (Accounts Payable) Category ==
@@ -393,14 +404,16 @@ Remittance: Payment confirmations
 - Extract: vendor/customer, payment_amount, payment_date, invoice_references
 - Look for "Remittance Advice", "Payment", check numbers
 
-Freight_Document: Shipping/freight documents
-- Extract: shipper, consignee, tracking_number, carrier, origin, destination
-- Look for "Bill of Lading", "BOL", "HAWB", tracking numbers
+Freight_Document: Shipping/freight INVOICES specifically — freight bills requesting payment
+- Extract: shipper, consignee, tracking_number, carrier, origin, destination, freight charges
+- Look for freight charges, rates, and billing — NOT just any BOL
+- A standalone Bill of Lading or BOL without an invoice component is a Shipping_Document, not a Freight_Document
 
 == Sales Category ==
-Sales_Order: Customer purchase orders to us
+Sales_Order: Customer purchase orders to us, PO confirmations, warehouse receipt confirmations
 - Extract: customer name, po_number, order_date, amount, ship_to address
-- Look for "Purchase Order", "PO#", "Order", quantity, ship to
+- Look for "Purchase Order", "PO#", "Order", "PO Confirmation", "Warehouse Receipt", quantity, ship to
+- If a PDF starts with a PO Confirmation or Warehouse Receipt followed by BOLs/freight bills, this is a Sales_Order
 
 Sales_Quote: Price quotes or proposals to customers
 - Extract: customer, amount, valid_until
@@ -414,7 +427,8 @@ Inventory_Report: Stock/inventory status reports
 - Extract: warehouse, items, quantities
 - Look for "Inventory", "Stock", "On Hand", "Available"
 
-Shipping_Document: Shipping documents, BOLs, Bills of Lading
+Shipping_Document: STANDALONE shipping documents — BOLs, Bills of Lading, delivery receipts
+- Only use this when the document is PURELY a shipping/transport document with NO leading PO, invoice, or receipt
 - Extract: bol_number, ship_date, po_number, shipper, consignee, carrier, tracking_number, pro_number, weight, pieces
 - Look for "Ship", "Delivery", "Dispatch", "Bill of Lading", "BOL", "Straight Bill", "Shipper", "Consignee"
 - BOL Number is the primary document identifier (often labeled "B/L No" or "BOL#")

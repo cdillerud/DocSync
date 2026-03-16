@@ -12,21 +12,23 @@
 - ~~Stable Vendor Auto-Ready Rules~~ (2026-03-11)
 - ~~Stable Vendor Admin Page~~ (2026-03-11)
 - ~~Remove SharePoint Migration Module~~ (2026-03-11)
+- ~~Autonomous Document Routing (Auto-Clear Gate)~~ (2026-03-16, iter_113) — 6-rule routing engine, pipeline stage 9, dashboard UI, 38 tests
 
 ### P1 — Next Up
-- **Package and Publish BC (AL) Extension** — Updated `.app` file in `/app/BC_extension/` needs publishing to BC Sandbox
-- **Add "Create BC Sales Order" Button to UI** — Frontend button to trigger BC sales order creation
+- **Complete Orchestration Logic Extraction from server.py** — Business orchestration logic still in server.py, paused for routing feature
+- **AR Release Gate (Prepay and Terms Approval)** — New approval step for AR documents
 
 ### P2 — Medium Priority
-- **Git Branch/Deployment Cleanup** — Standardize on main branch, resolve `conflict_020326_1424` branch issues
-- **Reference Intelligence Handler Extraction** — Final extraction pass: 7 remaining handlers from server.py to `services/reference_intelligence_handlers.py` ~~DONE~~
-- **Utility helper extraction** — Extract shared helpers (normalize_vendor_name, get_bc_companies, etc.) still imported from server.py by 12 router modules
+- **Package and Publish BC (AL) Extension** — Updated `.app` file in `/app/BC_extension/` needs publishing to BC Sandbox
+- **Add "Create BC Sales Order" Button to UI** — Frontend button to trigger BC sales order creation
+- **Inventory Planning Horizon** — Demand Forecast + Purchase Timing
+- **Utility helper extraction** — Extract shared helpers still imported from server.py by 12 router modules
 - **Refactor monolithic files** — `backend/routers/inventory_ledger.py` and `frontend/src/pages/InventoryLedgerPage.js`
 
 ### P3 — Future/Backlog
+- Routing engine extensions: stable_vendor auto-approval, layout family trust scoring, dynamic policy thresholds
 - Implement Outbound Document Delivery module
-- Implement "Stable Vendor" rules for auto-posting
+- Admin UI for item mapping rules
 - Replace mock email service with production-ready solution (e.g., SendGrid, Resend)
-- Add multi-step approval routing for documents
 - Decommission legacy Zetadocs system
 - Replace mock JWT auth with Entra ID SSO

@@ -277,3 +277,17 @@
 
 - Comprehensive test run of document-to-transaction matching feature
 - All tests passed successfully
+
+## March 16, 2026 — Autonomous Document Routing (Auto-Clear Gate)
+
+- Created `services/document_routing_service.py`: pure-function routing engine evaluating 6 rule categories (confidence, required fields, validation, duplicates, entity resolution, optional fields)
+- Routing statuses: `auto_process` (score >= 75), `review` (40-74), `blocked` (< 40)
+- Integrated as pipeline stage 9 (`document_routing`) in `pipeline/document_pipeline.py`
+- Integrated into document intake flow in `server.py` (runs after auto-clear)
+- Added `/api/dashboard/routing-summary` endpoint
+- Added `routing_summary` to `/api/dashboard/stats` and `/api/dashboard/workflow-intelligence`
+- Added `/api/auto-clear/route/{doc_id}` and `/api/auto-clear/route-batch` endpoints
+- Updated `DashboardPage.js` with `RoutingSummaryCard` showing counts, avg scores, progress bar, percentage labels
+- Schema extension: `routing_status`, `routing_reasons`, `routing_score`, `routing_timestamp` on hub_documents
+- 28 unit tests + 10 API integration tests, all passing
+- Backfilled all 79 existing documents: 39 auto_process, 22 review, 18 blocked

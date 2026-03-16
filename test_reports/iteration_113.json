@@ -1,0 +1,84 @@
+{
+  "summary": "Document Routing (Auto-Clear Gate) feature fully tested - All backend unit tests (28), API integration tests (10), and frontend UI tests pass. Feature is working correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_document_routing.py",
+    "/app/backend/tests/test_document_routing_api.py",
+    "/app/test_reports/pytest/document_routing_results.xml",
+    "/app/test_reports/pytest/document_routing_api_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_document_routing_api.py"
+  ],
+  "success_rate": {
+    "backend": "100% (28/28 unit tests + 10/10 API tests)",
+    "frontend": "100% (RoutingSummaryCard renders correctly)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "79 documents already routed (39 auto_process, 22 review, 18 blocked)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Document Routing feature is complete. All 79 documents have routing_status, routing_score, routing_reasons, and routing_timestamp fields. Score thresholds: auto_process >= 75, review 40-74, blocked < 40.",
+  "tests_executed": {
+    "unit_tests": {
+      "file": "/app/backend/tests/test_document_routing.py",
+      "passed": 28,
+      "failed": 0,
+      "coverage": [
+        "Score confidence (4 tests)",
+        "Score required fields (4 tests)",
+        "Score validation (3 tests)",
+        "Score duplicates (2 tests)",
+        "Score entity resolution (3 tests)",
+        "Score optional fields (2 tests)",
+        "evaluate_routing full flow (8 tests)",
+        "route_document async integration (2 tests)"
+      ]
+    },
+    "api_tests": {
+      "file": "/app/backend/tests/test_document_routing_api.py",
+      "passed": 10,
+      "failed": 0,
+      "endpoints_tested": [
+        "GET /api/dashboard/routing-summary",
+        "GET /api/dashboard/stats (routing_summary field)",
+        "GET /api/dashboard/workflow-intelligence (routing_summary field)",
+        "POST /api/auto-clear/route/{doc_id}",
+        "POST /api/auto-clear/route-batch",
+        "Score threshold verification"
+      ]
+    },
+    "ui_tests": {
+      "passed": true,
+      "elements_verified": [
+        "data-testid='routing-summary-card' present",
+        "data-testid='routing-auto_process' shows 39",
+        "data-testid='routing-review' shows 22",
+        "data-testid='routing-blocked' shows 18",
+        "data-testid='routing-total-badge' shows '79 routed'",
+        "Progress bar with emerald/amber/red segments",
+        "Percentage labels (49%, 28%, 23%)",
+        "Average scores (79.7, 67.4, 19.2)"
+      ]
+    }
+  },
+  "verified_features": {
+    "routing_summary_endpoint": "Returns total:79, auto_process:39 (avg 79.7), review:22 (avg 67.4), blocked:18 (avg 19.2)",
+    "stats_routing_summary": "routing_summary included in /api/dashboard/stats",
+    "workflow_intelligence_routing": "routing_summary included with total_routed and counts",
+    "route_single_doc": "Returns success:true with routing_status, routing_score, routing_reasons, routing_timestamp",
+    "route_batch": "Returns total, auto_process, review, blocked, errors counts",
+    "score_thresholds": "auto_process >= 75, review 40-74, blocked < 40",
+    "ui_routing_card": "RoutingSummaryCard displays counts, progress bar, percentages"
+  }
+}

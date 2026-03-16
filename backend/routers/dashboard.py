@@ -22,10 +22,25 @@ async def get_dashboard_stats():
             by_type[t] = count
     recent_workflows = await db.hub_workflow_runs.find({}, {"_id": 0}).sort("started_utc", -1).limit(10).to_list(10)
     failed_workflows = await db.hub_workflow_runs.find({"status": "Failed"}, {"_id": 0}).sort("started_utc", -1).limit(10).to_list(10)
+    # Routing status counts
+    routing_pipeline = [
+        {"$group": {
+            "_id": "$routing_status",
+            "count": {"$sum": 1},
+            "avg_score": {"$avg": "$routing_score"},
+        }},
+    ]
+    routing_raw = await db.hub_documents.aggregate(routing_pipeline).to_list(10)
+    routing_counts = {}
+    for r in routing_raw:
+        key = r["_id"] or "unrouted"
+        routing_counts[key] = {"count": r["count"], "avg_score": round(r.get("avg_score") or 0, 1)}
+
     return {
         "total_documents": total, "by_status": by_status, "by_type": by_type,
         "recent_workflows": recent_workflows, "failed_workflows": failed_workflows,
-        "demo_mode": DEMO_MODE
+        "demo_mode": DEMO_MODE,
+        "routing_summary": routing_counts,
     }
 
 
@@ -279,9 +294,34 @@ async def get_workflow_intelligence_stats():
     processing_rate = round((processing_complete / total_docs * 100) if total_docs > 0 else 0, 1)
     vendor_rate = round((docs_with_vendor / total_docs * 100) if total_docs > 0 else 0, 1)
     
+    # ============== ROUTING STATUS (Auto-Clear Gate) ==============
+    routing_pipeline = [
+        {"$match": {"routing_status": {"$exists": True, "$ne": None}}},
+        {"$group": {
+            "_id": "$routing_status",
+            "count": {"$sum": 1},
+            "avg_score": {"$avg": "$routing_score"},
+        }},
+    ]
+    routing_raw = await db.hub_documents.aggregate(routing_pipeline).to_list(10)
+    routing_counts = {}
+    for r in routing_raw:
+        if r["_id"]:
+            routing_counts[r["_id"]] = {
+                "count": r["count"],
+                "avg_score": round(r.get("avg_score") or 0, 1),
+            }
+    total_routed = sum(v["count"] for v in routing_counts.values())
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "total_documents": total_docs,
+        
+        # Routing Summary (Auto-Clear Gate)
+        "routing_summary": {
+            "total_routed": total_routed,
+            "counts": routing_counts,
+        },
         
         # Action Required Queues - clear, actionable counts
         "action_required": {
@@ -534,6 +574,13 @@ async def export_document_types_dashboard(
 
 
 # ==================== SHAREPOINT FOLDER STRUCTURE (Accounting) ====================
+
+
+@router.get("/routing-summary")
+async def get_routing_summary():
+    """Get document routing status summary (Auto-Clear Gate metrics)."""
+    from services.document_routing_service import get_routing_summary as _get_routing_summary
+    return await _get_routing_summary()
 
 
 @router.get("/email-stats")

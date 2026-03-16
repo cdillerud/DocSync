@@ -84,10 +84,29 @@ def _get_default_job_types():
 
 
 # ---------------------------------------------------------------------------
-# Server.py functions still needed (extraction targets for next passes)
+# Direct imports from authoritative service modules
 # ---------------------------------------------------------------------------
-# These are imported lazily to avoid circular imports and to clearly
-# document the remaining server.py coupling.
+from services.document_intel_helpers import (
+    classify_document_with_ai as _classify_with_ai,
+    compute_ap_normalized_fields as _compute_ap_normalized,
+    make_automation_decision as _make_automation_decision,
+)
+from services.vendor_matching import (
+    lookup_vendor_alias as _lookup_vendor_alias,
+    check_duplicate_document as _check_duplicate,
+)
+from services.ap_computation import (
+    compute_ap_validation as _compute_ap_validation,
+    is_eligible_for_draft_creation as _is_eligible_for_draft,
+)
+from services.bc_api_helpers import get_bc_companies as _get_bc_companies
+
+# ---------------------------------------------------------------------------
+# Server.py functions still needed (remaining extraction targets)
+# Used for: run_upload_and_link_workflow, link_document_to_bc,
+#   classify_document_type, upload_to_sharepoint, create_sharing_link,
+#   get_bc_token, check_duplicate_purchase_invoice, create_purchase_invoice_header
+# ---------------------------------------------------------------------------
 
 def _server():
     """Lazy import of server module for functions not yet extracted."""
@@ -384,7 +403,7 @@ async def intake_document(
 
     # AI classification
     logger.info("Running AI field extraction for document %s", doc_id)
-    classification = await srv.classify_document_with_ai(str(file_path), final_filename)
+    classification = await _classify_with_ai(str(file_path), final_filename)
 
     suggested_type = classification.get("suggested_job_type", "Unknown")
     confidence = classification.get("confidence", 0.0)
@@ -410,15 +429,15 @@ async def intake_document(
                 doc_id, doc_type_value, category, classification_method)
 
     # Phase 7 normalization
-    normalized_fields = srv.compute_ap_normalized_fields(extracted_fields)
-    vendor_alias_result = await srv.lookup_vendor_alias(normalized_fields.get("vendor_normalized"))
-    duplicate_result = await srv.check_duplicate_document(
+    normalized_fields = _compute_ap_normalized(extracted_fields)
+    vendor_alias_result = await _lookup_vendor_alias(normalized_fields.get("vendor_normalized"))
+    duplicate_result = await _check_duplicate(
         vendor_normalized=normalized_fields.get("vendor_normalized"),
         vendor_canonical=vendor_alias_result.get("vendor_canonical"),
         invoice_number_clean=normalized_fields.get("invoice_number_clean"),
         current_doc_id=doc_id,
     )
-    ap_validation = srv.compute_ap_validation(
+    ap_validation = _compute_ap_validation(
         document_type=suggested_type,
         vendor_normalized=normalized_fields.get("vendor_normalized"),
         invoice_number_clean=normalized_fields.get("invoice_number_clean"),
@@ -436,7 +455,7 @@ async def intake_document(
     from services.bc_validation_service import validate_bc_match
     validation_results = await validate_bc_match(suggested_type, extracted_fields, job_configs)
 
-    decision, reasoning, decision_metadata = srv.make_automation_decision(job_configs, confidence, validation_results)
+    decision, reasoning, decision_metadata = _make_automation_decision(job_configs, confidence, validation_results)
 
     bc_entity = job_configs.get("bc_entity", "salesOrders")
 
@@ -555,7 +574,7 @@ async def intake_document(
         match_score = validation_results.get("match_score", 0.0)
 
         current_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-        is_draft_eligible, draft_reason = srv.is_eligible_for_draft_creation(
+        is_draft_eligible, draft_reason = _is_eligible_for_draft(
             job_type=suggested_type, match_method=match_method,
             match_score=match_score, ai_confidence=confidence,
             validation_results=validation_results, doc=current_doc,
@@ -570,7 +589,7 @@ async def intake_document(
 
             if vendor_no and external_doc_no:
                 token = await srv.get_bc_token()
-                companies = await srv.get_bc_companies()
+                companies = await _get_bc_companies()
                 company_id = companies[0]["id"] if companies else None
 
                 dup_check = await srv.check_duplicate_purchase_invoice(
@@ -680,7 +699,6 @@ async def intake_document(
 async def classify_document(doc_id: str):
     """Re-run AI classification on an existing document."""
     db = get_db()
-    srv = _server()
     DEFAULT_JOB_TYPES = _get_default_job_types()
 
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
@@ -691,7 +709,7 @@ async def classify_document(doc_id: str):
     if not file_path.exists():
         raise HTTPException(status_code=400, detail="Original file not found")
 
-    classification = await srv.classify_document_with_ai(str(file_path), doc["file_name"])
+    classification = await _classify_with_ai(str(file_path), doc["file_name"])
 
     suggested_type = classification.get("suggested_job_type", "Unknown")
     confidence = classification.get("confidence", 0.0)
@@ -704,7 +722,7 @@ async def classify_document(doc_id: str):
     from services.bc_validation_service import validate_bc_match
     validation_results = await validate_bc_match(suggested_type, extracted_fields, job_configs)
 
-    decision, reasoning, decision_metadata = srv.make_automation_decision(job_configs, confidence, validation_results)
+    decision, reasoning, decision_metadata = _make_automation_decision(job_configs, confidence, validation_results)
 
     await db.hub_documents.update_one({"id": doc_id}, {"$set": {
         "suggested_job_type": suggested_type,
@@ -852,7 +870,6 @@ async def resolve_and_link_document(doc_id: str, resolve: ResolveRequest):
 async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
     """Safe reprocess — re-runs validation + vendor match only."""
     db = get_db()
-    srv = _server()
     TransactionAction = _get_transaction_action()
     DEFAULT_JOB_TYPES = _get_default_job_types()
 
@@ -869,7 +886,7 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
     file_path = UPLOAD_DIR / doc_id
     if reclassify and file_path.exists():
         logger.info("Re-running AI classification for document %s", doc_id)
-        classification = await srv.classify_document_with_ai(str(file_path), doc["file_name"])
+        classification = await _classify_with_ai(str(file_path), doc["file_name"])
         await db.hub_documents.update_one({"id": doc_id}, {"$set": {
             "document_type": classification.get("suggested_job_type", "Unknown"),
             "suggested_job_type": classification.get("suggested_job_type", "Unknown"),
@@ -892,7 +909,7 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
     new_match_method = validation_results.get("match_method", "none")
 
     confidence = doc.get("ai_confidence", 0.0)
-    decision, reasoning, decision_metadata = srv.make_automation_decision(job_configs, confidence, validation_results)
+    decision, reasoning, decision_metadata = _make_automation_decision(job_configs, confidence, validation_results)
 
     old_status = doc.get("status")
     new_status = old_status
@@ -980,7 +997,6 @@ async def batch_revalidate_documents(
 ):
     """Batch re-validate all documents against Production BC."""
     db = get_db()
-    srv = _server()
     DEFAULT_JOB_TYPES = _get_default_job_types()
 
     query = {"doc_type": {"$in": doc_types}}
@@ -1016,7 +1032,7 @@ async def batch_revalidate_documents(
             new_validation_passed = validation_results.get("all_passed", False)
 
             confidence = doc.get("ai_confidence", 0.0)
-            decision, reasoning, decision_metadata = srv.make_automation_decision(job_configs, confidence, validation_results)
+            decision, reasoning, decision_metadata = _make_automation_decision(job_configs, confidence, validation_results)
 
             update_data = {
                 "validation_results": validation_results,

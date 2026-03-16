@@ -13,7 +13,7 @@ import {
   FileText, AlertCircle, CheckCircle2, RefreshCw, ArrowRight, UploadCloud, Files,
   TrendingUp, Target, Zap, Clock, Users, Truck, Database, FolderArchive, 
   BarChart3, PieChart, Activity, Layers, Network, Building2, GitBranch,
-  UserX, Link2Off, ClipboardCheck, Bell, ShieldCheck
+  UserX, Link2Off, ClipboardCheck, Bell, ShieldCheck, Route
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, PieChart as RechartsPieChart, Pie, Legend } from 'recharts';
 import { Square9StageSummary } from '../components/Square9WorkflowTracker';
@@ -641,6 +641,102 @@ function OperationsQueueSummaryCard() {
   );
 }
 
+// Document Routing Summary Card (Auto-Clear Gate)
+function RoutingSummaryCard({ statsRouting, intelligenceRouting }) {
+  // Merge data: prefer intelligence routing (more detailed), fall back to stats
+  const routing = intelligenceRouting || {};
+  const counts = routing.counts || statsRouting || {};
+
+  const autoProcess = counts.auto_process || { count: 0, avg_score: 0 };
+  const review = counts.review || { count: 0, avg_score: 0 };
+  const blocked = counts.blocked || { count: 0, avg_score: 0 };
+  const unrouted = counts.unrouted || { count: 0, avg_score: 0 };
+
+  // Normalize: counts may be plain numbers (from stats) or objects (from intelligence)
+  const ap = typeof autoProcess === 'number' ? { count: autoProcess, avg_score: 0 } : autoProcess;
+  const rv = typeof review === 'number' ? { count: review, avg_score: 0 } : review;
+  const bl = typeof blocked === 'number' ? { count: blocked, avg_score: 0 } : blocked;
+  const un = typeof unrouted === 'number' ? { count: unrouted, avg_score: 0 } : unrouted;
+
+  const totalRouted = ap.count + rv.count + bl.count;
+  if (totalRouted === 0 && un.count === 0) return null;
+
+  const segments = [
+    { key: 'auto_process', label: 'Auto Process', count: ap.count, avgScore: ap.avg_score, color: 'text-emerald-500', bg: 'bg-emerald-500/10', barColor: 'bg-emerald-500' },
+    { key: 'review', label: 'Needs Review', count: rv.count, avgScore: rv.avg_score, color: 'text-amber-500', bg: 'bg-amber-500/10', barColor: 'bg-amber-500' },
+    { key: 'blocked', label: 'Blocked', count: bl.count, avgScore: bl.avg_score, color: 'text-red-500', bg: 'bg-red-500/10', barColor: 'bg-red-500' },
+  ];
+
+  return (
+    <Card className="border-2 border-emerald-500/30 bg-gradient-to-br from-emerald-500/5 to-transparent" data-testid="routing-summary-card">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Route className="w-5 h-5 text-emerald-500" />
+            <CardTitle className="text-lg font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Document Routing</CardTitle>
+          </div>
+          {totalRouted > 0 && (
+            <Badge variant="secondary" className="text-sm px-3 py-1" data-testid="routing-total-badge">
+              {totalRouted} routed
+            </Badge>
+          )}
+        </div>
+        <CardDescription>Auto-Clear Gate classification</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Counts grid */}
+        <div className="grid grid-cols-3 gap-3">
+          {segments.map((seg) => (
+            <div key={seg.key} className={`${seg.bg} rounded-lg p-3 text-center`} data-testid={`routing-${seg.key}`}>
+              <div className={`text-2xl font-black ${seg.color}`} style={{ fontFamily: 'Chivo, sans-serif' }}>
+                {seg.count}
+              </div>
+              <div className="text-xs text-muted-foreground">{seg.label}</div>
+              {seg.avgScore > 0 && (
+                <div className="text-[10px] text-muted-foreground mt-1">avg {seg.avgScore}</div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Progress bar */}
+        {totalRouted > 0 && (
+          <div>
+            <div className="flex items-center gap-1 h-3 rounded-full overflow-hidden bg-muted/30">
+              {segments.map((seg) => {
+                const pct = (seg.count / totalRouted) * 100;
+                if (pct === 0) return null;
+                return (
+                  <div
+                    key={seg.key}
+                    className={`${seg.barColor} h-full transition-all`}
+                    style={{ width: `${pct}%` }}
+                    title={`${seg.label}: ${seg.count} (${pct.toFixed(0)}%)`}
+                  />
+                );
+              })}
+            </div>
+            <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
+              {segments.filter(s => s.count > 0).map((seg) => (
+                <span key={seg.key} className={seg.color}>
+                  {seg.label} {((seg.count / totalRouted) * 100).toFixed(0)}%
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Unrouted notice */}
+        {un.count > 0 && (
+          <div className="text-xs text-muted-foreground pt-1 border-t">
+            {un.count} document{un.count !== 1 ? 's' : ''} not yet routed
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function DashboardPage() {
   const [stats, setStats] = useState(null);
   const [intelligence, setIntelligence] = useState(null);
@@ -750,6 +846,12 @@ export default function DashboardPage() {
 
       {/* Operations Queue Summary */}
       <OperationsQueueSummaryCard />
+
+      {/* Document Routing Summary (Auto-Clear Gate) */}
+      <RoutingSummaryCard
+        statsRouting={stats?.routing_summary}
+        intelligenceRouting={intelligence?.routing_summary}
+      />
 
       {/* Stable Vendor Auto-Ready KPIs */}
       {stableVendorMetrics && stableVendorMetrics.feature_enabled && (

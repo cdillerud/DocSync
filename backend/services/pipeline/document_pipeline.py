@@ -5,7 +5,7 @@ Orchestrates the multi-stage document intelligence pipeline by sequencing
 existing services.  Each stage is independently callable and produces a
 typed result dict so callers can inspect partial progress.
 
-Pipeline stages (v2, 9 stages):
+Pipeline stages (v2, 10 stages):
   1. classification    - AI-driven doc type + field extraction
   2. extraction        - surface extracted-field summary
   3. layout            - layout fingerprinting / structural signals
@@ -14,7 +14,8 @@ Pipeline stages (v2, 9 stages):
   6. bundle_detection  - group related documents into packets
   7. lifecycle_check   - analyse document set completeness
   8. policy_decision   - evaluate automation rules and decide action
-  9. learning_capture  - update automation metrics from outcome
+  9. document_routing  - autonomous routing gate (auto_process / review / blocked)
+ 10. learning_capture  - update automation metrics from outcome
 
 Usage:
     from services.pipeline.document_pipeline import run_pipeline
@@ -147,6 +148,7 @@ STAGE_ORDER = [
     "bundle_detection",
     "lifecycle_check",
     "policy_decision",
+    "document_routing",
     "learning_capture",
 ]
 
@@ -327,8 +329,22 @@ async def _run_policy_decision(doc_id: str, ctx: Dict) -> StageResult:
     return StageResult(stage="policy_decision", status="ok", output=summary)
 
 
+async def _run_document_routing(doc_id: str, ctx: Dict) -> StageResult:
+    """Stage 9: Autonomous document routing (Auto-Clear Gate)."""
+    from services.document_routing_service import route_document
+
+    result = await route_document(doc_id)
+    ctx["routing"] = result
+    summary = {
+        "routing_status": result.get("routing_status"),
+        "routing_score": result.get("routing_score"),
+        "reasons_count": len(result.get("routing_reasons", [])),
+    }
+    return StageResult(stage="document_routing", status="ok", output=summary)
+
+
 async def _run_learning_capture(doc_id: str, ctx: Dict) -> StageResult:
-    """Stage 9: Update aggregated automation metrics."""
+    """Stage 10: Update aggregated automation metrics."""
     from services.learning_loop_service import update_automation_metrics
 
     result = await update_automation_metrics()
@@ -349,6 +365,7 @@ _STAGE_RUNNERS = {
     "bundle_detection": _run_bundle_detection,
     "lifecycle_check": _run_lifecycle_check,
     "policy_decision": _run_policy_decision,
+    "document_routing": _run_document_routing,
     "learning_capture": _run_learning_capture,
 }
 

@@ -156,3 +156,44 @@ async def get_auto_clear_stats():
 # ==================== SPIRO VENDOR MATCHING ====================
 
 
+# ==================== DOCUMENT ROUTING (Auto-Clear Gate) ====================
+
+
+@router.post("/route/{doc_id}")
+async def route_single_document(doc_id: str):
+    """Evaluate and apply routing decision for a single document."""
+    from services.document_routing_service import route_document
+    try:
+        result = await route_document(doc_id)
+        return {"success": True, "doc_id": doc_id, **result}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/route-batch")
+async def route_batch_documents(limit: int = Query(100, ge=1, le=1000)):
+    """Route all unrouted documents (backfill). Returns counts."""
+    db = get_db()
+    from services.document_routing_service import route_document
+
+    cursor = db.hub_documents.find(
+        {"$or": [
+            {"routing_status": {"$exists": False}},
+            {"routing_status": None},
+        ]},
+        {"_id": 0, "id": 1},
+    ).limit(limit)
+    docs = await cursor.to_list(length=limit)
+
+    results = {"total": len(docs), "auto_process": 0, "review": 0, "blocked": 0, "errors": 0}
+    for d in docs:
+        try:
+            r = await route_document(d["id"])
+            status = r.get("routing_status", "unknown")
+            if status in results:
+                results[status] += 1
+        except Exception:
+            results["errors"] += 1
+    return results
+
+

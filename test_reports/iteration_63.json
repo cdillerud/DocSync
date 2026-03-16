@@ -59,7 +59,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://service-migration-3.preview.emergentagent.com"
+    "api_url": "https://routing-intelligence.preview.emergentagent.com"
   },
   "seed_data_used": "Used existing Hormel Foods workspace (ID: 366bfcce-4d68-4daf-b9f4-cb05a35de8c8) with 3 SHORT items: TEST-ITEM-WARN (available=-5000), SPAM-LITE (available=-799), TEST-WARNONLY-732C83 (available=-90). Supply created for TEST-WARNONLY-732C83 during testing.",
   "retest_needed": false,

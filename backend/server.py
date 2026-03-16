@@ -868,6 +868,10 @@ async def create_purchase_invoice_header(
         }
 
 
+# ---------------------------------------------------------------------------
+# COMPATIBILITY WRAPPER: is_eligible_for_draft_creation
+# Authoritative source: services.ap_computation
+# ---------------------------------------------------------------------------
 def is_eligible_for_draft_creation(
     job_type: str,
     match_method: str,
@@ -876,71 +880,8 @@ def is_eligible_for_draft_creation(
     validation_results: dict,
     doc: dict
 ) -> tuple:
-    """
-    Check if a document meets ALL preconditions for draft creation.
-    
-    PRECONDITIONS (ALL must be true):
-    1. Feature flag ENABLE_CREATE_DRAFT_HEADER is true
-    2. Job type is AP_Invoice (only supported type for now)
-    3. match_method is in eligible methods (exact_no, exact_name, normalized, alias)
-    4. match_score >= 0.92
-    5. AI confidence >= 0.92
-    6. duplicate_check passed (no existing invoice)
-    7. vendor_match passed
-    8. PO validation passed (if required by mode)
-    9. Document status != LinkedToBC (not already linked)
-    10. bc_record_id not already set (no draft already created)
-    
-    Returns:
-        (is_eligible: bool, reason: str)
-    """
-    config = DRAFT_CREATION_CONFIG
-    
-    # 1. Feature flag check
-    if not ENABLE_CREATE_DRAFT_HEADER:
-        return (False, "Feature flag ENABLE_CREATE_DRAFT_HEADER is disabled")
-    
-    # 2. Job type check
-    if job_type != "AP_Invoice":
-        return (False, f"Draft creation only supported for AP_Invoice, got {job_type}")
-    
-    # 3. Match method check
-    if match_method not in config["eligible_match_methods"]:
-        return (False, f"Match method '{match_method}' not eligible for draft (requires: {config['eligible_match_methods']})")
-    
-    # 4. Match score check
-    if match_score < config["min_match_score_for_draft"]:
-        return (False, f"Match score {match_score:.2%} below draft threshold {config['min_match_score_for_draft']:.2%}")
-    
-    # 5. AI confidence check
-    if ai_confidence < config["min_confidence_for_draft"]:
-        return (False, f"AI confidence {ai_confidence:.2%} below draft threshold {config['min_confidence_for_draft']:.2%}")
-    
-    # 6-8. Check validation results
-    if not validation_results.get("all_passed", False):
-        failed_checks = [c["check_name"] for c in validation_results.get("checks", []) 
-                        if not c.get("passed", True) and c.get("required", True)]
-        return (False, f"Validation failed: {', '.join(failed_checks)}")
-    
-    # Check specific critical checks
-    checks = validation_results.get("checks", [])
-    for check in checks:
-        if check["check_name"] == "duplicate_check" and not check.get("passed", True):
-            return (False, "Duplicate invoice check failed - hard stop")
-        if check["check_name"] == "vendor_match" and not check.get("passed", True):
-            return (False, "Vendor match failed - cannot create draft without matched vendor")
-    
-    # 9. Status check - don't create draft for already linked documents
-    doc_status = doc.get("status", "")
-    if doc_status == "LinkedToBC":
-        return (False, "Document already linked to BC - no draft needed")
-    
-    # 10. bc_record_id check - don't create duplicate draft
-    if doc.get("bc_record_id"):
-        return (False, f"BC record already exists: {doc.get('bc_record_id')} - idempotency guard")
-    
-    # All checks passed
-    return (True, "All preconditions met for draft creation")
+    from services.ap_computation import is_eligible_for_draft_creation as _impl
+    return _impl(job_type, match_method, match_score, ai_confidence, validation_results, doc)
 
 
 # ==================== WORKFLOW ENGINE ====================
@@ -2049,17 +1990,9 @@ def compute_ap_normalized_fields(extracted_fields: dict) -> dict:
     return _impl(extracted_fields)
 
 async def lookup_vendor_alias(vendor_normalized: str) -> dict:
-    """
-    Phase 7: Look up vendor in alias collection, BC cache, or live BC API.
-    
-    Returns:
-    - vendor_canonical: the canonical_vendor_id if found, else None
-    - vendor_match_method: "alias", "exact_name", "bc_search", "fuzzy_bc", or "none"
-    - vendor_name: matched vendor name
-    - vendor_no: matched vendor number
-    """
-    if not vendor_normalized:
-        return {"vendor_canonical": None, "vendor_match_method": "none"}
+    """COMPATIBILITY WRAPPER — authoritative source: services.vendor_matching"""
+    from services.vendor_matching import lookup_vendor_alias as _impl
+    return await _impl(vendor_normalized)
     
     # Check vendor_aliases collection
     alias_doc = await db.vendor_aliases.find_one({
@@ -2188,19 +2121,9 @@ async def lookup_vendor_alias(vendor_normalized: str) -> dict:
 
 
 async def check_duplicate_document(vendor_normalized: str, vendor_canonical: str, invoice_number_clean: str, current_doc_id: str) -> dict:
-    """
-    Phase 7: Check for potential duplicate AP invoice in the Hub.
-    
-    A document is a possible duplicate if another non-deleted doc exists with:
-    - same vendor_canonical (if set) OR same vendor_normalized
-    - same invoice_number_clean
-    
-    Returns:
-    - possible_duplicate: boolean
-    - duplicate_of_document_id: id of existing doc or None
-    """
-    if not invoice_number_clean:
-        return {"possible_duplicate": False, "duplicate_of_document_id": None}
+    """COMPATIBILITY WRAPPER — authoritative source: services.vendor_matching"""
+    from services.vendor_matching import check_duplicate_document as _impl
+    return await _impl(vendor_normalized, vendor_canonical, invoice_number_clean, current_doc_id)
     
     # Build query
     vendor_match = {}
@@ -2239,66 +2162,11 @@ def compute_ap_validation(
     amount_float: float,
     po_number_clean: str,
     ai_confidence: float,
-    possible_duplicate: bool
+    possible_duplicate: bool = False,
 ) -> dict:
-    """
-    Phase 7: Compute validation_errors, validation_warnings, and draft_candidate for AP invoices.
-    
-    Required fields for AP invoice header readiness:
-    - vendor_normalized
-    - invoice_number_clean
-    - amount_float
-    
-    draft_candidate = True when all three required fields are present and valid
-    
-    This does NOT create drafts or change status logic (handled separately).
-    """
-    validation_errors = []
-    validation_warnings = []
-    
-    # Only process AP_Invoice documents
-    if document_type not in ("AP_Invoice", "AP Invoice"):
-        return {
-            "draft_candidate": False,
-            "validation_errors": [],
-            "validation_warnings": []
-        }
-    
-    # Check required fields
-    if not vendor_normalized:
-        validation_errors.append("missing_vendor")
-    
-    if not invoice_number_clean:
-        validation_errors.append("missing_invoice_number")
-    
-    if amount_float is None:
-        validation_errors.append("missing_amount")
-    
-    # Check confidence
-    if ai_confidence is not None and ai_confidence < 0.90:
-        validation_errors.append("low_classification_confidence")
-    
-    # Check duplicate
-    if possible_duplicate:
-        validation_errors.append("potential_duplicate_invoice")
-    
-    # Warnings (non-blocking)
-    if not po_number_clean:
-        validation_warnings.append("missing_po_number")
-    
-    # draft_candidate is True only when all required fields present and no errors
-    draft_candidate = (
-        len(validation_errors) == 0 and
-        vendor_normalized is not None and
-        invoice_number_clean is not None and
-        amount_float is not None
-    )
-    
-    return {
-        "draft_candidate": draft_candidate,
-        "validation_errors": validation_errors,
-        "validation_warnings": validation_warnings
-    }
+    """COMPATIBILITY WRAPPER — authoritative source: services.ap_computation"""
+    from services.ap_computation import compute_ap_validation as _impl
+    return _impl(document_type, vendor_normalized, invoice_number_clean, amount_float, po_number_clean, ai_confidence, possible_duplicate)
 
 
 def compute_ap_status(
@@ -2306,25 +2174,11 @@ def compute_ap_status(
     ai_confidence: float,
     validation_errors: list,
     draft_candidate: bool,
-    current_status: str
+    current_status: str,
 ) -> str:
-    """
-    Phase 7: Determine status for AP_Invoice documents.
-    
-    Status logic (observation mode - conservative):
-    - If not AP_Invoice: unchanged (let other workflows handle)
-    - If ai_confidence < 0.90: NeedsReview
-    - If any validation_errors: NeedsReview
-    - Else (no errors, draft_candidate=True): NeedsReview (but draft_candidate flag visible)
-    
-    In Phase 7, we do NOT auto-advance to any status that triggers BC writes.
-    """
-    if document_type not in ("AP_Invoice", "AP Invoice"):
-        return current_status  # Unchanged for non-AP
-    
-    # All AP_Invoice documents stay in NeedsReview during Phase 7
-    # The draft_candidate flag indicates readiness without changing status
-    return "NeedsReview"
+    """COMPATIBILITY WRAPPER — authoritative source: services.ap_computation"""
+    from services.ap_computation import compute_ap_status as _impl
+    return _impl({"vendor_canonical": None}, {"validation_errors": validation_errors, "draft_candidate": draft_candidate}, {})
 
 
 # Legacy wrapper for backward compatibility
@@ -2337,34 +2191,11 @@ def compute_draft_candidate_flag(
     document_type: str,
     extracted_fields: dict,
     canonical_fields: dict,
-    ai_confidence: float
+    ai_confidence: float,
 ) -> dict:
-    """
-    Legacy wrapper for backward compatibility.
-    Now delegates to compute_ap_validation.
-    """
-    # Extract normalized values
-    vendor_normalized = canonical_fields.get("vendor_normalized")
-    invoice_number_clean = canonical_fields.get("invoice_number_clean")
-    amount_float = canonical_fields.get("amount_float")
-    po_number_clean = canonical_fields.get("po_number_clean")
-    
-    result = compute_ap_validation(
-        document_type=document_type,
-        vendor_normalized=vendor_normalized,
-        invoice_number_clean=invoice_number_clean,
-        amount_float=amount_float,
-        po_number_clean=po_number_clean,
-        ai_confidence=ai_confidence,
-        possible_duplicate=False  # Legacy doesn't have this
-    )
-    
-    # Map to legacy format
-    return {
-        "draft_candidate": result["draft_candidate"],
-        "draft_candidate_reason": result["validation_errors"] + result["validation_warnings"],
-        "draft_candidate_score": 100.0 if result["draft_candidate"] else 0.0
-    }
+    """COMPATIBILITY WRAPPER — authoritative source: services.ap_computation"""
+    from services.ap_computation import compute_draft_candidate_flag as _impl
+    return _impl(document_type, extracted_fields, canonical_fields, ai_confidence)
 
 
 # ---------------------------------------------------------------------------
@@ -2375,154 +2206,19 @@ def compute_draft_candidate_flag(
 # ---------------------------------------------------------------------------
 from services.vendor_name_helpers import normalize_vendor_name, calculate_fuzzy_score
 
-# ==================== BC MATCHING SERVICE ====================
-
+# ---------------------------------------------------------------------------
+# COMPATIBILITY WRAPPER: match_vendor_in_bc
+# Authoritative source: services.vendor_matching
+# ---------------------------------------------------------------------------
 async def match_vendor_in_bc(
     vendor_name: str,
-    strategies: List[str],
+    strategies: list,
     threshold: float,
     token: str,
-    company_id: str
+    company_id: str,
 ) -> dict:
-    """
-    Multi-strategy vendor matching against BC.
-    Uses server-side filtering for efficient matching.
-    Returns candidates and best match.
-    """
-    result = {
-        "matched": False,
-        "match_method": None,
-        "selected_vendor": None,
-        "vendor_candidates": [],
-        "score": 0.0
-    }
-    
-    if not vendor_name:
-        return result
-    
-    normalized_input = normalize_vendor_name(vendor_name)
-    
-    # Extract key search terms for server-side filtering
-    # Use the longest word (likely the most distinctive) for filtering
-    search_terms = [w for w in normalized_input.split() if len(w) >= 3]
-    primary_search_term = max(search_terms, key=len) if search_terms else None
-    
-    async with httpx.AsyncClient(timeout=30.0) as c:
-        vendors = []
-        
-        # Strategy 1: Try server-side search with contains() filter
-        # Use BC_READ_ENVIRONMENT for reads (Production)
-        if primary_search_term and len(primary_search_term) >= 4:
-            # Use OData $filter to narrow down results server-side
-            filter_query = f"contains(displayName, '{primary_search_term}')"
-            resp = await c.get(
-                f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
-                headers={"Authorization": f"Bearer {token}"},
-                params={"$select": "id,number,displayName", "$filter": filter_query, "$top": "100"}
-            )
-            
-            if resp.status_code == 200:
-                vendors = resp.json().get("value", [])
-                logger.info("BC vendor search for '%s' returned %d candidates (env=%s)", primary_search_term, len(vendors), BC_READ_ENVIRONMENT)
-        
-        # Strategy 2: If no results from filtered search, fall back to broader fetch
-        if not vendors:
-            resp = await c.get(
-                f"https://api.businesscentral.dynamics.com/v2.0/{TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors",
-                headers={"Authorization": f"Bearer {token}"},
-                params={"$select": "id,number,displayName", "$top": "1000"}
-            )
-            
-            if resp.status_code != 200:
-                return result
-            
-            vendors = resp.json().get("value", [])
-        
-        # Check alias map first (case-insensitive)
-        if "alias" in strategies:
-            # Try exact match, then lowercase, then normalized
-            alias_target = (
-                VENDOR_ALIAS_MAP.get(vendor_name) or 
-                VENDOR_ALIAS_MAP.get(vendor_name.lower()) or 
-                VENDOR_ALIAS_MAP.get(normalized_input)
-            )
-            if alias_target:
-                # alias_target is the vendor_name or vendor_no from the alias
-                for v in vendors:
-                    v_display = v.get("displayName", "")
-                    v_number = v.get("number", "")
-                    # Match against vendor name or number
-                    if (v_display.lower() == alias_target.lower() or 
-                        v_number.lower() == alias_target.lower()):
-                        result["matched"] = True
-                        result["match_method"] = "alias"
-                        result["selected_vendor"] = v
-                        result["score"] = 1.0
-                        return result
-        
-        # Try each strategy in order
-        candidates = []
-        
-        for vendor in vendors:
-            vendor_display = vendor.get("displayName", "")
-            vendor_number = vendor.get("number", "")
-            
-            # Exact match on number
-            if "exact_no" in strategies:
-                if vendor_number.lower() == vendor_name.lower():
-                    result["matched"] = True
-                    result["match_method"] = "exact_no"
-                    result["selected_vendor"] = vendor
-                    result["score"] = 1.0
-                    return result
-            
-            # Exact match on name
-            if "exact_name" in strategies:
-                if vendor_display.lower() == vendor_name.lower():
-                    result["matched"] = True
-                    result["match_method"] = "exact_name"
-                    result["selected_vendor"] = vendor
-                    result["score"] = 1.0
-                    return result
-            
-            # Normalized match
-            if "normalized" in strategies:
-                normalized_bc = normalize_vendor_name(vendor_display)
-                if normalized_input and normalized_bc == normalized_input:
-                    result["matched"] = True
-                    result["match_method"] = "normalized"
-                    result["selected_vendor"] = vendor
-                    result["score"] = 0.95
-                    return result
-            
-            # Fuzzy match - collect all candidates
-            if "fuzzy" in strategies:
-                score = calculate_fuzzy_score(vendor_name, vendor_display)
-                if score > 0.3:  # Minimum threshold for candidate list
-                    candidates.append({
-                        "vendor": vendor,
-                        "score": score,
-                        "display_name": vendor_display,
-                        "vendor_id": vendor.get("id")
-                    })
-        
-        # Sort candidates by score
-        candidates.sort(key=lambda x: x["score"], reverse=True)
-        result["vendor_candidates"] = candidates[:5]  # Top 5
-        
-        # Check if best fuzzy match meets threshold
-        if candidates and candidates[0]["score"] >= threshold:
-            result["matched"] = True
-            result["match_method"] = "fuzzy"
-            result["selected_vendor"] = candidates[0]["vendor"]
-            result["score"] = candidates[0]["score"]
-        elif candidates:
-            # Have candidates but below threshold - needs review
-            result["matched"] = False
-            result["match_method"] = "fuzzy_candidates"
-            result["score"] = candidates[0]["score"] if candidates else 0
-    
-    return result
+    from services.vendor_matching import match_vendor_in_bc as _impl
+    return await _impl(vendor_name, strategies, threshold, token, company_id)
 
 async def match_customer_in_bc(
     customer_name: str,
@@ -3863,6 +3559,19 @@ async def _internal_intake_document(
     except Exception as e:
         logger.error("[Auto-Clear] Error evaluating document %s: %s", doc_id, str(e))
     
+    # =================================================================
+    # DOCUMENT ROUTING (Auto-Clear Gate)
+    # Evaluate document routing after auto-clear
+    # =================================================================
+    routing_result = None
+    try:
+        from services.document_routing_service import route_document
+        routing_result = await route_document(doc_id)
+        logger.info("[Routing] Document %s routed: status=%s score=%d",
+                     doc_id, routing_result.get("routing_status"), routing_result.get("routing_score", 0))
+    except Exception as e:
+        logger.error("[Routing] Error routing document %s: %s", doc_id, str(e))
+
     # Emit workflow events (Phase 1)
     try:
         await _emit_intake_events(
@@ -3888,7 +3597,8 @@ async def _internal_intake_document(
         "classification": classification,
         "automation_decision": decision,
         "sharepoint": sp_result,
-        "auto_clear": auto_clear_result
+        "auto_clear": auto_clear_result,
+        "routing": routing_result
     }
 
 

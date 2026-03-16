@@ -74,7 +74,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://service-migration-3.preview.emergentagent.com"
+    "api_url": "https://routing-intelligence.preview.emergentagent.com"
   },
   "seed_data_created": {
     "learning_events": "5 total events (2 classification_correction, 3 field_correction) on TEST-BUNDLE-B",

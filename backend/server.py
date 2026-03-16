@@ -7671,6 +7671,44 @@ async def startup():
     for alias in aliases:
         VENDOR_ALIAS_MAP[alias["alias_string"]] = alias.get("vendor_name") or alias.get("vendor_no")
         VENDOR_ALIAS_MAP[alias["normalized_alias"]] = alias.get("vendor_name") or alias.get("vendor_no")
+
+    # Bootstrap: create normalized aliases for all BC vendor names
+    try:
+        bc_vendors = await db.hub_bc_vendors.find({}, {"_id": 0, "displayName": 1, "number": 1}).to_list(2000)
+        from services.vendor_name_helpers import normalize_vendor_name as _norm_vendor
+        bootstrap_count = 0
+        for bv in bc_vendors:
+            display = bv.get("displayName", "")
+            vendor_no = bv.get("number", "")
+            if not display or not vendor_no:
+                continue
+            normalized = _norm_vendor(display)
+            if not normalized or len(normalized) < 3:
+                continue
+            # Only insert if not already present
+            existing = await db.vendor_aliases.find_one({"normalized_alias": normalized})
+            if not existing:
+                await db.vendor_aliases.insert_one({
+                    "alias_string": display,
+                    "normalized_alias": normalized,
+                    "canonical_vendor_id": vendor_no,
+                    "vendor_no": vendor_no,
+                    "vendor_name": display,
+                    "vendor_id": vendor_no,
+                    "source": "bc_bootstrap",
+                    "confidence": 1.0,
+                    "usage_count": 0,
+                    "first_seen": datetime.now(timezone.utc).isoformat(),
+                    "last_seen": datetime.now(timezone.utc).isoformat(),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+                VENDOR_ALIAS_MAP[display] = display
+                VENDOR_ALIAS_MAP[normalized] = display
+                bootstrap_count += 1
+        if bootstrap_count > 0:
+            logger.info("Bootstrapped %d BC vendor aliases into vendor_aliases collection", bootstrap_count)
+    except Exception as e:
+        logger.warning("BC vendor alias bootstrap failed: %s", e)
     
     # Start dynamic mailbox polling worker (polls mailboxes configured via UI)
     global _dynamic_mailbox_polling_task

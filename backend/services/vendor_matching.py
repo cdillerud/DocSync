@@ -97,7 +97,7 @@ async def lookup_vendor_alias(vendor_normalized: str) -> dict:
             )
         except Exception:
             pass
-        match_method = "learned_alias" if alias_doc.get("source") == "auto_learned" else "alias"
+        match_method = "alias_match" if alias_doc.get("source") in ("auto_learned", "manual_resolution") else "alias_match"
         return {
             "vendor_canonical": canonical_id,
             "vendor_match_method": match_method,
@@ -105,7 +105,7 @@ async def lookup_vendor_alias(vendor_normalized: str) -> dict:
             "vendor_no": alias_doc.get("vendor_no"),
         }
 
-    # 2. Check cached BC vendors
+    # 2. Check cached BC vendors (exact + fuzzy with rapidfuzz)
     bc_vendor = await db.hub_bc_vendors.find_one({
         "$or": [
             {"name_normalized": vendor_normalized},
@@ -116,10 +116,41 @@ async def lookup_vendor_alias(vendor_normalized: str) -> dict:
     if bc_vendor:
         return {
             "vendor_canonical": bc_vendor.get("number") or bc_vendor.get("id"),
-            "vendor_match_method": "exact_name",
+            "vendor_match_method": "bc_exact_match",
             "vendor_name": bc_vendor.get("displayName"),
             "vendor_no": bc_vendor.get("number"),
         }
+
+    # 2b. Fuzzy match against cached BC vendors using rapidfuzz
+    try:
+        from rapidfuzz import fuzz as _fuzz
+        normalize_vendor_name, _, _ = _vendor_helpers()
+
+        bc_vendors_cursor = db.hub_bc_vendors.find({}, {"_id": 0, "displayName": 1, "number": 1, "id": 1})
+        bc_vendors_list = await bc_vendors_cursor.to_list(1000)
+
+        best_match = None
+        best_score = 0.0
+        for bv in bc_vendors_list:
+            bc_display = bv.get("displayName", "")
+            bc_norm = normalize_vendor_name(bc_display)
+            if not bc_norm:
+                continue
+            score = _fuzz.token_sort_ratio(vendor_normalized, bc_norm) / 100.0
+            if score > best_score:
+                best_score = score
+                best_match = bv
+
+        if best_match and best_score >= 0.90:
+            return {
+                "vendor_canonical": best_match.get("number") or best_match.get("id"),
+                "vendor_match_method": "fuzzy_match",
+                "vendor_name": best_match.get("displayName"),
+                "vendor_no": best_match.get("number"),
+                "match_score": round(best_score, 3),
+            }
+    except Exception as e:
+        logger.debug("Fuzzy BC vendor match failed: %s", e)
 
     # 3. Live BC API search
     try:
@@ -143,30 +174,46 @@ async def lookup_vendor_alias(vendor_normalized: str) -> dict:
                             "vendor_no": vendor.get("number"),
                         }
 
-                # Fuzzy matching
+                # Fuzzy matching with rapidfuzz
                 best_match = None
                 best_score = 0
 
+                normalize_fn, _, _ = _vendor_helpers()
+
                 for vendor in vendors:
-                    bc_name = vendor.get("displayName", "").lower()
-                    bc_normalized = re.sub(r'\s+', ' ', bc_name.strip())
-                    search_words = set(vendor_normalized.split())
-                    bc_words = set(bc_normalized.split())
-                    overlap = len(search_words & bc_words)
-                    total = len(search_words | bc_words)
-                    score = overlap / total if total > 0 else 0
+                    bc_name = vendor.get("displayName", "")
+                    bc_normalized = normalize_fn(bc_name)
+
+                    try:
+                        from rapidfuzz import fuzz as _fuzz
+                        score = _fuzz.token_sort_ratio(vendor_normalized, bc_normalized) / 100.0
+                    except ImportError:
+                        # Fallback to token overlap
+                        search_words = set(vendor_normalized.split())
+                        bc_words = set(bc_normalized.split())
+                        overlap = len(search_words & bc_words)
+                        total = len(search_words | bc_words)
+                        score = overlap / total if total > 0 else 0
 
                     if score > best_score and score >= 0.6:
                         best_score = score
                         best_match = vendor
 
-                if best_match:
+                if best_match and best_score >= 0.90:
                     return {
                         "vendor_canonical": best_match.get("number") or best_match.get("id"),
-                        "vendor_match_method": "fuzzy_bc",
+                        "vendor_match_method": "fuzzy_match",
                         "vendor_name": best_match.get("displayName"),
                         "vendor_no": best_match.get("number"),
-                        "match_score": best_score,
+                        "match_score": round(best_score, 3),
+                    }
+                elif best_match:
+                    return {
+                        "vendor_canonical": best_match.get("number") or best_match.get("id"),
+                        "vendor_match_method": "fuzzy_match",
+                        "vendor_name": best_match.get("displayName"),
+                        "vendor_no": best_match.get("number"),
+                        "match_score": round(best_score, 3),
                     }
 
         # Fallback: first-word search
@@ -178,23 +225,27 @@ async def lookup_vendor_alias(vendor_normalized: str) -> dict:
                 vendors2 = bc_result2.data.get("vendors", [])
 
                 for vendor in vendors2:
-                    bc_name = vendor.get("displayName", "").lower()
-                    bc_normalized = re.sub(r'\s+', ' ', bc_name.strip())
+                    bc_name = vendor.get("displayName", "")
+                    bc_normalized = normalize_fn(bc_name) if 'normalize_fn' in dir() else re.sub(r'\s+', ' ', bc_name.lower().strip())
 
                     if bc_normalized.startswith(first_word):
-                        search_words = set(vendor_normalized.split())
-                        bc_words = set(bc_normalized.split())
-                        overlap = len(search_words & bc_words)
-                        total = len(search_words | bc_words)
-                        score = overlap / total if total > 0 else 0
+                        try:
+                            from rapidfuzz import fuzz as _fuzz
+                            score = _fuzz.token_sort_ratio(vendor_normalized, bc_normalized) / 100.0
+                        except ImportError:
+                            search_words = set(vendor_normalized.split())
+                            bc_words = set(bc_normalized.split())
+                            overlap = len(search_words & bc_words)
+                            total = len(search_words | bc_words)
+                            score = overlap / total if total > 0 else 0
 
                         if score >= 0.5:
                             return {
                                 "vendor_canonical": vendor.get("number") or vendor.get("id"),
-                                "vendor_match_method": "fuzzy_bc",
+                                "vendor_match_method": "fuzzy_match",
                                 "vendor_name": vendor.get("displayName"),
                                 "vendor_no": vendor.get("number"),
-                                "match_score": score,
+                                "match_score": round(score, 3),
                             }
 
     except Exception as e:
@@ -289,7 +340,7 @@ async def match_vendor_in_bc(
                     if (v_display.lower() == alias_target.lower()
                             or v_number.lower() == alias_target.lower()):
                         result["matched"] = True
-                        result["match_method"] = "alias"
+                        result["match_method"] = "alias_match"
                         result["selected_vendor"] = v
                         result["score"] = 1.0
                         return result
@@ -304,7 +355,7 @@ async def match_vendor_in_bc(
             if "exact_no" in strategies:
                 if vendor_number.lower() == vendor_name.lower():
                     result["matched"] = True
-                    result["match_method"] = "exact_no"
+                    result["match_method"] = "bc_exact_match"
                     result["selected_vendor"] = vendor
                     result["score"] = 1.0
                     return result
@@ -312,7 +363,7 @@ async def match_vendor_in_bc(
             if "exact_name" in strategies:
                 if vendor_display.lower() == vendor_name.lower():
                     result["matched"] = True
-                    result["match_method"] = "exact_name"
+                    result["match_method"] = "bc_exact_match"
                     result["selected_vendor"] = vendor
                     result["score"] = 1.0
                     return result
@@ -321,7 +372,7 @@ async def match_vendor_in_bc(
                 normalized_bc = normalize_vendor_name(vendor_display)
                 if normalized_input and normalized_bc == normalized_input:
                     result["matched"] = True
-                    result["match_method"] = "normalized"
+                    result["match_method"] = "bc_exact_match"
                     result["selected_vendor"] = vendor
                     result["score"] = 0.95
                     return result
@@ -341,12 +392,12 @@ async def match_vendor_in_bc(
 
         if candidates and candidates[0]["score"] >= threshold:
             result["matched"] = True
-            result["match_method"] = "fuzzy"
+            result["match_method"] = "fuzzy_match"
             result["selected_vendor"] = candidates[0]["vendor"]
             result["score"] = candidates[0]["score"]
         elif candidates:
             result["matched"] = False
-            result["match_method"] = "fuzzy_candidates"
+            result["match_method"] = "fuzzy_match"
             result["score"] = candidates[0]["score"] if candidates else 0
 
     return result

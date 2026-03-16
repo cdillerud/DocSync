@@ -246,6 +246,12 @@ function VendorIntelligenceCard({ data }) {
                 <div className="text-[10px] text-muted-foreground">Alias Match Rate</div>
               </div>
             </div>
+            {(data.alias_metrics.vendor_resolution_rate > 0) && (
+              <div className="flex items-center justify-between text-sm bg-emerald-500/5 rounded-lg px-3 py-2">
+                <span className="text-muted-foreground">Vendor Resolution Rate</span>
+                <span className="font-bold text-emerald-500">{data.alias_metrics.vendor_resolution_rate}%</span>
+              </div>
+            )}
             {data.alias_metrics.top_aliases && data.alias_metrics.top_aliases.length > 0 && (
               <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">Top Learned Aliases</div>

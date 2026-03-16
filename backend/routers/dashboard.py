@@ -14,9 +14,19 @@ async def _get_alias_metrics_safe(db, total_docs: int) -> dict:
         total_aliases = await db.vendor_aliases.count_documents({})
         auto_learned = await db.vendor_aliases.count_documents({"source": "auto_learned"})
         alias_matched = await db.hub_documents.count_documents({
-            "vendor_match_method": {"$in": ["alias", "learned_alias"]},
+            "vendor_match_method": {"$in": ["alias", "learned_alias", "alias_match"]},
         })
         alias_rate = round((alias_matched / total_docs * 100), 1) if total_docs > 0 else 0
+
+        # Vendor resolution rate (auto-resolved before human review)
+        auto_resolved = await db.hub_documents.count_documents({
+            "vendor_match_method": {"$in": [
+                "alias_match", "fuzzy_match", "bc_exact_match",
+                "alias", "learned_alias", "exact_name", "bc_search", "normalized",
+                "fuzzy", "fuzzy_bc", "fuzzy_candidates",
+            ]},
+        })
+        vendor_resolution_rate = round((auto_resolved / total_docs * 100), 1) if total_docs > 0 else 0
 
         top_cursor = db.vendor_aliases.find(
             {"usage_count": {"$gt": 0}},
@@ -29,10 +39,12 @@ async def _get_alias_metrics_safe(db, total_docs: int) -> dict:
             "auto_learned": auto_learned,
             "alias_match_rate": alias_rate,
             "alias_matched_docs": alias_matched,
+            "vendor_resolution_rate": vendor_resolution_rate,
+            "auto_resolved_docs": auto_resolved,
             "top_aliases": top_aliases,
         }
     except Exception:
-        return {"total_aliases": 0, "auto_learned": 0, "alias_match_rate": 0, "alias_matched_docs": 0, "top_aliases": []}
+        return {"total_aliases": 0, "auto_learned": 0, "alias_match_rate": 0, "alias_matched_docs": 0, "vendor_resolution_rate": 0, "auto_resolved_docs": 0, "top_aliases": []}
 
 
 @router.get("/stats")

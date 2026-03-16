@@ -276,6 +276,16 @@ async def get_alias_metrics() -> Dict[str, Any]:
     direct_match_rate = (direct_matched / total_docs * 100) if total_docs > 0 else 0
     vendor_match_rate = (total_with_vendor / total_docs * 100) if total_docs > 0 else 0
 
+    # Vendor resolution rate: how many docs got a vendor before human review
+    auto_resolved = await db.hub_documents.count_documents({
+        "vendor_match_method": {"$in": [
+            "alias_match", "fuzzy_match", "bc_exact_match",
+            "alias", "learned_alias", "exact_name", "bc_search", "normalized",
+            "fuzzy", "fuzzy_bc", "fuzzy_candidates",
+        ]},
+    })
+    vendor_resolution_rate = (auto_resolved / total_docs * 100) if total_docs > 0 else 0
+
     return {
         "total_aliases": total_aliases,
         "auto_learned": auto_learned,
@@ -286,9 +296,11 @@ async def get_alias_metrics() -> Dict[str, Any]:
         "alias_match_rate": round(alias_match_rate, 1),
         "direct_match_rate": round(direct_match_rate, 1),
         "vendor_match_rate": round(vendor_match_rate, 1),
+        "vendor_resolution_rate": round(vendor_resolution_rate, 1),
         "alias_matched_docs": alias_matched,
         "direct_matched_docs": direct_matched,
         "fuzzy_matched_docs": fuzzy_matched,
+        "auto_resolved_docs": auto_resolved,
         "total_with_vendor": total_with_vendor,
         "total_docs": total_docs,
     }

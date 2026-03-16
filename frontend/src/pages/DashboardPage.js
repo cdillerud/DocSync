@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getDashboardStats, retryWorkflow, getWorkflowIntelligence, getStableVendorMetrics } from '../lib/api';
+import { getDashboardStats, retryWorkflow, getWorkflowIntelligence, getStableVendorMetrics, getDailyIngestion } from '../lib/api';
 import api from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -14,7 +14,7 @@ import {
   TrendingUp, Target, Zap, Clock, Users, Truck, Database, FolderArchive, 
   BarChart3, PieChart, Activity, Layers, Network, Building2, GitBranch,
   UserX, Link2Off, ClipboardCheck, Bell, ShieldCheck, Route,
-  Gauge, ShieldAlert, Eye, Ban, HelpCircle
+  Gauge, ShieldAlert, Eye, Ban, HelpCircle, Calendar, Inbox, Mail
 } from 'lucide-react';
 import AutomationMetricsCard from '../components/AutomationMetricsCard';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, PieChart as RechartsPieChart, Pie, Legend } from 'recharts';
@@ -915,30 +915,216 @@ function ReadinessSummaryCard({ data }) {
   );
 }
 
+// ─── Daily Ingestion Card ────────────────────────────────────
+function DailyIngestionCard({ data, date, onDateChange }) {
+  if (!data) return null;
+
+  const SOURCE_COLORS = {
+    email: '#6366f1', email_poll: '#8b5cf6', backfill: '#94a3b8',
+    manual_upload: '#10b981', unknown: '#64748b',
+  };
+
+  const hourData = Array.from({ length: 24 }, (_, i) => {
+    const found = (data.by_hour || []).find(h => h.hour === i);
+    return { hour: `${i.toString().padStart(2, '0')}:00`, count: found?.count || 0 };
+  });
+
+  const typeData = Object.entries(data.by_type || {}).slice(0, 8).map(([name, value]) => ({ name, value }));
+  const sourceData = Object.entries(data.by_source || {}).map(([name, value]) => ({
+    name, value, fill: SOURCE_COLORS[name] || '#64748b',
+  }));
+
+  return (
+    <Card className="border border-border" data-testid="daily-ingestion-card">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Inbox className="w-5 h-5 text-indigo-500" />
+            <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>
+              Daily Ingestion
+            </CardTitle>
+            <Badge className="text-xs bg-indigo-500/20 text-indigo-400 border-indigo-700">
+              {data.total} docs
+            </Badge>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" className="text-xs h-7 px-2"
+              onClick={() => {
+                const d = new Date(date); d.setDate(d.getDate() - 1);
+                onDateChange(d.toISOString().split('T')[0]);
+              }} data-testid="prev-day-btn">
+              &larr;
+            </Button>
+            <input type="date" value={date}
+              onChange={e => onDateChange(e.target.value)}
+              className="text-xs h-7 px-2 bg-muted/40 border border-border rounded-md font-mono"
+              data-testid="ingestion-date-picker" />
+            <Button variant="ghost" size="sm" className="text-xs h-7 px-2"
+              onClick={() => {
+                const d = new Date(date); d.setDate(d.getDate() + 1);
+                const today = new Date().toISOString().split('T')[0];
+                const next = d.toISOString().split('T')[0];
+                if (next <= today) onDateChange(next);
+              }} data-testid="next-day-btn">
+              &rarr;
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Summary KPIs */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {sourceData.map(s => (
+            <div key={s.name} className="bg-muted/30 rounded-md p-2.5 text-center">
+              <p className="text-xl font-black font-mono" style={{ color: s.fill }}>{s.value}</p>
+              <p className="text-[10px] text-muted-foreground uppercase">{s.name.replace(/_/g, ' ')}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Hourly activity chart */}
+        {data.total > 0 && (
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Hourly Activity</p>
+            <div className="h-[100px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={hourData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+                  <XAxis dataKey="hour" tick={{ fontSize: 9 }} interval={2} />
+                  <YAxis hide />
+                  <Tooltip contentStyle={{ fontSize: 11, background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }} />
+                  <Bar dataKey="count" fill="#6366f1" radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* By Document Type */}
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">By Document Type</p>
+            <div className="space-y-1">
+              {typeData.map(t => (
+                <div key={t.name} className="flex items-center justify-between text-xs px-2 py-1 bg-muted/20 rounded">
+                  <span className="text-muted-foreground truncate max-w-[150px]">{t.name.replace(/_/g, ' ')}</span>
+                  <span className="font-mono font-bold">{t.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Top Senders */}
+          {data.top_senders?.length > 0 && (
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Top Senders</p>
+              <div className="space-y-1">
+                {data.top_senders.slice(0, 8).map(s => (
+                  <div key={s.sender} className="flex items-center justify-between text-xs px-2 py-1 bg-muted/20 rounded">
+                    <span className="text-muted-foreground truncate max-w-[180px] flex items-center gap-1">
+                      <Mail className="w-3 h-3 shrink-0" />{s.sender}
+                    </span>
+                    <span className="font-mono font-bold">{s.count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Recent Documents */}
+        {data.recent_documents?.length > 0 && (
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
+              Recent Documents ({data.recent_documents.length})
+            </p>
+            <div className="max-h-[250px] overflow-y-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="text-[10px]">File</TableHead>
+                    <TableHead className="text-[10px]">Type</TableHead>
+                    <TableHead className="text-[10px]">Source</TableHead>
+                    <TableHead className="text-[10px]">Vendor</TableHead>
+                    <TableHead className="text-[10px]">Status</TableHead>
+                    <TableHead className="text-[10px]">Time</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.recent_documents.map((doc, i) => (
+                    <TableRow key={doc.id || i} className="text-xs">
+                      <TableCell className="py-1.5">
+                        <span className="truncate max-w-[180px] block font-medium">{doc.file_name || '-'}</span>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <Badge variant="outline" className="text-[9px]">{(doc.document_type || '?').replace(/_/g, ' ')}</Badge>
+                      </TableCell>
+                      <TableCell className="py-1.5 text-muted-foreground">{doc.source || '-'}</TableCell>
+                      <TableCell className="py-1.5 text-muted-foreground truncate max-w-[120px]">
+                        {doc.vendor_canonical || doc.matched_vendor_name || '-'}
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <Badge variant="outline" className="text-[9px]">{doc.status || doc.workflow_status || '-'}</Badge>
+                      </TableCell>
+                      <TableCell className="py-1.5 font-mono text-muted-foreground">
+                        {doc.created_utc ? doc.created_utc.substring(11, 16) : '-'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        )}
+
+        {data.total === 0 && (
+          <div className="text-center py-6 text-muted-foreground">
+            <Calendar className="w-8 h-8 mx-auto mb-2 opacity-40" />
+            <p className="text-sm">No documents ingested on this day</p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+
 export default function DashboardPage() {
   const [stats, setStats] = useState(null);
   const [intelligence, setIntelligence] = useState(null);
   const [stableVendorMetrics, setStableVendorMetrics] = useState(null);
+  const [dailyIngestion, setDailyIngestion] = useState(null);
+  const [ingestionDate, setIngestionDate] = useState(() => {
+    const d = new Date(); return d.toISOString().split('T')[0];
+  });
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
   const fetchStats = async () => {
     setLoading(true);
     try {
-      const [statsRes, intelligenceRes, svRes] = await Promise.all([
+      const [statsRes, intelligenceRes, svRes, diRes] = await Promise.all([
         getDashboardStats(),
         getWorkflowIntelligence().catch(() => ({ data: null })),
         getStableVendorMetrics().catch(() => ({ data: null })),
+        getDailyIngestion(ingestionDate).catch(() => ({ data: null })),
       ]);
       setStats(statsRes.data);
       setIntelligence(intelligenceRes.data);
       setStableVendorMetrics(svRes.data);
+      setDailyIngestion(diRes.data);
     } catch (err) {
       toast.error('Failed to load dashboard');
     } finally {
       setLoading(false);
     }
   };
+
+  const fetchIngestion = useCallback(async (date) => {
+    try {
+      const res = await getDailyIngestion(date);
+      setDailyIngestion(res.data);
+    } catch {}
+  }, []);
 
   useEffect(() => { fetchStats(); }, []);
 
@@ -1088,6 +1274,15 @@ export default function DashboardPage() {
 
       {/* Main Intelligence Grid */}
       <Tabs defaultValue="overview" className="w-full">
+
+      {/* Daily Ingestion */}
+      <DailyIngestionCard
+        data={dailyIngestion}
+        date={ingestionDate}
+        onDateChange={(d) => { setIngestionDate(d); fetchIngestion(d); }}
+      />
+
+      {/* Main Intelligence Grid - continued */}
         <TabsList className="mb-4">
           <TabsTrigger value="overview" data-testid="tab-overview">
             <BarChart3 className="w-4 h-4 mr-2" /> Overview

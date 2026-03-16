@@ -105,6 +105,7 @@ export const getVendorOverrideHistory = (vendorNo) => api.get(`/stable-vendor/ve
 
 // Stable Vendor Config & Diagnostics
 export const getStableVendorConfig = () => api.get('/stable-vendor/config');
+export const getDailyIngestion = (date) => api.get('/dashboard/daily-ingestion', { params: date ? { date } : {} });
 export const updateStableVendorConfig = (data) => api.put('/stable-vendor/config', data);
 export const diagnoseStableVendors = () => api.get('/stable-vendor/diagnose');
 export const applySuggestedThresholds = () => api.post('/stable-vendor/apply-suggested-thresholds');

@@ -35,6 +35,94 @@ async def _get_alias_metrics_safe(db, total_docs: int) -> dict:
         return {"total_aliases": 0, "auto_learned": 0, "alias_match_rate": 0, "alias_matched_docs": 0, "top_aliases": []}
 
 
+
+@router.get("/daily-ingestion")
+async def get_daily_ingestion(date: Optional[str] = None):
+    """
+    Get document ingestion stats for a specific day.
+    Defaults to today (UTC). Pass date=YYYY-MM-DD for other days.
+    """
+    db = get_db()
+
+    if date:
+        try:
+            day_start = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            day_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        day_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    day_end = day_start + timedelta(days=1)
+    day_str_start = day_start.isoformat()
+    day_str_end = day_end.isoformat()
+
+    date_filter = {"created_utc": {"$gte": day_str_start, "$lt": day_str_end}}
+
+    total = await db.hub_documents.count_documents(date_filter)
+
+    # By source
+    source_pipeline = [
+        {"$match": date_filter},
+        {"$group": {"_id": {"$ifNull": ["$source", "unknown"]}, "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    by_source = {r["_id"]: r["count"] for r in await db.hub_documents.aggregate(source_pipeline).to_list(20)}
+
+    # By document type
+    type_pipeline = [
+        {"$match": date_filter},
+        {"$group": {"_id": {"$ifNull": ["$document_type", "Unknown"]}, "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    by_type = {r["_id"]: r["count"] for r in await db.hub_documents.aggregate(type_pipeline).to_list(30)}
+
+    # By hour
+    hour_pipeline = [
+        {"$match": date_filter},
+        {"$addFields": {"hour_str": {"$substr": ["$created_utc", 11, 2]}}},
+        {"$group": {"_id": "$hour_str", "count": {"$sum": 1}}},
+        {"$sort": {"_id": 1}},
+    ]
+    by_hour_raw = await db.hub_documents.aggregate(hour_pipeline).to_list(24)
+    by_hour = [{"hour": int(r["_id"]), "count": r["count"]} for r in by_hour_raw if r["_id"]]
+
+    # By status
+    status_pipeline = [
+        {"$match": date_filter},
+        {"$group": {"_id": {"$ifNull": ["$status", "Unknown"]}, "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    by_status = {r["_id"]: r["count"] for r in await db.hub_documents.aggregate(status_pipeline).to_list(20)}
+
+    # By sender (top 10)
+    sender_pipeline = [
+        {"$match": {**date_filter, "email_sender": {"$exists": True, "$ne": None, "$ne": ""}}},
+        {"$group": {"_id": "$email_sender", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 10},
+    ]
+    by_sender = [{"sender": r["_id"], "count": r["count"]} for r in await db.hub_documents.aggregate(sender_pipeline).to_list(10)]
+
+    # Recent documents (last 50)
+    recent = await db.hub_documents.find(
+        date_filter,
+        {"_id": 0, "id": 1, "file_name": 1, "document_type": 1, "source": 1,
+         "status": 1, "workflow_status": 1, "created_utc": 1, "email_sender": 1,
+         "vendor_canonical": 1, "matched_vendor_name": 1},
+    ).sort("created_utc", -1).limit(50).to_list(50)
+
+    return {
+        "date": day_start.strftime("%Y-%m-%d"),
+        "total": total,
+        "by_source": by_source,
+        "by_type": by_type,
+        "by_hour": by_hour,
+        "by_status": by_status,
+        "top_senders": by_sender,
+        "recent_documents": recent,
+    }
+
+
 @router.get("/stats")
 async def get_dashboard_stats():
     db = get_db()

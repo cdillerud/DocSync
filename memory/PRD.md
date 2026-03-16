@@ -62,6 +62,8 @@ See CHANGELOG.md for full history.
 - **Stable Vendor Pipeline Boost** — Lowered thresholds (50→10 docs, 90%→50% automation, 85%→5% validation), added diagnostic endpoint, suggested thresholds, auto-apply
 - **Auto-Approve Engine** — New batch auto-approve for validated docs from stable vendors. Includes diagnose, dry-run, run, and force modes
 - **Stable Vendor Admin UI** — Config panel for threshold editing, vendor diagnostics panel, auto-approve controls, suggested threshold application
+- **Junk Document Auto-Clear** — New clear-junk endpoint that clears Unknown_Sales, Unknown, non-document files (.mp4/.mp3/.png/.xlsx) while preserving Sales Orders, POs, and operational docs. Cleared 112 junk docs on production.
+- **Daily Ingestion Dashboard** — New card on dashboard showing documents ingested per day with date picker, hourly activity chart, source/type breakdown, top senders, and recent documents table
 
 ## Tech Stack
 - FastAPI, Motor (async MongoDB), Pydantic

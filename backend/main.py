@@ -76,6 +76,7 @@ from routers.spiro import spiro_router
 from routers.ar_release import router as ar_release_router
 from routers.automation_intelligence import router as automation_intelligence_router
 from routers.vendor_reprocess import router as vendor_reprocess_router
+from routers.workflow_fix import router as workflow_fix_router
 
 # ==================== APP ====================
 app = FastAPI(title="GPI Document Hub API")
@@ -133,6 +134,7 @@ app.include_router(spiro_router, prefix="/api")
 app.include_router(ar_release_router, prefix="/api")
 app.include_router(automation_intelligence_router, prefix="/api")
 app.include_router(vendor_reprocess_router, prefix="/api")
+app.include_router(workflow_fix_router, prefix="/api")
 
 # ==================== SALES MODULE ====================
 app.include_router(sales_router)

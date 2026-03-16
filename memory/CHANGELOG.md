@@ -1,5 +1,22 @@
 # GPI Document Hub - Changelog
 
+## March 16, 2026 — Fix: Documents Stuck in "captured" workflow_status
+
+### Root Cause
+`_internal_intake_document` and `document_handlers.intake_document` ran the full pipeline (classify, validate, route) but never updated `workflow_status` — it stayed at "captured" forever. Only `status` was updated. The frontend displayed `workflow_status || status`, showing "captured" for all processed docs.
+
+### Fixes
+**Backend (`server.py`, `services/document_handlers.py`):**
+- Both intake functions now set `workflow_status` to a meaningful value (`classified`, `needs_review`, `validation_passed`, `processed`, `completed`) based on `status` and `automation_decision` — via new `_derive_workflow_status()` helpers.
+
+**New endpoint (`/api/workflow-fix`):**
+- `POST /api/workflow-fix/dry-run` — preview how many stuck "captured" docs would be fixed
+- `POST /api/workflow-fix/run` — batch-fix all stuck "captured" docs by deriving the correct workflow_status from existing fields (status, auto_cleared, routing_status, automation_decision)
+- **Run this on production:** `curl -s -X POST http://localhost:8005/api/workflow-fix/dry-run` then `curl -s -X POST http://localhost:8005/api/workflow-fix/run`
+
+**Frontend (`UnifiedQueuePage.js`):**
+- Status column now shows `status || workflow_status` (was `workflow_status || status`)
+
 ## March 16, 2026 — Fix: Document Queue Filtering & Counts
 
 ### Backend (`backend/routers/documents.py`)

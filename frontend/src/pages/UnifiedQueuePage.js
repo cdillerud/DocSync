@@ -558,7 +558,7 @@ export default function UnifiedQueuePage() {
                           </div>
                         </TableCell>
                         <TableCell>{getTypeBadge(doc.doc_type)}</TableCell>
-                        <TableCell>{getStatusBadge(doc.workflow_status || doc.status)}</TableCell>
+                        <TableCell>{getStatusBadge(doc.status || doc.workflow_status)}</TableCell>
                         <TableCell data-testid={`ref-intel-${doc.id}`}>
                           {(() => {
                             const st = doc.reference_intelligence_status || 'not_run';

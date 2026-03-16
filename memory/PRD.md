@@ -49,6 +49,8 @@ See CHANGELOG.md for full history.
 
 ### Latest (March 16, 2026)
 - Fixed Vendor KPI `$or` key collision bug in dashboard (P0)
+- Fixed documents stuck in "captured" workflow_status — intake pipeline now sets workflow_status properly
+- Added `/api/workflow-fix/run` batch endpoint to fix existing stuck docs on production
 - Fixed Document Queue: type filter, status filter, tab counts, dynamic dropdowns
 - Vendor matching remediation complete (auto-resolve, fuzzy candidates, reprocessing)
 - **Dashboard Readiness Summary Card** — Shows document readiness status distribution with counts, confidence scores, top blockers and warnings

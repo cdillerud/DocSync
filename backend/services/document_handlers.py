@@ -37,6 +37,26 @@ logger = logging.getLogger(__name__)
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/app/backend/uploads"))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+
+def _derive_workflow_status_simple(final_status: str, decision: str) -> str:
+    """Map processing result to workflow_status so docs don't stay 'captured'."""
+    s = (final_status or "").lower()
+    if s in ("completed", "posted", "archived"):
+        return "completed"
+    if s == "exception":
+        return "exception"
+    if s in ("readytolink", "linkedtobc"):
+        return "ready_for_approval"
+    if s == "storedinsp":
+        return "processed"
+    if decision == "auto_link":
+        return "validation_passed"
+    if s == "needsreview":
+        return "needs_review"
+    return "classified"
+
+
+
 # ---------------------------------------------------------------------------
 # Pydantic models (moved from server.py)
 # ---------------------------------------------------------------------------
@@ -518,6 +538,7 @@ async def intake_document(
         "customer_candidates": decision_metadata.get("customer_candidates", []),
         "warnings": decision_metadata.get("warnings", []),
         "status": final_status,
+        "workflow_status": _derive_workflow_status_simple(final_status, decision),
         "updated_utc": datetime.now(timezone.utc).isoformat(),
     }
 

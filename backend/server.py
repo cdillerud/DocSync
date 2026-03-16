@@ -3158,6 +3158,27 @@ def _get_category_for_doc_type(doc_type: str) -> str:
         return "Other"
 
 
+
+def _derive_workflow_status(final_status: str, doc_type: str, decision: str) -> str:
+    """Map the processing result to a meaningful workflow_status so documents
+    never stay stuck at 'captured' after the intake pipeline completes."""
+    status_lower = (final_status or "").lower()
+    if status_lower in ("completed", "posted", "archived"):
+        return "completed"
+    if status_lower == "exception":
+        return "exception"
+    if status_lower in ("readytolink", "linkedtobc"):
+        return "ready_for_approval"
+    if status_lower == "storedInsp" or status_lower == "storedinsp":
+        return "processed"
+    if decision == "auto_link":
+        return "validation_passed"
+    if status_lower == "needsreview":
+        return "needs_review"
+    # Fallback: if the pipeline finished at all, it's at least classified
+    return "classified"
+
+
 async def _internal_intake_document(
     file_content: bytes,
     filename: str,
@@ -3453,6 +3474,7 @@ async def _internal_intake_document(
         "customer_candidates": decision_metadata.get("customer_candidates", []),
         "warnings": decision_metadata.get("warnings", []),
         "status": final_status,
+        "workflow_status": _derive_workflow_status(final_status, doc_type_value, decision),
         "workflow_state": "Validated",
         "updated_utc": datetime.now(timezone.utc).isoformat()
     }

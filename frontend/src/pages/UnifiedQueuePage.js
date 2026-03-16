@@ -75,6 +75,8 @@ const STATUS_LABELS = {
   exported: "Exported",
   Completed: "Completed",
   completed: "Completed",
+  FileMissing: "File Missing",
+  file_missing: "File Missing",
   Posted: "Posted",
   posted: "Posted",
   Archived: "Archived",

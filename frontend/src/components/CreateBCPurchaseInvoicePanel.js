@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { purchaseInvoicePreflight, createPurchaseInvoiceFromDocument } from '../lib/api';
+import api from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -9,7 +10,7 @@ import { toast } from 'sonner';
 import {
   FileInput, Loader2, CheckCircle2, AlertCircle,
   AlertTriangle, ChevronRight, Package, Building2, Calendar,
-  FileText, Hash, Shield, XCircle, Receipt
+  FileText, Hash, Shield, XCircle, Receipt, RefreshCw, RotateCcw
 } from 'lucide-react';
 
 const ELIGIBLE_TYPES = new Set(['AP_Invoice']);
@@ -77,20 +78,75 @@ export default function CreateBCPurchaseInvoicePanel({ document, onUpdate }) {
 
   if (!eligible && !existingPI) return null;
 
-  // Already created — show success
+  // Already created — show success with retry option if no lines
   if (existingPI && state === 'idle') {
+    const needsLines = !existingPI.lines_added || existingPI.lines_added === 0;
+
+    const handleRetryLines = async () => {
+      setState('creating');
+      try {
+        const res = await api.post(`/gpi-integration/purchase-invoices/retry-lines/${document.id}`);
+        toast.success(res.data.message || 'Lines added');
+        setResult({ ...existingPI, ...res.data });
+        setState('success');
+        onUpdate?.();
+      } catch (err) {
+        setError(err.response?.data?.detail || 'Failed to add lines');
+        setState('error');
+      }
+    };
+
+    const handleForceRecreate = async () => {
+      setState('creating');
+      try {
+        const res = await api.post(`/gpi-integration/purchase-invoices/from-document/${document.id}?force=true`);
+        setResult(res.data);
+        if (res.data.success) {
+          toast.success(`PI ${res.data.bc_record_no} re-created with ${res.data.lines_added || 0} lines`);
+          setState('success');
+          onUpdate?.();
+        } else {
+          setError(res.data.error_message || 'Re-creation failed');
+          setState('error');
+        }
+      } catch (err) {
+        setError(err.response?.data?.detail || 'Re-creation failed');
+        setState('error');
+      }
+    };
+
     return (
       <Card className="border border-emerald-300 dark:border-emerald-700 bg-emerald-50/50 dark:bg-emerald-950/20" data-testid="bc-purchase-invoice-panel">
         <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-            <CardTitle className="text-sm font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400" style={{ fontFamily: 'Chivo, sans-serif' }}>
-              BC Purchase Invoice Created
-            </CardTitle>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+              <CardTitle className="text-sm font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400" style={{ fontFamily: 'Chivo, sans-serif' }}>
+                BC Purchase Invoice Created
+              </CardTitle>
+            </div>
+            {needsLines && (
+              <div className="flex gap-1.5">
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleRetryLines} data-testid="bc-pi-retry-lines-btn">
+                  <RefreshCw className="w-3 h-3 mr-1" /> Add Lines
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-xs text-amber-600 border-amber-300 hover:bg-amber-50" onClick={handleForceRecreate} data-testid="bc-pi-force-recreate-btn">
+                  <RotateCcw className="w-3 h-3 mr-1" /> Re-create
+                </Button>
+              </div>
+            )}
           </div>
         </CardHeader>
         <CardContent>
           <SuccessDisplay data={existingPI} />
+          {needsLines && (
+            <div className="mt-3 p-2 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md">
+              <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                <AlertTriangle className="w-3 h-3 inline mr-1" />
+                No line items were added. Use <strong>Add Lines</strong> to retry adding extracted line items, or <strong>Re-create</strong> to create a new PI with lines.
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
     );

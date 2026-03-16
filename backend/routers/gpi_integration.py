@@ -1060,8 +1060,87 @@ async def purchase_invoice_preflight(doc_id: str):
     }
 
 
+@router.post("/purchase-invoices/retry-lines/{doc_id}")
+async def retry_purchase_invoice_lines(doc_id: str):
+    """Add line items to an existing BC Purchase Invoice that was created without lines.
+    Uses the stored bc_system_id from the existing PI record.
+    """
+    if not HAS_CREDENTIALS:
+        raise HTTPException(status_code=503, detail="BC credentials not configured")
+
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    existing_pi = doc.get("bc_purchase_invoice")
+    if not existing_pi or not existing_pi.get("bc_system_id"):
+        raise HTTPException(status_code=422, detail="No existing BC Purchase Invoice found for this document. Use the create endpoint instead.")
+
+    bc_system_id = existing_pi["bc_system_id"]
+    bc_record_no = existing_pi.get("bc_record_no", "")
+
+    ef = doc.get("extracted_fields") or {}
+    nf = doc.get("normalized_fields") or {}
+    line_items = ef.get("line_items") or nf.get("line_items") or []
+
+    if not line_items:
+        raise HTTPException(status_code=422, detail="No line items found in document extracted_fields. Re-process the document first.")
+
+    bc_lines = []
+    for li in line_items:
+        bc_line = {
+            "description": li.get("description", ""),
+            "quantity": float(li.get("quantity", 1) or 1),
+            "unitCost": float(li.get("unit_price", 0) or li.get("unitCost", 0) or 0),
+        }
+        if li.get("item_number") or li.get("lineObjectNumber"):
+            bc_line["lineObjectNumber"] = li.get("item_number") or li["lineObjectNumber"]
+            bc_line["lineType"] = "Item"
+        elif li.get("gl_account") or li.get("account_number"):
+            bc_line["lineObjectNumber"] = li.get("gl_account") or li["account_number"]
+            bc_line["lineType"] = "Account"
+        bc_lines.append(bc_line)
+
+    try:
+        line_results = await add_purchase_invoice_lines(
+            invoice_system_id=bc_system_id,
+            lines=bc_lines,
+        )
+    except Exception as e:
+        logger.error("Failed to add lines to PI %s: %s", bc_record_no, str(e))
+        raise HTTPException(status_code=502, detail=f"BC API error adding lines: {str(e)}")
+
+    # Update the document record with line results
+    now = datetime.now(timezone.utc).isoformat()
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "bc_purchase_invoice.lines_added": line_results["added"],
+            "bc_purchase_invoice.lines_total": line_results["total"],
+            "bc_purchase_invoice.line_errors": line_results.get("errors", []),
+            "bc_purchase_invoice.lines_retried_at": now,
+            "updated_utc": now,
+        }}
+    )
+
+    return {
+        "success": line_results["added"] > 0,
+        "bc_record_no": bc_record_no,
+        "bc_system_id": bc_system_id,
+        "lines_added": line_results["added"],
+        "lines_total": line_results["total"],
+        "line_errors": line_results.get("errors", []),
+        "message": f"Added {line_results['added']}/{line_results['total']} lines to PI #{bc_record_no}",
+    }
+
+
 @router.post("/purchase-invoices/from-document/{doc_id}")
-async def create_purchase_invoice_from_document(doc_id: str, vendor_no_override: str = Query("", description="Override vendor number")):
+async def create_purchase_invoice_from_document(
+    doc_id: str,
+    vendor_no_override: str = Query("", description="Override vendor number"),
+    force: bool = Query(False, description="Force re-creation even if PI already exists"),
+):
     """Create a BC Purchase Invoice from a GPI Hub document.
     Performs preflight, creates the invoice header, adds line items, and writes back to the document graph.
     """
@@ -1075,7 +1154,7 @@ async def create_purchase_invoice_from_document(doc_id: str, vendor_no_override:
 
     # Check for existing PI
     existing_pi = doc.get("bc_purchase_invoice")
-    if existing_pi:
+    if existing_pi and not force:
         return {
             "success": True,
             "already_exists": True,
@@ -1083,9 +1162,18 @@ async def create_purchase_invoice_from_document(doc_id: str, vendor_no_override:
             "bc_system_id": existing_pi.get("bc_system_id", ""),
             "idempotency_key": existing_pi.get("idempotency_key", ""),
             "status": "already_exists",
-            "message": "A BC Purchase Invoice was already created for this document.",
+            "message": "A BC Purchase Invoice was already created for this document. Use force=true to re-create.",
             "created_at": existing_pi.get("created_at", ""),
         }
+
+    if force and existing_pi:
+        logger.info("Force re-creating PI for doc %s (previous: %s)", doc_id, existing_pi.get("bc_record_no", ""))
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {"bc_purchase_invoice_previous": existing_pi},
+             "$unset": {"bc_purchase_invoice": ""}}
+        )
+        doc.pop("bc_purchase_invoice", None)
 
     # Check eligibility
     doc_type = doc.get("document_type", "")

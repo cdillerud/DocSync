@@ -51,6 +51,8 @@ See CHANGELOG.md for full history.
 - Fixed Vendor KPI `$or` key collision bug in dashboard (P0)
 - Fixed documents stuck in "captured" workflow_status — intake pipeline now sets workflow_status properly
 - Added `/api/workflow-fix/run` batch endpoint to fix existing stuck docs on production
+- Dedup: content-hash dedup gate in all intake paths + batch cleanup endpoint (`/api/dedup/run`)
+- Production result: 1261 duplicates removed, pending 1818 → 289
 - Fixed Document Queue: type filter, status filter, tab counts, dynamic dropdowns
 - Vendor matching remediation complete (auto-resolve, fuzzy candidates, reprocessing)
 - **Dashboard Readiness Summary Card** — Shows document readiness status distribution with counts, confidence scores, top blockers and warnings

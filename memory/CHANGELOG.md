@@ -1,5 +1,27 @@
 # GPI Document Hub - Changelog
 
+## March 16, 2026 — Dedup: Past, Present, and Future Duplicate Prevention
+
+### Root Cause
+Email polling checked `mail_intake_log` by message ID + filename, but:
+- If message IDs varied or log entries were missing, dupes slipped through
+- Content hash (sha256) was computed but never used for dedup
+- No file-level dedup existed in `hub_documents`
+
+### Fixes
+**Future prevention (`server.py`, `document_handlers.py`):**
+- Both `_internal_intake_document` and `upload_document` now check `sha256_hash` against existing docs BEFORE creating a new record
+- Email polling (`poll_mailbox_for_documents`) now checks content hash against `hub_documents` before calling intake
+
+**Past cleanup (new `/api/dedup` endpoints):**
+- `GET /api/dedup/stats` — quick duplicate group summary
+- `POST /api/dedup/dry-run` — preview what would be marked
+- `POST /api/dedup/run` — groups by sha256_hash, keeps the most-processed copy, marks rest as `is_duplicate: true`
+- Production result: **1261 duplicates removed**, pending dropped from 1818 → 289
+
+**Queue counts (`documents.py`):**
+- All queries (counts, filters, aggregations) now exclude `is_duplicate: true` documents
+
 ## March 16, 2026 — Fix: Documents Stuck in "captured" workflow_status
 
 ### Root Cause

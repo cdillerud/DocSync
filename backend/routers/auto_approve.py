@@ -19,22 +19,17 @@ router = APIRouter(prefix="/auto-approve", tags=["Auto-Approve"])
 
 TERMINAL_STATUSES = ["Completed", "Archived", "Posted", "Deleted"]
 
-APPROVAL_WORKFLOW_STATUSES = [
-    "ready_for_approval", "validated", "ready_for_post",
-    "processed", "validation_passed", "ready_for_review",
-]
-
 
 async def _get_approval_candidates(db, limit=5000):
-    """Get documents in the 'Needs Approval' bucket."""
+    """Get documents in the 'Needs Approval' bucket — matches dashboard query exactly."""
     return await db.hub_documents.find(
         {
             "validation_results.all_passed": True,
-            "is_duplicate": {"$ne": True},
-            "auto_cleared": {"$ne": True},
             "status": {"$nin": TERMINAL_STATUSES},
             "$or": [
-                {"workflow_status": {"$in": APPROVAL_WORKFLOW_STATUSES}},
+                {"workflow_status": "ready_for_approval"},
+                {"workflow_status": "validated"},
+                {"workflow_status": "ready_for_post"},
                 {"$and": [
                     {"bc_record_id": {"$exists": True}},
                     {"bc_posting_status": {"$nin": ["posted", "completed"]}},
@@ -45,11 +40,24 @@ async def _get_approval_candidates(db, limit=5000):
     ).to_list(limit)
 
 
+def _get_vendor_id(doc):
+    """Extract vendor identifier from document, checking all possible fields."""
+    return (
+        doc.get("vendor_canonical")
+        or doc.get("matched_vendor_name")
+        or doc.get("vendor_raw")
+        or (doc.get("unified_vendor_match") or {}).get("vendor_no")
+        or (doc.get("unified_vendor_match") or {}).get("vendor_name")
+        or (doc.get("validation_results") or {}).get("vendor_no")
+        or doc.get("vendor_no")
+        or ""
+    )
+
+
 @router.get("/diagnose")
 async def diagnose_approval_backlog():
     """Analyze the Needs Approval backlog and what's blocking auto-approval."""
     db = get_db()
-    svc = get_stable_vendor_service()
 
     candidates = await _get_approval_candidates(db)
 
@@ -57,11 +65,7 @@ async def diagnose_approval_backlog():
     by_vendor = {}
     no_vendor = 0
     for doc in candidates:
-        vendor = (
-            doc.get("vendor_canonical")
-            or doc.get("matched_vendor_name")
-            or doc.get("vendor_raw")
-        )
+        vendor = _get_vendor_id(doc)
         if not vendor:
             no_vendor += 1
             continue
@@ -147,12 +151,7 @@ async def dry_run_auto_approve(
     would_skip = []
 
     for doc in candidates:
-        vendor = (
-            doc.get("vendor_canonical")
-            or doc.get("matched_vendor_name")
-            or doc.get("vendor_raw")
-            or ""
-        )
+        vendor = _get_vendor_id(doc)
         skip_reasons = []
 
         if require_stable_vendor and vendor not in stable_vendors:
@@ -230,12 +229,7 @@ async def run_auto_approve(
     by_vendor = {}
 
     for doc in candidates:
-        vendor = (
-            doc.get("vendor_canonical")
-            or doc.get("matched_vendor_name")
-            or doc.get("vendor_raw")
-            or ""
-        )
+        vendor = _get_vendor_id(doc)
 
         if not force:
             if require_stable_vendor and vendor not in stable_vendors:

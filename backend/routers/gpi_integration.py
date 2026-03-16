@@ -1084,8 +1084,17 @@ async def retry_purchase_invoice_lines(doc_id: str):
     nf = doc.get("normalized_fields") or {}
     line_items = ef.get("line_items") or nf.get("line_items") or []
 
+    # Fallback: if no line_items extracted, create a single line from total amount
     if not line_items:
-        raise HTTPException(status_code=422, detail="No line items found in document extracted_fields. Re-process the document first.")
+        total_amount = float(nf.get("amount", 0) or ef.get("amount", 0) or 0)
+        if total_amount > 0:
+            vendor_name = nf.get("vendor") or ef.get("vendor") or ""
+            inv_no = ef.get("invoice_number") or nf.get("invoice_number") or ""
+            desc = f"Per invoice {inv_no}" if inv_no else f"Invoice from {vendor_name}"
+            line_items = [{"description": desc[:100], "quantity": 1, "unit_price": total_amount}]
+
+    if not line_items:
+        raise HTTPException(status_code=422, detail="No line items found and no total amount to create a fallback line. Re-process the document first.")
 
     bc_lines = []
     for li in line_items:
@@ -1218,6 +1227,16 @@ async def create_purchase_invoice_from_document(
     line_results = None
     if result.get("success") and result.get("bc_system_id"):
         line_items = ef.get("line_items") or nf.get("line_items") or []
+
+        # Fallback: if no line_items extracted, create a single line from total amount
+        if not line_items:
+            total_amount = float(nf.get("amount", 0) or ef.get("amount", 0) or 0)
+            if total_amount > 0:
+                vendor_name = nf.get("vendor") or ef.get("vendor") or ""
+                inv_no = vendor_invoice_no or ""
+                desc = f"Per invoice {inv_no}" if inv_no else f"Invoice from {vendor_name}"
+                line_items = [{"description": desc[:100], "quantity": 1, "unit_price": total_amount}]
+
         if line_items:
             try:
                 bc_lines = []

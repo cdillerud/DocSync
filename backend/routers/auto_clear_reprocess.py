@@ -250,23 +250,43 @@ async def dry_run_clear_junk():
     db = get_db()
     TERMINAL = ["Completed", "Posted", "Archived", "Duplicate", "FileMissing"]
 
-    docs = await db.hub_documents.find(
-        {"status": {"$nin": TERMINAL}},
-        {"_id": 0, "id": 1, "file_name": 1, "original_file_name": 1,
-         "doc_type": 1, "document_type": 1, "ai_classification": 1,
-         "classification_confidence": 1, "confidence": 1,
-         "source_email": 1, "sender_email": 1},
+    # Query both hub_documents AND document_intelligence_results
+    # The Doc Intelligence page reads from the intelligence collection
+    intel_docs = await db.document_intelligence_results.find(
+        {"automation_readiness": {"$in": ["needs_review", "blocked"]}},
+        {"_id": 0},
     ).to_list(5000)
+
+    # Enrich with hub_document metadata
+    if intel_docs:
+        doc_ids = [d["document_id"] for d in intel_docs]
+        hub_docs = await db.hub_documents.find(
+            {"id": {"$in": doc_ids}},
+            {"_id": 0, "id": 1, "file_name": 1, "original_file_name": 1,
+             "doc_type": 1, "document_type": 1, "ai_classification": 1,
+             "classification_confidence": 1, "confidence": 1, "status": 1},
+        ).to_list(len(doc_ids))
+        hub_map = {d["id"]: d for d in hub_docs}
+    else:
+        hub_map = {}
 
     would_clear = []
     would_keep = []
 
-    for doc in docs:
-        is_junk, reason = _is_junk(doc)
+    for intel in intel_docs:
+        hub = hub_map.get(intel.get("document_id"), {})
+        # Build a merged doc for junk detection
+        merged = {**hub, **{k: v for k, v in intel.items() if v}}
+        merged["file_name"] = hub.get("file_name") or intel.get("file_name", "")
+        merged["doc_type"] = intel.get("document_type") or hub.get("doc_type") or hub.get("document_type", "")
+
+        is_junk, reason = _is_junk(merged)
         entry = {
-            "id": doc.get("id", ""),
-            "file_name": doc.get("file_name") or doc.get("original_file_name", ""),
-            "doc_type": doc.get("doc_type") or doc.get("document_type", ""),
+            "id": intel.get("document_id", ""),
+            "file_name": merged.get("file_name", ""),
+            "doc_type": merged.get("doc_type", ""),
+            "readiness": intel.get("automation_readiness", ""),
+            "score": intel.get("automation_readiness_score", 0),
             "reason": reason,
         }
         if is_junk:
@@ -287,12 +307,12 @@ async def dry_run_clear_junk():
         by_type_keep[t] += 1
 
     return {
-        "total_evaluated": len(docs),
+        "total_evaluated": len(intel_docs),
         "would_clear": len(would_clear),
         "would_keep": len(would_keep),
         "clear_by_reason": dict(sorted(by_reason.items(), key=lambda x: -x[1])),
         "keep_by_type": dict(sorted(by_type_keep.items(), key=lambda x: -x[1])),
-        "sample_junk": would_clear[:20],
+        "sample_junk": would_clear[:30],
     }
 
 
@@ -301,23 +321,54 @@ async def run_clear_junk():
     """Clear all junk documents while preserving operational docs."""
     db = get_db()
     now = datetime.now(timezone.utc).isoformat()
-    TERMINAL = ["Completed", "Posted", "Archived", "Duplicate", "FileMissing"]
 
-    docs = await db.hub_documents.find(
-        {"status": {"$nin": TERMINAL}},
+    intel_docs = await db.document_intelligence_results.find(
+        {"automation_readiness": {"$in": ["needs_review", "blocked"]}},
         {"_id": 0},
     ).to_list(5000)
+
+    # Enrich with hub_document metadata
+    if intel_docs:
+        doc_ids = [d["document_id"] for d in intel_docs]
+        hub_docs = await db.hub_documents.find(
+            {"id": {"$in": doc_ids}},
+            {"_id": 0, "id": 1, "file_name": 1, "original_file_name": 1,
+             "doc_type": 1, "document_type": 1, "ai_classification": 1,
+             "classification_confidence": 1, "confidence": 1},
+        ).to_list(len(doc_ids))
+        hub_map = {d["id"]: d for d in hub_docs}
+    else:
+        hub_map = {}
 
     cleared = 0
     by_reason = {}
 
-    for doc in docs:
-        is_junk, reason = _is_junk(doc)
+    for intel in intel_docs:
+        hub = hub_map.get(intel.get("document_id"), {})
+        merged = {**hub, **{k: v for k, v in intel.items() if v}}
+        merged["file_name"] = hub.get("file_name") or intel.get("file_name", "")
+        merged["doc_type"] = intel.get("document_type") or hub.get("doc_type") or hub.get("document_type", "")
+
+        is_junk, reason = _is_junk(merged)
         if not is_junk:
             continue
 
+        doc_id = intel.get("document_id")
+
+        # Update intelligence collection — mark as ready (cleared)
+        await db.document_intelligence_results.update_one(
+            {"document_id": doc_id},
+            {"$set": {
+                "automation_readiness": "ready",
+                "automation_readiness_score": 100,
+                "automation_readiness_reasons": [f"junk_cleared: {reason}"],
+                "updated_at": now,
+            }},
+        )
+
+        # Update hub_documents — mark as auto-cleared
         await db.hub_documents.update_one(
-            {"id": doc["id"]},
+            {"id": doc_id},
             {"$set": {
                 "auto_cleared": True,
                 "auto_clear_decision": "cleared",

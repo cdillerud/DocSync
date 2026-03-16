@@ -719,6 +719,20 @@ async def intake_document(
         }})
 
     updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+
+    # Incremental vendor profile update
+    try:
+        vendor_name = (
+            update_data.get("vendor_canonical")
+            or update_data.get("matched_vendor_name")
+            or update_data.get("vendor_raw")
+        )
+        if vendor_name:
+            from server import _update_vendor_profile_incremental
+            await _update_vendor_profile_incremental(db, doc_id, vendor_name, update_data, final_status)
+    except Exception as e:
+        logger.error("[VendorProfile] Error updating profile for doc %s: %s", doc_id, str(e))
+
     return {
         "document": updated_doc,
         "classification": classification,

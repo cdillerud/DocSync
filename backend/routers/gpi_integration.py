@@ -115,6 +115,23 @@ async def gpi_integration_status():
     return get_integration_status()
 
 
+@router.get("/bc-api-schema/{entity_set}")
+async def get_bc_api_schema(entity_set: str):
+    """Query BC custom API to discover available fields for an entity set."""
+    if not HAS_CREDENTIALS:
+        raise HTTPException(status_code=503, detail="BC credentials not configured")
+    try:
+        from services.gpi_integration_service import _api_request, BC_WRITE_ENVIRONMENT
+        result = await _api_request("GET", entity_set, params={"$top": "1"}, environment=BC_WRITE_ENVIRONMENT)
+        records = result.get("value", [])
+        if records:
+            return {"entity_set": entity_set, "fields": list(records[0].keys()), "sample": records[0]}
+        return {"entity_set": entity_set, "fields": [], "message": "No records found"}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+
 @router.get("/companies")
 async def gpi_list_companies():
     """List available BC companies via GPI custom API."""

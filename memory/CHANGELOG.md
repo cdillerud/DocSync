@@ -1,5 +1,43 @@
 # GPI Document Hub - Changelog
 
+## March 16, 2026 — Stable Vendor Pipeline Boost & Auto-Approve Engine
+
+### Problem
+1. Only 1/72 vendors qualifying as "stable" due to overly strict thresholds (50 docs, 90% automation, 85% validation)
+2. 1,244 validated documents stuck in "Needs Approval" with no automation path
+
+### Changes
+**Stable Vendor Thresholds Lowered:**
+- `min_documents_processed`: 50 → 10
+- `min_automation_success_rate`: 90% → 50%
+- `min_reference_resolution_rate`: 90% → 70%
+- `max_correction_rate`: 10% → 20%
+- `min_validation_pass_rate`: 85% → 5%
+- `resolver_confidence_auto_ready`: 90% → 85%
+- `resolver_confidence_low_priority`: 70% → 60%
+
+**New Backend Endpoints:**
+- `GET /api/stable-vendor/diagnose` — Shows per-vendor check pass/fail, suggests optimal thresholds
+- `POST /api/stable-vendor/apply-suggested-thresholds` — Auto-applies suggested thresholds and re-evaluates
+- `GET /api/auto-approve/diagnose` — Analyzes approval backlog by vendor, shows what's auto-approvable
+- `POST /api/auto-approve/dry-run` — Preview auto-approve results with configurable filters
+- `POST /api/auto-approve/run` — Execute batch auto-approve (supports `force=true` to approve ALL)
+
+**Enhanced Stable Vendors Page:**
+- Config Panel: View/edit stability thresholds directly from UI
+- Vendor Diagnostics: Run diagnosis showing each vendor's check results and suggested thresholds
+- Auto-Approve Engine: Diagnose backlog, preview dry-run, execute batch approval with force mode
+- One-click "Apply & Re-evaluate" for suggested thresholds
+
+### Testing
+- 16/16 backend tests pass
+- All frontend UI components verified via Playwright
+
+---
+
+
+# GPI Document Hub - Changelog
+
 ## March 16, 2026 — Auto-Clear Overhaul: Non-AP Docs + Backfill + Age Rules
 
 ### Changes

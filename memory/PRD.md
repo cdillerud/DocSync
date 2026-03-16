@@ -59,6 +59,9 @@ See CHANGELOG.md for full history.
 - **Dashboard Readiness Summary Card** — Shows document readiness status distribution with counts, confidence scores, top blockers and warnings
 - **Config Service Extraction** — Centralized config_service.py module, decoupling settings.py/vendor_matching.py/mailbox_sources.py from server.py
 - **AR Release Gate (Prepay & Terms Approval)** — Evaluates sales documents for customer resolution, prepay holds, credit limits, payment terms, and ship-to validation. Includes manual override workflow.
+- **Stable Vendor Pipeline Boost** — Lowered thresholds (50→10 docs, 90%→50% automation, 85%→5% validation), added diagnostic endpoint, suggested thresholds, auto-apply
+- **Auto-Approve Engine** — New batch auto-approve for validated docs from stable vendors. Includes diagnose, dry-run, run, and force modes
+- **Stable Vendor Admin UI** — Config panel for threshold editing, vendor diagnostics panel, auto-approve controls, suggested threshold application
 
 ## Tech Stack
 - FastAPI, Motor (async MongoDB), Pydantic

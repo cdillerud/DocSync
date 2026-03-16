@@ -16,6 +16,7 @@ import {
   UserX, Link2Off, ClipboardCheck, Bell, ShieldCheck, Route,
   Gauge, ShieldAlert, Eye, Ban, HelpCircle
 } from 'lucide-react';
+import AutomationMetricsCard from '../components/AutomationMetricsCard';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, PieChart as RechartsPieChart, Pie, Legend } from 'recharts';
 import { Square9StageSummary } from '../components/Square9WorkflowTracker';
 
@@ -1026,6 +1027,9 @@ export default function DashboardPage() {
 
       {/* Document Readiness Summary */}
       <ReadinessSummaryCard data={intelligence?.readiness_summary} />
+
+      {/* Automation Intelligence Metrics */}
+      <AutomationMetricsCard />
 
       {/* Stable Vendor Auto-Ready KPIs */}
       {stableVendorMetrics && stableVendorMetrics.feature_enabled && (

@@ -385,6 +385,14 @@ export const evaluateARRelease = (docId) => api.post(`/ar-release/evaluate/${doc
 export const overrideARRelease = (docId, data) => api.post(`/ar-release/override/${docId}`, data);
 export const getARReleaseQueue = (params) => api.get('/ar-release/queue', { params });
 
+// Automation Intelligence APIs
+export const getAutomationMetrics = () => api.get('/automation/metrics');
+export const batchEvaluateIntelligence = (limit) => api.post(`/automation/batch-evaluate?limit=${limit || 200}`);
+export const getDecisionExplanation = (docId) => api.get(`/documents/${docId}/decision-explanation`);
+export const getAutomationConfidence = (docId) => api.get(`/documents/${docId}/automation-confidence`);
+export const getReviewAssist = (docId) => api.post(`/documents/${docId}/review-assist`);
+export const acceptSuggestion = (docId, data) => api.post(`/documents/${docId}/accept-suggestion`, data);
+
 
 
 

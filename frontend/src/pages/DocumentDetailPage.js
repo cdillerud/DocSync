@@ -26,6 +26,8 @@ import CreateBCSalesOrderPanel from '../components/CreateBCSalesOrderPanel';
 import CreateBCPurchaseInvoicePanel from '../components/CreateBCPurchaseInvoicePanel';
 import DocumentIntelligencePanel from '../components/DocumentIntelligencePanel';
 import ARReleaseGatePanel from '../components/ARReleaseGatePanel';
+import DecisionExplainabilityPanel from '../components/DecisionExplainabilityPanel';
+import ReviewerAssistPanel from '../components/ReviewerAssistPanel';
 
 const READINESS_CONFIG = {
   ready_auto_draft: { label: 'Ready (Auto-Draft)', color: 'bg-emerald-500', textColor: 'text-emerald-500', icon: CheckCircle2 },
@@ -587,6 +589,18 @@ export default function DocumentDetailPage() {
 
           {/* Readiness Panel */}
           <ReadinessPanel readiness={doc.readiness} />
+
+          {/* Decision Explainability Panel */}
+          <DecisionExplainabilityPanel
+            document={doc}
+            onRefresh={() => fetchDoc()}
+          />
+
+          {/* Reviewer Assist Panel — shows for needs_review/blocked/ambiguous */}
+          <ReviewerAssistPanel
+            document={doc}
+            onRefresh={() => fetchDoc()}
+          />
 
           {/* AR Release Gate Panel - for sales/AR documents */}
           {((doc.doc_type || doc.suggested_job_type || '').toLowerCase().includes('sales') || doc.ar_release_gate) && (

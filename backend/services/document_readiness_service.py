@@ -293,7 +293,8 @@ def _compute_confidence(signals: Dict[str, bool], ai_conf: float, n_blocking: in
 # ---------------------------------------------------------------------------
 
 async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
-    """Evaluate readiness for a document and persist the result."""
+    """Evaluate readiness for a document and persist the result.
+    Also computes automation confidence and decision explanation."""
     from deps import get_db
     db = get_db()
 
@@ -303,17 +304,30 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
 
     readiness = evaluate_readiness(doc)
 
+    # Compute automation intelligence alongside readiness
+    from services.automation_intelligence_service import (
+        compute_automation_confidence,
+        build_decision_explanation,
+    )
+    # Temporarily attach readiness so intelligence can read it
+    doc["readiness"] = readiness
+    auto_conf = compute_automation_confidence(doc)
+    explanation = build_decision_explanation(doc)
+
     await db.hub_documents.update_one(
         {"id": doc_id},
         {"$set": {
             "readiness": readiness,
+            "automation_confidence": auto_conf,
+            "decision_explanation": explanation,
             "updated_utc": readiness["last_evaluated_at"],
         }},
     )
 
     logger.info(
-        "[Readiness] doc=%s status=%s confidence=%.2f action=%s blockers=%d warnings=%d",
+        "[Readiness] doc=%s status=%s confidence=%.2f auto_conf=%.2f action=%s blockers=%d warnings=%d",
         doc_id, readiness["status"], readiness["confidence"],
+        auto_conf["score"],
         readiness["recommended_action"], len(readiness["blocking_reasons"]),
         len(readiness["warning_reasons"]),
     )
@@ -321,8 +335,13 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
 
 
 async def batch_evaluate(limit: int = 200) -> Dict[str, int]:
-    """Evaluate readiness for documents that don't have it yet."""
+    """Evaluate readiness for documents that don't have it yet.
+    Also computes automation confidence and decision explanation."""
     from deps import get_db
+    from services.automation_intelligence_service import (
+        compute_automation_confidence,
+        build_decision_explanation,
+    )
     db = get_db()
 
     cursor = db.hub_documents.find(
@@ -336,9 +355,17 @@ async def batch_evaluate(limit: int = 200) -> Dict[str, int]:
     for d in docs:
         try:
             r = evaluate_readiness(d)
+            d["readiness"] = r
+            auto_conf = compute_automation_confidence(d)
+            explanation = build_decision_explanation(d)
             await db.hub_documents.update_one(
                 {"id": d["id"]},
-                {"$set": {"readiness": r, "updated_utc": r["last_evaluated_at"]}},
+                {"$set": {
+                    "readiness": r,
+                    "automation_confidence": auto_conf,
+                    "decision_explanation": explanation,
+                    "updated_utc": r["last_evaluated_at"],
+                }},
             )
             counts[r["status"]] = counts.get(r["status"], 0) + 1
         except Exception:

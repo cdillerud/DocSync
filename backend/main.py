@@ -74,6 +74,7 @@ from routers.auth import router as auth_router
 from routers.ap_review import ap_review_router, set_dependencies as set_ap_review_deps
 from routers.spiro import spiro_router
 from routers.ar_release import router as ar_release_router
+from routers.automation_intelligence import router as automation_intelligence_router
 
 # ==================== APP ====================
 app = FastAPI(title="GPI Document Hub API")
@@ -129,6 +130,7 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(ap_review_router, prefix="/api")
 app.include_router(spiro_router, prefix="/api")
 app.include_router(ar_release_router, prefix="/api")
+app.include_router(automation_intelligence_router, prefix="/api")
 
 # ==================== SALES MODULE ====================
 app.include_router(sales_router)

@@ -133,6 +133,18 @@ AUTO_CLEAR_CONFIG = {
             "require_no_duplicate": False,
             "auto_post_if_cleared": False,
         },
+        "Unknown_Sales": {
+            "confidence_threshold": 0.0,
+            "require_vendor_match": False,
+            "require_no_duplicate": False,
+            "auto_post_if_cleared": False,
+        },
+        "Unknown": {
+            "confidence_threshold": 0.0,
+            "require_vendor_match": False,
+            "require_no_duplicate": False,
+            "auto_post_if_cleared": False,
+        },
         "Sales_Order": {
             "confidence_threshold": 0.90,
             "require_customer_match": True,

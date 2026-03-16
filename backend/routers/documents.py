@@ -153,13 +153,18 @@ async def list_documents(
             fq.update(search_cond)
 
     TERMINAL_STATUSES = ["Completed", "Posted", "Archived", "completed", "posted", "archived"]
+    DONE_WORKFLOW_STATUSES = ["completed", "validation_passed", "processed", "ready_for_approval", "exported"]
     if queue_view and not include_cleared and not status:
         not_cleared = {"$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}]}
         not_terminal = {"status": {"$nin": TERMINAL_STATUSES}}
+        not_done_wf = {"$or": [
+            {"workflow_status": {"$nin": DONE_WORKFLOW_STATUSES}},
+            {"workflow_status": {"$exists": False}},
+        ]}
         if "$and" in fq:
-            fq["$and"].extend([not_cleared, not_terminal])
+            fq["$and"].extend([not_cleared, not_terminal, not_done_wf])
         else:
-            fq["$and"] = [not_cleared, not_terminal]
+            fq["$and"] = [not_cleared, not_terminal, not_done_wf]
 
     total = await db.hub_documents.count_documents(fq)
     docs = await db.hub_documents.find(fq, {"_id": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
@@ -167,14 +172,25 @@ async def list_documents(
     # Compute global counts
     total_all = await db.hub_documents.count_documents({})
     cleared_count = await db.hub_documents.count_documents({"auto_cleared": True})
+
+    DONE_WF = DONE_WORKFLOW_STATUSES
+
     pending_count = await db.hub_documents.count_documents({
         "$and": [
             {"$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}]},
             {"status": {"$nin": TERMINAL_STATUSES}},
+            {"$or": [
+                {"workflow_status": {"$nin": DONE_WF}},
+                {"workflow_status": {"$exists": False}},
+            ]},
         ]
     })
     completed_count = await db.hub_documents.count_documents({
-        "status": {"$in": TERMINAL_STATUSES}
+        "$or": [
+            {"status": {"$in": TERMINAL_STATUSES}},
+            {"auto_cleared": True},
+            {"workflow_status": {"$in": DONE_WF}},
+        ]
     })
 
     # Distinct types and statuses for dynamic filter dropdowns

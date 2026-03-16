@@ -1,5 +1,26 @@
 # GPI Document Hub - Changelog
 
+## March 16, 2026 — Dashboard Readiness, Config Extraction, AR Release Gate
+
+### Dashboard Readiness Summary Card
+- Added `readiness_summary` to `/api/dashboard/workflow-intelligence` endpoint
+- Created `ReadinessSummaryCard` on dashboard with 5-status distribution, progress bar, confidence %, blockers/warnings
+- 20/20 tests passing
+
+### Config Service Extraction (Orchestration Refactor)
+- Created `backend/services/config_service.py` — centralized config variables and token helpers
+- Rewired settings.py, vendor_matching.py, mailbox_sources.py to import from config_service
+- Added DB config sync in server.py `_load_config_from_db()`
+
+### AR Release Gate (Prepay & Terms Approval)
+- `backend/services/ar_release_gate_service.py` — 5 checks: customer_resolution, prepay_hold, credit_limit, payment_terms, ship_to
+- `backend/routers/ar_release.py` — GET metrics, POST evaluate, POST override, GET queue
+- `frontend/src/components/ARReleaseGatePanel.js` — sales document detail panel with check results, override form
+- 27/27 backend tests, frontend UI verified
+- Test reports: iteration_118.json, iteration_119.json
+
+
+
 ## March 15, 2026 — Shared Helper Extraction (iter_112)
 
 ### Extraction

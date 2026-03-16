@@ -18,8 +18,14 @@
 - ~~Vendor Resolution Observability + Negative Feedback Loop~~ (2026-03-16, iter_116) — per-doc resolution objects, rejection memory, guardrails, analytics, 71 tests
 
 ### P1 — Next Up
-- **Complete Orchestration Logic Extraction from server.py** — Business orchestration logic still in server.py, paused for routing feature
-- **AR Release Gate (Prepay and Terms Approval)** — New approval step for AR documents
+- **Admin UI for Item Mapping Rules** — CRUD interface for managing item mapping rules
+- **Continue Orchestration Extraction** — document_handlers.py, sharepoint helpers, email polling still import from server.py
+- **Batch AR Release Evaluation** — Auto-evaluate all sales docs through AR gate in pipeline
+
+### P1 — Recently Completed
+- ~~Dashboard Readiness Summary Card~~ (2026-03-16, iter_118) — Readiness status distribution with counts/confidence/blockers
+- ~~Config Service Extraction~~ (2026-03-16) — Centralized config vars and token helpers, rewired 3 consumers
+- ~~AR Release Gate (Prepay & Terms Approval)~~ (2026-03-16, iter_119) — 5-check gate, override workflow, UI panel, 27 tests
 
 ### P2 — Medium Priority
 - **Package and Publish BC (AL) Extension** — Updated `.app` file in `/app/BC_extension/` needs publishing to BC Sandbox

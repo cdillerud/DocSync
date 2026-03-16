@@ -13,7 +13,8 @@ import {
   FileText, AlertCircle, CheckCircle2, RefreshCw, ArrowRight, UploadCloud, Files,
   TrendingUp, Target, Zap, Clock, Users, Truck, Database, FolderArchive, 
   BarChart3, PieChart, Activity, Layers, Network, Building2, GitBranch,
-  UserX, Link2Off, ClipboardCheck, Bell, ShieldCheck, Route
+  UserX, Link2Off, ClipboardCheck, Bell, ShieldCheck, Route,
+  Gauge, ShieldAlert, Eye, Ban, HelpCircle
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, PieChart as RechartsPieChart, Pie, Legend } from 'recharts';
 import { Square9StageSummary } from '../components/Square9WorkflowTracker';
@@ -777,6 +778,136 @@ function RoutingSummaryCard({ statsRouting, intelligenceRouting }) {
   );
 }
 
+// Document Readiness Summary Card
+function ReadinessSummaryCard({ data }) {
+  if (!data) return null;
+
+  const byStatus = data.by_status || {};
+  const confidence = data.confidence_by_status || {};
+  const total = Object.values(byStatus).reduce((a, b) => a + b, 0);
+  if (total === 0 && (data.no_readiness_data || 0) === 0) return null;
+
+  const statuses = [
+    { key: 'ready_auto_draft', label: 'Auto Draft', icon: Zap, color: 'text-emerald-500', bg: 'bg-emerald-500/10', barColor: 'bg-emerald-500' },
+    { key: 'ready_auto_link', label: 'Auto Link', icon: Link2Off, color: 'text-blue-500', bg: 'bg-blue-500/10', barColor: 'bg-blue-500' },
+    { key: 'needs_review', label: 'Needs Review', icon: Eye, color: 'text-amber-500', bg: 'bg-amber-500/10', barColor: 'bg-amber-500' },
+    { key: 'blocked', label: 'Blocked', icon: Ban, color: 'text-red-500', bg: 'bg-red-500/10', barColor: 'bg-red-500' },
+    { key: 'ambiguous', label: 'Ambiguous', icon: HelpCircle, color: 'text-purple-500', bg: 'bg-purple-500/10', barColor: 'bg-purple-500' },
+  ];
+
+  const topBlockers = (data.top_blocking_reasons || []).slice(0, 4);
+  const topWarnings = (data.top_warning_reasons || []).slice(0, 4);
+
+  return (
+    <Card className="border-2 border-sky-500/30 bg-gradient-to-br from-sky-500/5 to-transparent" data-testid="readiness-summary-card">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Gauge className="w-5 h-5 text-sky-500" />
+            <CardTitle className="text-lg font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Document Readiness</CardTitle>
+          </div>
+          {total > 0 && (
+            <Badge variant="secondary" className="text-sm px-3 py-1" data-testid="readiness-total-badge">
+              {total} evaluated
+            </Badge>
+          )}
+        </div>
+        <CardDescription>Readiness engine assessment — can documents be auto-processed?</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Status counts grid */}
+        <div className="grid grid-cols-5 gap-2">
+          {statuses.map((s) => {
+            const count = byStatus[s.key] || 0;
+            const conf = confidence[s.key];
+            return (
+              <div key={s.key} className={`${s.bg} rounded-lg p-2.5 text-center`} data-testid={`readiness-${s.key}`}>
+                <s.icon className={`w-4 h-4 mx-auto mb-1 ${s.color}`} />
+                <div className={`text-xl font-black ${s.color}`} style={{ fontFamily: 'Chivo, sans-serif' }}>
+                  {count}
+                </div>
+                <div className="text-[10px] text-muted-foreground leading-tight">{s.label}</div>
+                {conf !== undefined && (
+                  <div className="text-[9px] text-muted-foreground mt-0.5">{(conf * 100).toFixed(0)}% conf</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Progress bar */}
+        {total > 0 && (
+          <div>
+            <div className="flex items-center gap-0.5 h-2.5 rounded-full overflow-hidden bg-muted/30">
+              {statuses.map((s) => {
+                const count = byStatus[s.key] || 0;
+                const pct = (count / total) * 100;
+                if (pct === 0) return null;
+                return (
+                  <div
+                    key={s.key}
+                    className={`${s.barColor} h-full transition-all`}
+                    style={{ width: `${pct}%` }}
+                    title={`${s.label}: ${count} (${pct.toFixed(0)}%)`}
+                  />
+                );
+              })}
+            </div>
+            <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
+              {statuses.filter(s => (byStatus[s.key] || 0) > 0).map((s) => (
+                <span key={s.key} className={s.color}>
+                  {s.label} {(((byStatus[s.key] || 0) / total) * 100).toFixed(0)}%
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Top blockers & warnings */}
+        <div className="grid grid-cols-2 gap-3">
+          {topBlockers.length > 0 && (
+            <div>
+              <h4 className="text-xs font-semibold mb-1.5 flex items-center gap-1">
+                <ShieldAlert className="w-3 h-3 text-red-500" /> Top Blockers
+              </h4>
+              <div className="space-y-1">
+                {topBlockers.map((b) => (
+                  <div key={b.reason} className="flex items-center justify-between text-xs">
+                    <span className="truncate text-muted-foreground">{b.reason.replace(/_/g, ' ')}</span>
+                    <Badge variant="destructive" className="text-[10px] h-4 px-1.5">{b.count}</Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {topWarnings.length > 0 && (
+            <div>
+              <h4 className="text-xs font-semibold mb-1.5 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3 text-amber-500" /> Top Warnings
+              </h4>
+              <div className="space-y-1">
+                {topWarnings.map((w) => (
+                  <div key={w.reason} className="flex items-center justify-between text-xs">
+                    <span className="truncate text-muted-foreground">{w.reason.replace(/_/g, ' ')}</span>
+                    <Badge variant="secondary" className="text-[10px] h-4 px-1.5">{w.count}</Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Unscored docs notice */}
+        {(data.no_readiness_data || 0) > 0 && (
+          <div className="text-xs text-muted-foreground pt-1 border-t">
+            {data.no_readiness_data} document{data.no_readiness_data !== 1 ? 's' : ''} not yet evaluated
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function DashboardPage() {
   const [stats, setStats] = useState(null);
   const [intelligence, setIntelligence] = useState(null);
@@ -892,6 +1023,9 @@ export default function DashboardPage() {
         statsRouting={stats?.routing_summary}
         intelligenceRouting={intelligence?.routing_summary}
       />
+
+      {/* Document Readiness Summary */}
+      <ReadinessSummaryCard data={intelligence?.readiness_summary} />
 
       {/* Stable Vendor Auto-Ready KPIs */}
       {stableVendorMetrics && stableVendorMetrics.feature_enabled && (

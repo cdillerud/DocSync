@@ -352,6 +352,48 @@ async def get_workflow_intelligence_stats():
             }
     total_routed = sum(v["count"] for v in routing_counts.values())
 
+    # ============== READINESS STATUS ==============
+    readiness_status_pipeline = [
+        {"$group": {"_id": "$readiness.status", "count": {"$sum": 1}}},
+    ]
+    readiness_raw = await db.hub_documents.aggregate(readiness_status_pipeline).to_list(10)
+    readiness_by_status = {r["_id"]: r["count"] for r in readiness_raw if r["_id"]}
+    no_readiness = total_docs - sum(readiness_by_status.values())
+
+    readiness_action_pipeline = [
+        {"$match": {"readiness.recommended_action": {"$exists": True, "$ne": None}}},
+        {"$group": {"_id": "$readiness.recommended_action", "count": {"$sum": 1}}},
+    ]
+    readiness_action_raw = await db.hub_documents.aggregate(readiness_action_pipeline).to_list(10)
+    readiness_by_action = {r["_id"]: r["count"] for r in readiness_action_raw if r["_id"]}
+
+    readiness_conf_pipeline = [
+        {"$match": {"readiness.confidence": {"$exists": True}}},
+        {"$group": {"_id": "$readiness.status", "avg_confidence": {"$avg": "$readiness.confidence"}}},
+    ]
+    readiness_conf_raw = await db.hub_documents.aggregate(readiness_conf_pipeline).to_list(10)
+    readiness_confidence = {r["_id"]: round(r["avg_confidence"], 3) for r in readiness_conf_raw if r["_id"]}
+
+    readiness_block_pipeline = [
+        {"$match": {"readiness.blocking_reasons": {"$exists": True, "$ne": []}}},
+        {"$unwind": "$readiness.blocking_reasons"},
+        {"$group": {"_id": "$readiness.blocking_reasons", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 10},
+    ]
+    readiness_block_raw = await db.hub_documents.aggregate(readiness_block_pipeline).to_list(10)
+    top_blocking = [{"reason": r["_id"], "count": r["count"]} for r in readiness_block_raw if r["_id"]]
+
+    readiness_warn_pipeline = [
+        {"$match": {"readiness.warning_reasons": {"$exists": True, "$ne": []}}},
+        {"$unwind": "$readiness.warning_reasons"},
+        {"$group": {"_id": "$readiness.warning_reasons", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 10},
+    ]
+    readiness_warn_raw = await db.hub_documents.aggregate(readiness_warn_pipeline).to_list(10)
+    top_warnings = [{"reason": r["_id"], "count": r["count"]} for r in readiness_warn_raw if r["_id"]]
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "total_documents": total_docs,
@@ -428,6 +470,16 @@ async def get_workflow_intelligence_stats():
             "top_folders": {item["_id"]: item["count"] for item in folder_distribution if item["_id"]}
         },
         
+        # Readiness Summary (Document Readiness Engine)
+        "readiness_summary": {
+            "by_status": readiness_by_status,
+            "by_action": readiness_by_action,
+            "no_readiness_data": no_readiness,
+            "confidence_by_status": readiness_confidence,
+            "top_blocking_reasons": top_blocking,
+            "top_warning_reasons": top_warnings,
+        },
+
         "ingestion_sources": {item["_id"]: item["count"] for item in by_source if item["_id"]},
         
         "daily_trends": [

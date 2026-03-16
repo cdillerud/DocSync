@@ -122,7 +122,7 @@ async def list_documents(
     queue_view: bool = Query(True, description="Queue view mode - hides completed/cleared docs by default")
 ):
     db = get_db()
-    fq = {}
+    fq = {"is_duplicate": {"$ne": True}}  # Always exclude duplicates
 
     # Status filter: check both status and workflow_status fields (case-insensitive)
     if status:
@@ -169,14 +169,16 @@ async def list_documents(
     total = await db.hub_documents.count_documents(fq)
     docs = await db.hub_documents.find(fq, {"_id": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
 
-    # Compute global counts
-    total_all = await db.hub_documents.count_documents({})
-    cleared_count = await db.hub_documents.count_documents({"auto_cleared": True})
+    # Compute global counts (excluding duplicates)
+    not_dup = {"is_duplicate": {"$ne": True}}
+    total_all = await db.hub_documents.count_documents(not_dup)
+    cleared_count = await db.hub_documents.count_documents({"auto_cleared": True, **not_dup})
 
     DONE_WF = DONE_WORKFLOW_STATUSES
 
     pending_count = await db.hub_documents.count_documents({
         "$and": [
+            not_dup,
             {"$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}]},
             {"status": {"$nin": TERMINAL_STATUSES}},
             {"$or": [
@@ -186,20 +188,25 @@ async def list_documents(
         ]
     })
     completed_count = await db.hub_documents.count_documents({
-        "$or": [
-            {"status": {"$in": TERMINAL_STATUSES}},
-            {"auto_cleared": True},
-            {"workflow_status": {"$in": DONE_WF}},
+        "$and": [
+            not_dup,
+            {"$or": [
+                {"status": {"$in": TERMINAL_STATUSES}},
+                {"auto_cleared": True},
+                {"workflow_status": {"$in": DONE_WF}},
+            ]},
         ]
     })
 
     # Distinct types and statuses for dynamic filter dropdowns
     distinct_types_raw = await db.hub_documents.aggregate([
+        {"$match": {"is_duplicate": {"$ne": True}}},
         {"$group": {"_id": {"$ifNull": ["$doc_type", "$document_type"]}, "count": {"$sum": 1}}},
         {"$match": {"_id": {"$ne": None}}},
         {"$sort": {"count": -1}},
     ]).to_list(50)
     distinct_statuses_raw = await db.hub_documents.aggregate([
+        {"$match": {"is_duplicate": {"$ne": True}}},
         {"$group": {"_id": "$status", "count": {"$sum": 1}}},
         {"$match": {"_id": {"$ne": None}}},
         {"$sort": {"count": -1}},

@@ -153,6 +153,19 @@ async def upload_document(
 
     file_content = await file.read()
     sha256_hash = hashlib.sha256(file_content).hexdigest()
+
+    # ---- Content-hash dedup gate ----
+    existing_by_hash = await db.hub_documents.find_one(
+        {"sha256_hash": sha256_hash, "is_duplicate": {"$ne": True}},
+        {"_id": 0, "id": 1, "file_name": 1}
+    )
+    if existing_by_hash:
+        return {
+            "document": existing_by_hash,
+            "skipped_duplicate": True,
+            "message": f"Duplicate of {existing_by_hash['id']} by content hash",
+        }
+
     doc_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     correlation_id = str(uuid.uuid4())

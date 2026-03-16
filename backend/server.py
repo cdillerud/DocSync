@@ -3193,6 +3193,21 @@ async def _internal_intake_document(
     Similar to intake_document but accepts raw bytes instead of UploadFile.
     """
     computed_hash = hashlib.sha256(file_content).hexdigest()
+
+    # ---- Content-hash dedup gate ----
+    existing_by_hash = await db.hub_documents.find_one(
+        {"sha256_hash": computed_hash, "is_duplicate": {"$ne": True}},
+        {"_id": 0, "id": 1, "file_name": 1}
+    )
+    if existing_by_hash:
+        logger.info("[Intake] Skipped duplicate: %s (hash matches doc %s / %s)",
+                     filename, existing_by_hash["id"], existing_by_hash.get("file_name"))
+        return {
+            "document_id": existing_by_hash["id"],
+            "skipped_duplicate": True,
+            "message": f"Duplicate of {existing_by_hash['id']} by content hash",
+        }
+
     doc_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     correlation_id = str(uuid.uuid4())  # For event correlation
@@ -7263,6 +7278,26 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
                         content_b64 = att_content_resp.json().get("contentBytes", "")
                         content_bytes = base64.b64decode(content_b64)
                         content_hash = hashlib.sha256(content_bytes).hexdigest()
+                        
+                        # Content-hash dedup against hub_documents
+                        hash_dup = await db.hub_documents.find_one(
+                            {"sha256_hash": content_hash, "is_duplicate": {"$ne": True}},
+                            {"_id": 0, "id": 1}
+                        )
+                        if hash_dup:
+                            # Log so future polls also skip via mail_intake_log
+                            await db.mail_intake_log.insert_one({
+                                "internet_message_id": internet_msg_id,
+                                "attachment_name": filename,
+                                "attachment_hash": content_hash,
+                                "document_id": hash_dup["id"],
+                                "mailbox_source": mailbox_address,
+                                "source_id": source_id,
+                                "status": "Skipped_Duplicate",
+                                "created_utc": datetime.now(timezone.utc).isoformat()
+                            })
+                            stats["attachments_skipped_dup"] += 1
+                            continue
                         
                         # Ingest through unified pipeline
                         result = await _internal_intake_document(

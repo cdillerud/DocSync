@@ -49,26 +49,88 @@ AUTO_CLEAR_CONFIG = {
             "auto_post_if_cleared": True,    # Auto-post to BC when cleared
         },
         "Freight_Document": {
-            "confidence_threshold": 0.85,  # Slightly lower for freight
-            "require_vendor_match": True,
+            "confidence_threshold": 0.80,
+            "require_vendor_match": False,
             "require_no_duplicate": True,
-            "require_order_reference": True,  # Must have BOL/Order #
-            "auto_post_if_cleared": True,
+            "require_order_reference": False,
+            "auto_post_if_cleared": False,   # Just archive
         },
         "Shipping_Document": {
-            "confidence_threshold": 0.85,
-            "require_vendor_match": False,  # Vendor not always on BOLs
+            "confidence_threshold": 0.80,
+            "require_vendor_match": False,
             "require_no_duplicate": True,
-            "require_order_reference": True,
-            "require_bol_number": True,
-            "require_ship_date": True,
-            "auto_post_if_cleared": False,  # Just archive, no BC posting
+            "auto_post_if_cleared": False,   # Just archive
         },
         "Warehouse_Document": {
+            "confidence_threshold": 0.80,
+            "require_vendor_match": False,
+            "require_no_duplicate": True,
+            "auto_post_if_cleared": False,
+        },
+        "Quality_Doc": {
+            "confidence_threshold": 0.80,
+            "require_vendor_match": False,
+            "require_no_duplicate": True,
+            "auto_post_if_cleared": False,
+        },
+        "QUALITY_DOC": {
+            "confidence_threshold": 0.80,
+            "require_vendor_match": False,
+            "require_no_duplicate": True,
+            "auto_post_if_cleared": False,
+        },
+        "Statement": {
+            "confidence_threshold": 0.80,
+            "require_vendor_match": False,
+            "require_no_duplicate": True,
+            "auto_post_if_cleared": False,
+        },
+        "STATEMENT": {
+            "confidence_threshold": 0.80,
+            "require_vendor_match": False,
+            "require_no_duplicate": True,
+            "auto_post_if_cleared": False,
+        },
+        "Remittance": {
+            "confidence_threshold": 0.80,
+            "require_vendor_match": False,
+            "require_no_duplicate": True,
+            "auto_post_if_cleared": False,
+        },
+        "REMITTANCE": {
+            "confidence_threshold": 0.80,
+            "require_vendor_match": False,
+            "require_no_duplicate": True,
+            "auto_post_if_cleared": False,
+        },
+        "Order_Confirmation": {
+            "confidence_threshold": 0.80,
+            "require_vendor_match": False,
+            "require_no_duplicate": True,
+            "auto_post_if_cleared": False,
+        },
+        "BOL": {
+            "confidence_threshold": 0.80,
+            "require_vendor_match": False,
+            "require_no_duplicate": True,
+            "auto_post_if_cleared": False,
+        },
+        "Packing_List": {
+            "confidence_threshold": 0.80,
+            "require_vendor_match": False,
+            "require_no_duplicate": True,
+            "auto_post_if_cleared": False,
+        },
+        "Unknown_Document": {
             "confidence_threshold": 0.85,
             "require_vendor_match": False,
             "require_no_duplicate": True,
-            "require_order_reference": True,
+            "auto_post_if_cleared": False,
+        },
+        "Other": {
+            "confidence_threshold": 0.85,
+            "require_vendor_match": False,
+            "require_no_duplicate": True,
             "auto_post_if_cleared": False,
         },
         "Sales_Order": {
@@ -83,9 +145,9 @@ AUTO_CLEAR_CONFIG = {
             "require_no_duplicate": True,
             "auto_post_if_cleared": False,  # Credits need review
         },
-        # Default for unknown types - conservative
+        # Default for unknown types - archive-only, relaxed
         "DEFAULT": {
-            "confidence_threshold": 0.95,
+            "confidence_threshold": 0.85,
             "require_vendor_match": False,
             "require_no_duplicate": True,
             "auto_post_if_cleared": False,
@@ -123,7 +185,7 @@ def evaluate_auto_clear(
     if not config.get("enabled", True):
         return AutoClearDecision.NEEDS_REVIEW, "Auto-clear disabled", {}
     
-    doc_type = doc.get("document_type") or doc.get("suggested_job_type") or "DEFAULT"
+    doc_type = doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type") or "DEFAULT"
     type_config = config["thresholds"].get(doc_type, config["thresholds"]["DEFAULT"])
     
     details = {

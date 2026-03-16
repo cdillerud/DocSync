@@ -263,7 +263,7 @@ async def add_sales_order_lines(
 
 
 # Fallback defaults for purchase invoice lines
-BC_PI_FALLBACK_GL_ACCOUNT = os.environ.get('BC_PI_FALLBACK_GL_ACCOUNT', '')
+BC_PI_FALLBACK_GL_ACCOUNT = os.environ.get('BC_PI_FALLBACK_GL_ACCOUNT', '60500')
 BC_PI_FALLBACK_ITEM_CODE = os.environ.get('BC_PI_FALLBACK_ITEM_CODE', os.environ.get('BC_DEFAULT_ITEM_CODE', ''))
 
 

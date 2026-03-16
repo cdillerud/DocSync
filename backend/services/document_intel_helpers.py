@@ -77,7 +77,15 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
 
         file_content = FileContentWithMimeType(file_path=file_path, mime_type=mime_type)
         user_message = UserMessage(
-            text="Please analyze this business document. Classify it and extract all relevant fields. Respond with JSON only.",
+            text=(
+                "Please analyze this business document. "
+                "IMPORTANT: If this PDF has multiple pages, focus on the FIRST PAGE to determine the document type. "
+                "Subsequent pages often contain supporting documents (BOLs, freight bills, packing slips) that should NOT change "
+                "the classification of the primary/lead document on page 1. "
+                "For example, if page 1 is a PO Confirmation or Warehouse Receipt and later pages are Bills of Lading, "
+                "classify as Sales_Order, not Shipping_Document. "
+                "Classify the document and extract all relevant fields. Respond with JSON only."
+            ),
             file_contents=[file_content],
         )
 

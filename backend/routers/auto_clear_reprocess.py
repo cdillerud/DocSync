@@ -77,6 +77,7 @@ async def run_reprocess():
 
     cleared = 0
     by_type = {}
+    by_reason = {}
 
     for doc in docs:
         decision, reason, details = evaluate_auto_clear(doc)
@@ -91,11 +92,15 @@ async def run_reprocess():
             dt = doc.get("doc_type") or doc.get("document_type") or "unknown"
             by_type.setdefault(dt, 0)
             by_type[dt] += 1
+        else:
+            by_reason.setdefault(reason[:80], 0)
+            by_reason[reason[:80]] += 1
 
     return {
         "total_evaluated": len(docs),
         "auto_cleared": cleared,
         "remained": len(docs) - cleared,
         "by_type": by_type,
+        "top_block_reasons": dict(sorted(by_reason.items(), key=lambda x: -x[1])[:15]),
         "timestamp": now,
     }

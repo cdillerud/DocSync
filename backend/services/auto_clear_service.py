@@ -199,7 +199,16 @@ def evaluate_auto_clear(
     # =================================================================
     # CHECK 1: Confidence Threshold
     # =================================================================
-    confidence = doc.get("ai_confidence", 0) or doc.get("confidence", 0)
+    confidence = (
+        doc.get("ai_confidence")
+        or doc.get("confidence")
+        or (doc.get("ai_classification") or {}).get("confidence")
+        or 0
+    )
+    # Handle string percentages like "100%"
+    if isinstance(confidence, str):
+        confidence = float(confidence.replace("%", "")) / 100 if "%" in confidence else float(confidence)
+    confidence = float(confidence)
     threshold = type_config.get("confidence_threshold", 0.90)
     
     confidence_passed = confidence >= threshold
@@ -374,7 +383,12 @@ def evaluate_auto_clear(
     # CHECK 6: SharePoint Upload (if required globally)
     # =================================================================
     if config.get("require_sharepoint_upload"):
-        sp_uploaded = bool(doc.get("sharepoint_item_id") or doc.get("sharepoint_web_url"))
+        sp_uploaded = bool(
+            doc.get("sharepoint_item_id")
+            or doc.get("sharepoint_web_url")
+            or doc.get("sharepoint_drive_id")
+            or doc.get("sharepoint_share_link_url")
+        )
         details["checks"].append({
             "check": "sharepoint_upload",
             "passed": sp_uploaded,

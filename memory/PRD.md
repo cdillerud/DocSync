@@ -53,6 +53,8 @@ See CHANGELOG.md for full history.
 - Added `/api/workflow-fix/run` batch endpoint to fix existing stuck docs on production
 - Dedup: content-hash dedup gate in all intake paths + batch cleanup endpoint (`/api/dedup/run`)
 - Production result: 1261 duplicates removed, pending 1818 → 289
+- Stable Vendor profiles rebuilt from real document data — `/api/vendor-profiles/rebuild/run`
+- Vendor name normalization dedup (case/punctuation variants merged)
 - Fixed Document Queue: type filter, status filter, tab counts, dynamic dropdowns
 - Vendor matching remediation complete (auto-resolve, fuzzy candidates, reprocessing)
 - **Dashboard Readiness Summary Card** — Shows document readiness status distribution with counts, confidence scores, top blockers and warnings

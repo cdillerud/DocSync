@@ -78,6 +78,7 @@ from routers.automation_intelligence import router as automation_intelligence_ro
 from routers.vendor_reprocess import router as vendor_reprocess_router
 from routers.workflow_fix import router as workflow_fix_router
 from routers.dedup import router as dedup_router
+from routers.vendor_profile_rebuild import router as vendor_profile_rebuild_router
 
 # ==================== APP ====================
 app = FastAPI(title="GPI Document Hub API")
@@ -137,6 +138,7 @@ app.include_router(automation_intelligence_router, prefix="/api")
 app.include_router(vendor_reprocess_router, prefix="/api")
 app.include_router(workflow_fix_router, prefix="/api")
 app.include_router(dedup_router, prefix="/api")
+app.include_router(vendor_profile_rebuild_router, prefix="/api")
 
 # ==================== SALES MODULE ====================
 app.include_router(sales_router)

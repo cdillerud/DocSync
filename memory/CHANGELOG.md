@@ -1,5 +1,22 @@
 # GPI Document Hub - Changelog
 
+## March 16, 2026 — Fix: Stable Vendor Profiles Rebuilt from Real Data
+
+### Root Cause
+Vendor intelligence profiles had garbage data (all 0.15 scores, 0% rates) because:
+1. Rates were computed incrementally but docs were processed before these fields existed
+2. Different case/punctuation variants of same vendor created separate profiles
+3. `rebuild_all_profiles` depended on incremental updates that never fired
+
+### Fixes
+**New rebuild endpoint (`/api/vendor-profiles/rebuild`):**
+- `POST /rebuild/dry-run` — preview vendor grouping and computed rates
+- `POST /rebuild/run` — full rebuild: aggregates DIRECTLY from `hub_documents`, normalizes vendor names (dedup), computes real auto_rate, validation_pass_rate, resolution_rate, and vendor stability score
+- Preserves manual overrides from existing profiles
+- Stability thresholds: doc_count >= 10, auto_rate >= 50% OR resolution >= 70%, validation >= 40%
+
+**"Reevaluate All" button** now triggers full rebuild instead of re-running old threshold logic.
+
 ## March 16, 2026 — Dedup: Past, Present, and Future Duplicate Prevention
 
 ### Root Cause

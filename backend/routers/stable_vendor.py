@@ -75,18 +75,18 @@ async def get_stable_vendor_dashboard_metrics():
 
 @router.post("/reevaluate-all")
 async def reevaluate_all_vendors(background_tasks: BackgroundTasks):
-    """Reevaluate all vendors for stability status. Runs in background."""
-    svc = _svc()
+    """Full rebuild of vendor profiles from document data, then reevaluate stability."""
+    from routers.vendor_profile_rebuild import rebuild_run
 
     async def _run():
         try:
-            result = await svc.reevaluate_all_vendors()
-            logger.info("[StableVendor] Reevaluation complete: %s", result)
+            result = await rebuild_run()
+            logger.info("[StableVendor] Profile rebuild complete: %s", result)
         except Exception as e:
-            logger.error("[StableVendor] Reevaluation failed: %s", e)
+            logger.error("[StableVendor] Profile rebuild failed: %s", e)
 
     background_tasks.add_task(_run)
-    return {"status": "accepted", "message": "Vendor reevaluation started in background"}
+    return {"status": "accepted", "message": "Vendor profile rebuild started in background"}
 
 
 # ==================== ADMIN: VENDOR LIST / DETAIL ====================

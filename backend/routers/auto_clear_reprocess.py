@@ -84,9 +84,11 @@ async def run_reprocess():
         decision, reason, details = evaluate_auto_clear(doc)
 
         # Rule 2: Backfill docs or old unprocessed Unknown docs → auto-clear
+        # BUT preserve inventory/operational docs for future sales module use
         if decision != AutoClearDecision.CLEARED:
             source = (doc.get("source") or "").lower()
             doc_type = doc.get("doc_type") or doc.get("document_type") or ""
+            fname = (doc.get("file_name") or "").lower()
             created = doc.get("created_utc") or doc.get("created_at") or ""
             is_old = False
             age_days = 0
@@ -102,11 +104,25 @@ async def run_reprocess():
                 except Exception:
                     is_old = False
 
+            # Protect operational docs from auto-clear
+            _PROTECT_TYPES = ("Inventory_Report", "Sales_Order", "Purchase_Order",
+                              "SALES_ORDER", "PURCHASE_ORDER")
+            _PROTECT_KEYWORDS = ("inventory", "open order", "open release",
+                                 "warehouse", "stock", "sales-order", "sales order",
+                                 "purchase-order", "purchase order", "pick-ticket",
+                                 "pick ticket", "whse receipt", "demand", "forecast")
+            is_protected = (
+                doc_type in _PROTECT_TYPES
+                or any(kw in fname for kw in _PROTECT_KEYWORDS)
+            )
+
             is_unknown_type = not doc_type or doc_type in ("Unknown", "Unknown_Document", "Other")
             is_backfill = source == "backfill"
             is_non_ap = doc_type not in ("AP_Invoice", "AP_INVOICE")
 
-            if is_backfill and is_unknown_type:
+            if is_protected:
+                pass  # Never auto-clear operational docs
+            elif is_backfill and is_unknown_type:
                 decision = AutoClearDecision.CLEARED
                 reason = f"Backfill reference doc (type={doc_type or 'none'}, source={source})"
             elif is_old and is_unknown_type:

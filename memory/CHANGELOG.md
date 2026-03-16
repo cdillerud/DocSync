@@ -1,5 +1,40 @@
 # GPI Document Hub - Changelog
 
+
+## March 16, 2026 — Automation Intelligence (Confidence, Explainability, Reviewer Assist, Metrics)
+
+### Feature 1: Automation Confidence Scoring
+- Created `backend/services/automation_intelligence_service.py` with weighted scoring model
+- 6 weighted signals: vendor_resolution (25%), entity_resolution (20%), extraction (20%), transaction_graph (15%), policy (10%), duplicate_risk (-10%)
+- Thresholds: auto_execute >= 0.90, review >= 0.70, manual < 0.70
+- Integrated into readiness engine — `evaluate_and_persist()` and `batch_evaluate()` now compute automation_confidence alongside readiness
+
+### Feature 2: Decision Explainability Layer
+- Structured explanation objects with decision, confidence, signals, supporting_evidence, risk_flags
+- Endpoint: `GET /api/documents/{id}/decision-explanation`
+- Frontend: `DecisionExplainabilityPanel.js` — "Why this decision?" card with confidence bar, evidence/risk lists, expandable signal breakdown
+
+### Feature 3: Reviewer Assist Engine
+- Generates context-aware suggestions for needs_review/blocked/ambiguous docs
+- Suggestion types: confirm_vendor, resolve_vendor, confirm_customer, link_po, resolve_duplicate, correct_field
+- Endpoints: `POST /api/documents/{id}/review-assist`, `POST /api/documents/{id}/accept-suggestion`
+- Frontend: `ReviewerAssistPanel.js` — one-click accept/dismiss buttons for each suggestion
+
+### Feature 4: Automation Metrics Dashboard
+- Endpoint: `GET /api/automation/metrics` with rates, confidence distribution, signal averages, top causes
+- Frontend: `AutomationMetricsCard.js` — shows automation/review/blocked rates, confidence distribution bar, signal strength chart, top review causes and blockers
+
+### Files Created
+- `backend/services/automation_intelligence_service.py`
+- `backend/routers/automation_intelligence.py`
+- `frontend/src/components/DecisionExplainabilityPanel.js`
+- `frontend/src/components/ReviewerAssistPanel.js`
+- `frontend/src/components/AutomationMetricsCard.js`
+- `backend/tests/test_automation_intelligence.py` (35 tests)
+
+### Testing: 35/35 backend, 3/3 frontend UI tests passed (iteration_120)
+
+
 ## March 16, 2026 — Dashboard Readiness, Config Extraction, AR Release Gate
 
 ### Dashboard Readiness Summary Card

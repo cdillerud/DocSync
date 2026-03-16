@@ -14,7 +14,7 @@ import pytest
 import requests
 import os
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "http://localhost:8001").rstrip("/")
 
 # Test document ID (blocked doc with suggestions) from main agent context
 TEST_DOC_ID = "1acf983b-a65b-423a-bfcd-8e0ee63fd25d"

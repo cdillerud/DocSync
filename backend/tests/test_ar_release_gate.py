@@ -7,7 +7,7 @@ import pytest
 import requests
 import os
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'http://localhost:8001').rstrip('/')
 
 # Test document IDs from main agent context
 SALES_DOC_ID = "8fec1917-0961-41c4-a327-4e5924aad5f8"  # Evaluated sales doc with ar_release_gate

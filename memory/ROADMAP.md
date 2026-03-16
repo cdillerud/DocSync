@@ -23,9 +23,13 @@
 - **Batch AR Release Evaluation** — Auto-evaluate all sales docs through AR gate in pipeline
 
 ### P1 — Recently Completed
-- ~~Dashboard Readiness Summary Card~~ (2026-03-16, iter_118) — Readiness status distribution with counts/confidence/blockers
-- ~~Config Service Extraction~~ (2026-03-16) — Centralized config vars and token helpers, rewired 3 consumers
-- ~~AR Release Gate (Prepay & Terms Approval)~~ (2026-03-16, iter_119) — 5-check gate, override workflow, UI panel, 27 tests
+- ~~Automation Confidence Scoring~~ (2026-03-16, iter_120) — Weighted 6-signal scoring model integrated into readiness
+- ~~Decision Explainability Layer~~ (2026-03-16, iter_120) — Structured explanation objects with evidence/risks
+- ~~Reviewer Assist Engine~~ (2026-03-16, iter_120) — AI-powered one-click suggestions for reviewers
+- ~~Automation Metrics Dashboard~~ (2026-03-16, iter_120) — Rates, distribution, signal averages, top causes
+- ~~Dashboard Readiness Summary Card~~ (2026-03-16, iter_118)
+- ~~Config Service Extraction~~ (2026-03-16)
+- ~~AR Release Gate (Prepay & Terms Approval)~~ (2026-03-16, iter_119)
 
 ### P2 — Medium Priority
 - **Package and Publish BC (AL) Extension** — Updated `.app` file in `/app/BC_extension/` needs publishing to BC Sandbox

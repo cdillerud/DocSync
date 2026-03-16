@@ -83,12 +83,13 @@ async def run_reprocess():
         # Rule 1: Standard auto-clear evaluation
         decision, reason, details = evaluate_auto_clear(doc)
 
-        # Rule 2: Backfill docs older than 14 days with Unknown type → auto-clear
+        # Rule 2: Backfill docs or old unprocessed Unknown docs → auto-clear
         if decision != AutoClearDecision.CLEARED:
             source = (doc.get("source") or "").lower()
             doc_type = doc.get("doc_type") or doc.get("document_type") or ""
             created = doc.get("created_utc") or doc.get("created_at") or ""
             is_old = False
+            age_days = 0
             if created:
                 try:
                     from datetime import datetime as dt_cls
@@ -101,12 +102,19 @@ async def run_reprocess():
                 except Exception:
                     is_old = False
 
-            if source == "backfill" and doc_type in ("Unknown", "Unknown_Document", "Other", ""):
+            is_unknown_type = not doc_type or doc_type in ("Unknown", "Unknown_Document", "Other")
+            is_backfill = source == "backfill"
+            is_non_ap = doc_type not in ("AP_Invoice", "AP_INVOICE")
+
+            if is_backfill and is_unknown_type:
                 decision = AutoClearDecision.CLEARED
-                reason = f"Backfill reference doc (type={doc_type}, source={source})"
-            elif is_old and doc_type in ("Unknown", "Unknown_Document", "") and source != "":
+                reason = f"Backfill reference doc (type={doc_type or 'none'}, source={source})"
+            elif is_old and is_unknown_type:
                 decision = AutoClearDecision.CLEARED
-                reason = f"Old unprocessed doc ({age_days}d, type={doc_type})"
+                reason = f"Old unprocessed doc ({age_days}d, type={doc_type or 'none'})"
+            elif is_old and is_non_ap:
+                decision = AutoClearDecision.CLEARED
+                reason = f"Old non-AP doc ({age_days}d, type={doc_type})"
 
         if decision == AutoClearDecision.CLEARED:
             update = get_auto_clear_update(decision, details)

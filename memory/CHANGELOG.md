@@ -291,3 +291,17 @@
 - Schema extension: `routing_status`, `routing_reasons`, `routing_score`, `routing_timestamp` on hub_documents
 - 28 unit tests + 10 API integration tests, all passing
 - Backfilled all 79 existing documents: 39 auto_process, 22 review, 18 blocked
+
+## March 16, 2026 — Vendor Alias Learning System (iter_114)
+
+- Created `services/vendor_alias_learning_service.py`: auto-learns vendor aliases from reviewer approvals
+- Safety rules: requires ai_confidence >= 0.8, vendor_raw >= 3 chars, no conflict overwrite
+- Hooked into `set_vendor_for_document` and `approve_document` in workflow_handlers.py
+- Enhanced `lookup_vendor_alias` in vendor_matching.py to track usage_count and distinguish `learned_alias` from manual `alias`
+- Added `GET /api/aliases/metrics` endpoint with total_aliases, auto_learned, alias_match_rate, top_aliases
+- Added `DELETE /api/aliases/vendors/by-alias/{alias}` admin endpoint
+- Enhanced `GET /api/aliases/vendors` with ?vendor_id and ?source filters
+- Added alias_metrics to workflow-intelligence dashboard response
+- Updated VendorIntelligenceCard in DashboardPage.js with alias learning metrics section
+- Fixed Dockerfile CMD: server:app → main:app (was breaking Docker deployments)
+- 21 unit tests + 13 API integration tests, all passing

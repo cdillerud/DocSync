@@ -36,7 +36,7 @@ def _vendor_helpers():
 
 
 def _bc_search():
-    from services.bc_access import search_vendors_by_name, BCLookupStatus
+    from services.bc_sandbox_service import search_vendors_by_name, BCLookupStatus
     return search_vendors_by_name, BCLookupStatus
 
 

@@ -379,6 +379,12 @@ export const getLearningEvents = (params) => api.get('/document-intelligence/lea
 export const getLearningSummary = () => api.get('/document-intelligence/learning/summary');
 export const getDocumentLearningEvents = (docId) => api.get(`/document-intelligence/learning/events/${docId}`);
 
+// AR Release Gate APIs
+export const getARReleaseMetrics = () => api.get('/ar-release/metrics');
+export const evaluateARRelease = (docId) => api.post(`/ar-release/evaluate/${docId}`);
+export const overrideARRelease = (docId, data) => api.post(`/ar-release/override/${docId}`, data);
+export const getARReleaseQueue = (params) => api.get('/ar-release/queue', { params });
+
 
 
 

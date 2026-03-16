@@ -157,7 +157,7 @@ async def delete_mailbox_source(mailbox_id: str):
 @router.post("/{mailbox_id}/test-connection")
 async def test_mailbox_connection(mailbox_id: str):
     """Test connection to a mailbox source."""
-    from server import get_email_token
+    from services.config_service import get_email_token
 
     db = get_db()
     source = await db.mailbox_sources.find_one({"mailbox_id": mailbox_id}, {"_id": 0})

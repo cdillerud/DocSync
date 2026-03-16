@@ -10,15 +10,16 @@ import logging
 from deps import get_db, DEMO_MODE
 from models.document_types import DEFAULT_JOB_TYPES, DRAFT_CREATION_CONFIG
 
-# Import configuration variables and helper functions from server
-from server import (
+# Import configuration variables and helper functions from config_service
+from services.config_service import (
     TENANT_ID, BC_ENVIRONMENT, BC_COMPANY_NAME, BC_CLIENT_ID, BC_CLIENT_SECRET,
     GRAPH_CLIENT_ID, GRAPH_CLIENT_SECRET, SHAREPOINT_SITE_HOSTNAME, 
     SHAREPOINT_SITE_PATH, SHAREPOINT_LIBRARY_NAME, FOLDER_MAP,
     ENABLE_CREATE_DRAFT_HEADER, SECRET_KEYS, _mask, _current_config,
-    get_graph_token, get_bc_token, get_email_watcher_config,
-    subscribe_to_mailbox_notifications
+    get_graph_token, get_bc_token,
 )
+# These two still live in server.py (email-watcher config + subscription are tightly coupled)
+from server import get_email_watcher_config, subscribe_to_mailbox_notifications
 
 logger = logging.getLogger(__name__)
 

@@ -25,6 +25,7 @@ import MatchingDebugPanel from '../components/MatchingDebugPanel';
 import CreateBCSalesOrderPanel from '../components/CreateBCSalesOrderPanel';
 import CreateBCPurchaseInvoicePanel from '../components/CreateBCPurchaseInvoicePanel';
 import DocumentIntelligencePanel from '../components/DocumentIntelligencePanel';
+import ARReleaseGatePanel from '../components/ARReleaseGatePanel';
 
 const READINESS_CONFIG = {
   ready_auto_draft: { label: 'Ready (Auto-Draft)', color: 'bg-emerald-500', textColor: 'text-emerald-500', icon: CheckCircle2 },
@@ -586,6 +587,15 @@ export default function DocumentDetailPage() {
 
           {/* Readiness Panel */}
           <ReadinessPanel readiness={doc.readiness} />
+
+          {/* AR Release Gate Panel - for sales/AR documents */}
+          {((doc.doc_type || doc.suggested_job_type || '').toLowerCase().includes('sales') || doc.ar_release_gate) && (
+            <ARReleaseGatePanel
+              gate={doc.ar_release_gate}
+              documentId={doc.id}
+              onRefresh={() => fetchDoc()}
+            />
+          )}
 
           {/* BC Sales Order Panel - for eligible document types */}
           <DocumentIntelligencePanel

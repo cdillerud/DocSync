@@ -1823,7 +1823,9 @@ def _current_config():
     }
 
 async def _load_config_from_db():
-    """Load saved config from MongoDB and apply to module globals."""
+    """Load saved config from MongoDB and apply to module globals.
+    Also syncs to services.config_service so downstream consumers stay in sync.
+    """
     global DEMO_MODE, TENANT_ID, BC_ENVIRONMENT, BC_COMPANY_NAME
     global BC_CLIENT_ID, BC_CLIENT_SECRET, GRAPH_CLIENT_ID, GRAPH_CLIENT_SECRET
     global SHAREPOINT_SITE_HOSTNAME, SHAREPOINT_SITE_PATH, SHAREPOINT_LIBRARY_NAME
@@ -1853,6 +1855,20 @@ async def _load_config_from_db():
         SHAREPOINT_LIBRARY_NAME = saved["SHAREPOINT_LIBRARY_NAME"]
     if "DEMO_MODE" in saved:
         DEMO_MODE = str(saved["DEMO_MODE"]).lower() == "true"
+
+    # Sync to config_service so routers/services that import from there stay current
+    from services import config_service as _cs
+    _cs.DEMO_MODE = DEMO_MODE
+    _cs.TENANT_ID = TENANT_ID
+    _cs.BC_ENVIRONMENT = BC_ENVIRONMENT
+    _cs.BC_COMPANY_NAME = BC_COMPANY_NAME
+    _cs.BC_CLIENT_ID = BC_CLIENT_ID
+    _cs.BC_CLIENT_SECRET = BC_CLIENT_SECRET
+    _cs.GRAPH_CLIENT_ID = GRAPH_CLIENT_ID
+    _cs.GRAPH_CLIENT_SECRET = GRAPH_CLIENT_SECRET
+    _cs.SHAREPOINT_SITE_HOSTNAME = SHAREPOINT_SITE_HOSTNAME
+    _cs.SHAREPOINT_SITE_PATH = SHAREPOINT_SITE_PATH
+    _cs.SHAREPOINT_LIBRARY_NAME = SHAREPOINT_LIBRARY_NAME
 
 class ConfigUpdate(BaseModel):
     TENANT_ID: Optional[str] = None

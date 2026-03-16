@@ -1,5 +1,10 @@
 # GPI Document Hub - Changelog
 
+## March 16, 2026 — Fix: Vendor KPI `$or` Key Collision Bug (P0)
+- **Root Cause:** MongoDB `$or` key collision when spreading `vendor_applicable_filter` (which contains `$or`) into queries that also define their own `$or` — second key silently overwrites the first.
+- **Fix:** Wrapped both `vendor_auto_resolved_total` and `vendor_needs_review_total` queries in `$and` to combine filters without key collision.
+- **Affected file:** `backend/routers/dashboard.py`
+- **Validated:** `Needs Review` (8) ≤ `Applicable` (58) — all KPIs now correct.
 
 ## March 16, 2026 — Vendor Matching Remediation (KPI Accuracy + Matching Correctness)
 

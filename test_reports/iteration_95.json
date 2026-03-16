@@ -55,7 +55,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://vendor-intel-1.preview.emergentagent.com"
+    "api_url": "https://query-collision-fix.preview.emergentagent.com"
   },
   "seed_data_created": {
     "drafts_created": [

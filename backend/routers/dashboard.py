@@ -343,12 +343,16 @@ async def get_workflow_intelligence_stats():
         "alias", "learned_alias", "exact_name", "normalized",
     ]
     vendor_auto_resolved_total = await db.hub_documents.count_documents({
-        **vendor_applicable_filter,
-        "vendor_match_method": {"$in": AUTO_RESOLVE_METHODS},
-        "$or": [
-            {"vendor_resolution.reviewed_override": {"$ne": True}},
-            {"vendor_resolution.reviewed_override": {"$exists": False}},
-        ],
+        "$and": [
+            vendor_applicable_filter,
+            {
+                "vendor_match_method": {"$in": AUTO_RESOLVE_METHODS},
+                "$or": [
+                    {"vendor_resolution.reviewed_override": {"$ne": True}},
+                    {"vendor_resolution.reviewed_override": {"$exists": False}},
+                ],
+            },
+        ]
     })
 
     # Final resolved: vendor resolved at final state (any method, including human override)
@@ -359,14 +363,18 @@ async def get_workflow_intelligence_stats():
 
     # Needs vendor review: applicable docs currently unresolved or fuzzy_candidate
     vendor_needs_review_total = await db.hub_documents.count_documents({
-        **vendor_applicable_filter,
-        "$or": [
-            {"vendor_canonical": {"$exists": False}},
-            {"vendor_canonical": None},
-            {"vendor_match_method": "fuzzy_candidate"},
-            {"vendor_resolution.status": "needs_review"},
-        ],
-        "status": {"$nin": ["Completed", "Archived", "Posted", "Deleted"]},
+        "$and": [
+            vendor_applicable_filter,
+            {
+                "$or": [
+                    {"vendor_canonical": {"$exists": False}},
+                    {"vendor_canonical": None},
+                    {"vendor_match_method": "fuzzy_candidate"},
+                    {"vendor_resolution.status": "needs_review"},
+                ],
+                "status": {"$nin": ["Completed", "Archived", "Posted", "Deleted"]},
+            },
+        ]
     })
 
     vendor_auto_resolve_rate = round(

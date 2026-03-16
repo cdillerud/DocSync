@@ -1,5 +1,25 @@
 # GPI Document Hub - Changelog
 
+## March 16, 2026 — Auto-Clear Overhaul: Non-AP Docs + Backfill + Age Rules
+
+### Changes
+**Auto-clear config (`auto_clear_service.py`):**
+- Non-AP doc types (Shipping, Freight, Quality, Statement, Remittance, BOL, Packing List, Other, Unknown) → confidence threshold 0%, no vendor/duplicate requirement, no SharePoint requirement. Just classified = cleared.
+- AP invoices unchanged: 90% confidence, vendor match, no dupes, BC draft ready
+- SharePoint gate now only applies to doc types that need BC posting
+- Confidence lookup prioritizes classification confidence over extraction confidence
+
+**Batch reprocess (`/api/auto-clear-reprocess`):**
+- Backfill + Unknown type → auto-clear immediately
+- Old (14+ days) Unknown/unprocessed docs → auto-clear
+- Old non-AP docs → auto-clear
+- **Protected docs** preserved: Inventory reports, sales orders, purchase orders, pick tickets, warehouse receipts, demand/forecast — kept active for future sales module
+
+**Production results:**
+- Auto-cleared: ~130 additional docs across multiple runs
+- Pending Review: 1818 → 62 (97% reduction)
+- Remaining 70 are all AP invoices with legitimate blockers (confidence, BC draft, vendor match)
+
 ## March 16, 2026 — Fix: Stable Vendor Profiles Rebuilt from Real Data
 
 ### Root Cause

@@ -48,15 +48,14 @@ Build a document intelligence platform for GPI (Gamer Packaging Inc.) that autom
 See CHANGELOG.md for full history.
 
 ### Latest (March 16, 2026)
-- Fixed Vendor KPI `$or` key collision bug in dashboard (P0)
-- Fixed documents stuck in "captured" workflow_status — intake pipeline now sets workflow_status properly
-- Added `/api/workflow-fix/run` batch endpoint to fix existing stuck docs on production
-- Dedup: content-hash dedup gate in all intake paths + batch cleanup endpoint (`/api/dedup/run`)
-- Production result: 1261 duplicates removed, pending 1818 → 289
-- Stable Vendor profiles rebuilt from real document data — `/api/vendor-profiles/rebuild/run`
-- Vendor name normalization dedup (case/punctuation variants merged)
-- Fixed Document Queue: type filter, status filter, tab counts, dynamic dropdowns
-- Vendor matching remediation complete (auto-resolve, fuzzy candidates, reprocessing)
+- Vendor KPI `$or` key collision fix
+- Workflow status fix — docs no longer stuck in "captured", batch fix endpoint
+- Content-hash dedup — 1261 duplicates removed, future prevention in intake
+- Stable Vendor profiles rebuilt from real document data (96 → 71 profiles)
+- Incremental vendor profile updates on every doc intake
+- Auto-clear overhaul — non-AP docs auto-clear, backfill/age rules, protected inventory/sales docs
+- Document Queue: dynamic filters, correct counts
+- **Production result: Pending Review 1818 → 62 (97% reduction)**
 - **Dashboard Readiness Summary Card** — Shows document readiness status distribution with counts, confidence scores, top blockers and warnings
 - **Config Service Extraction** — Centralized config_service.py module, decoupling settings.py/vendor_matching.py/mailbox_sources.py from server.py
 - **AR Release Gate (Prepay & Terms Approval)** — Evaluates sales documents for customer resolution, prepay holds, credit limits, payment terms, and ship-to validation. Includes manual override workflow.

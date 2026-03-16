@@ -161,26 +161,54 @@ function VendorIntelligenceCard({ data }) {
         <CardDescription>Vendor matching across all data sources</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Key Metrics */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="bg-muted/50 rounded-lg p-3">
-            <div className="text-2xl font-bold text-green-500">{formatPercent(data.vendor_extraction_rate)}</div>
-            <div className="text-xs text-muted-foreground">Vendor Match Rate</div>
+        {/* Accurate Vendor KPIs */}
+        <div className="grid grid-cols-3 gap-2">
+          <div className="bg-emerald-500/10 rounded-lg p-2.5 text-center" data-testid="vendor-auto-resolve-rate">
+            <div className="text-2xl font-black text-emerald-500" style={{ fontFamily: 'Chivo, sans-serif' }}>
+              {formatPercent(data.vendor_auto_resolve_rate)}
+            </div>
+            <div className="text-[10px] text-muted-foreground">Auto-Resolve Rate</div>
+            <div className="text-[9px] text-muted-foreground">{data.vendor_auto_resolved_total || 0} / {data.vendor_applicable_total || 0}</div>
           </div>
-          <div className="bg-muted/50 rounded-lg p-3">
-            <div className="text-2xl font-bold text-blue-500">{data.total_with_vendor || 0}</div>
-            <div className="text-xs text-muted-foreground">Vendors Extracted</div>
+          <div className="bg-blue-500/10 rounded-lg p-2.5 text-center" data-testid="vendor-final-resolve-rate">
+            <div className="text-2xl font-black text-blue-500" style={{ fontFamily: 'Chivo, sans-serif' }}>
+              {formatPercent(data.vendor_final_resolved_rate)}
+            </div>
+            <div className="text-[10px] text-muted-foreground">Final Resolved Rate</div>
+            <div className="text-[9px] text-muted-foreground">{data.vendor_final_resolved_total || 0} / {data.vendor_applicable_total || 0}</div>
           </div>
-          <div className="bg-muted/50 rounded-lg p-3">
-            <div className="text-2xl font-bold text-purple-500">{data.cached_vendor_matches || 0}</div>
-            <div className="text-xs text-muted-foreground">Cached Matches</div>
-          </div>
-          <div className="bg-muted/50 rounded-lg p-3">
-            <div className="text-2xl font-bold text-red-500">{data.needs_vendor_review || 0}</div>
-            <div className="text-xs text-muted-foreground">Needs Review</div>
+          <div className="bg-amber-500/10 rounded-lg p-2.5 text-center" data-testid="vendor-needs-review">
+            <div className="text-2xl font-black text-amber-500" style={{ fontFamily: 'Chivo, sans-serif' }}>
+              {data.vendor_needs_review_total || 0}
+            </div>
+            <div className="text-[10px] text-muted-foreground">Needs Review</div>
           </div>
         </div>
 
+        {/* Method breakdown */}
+        {data.vendor_by_method && Object.keys(data.vendor_by_method).length > 0 && (
+          <div>
+            <h4 className="text-xs font-semibold mb-1.5">Resolution by Method</h4>
+            <div className="space-y-1">
+              {Object.entries(data.vendor_by_method).sort((a,b) => b[1]-a[1]).slice(0, 6).map(([method, count]) => {
+                const total = data.vendor_applicable_total || 1;
+                const pct = ((count / total) * 100).toFixed(0);
+                const isAutoMethod = ['bc_exact_match','alias_match','fuzzy_match','bc_search','exact_name'].includes(method);
+                const isCandidate = method === 'fuzzy_candidate';
+                return (
+                  <div key={method} className="flex items-center gap-2 text-xs" data-testid={`vendor-method-${method}`}>
+                    <span className="w-[100px] truncate text-muted-foreground">{method.replace(/_/g, ' ')}</span>
+                    <div className="flex-1 h-1.5 bg-muted/30 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${isAutoMethod ? 'bg-emerald-500' : isCandidate ? 'bg-amber-500' : 'bg-muted-foreground'}`}
+                        style={{ width: `${Math.max(2, parseFloat(pct))}%` }} />
+                    </div>
+                    <span className="w-[50px] text-right">{count} ({pct}%)</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
         {/* Match Sources */}
         {sourceData.length > 0 && (
           <div>
@@ -198,22 +226,6 @@ function VendorIntelligenceCard({ data }) {
                     {item.value} <span className="text-muted-foreground">({item.avgScore}%)</span>
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Match Methods */}
-        {matchMethodData.length > 0 && (
-          <div>
-            <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
-              <GitBranch className="w-3 h-3" /> Match Methods
-            </h4>
-            <div className="flex flex-wrap gap-2">
-              {matchMethodData.slice(0, 6).map((item) => (
-                <Badge key={item.name} variant="secondary" className="text-xs">
-                  {item.name}: {item.value}
-                </Badge>
               ))}
             </div>
           </div>
@@ -244,16 +256,10 @@ function VendorIntelligenceCard({ data }) {
                 <div className="text-[10px] text-muted-foreground">Auto-Learned</div>
               </div>
               <div className="bg-purple-500/10 rounded-lg p-2 text-center">
-                <div className="text-lg font-bold text-purple-500">{data.alias_metrics.alias_match_rate || 0}%</div>
-                <div className="text-[10px] text-muted-foreground">Alias Match Rate</div>
+                <div className="text-lg font-bold text-purple-500">{data.alias_metrics.alias_matched_docs || 0}</div>
+                <div className="text-[10px] text-muted-foreground">Alias Matches</div>
               </div>
             </div>
-            {(data.alias_metrics.vendor_resolution_rate > 0) && (
-              <div className="flex items-center justify-between text-sm bg-emerald-500/5 rounded-lg px-3 py-2">
-                <span className="text-muted-foreground">Vendor Resolution Rate</span>
-                <span className="font-bold text-emerald-500">{data.alias_metrics.vendor_resolution_rate}%</span>
-              </div>
-            )}
             {data.alias_metrics.top_aliases && data.alias_metrics.top_aliases.length > 0 && (
               <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">Top Learned Aliases</div>
@@ -962,7 +968,7 @@ export default function DashboardPage() {
   const metricCards = [
     { label: 'Total Documents', value: intelligence?.total_documents || stats?.total_documents || 0, icon: FileText, color: 'text-blue-500' },
     { label: 'Validation Rate', value: formatPercent(intelligence?.validation_metrics?.pass_rate || 0), icon: CheckCircle2, color: 'text-green-500' },
-    { label: 'Vendor Match Rate', value: formatPercent(intelligence?.vendor_intelligence?.vendor_extraction_rate || 0), icon: Users, color: 'text-purple-500' },
+    { label: 'Vendor Auto-Resolve', value: formatPercent(intelligence?.vendor_intelligence?.vendor_auto_resolve_rate || 0), icon: Users, color: 'text-purple-500' },
     { label: 'Exceptions', value: intelligence?.processing_metrics?.stuck || stats?.by_status?.Exception || 0, icon: AlertCircle, color: 'text-red-500' },
   ];
 

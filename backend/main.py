@@ -159,6 +159,16 @@ async def startup():
         await inv_ensure_indexes(get_db())
     except Exception as e:
         logger.warning("Inventory ledger index creation failed: %s", e)
+
+    # Vendor matching: backfill name_normalized on cached BC vendors
+    try:
+        from services.vendor_matching import backfill_bc_vendor_normalized
+        backfilled = await backfill_bc_vendor_normalized()
+        if backfilled > 0:
+            logger.info("Backfilled name_normalized for %d BC vendor records", backfilled)
+    except Exception as e:
+        logger.warning("Vendor normalized backfill failed: %s", e)
+
     logger.info("main.py startup complete")
 
 

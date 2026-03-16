@@ -18,16 +18,6 @@ async def _get_alias_metrics_safe(db, total_docs: int) -> dict:
         })
         alias_rate = round((alias_matched / total_docs * 100), 1) if total_docs > 0 else 0
 
-        # Vendor resolution rate (auto-resolved before human review)
-        auto_resolved = await db.hub_documents.count_documents({
-            "vendor_match_method": {"$in": [
-                "alias_match", "fuzzy_match", "bc_exact_match",
-                "alias", "learned_alias", "exact_name", "bc_search", "normalized",
-                "fuzzy", "fuzzy_bc", "fuzzy_candidates",
-            ]},
-        })
-        vendor_resolution_rate = round((auto_resolved / total_docs * 100), 1) if total_docs > 0 else 0
-
         top_cursor = db.vendor_aliases.find(
             {"usage_count": {"$gt": 0}},
             {"_id": 0, "alias": 1, "normalized_alias": 1, "vendor_name": 1, "usage_count": 1},
@@ -39,12 +29,10 @@ async def _get_alias_metrics_safe(db, total_docs: int) -> dict:
             "auto_learned": auto_learned,
             "alias_match_rate": alias_rate,
             "alias_matched_docs": alias_matched,
-            "vendor_resolution_rate": vendor_resolution_rate,
-            "auto_resolved_docs": auto_resolved,
             "top_aliases": top_aliases,
         }
     except Exception:
-        return {"total_aliases": 0, "auto_learned": 0, "alias_match_rate": 0, "alias_matched_docs": 0, "vendor_resolution_rate": 0, "auto_resolved_docs": 0, "top_aliases": []}
+        return {"total_aliases": 0, "auto_learned": 0, "alias_match_rate": 0, "alias_matched_docs": 0, "top_aliases": []}
 
 
 @router.get("/stats")
@@ -331,7 +319,71 @@ async def get_workflow_intelligence_stats():
     # Calculate success rates
     validation_rate = round((validation_passed / total_validated * 100) if total_validated > 0 else 0, 1)
     processing_rate = round((processing_complete / total_docs * 100) if total_docs > 0 else 0, 1)
-    vendor_rate = round((docs_with_vendor / total_docs * 100) if total_docs > 0 else 0, 1)
+
+    # ============== ACCURATE VENDOR KPI (vendor-applicable denominator) ==============
+    # Vendor-applicable = document types where vendor resolution is expected
+    VENDOR_APPLICABLE_TYPES = [
+        "AP_Invoice", "AP_INVOICE", "PurchaseInvoice", "PurchaseOrder",
+        "Remittance", "REMITTANCE", "Credit_Memo", "CREDIT_MEMO",
+        "Purchase_Invoice", "PURCHASE_INVOICE",
+    ]
+    vendor_applicable_filter = {
+        "$or": [
+            {"doc_type": {"$in": VENDOR_APPLICABLE_TYPES}},
+            {"suggested_job_type": {"$in": VENDOR_APPLICABLE_TYPES}},
+            # Include any doc that already has vendor_resolution (it was attempted)
+            {"vendor_resolution.status": {"$exists": True}},
+        ]
+    }
+    vendor_applicable_total = await db.hub_documents.count_documents(vendor_applicable_filter)
+
+    # Auto-resolved: resolved by system without human override
+    AUTO_RESOLVE_METHODS = [
+        "alias_match", "bc_exact_match", "bc_search", "fuzzy_match",
+        "alias", "learned_alias", "exact_name", "normalized",
+    ]
+    vendor_auto_resolved_total = await db.hub_documents.count_documents({
+        **vendor_applicable_filter,
+        "vendor_match_method": {"$in": AUTO_RESOLVE_METHODS},
+        "$or": [
+            {"vendor_resolution.reviewed_override": {"$ne": True}},
+            {"vendor_resolution.reviewed_override": {"$exists": False}},
+        ],
+    })
+
+    # Final resolved: vendor resolved at final state (any method, including human override)
+    vendor_final_resolved_total = await db.hub_documents.count_documents({
+        **vendor_applicable_filter,
+        "vendor_canonical": {"$exists": True, "$ne": None},
+    })
+
+    # Needs vendor review: applicable docs currently unresolved or fuzzy_candidate
+    vendor_needs_review_total = await db.hub_documents.count_documents({
+        **vendor_applicable_filter,
+        "$or": [
+            {"vendor_canonical": {"$exists": False}},
+            {"vendor_canonical": None},
+            {"vendor_match_method": "fuzzy_candidate"},
+            {"vendor_resolution.status": "needs_review"},
+        ],
+        "status": {"$nin": ["Completed", "Archived", "Posted", "Deleted"]},
+    })
+
+    vendor_auto_resolve_rate = round(
+        (vendor_auto_resolved_total / vendor_applicable_total * 100) if vendor_applicable_total > 0 else 0, 1
+    )
+    vendor_final_resolved_rate = round(
+        (vendor_final_resolved_total / vendor_applicable_total * 100) if vendor_applicable_total > 0 else 0, 1
+    )
+
+    # Method breakdown for applicable docs only
+    vendor_method_pipeline = [
+        {"$match": vendor_applicable_filter},
+        {"$group": {"_id": "$vendor_match_method", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    vendor_method_raw = await db.hub_documents.aggregate(vendor_method_pipeline).to_list(20)
+    vendor_by_method = {r["_id"]: r["count"] for r in vendor_method_raw if r["_id"]}
     
     # ============== ROUTING STATUS (Auto-Clear Gate) ==============
     routing_pipeline = [
@@ -414,7 +466,16 @@ async def get_workflow_intelligence_stats():
         
         "vendor_intelligence": {
             "total_with_vendor": docs_with_vendor,
-            "vendor_extraction_rate": vendor_rate,
+            # Accurate vendor KPIs with vendor-applicable denominator
+            "vendor_applicable_total": vendor_applicable_total,
+            "vendor_auto_resolved_total": vendor_auto_resolved_total,
+            "vendor_auto_resolve_rate": vendor_auto_resolve_rate,
+            "vendor_final_resolved_total": vendor_final_resolved_total,
+            "vendor_final_resolved_rate": vendor_final_resolved_rate,
+            "vendor_needs_review_total": vendor_needs_review_total,
+            "vendor_by_method": vendor_by_method,
+            # Legacy compat (deprecated — use above instead)
+            "vendor_extraction_rate": vendor_final_resolved_rate,
             "needs_vendor_review": needs_vendor_review,
             "freight_carriers_detected": freight_docs,
             "match_methods": {
@@ -432,7 +493,7 @@ async def get_workflow_intelligence_stats():
             "cached_vendor_matches": await db.vendor_matches.count_documents({}),
             "spiro_companies_available": spiro_companies,
             "spiro_freight_carriers": spiro_freight_carriers,
-            "alias_metrics": await _get_alias_metrics_safe(db, total_docs),
+            "alias_metrics": await _get_alias_metrics_safe(db, vendor_applicable_total),
         },
         
         "validation_metrics": {

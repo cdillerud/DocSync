@@ -57,8 +57,11 @@ def build_resolution_object(
         if vendor_canonical and method in ("alias_match", "bc_exact_match", "bc_search"):
             status = STATUS_RESOLVED
         elif vendor_canonical and method == "fuzzy_match":
-            score_val = float(score) if score else 0
-            status = STATUS_RESOLVED if score_val >= 0.95 else STATUS_NEEDS_REVIEW
+            # fuzzy_match = above auto-threshold (0.90), so it's auto-resolved
+            status = STATUS_RESOLVED
+        elif vendor_canonical and method == "fuzzy_candidate":
+            # Below auto-threshold — always needs review
+            status = STATUS_NEEDS_REVIEW
         elif vendor_canonical:
             status = STATUS_RESOLVED
         else:
@@ -68,7 +71,8 @@ def build_resolution_object(
         if status == STATUS_RESOLVED:
             reason = f"Auto-resolved via {method}"
         elif status == STATUS_NEEDS_REVIEW:
-            reason = f"Fuzzy match ({method}) below high-confidence threshold"
+            score_str = f" (score: {score})" if score else ""
+            reason = f"Fuzzy candidate below auto-resolve threshold{score_str}"
         elif status == STATUS_AMBIGUOUS:
             reason = "Multiple possible vendor matches"
         else:
@@ -220,13 +224,28 @@ async def check_rejection_guardrail(
 # ---------------------------------------------------------------------------
 
 async def get_resolution_metrics() -> Dict[str, Any]:
-    """Compute vendor resolution analytics."""
+    """Compute vendor resolution analytics with vendor-applicable denominator."""
     db = get_db()
 
+    # Vendor-applicable documents (same filter as dashboard)
+    VENDOR_APPLICABLE_TYPES = [
+        "AP_Invoice", "AP_INVOICE", "PurchaseInvoice", "PurchaseOrder",
+        "Remittance", "REMITTANCE", "Credit_Memo", "CREDIT_MEMO",
+        "Purchase_Invoice", "PURCHASE_INVOICE",
+    ]
+    applicable_filter = {
+        "$or": [
+            {"doc_type": {"$in": VENDOR_APPLICABLE_TYPES}},
+            {"suggested_job_type": {"$in": VENDOR_APPLICABLE_TYPES}},
+            {"vendor_resolution.status": {"$exists": True}},
+        ]
+    }
+    vendor_applicable_total = await db.hub_documents.count_documents(applicable_filter)
     total = await db.hub_documents.count_documents({})
 
-    # Count by resolution status
+    # Count by resolution status (within applicable docs)
     status_pipeline = [
+        {"$match": applicable_filter},
         {"$group": {
             "_id": "$vendor_resolution.status",
             "count": {"$sum": 1},
@@ -239,13 +258,13 @@ async def get_resolution_metrics() -> Dict[str, Any]:
     unresolved = status_counts.get(STATUS_UNRESOLVED, 0)
     ambiguous = status_counts.get(STATUS_AMBIGUOUS, 0)
     needs_review = status_counts.get(STATUS_NEEDS_REVIEW, 0)
-    no_resolution = total - resolved - unresolved - ambiguous - needs_review
+    no_resolution = vendor_applicable_total - resolved - unresolved - ambiguous - needs_review
 
-    resolution_rate = round((resolved / total * 100), 1) if total > 0 else 0
+    resolution_rate = round((resolved / vendor_applicable_total * 100), 1) if vendor_applicable_total > 0 else 0
 
-    # Count by match method
+    # Count by match method (within applicable docs)
     method_pipeline = [
-        {"$match": {"vendor_resolution.method": {"$exists": True, "$ne": None}}},
+        {"$match": {**applicable_filter, "vendor_resolution.method": {"$exists": True, "$ne": None}}},
         {"$group": {
             "_id": "$vendor_resolution.method",
             "count": {"$sum": 1},
@@ -254,14 +273,14 @@ async def get_resolution_metrics() -> Dict[str, Any]:
     method_raw = await db.hub_documents.aggregate(method_pipeline).to_list(20)
     by_method = {r["_id"]: r["count"] for r in method_raw if r["_id"]}
 
-    # Fuzzy score buckets
-    buckets = {"90-94": 0, "95-97": 0, "98-100": 0}
+    # Fuzzy score buckets (including fuzzy_candidate)
+    buckets = {"60-79": 0, "80-89": 0, "90-94": 0, "95-97": 0, "98-100": 0}
     fuzzy_pipeline = [
         {"$match": {
-            "vendor_resolution.method": "fuzzy_match",
+            "vendor_resolution.method": {"$in": ["fuzzy_match", "fuzzy_candidate"]},
             "vendor_resolution.score": {"$exists": True, "$ne": None},
         }},
-        {"$project": {"score": "$vendor_resolution.score"}},
+        {"$project": {"score": "$vendor_resolution.score", "method": "$vendor_resolution.method"}},
     ]
     fuzzy_docs = await db.hub_documents.aggregate(fuzzy_pipeline).to_list(5000)
     for fd in fuzzy_docs:
@@ -269,7 +288,11 @@ async def get_resolution_metrics() -> Dict[str, Any]:
         if s is None:
             continue
         pct = s * 100 if s <= 1 else s
-        if 90 <= pct < 95:
+        if 60 <= pct < 80:
+            buckets["60-79"] += 1
+        elif 80 <= pct < 90:
+            buckets["80-89"] += 1
+        elif 90 <= pct < 95:
             buckets["90-94"] += 1
         elif 95 <= pct < 98:
             buckets["95-97"] += 1
@@ -312,6 +335,7 @@ async def get_resolution_metrics() -> Dict[str, Any]:
 
     return {
         "total_documents": total,
+        "vendor_applicable_total": vendor_applicable_total,
         "resolved_count": resolved,
         "unresolved_count": unresolved,
         "ambiguous_count": ambiguous,

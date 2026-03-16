@@ -25,60 +25,96 @@ const INTEL_STATUS_CONFIG = {
 import api, { bulkResubmitDocuments, bulkDeleteDocuments, deleteDocument } from "@/lib/api";
 import BatchFreightClassifyDialog from "@/components/BatchFreightClassifyDialog";
 
-// Document types and their display names
-const DOC_TYPES = {
-  ALL: { label: "All Types", color: "default" },
-  AP_INVOICE: { label: "AP Invoice", color: "blue" },
-  SALES_ORDER: { label: "Sales Order", color: "green" },
-  PURCHASE_ORDER: { label: "Purchase Order", color: "purple" },
-  SALES_CREDIT_MEMO: { label: "Sales Credit", color: "orange" },
-  PURCHASE_CREDIT_MEMO: { label: "Purchase Credit", color: "orange" },
-  STATEMENT: { label: "Statement", color: "gray" },
-  OTHER: { label: "Other", color: "default" }
+// Document types and their display names (fallback labels for known types)
+const DOC_TYPE_LABELS = {
+  AP_INVOICE: "AP Invoice",
+  AP_Invoice: "AP Invoice",
+  SALES_ORDER: "Sales Order",
+  SALES_INVOICE: "Sales Invoice",
+  PURCHASE_ORDER: "Purchase Order",
+  PURCHASE_INVOICE: "Purchase Invoice",
+  SALES_CREDIT_MEMO: "Sales Credit",
+  PURCHASE_CREDIT_MEMO: "Purchase Credit",
+  STATEMENT: "Statement",
+  Shipping_Document: "Shipping Doc",
+  Freight_Document: "Freight Doc",
+  QUALITY_DOC: "Quality Doc",
+  Order_Confirmation: "Order Confirm",
+  Unknown_Document: "Unknown",
+  OTHER: "Other",
+  Other: "Other",
+  Remittance: "Remittance",
+  REMITTANCE: "Remittance",
+  Credit_Memo: "Credit Memo",
+  BOL: "BOL",
+  Packing_List: "Packing List",
 };
 
-// Workflow statuses and their display
-const STATUSES = {
-  ALL: { label: "All Status", color: "default" },
-  received: { label: "Received", color: "gray" },
-  classified: { label: "Classified", color: "blue" },
-  extracted: { label: "Extracted", color: "blue" },
-  pending_review: { label: "Pending Review", color: "yellow" },
-  vendor_pending: { label: "Vendor Pending", color: "yellow" },
-  bc_validation_pending: { label: "BC Validation", color: "yellow" },
-  ready_for_approval: { label: "Ready for Approval", color: "green" },
-  approved: { label: "Approved", color: "green" },
-  rejected: { label: "Rejected", color: "red" },
-  exported: { label: "Exported", color: "green" },
-  archived: { label: "Archived", color: "gray" }
+const getTypeLabel = (type) => DOC_TYPE_LABELS[type] || type;
+
+// Workflow statuses (fallback labels for known statuses)
+const STATUS_LABELS = {
+  captured: "Captured",
+  received: "Received",
+  Received: "Received",
+  classified: "Classified",
+  Classified: "Classified",
+  extracted: "Extracted",
+  NeedsReview: "Needs Review",
+  needs_review: "Needs Review",
+  pending_review: "Pending Review",
+  vendor_pending: "Vendor Pending",
+  bc_validation_pending: "BC Validation",
+  ready_for_approval: "Ready for Approval",
+  approved: "Approved",
+  ValidationPassed: "Validation Passed",
+  Validated: "Validated",
+  validated: "Validated",
+  LinkedToBC: "Linked to BC",
+  rejected: "Rejected",
+  exported: "Exported",
+  Completed: "Completed",
+  completed: "Completed",
+  Posted: "Posted",
+  posted: "Posted",
+  Archived: "Archived",
+  archived: "Archived",
+  Exception: "Exception",
+  StoredInSP: "Stored in SP",
 };
+
+const getStatusLabel = (status) => STATUS_LABELS[status] || status;
 
 const getStatusBadge = (status) => {
-  const config = STATUSES[status] || { label: status, color: "default" };
-  const colorClass = {
-    gray: "bg-gray-500/20 text-gray-400",
-    blue: "bg-blue-500/20 text-blue-400",
-    yellow: "bg-yellow-500/20 text-yellow-400",
-    green: "bg-green-500/20 text-green-400",
-    red: "bg-red-500/20 text-red-400",
-    default: "bg-gray-500/20 text-gray-400"
-  }[config.color] || "bg-gray-500/20 text-gray-400";
-  
-  return <Badge className={colorClass}>{config.label}</Badge>;
+  const label = getStatusLabel(status);
+  const lower = (status || "").toLowerCase();
+  const colorClass = lower.includes("complete") || lower.includes("posted") || lower.includes("approved") || lower.includes("exported") || lower === "validated" || lower === "validationpassed"
+    ? "bg-green-500/20 text-green-400"
+    : lower.includes("exception") || lower.includes("rejected") || lower.includes("fail")
+    ? "bg-red-500/20 text-red-400"
+    : lower.includes("review") || lower.includes("pending") || lower.includes("vendor")
+    ? "bg-yellow-500/20 text-yellow-400"
+    : lower.includes("classif") || lower.includes("extract") || lower.includes("linked")
+    ? "bg-blue-500/20 text-blue-400"
+    : "bg-gray-500/20 text-gray-400";
+  return <Badge className={colorClass}>{label}</Badge>;
 };
 
 const getTypeBadge = (docType) => {
-  const config = DOC_TYPES[docType] || { label: docType, color: "default" };
-  const colorClass = {
-    blue: "bg-blue-500/20 text-blue-400",
-    green: "bg-green-500/20 text-green-400",
-    purple: "bg-purple-500/20 text-purple-400",
-    orange: "bg-orange-500/20 text-orange-400",
-    gray: "bg-gray-500/20 text-gray-400",
-    default: "bg-gray-500/20 text-gray-400"
-  }[config.color] || "bg-gray-500/20 text-gray-400";
-  
-  return <Badge className={colorClass}>{config.label}</Badge>;
+  const label = getTypeLabel(docType || "Unknown");
+  const lower = (docType || "").toLowerCase();
+  const colorClass = lower.includes("ap") || lower.includes("purchase")
+    ? "bg-blue-500/20 text-blue-400"
+    : lower.includes("sales") || lower.includes("order_confirm")
+    ? "bg-green-500/20 text-green-400"
+    : lower.includes("credit") || lower.includes("remittance")
+    ? "bg-orange-500/20 text-orange-400"
+    : lower.includes("ship") || lower.includes("freight") || lower.includes("bol") || lower.includes("pack")
+    ? "bg-purple-500/20 text-purple-400"
+    : lower.includes("quality")
+    ? "bg-teal-500/20 text-teal-400"
+    : "bg-gray-500/20 text-gray-400";
+  return <Badge className={colorClass}>{label}</Badge>;
 };
 
 export default function UnifiedQueuePage() {
@@ -93,7 +129,8 @@ export default function UnifiedQueuePage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("pending");
   const [showCleared, setShowCleared] = useState(false);  // Toggle for auto-cleared docs
-  const [queueCounts, setQueueCounts] = useState({ total_all: 0, auto_cleared: 0, pending_review: 0 });
+  const [queueCounts, setQueueCounts] = useState({ total_all: 0, auto_cleared: 0, pending_review: 0, completed: 0 });
+  const [filterOptions, setFilterOptions] = useState({ types: [], statuses: [] });
   
   // Selection for bulk actions
   const [selectedDocs, setSelectedDocs] = useState(new Set());
@@ -130,6 +167,10 @@ export default function UnifiedQueuePage() {
       // Update counts
       if (response.data.counts) {
         setQueueCounts(response.data.counts);
+      }
+      // Update dynamic filter options
+      if (response.data.filter_options) {
+        setFilterOptions(response.data.filter_options);
       }
     } catch (err) {
       console.error("Failed to fetch documents:", err);
@@ -241,13 +282,8 @@ export default function UnifiedQueuePage() {
     toast.success("Queue refreshed");
   };
 
-  const pendingCount = Object.entries(stats.by_status)
-    .filter(([status]) => !["archived", "exported", "completed", "approved"].includes(status))
-    .reduce((sum, [, count]) => sum + count, 0);
-
-  const completedCount = (stats.by_status.archived || 0) + 
-                         (stats.by_status.exported || 0) + 
-                         (stats.by_status.completed || 0);
+  const pendingCount = queueCounts.pending_review || 0;
+  const completedCount = queueCounts.completed || 0;
 
   return (
     <div className="space-y-6" data-testid="unified-queue-page">
@@ -349,7 +385,7 @@ export default function UnifiedQueuePage() {
               <Archive className="h-5 w-5 text-blue-500" />
               <div>
                 <div className="text-2xl font-bold">{completedCount}</div>
-                <div className="text-xs text-muted-foreground">Archived</div>
+                <div className="text-xs text-muted-foreground">Completed</div>
               </div>
             </div>
           </CardContent>
@@ -359,7 +395,7 @@ export default function UnifiedQueuePage() {
             <div className="flex items-center gap-2">
               <Inbox className="h-5 w-5 text-purple-500" />
               <div>
-                <div className="text-2xl font-bold">{Object.keys(stats.by_type).length}</div>
+                <div className="text-2xl font-bold">{filterOptions.types.length}</div>
                 <div className="text-xs text-muted-foreground">Document Types</div>
               </div>
             </div>
@@ -381,8 +417,11 @@ export default function UnifiedQueuePage() {
                 <SelectValue placeholder="Document Type" />
               </SelectTrigger>
               <SelectContent>
-                {Object.entries(DOC_TYPES).map(([key, { label }]) => (
-                  <SelectItem key={key} value={key}>{label}</SelectItem>
+                <SelectItem value="ALL">All Types</SelectItem>
+                {filterOptions.types.map(({ value, count }) => (
+                  <SelectItem key={value} value={value}>
+                    {getTypeLabel(value)} ({count})
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -392,8 +431,11 @@ export default function UnifiedQueuePage() {
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
-                {Object.entries(STATUSES).map(([key, { label }]) => (
-                  <SelectItem key={key} value={key}>{label}</SelectItem>
+                <SelectItem value="ALL">All Status</SelectItem>
+                {filterOptions.statuses.map(({ value, count }) => (
+                  <SelectItem key={value} value={value}>
+                    {getStatusLabel(value)} ({count})
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -442,7 +484,7 @@ export default function UnifiedQueuePage() {
             Completed ({completedCount})
           </TabsTrigger>
           <TabsTrigger value="all" data-testid="tab-all">
-            All ({stats.total})
+            All ({queueCounts.total_all || stats.total})
           </TabsTrigger>
         </TabsList>
 

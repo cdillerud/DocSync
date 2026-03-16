@@ -48,6 +48,9 @@ Build a document intelligence platform for GPI (Gamer Packaging Inc.) that autom
 See CHANGELOG.md for full history.
 
 ### Latest (March 16, 2026)
+- Fixed Vendor KPI `$or` key collision bug in dashboard (P0)
+- Fixed Document Queue: type filter, status filter, tab counts, dynamic dropdowns
+- Vendor matching remediation complete (auto-resolve, fuzzy candidates, reprocessing)
 - **Dashboard Readiness Summary Card** — Shows document readiness status distribution with counts, confidence scores, top blockers and warnings
 - **Config Service Extraction** — Centralized config_service.py module, decoupling settings.py/vendor_matching.py/mailbox_sources.py from server.py
 - **AR Release Gate (Prepay & Terms Approval)** — Evaluates sales documents for customer resolution, prepay holds, credit limits, payment terms, and ship-to validation. Includes manual override workflow.

@@ -1,5 +1,19 @@
 # GPI Document Hub - Changelog
 
+## March 16, 2026 — Fix: Document Queue Filtering & Counts
+
+### Backend (`backend/routers/documents.py`)
+- **Type filter:** Now searches across `doc_type`, `document_type`, AND `suggested_job_type` (case-insensitive) instead of only `document_type`
+- **Status filter:** Now checks both `status` and `workflow_status` fields (case-insensitive) instead of exact match on `status`
+- **Counts:** Added `completed` count to response; terminal statuses now include both cased variants
+- **Dynamic filter options:** API now returns `filter_options.types` and `filter_options.statuses` with actual distinct values and counts from DB
+
+### Frontend (`frontend/src/pages/UnifiedQueuePage.js`)
+- **Tab counts:** Now use queue counts from documents API instead of broken dashboard stats (which only counted 5 hardcoded statuses)
+- **Filter dropdowns:** Now dynamically populated from DB data with counts, instead of hardcoded lists
+- **Status/Type badges:** Use flexible label lookups instead of rigid config objects
+- **Stat cards:** "Archived" renamed to "Completed"; "Document Types" uses dynamic count
+
 ## March 16, 2026 — Fix: Vendor KPI `$or` Key Collision Bug (P0)
 - **Root Cause:** MongoDB `$or` key collision when spreading `vendor_applicable_filter` (which contains `$or`) into queries that also define their own `$or` — second key silently overwrites the first.
 - **Fix:** Wrapped both `vendor_auto_resolved_total` and `vendor_needs_review_total` queries in `$and` to combine filters without key collision.

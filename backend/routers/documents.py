@@ -123,30 +123,71 @@ async def list_documents(
 ):
     db = get_db()
     fq = {}
+
+    # Status filter: check both status and workflow_status fields (case-insensitive)
     if status:
-        fq["status"] = status
+        status_regex = {"$regex": f"^{status}$", "$options": "i"}
+        fq["$or"] = [{"status": status_regex}, {"workflow_status": status_regex}]
+
+    # Type filter: search across doc_type, document_type, and suggested_job_type
     if document_type:
-        fq["document_type"] = document_type
+        type_regex = {"$regex": f"^{document_type}$", "$options": "i"}
+        type_conditions = [
+            {"doc_type": type_regex},
+            {"document_type": type_regex},
+            {"suggested_job_type": type_regex},
+        ]
+        if "$or" in fq:
+            # Already have $or from status filter, wrap both in $and
+            fq = {"$and": [{"$or": fq.pop("$or")}, {"$or": type_conditions}]}
+        else:
+            fq["$or"] = type_conditions
+
     if category:
         fq["category"] = category
     if search:
-        fq["file_name"] = {"$regex": search, "$options": "i"}
+        search_cond = {"file_name": {"$regex": search, "$options": "i"}}
+        if "$and" in fq:
+            fq["$and"].append(search_cond)
+        else:
+            fq.update(search_cond)
 
+    TERMINAL_STATUSES = ["Completed", "Posted", "Archived", "completed", "posted", "archived"]
     if queue_view and not include_cleared and not status:
-        fq["$and"] = [
-            {"$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}]},
-            {"status": {"$nin": ["Completed", "Posted", "Archived"]}}
-        ]
+        not_cleared = {"$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}]}
+        not_terminal = {"status": {"$nin": TERMINAL_STATUSES}}
+        if "$and" in fq:
+            fq["$and"].extend([not_cleared, not_terminal])
+        else:
+            fq["$and"] = [not_cleared, not_terminal]
 
     total = await db.hub_documents.count_documents(fq)
     docs = await db.hub_documents.find(fq, {"_id": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
 
+    # Compute global counts
     total_all = await db.hub_documents.count_documents({})
     cleared_count = await db.hub_documents.count_documents({"auto_cleared": True})
     pending_count = await db.hub_documents.count_documents({
-        "$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}],
-        "status": {"$nin": ["Completed", "Posted", "Archived"]}
+        "$and": [
+            {"$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}]},
+            {"status": {"$nin": TERMINAL_STATUSES}},
+        ]
     })
+    completed_count = await db.hub_documents.count_documents({
+        "status": {"$in": TERMINAL_STATUSES}
+    })
+
+    # Distinct types and statuses for dynamic filter dropdowns
+    distinct_types_raw = await db.hub_documents.aggregate([
+        {"$group": {"_id": {"$ifNull": ["$doc_type", "$document_type"]}, "count": {"$sum": 1}}},
+        {"$match": {"_id": {"$ne": None}}},
+        {"$sort": {"count": -1}},
+    ]).to_list(50)
+    distinct_statuses_raw = await db.hub_documents.aggregate([
+        {"$group": {"_id": "$status", "count": {"$sum": 1}}},
+        {"$match": {"_id": {"$ne": None}}},
+        {"$sort": {"count": -1}},
+    ]).to_list(50)
 
     return {
         "documents": docs,
@@ -155,8 +196,13 @@ async def list_documents(
             "total_all": total_all,
             "auto_cleared": cleared_count,
             "pending_review": pending_count,
-            "showing": len(docs)
-        }
+            "completed": completed_count,
+            "showing": len(docs),
+        },
+        "filter_options": {
+            "types": [{"value": r["_id"], "count": r["count"]} for r in distinct_types_raw],
+            "statuses": [{"value": r["_id"], "count": r["count"]} for r in distinct_statuses_raw],
+        },
     }
 
 

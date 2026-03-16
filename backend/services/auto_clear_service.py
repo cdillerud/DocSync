@@ -199,16 +199,26 @@ def evaluate_auto_clear(
     # =================================================================
     # CHECK 1: Confidence Threshold
     # =================================================================
+    # Prioritize classification confidence over extraction confidence
+    ai_class = doc.get("ai_classification") or {}
     confidence = (
-        doc.get("ai_confidence")
+        ai_class.get("confidence")
+        or doc.get("classification_confidence")
+        or doc.get("ai_confidence")
         or doc.get("confidence")
-        or (doc.get("ai_classification") or {}).get("confidence")
         or 0
     )
     # Handle string percentages like "100%"
     if isinstance(confidence, str):
         confidence = float(confidence.replace("%", "")) / 100 if "%" in confidence else float(confidence)
     confidence = float(confidence)
+    # If classification says 100% but field stores extraction confidence, use 100%
+    ai_method = ai_class.get("method") or doc.get("classification_method") or ""
+    if ai_method and confidence < 0.5:
+        # There was a classification — trust that over low extraction score
+        # Check if doc was successfully classified (has a doc_type)
+        if doc.get("doc_type") or doc.get("document_type"):
+            confidence = max(confidence, 0.85)  # Classified docs get at least 85%
     threshold = type_config.get("confidence_threshold", 0.90)
     
     confidence_passed = confidence >= threshold
@@ -274,15 +284,20 @@ def evaluate_auto_clear(
     # CHECK 3: Duplicate Check
     # =================================================================
     if type_config.get("require_no_duplicate"):
-        is_duplicate = doc.get("possible_duplicate", False) or doc.get("is_duplicate", False)
+        # Only use hard duplicate flag (content-hash match), not fuzzy "possible_duplicate"
+        # For AP invoices, also check possible_duplicate (fuzzy match)
+        is_hard_dup = doc.get("is_duplicate", False)
+        is_ap = doc_type in ("AP_Invoice", "AP_INVOICE")
+        is_fuzzy_dup = doc.get("possible_duplicate", False) if is_ap else False
+        is_dup = is_hard_dup or is_fuzzy_dup
         details["checks"].append({
             "check": "duplicate",
-            "passed": not is_duplicate,
-            "value": is_duplicate,
-            "message": "Duplicate detected" if is_duplicate else "No duplicate found"
+            "passed": not is_dup,
+            "value": is_dup,
+            "message": "Duplicate detected" if is_dup else "No duplicate found"
         })
         
-        if is_duplicate:
+        if is_dup:
             return (
                 AutoClearDecision.DUPLICATE,
                 "Duplicate document detected - requires review",

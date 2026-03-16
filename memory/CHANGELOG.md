@@ -19,7 +19,7 @@
 
 - **Folder Routing Service** (updated `folder_routing_service.py`)
   - Complete routing logic matching the accounting folder structure
-  - Priority-based rules: Canpack override → Credit Memos → Tooling → Freight → S&H → Standard
+  - Priority-based rules: Canpack override -> Credit Memos -> Tooling -> Freight -> S&H -> Standard
   - Vendor pattern matching for Ball, Canpack, Anchor, OI, freight carriers
   - International/domestic routing
   - Warehouse subfolder routing (Assembly, GT's, Ball Orders, UPS Orders, etc.)
@@ -33,6 +33,12 @@
   - Auto-compute SharePoint folder suggestion after document classification
   - Store `sharepoint_folder_suggested` and `sharepoint_folder_reason` on hub_documents
   - Display folder suggestion in document detail page with breadcrumb path
+
+- **Document Detail "Move to SharePoint" Button**
+  - "Get Folder Suggestion" button when no folder suggestion exists
+  - "Move to SharePoint" one-click button after folder is suggested
+  - Shows folder path breadcrumbs, routing reason, and move timestamp
+  - Both buttons integrated directly in the SharePoint card on document detail page
 
 ### Fixed
 - **P0: Multi-Page PDF Misclassification** - Root cause: entire multi-page PDF was sent to Gemini, causing shipping content from later pages to overwhelm the classification. Fix: extract first page only using pypdf for classification of multi-page PDFs.

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getDocument, linkDocument, updateDocument, resubmitDocument, refreshDocumentState } from '../lib/api';
+import api from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -13,7 +14,7 @@ import {
   CheckCircle2, AlertCircle, Clock, Loader2, Copy, RotateCcw, 
   ShieldCheck, ShieldAlert, Building2, FileSearch, Receipt,
   Zap, User, Cpu, Eye, Inbox, Check, XCircle, AlertTriangle,
-  Gauge, CircleDot
+  Gauge, CircleDot, FolderOpen, Send
 } from 'lucide-react';
 import { Square9WorkflowTracker } from '../components/Square9WorkflowTracker';
 import APReviewPanel from '../components/APReviewPanel';
@@ -416,9 +417,11 @@ export default function DocumentDetailPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              {(doc.sharepoint_folder_suggested || doc.sharepoint_folder) && (
+              {(doc.sharepoint_folder_suggested || doc.sharepoint_folder) ? (
                 <div data-testid="doc-sp-folder">
-                  <p className="text-xs text-muted-foreground mb-1">Suggested Folder</p>
+                  <p className="text-xs text-muted-foreground mb-1">
+                    {doc.sharepoint_status === 'moved' || doc.sharepoint_status === 'moved_demo' ? 'Filed In' : 'Suggested Folder'}
+                  </p>
                   <div className="flex items-center gap-2 flex-wrap">
                     {(doc.sharepoint_folder || doc.sharepoint_folder_suggested || '').split('/').map((part, i, arr) => (
                       <span key={i} className="flex items-center gap-1">
@@ -430,7 +433,19 @@ export default function DocumentDetailPage() {
                   {doc.sharepoint_folder_reason && (
                     <p className="text-[11px] text-muted-foreground mt-1">{doc.sharepoint_folder_reason}</p>
                   )}
+                  {doc.sharepoint_moved_at && (
+                    <p className="text-[11px] text-muted-foreground mt-1">Moved: {new Date(doc.sharepoint_moved_at).toLocaleString()}</p>
+                  )}
                 </div>
+              ) : (
+                <SharePointSuggestButton docId={doc.id} onResult={(folder, reason) => {
+                  doc.sharepoint_folder_suggested = folder;
+                  doc.sharepoint_folder_reason = reason;
+                  fetchDoc();
+                }} />
+              )}
+              {(doc.sharepoint_folder_suggested || doc.sharepoint_folder) && !doc.sharepoint_moved_at && (
+                <SharePointMoveButton docId={doc.id} folder={doc.sharepoint_folder || doc.sharepoint_folder_suggested} onMoved={fetchDoc} />
               )}
               <InfoRow label="Drive ID" value={doc.sharepoint_drive_id ? doc.sharepoint_drive_id.slice(0, 16) + '...' : '-'} mono />
               <InfoRow label="Item ID" value={doc.sharepoint_item_id ? doc.sharepoint_item_id.slice(0, 12) + '...' : '-'} mono />
@@ -1022,5 +1037,44 @@ function InfoRow({ label, value, mono, copyable, onCopy }) {
         )}
       </div>
     </div>
+  );
+}
+
+
+function SharePointSuggestButton({ docId, onResult }) {
+  const [loading, setLoading] = useState(false);
+  const handleSuggest = async () => {
+    setLoading(true);
+    try {
+      const res = await api.get(`/sharepoint-routing/document/${docId}/suggested-folder`);
+      toast.success(`Suggested: ${res.data.suggested_folder}`);
+      if (onResult) onResult(res.data.suggested_folder, res.data.reason);
+    } catch (e) { toast.error('Failed to get suggestion'); }
+    setLoading(false);
+  };
+  return (
+    <Button variant="outline" size="sm" className="w-full" onClick={handleSuggest} disabled={loading} data-testid="sp-suggest-btn">
+      {loading ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <FolderOpen className="w-3.5 h-3.5 mr-1.5" />}
+      Get Folder Suggestion
+    </Button>
+  );
+}
+
+function SharePointMoveButton({ docId, folder, onMoved }) {
+  const [loading, setLoading] = useState(false);
+  const handleMove = async () => {
+    setLoading(true);
+    try {
+      const res = await api.post(`/sharepoint-routing/document/${docId}/move-to-sharepoint`);
+      toast.success(res.data.message || 'Document moved');
+      if (onMoved) onMoved();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Move failed'); }
+    setLoading(false);
+  };
+  return (
+    <Button size="sm" className="w-full" onClick={handleMove} disabled={loading} data-testid="sp-move-btn">
+      {loading ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Send className="w-3.5 h-3.5 mr-1.5" />}
+      Move to SharePoint
+    </Button>
   );
 }

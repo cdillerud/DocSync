@@ -53,7 +53,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://doc-dedup-final.preview.emergentagent.com"
+    "api_url": "https://approval-engine-10.preview.emergentagent.com"
   },
   "seed_data_used": "Each test creates unique items with UUID prefixes to avoid cross-test interference. Test workspace created per module with deactivation on teardown.",
   "retest_needed": false,

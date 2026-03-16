@@ -26,6 +26,7 @@ import TemplatesPage from "@/pages/TemplatesPage";
 import DocumentReviewQueuePage from "@/pages/DocumentReviewQueuePage";
 import DocumentBundleReviewPage from "@/pages/DocumentBundleReviewPage";
 import DocumentLifecyclePage from "@/pages/DocumentLifecyclePage";
+import SharePointRoutingPage from "@/pages/SharePointRoutingPage";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -58,6 +59,7 @@ function AppRoutes() {
         <Route path="document-review" element={<DocumentReviewQueuePage />} />
         <Route path="document-bundles" element={<DocumentBundleReviewPage />} />
         <Route path="document-lifecycle" element={<DocumentLifecyclePage />} />
+        <Route path="sharepoint-routing" element={<SharePointRoutingPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

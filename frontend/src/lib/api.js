@@ -391,6 +391,25 @@ export const getLearningEvents = (params) => api.get('/document-intelligence/lea
 export const getLearningSummary = () => api.get('/document-intelligence/learning/summary');
 export const getDocumentLearningEvents = (docId) => api.get(`/document-intelligence/learning/events/${docId}`);
 
+// SharePoint Routing APIs
+export const getSharePointFolderTree = () => api.get('/sharepoint-routing/folder-tree');
+export const getSharePointFolderRules = (includeInactive) => api.get('/sharepoint-routing/folder-rules', { params: { include_inactive: includeInactive } });
+export const createFolderRule = (rule) => api.post('/sharepoint-routing/folder-rules', rule);
+export const updateFolderRule = (key, data) => api.put(`/sharepoint-routing/folder-rules/${key}`, data);
+export const deleteFolderRule = (key) => api.delete(`/sharepoint-routing/folder-rules/${key}`);
+export const getVendorMappings = () => api.get('/sharepoint-routing/vendor-mappings');
+export const createVendorMapping = (mapping) => api.post('/sharepoint-routing/vendor-mappings', mapping);
+export const deleteVendorMapping = (pattern) => api.delete(`/sharepoint-routing/vendor-mappings/${encodeURIComponent(pattern)}`);
+export const getProcessorAssignments = () => api.get('/sharepoint-routing/processor-assignments');
+export const createProcessorAssignment = (assignment) => api.post('/sharepoint-routing/processor-assignments', assignment);
+export const suggestFolder = (data) => api.post('/sharepoint-routing/suggest-folder', data);
+export const getDocSuggestedFolder = (docId) => api.get(`/sharepoint-routing/document/${docId}/suggested-folder`);
+export const assignFolderToDoc = (docId, folder) => api.post(`/sharepoint-routing/document/${docId}/assign-folder`, { folder_path: folder });
+export const moveDocToSharePoint = (docId) => api.post(`/sharepoint-routing/document/${docId}/move-to-sharepoint`);
+export const batchMoveToSharePoint = (docIds) => api.post('/sharepoint-routing/batch-move', { doc_ids: docIds });
+export const batchSuggestFolders = (data) => api.post('/sharepoint-routing/batch-suggest', data);
+export const seedSharePointDefaults = () => api.post('/sharepoint-routing/seed-defaults');
+
 // AR Release Gate APIs
 export const getARReleaseMetrics = () => api.get('/ar-release/metrics');
 export const evaluateARRelease = (docId) => api.post(`/ar-release/evaluate/${docId}`);

@@ -309,6 +309,31 @@ async def process_document(doc_id: str) -> Dict[str, Any]:
     }
     await db.hub_documents.update_one({"id": doc_id}, {"$set": doc_update})
 
+    # 8b) Compute and store SharePoint folder suggestion
+    try:
+        from services.folder_routing_service import determine_folder_path
+        updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+        if updated_doc:
+            ef = ai_extracted_fields or {}
+            if ef.get("is_international"):
+                updated_doc["is_international"] = True
+            folder_path, folder_reason, _ = determine_folder_path(
+                doc=updated_doc,
+                freight_direction=ef.get("freight_direction"),
+                is_international=bool(ef.get("is_international")),
+            )
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    "sharepoint_folder_suggested": folder_path,
+                    "sharepoint_folder_reason": folder_reason,
+                }}
+            )
+            intelligence_result["sharepoint_folder_suggested"] = folder_path
+            intelligence_result["sharepoint_folder_reason"] = folder_reason
+    except Exception as e:
+        logger.warning("Folder routing failed for %s: %s", doc_id, e)
+
     # 9) Emit event
     try:
         from services.event_service import get_event_service

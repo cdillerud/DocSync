@@ -79,7 +79,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://doc-dedup-final.preview.emergentagent.com"
+    "api_url": "https://approval-engine-10.preview.emergentagent.com"
   },
   "seed_data_used": "Used existing Hormel Foods workspace (ID: 366bfcce-4d68-4daf-b9f4-cb05a35de8c8) with 29 unique items, 32 balance rows (24 OK, 3 LOW, 5 SHORT), 5 reorder recommendations.",
   "retest_needed": false,

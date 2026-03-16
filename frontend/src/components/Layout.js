@@ -6,7 +6,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator
 } from '../components/ui/dropdown-menu';
 import {
-  LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, Brain, FileSpreadsheet, ChevronRight, Users, Zap, Target, Fingerprint, ShieldCheck, ArrowLeftRight, ShoppingCart, Warehouse, ClipboardList, ScanSearch, Layers, Activity
+  LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, Brain, FileSpreadsheet, ChevronRight, Users, Zap, Target, Fingerprint, ShieldCheck, ArrowLeftRight, ShoppingCart, Warehouse, ClipboardList, ScanSearch, Layers, Activity, FolderTree
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
@@ -30,6 +30,7 @@ const navItems = [
   { to: '/document-review', icon: ScanSearch, label: 'Doc Intelligence' },
   { to: '/document-bundles', icon: Layers, label: 'Doc Bundles' },
   { to: '/document-lifecycle', icon: Activity, label: 'Lifecycle' },
+  { to: '/sharepoint-routing', icon: FolderTree, label: 'SP Routing' },
   { to: '/bc-integration', icon: ArrowLeftRight, label: 'BC Integration' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
@@ -85,6 +86,7 @@ export default function Layout() {
     if (path === '/email-parser') return 'Email Config';
     if (path === '/settings') return 'Settings';
     if (path === '/migration/onegamer-poc') return 'SharePoint Migration POC';
+    if (path === '/sharepoint-routing') return 'SharePoint Folder Routing';
     return 'GPI Document Hub';
   };
 

@@ -2,6 +2,14 @@
 Folder Routing Service - Routes documents to SharePoint folders based on accounting structure.
 
 Mirrors the accounting department's folder structure from "Temp Folder Structure 9.15.25.docx"
+
+Key routing rules:
+- All Canpack shipment docs → Dropship Not International → Canpack
+- Dunnage return freight → Canpack → Dunnage return freight
+- Freight issues needing logistics approval → Freight Issues
+- S&H invoices split by approved/waiting and processor (Andy/Ellie)
+- Credit memos routed by vendor (Anchor/Ball/OI dunnage, Aaron, Quality, Unclaimed)
+- Warehouse docs split by international/domestic and order type
 """
 
 import logging
@@ -11,155 +19,29 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# ACCOUNTING FOLDER STRUCTURE CONFIGURATION
-# =============================================================================
-
-# Main folder categories matching accounting's structure
-FOLDER_STRUCTURE = {
-    # DO NOT PAY - Vendor invoices authorized not to pay (organized by year)
-    "DO_NOT_PAY": {
-        "path": "DO NOT PAY Documents",
-        "description": "Vendor invoices and supporting documents for invoices authorized not to pay",
-        "subfolders": ["by_year"],  # Dynamic: creates year subfolders
-    },
-    
-    # DROPSHIP INTERNATIONAL - International vendor invoices for drop ship orders
-    "DROPSHIP_INTERNATIONAL": {
-        "path": "Dropship International Documents",
-        "description": "International vendor invoices, freight bills, and shipping docs for drop ship orders",
-        "subfolders": ["by_order"],  # Dynamic: creates order number subfolders
-    },
-    
-    # DROPSHIP NOT INTERNATIONAL - Domestic vendor invoices for drop ship orders
-    "DROPSHIP_DOMESTIC": {
-        "path": "Dropship Not International",
-        "description": "Domestic vendor invoices, freight bills, and shipping docs for drop ship orders",
-        "subfolders": {
-            "Ball": "Ball vendor documents",
-            "Canpack": "Canpack vendor documents",
-            "Canpack/Dunnage return freight": "Canpack dunnage return freight invoices",
-            "All Others": "Other vendor documents",
-            "Freight": "Freight invoices",
-            "Freight Issues": "Freight invoices needing logistics approval",
-            "Ready to process": "Documents ready for processing",
-            "Purch Inv": "Invoices with cost verified, ready for purchase invoice",
-            "Meg to Process": "Documents for Meg to process",
-        }
-    },
-    
-    # MISCELLANEOUS - Office invoices
-    "MISCELLANEOUS": {
-        "path": "Miscellaneous Documents",
-        "description": "Miscellaneous office invoices",
-        "subfolders": {
-            "Misc Invoices - approved": "Approved miscellaneous invoices",
-            "Misc Invoices - need approval": "Miscellaneous invoices needing approval",
-            "Rhonda - Issues": "Documents for Rhonda to process",
-            "S&H Invoices": "Storage and handling invoices",
-        }
-    },
-    
-    # APPROVED DOCUMENTS - Warehouse invoices ready to process
-    "APPROVED_WAREHOUSE": {
-        "path": "Approved Documents",
-        "description": "Warehouse invoices for storage and handling charges ready to be processed",
-        "subfolders": {
-            "Andy to Process": "Documents for Andy to process",
-            "Ellie to Process": "Documents for Ellie to process",
-        }
-    },
-    
-    # S&H WAITING APPROVAL - Warehouse invoices needing approval
-    "SH_WAITING_APPROVAL": {
-        "path": "S&H Invoices waiting for approval Documents",
-        "description": "Warehouse invoices for storage and handling charges needing approval",
-        "subfolders": {
-            "Andy to Process": "Documents for Andy to process",
-        }
-    },
-    
-    # MONTH REC & TEMPLATES
-    "MONTH_REC_TEMPLATES": {
-        "path": "Month Rec & Templates",
-        "description": "Monthly reconciliation and templates",
-        "subfolders": {}
-    },
-    
-    # TOOLING INVOICES
-    "TOOLING": {
-        "path": "Tooling Invoices Documents",
-        "description": "Invoices for tooling charges",
-        "subfolders": {}
-    },
-    
-    # VENDOR CREDIT MEMOS
-    "VENDOR_CREDITS": {
-        "path": "Vendor Credit Memos Documents",
-        "description": "Vendor credits",
-        "subfolders": {
-            "Anchor": "Anchor vendor credits",
-            "Anchor/Dunnage": "Anchor dunnage credits",
-            "Ball": "Ball vendor credits",
-            "Ball/Dunnage": "Ball dunnage credits",
-            "OI": "OI vendor credits",
-            "OI/Dunnage": "OI dunnage credits",
-            "Processed Credit Memo - Aaron": "Processed credit memos by Aaron",
-            "Sent to Quality": "Credits sent to quality",
-            "Unclaimed credits posted": "Unclaimed posted credits",
-        }
-    },
-    
-    # WAREHOUSE INTERNATIONAL - International vendor invoices for warehouse orders
-    "WAREHOUSE_INTERNATIONAL": {
-        "path": "Warehouse International Documents",
-        "description": "International vendor invoices, freight bills, and inbound paperwork for warehouse orders",
-        "subfolders": ["by_order"],  # Dynamic: creates order number subfolders
-    },
-    
-    # WAREHOUSE NOT INTERNATIONAL - Domestic warehouse orders
-    "WAREHOUSE_DOMESTIC": {
-        "path": "Warehouse Not International Documents",
-        "description": "Domestic vendor invoices, freight bills, and paperwork for warehouse orders",
-        "subfolders": {
-            "Assembly/GT's/Sort and Stack": "GT's Sort and Stack inbound paperwork and assembly invoices",
-            "Assembly/Assembly Kent": "Assembly Kent inbound paperwork, freight, invoices",
-            "Ball Orders": "Ball inbound/outbound paperwork and freight",
-            "GT's Orders": "GT's outbound paperwork from Sort and Stack",
-            "Transfer Orders": "Transfer orders outbound paperwork",
-            "UPS Orders": "UPS shipped orders outbound paperwork",
-        }
-    },
-}
-
-# =============================================================================
 # VENDOR ROUTING RULES
 # =============================================================================
 
-# Known vendors and their folder mappings
 VENDOR_FOLDER_MAPPING = {
     # Ball vendors
     "ball": "Ball",
     "ball corporation": "Ball",
     "ball container": "Ball",
     "ball metal": "Ball",
-    
     # Canpack vendors
     "canpack": "Canpack",
     "canpack group": "Canpack",
     "canpack usa": "Canpack",
-    
     # Anchor vendors
     "anchor": "Anchor",
     "anchor glass": "Anchor",
     "anchor packaging": "Anchor",
-    
     # OI vendors
     "oi": "OI",
     "o-i": "OI",
     "owens illinois": "OI",
     "owens-illinois": "OI",
-    
-    # Freight carriers (common ones)
+    # Freight carriers
     "ups": "Freight",
     "fedex": "Freight",
     "usps": "Freight",
@@ -178,8 +60,120 @@ VENDOR_FOLDER_MAPPING = {
     "pitt ohio": "Freight",
     "tumalo creek": "Freight",
     "tumalo creek transportation": "Freight",
-    "tumaloc": "Freight",  # BC vendor code for Tumalo Creek
+    "tumaloc": "Freight",
 }
+
+# =============================================================================
+# FOLDER STRUCTURE (for backward compat / summary views)
+# =============================================================================
+
+FOLDER_STRUCTURE = {
+    "DO_NOT_PAY": {
+        "path": "DO NOT PAY Documents",
+        "description": "Vendor invoices authorized not to pay",
+        "subfolders": ["by_year"],
+    },
+    "DROPSHIP_INTERNATIONAL": {
+        "path": "Dropship International Documents",
+        "description": "International vendor invoices for drop ship orders",
+        "subfolders": ["by_order"],
+    },
+    "DROPSHIP_DOMESTIC": {
+        "path": "Dropship Not International Documents",
+        "description": "Domestic vendor invoices for drop ship orders",
+        "subfolders": {
+            "Canpack": "All Canpack shipment documents",
+            "Canpack/Dunnage return freight": "Canpack dunnage return freight invoices",
+        },
+    },
+    "FREIGHT_ISSUES": {
+        "path": "Freight Issues",
+        "description": "Freight invoices needing logistics approval",
+        "subfolders": {},
+    },
+    "READY_TO_PROCESS": {
+        "path": "Ready to process",
+        "description": "Documents ready for processing",
+        "subfolders": {
+            "Purch Inv": "Invoices with cost verified, purchase invoice only",
+        },
+    },
+    "MEG_TO_PROCESS": {
+        "path": "Meg to Process",
+        "description": "Documents for Meg to process",
+        "subfolders": {},
+    },
+    "MISCELLANEOUS": {
+        "path": "Miscellaneous Documents",
+        "description": "Miscellaneous office invoices",
+        "subfolders": {
+            "Misc Invoices - approved": "Approved miscellaneous invoices",
+            "Misc Invoices - need approval": "Miscellaneous invoices needing approval",
+        },
+    },
+    "RHONDA_ISSUES": {
+        "path": "Rhonda - Issues",
+        "description": "Documents for Rhonda to process",
+        "subfolders": {},
+    },
+    "SH_APPROVED": {
+        "path": "S&H Invoices Approved Documents",
+        "description": "Warehouse S&H invoices ready to process as cost only",
+        "subfolders": {
+            "Andy to Process": "S&H approved - Andy to process",
+            "Ellie to Process": "S&H approved - Ellie to process",
+        },
+    },
+    "SH_WAITING_APPROVAL": {
+        "path": "S&H Invoices waiting for approval Documents",
+        "description": "Warehouse S&H invoices needing approval",
+        "subfolders": {
+            "Andy to Process": "S&H waiting approval - Andy to process",
+        },
+    },
+    "MONTH_REC_TEMPLATES": {
+        "path": "Month Rec & Templates",
+        "description": "Monthly reconciliation and templates",
+        "subfolders": {},
+    },
+    "TOOLING": {
+        "path": "Tooling Invoices",
+        "description": "Invoices for tooling charges",
+        "subfolders": {},
+    },
+    "VENDOR_CREDITS": {
+        "path": "Vendor Credit Memos",
+        "description": "Vendor credit memos",
+        "subfolders": {
+            "Anchor Dunnage": "Anchor dunnage credits",
+            "Ball Dunnage": "Ball dunnage credits",
+            "OI Dunnage": "OI dunnage credits",
+            "Processed Credit Memo - Aaron": "Processed credit memos by Aaron",
+            "Sent to Quality": "Credits sent to quality",
+            "Unclaimed credits posted": "Unclaimed posted credits",
+        },
+    },
+    "WAREHOUSE_INTERNATIONAL": {
+        "path": "Warehouse International Documents",
+        "description": "International vendor invoices for warehouse orders",
+        "subfolders": ["by_order"],
+    },
+    "WAREHOUSE_DOMESTIC": {
+        "path": "Warehouse Not International Documents",
+        "description": "Domestic vendor invoices for warehouse orders",
+        "subfolders": {
+            "Assembly": "Assembly paperwork and invoices",
+            "GT's": "GT's inbound paperwork",
+            "Sort and Stack": "Sort and Stack inbound/assembly",
+            "Assembly Kent": "Assembly Kent inbound paperwork, freight, invoices",
+            "Ball Orders": "Ball inbound/outbound paperwork and freight",
+            "GT's Orders": "GT's outbound paperwork from Sort and Stack",
+            "Transfer Orders": "Transfer orders outbound paperwork",
+            "UPS Orders": "UPS shipped orders outbound paperwork",
+        },
+    },
+}
+
 
 # Document type indicators for special routing
 CREDIT_MEMO_INDICATORS = [
@@ -207,12 +201,7 @@ def determine_folder_path(
 ) -> Tuple[str, str, Dict[str, Any]]:
     """
     Determine the SharePoint folder path for a document based on accounting rules.
-    
-    Args:
-        doc: Document dictionary with extracted fields
-        freight_direction: "inbound", "outbound", or None
-        is_international: Whether the document is for international shipment
-        
+
     Returns:
         Tuple of (folder_path, routing_reason, routing_details)
     """
@@ -220,16 +209,16 @@ def determine_folder_path(
     extracted = doc.get("extracted_fields", {})
     normalized = doc.get("normalized_fields", {})
     ai_extraction = doc.get("ai_extraction", {})
-    
+
     # Get key fields
     vendor_name = (
-        doc.get("vendor_canonical") or 
-        normalized.get("vendor") or 
-        extracted.get("vendor") or 
-        ai_extraction.get("vendor") or 
+        doc.get("vendor_canonical") or
+        normalized.get("vendor") or
+        extracted.get("vendor") or
+        ai_extraction.get("vendor") or
         ""
     ).lower()
-    
+
     order_number = (
         doc.get("po_number_extracted") or
         doc.get("bol_number_extracted") or
@@ -240,17 +229,14 @@ def determine_folder_path(
         extracted.get("order_number") or
         ""
     )
-    
+
     invoice_description = (
         extracted.get("description") or
         ai_extraction.get("description") or
         doc.get("file_name") or
         ""
     ).lower()
-    
-    # Get document amount for potential routing
-    amount = doc.get("amount_float") or extracted.get("amount") or 0
-    
+
     routing_details = {
         "doc_type": doc_type,
         "vendor": vendor_name,
@@ -258,132 +244,252 @@ def determine_folder_path(
         "freight_direction": freight_direction,
         "is_international": is_international,
     }
-    
+
     # =================================================================
-    # ROUTING RULES (in priority order)
+    # ROUTING RULES (in priority order per accounting document)
     # =================================================================
-    
-    # 1. Credit Memos -> Vendor Credit Memos folder
-    if any(indicator in invoice_description for indicator in CREDIT_MEMO_INDICATORS):
-        vendor_folder = _get_vendor_subfolder(vendor_name, for_credits=True)
+
+    # RULE 0: All Canpack documents → Dropship Not International → Canpack
+    # This is a high-level directive that overrides other paths for Canpack
+    if _is_canpack_vendor(vendor_name):
         if _is_dunnage_related(invoice_description):
-            folder_path = f"Vendor Credit Memos Documents/{vendor_folder}/Dunnage"
-            reason = f"Credit memo with dunnage for {vendor_folder}"
-        else:
-            folder_path = f"Vendor Credit Memos Documents/{vendor_folder}"
-            reason = f"Credit memo for vendor {vendor_folder}"
-        return folder_path, reason, routing_details
-    
-    # 2. Tooling Invoices
+            return (
+                "Dropship Not International Documents/Canpack/Dunnage return freight",
+                "Canpack dunnage return freight",
+                routing_details,
+            )
+        return (
+            "Dropship Not International Documents/Canpack",
+            "All Canpack shipment documents route here",
+            routing_details,
+        )
+
+    # RULE 1: Credit Memos → Vendor Credit Memos
+    if _is_credit_memo(doc_type, invoice_description):
+        vendor_folder = _get_credit_vendor_subfolder(vendor_name, invoice_description)
+        if vendor_folder:
+            return (
+                f"Vendor Credit Memos/{vendor_folder}",
+                f"Credit memo → {vendor_folder}",
+                routing_details,
+            )
+        return (
+            "Vendor Credit Memos",
+            "Vendor credit memo (general)",
+            routing_details,
+        )
+
+    # RULE 2: Quality Issues → Vendor Credit Memos / Sent to Quality
+    if doc_type == "Quality_Issue":
+        return (
+            "Vendor Credit Memos/Sent to Quality",
+            "Quality issue document",
+            routing_details,
+        )
+
+    # RULE 3: Tooling Invoices
     if any(indicator in invoice_description for indicator in TOOLING_INDICATORS):
-        folder_path = "Tooling Invoices Documents"
-        reason = "Tooling invoice detected"
-        return folder_path, reason, routing_details
-    
-    # 3. Shipping/Warehouse Documents based on freight direction
-    if doc_type in ("Shipping_Document", "Warehouse_Document", "SHIPMENT", "RECEIPT", "Freight_Document"):
-        
-        # Outbound freight -> Warehouse folders
-        if freight_direction == "outbound":
-            if is_international:
-                # International outbound -> Warehouse International by order
-                folder_path = f"Warehouse International Documents/{order_number}" if order_number else "Warehouse International Documents"
-                reason = "Outbound international shipment"
-            else:
-                # Domestic outbound -> Warehouse Not International
-                subfolder = _get_warehouse_subfolder(vendor_name, order_number, doc)
-                folder_path = f"Warehouse Not International Documents/{subfolder}"
-                reason = f"Outbound domestic shipment - {subfolder}"
-            return folder_path, reason, routing_details
-        
-        # Inbound freight -> Dropship folders
-        elif freight_direction == "inbound":
-            if is_international:
-                # International inbound -> Dropship International by order
-                folder_path = f"Dropship International Documents/{order_number}" if order_number else "Dropship International Documents"
-                reason = "Inbound international shipment"
-            else:
-                # Domestic inbound -> Dropship Not International
-                vendor_folder = _get_vendor_subfolder(vendor_name)
-                
-                # Check for dunnage return freight
-                if _is_dunnage_related(invoice_description) and vendor_folder == "Canpack":
-                    folder_path = "Dropship Not International/Canpack/Dunnage return freight"
-                    reason = "Canpack dunnage return freight"
-                else:
-                    folder_path = f"Dropship Not International/{vendor_folder}"
-                    reason = f"Inbound domestic from {vendor_folder}"
-            return folder_path, reason, routing_details
-        
-        # Unknown freight direction -> default to Freight folder
-        else:
-            folder_path = "Dropship Not International/Freight"
-            reason = "Freight document (direction unknown)"
-            return folder_path, reason, routing_details
-    
-    # 4. AP Invoices - Route based on vendor and type
-    if doc_type in ("AP_Invoice", "AP Invoice"):
-        vendor_folder = _get_vendor_subfolder(vendor_name)
-        
-        # Check if it's a freight invoice
-        if _is_freight_vendor(vendor_name):
-            # Freight invoice - check for issues flag
-            if doc.get("needs_logistics_approval") or doc.get("has_freight_issue"):
-                folder_path = "Dropship Not International/Freight Issues"
-                reason = "Freight invoice needing logistics approval"
-            else:
-                folder_path = "Dropship Not International/Freight"
-                reason = "Freight invoice"
-            return folder_path, reason, routing_details
-        
-        # Check if it's S&H (storage and handling)
-        if _is_storage_handling(invoice_description):
-            if doc.get("approved") or doc.get("status") == "Approved":
-                folder_path = "Approved Documents/Andy to Process"
-                reason = "Approved S&H invoice"
-            else:
-                folder_path = "S&H Invoices waiting for approval Documents/Andy to Process"
-                reason = "S&H invoice awaiting approval"
-            return folder_path, reason, routing_details
-        
-        # Regular vendor invoice
-        if is_international:
-            folder_path = f"Dropship International Documents/{order_number}" if order_number else "Dropship International Documents"
-            reason = "International vendor invoice"
-        else:
-            folder_path = f"Dropship Not International/{vendor_folder}"
-            reason = f"Domestic vendor invoice - {vendor_folder}"
-        return folder_path, reason, routing_details
-    
-    # 5. Miscellaneous documents
-    if doc_type in ("OTHER", "Unknown", "Unknown_Document", "QUALITY_DOC"):
+        return ("Tooling Invoices", "Tooling invoice detected", routing_details)
+
+    # RULE 4: Freight Issues (needing logistics approval)
+    if doc.get("needs_logistics_approval") or doc.get("has_freight_issue"):
+        return ("Freight Issues", "Freight invoice needing logistics approval", routing_details)
+
+    # RULE 5: S&H (Storage & Handling) Invoices
+    if _is_storage_handling(invoice_description):
         if doc.get("approved") or doc.get("status") == "Approved":
-            folder_path = "Miscellaneous Documents/Misc Invoices - approved"
-            reason = "Approved miscellaneous document"
-        else:
-            folder_path = "Miscellaneous Documents/Misc Invoices - need approval"
-            reason = "Miscellaneous document needing approval"
-        return folder_path, reason, routing_details
-    
-    # 6. Default fallback
+            return (
+                "S&H Invoices Approved Documents/Andy to Process",
+                "Approved S&H invoice → Andy",
+                routing_details,
+            )
+        return (
+            "S&H Invoices waiting for approval Documents/Andy to Process",
+            "S&H invoice awaiting approval → Andy",
+            routing_details,
+        )
+
+    # RULE 6: Shipping/Freight documents based on direction & international
+    if doc_type in ("Shipping_Document", "Freight_Document", "SHIPMENT", "RECEIPT"):
+        if _is_freight_vendor(vendor_name) and doc_type == "Freight_Document":
+            return ("Freight Issues", "Freight invoice from carrier", routing_details)
+
+        if is_international or doc.get("is_international"):
+            if freight_direction == "outbound":
+                path = f"Warehouse International Documents/{order_number}" if order_number else "Warehouse International Documents"
+                return (path, "Outbound international shipment", routing_details)
+            path = f"Dropship International Documents/{order_number}" if order_number else "Dropship International Documents"
+            return (path, "International shipment document", routing_details)
+
+        # Domestic
+        if freight_direction == "outbound":
+            subfolder = _get_warehouse_subfolder(vendor_name, order_number, doc)
+            return (
+                f"Warehouse Not International Documents/{subfolder}",
+                f"Outbound domestic → {subfolder}",
+                routing_details,
+            )
+
+        if freight_direction == "inbound":
+            vendor_folder = _get_vendor_subfolder(vendor_name)
+            return (
+                f"Dropship Not International Documents/{order_number}" if order_number else f"Dropship Not International Documents",
+                f"Inbound domestic from {vendor_folder}",
+                routing_details,
+            )
+
+        # Unknown direction — default based on vendor
+        vendor_folder = _get_vendor_subfolder(vendor_name)
+        if vendor_folder == "Freight":
+            return ("Freight Issues", "Freight document (direction unknown)", routing_details)
+        return (
+            f"Dropship Not International Documents/{order_number}" if order_number else "Dropship Not International Documents",
+            "Shipping document (domestic default)",
+            routing_details,
+        )
+
+    # RULE 7: AP Invoices
+    if doc_type in ("AP_Invoice", "AP Invoice"):
+        # Freight vendors
+        if _is_freight_vendor(vendor_name):
+            return ("Freight Issues", "Freight invoice from carrier", routing_details)
+
+        # International
+        if is_international or doc.get("is_international"):
+            if _is_warehouse_order(doc):
+                path = f"Warehouse International Documents/{order_number}" if order_number else "Warehouse International Documents"
+                return (path, "International warehouse invoice", routing_details)
+            path = f"Dropship International Documents/{order_number}" if order_number else "Dropship International Documents"
+            return (path, "International vendor invoice", routing_details)
+
+        # Domestic warehouse
+        if _is_warehouse_order(doc):
+            subfolder = _get_warehouse_subfolder(vendor_name, order_number, doc)
+            return (
+                f"Warehouse Not International Documents/{subfolder}",
+                f"Domestic warehouse invoice → {subfolder}",
+                routing_details,
+            )
+
+        # Regular domestic invoice → Dropship Not International by order
+        vendor_folder = _get_vendor_subfolder(vendor_name)
+        if order_number:
+            return (
+                f"Dropship Not International Documents/{order_number}",
+                f"Domestic vendor invoice ({vendor_folder}) → order {order_number}",
+                routing_details,
+            )
+        return (
+            "Dropship Not International Documents",
+            f"Domestic vendor invoice ({vendor_folder})",
+            routing_details,
+        )
+
+    # RULE 8: Sales Orders / Order Confirmations
+    if doc_type in ("Sales_Order", "Order_Confirmation", "Sales_Quote"):
+        if is_international or doc.get("is_international"):
+            if _is_warehouse_order(doc):
+                path = f"Warehouse International Documents/{order_number}" if order_number else "Warehouse International Documents"
+                return (path, "International warehouse sales doc", routing_details)
+            path = f"Dropship International Documents/{order_number}" if order_number else "Dropship International Documents"
+            return (path, "International sales document", routing_details)
+
+        if _is_warehouse_order(doc):
+            subfolder = _get_warehouse_subfolder(vendor_name, order_number, doc)
+            return (
+                f"Warehouse Not International Documents/{subfolder}",
+                f"Domestic warehouse sales doc → {subfolder}",
+                routing_details,
+            )
+
+        if order_number:
+            return (
+                f"Dropship Not International Documents/{order_number}",
+                "Domestic sales document with order",
+                routing_details,
+            )
+        return (
+            "Dropship Not International Documents",
+            "Domestic sales document",
+            routing_details,
+        )
+
+    # RULE 9: Miscellaneous / Unknown
+    if doc_type in ("OTHER", "Unknown", "Unknown_Document"):
+        if doc.get("approved") or doc.get("status") == "Approved":
+            return (
+                "Miscellaneous Documents/Misc Invoices - approved",
+                "Approved miscellaneous document",
+                routing_details,
+            )
+        return (
+            "Miscellaneous Documents/Misc Invoices - need approval",
+            "Miscellaneous document needing approval",
+            routing_details,
+        )
+
+    # RULE 10: DO NOT PAY
+    if doc.get("do_not_pay") or doc.get("status") == "DO_NOT_PAY":
+        year = datetime.now().year
+        return (
+            f"DO NOT PAY Documents/{year}",
+            "Document marked Do Not Pay",
+            routing_details,
+        )
+
+    # FALLBACK
     current_year = datetime.now().year
-    folder_path = f"Uncategorized/{current_year}"
-    reason = f"Default routing for {doc_type}"
-    return folder_path, reason, routing_details
+    return (
+        f"Miscellaneous Documents/Misc Invoices - need approval",
+        f"Default routing for {doc_type}",
+        routing_details,
+    )
 
 
-def _get_vendor_subfolder(vendor_name: str, for_credits: bool = False) -> str:
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+def _is_canpack_vendor(vendor_name: str) -> bool:
+    """Check if the vendor is Canpack (overrides other routing)."""
+    return "canpack" in vendor_name.lower()
+
+
+def _is_credit_memo(doc_type: str, description: str) -> bool:
+    """Check if document is a credit memo."""
+    if doc_type in ("Return_Request", "Remittance"):
+        return True
+    return any(indicator in description for indicator in CREDIT_MEMO_INDICATORS)
+
+
+def _get_credit_vendor_subfolder(vendor_name: str, description: str) -> Optional[str]:
+    """Get credit memo subfolder based on vendor."""
+    vl = vendor_name.lower()
+    dl = description.lower()
+
+    if "anchor" in vl:
+        if _is_dunnage_related(dl):
+            return "Anchor Dunnage"
+        return None
+    if "ball" in vl:
+        if _is_dunnage_related(dl):
+            return "Ball Dunnage"
+        return None
+    if "oi" in vl or "owens" in vl or "o-i" in vl:
+        if _is_dunnage_related(dl):
+            return "OI Dunnage"
+        return None
+    if "quality" in dl:
+        return "Sent to Quality"
+    return None
+
+
+def _get_vendor_subfolder(vendor_name: str) -> str:
     """Get the appropriate subfolder for a vendor."""
     vendor_lower = vendor_name.lower().strip()
-    
     for key, folder in VENDOR_FOLDER_MAPPING.items():
         if key in vendor_lower:
             return folder
-    
-    # For credits, default to a catch-all
-    if for_credits:
-        return "Other"
-    
     return "All Others"
 
 
@@ -391,28 +497,26 @@ def _get_warehouse_subfolder(vendor_name: str, order_number: str, doc: Dict) -> 
     """Determine warehouse subfolder based on order type."""
     vendor_lower = vendor_name.lower()
     file_name = (doc.get("file_name") or "").lower()
-    
-    # Check for specific warehouse operations
+    desc = (doc.get("extracted_fields", {}).get("description") or "").lower()
+
     if "ball" in vendor_lower:
         return "Ball Orders"
-    
-    if "gt" in vendor_lower or "gt's" in file_name:
+    if "gt" in vendor_lower or "gt's" in file_name or "gt's" in desc:
         return "GT's Orders"
-    
-    if "transfer" in file_name:
+    if "transfer" in file_name or "transfer" in desc:
         return "Transfer Orders"
-    
-    if "ups" in vendor_lower or "ups" in file_name:
+    if "ups" in vendor_lower or ("ups" in file_name and "ups" not in vendor_lower):
         return "UPS Orders"
-    
-    if "assembly" in file_name or "kent" in file_name:
-        return "Assembly/Assembly Kent"
-    
-    if "sort" in file_name or "stack" in file_name:
-        return "Assembly/GT's/Sort and Stack"
-    
-    # Default
-    return "General"
+    if "kent" in file_name or "kent" in desc:
+        return "Assembly Kent"
+    if "sort" in file_name or "stack" in file_name or "sort" in desc or "stack" in desc:
+        return "Sort and Stack"
+    if "assembly" in file_name or "assembly" in desc:
+        return "Assembly"
+    if "gt" in file_name or "gt" in desc:
+        return "GT's"
+
+    return "Assembly"  # Default warehouse subfolder
 
 
 def _is_freight_vendor(vendor_name: str) -> bool:
@@ -422,14 +526,26 @@ def _is_freight_vendor(vendor_name: str) -> bool:
         "freight", "trucking", "logistics", "transport", "shipping",
         "carrier", "express", "delivery", "ltl", "truckload"
     ]
-    
-    # Check against known freight carriers
     for key, folder in VENDOR_FOLDER_MAPPING.items():
         if folder == "Freight" and key in vendor_lower:
             return True
-    
-    # Check for freight keywords
     return any(kw in vendor_lower for kw in freight_keywords)
+
+
+def _is_warehouse_order(doc: Dict) -> bool:
+    """Check if document is related to a warehouse order."""
+    file_name = (doc.get("file_name") or "").lower()
+    desc = (doc.get("extracted_fields", {}).get("description") or "").lower()
+    tags = doc.get("tags", [])
+
+    warehouse_keywords = ["warehouse", "wh ", "assembly", "storage", "inventory"]
+    if any(kw in file_name for kw in warehouse_keywords):
+        return True
+    if any(kw in desc for kw in warehouse_keywords):
+        return True
+    if "warehouse" in [t.lower() for t in tags]:
+        return True
+    return False
 
 
 def _is_dunnage_related(description: str) -> bool:
@@ -450,20 +566,14 @@ def _is_storage_handling(description: str) -> bool:
 def get_all_folder_paths() -> list:
     """Get all folder paths that should exist in SharePoint."""
     paths = []
-    
     for category, config in FOLDER_STRUCTURE.items():
         base_path = config["path"]
         paths.append(base_path)
-        
         subfolders = config.get("subfolders", {})
-        
         if isinstance(subfolders, dict):
             for subfolder in subfolders.keys():
                 paths.append(f"{base_path}/{subfolder}")
-        elif isinstance(subfolders, list):
-            # Dynamic subfolders (by_year, by_order) - just create base
-            pass
-    
+        # Dynamic subfolders (by_year, by_order) - just create base
     return paths
 
 

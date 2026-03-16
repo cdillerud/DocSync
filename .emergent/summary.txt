@@ -1,44 +1,44 @@
 <analysis>**original_problem_statement:**
-The user's application, a Document Intelligence Platform, required a critical production remediation pass. The initial task was to fix misleading vendor KPIs and broken vendor matching logic. This led to a cascade of bug discoveries as the user tested the fixes against their large, real-world production dataset. The agent systematically addressed each issue, including:
-1.  An incorrect Needs Review KPI caused by a MongoDB query bug.
-2.  A dysfunctional Document Queue page with broken filters and inconsistent counts.
-3.  A core pipeline flaw where over 1,800 documents were stuck in a Captured status and not being processed.
-4.  A massive duplicate ingestion problem that inflated queues.
-5.  A Stable Vendors feature that showed garbage data due to a flawed calculation logic.
-6.  Overly strict auto-clear rules that kept hundreds of non-actionable documents in the review queue.
-7.  Documents being stuck due to the underlying files being inaccessible or missing.
+The user's Document Intelligence Platform required several enhancements and fixes to handle production data more effectively. The main goals for this session were:
+1.  Address a massive **1,244-document backlog** in the Needs Approval queue.
+2.  Improve the Stable Vendor pipeline, as only 1 out of 72 vendors was qualifying, hindering automation.
+3.  Clean up a Document Intelligence review queue containing over 300 items, many of which were junk files (images, spreadsheets, email bodies).
+4.  Add a dashboard feature to view documents ingested on a specific day.
+5.  Fix a critical misclassification where a multi-page document bundle (PO + BOL) was incorrectly identified as a .
 
 **User's preferred language**: English
 
 **what currently exists?**
-The application is a full-stack document intelligence platform (FastAPI/React) that has undergone an extensive production hardening session. The core ingestion and processing pipelines are now significantly more robust and autonomous.
+The application is a full-stack document intelligence platform (FastAPI/React). In this session, several major features and fixes were implemented to improve automation and data visibility:
 
-Key remediation work is complete:
-- The ingestion pipeline now correctly sets document statuses, preventing them from getting stuck.
-- A robust, multi-layered de-duplication system using content-hashes (sha256) is in place to prevent duplicates at the source.
-- Vendor profiles are now calculated accurately and update incrementally as new documents are processed.
-- Auto-clear logic has been refined to correctly process non-actionable documents while protecting important operational documents (e.g., Inventory Reports, Purchase Orders) for future modules.
-- A file integrity scanner has been implemented to identify and isolate documents with missing source files.
-- Through a series of purpose-built batch-fix endpoints, the Pending Review queue has been successfully reduced from **1,818 to 13 documents**.
+-   **Auto-Approval Engine:** A new UI and backend logic were created to define Stable Vendors based on configurable thresholds. This system was successfully used to clear the entire **1,244-document Needs Approval backlog**.
+-   **Junk Document Cleanup:** A new set of rules and a dedicated API endpoint were built to identify and clear non-essential files (e.g., , , low-confidence  types) from the review queue. This cleared **112 junk items**.
+-   **Daily Ingestion Dashboard:** A new card was added to the main dashboard, providing a detailed breakdown of documents ingested on any given day, complete with an hourly bar chart, source/type summaries, and a table of recent documents.
+-   **AI Classification Prompt Improvement:** The prompts used for document classification were enhanced to better handle multi-page document bundles.
+
+The application is stable, but the final task of fixing a document misclassification remains unresolved.
 
 **Last working item**:
-- **Last item agent was working:** The user requested to clear the final 13 documents remaining in the Pending Review queue, which were legacy files from the initial data backfill. The agent implemented a  parameter for the  endpoint to bypass all rules and clear these specific documents.
-- **Status:** USER VERIFICATION PENDING
-- **Agent Testing Done:** Y
-- **Which testing method agent to use?** manual testing by curl
-- **User Testing Done:** N
+-   **Last item agent was working:** The agent was attempting to fix an AI classification issue where a multi-page document bundle (containing a PO Confirmation, BOL, and Freight Bill) was being misclassified as a  instead of a . The agent tried multiple prompt engineering updates, but the re-classification on the user's production environment still yielded the incorrect type.
+-   **Status:** BLOCKED
+-   **Agent Testing Done:** Y (Agent verified the code changes, but the fix did not work on the user's production data)
+-   **Which testing method agent to use?** manual testing by curl
+-   **User Testing Done:** Y (User confirmed the issue persists after the last deployment)
 
 **All Pending/In progress Issue list**:
-- **Issue 1: Force-clear the remaining 13 documents (P0)**
-  - **Description:** The user wants to clear the last 13 legacy documents from the pending queue to achieve a clean slate before moving on to new features.
-  - **Attempted fixes:** The agent added a  query parameter to the  endpoint.
-  - **Next debug checklist:**
-    1.  Instruct the user to execute the following command on their production environment:
-        
-    2.  Ask the user to refresh the Document Queue page and confirm the Pending Review count is now 0.
-  - **Why fix this issue and what will be achieved with the fix?** This finalizes the extensive production remediation pass, bringing the pending queue to zero and allowing development to shift to new features.
-  - **Status:** USER VERIFICATION PENDING
-  - **Is recurring issue?** N
+- **Issue 1: Document Misclassification of Bundles (P0)**
+  - **Description:** A specific document (), which is a 5-page bundle, is consistently misclassified as  despite containing a Purchase Order Confirmation on the first page.
+  - **Attempted fixes:**
+    1.  Updated the system prompt in  to add a MULTI-PAGE BUNDLE HANDLING section, instructing the AI to prioritize the first page.
+    2.  Updated the user message sent to the LLM to be more specific, asking it to focus on page 1 for classification.
+  - **Next debug checklist:** The prompt engineering is not working. The next step is to investigate the data being sent to the LLM.
+    1.  View  and inspect the  function.
+    2.  Verify whether the function sends the text from only the first page or from all pages of the PDF.
+    3.  Add temporary logging within  to print the exact , , and  being sent to the Gemini API for this specific document ID. This will confirm if the prompt changes are active and reveal the exact text the AI is reasoning over.
+    4.  If the full text is being sent, the logic must be changed to send only the text of the first page to ensure the AI isn't overwhelmed by shipping content on subsequent pages.
+  - **Why fix this issue and what will be achieved with the fix?** Correctly classifying document bundles is critical for the core functionality and accuracy of the entire platform.
+  - **Status:** BLOCKED
+  - **Is recurring issue?** Y
   - **Should Test frontend/backend/both after fix?** backend
   - **Blocked on other issue:** None
 
@@ -50,26 +50,30 @@ Key remediation work is complete:
 - **P1:** Build an admin UI for managing item mapping rules.
 
 **Future Tasks:**
-- **P2:** Build a Vendor Inventory Dashboard and Sales module, utilizing the preserved inventory, sales, and purchase order documents.
-- **P2:** Build a Product/BOM (Bill of Materials) module, utilizing preserved product specification documents.
-- **P2:** Refactor monolithic files:  and .
-- **P2:** Extend the document routing engine (e.g., stable_vendor auto-approval, layout family trust scoring).
-- **P2:** Implement a production-ready email service to replace the current mock.
-- **P2:** Implement Entra ID SSO to replace the current mock JWT authentication.
+- **P2:** Build a Vendor Inventory Dashboard and Sales module.
+- **P2:** Build a Product/BOM (Bill of Materials) module.
+- **P2:** Refactor monolithic files: , , and .
+- **P2:** Implement a production-ready email service and Entra ID SSO to replace current mocks.
 - **P2:** Decommission the legacy Zetadocs system.
 
 **Completed work in this session**
-- **Production Data & Pipeline Remediation (DONE):**
-  - **KPI Fix:** Fixed a critical bug in the dashboard KPI ( key collision in MongoDB query).
-  - **Document Queue Overhaul:** Replaced static filters and counts with a dynamic, database-driven system on the  and its backend.
-  - **Stuck & Duplicate Document Fix:** Repaired the intake pipeline to set  correctly and implemented a robust content-hash-based de-duplication system. Created batch-fix endpoints (, ) that cleaned up over 1,200 historical duplicates and 1,800 stuck documents.
-  - **Stable Vendor Logic Rebuild:** Fixed garbage data by creating a full rebuild mechanism () and implementing reliable incremental updates in the intake pipeline.
-  - **Auto-Clear Engine Hardening:** Iteratively tuned auto-clear rules in  to massively increase automation for non-AP documents while adding protections for operational files (Inventory Reports, POs, SOs).
-  - **File Integrity Check:** Implemented a scanner () to find and flag 49 documents with missing source files, removing them from the active queue.
+- **Needs Approval Backlog Cleared (DONE):**
+  - Built a Stable Vendors UI with configurable thresholds and diagnostics ().
+  - Created backend APIs for vendor diagnostics and auto-approval (, ).
+  - Successfully used the new tools to process and clear the **1,244-document** Needs Approval queue.
+- **Junk Document Queue Cleanup (DONE):**
+  - Implemented rules to identify junk files (low-confidence types, non-doc extensions, email bodies) in .
+  - Created a robust  endpoint that correctly queries the  collection.
+  - Successfully cleared **112 junk items** from the Document Intelligence review queue.
+- **Daily Ingestion Dashboard Card (DONE):**
+  - Added a  endpoint to .
+  - Created a new  React component and integrated it into , showing daily stats, an hourly chart, and recent documents.
+- **Initial Queue Remediation (DONE):**
+  - Fixed a broken  file and added a  endpoint to clear the last 13 legacy documents from the previous session.
 
 **Earlier issues found/mentioned but not fixed**
 - **Issue 1: Monolithic Codebase (P2)**
-    - **Debug checklist:** Examine ,  and  for refactoring opportunities.
+    - **Debug checklist:** Examine , , and  for refactoring opportunities.
     - **Why to solve this issue and what will be achieved with this?** To improve maintainability, testability, and developer velocity.
     - **Should Test frontend/backend/both after fix:** both
     - **Is recurring issue?** Y
@@ -81,61 +85,66 @@ Key remediation work is complete:
 
 
 **Key Technical Concepts**
-- **Production Debugging:** The session was a masterclass in diagnosing and fixing bugs that only surface on large, real-world datasets, primarily by creating  endpoints with rich diagnostic output.
-- **Batch Data Remediation:** A pattern of creating single-purpose API endpoints was used to systematically fix different classes of historical data bugs (, , , etc.).
-- **Content-Hash Deduplication:** A  hash of file content was implemented as the definitive source of truth for preventing duplicate document ingestion.
-- **Configuration-Driven Logic:** The  in  became the central place to tune the system's automation behavior without changing core code.
+- **Iterative Production Debugging:** The agent and user worked in a tight loop, with the user running  commands and python scripts directly on the production server to debug data-specific issues that did not appear in the preview environment.
+- **Configuration-Driven Automation:** Created a UI and backend for managing Stable Vendor thresholds, allowing the user to tune automation logic in real-time without needing a new deployment.
+- **Targeted Data Remediation:** Used purpose-built API endpoints (, ) and direct database scripts to systematically clear large backlogs of historical data.
+- **Prompt Engineering:** Attempted to fix a document classification error by iteratively refining the system and user prompts sent to the LLM, although this approach has so far been unsuccessful.
 
 **key DB schema**
-- **:** No schema change, but the usage and integrity of several fields were corrected and standardized:
-    -  is now used to flag and hide duplicates.
-    -  and  fields were reconciled to provide consistent state tracking (e.g., , ).
+- No schema changes were made.
+- **Critical learning:** The application uses two distinct primary collections that power different UIs.  is the main document store, while  is a separate collection for the Document Intelligence page. Queries must target the correct collection to match the UI the user is viewing.
 
 **changes in tech stack**
 - None.
 
 **All files of reference**
-- ****: Heavily modified to integrate de-duplication, correct status updates, and incremental vendor profile updates into the main intake pipeline.
-- ****: The  API was rewritten for dynamic filtering and accurate counts.
-- ****: The  was iteratively updated to tune automation.
-- ****: Refactored to use dynamic data from the backend instead of hardcoded values.
-- **New Remediation Routers**: , , , .
+- ****: New router for handling the auto-approval of validated documents.
+- ****: Modified to add logic for clearing junk documents from the intelligence queue.
+- ****: Modified to add the  endpoint.
+- ****: Modified to add diagnostic and configuration endpoints.
+- ****: Updated with new rules for identifying and clearing junk documents.
+- ****: Modified with updated LLM prompts for document classification.
+- ****: Overhauled to include a management UI for stability thresholds and the auto-approval engine.
+- ****: Modified to include the new  component.
 
 **Areas that need refactoring**:
--  is a monolith containing the entire intake pipeline and is a prime candidate for being broken down into smaller, dedicated services.
--  &  are known large files that need refactoring.
+-  contains the entire intake pipeline and should be broken into smaller services.
+-  &  are large, monolithic files that need to be refactored.
 
 **key api endpoints**
-- ****: Re-evaluates documents against auto-clear rules. Now has a  parameter.
-- ****: Scans for and marks duplicate documents.
-- ****: Rebuilds all vendor profiles from document data.
-- ****: Batch fixes documents stuck in 'captured' status.
-- ****: Scans for and flags documents with missing files.
-- ****: Powers the Document Queue with dynamic filters and counts.
+- ****: Executes the auto-approval of documents.
+- ****: Provides a summary of the Needs Approval queue.
+- ****: Clears junk files from the  queue.
+- ****: Previews the junk clearing operation.
+- ****: Retrieves stats for documents ingested on a specific date.
+- ****: Updates the configuration for stable vendor thresholds.
+- ****: Re-processes a document, forcing re-classification with the latest prompt.
 
 **Critical Info for New Agent**
-- This entire session was a successful, but intensive, production remediation pass. The application is now in a much more stable and autonomous state.
-- **Your immediate priority is to guide the user to run the final cleanup command to clear the last 13 documents from their queue.** After they confirm, you can move on to new features.
-- The user has expressed clear interest in building out a sales module and vendor inventory dashboard. This should be a high-priority topic for your initial planning discussion.
-- The user also prioritized an admin UI for managing item mapping rules. You should clarify with the user which of these P1 tasks they'd like to tackle first.
+- Your immediate priority is to resolve the **blocked document misclassification issue**. The previous agent's prompt engineering attempts failed. You must now investigate the code to see what text content is *actually* being sent to the LLM, as this is the most likely cause of the failure.
+- The user is technically proficient and comfortable running  commands and scripts directly on their production server. This is the primary debugging loop.
+- Be aware of the two different MongoDB collections ( and ) and ensure your queries and fixes target the correct one based on the context of the user's request.
+- When providing commands for the user, be mindful of their environment (e.g., the MongoDB connection string is  and scripts may need to be run inside the Docker container via ).
 
 **documents and test reports created in this job**
--  was updated.
+- 
+- 
+- 
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **User**:  - Pointing out a misclassified Sales Order with a broken preview, leading to the file integrity check. (Addressed)
-2.  **User**:  - Highlighting the inability to verify document content due to a broken preview. (Addressed)
-3.  **User**:  - Approving the plan to create a file integrity scanner. (Implemented)
-4.  **User**: *Runs file integrity scan and clears 49 docs.* (Completed)
-5.  **User**: *Sees the final queue of 13 documents.* (Acknowledged)
-6.  **User**:  - Requesting to force-clear the remaining documents to finish the cleanup. (Actionable)
-7.  **User**:  - Requesting a feature to protect specific document types from being auto-cleared. (Implemented)
-8.  **User**:  - Confirming that Purchase Orders are also protected from auto-clear for future use. (Confirmed)
-9.  **User**: *Runs the final auto-clear and confirms the remaining 70 docs are legitimate AP Invoices.* (Completed)
-10. **User**:  - Asking for confirmation that the bundling feature was not broken by the recent fixes. (Confirmed)
+1.  **User:** Showed a document detail page for a multi-page bundle ().
+2.  **User:** Stated their belief that the document was a PO, not a  as classified by the AI.
+3.  **Agent:** Analyzed the PDF, agreed with the user, and proposed fixing the AI prompt.
+4.  **User:** Agreed to fix the prompt ().
+5.  **Agent:** Implemented prompt changes and provided a command to re-process and re-classify.
+6.  **User:** Ran the command, which showed the classification was still incorrect.
+7.  **Agent:** Theorized the user hadn't deployed yet and that the  endpoint wasn't re-classifying. Provided a corrected command with .
+8.  **User:** Ran the corrected command; the classification was still .
+9.  **Agent:** Implemented a more targeted prompt and provided deployment/re-classification instructions.
+10. **User:** Deployed the changes and ran the re-classification command, which still failed to produce the correct  type. The agent was about to investigate the code further when the session ended.
 
 **Project Health Check:**
-- **Broken:** No. The application is stable. The critical production bugs that plagued this session have been resolved.
+- **Broken:** No. The application is stable and has significantly improved automation.
 - **Mocked:** Email service (Microsoft Graph), Business Central (BC) API write operations, JWT Auth (Entra ID).
 
 **3rd Party Integrations**
@@ -146,7 +155,7 @@ Key remediation work is complete:
 - **rapidfuzz:** Used for fuzzy string matching.
 
 **Testing status**
-- **Testing agent used after significant changes:** NO. The agent primarily used an iterative  cycle with  against the user's production environment, which proved highly effective for this type of data-dependent bug fixing.
+- **Testing agent used after significant changes:** YES. The  was used successfully to validate the Stable Vendor and Auto-Approval features, passing 100% of tests.
 - **Troubleshoot agent used after agent stuck in loop:** NO
 - **Test files created:** No new automated test files were created.
 - **Known regressions:** None.
@@ -155,4 +164,8 @@ Key remediation work is complete:
 - **Web UI:**  / 
 
 **What agent forgot to execute**
-The agent initially made several assumptions that the production data structure would match the preview environment's data. This led to an iterative debugging cycle where fixes failed on production. The agent adapted by building rich diagnostics into the  endpoints to first observe the production reality before implementing the correct, robust fix.</analysis>
+- The agent repeatedly made incorrect assumptions about the user's production environment versus the preview environment, leading to multiple failed attempts and debugging cycles. Key mistakes included:
+    - Assuming an API endpoint should query  when the user's UI was powered by .
+    - Assuming the user's MongoDB was accessible via  when it required a Docker container hostname ().
+    - Assuming the  endpoint would automatically re-classify a document without the specific  parameter.
+    - Wasting cycles on prompt engineering without first verifying what text content the classification function was actually sending to the LLM.</analysis>

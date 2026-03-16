@@ -416,6 +416,22 @@ export default function DocumentDetailPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
+              {(doc.sharepoint_folder_suggested || doc.sharepoint_folder) && (
+                <div data-testid="doc-sp-folder">
+                  <p className="text-xs text-muted-foreground mb-1">Suggested Folder</p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {(doc.sharepoint_folder || doc.sharepoint_folder_suggested || '').split('/').map((part, i, arr) => (
+                      <span key={i} className="flex items-center gap-1">
+                        <Badge variant={i === arr.length - 1 ? 'default' : 'outline'} className="text-[10px]">{part}</Badge>
+                        {i < arr.length - 1 && <span className="text-muted-foreground text-xs">/</span>}
+                      </span>
+                    ))}
+                  </div>
+                  {doc.sharepoint_folder_reason && (
+                    <p className="text-[11px] text-muted-foreground mt-1">{doc.sharepoint_folder_reason}</p>
+                  )}
+                </div>
+              )}
               <InfoRow label="Drive ID" value={doc.sharepoint_drive_id ? doc.sharepoint_drive_id.slice(0, 16) + '...' : '-'} mono />
               <InfoRow label="Item ID" value={doc.sharepoint_item_id ? doc.sharepoint_item_id.slice(0, 12) + '...' : '-'} mono />
               {doc.sharepoint_share_link_url && (

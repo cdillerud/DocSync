@@ -382,6 +382,7 @@ IMPORTANT CONTEXT:
 - Our company is "Gamer Packaging, Inc." (also known as "Gamer Packaging" or "GPI")
 - Documents come from BOTH our Accounts Payable inbox AND Sales mailboxes
 - You must classify documents into the correct category: AP (accounts payable) or Sales
+- Classified documents are automatically routed to SharePoint folders based on type, vendor, and order
 
 MULTI-PAGE BUNDLE HANDLING:
 - PDFs often contain MULTIPLE related documents bundled together (e.g., a PO Confirmation + Bill of Lading + Freight Bill)
@@ -403,6 +404,7 @@ AP_Invoice: Vendor invoices we RECEIVE
 - Extract: vendor name (the sender), invoice_number, invoice_date, amount, po_number (if present), due_date
 - CRITICAL: Always extract invoice_date (the date on the invoice itself)
 - CRITICAL: Extract ALL line items with description, quantity, unit_price, and total
+- ROUTING NOTE: Also extract is_international (true/false), is_tooling (true if tooling/mold/die charges), is_storage_handling (true if S&H/storage/handling charges), is_credit_memo (true if credit memo/credit note/refund/adjustment), is_dunnage (true if dunnage/pallet/return freight related)
 
 AR_Invoice: Invoices we send to customers (outgoing)
 - Our company name appears as the sender
@@ -446,9 +448,9 @@ Quality_Issue: Quality complaints or issues
 - Extract: customer, item, description
 - Look for "Quality", "Defect", "Complaint", "NCR", "Claim"
 
-Return_Request: Return requests / RMAs
+Return_Request: Return requests / RMAs / Credit Memos
 - Extract: customer, amount, reason
-- Look for "Return", "RMA", "Credit", "Refund"
+- Look for "Return", "RMA", "Credit", "Refund", "Credit Memo", "Adjustment"
 
 Unknown_Document: Cannot determine type confidently
 
@@ -480,6 +482,12 @@ Always respond with valid JSON in this exact format:
         "warehouse": "...",
         "items": "...",
         "ship_to": "...",
+        "is_international": false,
+        "is_tooling": false,
+        "is_storage_handling": false,
+        "is_credit_memo": false,
+        "is_dunnage": false,
+        "freight_direction": "inbound|outbound|unknown",
         "line_items": [
             {
                 "description": "Item/service description",
@@ -495,6 +503,14 @@ Always respond with valid JSON in this exact format:
 IMPORTANT: For invoices (AP_Invoice, AR_Invoice), you MUST extract:
 - invoice_date: The date the invoice was issued (NOT due_date)
 - line_items: ALL line items showing what was purchased/charged
+
+ROUTING FIELDS (always include when detectable):
+- is_international: true if the shipment/order involves international origins or destinations
+- is_tooling: true if the document is for tooling, mold, die, or fixture charges
+- is_storage_handling: true if the document is for storage and handling (S&H) charges
+- is_credit_memo: true if the document is a credit memo, credit note, refund, or adjustment
+- is_dunnage: true if the document involves dunnage, pallets, or return freight
+- freight_direction: "inbound" for incoming shipments, "outbound" for outgoing, "unknown" if unclear
 
 For freight/transportation invoices, line items may include:
 - Weight, distance, rate, charges

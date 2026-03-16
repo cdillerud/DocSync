@@ -40,7 +40,8 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
     Use Gemini to analyze a document and extract structured data.
     Returns classification and extracted fields.
 
-    Extracted from server.py — same prompt, same return format.
+    For multi-page PDFs, extracts only the first page to avoid
+    classification confusion from supporting documents on later pages.
     """
     if not EMERGENT_LLM_KEY:
         return {
@@ -69,27 +70,58 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
         }
         mime_type = mime_map.get(ext, "text/plain")
 
+        # For multi-page PDFs, extract just page 1 to avoid misclassification
+        actual_file_path = file_path
+        temp_pdf_path = None
+        page_count = 1
+        if ext == "pdf":
+            try:
+                actual_file_path, temp_pdf_path, page_count = _extract_first_page_pdf(file_path)
+                if page_count > 1:
+                    logger.info(
+                        "Multi-page PDF (%d pages): sending only page 1 for classification: %s",
+                        page_count, file_name,
+                    )
+            except Exception as e:
+                logger.warning("Failed to extract first page from %s: %s — sending full PDF", file_name, e)
+                actual_file_path = file_path
+
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=f"classify-{uuid.uuid4()}",
             system_message=_CLASSIFY_SYSTEM_PROMPT,
         ).with_model("gemini", "gemini-3-flash-preview")
 
-        file_content = FileContentWithMimeType(file_path=file_path, mime_type=mime_type)
+        file_content = FileContentWithMimeType(file_path=actual_file_path, mime_type=mime_type)
+
+        bundle_note = ""
+        if page_count > 1:
+            bundle_note = (
+                f" NOTE: This is page 1 of a {page_count}-page document bundle. "
+                "Classify based on THIS page only (the primary/lead document). "
+                "Later pages contain supporting documents like BOLs or freight bills."
+            )
+
         user_message = UserMessage(
             text=(
                 "Please analyze this business document. "
-                "IMPORTANT: If this PDF has multiple pages, focus on the FIRST PAGE to determine the document type. "
-                "Subsequent pages often contain supporting documents (BOLs, freight bills, packing slips) that should NOT change "
-                "the classification of the primary/lead document on page 1. "
-                "For example, if page 1 is a PO Confirmation or Warehouse Receipt and later pages are Bills of Lading, "
-                "classify as Sales_Order, not Shipping_Document. "
-                "Classify the document and extract all relevant fields. Respond with JSON only."
+                "Classify the document and extract all relevant fields. "
+                "Also extract routing fields: is_international, is_tooling, is_storage_handling, "
+                "is_credit_memo, is_dunnage, freight_direction."
+                + bundle_note
+                + " Respond with JSON only."
             ),
             file_contents=[file_content],
         )
 
         response = await chat.send_message(user_message)
+
+        # Clean up temp file
+        if temp_pdf_path:
+            try:
+                os.remove(temp_pdf_path)
+            except Exception:
+                pass
 
         response_text = response.strip()
         if response_text.startswith("```"):
@@ -110,9 +142,10 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
 
         extracted = result.get("extracted_fields", {})
         logger.info(
-            "AI Classification result - doc_type: %s, confidence: %s",
+            "AI Classification result - doc_type: %s, confidence: %s, pages: %d",
             result.get("document_type"),
             result.get("confidence"),
+            page_count,
         )
         logger.info("AI extracted invoice_date: %s", extracted.get("invoice_date"))
 
@@ -122,10 +155,18 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
             "extracted_fields": result.get("extracted_fields", {}),
             "reasoning": result.get("reasoning", ""),
             "model": "gemini-3-flash-preview",
+            "page_count": page_count,
+            "classified_from_page": 1 if page_count > 1 else None,
         }
 
     except Exception as e:
         logger.error("AI classification failed: %s", str(e))
+        # Clean up temp file on error
+        if 'temp_pdf_path' in dir() and temp_pdf_path:
+            try:
+                os.remove(temp_pdf_path)
+            except Exception:
+                pass
         return {
             "error": str(e),
             "suggested_job_type": "Unknown",
@@ -133,6 +174,37 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
             "extracted_fields": {},
             "reasoning": f"Classification failed: {str(e)}",
         }
+
+
+def _extract_first_page_pdf(file_path: str):
+    """
+    Extract the first page of a PDF into a temporary file.
+
+    Returns:
+        (actual_path, temp_path, page_count):
+        - actual_path: path to use for classification (temp or original if single page)
+        - temp_path: path to temp file (None if single page)
+        - page_count: total pages in original PDF
+    """
+    import tempfile
+    from pypdf import PdfReader, PdfWriter
+
+    reader = PdfReader(file_path)
+    page_count = len(reader.pages)
+
+    if page_count <= 1:
+        return file_path, None, page_count
+
+    # Extract first page to temp file
+    writer = PdfWriter()
+    writer.add_page(reader.pages[0])
+
+    temp_fd, temp_path = tempfile.mkstemp(suffix=".pdf")
+    os.close(temp_fd)
+    with open(temp_path, "wb") as f:
+        writer.write(f)
+
+    return temp_path, temp_path, page_count
 
 
 # ---------------------------------------------------------------------------

@@ -1,77 +1,110 @@
-# GPI Document Hub — PRD
+# GPI Document Hub - Product Requirements Document
 
 ## Original Problem Statement
-Build a document intelligence platform for GPI (Gamer Packaging Inc.) that automates document processing, vendor matching, and AP/AR workflows with connections to Microsoft Dynamics 365 Business Central and SharePoint.
+Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that automates document classification, routing, approval workflows, and integration with Business Central and SharePoint.
 
-## Core Architecture
-- **Backend**: FastAPI (Python 3.11) on port 8001
-- **Frontend**: React with Shadcn/UI on port 3000
-- **Database**: MongoDB
+## Core Requirements
+1. Document ingestion from email (Microsoft Graph API) and manual upload
+2. AI-powered document classification using Gemini
+3. Automated approval workflows
+4. SharePoint folder routing based on document type, vendor, and order
+5. Business Central integration for vendor matching
+6. Dashboard and analytics for operational visibility
+
+## Architecture
+- **Backend**: FastAPI (Python) with MongoDB
+- **Frontend**: React with Shadcn/UI components
 - **AI**: Gemini via Emergent LLM Key
-- **External APIs**: Dynamics 365 Business Central (read-only live, writes mocked), Microsoft Graph (mocked), SharePoint
+- **External APIs**: Microsoft Graph (mocked), Business Central (read-only), SharePoint (move in demo mode)
 
-## Key Integrations
-- **Dynamics 365 Business Central**: Live read access for vendors, customers, items, purchase orders, sales orders
-- **Microsoft Graph API**: Mocked — email ingestion from mailboxes
-- **SharePoint**: Document storage and linking
-- **Gemini LLM**: Document classification and data extraction
-- **rapidfuzz**: Fuzzy string matching for vendor resolution
+## What's Been Implemented
 
-## User Personas
-- **AP Clerk**: Reviews and processes purchase invoices
-- **AR Clerk**: Reviews and processes sales orders/invoices
-- **Admin**: Configures system settings, manages item mappings, monitors health
+### Phase 1 - Core Platform (Complete)
+- Document ingestion pipeline
+- AI classification with Gemini
+- MongoDB storage (hub_documents, document_intelligence_results)
+- Dashboard with stats and charts
+- Document detail pages with full metadata
+- Business Central integration (read-only)
+- Vendor intelligence and matching
 
-## Authentication
-- Mock JWT auth (admin/admin). Entra ID SSO planned for production.
+### Phase 2 - Automation (Complete)
+- Stable Vendor engine with configurable thresholds
+- Auto-approval of validated documents (cleared 1,244 backlog)
+- Junk document cleanup (cleared 112 items)
+- Daily ingestion dashboard card
 
-## Document Processing Pipeline
-1. Ingestion (email, upload, file import)
-2. AI Classification & Extraction
-3. Reference Intelligence (BC lookup)
-4. Vendor Intelligence (resolution, aliases, fuzzy matching)
-5. Freight G/L Routing
-6. AP Validation
-7. Document Routing (auto-clear gate)
-8. Document Readiness Engine
-9. AR Release Gate
-10. Derived State Update
-11. Queue Routing
+### Phase 3 - SharePoint Folder Routing (Complete - Feb 2026)
+- **Folder Tree Management**: Full SharePoint folder structure from "Temp Folder Structure 9.15.25.docx" with 37 rules, 15 top-level folders
+- **Vendor Mappings**: 31 vendor-to-folder mappings (Ball, Canpack, OI, Anchor, freight carriers)
+- **Processor Assignments**: 6 processor assignments (Andy, Ellie, Meg, Rhonda, Aaron)
+- **Test Routing Tool**: Interactive UI to test document routing with any combination of parameters
+- **AI Classification Enhancement**: Updated prompt to extract routing fields (is_international, is_tooling, is_storage_handling, is_credit_memo, is_dunnage, freight_direction)
+- **Document-Level Folder Suggestion**: Auto-computed on document processing, displayed in document detail
+- **SharePoint File Move**: API endpoint to move/copy documents to SharePoint folders (demo mode)
+- **Batch Operations**: Batch suggest and batch move endpoints
 
-## Key DB Collections
-- `hub_documents` — Main document store with all processing results
-- `vendor_aliases` — Learned vendor name variations
-- `vendor_resolution_rejections` — Negative feedback for fuzzy matching
-- `hub_config` — System configuration
+### P0 Fix - Multi-Page PDF Classification (Feb 2026)
+- Fixed root cause: entire multi-page PDF was sent to Gemini, overwhelming the model with shipping content from later pages
+- Solution: Extract first page only for classification of multi-page PDFs
+- Uses pypdf to extract page 1 to temp file, sends only that to Gemini
+- Adds page_count and classified_from_page to classification result
 
-## Completed Features
-See CHANGELOG.md for full history.
+## Key Folder Routing Rules
+1. All Canpack → Dropship Not International / Canpack
+2. Dunnage return freight → Canpack / Dunnage return freight
+3. Freight issues → Freight Issues
+4. Credit memos → Vendor Credit Memos / by vendor (Anchor/Ball/OI Dunnage)
+5. Tooling → Tooling Invoices
+6. S&H approved → S&H Invoices Approved Documents / by processor
+7. S&H waiting → S&H Invoices waiting for approval Documents
+8. International → Dropship/Warehouse International Documents
+9. Domestic → Dropship/Warehouse Not International Documents
+10. Unknown → Miscellaneous Documents
 
-### Latest (March 16, 2026)
-- Pipeline autonomy overhaul: Pending Review 1818 → 13 (99.3% reduction)
-- Vendor KPI `$or` key collision fix
-- Workflow status fix — docs no longer stuck in "captured", batch fix endpoint
-- Content-hash dedup — 1261 duplicates removed, future prevention in intake
-- Stable Vendor profiles rebuilt from real document data (96 → 71 profiles), incremental updates
-- Auto-clear overhaul — non-AP docs auto-clear, backfill/age rules, protected inventory/sales/PO docs
-- File integrity scanner — 49 missing-file docs flagged as "FileMissing"
-- Document Queue: dynamic filters, correct counts
-- **Dashboard Readiness Summary Card** — Shows document readiness status distribution with counts, confidence scores, top blockers and warnings
-- **Config Service Extraction** — Centralized config_service.py module, decoupling settings.py/vendor_matching.py/mailbox_sources.py from server.py
-- **AR Release Gate (Prepay & Terms Approval)** — Evaluates sales documents for customer resolution, prepay holds, credit limits, payment terms, and ship-to validation. Includes manual override workflow.
-- **Stable Vendor Pipeline Boost** — Lowered thresholds (50→10 docs, 90%→50% automation, 85%→5% validation), added diagnostic endpoint, suggested thresholds, auto-apply
-- **Auto-Approve Engine** — New batch auto-approve for validated docs from stable vendors. Includes diagnose, dry-run, run, and force modes
-- **Stable Vendor Admin UI** — Config panel for threshold editing, vendor diagnostics panel, auto-approve controls, suggested threshold application
-- **Junk Document Auto-Clear** — New clear-junk endpoint that clears Unknown_Sales, Unknown, non-document files (.mp4/.mp3/.png/.xlsx) while preserving Sales Orders, POs, and operational docs. Cleared 112 junk docs on production.
-- **Daily Ingestion Dashboard** — New card on dashboard showing documents ingested per day with date picker, hourly activity chart, source/type breakdown, top senders, and recent documents table
+## Database Collections
+- `hub_documents` - Main document store
+- `document_intelligence_results` - AI processing results
+- `sharepoint_folder_rules` - Folder structure (auto-seeded)
+- `sharepoint_vendor_mappings` - Vendor-to-folder mappings (auto-seeded)
+- `sharepoint_processor_assignments` - Who processes what folders (auto-seeded)
 
-## Tech Stack
-- FastAPI, Motor (async MongoDB), Pydantic
-- React 18, Shadcn/UI, Tailwind CSS, Lucide icons
-- rapidfuzz, APScheduler, httpx
-- emergentintegrations (Gemini LLM)
+## API Endpoints - SharePoint Routing
+- `GET /api/sharepoint-routing/folder-tree` - Full folder tree
+- `GET /api/sharepoint-routing/folder-rules` - All rules
+- `POST /api/sharepoint-routing/folder-rules` - Create rule
+- `PUT /api/sharepoint-routing/folder-rules/{key}` - Update rule
+- `DELETE /api/sharepoint-routing/folder-rules/{key}` - Delete rule
+- `GET /api/sharepoint-routing/vendor-mappings` - All vendor mappings
+- `POST /api/sharepoint-routing/vendor-mappings` - Create mapping
+- `DELETE /api/sharepoint-routing/vendor-mappings/{pattern}` - Delete mapping
+- `GET /api/sharepoint-routing/processor-assignments` - All processor assignments
+- `POST /api/sharepoint-routing/processor-assignments` - Create assignment
+- `DELETE /api/sharepoint-routing/processor-assignments` - Delete assignment
+- `POST /api/sharepoint-routing/suggest-folder` - Suggest folder for criteria
+- `GET /api/sharepoint-routing/document/{id}/suggested-folder` - Get suggested folder for doc
+- `POST /api/sharepoint-routing/document/{id}/assign-folder` - Manually assign folder
+- `POST /api/sharepoint-routing/document/{id}/move-to-sharepoint` - Move doc to SP
+- `POST /api/sharepoint-routing/batch-move` - Batch move
+- `POST /api/sharepoint-routing/batch-suggest` - Batch suggest
+- `POST /api/sharepoint-routing/seed-defaults` - Re-seed defaults
 
 ## Mocked Services
-- Email ingestion (Microsoft Graph)
-- BC write operations
+- Microsoft Graph API (email ingestion)
+- Business Central write operations
 - JWT Authentication (Entra ID)
+- SharePoint file move (demo mode)
+
+## P0/P1/P2 Backlog
+### P1 - Upcoming
+- Admin UI for managing item mapping rules
+
+### P2 - Future
+- Vendor Inventory Dashboard and Sales module
+- Product/BOM (Bill of Materials) module
+- Refactor monolithic files (server.py, inventory_ledger)
+- Production email service and Entra ID SSO
+- Decommission legacy Zetadocs system
+
+## Credentials
+- Web UI: admin / admin

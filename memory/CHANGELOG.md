@@ -1,6 +1,49 @@
 # GPI Document Hub - Changelog
 
 
+## March 16, 2026 — Vendor Matching Remediation (KPI Accuracy + Matching Correctness)
+
+### 1. Fixed Dashboard Vendor KPI
+- **Old**: Used all 79 documents as denominator, checked `vendor_canonical` existence = misleading "Vendor Match Rate"
+- **New**: Uses vendor-applicable filter (58 AP/invoice-style docs) as denominator
+- New accurate metrics: `vendor_applicable_total`, `vendor_auto_resolved_total`, `vendor_auto_resolve_rate`, `vendor_final_resolved_total`, `vendor_final_resolved_rate`, `vendor_needs_review_total`, `vendor_by_method`
+- Renamed dashboard label from "Vendor Match Rate" → "Vendor Auto-Resolve"
+- Removed misleading `vendor_resolution_rate` and `auto_resolved_docs` from alias_metrics
+
+### 2. Fixed Cached BC Exact Match
+- **Old**: Used `$or` with `name_normalized` AND regex against raw `displayName`
+- **New**: Matches only on `name_normalized` field
+- Added `backfill_bc_vendor_normalized()` utility — runs at startup, ensures all cached BC vendor records have normalized names
+- Added index on `name_normalized` for fast exact match
+
+### 3. Fixed Fuzzy Scoring
+- **Old**: Used ad-hoc `rapidfuzz.fuzz.token_sort_ratio` directly
+- **New**: Uses shared `calculate_fuzzy_score` from `vendor_name_helpers.py` which handles BC code prefix stripping, partial_ratio, and multi-strategy scoring
+
+### 4. Clean Fuzzy Auto-Match vs Candidate Semantics
+- **Old**: `fuzzy_match` method used for ALL fuzzy results regardless of score; 0.50+ returned as matched
+- **New**: `fuzzy_match` ONLY for scores >= 0.90 (true auto-resolve), `fuzzy_candidate` for 0.60-0.89 (needs review), `no_match` for <0.60
+- Updated `vendor_resolution_service.py` to correctly handle `fuzzy_candidate` as `needs_review` status
+- Rejection guardrails preserved — previously rejected pairings always become `fuzzy_candidate` with `needs_review`
+
+### 5. Aligned Vendor Metrics Across App
+- Dashboard, vendor-resolution metrics, and alias metrics all use consistent vendor-applicable denominator
+- `vendor_resolution_service.get_resolution_metrics()` now includes `vendor_applicable_total` and wider fuzzy score buckets (60-79, 80-89)
+
+### 6. Tests
+- Created `tests/test_vendor_remediation.py` — 22 tests covering all remediation items
+- All 202 existing tests pass (zero regressions)
+- Test report: iteration_121.json
+
+### Files Changed
+- `backend/services/vendor_matching.py` — exact match, fuzzy scoring, fuzzy_candidate semantics, backfill utility
+- `backend/services/vendor_resolution_service.py` — fuzzy_candidate handling, vendor-applicable denominator in metrics
+- `backend/routers/dashboard.py` — accurate vendor KPI with applicable filter, removed misleading metrics
+- `backend/main.py` — startup backfill hook
+- `frontend/src/pages/DashboardPage.js` — new vendor KPI display, renamed labels, method breakdown
+
+
+
 ## March 16, 2026 — Automation Intelligence (Confidence, Explainability, Reviewer Assist, Metrics)
 
 ### Feature 1: Automation Confidence Scoring

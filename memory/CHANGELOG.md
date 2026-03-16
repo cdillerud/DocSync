@@ -316,3 +316,14 @@
 - Added `vendor_resolution_rate` to `/api/aliases/metrics` and workflow-intelligence dashboard
 - Updated VendorIntelligenceCard to show vendor resolution rate
 - 25 unit tests for normalization + rapidfuzz + 9 API tests, all passing (55 total)
+
+## March 16, 2026 — Vendor Resolution Observability + Negative Feedback Loop (iter_116)
+
+- Created `services/vendor_resolution_service.py`: resolution object builder, rejection capture, guardrails, analytics
+- Created `routers/vendor_resolution.py`: GET /api/vendor-resolution/metrics and /api/vendor-resolution/rejections
+- Per-document `vendor_resolution` object: status (resolved/unresolved/ambiguous/needs_review), method, raw, normalized, score, reason, reviewed_override
+- Negative feedback: captures rejected auto-matches in `vendor_match_rejections` collection when reviewer overrides fuzzy/exact match
+- Safe auto-match guardrails: checks rejection history before accepting fuzzy matches, downgrades to needs_review if previously rejected
+- Resolution analytics: rates, method breakdown, fuzzy score buckets (90-94/95-97/98-100), top 25 unresolved/corrected vendor strings
+- Hooked into `set_vendor_for_document` for rejection capture + resolution override tracking
+- 71 tests (14 unit + 25 normalization + 21 alias + 11 API), all passing

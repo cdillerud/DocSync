@@ -15,6 +15,7 @@
 - ~~Autonomous Document Routing (Auto-Clear Gate)~~ (2026-03-16, iter_113) — 6-rule routing engine, pipeline stage 9, dashboard UI, 38 tests
 - ~~Vendor Alias Learning System~~ (2026-03-16, iter_114) — Auto-learns aliases from approvals, safety rules, dashboard metrics, 34 tests
 - ~~Vendor Resolution Pipeline Improvements~~ (2026-03-16, iter_115) — rapidfuzz fuzzy matching, BC bootstrap, standardized match methods, 55 tests
+- ~~Vendor Resolution Observability + Negative Feedback Loop~~ (2026-03-16, iter_116) — per-doc resolution objects, rejection memory, guardrails, analytics, 71 tests
 
 ### P1 — Next Up
 - **Complete Orchestration Logic Extraction from server.py** — Business orchestration logic still in server.py, paused for routing feature

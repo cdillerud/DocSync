@@ -48,14 +48,14 @@ Build a document intelligence platform for GPI (Gamer Packaging Inc.) that autom
 See CHANGELOG.md for full history.
 
 ### Latest (March 16, 2026)
+- Pipeline autonomy overhaul: Pending Review 1818 → 13 (99.3% reduction)
 - Vendor KPI `$or` key collision fix
 - Workflow status fix — docs no longer stuck in "captured", batch fix endpoint
 - Content-hash dedup — 1261 duplicates removed, future prevention in intake
-- Stable Vendor profiles rebuilt from real document data (96 → 71 profiles)
-- Incremental vendor profile updates on every doc intake
-- Auto-clear overhaul — non-AP docs auto-clear, backfill/age rules, protected inventory/sales docs
+- Stable Vendor profiles rebuilt from real document data (96 → 71 profiles), incremental updates
+- Auto-clear overhaul — non-AP docs auto-clear, backfill/age rules, protected inventory/sales/PO docs
+- File integrity scanner — 49 missing-file docs flagged as "FileMissing"
 - Document Queue: dynamic filters, correct counts
-- **Production result: Pending Review 1818 → 62 (97% reduction)**
 - **Dashboard Readiness Summary Card** — Shows document readiness status distribution with counts, confidence scores, top blockers and warnings
 - **Config Service Extraction** — Centralized config_service.py module, decoupling settings.py/vendor_matching.py/mailbox_sources.py from server.py
 - **AR Release Gate (Prepay & Terms Approval)** — Evaluates sales documents for customer resolution, prepay holds, credit limits, payment terms, and ship-to validation. Includes manual override workflow.

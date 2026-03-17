@@ -185,6 +185,15 @@ async def startup():
     except Exception as e:
         logger.warning("Vendor normalized backfill failed: %s", e)
 
+    # Initialize classification feedback service
+    try:
+        from services.classification_feedback_service import init_classification_feedback
+        from deps import get_db
+        init_classification_feedback(get_db())
+        logger.info("Classification feedback service initialized")
+    except Exception as e:
+        logger.warning("Classification feedback init failed: %s", e)
+
     logger.info("main.py startup complete")
 
 

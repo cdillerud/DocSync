@@ -229,6 +229,14 @@ async def list_documents(
     }
 
 
+
+@router.get("/classification-accuracy")
+async def get_classification_accuracy():
+    """Get classification accuracy metrics — confusion matrix, worst types, vendor patterns."""
+    from services.classification_feedback_service import get_accuracy_metrics
+    return await get_accuracy_metrics()
+
+
 @router.get("/{doc_id}")
 async def get_document(doc_id: str, include_events: bool = Query(True)):
     from services.event_service import get_event_service
@@ -392,13 +400,57 @@ async def refresh_document_state(doc_id: str):
 @router.put("/{doc_id}")
 async def update_document(doc_id: str, update: DocumentUpdate):
     db = get_db()
+    
+    # Fetch current doc to detect classification changes
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}
     update_data["updated_utc"] = datetime.now(timezone.utc).isoformat()
-    result = await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Document not found")
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-    return doc
+    
+    # Classification change? Record the correction for AI learning
+    if update.document_type is not None:
+        original_type = doc.get("document_type") or doc.get("suggested_job_type") or ""
+        if update.document_type != original_type:
+            update_data["suggested_job_type"] = update.document_type
+            update_data["document_type_source"] = "manual"
+            update_data["classification_override"] = {
+                "original_type": original_type,
+                "corrected_type": update.document_type,
+                "corrected_at": datetime.now(timezone.utc).isoformat(),
+            }
+            try:
+                from services.classification_feedback_service import record_correction
+                text_snippet = ""
+                raw_text = doc.get("raw_text") or doc.get("extracted_text") or ""
+                if not raw_text:
+                    ef = doc.get("extracted_fields") or {}
+                    parts = [str(v) for v in ef.values() if v and not isinstance(v, (list, dict))]
+                    raw_text = " | ".join(parts)
+                text_snippet = raw_text[:500]
+                
+                await record_correction(
+                    doc_id=doc_id,
+                    original_type=original_type,
+                    corrected_type=update.document_type,
+                    corrected_by="user",
+                    doc_context={
+                        "file_name": doc.get("file_name", ""),
+                        "vendor_raw": doc.get("vendor_raw", ""),
+                        "vendor_canonical": doc.get("vendor_canonical", ""),
+                        "text_snippet": text_snippet,
+                        "classification_method": doc.get("classification_method", ""),
+                        "classification_confidence": doc.get("classification_confidence", 0),
+                    },
+                )
+                logger.info("Classification correction recorded: %s → %s for doc %s", original_type, update.document_type, doc_id)
+            except Exception as e:
+                logger.warning("Failed to record classification correction: %s", e)
+    
+    await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
+    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    return updated_doc
 
 
 @router.delete("/{doc_id}")

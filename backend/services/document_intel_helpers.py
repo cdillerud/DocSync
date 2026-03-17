@@ -224,10 +224,29 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
                 logger.warning("Failed to extract first page from %s: %s — sending full PDF", file_name, e)
                 actual_file_path = file_path
 
+        # Build dynamic prompt with learned examples
+        dynamic_prompt = _CLASSIFY_SYSTEM_PROMPT
+        try:
+            from services.classification_feedback_service import (
+                build_few_shot_prompt_section,
+                build_vendor_hints_prompt_section,
+            )
+            few_shot_section = await build_few_shot_prompt_section()
+            if few_shot_section:
+                dynamic_prompt = dynamic_prompt + "\n" + few_shot_section
+                logger.info("Injected few-shot examples into classification prompt")
+            
+            # If we can detect the vendor from filename, add vendor hint
+            vendor_hint = await build_vendor_hints_prompt_section(file_name)
+            if vendor_hint:
+                dynamic_prompt = dynamic_prompt + "\n" + vendor_hint
+        except Exception as e:
+            logger.debug("Few-shot injection skipped: %s", e)
+
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=f"classify-{uuid.uuid4()}",
-            system_message=_CLASSIFY_SYSTEM_PROMPT,
+            system_message=dynamic_prompt,
         ).with_model("gemini", "gemini-3-flash-preview")
 
         file_content = FileContentWithMimeType(file_path=actual_file_path, mime_type=mime_type)

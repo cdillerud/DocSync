@@ -76,9 +76,17 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - **Fix**: Short-circuit in `evaluate_readiness()` — terminal docs return "Ready Auto Link" at 100%. Document detail endpoint re-evaluates stale readiness on the fly.
 - **Files changed**: `backend/services/document_readiness_service.py`, `backend/routers/documents.py`
 
-### Extracted Data Card Restored (Mar 2026)
-- Previous agent removed the extracted data display card during UI cleanup
-- Restored in `frontend/src/pages/DocumentDetailPage.js` — shows all extracted fields + line items
+### Classification Learning Loop (Mar 2026)
+- **Feature**: AI classification now improves from user corrections
+- **How it works**:
+  1. User corrects a document type → correction stored with doc context (filename, vendor, text snippet)
+  2. Next classification: few-shot examples from corrections injected into Gemini prompt
+  3. Vendor-type patterns tracked: if 70%+ of vendor's docs are one type, hint given to AI
+  4. Accuracy metrics API: confusion matrix, worst types, vendor patterns
+- **New document type**: `Warehouse_Receipt` (was previously lumped into Sales_Order)
+- **Collections**: `classification_corrections`, `vendor_type_patterns`
+- **Files**: `backend/services/classification_feedback_service.py` (new), `backend/services/document_intel_helpers.py` (updated prompt + few-shot injection), `backend/routers/documents.py` (accuracy endpoint), `backend/routers/ap_review.py` (correction recording)
+- **API**: `GET /api/documents/classification-accuracy`
 
 ### Auto PI Creation Pipeline (Mar 2026)
 - **Feature**: When an AP_Invoice document passes auto-clear, the system automatically creates a Purchase Invoice in BC sandbox with line items and GPI document link

@@ -42,6 +42,8 @@ class APReviewData(BaseModel):
     po_number: Optional[str] = None
     line_items: Optional[List[dict]] = None
     notes: Optional[str] = None
+    document_type: Optional[str] = None
+    bc_document_no: Optional[str] = None
 
 
 class PostToBCRequest(BaseModel):
@@ -236,6 +238,56 @@ async def save_ap_review(doc_id: str, data: APReviewData):
         update_data["line_items"] = data.line_items
     if data.notes is not None:
         update_data["ap_review_notes"] = data.notes
+    if data.bc_document_no is not None:
+        update_data["bc_document_no"] = data.bc_document_no
+    
+    # Handle document_type change — record correction for learning
+    if data.document_type is not None:
+        original_type = doc.get("document_type") or doc.get("suggested_job_type") or ""
+        if data.document_type != original_type:
+            update_data["document_type"] = data.document_type
+            update_data["suggested_job_type"] = data.document_type
+            update_data["document_type_source"] = "manual"
+            update_data["classification_override"] = {
+                "original_type": original_type,
+                "corrected_type": data.document_type,
+                "corrected_at": datetime.now(timezone.utc).isoformat(),
+            }
+            
+            # Record correction for AI learning loop
+            try:
+                from services.classification_feedback_service import record_correction
+                # Extract first 500 chars of text for few-shot example
+                text_snippet = ""
+                try:
+                    raw_text = doc.get("raw_text") or doc.get("extracted_text") or ""
+                    if not raw_text:
+                        ef = doc.get("extracted_fields") or {}
+                        parts = [str(v) for v in ef.values() if v and not isinstance(v, (list, dict))]
+                        raw_text = " | ".join(parts)
+                    text_snippet = raw_text[:500]
+                except Exception:
+                    pass
+                
+                await record_correction(
+                    doc_id=doc_id,
+                    original_type=original_type,
+                    corrected_type=data.document_type,
+                    corrected_by="user",
+                    doc_context={
+                        "file_name": doc.get("file_name", ""),
+                        "vendor_raw": doc.get("vendor_raw", ""),
+                        "vendor_canonical": doc.get("vendor_canonical", ""),
+                        "text_snippet": text_snippet,
+                        "classification_method": doc.get("classification_method", ""),
+                        "classification_confidence": doc.get("classification_confidence", 0),
+                    },
+                )
+                logger.info("Classification correction recorded: %s → %s for doc %s", original_type, data.document_type, doc_id)
+            except Exception as e:
+                logger.warning("Failed to record classification correction: %s", e)
+        else:
+            update_data["document_type"] = data.document_type
     
     # Update document
     await db.hub_documents.update_one(

@@ -36,6 +36,7 @@ from services.gpi_integration_service import (
     add_purchase_invoice_lines,
     delete_purchase_invoice_lines,
     attach_document_to_bc_record,
+    create_gpi_document_link,
     create_customer,
     create_vendor,
     list_integration_logs,
@@ -1293,53 +1294,26 @@ async def create_purchase_invoice_from_document(
                 logger.error("Failed to add lines to PI %s from doc %s: %s", result.get("bc_record_no"), doc_id, str(e))
                 line_results = {"added": 0, "total": len(line_items), "errors": [{"error": str(e)}]}
 
-    # Step 3: Link document to BC (attach file to Purchase Invoice in BC)
+    # Step 3: Create GPI Document Link in BC (populates the GPI Documents factbox)
     link_result = None
     if result.get("success") and result.get("bc_system_id"):
         try:
-            from pathlib import Path
-            import server as srv
-            upload_dir = Path(os.environ.get("UPLOAD_DIR", "/app/backend/uploads"))
-            file_path = upload_dir / doc_id
-            file_content = None
-
-            # Try loading from disk first
-            if file_path.exists():
-                file_content = file_path.read_bytes()
-                logger.info("PI %s: loaded file from disk for BC link", result.get("bc_record_no", ""))
-            # Fallback: download from SharePoint if drive_id and item_id available
-            elif doc.get("sharepoint_drive_id") and doc.get("sharepoint_item_id"):
-                try:
-                    import httpx as _httpx
-                    sp_token = await srv.get_graph_token()
-                    sp_drive = doc["sharepoint_drive_id"]
-                    sp_item = doc["sharepoint_item_id"]
-                    dl_url = f"https://graph.microsoft.com/v1.0/drives/{sp_drive}/items/{sp_item}/content"
-                    async with _httpx.AsyncClient(timeout=30.0, follow_redirects=True) as sp_client:
-                        sp_resp = await sp_client.get(dl_url, headers={"Authorization": f"Bearer {sp_token}"})
-                        if sp_resp.status_code == 200:
-                            file_content = sp_resp.content
-                            logger.info("PI %s: downloaded file from SharePoint for BC link (%d bytes)", result.get("bc_record_no", ""), len(file_content))
-                        else:
-                            logger.warning("PI %s: SharePoint download failed HTTP %d", result.get("bc_record_no", ""), sp_resp.status_code)
-                except Exception as sp_err:
-                    logger.warning("PI %s: SharePoint download error: %s", result.get("bc_record_no", ""), str(sp_err))
-
-            if file_content:
-                link_result = await attach_document_to_bc_record(
-                    bc_record_id=result["bc_system_id"],
-                    file_name=doc.get("file_name", "document"),
-                    file_content=file_content,
-                    bc_entity="purchaseInvoices",
-                )
-                if link_result.get("success"):
-                    logger.info("PI %s: document linked to BC successfully", result.get("bc_record_no", ""))
-                else:
-                    logger.warning("PI %s: failed to link document to BC: %s", result.get("bc_record_no", ""), link_result.get("error", ""))
+            link_result = await create_gpi_document_link(
+                bc_system_id=result["bc_system_id"],
+                bc_document_no=result.get("bc_record_no", ""),
+                document_type="Purchase Invoice",
+                sharepoint_url=doc.get("sharepoint_share_link_url", ""),
+                sharepoint_drive_id=doc.get("sharepoint_drive_id", ""),
+                sharepoint_item_id=doc.get("sharepoint_item_id", ""),
+                uploaded_by="GPI Hub",
+                source="GPIHub",
+            )
+            if link_result.get("success"):
+                logger.info("PI %s: GPI Document Link created successfully", result.get("bc_record_no", ""))
             else:
-                logger.warning("PI %s: no file content available (not on disk, no SharePoint refs), skipping BC document link", result.get("bc_record_no", ""))
+                logger.warning("PI %s: failed to create GPI Document Link: %s", result.get("bc_record_no", ""), link_result.get("error", ""))
         except Exception as link_err:
-            logger.warning("PI %s: exception linking document to BC: %s", result.get("bc_record_no", ""), str(link_err))
+            logger.warning("PI %s: exception creating GPI Document Link: %s", result.get("bc_record_no", ""), str(link_err))
 
     # Graph writeback
     now = datetime.now(timezone.utc).isoformat()

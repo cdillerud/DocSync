@@ -322,6 +322,59 @@ async def attach_document_to_bc_record(
     return {"success": True, "method": "api", "attachment_id": attachment_id}
 
 
+async def create_gpi_document_link(
+    bc_system_id: str,
+    bc_document_no: str,
+    document_type: str,
+    sharepoint_url: str = "",
+    sharepoint_drive_id: str = "",
+    sharepoint_item_id: str = "",
+    uploaded_by: str = "GPI Hub",
+    source: str = "GPIHub",
+) -> Dict[str, Any]:
+    """Create a GPI Document Link record in BC via the gpi/documents/v1.0 API.
+    This populates the GPI Documents factbox on the Purchase Invoice page.
+    """
+    _check_write_protection("create_gpi_document_link")
+    if not HAS_CREDENTIALS:
+        raise ValueError("BC credentials not configured")
+
+    token = await _get_token()
+    company_id = await _get_company_id_standard_api()
+    doc_link_api = "gpi/documents/v1.0"
+    url = f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/{doc_link_api}/companies({company_id})/documentLinks"
+
+    payload = {
+        "documentType": document_type,
+        "targetSystemId": bc_system_id,
+        "bcDocumentNo": bc_document_no,
+        "sharePointUrl": sharepoint_url,
+        "sharePointDriveId": sharepoint_drive_id,
+        "sharePointItemId": sharepoint_item_id,
+        "uploadedBy": uploaded_by,
+        "source": source,
+    }
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            url,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json=payload,
+        )
+        if resp.status_code in (200, 201):
+            data = resp.json()
+            logger.info("Created GPI Document Link for %s %s", document_type, bc_document_no)
+            return {"success": True, "entry_no": data.get("entryNo"), "id": data.get("id")}
+        else:
+            error_msg = resp.text[:300]
+            try:
+                error_msg = resp.json().get("error", {}).get("message", error_msg)
+            except Exception:
+                pass
+            logger.warning("Failed to create GPI Document Link (HTTP %d): %s", resp.status_code, error_msg)
+            return {"success": False, "error": f"HTTP {resp.status_code}: {error_msg}"}
+
+
 # Fallback defaults for purchase invoice lines
 BC_PI_FALLBACK_GL_ACCOUNT = os.environ.get('BC_PI_FALLBACK_GL_ACCOUNT', '60500')
 BC_PI_FALLBACK_ITEM_CODE = os.environ.get('BC_PI_FALLBACK_ITEM_CODE', os.environ.get('BC_DEFAULT_ITEM_CODE', ''))

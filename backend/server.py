@@ -979,6 +979,21 @@ async def run_upload_and_link_workflow(doc_id: str, file_content: bytes, file_na
             "last_error": bc_error
         }})
 
+        # Record positive classification confirmation when linked to BC
+        if bc_linked:
+            try:
+                from services.classification_feedback_service import record_confirmation, _build_doc_context
+                doc_fresh = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+                if doc_fresh:
+                    await record_confirmation(
+                        doc_id=doc_id,
+                        confirmed_type=doc_fresh.get("document_type") or doc_fresh.get("suggested_job_type") or "",
+                        confirmation_source="posted_to_bc",
+                        doc_context=_build_doc_context(doc_fresh),
+                    )
+            except Exception:
+                pass
+
         workflow = {
             "id": workflow_id, "document_id": doc_id, "workflow_name": "upload_and_link",
             "started_utc": started, "ended_utc": datetime.now(timezone.utc).isoformat(),
@@ -2587,6 +2602,17 @@ async def on_document_ingested(doc_id: str, source: str = "unknown"):
                         )
                         logger.info("[Workflow:%s] Auto-filed doc %s to '%s' (pattern count: %d)",
                                     run_id, doc_id, folder_path, filing_match["count"])
+                        # Record positive classification confirmation
+                        try:
+                            from services.classification_feedback_service import record_confirmation, _build_doc_context
+                            await record_confirmation(
+                                doc_id=doc_id,
+                                confirmed_type=doc_type_for_filing,
+                                confirmation_source="auto_clear",
+                                doc_context=_build_doc_context(doc),
+                            )
+                        except Exception:
+                            pass
             except Exception as af_err:
                 logger.warning("[Workflow:%s] Auto-file check failed for %s: %s", run_id, doc_id, str(af_err))
         
@@ -3746,6 +3772,20 @@ async def _internal_intake_document(
             if auto_clear_decision == AutoClearDecision.CLEARED:
                 final_status = "Completed"  # Override final status
                 logger.info("[Auto-Clear] Document %s AUTO-CLEARED: %s", doc_id, auto_clear_reason)
+                
+                # Record positive classification confirmation
+                try:
+                    from services.classification_feedback_service import record_confirmation, _build_doc_context
+                    doc_type_confirmed = (doc_for_eval.get("document_type") or 
+                                          doc_for_eval.get("suggested_job_type") or "")
+                    await record_confirmation(
+                        doc_id=doc_id,
+                        confirmed_type=doc_type_confirmed,
+                        confirmation_source="auto_clear",
+                        doc_context=_build_doc_context(doc_for_eval),
+                    )
+                except Exception as cf_err:
+                    logger.debug("[Auto-Clear] Classification confirmation failed for %s: %s", doc_id, cf_err)
                 
                 # AUTO-CREATE PURCHASE INVOICE in BC sandbox for AP_Invoice docs
                 try:

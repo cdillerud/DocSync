@@ -605,9 +605,21 @@ async def file_and_clear_document(doc_id: str):
     }
     await db.hub_documents.update_one({"id": doc_id}, {"$set": clear_update})
 
-    # Step 4: Record for AI learning
+    # Step 4: Record for AI filing learning
     doc_type = doc.get("document_type") or doc.get("suggested_job_type") or "Unknown"
     vendor = doc.get("vendor_canonical") or doc.get("normalized_fields", {}).get("vendor") or ""
+
+    # Step 4b: Record positive classification confirmation (user accepted the type)
+    try:
+        from services.classification_feedback_service import record_confirmation, _build_doc_context
+        await record_confirmation(
+            doc_id=doc_id,
+            confirmed_type=doc_type,
+            confirmation_source="file_and_clear",
+            doc_context=_build_doc_context(doc),
+        )
+    except Exception as e:
+        logger.warning("Failed to record classification confirmation on file-and-clear: %s", e)
     await db.filing_actions.update_one(
         {"document_type": doc_type, "vendor_lower": vendor.lower(), "folder_path": folder_path},
         {"$inc": {"count": 1}, "$set": {
@@ -675,7 +687,7 @@ async def bulk_file_and_clear(doc_ids: list = None):
             }
             await db.hub_documents.update_one({"id": doc_id}, {"$set": clear_update})
 
-            # Record for AI learning
+            # Record for AI filing learning
             doc_type = doc.get("document_type") or doc.get("suggested_job_type") or "Unknown"
             vendor = doc.get("vendor_canonical") or doc.get("normalized_fields", {}).get("vendor") or ""
             await db.filing_actions.update_one(
@@ -686,6 +698,18 @@ async def bulk_file_and_clear(doc_ids: list = None):
                 }},
                 upsert=True,
             )
+
+            # Record positive classification confirmation
+            try:
+                from services.classification_feedback_service import record_confirmation, _build_doc_context
+                await record_confirmation(
+                    doc_id=doc_id,
+                    confirmed_type=doc_type,
+                    confirmation_source="bulk_file_and_clear",
+                    doc_context=_build_doc_context(doc),
+                )
+            except Exception:
+                pass
 
             results["success"].append({"doc_id": doc_id, "folder_path": folder_path})
         except Exception as e:

@@ -73,6 +73,102 @@ async def record_correction(
     return {"success": True, "original": original_type, "corrected": corrected_type}
 
 
+
+async def record_confirmation(
+    doc_id: str,
+    confirmed_type: str,
+    confirmation_source: str,
+    doc_context: Optional[Dict] = None,
+) -> Dict:
+    """Record an implicit positive confirmation that the AI classification was correct.
+
+    Called when a document completes its lifecycle without the user changing its type:
+      - auto_clear: system auto-cleared the doc (high confidence)
+      - file_and_clear: user filed to SharePoint without changing type
+      - bulk_file_and_clear: same, bulk operation
+      - completed: doc reached Completed status without correction
+      - posted_to_bc: doc was posted to Business Central
+
+    Unlike record_correction, this does NOT require a type change.
+    It reinforces that the current type is correct.
+    """
+    if _db is None:
+        return {"success": False, "reason": "db_not_initialized"}
+
+    if not confirmed_type or confirmed_type in ("Unknown", "Unknown_Document", "", None):
+        return {"success": True, "skipped": True, "reason": "unknown_type"}
+
+    # Skip if we already have an entry for this doc (idempotent)
+    existing = await _db.classification_corrections.find_one({"doc_id": doc_id}, {"_id": 1})
+    if existing:
+        return {"success": True, "skipped": True, "reason": "already_recorded"}
+
+    doc_context = doc_context or {}
+
+    # Confidence weight based on source
+    confidence_map = {
+        "auto_clear": 0.90,
+        "file_and_clear": 0.95,
+        "bulk_file_and_clear": 0.90,
+        "completed": 0.85,
+        "posted_to_bc": 0.95,
+    }
+
+    record = {
+        "doc_id": doc_id,
+        "original_type": confirmed_type,
+        "corrected_type": confirmed_type,
+        "corrected_by": f"confirmed_{confirmation_source}",
+        "corrected_at": datetime.now(timezone.utc).isoformat(),
+        "file_name": doc_context.get("file_name", ""),
+        "vendor_raw": doc_context.get("vendor_raw", ""),
+        "vendor_canonical": doc_context.get("vendor_canonical", ""),
+        "text_snippet": doc_context.get("text_snippet", "")[:500],
+        "classification_method": doc_context.get("classification_method", ""),
+        "classification_confidence": confidence_map.get(confirmation_source, 0.80),
+        "is_positive_confirmation": True,
+    }
+
+    await _db.classification_corrections.insert_one(record)
+
+    # Update vendor→type pattern
+    vendor = doc_context.get("vendor_canonical") or doc_context.get("vendor_raw") or ""
+    if vendor:
+        await _db.vendor_type_patterns.update_one(
+            {"vendor": vendor.upper().strip()},
+            {
+                "$inc": {f"type_counts.{confirmed_type}": 1, "total_corrections": 1},
+                "$set": {"last_updated": datetime.now(timezone.utc).isoformat()},
+                "$setOnInsert": {"vendor": vendor.upper().strip(), "created_at": datetime.now(timezone.utc).isoformat()},
+            },
+            upsert=True,
+        )
+
+    logger.info(
+        "Classification confirmed: doc=%s, type=%s (source=%s, vendor=%s)",
+        doc_id, confirmed_type, confirmation_source, vendor,
+    )
+    return {"success": True, "confirmed_type": confirmed_type, "source": confirmation_source}
+
+
+
+def _build_doc_context(doc: Dict) -> Dict:
+    """Build doc_context dict from a hub_documents record."""
+    raw_text = doc.get("raw_text") or doc.get("extracted_text") or ""
+    if not raw_text:
+        ef = doc.get("extracted_fields") or {}
+        parts = [str(v) for v in ef.values() if v and not isinstance(v, (list, dict))]
+        raw_text = " | ".join(parts)
+    return {
+        "file_name": doc.get("file_name", ""),
+        "vendor_raw": doc.get("vendor_raw", ""),
+        "vendor_canonical": doc.get("vendor_canonical", ""),
+        "text_snippet": raw_text[:500],
+        "classification_method": doc.get("classification_method", ""),
+        "classification_confidence": doc.get("classification_confidence") or doc.get("ai_confidence") or 0,
+    }
+
+
 async def get_few_shot_examples(limit_per_type: int = 2) -> List[Dict]:
     """Get recent corrections grouped by corrected_type for few-shot prompting.
     

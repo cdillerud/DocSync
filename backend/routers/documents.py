@@ -764,9 +764,13 @@ async def sweep_reclassify_bols(dry_run: bool = False, limit: int = 1000):
             ef = doc.get("extracted_fields") or {}
             nf = doc.get("normalized_fields") or {}
             all_fields = {**nf, **ef}
+
+            # Exclude docs with strong invoice indicators
+            has_invoice_fields = bool(all_fields.get("invoice_number") or all_fields.get("amount"))
+
             bol_indicators = 0
             if all_fields.get("bol_number"):
-                bol_indicators += 2
+                bol_indicators += 3  # Strongest signal
             if all_fields.get("pro_number"):
                 bol_indicators += 1
             if all_fields.get("carrier"):
@@ -779,10 +783,14 @@ async def sweep_reclassify_bols(dry_run: bool = False, limit: int = 1000):
                 bol_indicators += 1
             if all_fields.get("weight"):
                 bol_indicators += 1
-            # Need bol_number or 3+ other shipping indicators
-            if all_fields.get("bol_number") or bol_indicators >= 4:
+
+            # Must have bol_number, OR 5+ indicators without invoice fields
+            if all_fields.get("bol_number"):
                 is_bol = True
-                match_reason = f"fields({bol_indicators} indicators)"
+                match_reason = f"bol_number+fields({bol_indicators})"
+            elif bol_indicators >= 5 and not has_invoice_fields:
+                is_bol = True
+                match_reason = f"fields({bol_indicators}, no invoice fields)"
 
         if is_bol:
             reclassified.append({

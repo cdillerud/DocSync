@@ -63,6 +63,82 @@ SALES_ORDER_ELIGIBLE_TYPES = {"Sales_Order", "SalesOrder", "Order_Confirmation",
 # Document types eligible for BC Purchase Invoice creation
 PURCHASE_INVOICE_ELIGIBLE_TYPES = {"AP_Invoice"}
 
+# Default freight item code for PI lines
+BC_PI_FREIGHT_ITEM = os.environ.get("BC_PI_FREIGHT_ITEM", os.environ.get("BC_DEFAULT_ITEM_CODE", "FREIGHT"))
+
+
+def _resolve_po_reference(doc: dict) -> str:
+    """Extract the PO/BOL reference number from a document for use in BC PI line description.
+    
+    Priority: po_number_clean > po_number > bol_number > reference fields
+    Returns the reference string, or empty string if none found.
+    """
+    ef = doc.get("extracted_fields") or {}
+    nf = doc.get("normalized_fields") or {}
+    
+    # Check normalized PO number first (cleanest)
+    ref = doc.get("po_number_clean") or ""
+    if ref:
+        return ref
+    
+    # Raw PO number from extracted fields
+    ref = ef.get("po_number") or nf.get("po_number") or doc.get("po_number") or ""
+    if ref:
+        return str(ref).strip()
+    
+    # BOL number (common on freight invoices)
+    ref = doc.get("bol_number") or ef.get("bol_number") or ""
+    if ref:
+        return str(ref).strip()
+    
+    # Reference field
+    ref = ef.get("reference_number") or ef.get("reference") or ""
+    if ref:
+        return str(ref).strip()
+    
+    return ""
+
+
+def _build_freight_pi_lines(doc: dict) -> list:
+    """Build the BC Purchase Invoice line items for a freight/AP invoice.
+    
+    Creates a single FREIGHT item line with:
+    - Type: Item
+    - No.: FREIGHT (from BC_PI_FREIGHT_ITEM)
+    - Description: PO/BOL reference number
+    - Qty: 1
+    - Unit Cost: invoice total amount
+    """
+    ef = doc.get("extracted_fields") or {}
+    nf = doc.get("normalized_fields") or {}
+    
+    # Resolve PO/BOL reference for the description field
+    po_ref = _resolve_po_reference(doc)
+    
+    # Get the total amount
+    total_amount = 0
+    for field in ["amount", "invoice_amount", "total_amount", "balance_due"]:
+        val = nf.get(field) or ef.get(field)
+        if val:
+            # Clean currency strings like "$4,300.00"
+            cleaned = str(val).replace("$", "").replace(",", "").strip()
+            try:
+                total_amount = float(cleaned)
+                break
+            except (ValueError, TypeError):
+                continue
+    
+    if total_amount <= 0:
+        return []
+    
+    return [{
+        "lineType": "Item",
+        "lineObjectNumber": BC_PI_FREIGHT_ITEM,
+        "description": po_ref,
+        "quantity": 1,
+        "unitCost": total_amount,
+    }]
+
 
 # =========================================================================
 # Request/Response Models
@@ -1019,40 +1095,43 @@ async def auto_create_pi_from_document(doc_id: str, db) -> dict:
             logger.error("[AutoPI] Failed to create PI for doc %s: %s", doc_id, result.get("error_message", ""))
             return {"success": False, "reason": "bc_api_error", "error": result.get("error_message", "")}
 
-        # Step 2: Add line items
+        # Step 2: Add line items — use freight line builder (FREIGHT item + PO/BOL ref as description)
         line_results = None
         if result.get("bc_system_id"):
-            line_items = ef.get("line_items") or nf.get("line_items") or []
-            if not line_items:
-                total_amount = float(nf.get("amount", 0) or ef.get("amount", 0) or 0)
-                if total_amount > 0:
-                    inv_no = vendor_invoice_no or ""
-                    desc = f"Per invoice {inv_no}" if inv_no else f"Invoice from {vendor_info.get('vendor_name', '')}"
-                    line_items = [{"description": desc[:100], "quantity": 1, "unit_price": total_amount}]
+            bc_lines = _build_freight_pi_lines(doc)
+            
+            # Fallback to extracted line items if freight builder didn't produce lines
+            if not bc_lines:
+                line_items = ef.get("line_items") or nf.get("line_items") or []
+                if not line_items:
+                    total_amount = float(nf.get("amount", 0) or ef.get("amount", 0) or 0)
+                    if total_amount > 0:
+                        inv_no = vendor_invoice_no or ""
+                        desc = f"Per invoice {inv_no}" if inv_no else f"Invoice from {vendor_info.get('vendor_name', '')}"
+                        line_items = [{"description": desc[:100], "quantity": 1, "unit_price": total_amount}]
+                for li in line_items:
+                    bc_line = {
+                        "description": li.get("description", ""),
+                        "quantity": float(li.get("quantity", 1) or 1),
+                        "unitCost": float(li.get("unit_price", 0) or li.get("unitCost", 0) or 0),
+                    }
+                    if li.get("item_number") or li.get("lineObjectNumber"):
+                        bc_line["lineObjectNumber"] = li.get("item_number") or li["lineObjectNumber"]
+                        bc_line["lineType"] = "Item"
+                    elif li.get("gl_account") or li.get("account_number"):
+                        bc_line["lineObjectNumber"] = li.get("gl_account") or li["account_number"]
+                        bc_line["lineType"] = "Account"
+                    bc_lines.append(bc_line)
 
-            if line_items:
+            if bc_lines:
                 try:
-                    bc_lines = []
-                    for li in line_items:
-                        bc_line = {
-                            "description": li.get("description", ""),
-                            "quantity": float(li.get("quantity", 1) or 1),
-                            "unitCost": float(li.get("unit_price", 0) or li.get("unitCost", 0) or 0),
-                        }
-                        if li.get("item_number") or li.get("lineObjectNumber"):
-                            bc_line["lineObjectNumber"] = li.get("item_number") or li["lineObjectNumber"]
-                            bc_line["lineType"] = "Item"
-                        elif li.get("gl_account") or li.get("account_number"):
-                            bc_line["lineObjectNumber"] = li.get("gl_account") or li["account_number"]
-                            bc_line["lineType"] = "Account"
-                        bc_lines.append(bc_line)
                     line_results = await add_purchase_invoice_lines(
                         invoice_system_id=result["bc_system_id"],
                         lines=bc_lines,
                     )
                 except Exception as e:
                     logger.error("[AutoPI] Failed to add lines for doc %s: %s", doc_id, str(e))
-                    line_results = {"added": 0, "total": len(line_items), "errors": [{"error": str(e)}]}
+                    line_results = {"added": 0, "total": len(bc_lines), "errors": [{"error": str(e)}]}
 
         # Step 3: Create GPI Document Link
         link_result = None
@@ -1278,37 +1357,39 @@ async def retry_purchase_invoice_lines(doc_id: str):
         logger.warning("PI %s: failed to delete existing lines: %s", bc_record_no, str(e))
         delete_result["errors"].append({"error": f"Delete failed: {str(e)}"})
 
-    # Step 2: Build new lines
-    ef = doc.get("extracted_fields") or {}
-    nf = doc.get("normalized_fields") or {}
-    line_items = ef.get("line_items") or nf.get("line_items") or []
+    # Step 2: Build new lines — use freight line builder first
+    bc_lines = _build_freight_pi_lines(doc)
+    
+    # Fallback to extracted line items if freight builder didn't produce lines
+    if not bc_lines:
+        ef = doc.get("extracted_fields") or {}
+        nf = doc.get("normalized_fields") or {}
+        line_items = ef.get("line_items") or nf.get("line_items") or []
 
-    # Fallback: if no line_items extracted, create a single line from total amount
-    if not line_items:
-        total_amount = float(nf.get("amount", 0) or ef.get("amount", 0) or 0)
-        if total_amount > 0:
-            vendor_name = nf.get("vendor") or ef.get("vendor") or ""
-            inv_no = ef.get("invoice_number") or nf.get("invoice_number") or ""
-            desc = f"Per invoice {inv_no}" if inv_no else f"Invoice from {vendor_name}"
-            line_items = [{"description": desc[:100], "quantity": 1, "unit_price": total_amount}]
+        if not line_items:
+            total_amount = float(nf.get("amount", 0) or ef.get("amount", 0) or 0)
+            if total_amount > 0:
+                vendor_name = nf.get("vendor") or ef.get("vendor") or ""
+                inv_no = ef.get("invoice_number") or nf.get("invoice_number") or ""
+                desc = f"Per invoice {inv_no}" if inv_no else f"Invoice from {vendor_name}"
+                line_items = [{"description": desc[:100], "quantity": 1, "unit_price": total_amount}]
 
-    if not line_items:
+        for li in line_items:
+            bc_line = {
+                "description": li.get("description", ""),
+                "quantity": float(li.get("quantity", 1) or 1),
+                "unitCost": float(li.get("unit_price", 0) or li.get("unitCost", 0) or 0),
+            }
+            if li.get("item_number") or li.get("lineObjectNumber"):
+                bc_line["lineObjectNumber"] = li.get("item_number") or li["lineObjectNumber"]
+                bc_line["lineType"] = "Item"
+            elif li.get("gl_account") or li.get("account_number"):
+                bc_line["lineObjectNumber"] = li.get("gl_account") or li["account_number"]
+                bc_line["lineType"] = "Account"
+            bc_lines.append(bc_line)
+
+    if not bc_lines:
         raise HTTPException(status_code=422, detail="No line items found and no total amount to create a fallback line. Re-process the document first.")
-
-    bc_lines = []
-    for li in line_items:
-        bc_line = {
-            "description": li.get("description", ""),
-            "quantity": float(li.get("quantity", 1) or 1),
-            "unitCost": float(li.get("unit_price", 0) or li.get("unitCost", 0) or 0),
-        }
-        if li.get("item_number") or li.get("lineObjectNumber"):
-            bc_line["lineObjectNumber"] = li.get("item_number") or li["lineObjectNumber"]
-            bc_line["lineType"] = "Item"
-        elif li.get("gl_account") or li.get("account_number"):
-            bc_line["lineObjectNumber"] = li.get("gl_account") or li["account_number"]
-            bc_line["lineType"] = "Account"
-        bc_lines.append(bc_line)
 
     # Step 3: Add new correct lines
     try:
@@ -1429,19 +1510,13 @@ async def create_purchase_invoice_from_document(
     # Step 2: Add line items if the header was created and we have lines
     line_results = None
     if result.get("success") and result.get("bc_system_id"):
-        line_items = ef.get("line_items") or nf.get("line_items") or []
-
-        # Fallback: if no line_items extracted, create a single line from total amount
-        if not line_items:
-            total_amount = float(nf.get("amount", 0) or ef.get("amount", 0) or 0)
-            if total_amount > 0:
-                vendor_name = nf.get("vendor") or ef.get("vendor") or ""
-                inv_no = vendor_invoice_no or ""
-                desc = f"Per invoice {inv_no}" if inv_no else f"Invoice from {vendor_name}"
-                line_items = [{"description": desc[:100], "quantity": 1, "unit_price": total_amount}]
-
-        if line_items:
-            try:
+        # Build freight PI lines: Type=Item, No.=FREIGHT, Description=PO/BOL reference
+        bc_lines = _build_freight_pi_lines(doc)
+        
+        # If freight line builder didn't produce lines, try extracted line items
+        if not bc_lines:
+            line_items = ef.get("line_items") or nf.get("line_items") or []
+            if line_items:
                 bc_lines = []
                 for li in line_items:
                     bc_line = {
@@ -1449,7 +1524,6 @@ async def create_purchase_invoice_from_document(
                         "quantity": float(li.get("quantity", 1) or 1),
                         "unitCost": float(li.get("unit_price", 0) or li.get("unitCost", 0) or 0),
                     }
-                    # If line has an item number, use it
                     if li.get("item_number") or li.get("lineObjectNumber"):
                         bc_line["lineObjectNumber"] = li.get("item_number") or li["lineObjectNumber"]
                         bc_line["lineType"] = "Item"
@@ -1458,14 +1532,18 @@ async def create_purchase_invoice_from_document(
                         bc_line["lineType"] = "Account"
                     bc_lines.append(bc_line)
 
+        if bc_lines:
+            try:
                 line_results = await add_purchase_invoice_lines(
                     invoice_system_id=result["bc_system_id"],
                     lines=bc_lines,
                 )
-                logger.info("PI %s: added %d/%d lines", result["bc_record_no"], line_results["added"], line_results["total"])
+                logger.info("PI %s: added %d/%d lines (po_ref=%s)", result["bc_record_no"], 
+                           line_results["added"], line_results["total"],
+                           bc_lines[0].get("description", "N/A") if bc_lines else "N/A")
             except Exception as e:
                 logger.error("Failed to add lines to PI %s from doc %s: %s", result.get("bc_record_no"), doc_id, str(e))
-                line_results = {"added": 0, "total": len(line_items), "errors": [{"error": str(e)}]}
+                line_results = {"added": 0, "total": len(bc_lines), "errors": [{"error": str(e)}]}
 
     # Step 3: Create GPI Document Link in BC (populates the GPI Documents factbox)
     link_result = None

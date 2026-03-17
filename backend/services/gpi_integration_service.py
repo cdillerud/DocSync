@@ -267,6 +267,57 @@ BC_PI_FALLBACK_GL_ACCOUNT = os.environ.get('BC_PI_FALLBACK_GL_ACCOUNT', '60500')
 BC_PI_FALLBACK_ITEM_CODE = os.environ.get('BC_PI_FALLBACK_ITEM_CODE', os.environ.get('BC_DEFAULT_ITEM_CODE', ''))
 
 
+async def delete_purchase_invoice_lines(
+    invoice_system_id: str,
+) -> Dict[str, Any]:
+    """Delete all existing line items from a Purchase Invoice using the standard BC API.
+    Returns {deleted: int, errors: [...]}.
+    """
+    _check_write_protection("delete_purchase_invoice_lines")
+    if not HAS_CREDENTIALS:
+        raise ValueError("BC credentials not configured")
+
+    token = await _get_token()
+    company_id = await _get_company_id_standard_api()
+    base_url = f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/{BC_STANDARD_API}/companies({company_id})/purchaseInvoices({invoice_system_id})/purchaseInvoiceLines"
+
+    deleted = 0
+    errors = []
+
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        # Fetch existing lines
+        resp = await client.get(
+            base_url,
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        )
+        if resp.status_code != 200:
+            return {"deleted": 0, "errors": [{"error": f"Failed to fetch lines: HTTP {resp.status_code}"}]}
+
+        existing_lines = resp.json().get("value", [])
+        if not existing_lines:
+            return {"deleted": 0, "errors": []}
+
+        for line in existing_lines:
+            line_id = line.get("id")
+            if not line_id:
+                continue
+            etag = line.get("@odata.etag", "*")
+            del_resp = await client.delete(
+                f"{base_url}({line_id})",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "If-Match": etag,
+                },
+            )
+            if del_resp.status_code in (200, 204):
+                deleted += 1
+            else:
+                errors.append({"line_id": line_id, "status": del_resp.status_code, "error": del_resp.text[:200]})
+
+    logger.info("Deleted %d/%d existing lines from PI %s", deleted, len(existing_lines), invoice_system_id)
+    return {"deleted": deleted, "total_existing": len(existing_lines), "errors": errors}
+
+
 async def add_purchase_invoice_lines(
     invoice_system_id: str,
     lines: List[Dict[str, Any]],

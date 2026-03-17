@@ -58,7 +58,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://approval-engine-10.preview.emergentagent.com"
+    "api_url": "https://bc-integration-debug.preview.emergentagent.com"
   },
   "seed_data_used": "Each backend test class creates unique workspace with UUID prefix (TEST_HIST_*, TEST_SUMMARY_*, TEST_REGRESSION_*). Items seeded with opening_balance, order_commitment, order_release, receipt movements. Workspaces deactivated on teardown.",
   "retest_needed": false,

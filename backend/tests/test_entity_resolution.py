@@ -15,7 +15,7 @@ import os
 import pytest
 import requests
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://approval-engine-10.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://bc-integration-debug.preview.emergentagent.com').rstrip('/')
 
 # Test documents with entity resolution data
 DOC_WITH_RESOLUTION_80c7ab51 = "80c7ab51-0cdb-48cc-b39c-b5d8a9c27c85"  # Has 4 resolutions: customer ambiguous, vendor corrected, PO matched, invoice ambiguous

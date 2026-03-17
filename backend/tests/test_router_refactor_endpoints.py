@@ -21,7 +21,7 @@ import pytest
 import requests
 import os
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://approval-engine-10.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://bc-integration-debug.preview.emergentagent.com').rstrip('/')
 
 
 class TestHealthCheck:

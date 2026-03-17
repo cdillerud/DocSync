@@ -19,6 +19,7 @@ Endpoints:
 
 import hashlib
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -33,6 +34,7 @@ from services.gpi_integration_service import (
     add_sales_order_lines,
     create_purchase_invoice,
     add_purchase_invoice_lines,
+    delete_purchase_invoice_lines,
     create_customer,
     create_vendor,
     list_integration_logs,
@@ -870,12 +872,6 @@ def _sanitize_lines(lines: list) -> list:
         clean = {k: v for k, v in ln.items() if not k.startswith("_")}
         sanitized.append(clean)
     return sanitized
-    """Strip internal fields from lines for storage."""
-    sanitized = []
-    for ln in (lines or []):
-        clean = {k: v for k, v in ln.items() if not k.startswith("_")}
-        sanitized.append(clean)
-    return sanitized
 
 
 @router.post("/purchase-invoices")
@@ -1080,6 +1076,7 @@ async def purchase_invoice_preflight(doc_id: str):
 @router.post("/purchase-invoices/retry-lines/{doc_id}")
 async def retry_purchase_invoice_lines(doc_id: str):
     """Add line items to an existing BC Purchase Invoice that was created without lines.
+    First deletes any existing (bad) lines, then adds correct ones.
     Uses the stored bc_system_id from the existing PI record.
     """
     if not HAS_CREDENTIALS:
@@ -1097,6 +1094,16 @@ async def retry_purchase_invoice_lines(doc_id: str):
     bc_system_id = existing_pi["bc_system_id"]
     bc_record_no = existing_pi.get("bc_record_no", "")
 
+    # Step 1: Delete existing bad lines
+    delete_result = {"deleted": 0, "errors": []}
+    try:
+        delete_result = await delete_purchase_invoice_lines(invoice_system_id=bc_system_id)
+        logger.info("PI %s: deleted %d existing lines before retry", bc_record_no, delete_result.get("deleted", 0))
+    except Exception as e:
+        logger.warning("PI %s: failed to delete existing lines: %s", bc_record_no, str(e))
+        delete_result["errors"].append({"error": f"Delete failed: {str(e)}"})
+
+    # Step 2: Build new lines
     ef = doc.get("extracted_fields") or {}
     nf = doc.get("normalized_fields") or {}
     line_items = ef.get("line_items") or nf.get("line_items") or []
@@ -1128,6 +1135,7 @@ async def retry_purchase_invoice_lines(doc_id: str):
             bc_line["lineType"] = "Account"
         bc_lines.append(bc_line)
 
+    # Step 3: Add new correct lines
     try:
         line_results = await add_purchase_invoice_lines(
             invoice_system_id=bc_system_id,
@@ -1146,6 +1154,7 @@ async def retry_purchase_invoice_lines(doc_id: str):
             "bc_purchase_invoice.lines_total": line_results["total"],
             "bc_purchase_invoice.line_errors": line_results.get("errors", []),
             "bc_purchase_invoice.lines_retried_at": now,
+            "bc_purchase_invoice.lines_deleted_before_retry": delete_result.get("deleted", 0),
             "updated_utc": now,
         }}
     )
@@ -1154,10 +1163,12 @@ async def retry_purchase_invoice_lines(doc_id: str):
         "success": line_results["added"] > 0,
         "bc_record_no": bc_record_no,
         "bc_system_id": bc_system_id,
+        "lines_deleted": delete_result.get("deleted", 0),
         "lines_added": line_results["added"],
         "lines_total": line_results["total"],
         "line_errors": line_results.get("errors", []),
-        "message": f"Added {line_results['added']}/{line_results['total']} lines to PI #{bc_record_no}",
+        "delete_errors": delete_result.get("errors", []),
+        "message": f"Deleted {delete_result.get('deleted', 0)} old lines, added {line_results['added']}/{line_results['total']} new lines to PI #{bc_record_no}",
     }
 
 
@@ -1281,6 +1292,33 @@ async def create_purchase_invoice_from_document(
                 logger.error("Failed to add lines to PI %s from doc %s: %s", result.get("bc_record_no"), doc_id, str(e))
                 line_results = {"added": 0, "total": len(line_items), "errors": [{"error": str(e)}]}
 
+    # Step 3: Link document to BC (attach file to Purchase Invoice in BC)
+    link_result = None
+    if result.get("success") and result.get("bc_system_id"):
+        try:
+            from pathlib import Path
+            import server as srv
+            upload_dir = Path(os.environ.get("UPLOAD_DIR", "/app/backend/uploads"))
+            file_path = upload_dir / doc_id
+            if file_path.exists():
+                file_content = file_path.read_bytes()
+                share_link = doc.get("sharepoint_share_link_url", "")
+                link_result = await srv.link_document_to_bc(
+                    bc_record_id=result["bc_system_id"],
+                    share_link=share_link,
+                    file_name=doc.get("file_name", "document"),
+                    file_content=file_content,
+                    bc_entity="purchaseInvoices",
+                )
+                if link_result.get("success"):
+                    logger.info("PI %s: document linked to BC successfully", result.get("bc_record_no", ""))
+                else:
+                    logger.warning("PI %s: failed to link document to BC: %s", result.get("bc_record_no", ""), link_result.get("error", ""))
+            else:
+                logger.warning("PI %s: file not found at %s, skipping BC document link", result.get("bc_record_no", ""), file_path)
+        except Exception as link_err:
+            logger.warning("PI %s: exception linking document to BC: %s", result.get("bc_record_no", ""), str(link_err))
+
     # Graph writeback
     now = datetime.now(timezone.utc).isoformat()
     bc_purchase_invoice = {
@@ -1301,6 +1339,8 @@ async def create_purchase_invoice_from_document(
         "lines_added": line_results["added"] if line_results else 0,
         "lines_total": line_results["total"] if line_results else 0,
         "line_errors": line_results.get("errors", []) if line_results else [],
+        "document_linked": link_result.get("success", False) if link_result else False,
+        "document_link_method": link_result.get("method", "") if link_result else "",
     }
 
     await db.hub_documents.update_one(
@@ -1346,6 +1386,7 @@ async def create_purchase_invoice_from_document(
         "lines_added": line_results["added"] if line_results else 0,
         "lines_total": line_results["total"] if line_results else 0,
         "line_errors": line_results.get("errors", []) if line_results else [],
+        "document_linked": link_result.get("success", False) if link_result else False,
     }
 
 

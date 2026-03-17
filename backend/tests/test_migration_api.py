@@ -10,7 +10,7 @@ sys.path.insert(0, '/app/backend')
 
 
 # Test configuration
-API_BASE_URL = "https://approval-engine-10.preview.emergentagent.com"
+API_BASE_URL = "https://bc-integration-debug.preview.emergentagent.com"
 
 
 @pytest.fixture

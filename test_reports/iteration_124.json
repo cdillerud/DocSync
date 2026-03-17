@@ -1,0 +1,83 @@
+{
+  "summary": "P0 Bug Fix Verification Complete - All 11 tests pass. Verified: (1) link_document_to_bc is now called in create_purchase_invoice_from_document flow (Step 3), (2) retry-lines endpoint now deletes existing lines before adding new ones, (3) delete_purchase_invoice_lines function exists and is properly implemented.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_pi_bug_fixes.py",
+    "/app/test_reports/pytest/pi_bug_fixes_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Bug Fix #1 VERIFIED: link_document_to_bc is now called in create_purchase_invoice_from_document (Line 1306) with bc_entity='purchaseInvoices' after PI header creation (Step 3)",
+    "Bug Fix #2 VERIFIED: retry_purchase_invoice_lines now calls delete_purchase_invoice_lines (Line 1100) BEFORE add_purchase_invoice_lines (Line 1140)",
+    "New function delete_purchase_invoice_lines properly implemented in gpi_integration_service.py (Lines 270-318) with: write protection, fetching existing lines, HTTP DELETE for each line, returning {deleted, errors}"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_pi_bug_fixes.py"
+  ],
+  "success_rate": {
+    "backend": "100% (11/11 tests passed)"
+  },
+  "test_credentials": "N/A - backend-only testing",
+  "seed_data_creation": "None - tested with nonexistent doc IDs (expected 404 responses) and code inspection",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "P0 bug fixes verified via code inspection and endpoint behavior tests. Cannot do full E2E integration test since: (1) empty database in preview env, (2) BC API calls require real documents and credentials. The bug fixes are structurally correct - link_document_to_bc is called after PI creation, delete is called before add in retry-lines.",
+  "verified_bug_fixes": {
+    "bug_1_gpi_document_link_missing": {
+      "description": "GPI Document link was missing in BC for Purchase Invoices - link_document_to_bc was never called in PI creation flow",
+      "fix_verified": true,
+      "fix_location": "backend/routers/gpi_integration.py Lines 1295-1320",
+      "verification_method": "Code inspection via Python inspect module",
+      "details": "link_document_to_bc is now imported via 'import server as srv' and called with bc_entity='purchaseInvoices' after successful PI header creation"
+    },
+    "bug_2_retry_lines_no_delete": {
+      "description": "Purchase Invoice retry-lines endpoint didn't delete existing bad lines before adding new correct ones",
+      "fix_verified": true,
+      "fix_location": "backend/routers/gpi_integration.py Lines 1097-1104",
+      "verification_method": "Code inspection via Python inspect module",
+      "details": "retry_purchase_invoice_lines now calls delete_purchase_invoice_lines (Step 1) before add_purchase_invoice_lines (Step 3)"
+    },
+    "new_delete_function": {
+      "description": "New delete_purchase_invoice_lines function added to gpi_integration_service.py",
+      "verified": true,
+      "fix_location": "backend/services/gpi_integration_service.py Lines 270-318",
+      "verification_method": "Import verification and code inspection",
+      "details": "Async function that: checks write protection, fetches existing lines via GET, deletes each line via HTTP DELETE, returns {deleted: int, errors: []}"
+    }
+  },
+  "tests_executed": {
+    "TestBackendHealth": {
+      "test_gpi_integration_status_endpoint": "PASS - GET /api/gpi-integration/status returns valid config"
+    },
+    "TestEndpoint404Behavior": {
+      "test_purchase_invoice_preflight_404": "PASS - Returns 404 for nonexistent doc",
+      "test_purchase_invoice_retry_lines_404": "PASS - Returns 404 for nonexistent doc",
+      "test_purchase_invoice_from_document_404": "PASS - Returns 404 for nonexistent doc"
+    },
+    "TestCodeStructureDeleteFunction": {
+      "test_delete_function_exists_in_service": "PASS - delete_purchase_invoice_lines exists and is async with correct signature",
+      "test_delete_function_imported_in_router": "PASS - Function is imported in gpi_integration.py"
+    },
+    "TestCodeStructureLinkDocumentToBc": {
+      "test_link_function_exists_in_server": "PASS - link_document_to_bc exists in server.py with correct signature",
+      "test_link_document_called_in_pi_creation": "PASS - Function is called in create_purchase_invoice_from_document with bc_entity='purchaseInvoices'"
+    },
+    "TestCodeStructureRetryLinesDeletesFirst": {
+      "test_retry_lines_deletes_before_adds": "PASS - delete_purchase_invoice_lines called BEFORE add_purchase_invoice_lines"
+    },
+    "TestDeleteFunctionImplementation": {
+      "test_delete_function_implementation_details": "PASS - Implementation has write protection, uses purchaseInvoiceLines endpoint, returns deleted count"
+    },
+    "TestRouterIntegrity": {
+      "test_router_imports_correct": "PASS - All required imports present"
+    }
+  }
+}

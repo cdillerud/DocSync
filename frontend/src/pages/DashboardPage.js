@@ -1136,13 +1136,14 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
-  const fetchStats = async () => {
+  const fetchStats = async (dateOverride) => {
+    const d = dateOverride || ingestionDate;
     setLoading(true);
     try {
       const [statsRes, intelligenceRes, diRes] = await Promise.all([
-        getDashboardStats(),
-        getWorkflowIntelligence().catch(() => ({ data: null })),
-        getDailyIngestion(ingestionDate).catch(() => ({ data: null })),
+        getDashboardStats(d),
+        getWorkflowIntelligence(d).catch(() => ({ data: null })),
+        getDailyIngestion(d).catch(() => ({ data: null })),
       ]);
       setStats(statsRes.data);
       setIntelligence(intelligenceRes.data);
@@ -1156,8 +1157,14 @@ export default function DashboardPage() {
 
   const fetchIngestion = useCallback(async (date) => {
     try {
-      const res = await getDailyIngestion(date);
-      setDailyIngestion(res.data);
+      const [statsRes, intelligenceRes, diRes] = await Promise.all([
+        getDashboardStats(date),
+        getWorkflowIntelligence(date).catch(() => ({ data: null })),
+        getDailyIngestion(date).catch(() => ({ data: null })),
+      ]);
+      setStats(statsRes.data);
+      setIntelligence(intelligenceRes.data);
+      setDailyIngestion(diRes.data);
     } catch {}
   }, []);
 
@@ -1205,7 +1212,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Header with refresh */}
+      {/* Header with date filter and refresh */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Workflow Intelligence Dashboard</h1>
@@ -1216,9 +1223,37 @@ export default function DashboardPage() {
             )}
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={fetchStats} data-testid="refresh-dashboard-btn">
-          <RefreshCw className="w-4 h-4 mr-2" /> Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" className="text-xs h-7 px-2"
+            onClick={() => {
+              const d = new Date(ingestionDate); d.setDate(d.getDate() - 1);
+              const newDate = d.toISOString().split('T')[0];
+              setIngestionDate(newDate); fetchIngestion(newDate);
+            }} data-testid="header-prev-day-btn">
+            &larr;
+          </Button>
+          <input type="date" value={ingestionDate}
+            onChange={e => { setIngestionDate(e.target.value); fetchIngestion(e.target.value); }}
+            className="text-xs h-7 px-2 bg-muted/40 border border-border rounded-md font-mono"
+            data-testid="header-date-picker" />
+          <Button variant="ghost" size="sm" className="text-xs h-7 px-2"
+            onClick={() => {
+              const d = new Date(ingestionDate); d.setDate(d.getDate() + 1);
+              const today = new Date().toISOString().split('T')[0];
+              const next = d.toISOString().split('T')[0];
+              if (next <= today) { setIngestionDate(next); fetchIngestion(next); }
+            }} data-testid="header-next-day-btn">
+            &rarr;
+          </Button>
+          <Button variant="outline" size="sm" className="text-xs h-7 px-2"
+            onClick={() => { setIngestionDate(''); fetchStats(''); }}
+            data-testid="all-time-btn">
+            All Time
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => fetchStats()} data-testid="refresh-dashboard-btn">
+            <RefreshCw className="w-4 h-4 mr-2" /> Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Top-level Metric Cards */}

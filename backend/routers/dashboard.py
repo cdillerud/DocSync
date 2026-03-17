@@ -12,6 +12,20 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 GPI_TZ = ZoneInfo("America/Chicago")
 
 
+def _date_filter(date: Optional[str] = None) -> dict:
+    """Build a MongoDB filter on created_utc for a given Central Time day.
+    Returns {} (match-all) when date is None."""
+    if not date:
+        return {}
+    try:
+        day_start = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=GPI_TZ)
+    except ValueError:
+        return {}
+    day_start_utc = day_start.astimezone(timezone.utc)
+    day_end_utc = day_start_utc + timedelta(days=1)
+    return {"created_utc": {"$gte": day_start_utc.isoformat(), "$lt": day_end_utc.isoformat()}}
+
+
 async def _get_alias_metrics_safe(db, total_docs: int) -> dict:
     """Get alias metrics for the vendor intelligence section."""
     try:
@@ -130,21 +144,26 @@ async def get_daily_ingestion(date: Optional[str] = None):
 
 
 @router.get("/stats")
-async def get_dashboard_stats():
+async def get_dashboard_stats(date: Optional[str] = None):
     db = get_db()
-    total = await db.hub_documents.count_documents({})
+    df = _date_filter(date)
+    total = await db.hub_documents.count_documents(df)
     by_status = {}
     for s in ["Received", "Classified", "LinkedToBC", "Exception", "Completed"]:
-        by_status[s] = await db.hub_documents.count_documents({"status": s})
+        by_status[s] = await db.hub_documents.count_documents({**df, "status": s})
     by_type = {}
-    for t in ["SalesOrder", "SalesInvoice", "PurchaseInvoice", "PurchaseOrder", "Shipment", "Receipt", "Other"]:
-        count = await db.hub_documents.count_documents({"document_type": t})
+    for t in ["AP_Invoice", "AR_Invoice", "Remittance", "Freight_Document", "Sales_Order",
+              "Sales_PO", "Sales_Quote", "Order_Confirmation", "Purchase_Order",
+              "Warehouse_Receipt", "Shipping_Document", "Inventory_Report",
+              "Quality_Issue", "Return_Request", "Unknown_Document"]:
+        count = await db.hub_documents.count_documents({**df, "document_type": t})
         if count > 0:
             by_type[t] = count
     recent_workflows = await db.hub_workflow_runs.find({}, {"_id": 0}).sort("started_utc", -1).limit(10).to_list(10)
     failed_workflows = await db.hub_workflow_runs.find({"status": "Failed"}, {"_id": 0}).sort("started_utc", -1).limit(10).to_list(10)
     # Routing status counts
     routing_pipeline = [
+        {"$match": {**df}},
         {"$group": {
             "_id": "$routing_status",
             "count": {"$sum": 1},
@@ -167,27 +186,20 @@ async def get_dashboard_stats():
 
 
 @router.get("/workflow-intelligence")
-async def get_workflow_intelligence_stats():
+async def get_workflow_intelligence_stats(date: Optional[str] = None):
     """
     Comprehensive workflow intelligence metrics.
     Provides insights into vendor matching, validation success, processing efficiency,
     and automation performance across the entire document processing pipeline.
+    Optionally filtered to a single Central Time day via ?date=YYYY-MM-DD.
     """
     db = get_db()
+    df = _date_filter(date)
     
     # ============== VENDOR INTELLIGENCE ==============
-    # Vendor match statistics by source
-    vendor_match_pipeline = [
-        {"$match": {"vendor_canonical": {"$exists": True, "$ne": None}}},
-        {"$group": {
-            "_id": {"$ifNull": ["$unified_vendor_match.sources_checked", ["unknown"]]},
-            "count": {"$sum": 1}
-        }}
-    ]
-    
     # Get vendor match method distribution
     match_method_pipeline = [
-        {"$match": {"validation_results.match_method": {"$exists": True}}},
+        {"$match": {**df, "validation_results.match_method": {"$exists": True}}},
         {"$group": {
             "_id": "$validation_results.match_method",
             "count": {"$sum": 1},
@@ -209,6 +221,7 @@ async def get_workflow_intelligence_stats():
     
     # Freight carrier detection stats
     freight_docs = await db.hub_documents.count_documents({
+        **df,
         "$or": [
             {"extracted_data.is_freight_carrier": True},
             {"unified_vendor_match.is_freight_carrier": True},
@@ -219,6 +232,7 @@ async def get_workflow_intelligence_stats():
     # ============== ACTION REQUIRED QUEUES ==============
     # 1. Needs Vendor Review - AP invoices with no vendor match
     needs_vendor_review = await db.hub_documents.count_documents({
+        **df,
         "doc_type": {"$in": ["AP_Invoice", "AP_INVOICE", "Remittance", "REMITTANCE"]},
         "$or": [
             {"validation_results.match_method": "none"},
@@ -231,6 +245,7 @@ async def get_workflow_intelligence_stats():
     
     # 2. Needs PO Match - Shipping docs missing PO link
     needs_po_match = await db.hub_documents.count_documents({
+        **df,
         "doc_type": {"$in": ["BOL", "Packing_List", "Shipping_Document", "SHIPPING", "Freight_Document"]},
         "$or": [
             {"po_number_clean": {"$exists": False}},
@@ -244,6 +259,7 @@ async def get_workflow_intelligence_stats():
     
     # 3. Needs Approval - Validated but awaiting human sign-off
     needs_approval = await db.hub_documents.count_documents({
+        **df,
         "validation_results.all_passed": True,
         "status": {"$nin": ["Completed", "Archived", "Posted", "Deleted"]},
         "$or": [
@@ -261,20 +277,20 @@ async def get_workflow_intelligence_stats():
     # ============== VALIDATION SUCCESS ==============
     # Overall validation rates
     total_validated = await db.hub_documents.count_documents({
-        "validation_results": {"$exists": True}
+        **df, "validation_results": {"$exists": True}
     })
     
     validation_passed = await db.hub_documents.count_documents({
-        "validation_results.all_passed": True
+        **df, "validation_results.all_passed": True
     })
     
     validation_failed = await db.hub_documents.count_documents({
-        "validation_results.all_passed": False
+        **df, "validation_results.all_passed": False
     })
     
     # Validation failure reasons
     failure_reasons_pipeline = [
-        {"$match": {"validation_results.all_passed": False}},
+        {"$match": {**df, "validation_results.all_passed": False}},
         {"$unwind": "$validation_results.checks"},
         {"$match": {"validation_results.checks.passed": False}},
         {"$group": {
@@ -288,6 +304,7 @@ async def get_workflow_intelligence_stats():
     # ============== PROCESSING EFFICIENCY ==============
     # Documents by workflow status
     workflow_status_pipeline = [
+        {"$match": {**df}},
         {"$group": {
             "_id": {"$ifNull": ["$workflow_status", "unknown"]},
             "count": {"$sum": 1}
@@ -297,15 +314,16 @@ async def get_workflow_intelligence_stats():
     by_workflow_status = await db.hub_documents.aggregate(workflow_status_pipeline).to_list(30)
     
     # Auto-clear statistics
-    auto_cleared = await db.hub_documents.count_documents({"auto_cleared": True})
+    auto_cleared = await db.hub_documents.count_documents({**df, "auto_cleared": True})
     
     # Processing success (documents that reached Completed/Posted/Archived)
     processing_complete = await db.hub_documents.count_documents({
-        "status": {"$in": ["Completed", "Posted", "Archived", "LinkedToBC"]}
+        **df, "status": {"$in": ["Completed", "Posted", "Archived", "LinkedToBC"]}
     })
     
     # Documents stuck (Exception status or auto_escalated)
     stuck_docs = await db.hub_documents.count_documents({
+        **df,
         "$or": [
             {"status": "Exception"},
             {"auto_escalated": True}
@@ -314,7 +332,7 @@ async def get_workflow_intelligence_stats():
     
     # Average retry count for documents
     retry_stats_pipeline = [
-        {"$match": {"retry_count": {"$gt": 0}}},
+        {"$match": {**df, "retry_count": {"$gt": 0}}},
         {"$group": {
             "_id": None,
             "avg_retries": {"$avg": "$retry_count"},
@@ -329,6 +347,7 @@ async def get_workflow_intelligence_stats():
     # ============== BC INTEGRATION SUCCESS ==============
     # Documents linked to BC
     bc_linked = await db.hub_documents.count_documents({
+        **df,
         "$or": [
             {"bc_record_id": {"$exists": True, "$ne": None}},
             {"bc_document_id": {"$exists": True, "$ne": None}},
@@ -338,6 +357,7 @@ async def get_workflow_intelligence_stats():
     
     # Documents posted to BC
     bc_posted = await db.hub_documents.count_documents({
+        **df,
         "$or": [
             {"bc_posting_status": "posted"},
             {"status": "Posted"}
@@ -346,18 +366,18 @@ async def get_workflow_intelligence_stats():
     
     # BC posting failures
     bc_post_failed = await db.hub_documents.count_documents({
-        "bc_posting_status": {"$in": ["failed", "error"]}
+        **df, "bc_posting_status": {"$in": ["failed", "error"]}
     })
     
     # ============== SHAREPOINT ARCHIVAL ==============
     # Documents archived to SharePoint
     sp_archived = await db.hub_documents.count_documents({
-        "sharepoint_item_id": {"$exists": True, "$ne": None}
+        **df, "sharepoint_item_id": {"$exists": True, "$ne": None}
     })
     
     # Folder routing distribution
     folder_routing_pipeline = [
-        {"$match": {"sharepoint_folder_path": {"$exists": True, "$ne": None}}},
+        {"$match": {**df, "sharepoint_folder_path": {"$exists": True, "$ne": None}}},
         {"$group": {
             "_id": "$sharepoint_folder_path",
             "count": {"$sum": 1}
@@ -370,6 +390,7 @@ async def get_workflow_intelligence_stats():
     # ============== DOCUMENT SOURCES ==============
     # Ingestion source breakdown
     source_pipeline = [
+        {"$match": {**df}},
         {"$group": {
             "_id": {"$ifNull": ["$source", "unknown"]},
             "count": {"$sum": 1}
@@ -389,10 +410,10 @@ async def get_workflow_intelligence_stats():
     
     # ============== TIME-BASED TRENDS (Last 7 days) ==============
     from datetime import timedelta
-    seven_days_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    seven_days_ago = (datetime.now(GPI_TZ) - timedelta(days=7)).astimezone(timezone.utc).isoformat()
     
     daily_trend_pipeline = [
-        {"$match": {"created_utc": {"$gte": seven_days_ago}}},
+        {"$match": {**df} if df else {"created_utc": {"$gte": seven_days_ago}}},
         {"$addFields": {
             "date": {"$substr": ["$created_utc", 0, 10]}
         }},
@@ -407,8 +428,8 @@ async def get_workflow_intelligence_stats():
     daily_trends = await db.hub_documents.aggregate(daily_trend_pipeline).to_list(7)
     
     # Calculate totals
-    total_docs = await db.hub_documents.count_documents({})
-    docs_with_vendor = await db.hub_documents.count_documents({"vendor_canonical": {"$exists": True, "$ne": None}})
+    total_docs = await db.hub_documents.count_documents(df)
+    docs_with_vendor = await db.hub_documents.count_documents({**df, "vendor_canonical": {"$exists": True, "$ne": None}})
     
     # Calculate success rates
     validation_rate = round((validation_passed / total_validated * 100) if total_validated > 0 else 0, 1)
@@ -422,6 +443,7 @@ async def get_workflow_intelligence_stats():
         "Purchase_Invoice", "PURCHASE_INVOICE",
     ]
     vendor_applicable_filter = {
+        **df,
         "$or": [
             {"doc_type": {"$in": VENDOR_APPLICABLE_TYPES}},
             {"suggested_job_type": {"$in": VENDOR_APPLICABLE_TYPES}},
@@ -489,7 +511,7 @@ async def get_workflow_intelligence_stats():
     
     # ============== ROUTING STATUS (Auto-Clear Gate) ==============
     routing_pipeline = [
-        {"$match": {"routing_status": {"$exists": True, "$ne": None}}},
+        {"$match": {**df, "routing_status": {"$exists": True, "$ne": None}}},
         {"$group": {
             "_id": "$routing_status",
             "count": {"$sum": 1},
@@ -508,6 +530,7 @@ async def get_workflow_intelligence_stats():
 
     # ============== READINESS STATUS ==============
     readiness_status_pipeline = [
+        {"$match": {**df}},
         {"$group": {"_id": "$readiness.status", "count": {"$sum": 1}}},
     ]
     readiness_raw = await db.hub_documents.aggregate(readiness_status_pipeline).to_list(10)
@@ -515,21 +538,21 @@ async def get_workflow_intelligence_stats():
     no_readiness = total_docs - sum(readiness_by_status.values())
 
     readiness_action_pipeline = [
-        {"$match": {"readiness.recommended_action": {"$exists": True, "$ne": None}}},
+        {"$match": {**df, "readiness.recommended_action": {"$exists": True, "$ne": None}}},
         {"$group": {"_id": "$readiness.recommended_action", "count": {"$sum": 1}}},
     ]
     readiness_action_raw = await db.hub_documents.aggregate(readiness_action_pipeline).to_list(10)
     readiness_by_action = {r["_id"]: r["count"] for r in readiness_action_raw if r["_id"]}
 
     readiness_conf_pipeline = [
-        {"$match": {"readiness.confidence": {"$exists": True}}},
+        {"$match": {**df, "readiness.confidence": {"$exists": True}}},
         {"$group": {"_id": "$readiness.status", "avg_confidence": {"$avg": "$readiness.confidence"}}},
     ]
     readiness_conf_raw = await db.hub_documents.aggregate(readiness_conf_pipeline).to_list(10)
     readiness_confidence = {r["_id"]: round(r["avg_confidence"], 3) for r in readiness_conf_raw if r["_id"]}
 
     readiness_block_pipeline = [
-        {"$match": {"readiness.blocking_reasons": {"$exists": True, "$ne": []}}},
+        {"$match": {**df, "readiness.blocking_reasons": {"$exists": True, "$ne": []}}},
         {"$unwind": "$readiness.blocking_reasons"},
         {"$group": {"_id": "$readiness.blocking_reasons", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
@@ -539,7 +562,7 @@ async def get_workflow_intelligence_stats():
     top_blocking = [{"reason": r["_id"], "count": r["count"]} for r in readiness_block_raw if r["_id"]]
 
     readiness_warn_pipeline = [
-        {"$match": {"readiness.warning_reasons": {"$exists": True, "$ne": []}}},
+        {"$match": {**df, "readiness.warning_reasons": {"$exists": True, "$ne": []}}},
         {"$unwind": "$readiness.warning_reasons"},
         {"$group": {"_id": "$readiness.warning_reasons", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},

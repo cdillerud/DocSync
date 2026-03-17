@@ -610,6 +610,43 @@ export default function DocumentDetailPage() {
           {/* Readiness Panel */}
           <ReadinessPanel readiness={doc.readiness} />
 
+          {/* Extracted Data Card */}
+          {doc.extracted_fields && Object.keys(doc.extracted_fields).length > 0 && (
+            <Card data-testid="extracted-data-card">
+              <CardHeader className="pb-2">
+                <div className="flex items-center gap-2">
+                  <FileSearch className="w-5 h-5 text-primary" />
+                  <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Extracted Data</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                {Object.entries(doc.extracted_fields).filter(([k]) => k !== 'line_items').map(([key, value]) => (
+                  <div key={key} className="flex justify-between" data-testid={`extracted-field-${key}`}>
+                    <span className="text-muted-foreground capitalize">{key.replace(/_/g, ' ')}</span>
+                    <span className="font-mono text-right max-w-[60%] truncate">{String(value || '—')}</span>
+                  </div>
+                ))}
+                {doc.extracted_fields.line_items?.length > 0 && (
+                  <div className="border-t border-border pt-3 mt-2" data-testid="extracted-line-items">
+                    <p className="text-xs font-medium mb-2 text-muted-foreground">Line Items ({doc.extracted_fields.line_items.length})</p>
+                    <div className="space-y-2">
+                      {doc.extracted_fields.line_items.map((item, idx) => (
+                        <div key={idx} className="bg-muted/50 rounded p-2 text-xs space-y-1">
+                          {item.description && <div className="font-medium">{item.description}</div>}
+                          <div className="flex gap-4 text-muted-foreground">
+                            {item.quantity != null && <span>Qty: {item.quantity}</span>}
+                            {(item.unit_price != null || item.amount != null) && <span>Price: ${item.unit_price ?? item.amount}</span>}
+                            {item.total != null && <span className="font-semibold text-foreground">Total: ${item.total}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {/* Decision Explainability Panel */}
           <DecisionExplainabilityPanel
             document={doc}

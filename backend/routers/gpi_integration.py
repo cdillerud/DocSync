@@ -66,11 +66,14 @@ PURCHASE_INVOICE_ELIGIBLE_TYPES = {"AP_Invoice"}
 # Default freight item code for PI lines
 BC_PI_FREIGHT_ITEM = os.environ.get("BC_PI_FREIGHT_ITEM", os.environ.get("BC_DEFAULT_ITEM_CODE", "FREIGHT"))
 
+# Document types that are primarily freight/transportation
+FREIGHT_DOC_TYPES = {"AP_Invoice", "Freight_Document", "Bill_of_Lading", "FreightInvoice"}
+
 
 def _resolve_po_reference(doc: dict) -> str:
     """Extract the PO/BOL reference number from a document for use in BC PI line description.
     
-    Priority: po_number_clean > po_number > bol_number > reference fields
+    Priority: po_number_clean > po_number > bol_number > order_number > reference fields
     Returns the reference string, or empty string if none found.
     """
     ef = doc.get("extracted_fields") or {}
@@ -82,12 +85,17 @@ def _resolve_po_reference(doc: dict) -> str:
         return ref
     
     # Raw PO number from extracted fields
-    ref = ef.get("po_number") or nf.get("po_number") or doc.get("po_number") or ""
+    ref = nf.get("po_number") or ef.get("po_number") or doc.get("po_number") or ""
     if ref:
         return str(ref).strip()
     
     # BOL number (common on freight invoices)
-    ref = doc.get("bol_number") or ef.get("bol_number") or ""
+    ref = nf.get("bol_number") or doc.get("bol_number") or ef.get("bol_number") or ""
+    if ref:
+        return str(ref).strip()
+    
+    # Order number
+    ref = ef.get("order_number") or nf.get("order_number") or ""
     if ref:
         return str(ref).strip()
     
@@ -99,45 +107,108 @@ def _resolve_po_reference(doc: dict) -> str:
     return ""
 
 
-def _build_freight_pi_lines(doc: dict) -> list:
-    """Build the BC Purchase Invoice line items for a freight/AP invoice.
+async def _build_pi_lines_with_mapping(doc: dict, db) -> list:
+    """Build BC Purchase Invoice lines with intelligent item mapping.
     
-    Creates a single FREIGHT item line with:
-    - Type: Item
-    - No.: FREIGHT (from BC_PI_FREIGHT_ITEM)
-    - Description: PO/BOL reference number
-    - Qty: 1
-    - Unit Cost: invoice total amount
+    Business rules for PI lines:
+    1. Extract ALL line items from the document
+    2. If AI extracted a specific item_number/SKU, use item_mapping_service to resolve it
+    3. Otherwise, default to the configured FREIGHT item (BC_PI_FREIGHT_ITEM)
+    4. Description is ALWAYS the PO/BOL reference (matching the Square9/BC pattern)
+    5. Each line gets its own qty/cost from the extraction
+    
+    The existing GL 60500 keyword mappings are for Sales Orders, not Purchase Invoices.
+    PI lines use the FREIGHT item because BC tracks freight costs at the item level.
     """
     ef = doc.get("extracted_fields") or {}
     nf = doc.get("normalized_fields") or {}
+    doc_id = doc.get("id", "")
     
-    # Resolve PO/BOL reference for the description field
+    # Get the PO/BOL reference — this goes in Description for ALL PI lines
     po_ref = _resolve_po_reference(doc)
     
-    # Get the total amount
-    total_amount = 0
-    for field in ["amount", "invoice_amount", "total_amount", "balance_due"]:
-        val = nf.get(field) or ef.get(field)
-        if val:
-            # Clean currency strings like "$4,300.00"
-            cleaned = str(val).replace("$", "").replace(",", "").strip()
-            try:
-                total_amount = float(cleaned)
-                break
-            except (ValueError, TypeError):
-                continue
+    # Collect line items from all sources
+    line_items = nf.get("line_items") or ef.get("line_items") or doc.get("line_items") or []
     
-    if total_amount <= 0:
-        return []
+    # If no line items extracted, create a single line from the total amount
+    if not line_items:
+        total_amount = 0
+        for field in ["amount", "amount_float", "invoice_amount", "total_amount", "balance_due"]:
+            val = nf.get(field) or ef.get(field) or doc.get(field)
+            if val:
+                cleaned = str(val).replace("$", "").replace(",", "").strip()
+                try:
+                    total_amount = float(cleaned)
+                    break
+                except (ValueError, TypeError):
+                    continue
+        
+        if total_amount <= 0:
+            return []
+        
+        line_items = [{
+            "description": po_ref or f"Per invoice {ef.get('invoice_number', '')}".strip(),
+            "quantity": 1,
+            "unit_price": total_amount,
+        }]
     
-    return [{
-        "lineType": "Item",
-        "lineObjectNumber": BC_PI_FREIGHT_ITEM,
-        "description": po_ref,
-        "quantity": 1,
-        "unitCost": total_amount,
-    }]
+    bc_lines = []
+    for idx, li in enumerate(line_items):
+        desc = str(li.get("description", "")).strip()
+        qty = float(li.get("quantity", 1) or 1)
+        unit_cost = float(li.get("unit_price", 0) or li.get("unitCost", 0) or li.get("unit_cost", 0) or 0)
+        if unit_cost == 0:
+            unit_cost = float(li.get("total", 0) or li.get("amount", 0) or 0)
+        
+        # Check if the line has an explicit item number or SKU from AI extraction
+        explicit_item = li.get("item_number") or li.get("sku") or li.get("lineObjectNumber") or ""
+        explicit_gl = li.get("gl_account") or li.get("account_number") or ""
+        
+        if explicit_item:
+            # AI extracted a specific item — validate it via the mapping service
+            mapping_result = await map_line_to_item(db, description=desc, extracted_sku=explicit_item, doc_id=doc_id)
+            bc_line = {
+                "lineType": mapping_result.get("line_type", "Item"),
+                "lineObjectNumber": mapping_result.get("target_no", explicit_item),
+                "description": po_ref if po_ref else desc,
+                "quantity": qty,
+                "unitCost": unit_cost,
+            }
+        elif explicit_gl:
+            # Line has an explicit GL account from extraction
+            bc_line = {
+                "lineType": "Account",
+                "lineObjectNumber": explicit_gl,
+                "description": po_ref if po_ref else desc,
+                "quantity": qty,
+                "unitCost": unit_cost,
+            }
+        else:
+            # No explicit item/GL — use the default FREIGHT item for PI lines
+            bc_line = {
+                "lineType": "Item",
+                "lineObjectNumber": BC_PI_FREIGHT_ITEM,
+                "description": po_ref if po_ref else desc,
+                "quantity": qty,
+                "unitCost": unit_cost,
+            }
+            # Record what we mapped for learning
+            mapping_result = {"matched": True, "target_type": "item", "target_no": BC_PI_FREIGHT_ITEM,
+                             "method": "pi_default_freight", "confidence": 0.85, "line_type": "Item",
+                             "original_description": desc}
+        
+        bc_lines.append(bc_line)
+        
+        # Record mapping history for learning
+        try:
+            mr = mapping_result if 'mapping_result' in dir() else {
+                "matched": True, "target_type": "item", "target_no": bc_line.get("lineObjectNumber", ""),
+                "method": "explicit", "confidence": 1.0, "original_description": desc}
+            await record_mapping_history(db, doc_id, idx, desc, mr)
+        except Exception:
+            pass
+    
+    return bc_lines
 
 
 # =========================================================================
@@ -1095,33 +1166,10 @@ async def auto_create_pi_from_document(doc_id: str, db) -> dict:
             logger.error("[AutoPI] Failed to create PI for doc %s: %s", doc_id, result.get("error_message", ""))
             return {"success": False, "reason": "bc_api_error", "error": result.get("error_message", "")}
 
-        # Step 2: Add line items — use freight line builder (FREIGHT item + PO/BOL ref as description)
+        # Step 2: Add line items using AI-driven item mapping
         line_results = None
         if result.get("bc_system_id"):
-            bc_lines = _build_freight_pi_lines(doc)
-            
-            # Fallback to extracted line items if freight builder didn't produce lines
-            if not bc_lines:
-                line_items = ef.get("line_items") or nf.get("line_items") or []
-                if not line_items:
-                    total_amount = float(nf.get("amount", 0) or ef.get("amount", 0) or 0)
-                    if total_amount > 0:
-                        inv_no = vendor_invoice_no or ""
-                        desc = f"Per invoice {inv_no}" if inv_no else f"Invoice from {vendor_info.get('vendor_name', '')}"
-                        line_items = [{"description": desc[:100], "quantity": 1, "unit_price": total_amount}]
-                for li in line_items:
-                    bc_line = {
-                        "description": li.get("description", ""),
-                        "quantity": float(li.get("quantity", 1) or 1),
-                        "unitCost": float(li.get("unit_price", 0) or li.get("unitCost", 0) or 0),
-                    }
-                    if li.get("item_number") or li.get("lineObjectNumber"):
-                        bc_line["lineObjectNumber"] = li.get("item_number") or li["lineObjectNumber"]
-                        bc_line["lineType"] = "Item"
-                    elif li.get("gl_account") or li.get("account_number"):
-                        bc_line["lineObjectNumber"] = li.get("gl_account") or li["account_number"]
-                        bc_line["lineType"] = "Account"
-                    bc_lines.append(bc_line)
+            bc_lines = await _build_pi_lines_with_mapping(doc, db)
 
             if bc_lines:
                 try:
@@ -1357,36 +1405,8 @@ async def retry_purchase_invoice_lines(doc_id: str):
         logger.warning("PI %s: failed to delete existing lines: %s", bc_record_no, str(e))
         delete_result["errors"].append({"error": f"Delete failed: {str(e)}"})
 
-    # Step 2: Build new lines — use freight line builder first
-    bc_lines = _build_freight_pi_lines(doc)
-    
-    # Fallback to extracted line items if freight builder didn't produce lines
-    if not bc_lines:
-        ef = doc.get("extracted_fields") or {}
-        nf = doc.get("normalized_fields") or {}
-        line_items = ef.get("line_items") or nf.get("line_items") or []
-
-        if not line_items:
-            total_amount = float(nf.get("amount", 0) or ef.get("amount", 0) or 0)
-            if total_amount > 0:
-                vendor_name = nf.get("vendor") or ef.get("vendor") or ""
-                inv_no = ef.get("invoice_number") or nf.get("invoice_number") or ""
-                desc = f"Per invoice {inv_no}" if inv_no else f"Invoice from {vendor_name}"
-                line_items = [{"description": desc[:100], "quantity": 1, "unit_price": total_amount}]
-
-        for li in line_items:
-            bc_line = {
-                "description": li.get("description", ""),
-                "quantity": float(li.get("quantity", 1) or 1),
-                "unitCost": float(li.get("unit_price", 0) or li.get("unitCost", 0) or 0),
-            }
-            if li.get("item_number") or li.get("lineObjectNumber"):
-                bc_line["lineObjectNumber"] = li.get("item_number") or li["lineObjectNumber"]
-                bc_line["lineType"] = "Item"
-            elif li.get("gl_account") or li.get("account_number"):
-                bc_line["lineObjectNumber"] = li.get("gl_account") or li["account_number"]
-                bc_line["lineType"] = "Account"
-            bc_lines.append(bc_line)
+    # Step 2: Build new lines using AI-driven item mapping
+    bc_lines = await _build_pi_lines_with_mapping(doc, db)
 
     if not bc_lines:
         raise HTTPException(status_code=422, detail="No line items found and no total amount to create a fallback line. Re-process the document first.")
@@ -1507,30 +1527,10 @@ async def create_purchase_invoice_from_document(
         logger.error("Failed to create purchase invoice from doc %s: %s", doc_id, str(e))
         raise HTTPException(status_code=502, detail=f"BC API error: {str(e)}")
 
-    # Step 2: Add line items if the header was created and we have lines
+    # Step 2: Add line items using AI-driven item mapping
     line_results = None
     if result.get("success") and result.get("bc_system_id"):
-        # Build freight PI lines: Type=Item, No.=FREIGHT, Description=PO/BOL reference
-        bc_lines = _build_freight_pi_lines(doc)
-        
-        # If freight line builder didn't produce lines, try extracted line items
-        if not bc_lines:
-            line_items = ef.get("line_items") or nf.get("line_items") or []
-            if line_items:
-                bc_lines = []
-                for li in line_items:
-                    bc_line = {
-                        "description": li.get("description", ""),
-                        "quantity": float(li.get("quantity", 1) or 1),
-                        "unitCost": float(li.get("unit_price", 0) or li.get("unitCost", 0) or 0),
-                    }
-                    if li.get("item_number") or li.get("lineObjectNumber"):
-                        bc_line["lineObjectNumber"] = li.get("item_number") or li["lineObjectNumber"]
-                        bc_line["lineType"] = "Item"
-                    elif li.get("gl_account") or li.get("account_number"):
-                        bc_line["lineObjectNumber"] = li.get("gl_account") or li["account_number"]
-                        bc_line["lineType"] = "Account"
-                    bc_lines.append(bc_line)
+        bc_lines = await _build_pi_lines_with_mapping(doc, db)
 
         if bc_lines:
             try:
@@ -1538,7 +1538,7 @@ async def create_purchase_invoice_from_document(
                     invoice_system_id=result["bc_system_id"],
                     lines=bc_lines,
                 )
-                logger.info("PI %s: added %d/%d lines (po_ref=%s)", result["bc_record_no"], 
+                logger.info("PI %s: added %d/%d lines (ref=%s)", result["bc_record_no"], 
                            line_results["added"], line_results["total"],
                            bc_lines[0].get("description", "N/A") if bc_lines else "N/A")
             except Exception as e:

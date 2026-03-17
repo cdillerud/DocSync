@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { listDocuments, deleteDocument, bulkResubmitDocuments, bulkRetryDocuments, bulkDeleteDocuments } from '../lib/api';
+import { listDocuments, deleteDocument, bulkResubmitDocuments, bulkRetryDocuments, bulkDeleteDocuments, bulkFileAndClear } from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -10,7 +10,7 @@ import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Checkbox } from '../components/ui/checkbox';
 import { toast } from 'sonner';
-import { Search, RefreshCw, FileText, ExternalLink, Filter, RotateCcw, Trash2, FolderOpen, CheckSquare, Play, Brain } from 'lucide-react';
+import { Search, RefreshCw, FileText, ExternalLink, Filter, RotateCcw, Trash2, FolderOpen, CheckSquare, Play, Brain, Archive } from 'lucide-react';
 
 const INTEL_STATUS_CONFIG = {
   completed: { label: 'Resolved', className: 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300' },
@@ -165,6 +165,25 @@ export default function QueuePage() {
     }
   };
 
+  // Bulk File & Clear handler
+  const handleBulkFileAndClear = async () => {
+    if (selectedDocs.size === 0) return;
+    if (!window.confirm(`File & Clear ${selectedDocs.size} document(s)? They will be routed to SharePoint and removed from the queue.`)) return;
+    
+    setBulkProcessing(true);
+    try {
+      const res = await bulkFileAndClear([...selectedDocs]);
+      const data = res.data || res;
+      toast.success(`Filed ${data.success?.length || 0} documents. ${data.failed?.length || 0} failed.`);
+      setSelectedDocs(new Set());
+      fetchDocs();
+    } catch (err) {
+      toast.error('Bulk File & Clear failed: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setBulkProcessing(false);
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto" data-testid="queue-page">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -200,6 +219,16 @@ export default function QueuePage() {
               >
                 <Trash2 className="w-3 h-3 mr-1" />
                 Delete
+              </Button>
+              <Button 
+                size="sm"
+                onClick={handleBulkFileAndClear}
+                disabled={bulkProcessing}
+                className="bg-green-600 hover:bg-green-700 text-white"
+                data-testid="bulk-file-clear-btn"
+              >
+                <Archive className="w-3 h-3 mr-1" />
+                File & Clear
               </Button>
               <Button 
                 variant="ghost" 

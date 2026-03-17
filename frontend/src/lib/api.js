@@ -155,6 +155,11 @@ export const bulkDeleteDocuments = async (docIds) => {
   return results;
 };
 
+// File & Clear
+export const fileAndClearDocument = (docId) => api.post(`/documents/${docId}/file-and-clear`);
+export const bulkFileAndClear = (docIds) => api.post('/documents/bulk-file-and-clear', docIds);
+export const getFilingStats = () => api.get('/documents/filing-actions/stats');
+
 // Workflows
 export const listWorkflows = (params) => api.get('/workflows', { params });
 export const getWorkflow = (id) => api.get(`/workflows/${id}`);

@@ -2555,6 +2555,40 @@ async def on_document_ingested(doc_id: str, source: str = "unknown"):
         
         logger.info("[Workflow:%s] Complete: %s → %s (decision: %s, score: %.2f)", 
                     run_id, old_status, new_status, decision, validation_results.get("match_score", 0.0))
+
+        # Auto-file check: if this doc type + vendor pattern has been filed enough times, auto-clear it
+        if new_status == "NeedsReview":
+            try:
+                doc_type_for_filing = doc.get("document_type") or doc.get("suggested_job_type") or "Unknown"
+                vendor_for_filing = (doc.get("vendor_canonical") or doc.get("normalized_fields", {}).get("vendor") or "").lower()
+                if doc_type_for_filing and vendor_for_filing:
+                    filing_match = await db.filing_actions.find_one(
+                        {"document_type": doc_type_for_filing, "vendor_lower": vendor_for_filing, "count": {"$gte": 3}},
+                        {"_id": 0}
+                    )
+                    if filing_match:
+                        folder_path = filing_match["folder_path"]
+                        auto_now = datetime.now(timezone.utc).isoformat()
+                        await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+                            "auto_cleared": True,
+                            "auto_clear_decision": "Cleared",
+                            "auto_clear_reason": f"Auto-filed (learned from {filing_match['count']} previous filings)",
+                            "auto_clear_details": {"method": "ai_auto_file", "pattern_count": filing_match["count"]},
+                            "status": "Completed",
+                            "workflow_status": "completed",
+                            "sharepoint_folder_suggestion": folder_path,
+                            "filed_at": auto_now,
+                            "filed_folder": folder_path,
+                            "updated_utc": auto_now,
+                        }})
+                        await db.filing_actions.update_one(
+                            {"_id": filing_match.get("_id", filing_match)},
+                            {"$inc": {"auto_filed_count": 1}, "$set": {"last_auto_filed_at": auto_now}},
+                        )
+                        logger.info("[Workflow:%s] Auto-filed doc %s to '%s' (pattern count: %d)",
+                                    run_id, doc_id, folder_path, filing_match["count"])
+            except Exception as af_err:
+                logger.warning("[Workflow:%s] Auto-file check failed for %s: %s", run_id, doc_id, str(af_err))
         
     except Exception as e:
         # Log error but don't fail silently - create an error audit entry

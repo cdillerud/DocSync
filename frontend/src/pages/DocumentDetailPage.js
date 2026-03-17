@@ -14,7 +14,7 @@ import {
   CheckCircle2, AlertCircle, Clock, Loader2, Copy, RotateCcw, 
   ShieldCheck, ShieldAlert, Building2, FileSearch, Receipt,
   Zap, User, Cpu, Eye, Inbox, Check, XCircle, AlertTriangle,
-  Gauge, CircleDot, FolderOpen, Send
+  Gauge, CircleDot, FolderOpen, Send, Archive
 } from 'lucide-react';
 import { Square9WorkflowTracker } from '../components/Square9WorkflowTracker';
 import APReviewPanel from '../components/APReviewPanel';
@@ -446,6 +446,15 @@ export default function DocumentDetailPage() {
               )}
               {(doc.sharepoint_folder_suggested || doc.sharepoint_folder) && !doc.sharepoint_moved_at && (
                 <SharePointMoveButton docId={doc.id} folder={doc.sharepoint_folder || doc.sharepoint_folder_suggested} onMoved={fetchDoc} />
+              )}
+              {doc.status !== 'Completed' && !doc.auto_cleared && (
+                <FileAndClearButton docId={doc.id} onCleared={fetchDoc} />
+              )}
+              {doc.filed_folder && (
+                <div className="flex items-center gap-1.5 text-xs text-green-600">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Filed & cleared</span>
+                </div>
               )}
               <InfoRow label="Drive ID" value={doc.sharepoint_drive_id ? doc.sharepoint_drive_id.slice(0, 16) + '...' : '-'} mono />
               <InfoRow label="Item ID" value={doc.sharepoint_item_id ? doc.sharepoint_item_id.slice(0, 12) + '...' : '-'} mono />
@@ -1075,6 +1084,27 @@ function SharePointMoveButton({ docId, folder, onMoved }) {
     <Button size="sm" className="w-full" onClick={handleMove} disabled={loading} data-testid="sp-move-btn">
       {loading ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Send className="w-3.5 h-3.5 mr-1.5" />}
       Move to SharePoint
+    </Button>
+  );
+}
+
+
+function FileAndClearButton({ docId, onCleared }) {
+  const [loading, setLoading] = useState(false);
+  const handleFileAndClear = async () => {
+    if (!window.confirm('File this document to its suggested SharePoint folder and clear it from the queue?')) return;
+    setLoading(true);
+    try {
+      const res = await api.post(`/documents/${docId}/file-and-clear`);
+      toast.success(res.data.message || 'Document filed & cleared');
+      if (onCleared) onCleared();
+    } catch (e) { toast.error(e.response?.data?.detail || 'File & Clear failed'); }
+    setLoading(false);
+  };
+  return (
+    <Button size="sm" variant="secondary" className="w-full bg-green-600/10 hover:bg-green-600/20 text-green-700 border border-green-600/20" onClick={handleFileAndClear} disabled={loading} data-testid="file-and-clear-btn">
+      {loading ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Archive className="w-3.5 h-3.5 mr-1.5" />}
+      File & Clear
     </Button>
   );
 }

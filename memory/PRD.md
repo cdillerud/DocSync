@@ -8,90 +8,61 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 2. AI-powered document classification using Gemini
 3. Automated approval workflows
 4. SharePoint folder routing based on document type, vendor, and order
-5. Business Central integration for vendor matching
+5. Business Central integration for vendor matching, PI/SO creation
 6. Dashboard and analytics for operational visibility
 
 ## Architecture
 - **Backend**: FastAPI (Python) with MongoDB
 - **Frontend**: React with Shadcn/UI components
 - **AI**: Gemini via Emergent LLM Key
-- **External APIs**: Microsoft Graph (mocked), Business Central (read-only), SharePoint (move in demo mode)
+- **External APIs**: Microsoft Graph, Business Central (read+write), SharePoint
 
 ## What's Been Implemented
 
 ### Phase 1 - Core Platform (Complete)
-- Document ingestion pipeline
-- AI classification with Gemini
-- MongoDB storage (hub_documents, document_intelligence_results)
-- Dashboard with stats and charts
-- Document detail pages with full metadata
-- Business Central integration (read-only)
+- Document ingestion pipeline, AI classification, MongoDB storage
+- Dashboard, Document detail pages, BC integration (read-only)
 - Vendor intelligence and matching
 
 ### Phase 2 - Automation (Complete)
-- Stable Vendor engine with configurable thresholds
-- Auto-approval of validated documents (cleared 1,244 backlog)
-- Junk document cleanup (cleared 112 items)
-- Daily ingestion dashboard card
+- Stable Vendor engine, Auto-approval, Junk cleanup
 
 ### Phase 3 - SharePoint Folder Routing (Complete - Feb 2026)
-- Folder Tree Management with 37 rules, 15 top-level folders
-- Vendor Mappings: 31 vendor-to-folder mappings
-- Processor Assignments: 6 processor assignments
-- Test Routing Tool, AI Classification Enhancement
-- Document-Level Folder Suggestion, SharePoint File Move (demo mode)
-- Batch Operations
+- 37 rules, 15 top-level folders, vendor mappings, processor assignments
+- Document-level folder suggestion, SharePoint file move (demo mode)
 
-### P0 Fix - Multi-Page PDF Classification (Feb 2026)
-- Fixed root cause: extract first page only for classification of multi-page PDFs
+### P0 Fixes (Mar 2026)
+- **Multi-page PDF Classification**: Extract first page only
+- **BC Purchase Invoice Document Link**: Created `create_gpi_document_link` function that POSTs to `gpi/documents/v1.0` API to populate the GPI Documents factbox
+- **PI Retry-Lines Delete-Before-Add**: New `delete_purchase_invoice_lines` with per-line client isolation to handle BC connection reuse issues
+- **Duplicate _sanitize_lines**: Removed
 
-### P0 Fix - BC Purchase Invoice Document Link (Mar 2026)
-- Root cause: `link_document_to_bc` was called for Sales Orders but never for Purchase Invoices
-- Fix: Added Step 3 to `create_purchase_invoice_from_document` that calls `link_document_to_bc` with `bc_entity="purchaseInvoices"` after PI creation
-- File content loaded from UPLOAD_DIR, attached to BC via documentAttachments API
-- Link status recorded in `bc_purchase_invoice.document_linked` and `document_link_method`
-
-### P0 Fix - PI Retry-Lines Delete-Before-Add (Mar 2026)
-- Root cause: `retry-lines` endpoint added new lines without deleting existing bad lines, leading to duplicates
-- Fix: New `delete_purchase_invoice_lines` function in `gpi_integration_service.py` fetches and deletes all existing PI lines via standard BC API
-- `retry-lines` endpoint now: (1) Deletes existing bad lines, (2) Builds new correct lines, (3) Adds them
-- Response includes `lines_deleted` count and `delete_errors`
-
-### Duplicated _sanitize_lines Fix (Mar 2026)
-- Fixed duplicated function body in `gpi_integration.py`
-
-## Key Folder Routing Rules
-1. All Canpack -> Dropship Not International / Canpack
-2. Dunnage return freight -> Canpack / Dunnage return freight
-3. Freight issues -> Freight Issues
-4. Credit memos -> Vendor Credit Memos / by vendor
-5. Tooling -> Tooling Invoices
-6. S&H approved -> S&H Invoices Approved Documents / by processor
-7. S&H waiting -> S&H Invoices waiting for approval Documents
-8. International -> Dropship/Warehouse International Documents
-9. Domestic -> Dropship/Warehouse Not International Documents
-10. Unknown -> Miscellaneous Documents
-
-## Database Collections
-- `hub_documents` - Main document store
-- `document_intelligence_results` - AI processing results
-- `sharepoint_folder_rules` - Folder structure (auto-seeded)
-- `sharepoint_vendor_mappings` - Vendor-to-folder mappings (auto-seeded)
-- `sharepoint_processor_assignments` - Who processes what folders (auto-seeded)
+### File & Clear Feature (Mar 2026)
+- **Backend**: `POST /api/documents/{doc_id}/file-and-clear` — one-click suggest folder → move to SharePoint → mark cleared
+- **Backend**: `POST /api/documents/bulk-file-and-clear` — bulk version for queue page
+- **AI Learning**: `filing_actions` MongoDB collection records doc_type + vendor + folder patterns. After 3+ filings of the same pattern, new documents auto-file without intervention
+- **Auto-filing hook**: Added to `on_document_ingested` — checks `filing_actions` for learned patterns before setting NeedsReview
+- **Frontend**: "File & Clear" button on Document Detail page (green, in SharePoint card)
+- **Frontend**: Bulk "File & Clear" button on Queue page (green, in bulk actions bar)
+- **Filing Stats**: `GET /api/documents/filing-actions/stats` — shows learned patterns and auto-file candidates
 
 ## Key API Endpoints
-- `POST /api/gpi-integration/purchase-invoices/from-document/{doc_id}` - Creates PI in BC with document linking
-- `POST /api/gpi-integration/purchase-invoices/retry-lines/{doc_id}` - Deletes bad lines + adds correct ones
-- `POST /api/gpi-integration/sales-orders/from-document/{doc_id}` - Creates SO in BC
-- `GET, POST, PUT, DELETE /api/folder-routing-rules` - CRUD for SharePoint folder rules
-- SharePoint routing endpoints (see Phase 3)
+- `POST /api/documents/{doc_id}/file-and-clear` — File to SharePoint + mark cleared
+- `POST /api/documents/bulk-file-and-clear` — Bulk file & clear
+- `GET /api/documents/filing-actions/stats` — Filing pattern stats
+- `POST /api/gpi-integration/purchase-invoices/from-document/{doc_id}` — Creates PI in BC with GPI Document Link
+- `POST /api/gpi-integration/purchase-invoices/retry-lines/{doc_id}` — Deletes bad lines + adds correct ones
+- SharePoint routing endpoints, folder routing rules CRUD
+
+## Database Collections
+- `hub_documents`, `document_intelligence_results`, `sharepoint_folder_rules`
+- `sharepoint_vendor_mappings`, `sharepoint_processor_assignments`
+- `filing_actions` — AI learning for auto-filing patterns
 
 ## Mocked Services
-- Microsoft Graph API (email ingestion)
-- Business Central write operations (partially - some custom APIs are live)
+- Microsoft Graph API (email ingestion - partial)
 - JWT Authentication (Entra ID)
 - SharePoint file move (demo mode)
-- `link_document_to_bc` returns mock when DEMO_MODE=True
 
 ## P0/P1/P2 Backlog
 ### P1 - Upcoming
@@ -99,7 +70,7 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 
 ### P2 - Future
 - Vendor Inventory Dashboard and Sales module
-- Product/BOM (Bill of Materials) module
+- Product/BOM module
 - Refactor monolithic files (server.py, inventory_ledger.py, InventoryLedgerPage.js)
 - Production email service and Entra ID SSO
 - Decommission legacy Zetadocs system

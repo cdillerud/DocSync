@@ -35,6 +35,78 @@ EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
 # 1. AI Classification + Extraction
 # ---------------------------------------------------------------------------
 
+import re as _re
+
+# BOL keyword patterns for fast pre-AI detection
+_BOL_FILENAME_PATTERNS = _re.compile(
+    r'\b(bol|b[/-]?l|bill[_ -]?of[_ -]?lading|straight[_ -]?bill)\b', _re.IGNORECASE
+)
+
+_BOL_TEXT_PATTERNS = _re.compile(
+    r'(bill\s+of\s+lading|straight\s+bill\s+of\s+lading|'
+    r'uniform\s+straight\s+bill\s+of\s+lading|'
+    r'short\s+form\s+bill\s+of\s+lading|'
+    r'shipper[\'s]*\s+no|consignee|'
+    r'carrier[\'s]*\s+no|pro\s*number|'
+    r'\bbol\s*#|\bb/l\s*no|\bbl\s*no)',
+    _re.IGNORECASE,
+)
+
+
+def _check_obvious_bol(file_path: str, file_name: str) -> dict | None:
+    """Fast heuristic: if filename or first-page text obviously indicates a BOL,
+    return a classification result without calling the LLM."""
+    
+    # Check filename first (cheapest check)
+    fn_lower = file_name.lower()
+    if _BOL_FILENAME_PATTERNS.search(fn_lower):
+        logger.info("Pre-AI BOL detection: filename match '%s'", file_name)
+        return {
+            "suggested_job_type": "Shipping_Document",
+            "confidence": 0.95,
+            "model": "heuristic-bol-filename",
+            "extracted_fields": {"bol_detected_by": "filename_pattern"},
+        }
+
+    # Check first-page text for PDFs (slightly more expensive but still fast)
+    ext = fn_lower.rsplit(".", 1)[-1] if "." in fn_lower else ""
+    if ext == "pdf":
+        try:
+            import fitz  # PyMuPDF
+            with fitz.open(file_path) as pdf_doc:
+                if len(pdf_doc) > 0:
+                    page_text = pdf_doc[0].get_text()[:2000]  # First 2000 chars of page 1
+                    matches = _BOL_TEXT_PATTERNS.findall(page_text)
+                    if len(matches) >= 2:  # Need at least 2 BOL indicators
+                        logger.info("Pre-AI BOL detection: text match (%d indicators) in '%s'", len(matches), file_name)
+                        # Extract basic fields from the text
+                        fields = {"bol_detected_by": "text_pattern", "bol_indicators": len(matches)}
+                        # Try to pull shipper/consignee
+                        shipper_m = _re.search(r'(?:shipper|from)[:\s]*([^\n]{5,60})', page_text, _re.IGNORECASE)
+                        consignee_m = _re.search(r'consignee[:\s]*([^\n]{5,60})', page_text, _re.IGNORECASE)
+                        bol_num_m = _re.search(r'(?:bol|b/l|bl)\s*(?:#|no\.?|number)?\s*[:\s]*([A-Z0-9-]{3,20})', page_text, _re.IGNORECASE)
+                        pro_m = _re.search(r'pro\s*(?:#|no\.?|number)?\s*[:\s]*([A-Z0-9-]{3,20})', page_text, _re.IGNORECASE)
+                        if shipper_m:
+                            fields["vendor"] = shipper_m.group(1).strip()
+                        if consignee_m:
+                            fields["customer"] = consignee_m.group(1).strip()
+                        if bol_num_m:
+                            fields["bol_number"] = bol_num_m.group(1).strip()
+                        if pro_m:
+                            fields["pro_number"] = pro_m.group(1).strip()
+                        return {
+                            "suggested_job_type": "Shipping_Document",
+                            "confidence": 0.92,
+                            "model": "heuristic-bol-text",
+                            "extracted_fields": fields,
+                        }
+        except Exception as e:
+            logger.debug("BOL text check failed for %s: %s", file_name, str(e))
+
+    return None
+
+
+
 async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
     """
     Use Gemini to analyze a document and extract structured data.
@@ -43,6 +115,11 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
     For multi-page PDFs, extracts only the first page to avoid
     classification confusion from supporting documents on later pages.
     """
+    # Fast pre-AI heuristic: catch obvious BOLs by filename before using LLM
+    bol_result = _check_obvious_bol(file_path, file_name)
+    if bol_result:
+        return bol_result
+
     if not EMERGENT_LLM_KEY:
         return {
             "error": "EMERGENT_LLM_KEY not configured",

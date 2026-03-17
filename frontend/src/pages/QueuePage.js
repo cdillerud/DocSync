@@ -412,7 +412,7 @@ export default function QueuePage() {
             <div className="py-16 text-center">
               <FileText className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
               <p className="text-sm text-muted-foreground">No documents found</p>
-              <Button variant="ghost" className="mt-2 text-primary text-sm" onClick={() => navigate('/upload')} data-testid="queue-empty-upload-btn">
+              <Button variant="ghost" className="mt-2 text-primary text-sm" onClick={() => navigate('/documents?tab=upload')} data-testid="queue-empty-upload-btn">
                 Upload your first document
               </Button>
             </div>

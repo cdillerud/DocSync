@@ -230,7 +230,7 @@ export default function DocumentDetailPage() {
       setDerivedState(res.data.derived_state);
     } catch (err) {
       toast.error('Document not found');
-      navigate('/queue');
+      navigate('/documents');
     } finally {
       setLoading(false);
     }
@@ -296,7 +296,7 @@ export default function DocumentDetailPage() {
     <div className="max-w-[1600px] mx-auto" data-testid="document-detail-page">
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
-        <Button variant="ghost" size="icon" onClick={() => navigate('/queue')} data-testid="back-to-queue-btn">
+        <Button variant="ghost" size="icon" onClick={() => navigate('/documents')} data-testid="back-to-queue-btn">
           <ArrowLeft className="w-4 h-4" />
         </Button>
         <div className="flex-1 min-w-0">
@@ -813,7 +813,7 @@ export default function DocumentDetailPage() {
                 </div>
                 {doc.vendor_canonical && (
                   <p className="text-xs text-muted-foreground mt-2 underline underline-offset-2 cursor-pointer hover:text-foreground"
-                    onClick={() => navigate('/stable-vendors')} data-testid="sv-view-vendor-link">
+                    onClick={() => navigate('/vendors?tab=stable')} data-testid="sv-view-vendor-link">
                     View Stable Vendor Details
                   </p>
                 )}

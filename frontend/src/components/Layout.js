@@ -6,33 +6,22 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator
 } from '../components/ui/dropdown-menu';
 import {
-  LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, Brain, FileSpreadsheet, ChevronRight, Users, Zap, Target, Fingerprint, ShieldCheck, ArrowLeftRight, ShoppingCart, Warehouse, ClipboardList, ScanSearch, Layers, Activity, FolderTree
+  LayoutDashboard, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, Users, ShoppingCart, ClipboardList, Brain, FolderTree, ArrowLeftRight
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
-// Simplified navigation - removed redundant workflow pages
+// Consolidated navigation — 8 items instead of 19
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', exact: true },
-  { to: '/upload', icon: UploadCloud, label: 'Upload' },
-  { to: '/queue', icon: Files, label: 'Document Queue' },
-  { to: '/file-import', icon: FileSpreadsheet, label: 'File Import' },
-  { to: '/email-parser', icon: Brain, label: 'Email Config' },
-  { to: '/vendor-intelligence', icon: Users, label: 'Vendor Intel' },
-  { to: '/automation-rules', icon: Zap, label: 'Automation Rules' },
-  { to: '/label-correction-insights', icon: Target, label: 'Label Insights' },
-  { to: '/layout-fingerprints', icon: Fingerprint, label: 'Layout Families' },
-  { to: '/stable-vendors', icon: ShieldCheck, label: 'Stable Vendors' },
-  { to: '/sales-orders', icon: ShoppingCart, label: 'Sales Orders' },
-  { to: '/inventory-ledger', icon: Warehouse, label: 'Inventory Ledger' },
-  { to: '/operations-queue', icon: ClipboardList, label: 'Operations Queue' },
-  { to: '/document-review', icon: ScanSearch, label: 'Doc Intelligence' },
-  { to: '/document-bundles', icon: Layers, label: 'Doc Bundles' },
-  { to: '/document-lifecycle', icon: Activity, label: 'Lifecycle' },
-  { to: '/sharepoint-routing', icon: FolderTree, label: 'SP Routing' },
-  { to: '/bc-integration', icon: ArrowLeftRight, label: 'BC Integration' },
-  { to: '/settings', icon: Settings, label: 'Settings' },
+  { to: '/documents', icon: Files, label: 'Documents' },
+  { to: '/vendors', icon: Users, label: 'Vendors' },
+  { to: '/sales-inventory', icon: ShoppingCart, label: 'Sales & Inventory' },
+  { to: '/intelligence', icon: Brain, label: 'Intelligence' },
+  { to: '/operations-queue', icon: ClipboardList, label: 'Operations' },
+  { to: '/integrations', icon: ArrowLeftRight, label: 'Integrations' },
+  { to: '/config', icon: Settings, label: 'Settings' },
 ];
 
 export default function Layout() {
@@ -79,14 +68,14 @@ export default function Layout() {
   const getPageTitle = () => {
     const path = location.pathname;
     if (path === '/') return 'Dashboard';
-    if (path === '/upload') return 'Upload Document';
-    if (path === '/queue') return 'Document Queue';
-    if (path === '/file-import') return 'File Import';
+    if (path === '/documents') return 'Documents';
+    if (path === '/vendors') return 'Vendors';
+    if (path === '/sales-inventory') return 'Sales & Inventory';
+    if (path === '/intelligence') return 'Intelligence';
+    if (path === '/operations-queue') return 'Operations';
+    if (path === '/integrations') return 'Integrations';
+    if (path === '/config') return 'Settings';
     if (path.startsWith('/documents/')) return 'Document Detail';
-    if (path === '/email-parser') return 'Email Config';
-    if (path === '/settings') return 'Settings';
-    if (path === '/migration/onegamer-poc') return 'SharePoint Migration POC';
-    if (path === '/sharepoint-routing') return 'SharePoint Folder Routing';
     return 'GPI Document Hub';
   };
 

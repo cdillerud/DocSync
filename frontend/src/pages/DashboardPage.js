@@ -1231,7 +1231,7 @@ export default function DashboardPage() {
               <ShieldCheck className="w-5 h-5 text-emerald-500" />
               <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Stable Vendor Auto-Ready</CardTitle>
               <span className="ml-auto text-xs text-muted-foreground hover:text-foreground cursor-pointer underline underline-offset-2"
-                onClick={() => navigate('/stable-vendors')} data-testid="sv-view-all-link">View All</span>
+                onClick={() => navigate('/vendors?tab=stable')} data-testid="sv-view-all-link">View All</span>
             </div>
           </CardHeader>
           <CardContent>
@@ -1346,10 +1346,10 @@ export default function DashboardPage() {
                 <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Quick Actions</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                <Button className="w-full justify-start gap-2" onClick={() => navigate('/upload')} data-testid="quick-upload-btn">
+                <Button className="w-full justify-start gap-2" onClick={() => navigate('/documents?tab=upload')} data-testid="quick-upload-btn">
                   <UploadCloud className="w-4 h-4" /> Upload Document
                 </Button>
-                <Button variant="secondary" className="w-full justify-start gap-2" onClick={() => navigate('/queue')} data-testid="quick-queue-btn">
+                <Button variant="secondary" className="w-full justify-start gap-2" onClick={() => navigate('/documents')} data-testid="quick-queue-btn">
                   <Files className="w-4 h-4" /> View Queue
                 </Button>
                 <Button variant="secondary" className="w-full justify-start gap-2" onClick={fetchStats} data-testid="quick-refresh-btn">

@@ -239,7 +239,7 @@ export default function UploadPage() {
 
       {/* Upload Button */}
       <div className="flex justify-end gap-3">
-        <Button variant="secondary" onClick={() => navigate('/queue')} data-testid="cancel-upload-btn">Cancel</Button>
+        <Button variant="secondary" onClick={() => navigate('/documents')} data-testid="cancel-upload-btn">Cancel</Button>
         <Button onClick={handleUpload} disabled={!file || uploading} data-testid="submit-upload-btn">
           {uploading ? (
             <span className="flex items-center gap-2">

@@ -742,19 +742,55 @@ async def sweep_reclassify_bols(dry_run: bool = False, limit: int = 1000):
         "document_type": {"$nin": ["Shipping_Document", "BOL", None]},
         "status": {"$nin": ["Deleted"]},
     }
-    cursor = db.hub_documents.find(query, {"_id": 0, "id": 1, "file_name": 1, "document_type": 1, "status": 1}).limit(limit)
+    cursor = db.hub_documents.find(query, {
+        "_id": 0, "id": 1, "file_name": 1, "document_type": 1, "status": 1,
+        "extracted_fields": 1, "normalized_fields": 1,
+    }).limit(limit)
 
     reclassified = []
     skipped = 0
 
     async for doc in cursor:
         fn = doc.get("file_name", "")
+        is_bol = False
+        match_reason = ""
+
+        # Check 1: filename pattern
         if _BOL_FILENAME_PATTERNS.search(fn.lower()):
+            is_bol = True
+            match_reason = "filename"
+        else:
+            # Check 2: extracted fields contain BOL indicators
+            ef = doc.get("extracted_fields") or {}
+            nf = doc.get("normalized_fields") or {}
+            all_fields = {**nf, **ef}
+            bol_indicators = 0
+            if all_fields.get("bol_number"):
+                bol_indicators += 2
+            if all_fields.get("pro_number"):
+                bol_indicators += 1
+            if all_fields.get("carrier"):
+                bol_indicators += 1
+            if all_fields.get("consignee"):
+                bol_indicators += 1
+            if all_fields.get("shipper"):
+                bol_indicators += 1
+            if all_fields.get("pieces"):
+                bol_indicators += 1
+            if all_fields.get("weight"):
+                bol_indicators += 1
+            # Need bol_number or 3+ other shipping indicators
+            if all_fields.get("bol_number") or bol_indicators >= 4:
+                is_bol = True
+                match_reason = f"fields({bol_indicators} indicators)"
+
+        if is_bol:
             reclassified.append({
                 "id": doc["id"],
                 "file_name": fn,
                 "old_type": doc.get("document_type", "Unknown"),
                 "old_status": doc.get("status", ""),
+                "match": match_reason,
             })
         else:
             skipped += 1

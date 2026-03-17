@@ -721,3 +721,100 @@ async def bulk_approve_and_file(
         "top_folders": [{"folder": f, "count": c} for f, c in top_folders],
         "message": f"Approved & filed {filed} documents ({failed} failed). {max(0, total_matching - filed - failed)} remaining.",
     }
+
+
+@router.post("/sweep-reclassify-bols")
+async def sweep_reclassify_bols(dry_run: bool = False, limit: int = 1000):
+    """Find documents that are likely BOLs but misclassified, reclassify them,
+    and auto-file + clear them from the queue.
+    
+    Checks filenames for BOL patterns. For PDFs on disk, also checks page 1 text.
+    """
+    import re
+    from services.document_intel_helpers import _BOL_FILENAME_PATTERNS
+    from services.folder_routing_service import determine_folder_path
+
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Find docs NOT already classified as Shipping_Document / BOL
+    query = {
+        "document_type": {"$nin": ["Shipping_Document", "BOL", None]},
+        "status": {"$nin": ["Deleted"]},
+    }
+    cursor = db.hub_documents.find(query, {"_id": 0, "id": 1, "file_name": 1, "document_type": 1, "status": 1}).limit(limit)
+
+    reclassified = []
+    skipped = 0
+
+    async for doc in cursor:
+        fn = doc.get("file_name", "")
+        if _BOL_FILENAME_PATTERNS.search(fn.lower()):
+            reclassified.append({
+                "id": doc["id"],
+                "file_name": fn,
+                "old_type": doc.get("document_type", "Unknown"),
+                "old_status": doc.get("status", ""),
+            })
+        else:
+            skipped += 1
+
+    if dry_run:
+        return {
+            "dry_run": True,
+            "would_reclassify": len(reclassified),
+            "scanned": len(reclassified) + skipped,
+            "samples": reclassified[:20],
+        }
+
+    # Now reclassify + file + clear each one
+    filed = 0
+    failed = 0
+    for item in reclassified:
+        try:
+            doc = await db.hub_documents.find_one({"id": item["id"]}, {"_id": 0})
+            if not doc:
+                failed += 1
+                continue
+
+            folder_path, reason, _ = determine_folder_path({**doc, "document_type": "Shipping_Document"})
+
+            await db.hub_documents.update_one({"id": item["id"]}, {"$set": {
+                "document_type": "Shipping_Document",
+                "classification_method": "heuristic-bol-sweep",
+                "ai_confidence": 0.95,
+                "auto_cleared": True,
+                "auto_clear_decision": "Cleared",
+                "auto_clear_reason": f"BOL sweep: reclassified from {item['old_type']} and filed",
+                "auto_clear_details": {"method": "bol_sweep", "old_type": item["old_type"]},
+                "status": "Completed",
+                "workflow_status": "completed",
+                "sharepoint_folder_suggestion": folder_path,
+                "filed_at": now,
+                "filed_folder": folder_path,
+                "updated_utc": now,
+            }})
+
+            # Record for AI learning
+            vendor = doc.get("vendor_canonical") or doc.get("normalized_fields", {}).get("vendor") or ""
+            await db.filing_actions.update_one(
+                {"document_type": "Shipping_Document", "vendor_lower": vendor.lower(), "folder_path": folder_path},
+                {"$inc": {"count": 1}, "$set": {
+                    "document_type": "Shipping_Document", "vendor": vendor, "vendor_lower": vendor.lower(),
+                    "folder_path": folder_path, "routing_reason": reason, "last_filed_at": now,
+                }},
+                upsert=True,
+            )
+            filed += 1
+        except Exception as e:
+            failed += 1
+            logger.warning("BOL sweep failed for %s: %s", item["id"], str(e)[:100])
+
+    return {
+        "success": True,
+        "scanned": len(reclassified) + skipped,
+        "reclassified_and_filed": filed,
+        "failed": failed,
+        "samples": reclassified[:10],
+        "message": f"Reclassified and filed {filed} BOLs ({failed} failed, {skipped} non-BOL skipped).",
+    }

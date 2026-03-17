@@ -410,22 +410,40 @@ async def delete_purchase_invoice_lines(
         if not existing_lines:
             return {"deleted": 0, "errors": []}
 
-        for line in existing_lines:
-            line_id = line.get("id")
-            if not line_id:
-                continue
-            etag = line.get("@odata.etag", "*")
-            del_resp = await client.delete(
-                f"{base_url}({line_id})",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "If-Match": etag,
-                },
-            )
-            if del_resp.status_code in (200, 204):
-                deleted += 1
-            else:
-                errors.append({"line_id": line_id, "status": del_resp.status_code, "error": del_resp.text[:200]})
+    # Delete each line in a fresh client to avoid connection reuse issues
+    for line in existing_lines:
+        line_id = line.get("id")
+        if not line_id:
+            continue
+        etag = line.get("@odata.etag", "*")
+        try:
+            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as del_client:
+                del_resp = await del_client.delete(
+                    f"{base_url}({line_id})",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "If-Match": etag,
+                    },
+                )
+                if del_resp.status_code in (200, 204):
+                    deleted += 1
+                else:
+                    errors.append({"line_id": line_id, "status": del_resp.status_code, "error": del_resp.text[:200]})
+        except Exception as e:
+            # BC may close connection after DELETE; treat as success if line is gone
+            logger.warning("Delete line %s raised %s, verifying...", line_id, str(e)[:100])
+            try:
+                async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as check_client:
+                    check = await check_client.get(
+                        f"{base_url}({line_id})",
+                        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+                    )
+                    if check.status_code == 404:
+                        deleted += 1  # Line was deleted despite the error
+                    else:
+                        errors.append({"line_id": line_id, "error": str(e)[:200]})
+            except Exception:
+                errors.append({"line_id": line_id, "error": str(e)[:200]})
 
     logger.info("Deleted %d/%d existing lines from PI %s", deleted, len(existing_lines), invoice_system_id)
     return {"deleted": deleted, "total_existing": len(existing_lines), "errors": errors}

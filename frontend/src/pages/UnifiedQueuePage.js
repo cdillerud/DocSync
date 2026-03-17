@@ -27,8 +27,25 @@ import BatchFreightClassifyDialog from "@/components/BatchFreightClassifyDialog"
 
 // Document types and their display names (fallback labels for known types)
 const DOC_TYPE_LABELS = {
-  AP_INVOICE: "AP Invoice",
+  // AI classification types (canonical)
   AP_Invoice: "AP Invoice",
+  AR_Invoice: "AR Invoice",
+  Remittance: "Remittance",
+  Freight_Document: "Freight Doc",
+  Sales_Order: "Sales Order",
+  Sales_PO: "Sales PO",
+  Sales_Quote: "Sales Quote",
+  Order_Confirmation: "Order Confirm",
+  Purchase_Order: "Purchase Order",
+  Warehouse_Receipt: "Warehouse Receipt",
+  Warehouse_Document: "Warehouse Doc",
+  Inventory_Report: "Inventory Report",
+  Shipping_Document: "Shipping Doc",
+  Quality_Issue: "Quality Issue",
+  Return_Request: "Return Request",
+  Unknown_Document: "Unknown",
+  // Legacy BC-style types (fallback)
+  AP_INVOICE: "AP Invoice",
   SALES_ORDER: "Sales Order",
   SALES_INVOICE: "Sales Invoice",
   PURCHASE_ORDER: "Purchase Order",
@@ -36,15 +53,9 @@ const DOC_TYPE_LABELS = {
   SALES_CREDIT_MEMO: "Sales Credit",
   PURCHASE_CREDIT_MEMO: "Purchase Credit",
   STATEMENT: "Statement",
-  Shipping_Document: "Shipping Doc",
-  Freight_Document: "Freight Doc",
-  Warehouse_Receipt: "Warehouse Receipt",
   QUALITY_DOC: "Quality Doc",
-  Order_Confirmation: "Order Confirm",
-  Unknown_Document: "Unknown",
   OTHER: "Other",
   Other: "Other",
-  Remittance: "Remittance",
   REMITTANCE: "Remittance",
   Credit_Memo: "Credit Memo",
   BOL: "BOL",
@@ -560,7 +571,7 @@ export default function UnifiedQueuePage() {
                             </div>
                           </div>
                         </TableCell>
-                        <TableCell>{getTypeBadge(doc.doc_type)}</TableCell>
+                        <TableCell>{getTypeBadge(doc.document_type || doc.doc_type)}</TableCell>
                         <TableCell>{getStatusBadge(doc.status || doc.workflow_status)}</TableCell>
                         <TableCell data-testid={`ref-intel-${doc.id}`}>
                           {(() => {

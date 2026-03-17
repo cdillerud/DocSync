@@ -38,6 +38,7 @@ const DOC_TYPE_LABELS = {
   STATEMENT: "Statement",
   Shipping_Document: "Shipping Doc",
   Freight_Document: "Freight Doc",
+  Warehouse_Receipt: "Warehouse Receipt",
   QUALITY_DOC: "Quality Doc",
   Order_Confirmation: "Order Confirm",
   Unknown_Document: "Unknown",

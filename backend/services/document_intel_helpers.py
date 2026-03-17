@@ -42,6 +42,62 @@ _BOL_FILENAME_PATTERNS = _re.compile(
     r'\b(bol|b[/-]?l|bill[_ -]?of[_ -]?lading|straight[_ -]?bill)\b', _re.IGNORECASE
 )
 
+# Warehouse receipt patterns — check BEFORE BOL to prevent misclassification
+_WR_FILENAME_PATTERNS = _re.compile(
+    r'\b(warehouse[_ -]?receipt|wh[_ -]?receipt|wr[_ -]?\d|non[_ -]?negotiable)\b', _re.IGNORECASE
+)
+
+_WR_TEXT_PATTERNS = _re.compile(
+    r'(warehouse\s+receipt|non[- ]negotiable\s+warehouse|goods\s+receiv|'
+    r'received\s+(?:in|at)\s+(?:good|apparent)|'
+    r'stored\s+(?:in|at)\s+warehouse|warehouse\s+no)',
+    _re.IGNORECASE,
+)
+
+
+def _check_obvious_warehouse_receipt(file_path: str, file_name: str) -> dict | None:
+    """Fast heuristic: if filename or first-page text indicates a warehouse receipt,
+    classify immediately. Must run BEFORE BOL check since WRs often contain shipping terms."""
+    
+    fn_lower = file_name.lower()
+    if _WR_FILENAME_PATTERNS.search(fn_lower):
+        logger.info("Pre-AI WR detection: filename match '%s'", file_name)
+        return {
+            "suggested_job_type": "Warehouse_Receipt",
+            "confidence": 0.95,
+            "model": "heuristic-wr-filename",
+            "extracted_fields": {"wr_detected_by": "filename_pattern"},
+        }
+    
+    ext = fn_lower.rsplit(".", 1)[-1] if "." in fn_lower else ""
+    if ext == "pdf":
+        try:
+            import fitz
+            with fitz.open(file_path) as pdf_doc:
+                if len(pdf_doc) > 0:
+                    page_text = pdf_doc[0].get_text()[:3000]
+                    matches = _WR_TEXT_PATTERNS.findall(page_text)
+                    if matches:
+                        logger.info("Pre-AI WR detection: text match (%d indicators) in '%s'", len(matches), file_name)
+                        fields = {"wr_detected_by": "text_pattern"}
+                        # Extract receipt number
+                        rcpt_m = _re.search(r'(?:receipt|rcpt)\s*(?:#|no\.?|number)?\s*[:\s]*([A-Z0-9-]{3,20})', page_text, _re.IGNORECASE)
+                        client_m = _re.search(r'client[:\s]*([^\n]{5,60})', page_text, _re.IGNORECASE)
+                        if rcpt_m:
+                            fields["receipt_number"] = rcpt_m.group(1).strip()
+                        if client_m:
+                            fields["customer"] = client_m.group(1).strip()
+                        return {
+                            "suggested_job_type": "Warehouse_Receipt",
+                            "confidence": 0.90,
+                            "model": "heuristic-wr-text",
+                            "extracted_fields": fields,
+                        }
+        except Exception as e:
+            logger.debug("WR text check failed for %s: %s", file_name, e)
+    
+    return None
+
 _BOL_TEXT_PATTERNS = _re.compile(
     r'(bill\s+of\s+lading|straight\s+bill\s+of\s+lading|'
     r'uniform\s+straight\s+bill\s+of\s+lading|'
@@ -115,6 +171,11 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
     For multi-page PDFs, extracts only the first page to avoid
     classification confusion from supporting documents on later pages.
     """
+    # Fast pre-AI heuristic: catch obvious warehouse receipts FIRST (before BOL check)
+    wr_result = _check_obvious_warehouse_receipt(file_path, file_name)
+    if wr_result:
+        return wr_result
+    
     # Fast pre-AI heuristic: catch obvious BOLs by filename before using LLM
     bol_result = _check_obvious_bol(file_path, file_name)
     if bol_result:
@@ -539,7 +600,7 @@ MULTI-PAGE BUNDLE HANDLING:
 - Supporting documents (BOLs, freight bills, packing slips) attached after the primary document do NOT change the classification
 - Examples of bundles:
   * PO Confirmation + BOL + Freight Bill → classify as Sales_Order (the PO is the primary doc)
-  * Warehouse Receipt + BOL → classify as Inventory_Report or Order_Confirmation (the receipt is primary)
+  * Warehouse Receipt + BOL → classify as Warehouse_Receipt (the receipt is primary, NOT a Sales_Order)
   * Invoice + Packing Slip → classify as AP_Invoice (the invoice is primary)
   * Bill of Lading ONLY (no other lead doc) → classify as Shipping_Document
 - Key rule: If page 1 is a PO, order, receipt, or invoice, classify based on THAT — not the supporting shipping docs that follow
@@ -569,10 +630,10 @@ Freight_Document: Shipping/freight INVOICES specifically — freight bills reque
 - A standalone Bill of Lading or BOL without an invoice component is a Shipping_Document, not a Freight_Document
 
 == Sales Category ==
-Sales_Order: Customer purchase orders to us, PO confirmations, warehouse receipt confirmations
+Sales_Order: Customer purchase orders to us, PO confirmations
 - Extract: customer name, po_number, order_date, amount, ship_to address
-- Look for "Purchase Order", "PO#", "Order", "PO Confirmation", "Warehouse Receipt", quantity, ship to
-- If a PDF starts with a PO Confirmation or Warehouse Receipt followed by BOLs/freight bills, this is a Sales_Order
+- Look for "Purchase Order", "PO#", "Order", "PO Confirmation", quantity, ship to
+- If a PDF starts with a PO Confirmation followed by BOLs/freight bills, this is a Sales_Order
 
 Sales_Quote: Price quotes or proposals to customers
 - Extract: customer, amount, valid_until
@@ -581,6 +642,14 @@ Sales_Quote: Price quotes or proposals to customers
 Order_Confirmation: Order acknowledgments
 - Extract: order_number, customer, amount
 - Look for "Confirmation", "Acknowledged", "Order Acknowledgment"
+
+Warehouse_Receipt: Non-negotiable or negotiable warehouse receipts — documents confirming goods received into storage
+- These are issued by a warehouse/3PL (e.g., Koch Logistics) to the client (e.g., Gamer Packaging)
+- Extract: receipt_number, receipt_date, warehouse, client, received_from, reference, carrier, items, quantities, weight, lot_numbers
+- Look for "Warehouse Receipt", "Non-Negotiable Warehouse Receipt", "Goods Received", lot numbers, manufacture dates, bin/location info
+- Key indicators: a warehouse company header, "Client" field, "Received From" field, detailed inventory line items with lot/batch tracking
+- NOT the same as a PO or Sales Order — this is a receiving/storage confirmation
+- A warehouse receipt + BOL bundle → classify as Warehouse_Receipt (the receipt is the primary doc)
 
 Inventory_Report: Stock/inventory status reports
 - Extract: warehouse, items, quantities
@@ -605,7 +674,7 @@ Unknown_Document: Cannot determine type confidently
 
 Always respond with valid JSON in this exact format:
 {
-    "document_type": "AP_Invoice|AR_Invoice|Remittance|Freight_Document|Sales_Order|Sales_Quote|Order_Confirmation|Inventory_Report|Shipping_Document|Quality_Issue|Return_Request|Unknown_Document",
+    "document_type": "AP_Invoice|AR_Invoice|Remittance|Freight_Document|Sales_Order|Sales_Quote|Order_Confirmation|Warehouse_Receipt|Inventory_Report|Shipping_Document|Quality_Issue|Return_Request|Unknown_Document",
     "confidence": 0.0-1.0,
     "extracted_fields": {
         "vendor": "...",
@@ -629,6 +698,10 @@ Always respond with valid JSON in this exact format:
         "weight": "...",
         "pieces": "...",
         "warehouse": "...",
+        "receipt_number": "...",
+        "receipt_date": "...",
+        "received_from": "...",
+        "lot_numbers": "...",
         "items": "...",
         "ship_to": "...",
         "is_international": false,

@@ -10,7 +10,7 @@ sys.path.insert(0, '/app/backend')
 
 
 # Test configuration
-API_BASE_URL = "https://backlog-clearance.preview.emergentagent.com"
+API_BASE_URL = "https://smart-classifier-3.preview.emergentagent.com"
 
 
 @pytest.fixture

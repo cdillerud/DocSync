@@ -55,7 +55,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://backlog-clearance.preview.emergentagent.com"
+    "api_url": "https://smart-classifier-3.preview.emergentagent.com"
   },
   "seed_data_created": {
     "drafts_created": [

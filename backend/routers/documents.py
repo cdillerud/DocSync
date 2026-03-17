@@ -618,3 +618,106 @@ async def get_filing_action_stats():
         "auto_file_threshold": 3,
         "auto_file_candidates": [a for a in actions if a.get("count", 0) >= 3],
     }
+
+
+@router.post("/bulk-approve-and-file")
+async def bulk_approve_and_file(
+    category: str = None,
+    limit: int = 500,
+):
+    """Bulk approve validated documents and file them to SharePoint.
+    
+    category options:
+    - 'needs_approval': validated docs awaiting sign-off (the 1,176 backlog)
+    - 'needs_vendor_review': AP docs with no vendor match
+    - 'all': everything not completed
+    - None/default: same as 'needs_approval'
+    """
+    from services.folder_routing_service import determine_folder_path
+
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Build query based on category
+    if category == "needs_vendor_review":
+        query = {
+            "document_type": {"$in": ["AP_Invoice", "AP_INVOICE", "Remittance", "REMITTANCE"]},
+            "$or": [
+                {"validation_results.match_method": "none"},
+                {"validation_results.match_method": {"$exists": False}},
+                {"vendor_canonical": {"$exists": False}},
+                {"vendor_canonical": None},
+            ],
+            "status": {"$nin": ["Completed", "Archived", "Posted", "Deleted"]},
+        }
+    elif category == "all":
+        query = {
+            "status": {"$nin": ["Completed", "Archived", "Posted", "Deleted"]},
+        }
+    else:
+        # Default: needs_approval — validated docs awaiting sign-off
+        query = {
+            "status": {"$nin": ["Completed", "Archived", "Posted", "Deleted"]},
+            "$or": [
+                {"validation_results.all_passed": True},
+                {"workflow_status": {"$in": ["ready_for_approval", "validated", "ready_for_post"]}},
+                {"workflow_status": "processing"},
+            ],
+        }
+
+    total_matching = await db.hub_documents.count_documents(query)
+    cursor = db.hub_documents.find(query, {"_id": 0}).limit(limit)
+
+    filed = 0
+    failed = 0
+    filing_counts = {}
+
+    async for doc in cursor:
+        try:
+            doc_id = doc["id"]
+            folder_path, reason, _ = determine_folder_path(doc)
+
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+                "auto_cleared": True,
+                "auto_clear_decision": "Cleared",
+                "auto_clear_reason": f"Bulk approved & filed: {reason}",
+                "auto_clear_details": {"method": "bulk_approve_and_file", "cleared_by": "admin"},
+                "status": "Completed",
+                "workflow_status": "completed",
+                "sharepoint_folder_suggestion": folder_path,
+                "filed_at": now,
+                "filed_folder": folder_path,
+                "updated_utc": now,
+            }})
+
+            # Record for AI learning
+            doc_type = doc.get("document_type") or doc.get("suggested_job_type") or "Unknown"
+            vendor = doc.get("vendor_canonical") or doc.get("normalized_fields", {}).get("vendor") or ""
+            await db.filing_actions.update_one(
+                {"document_type": doc_type, "vendor_lower": vendor.lower(), "folder_path": folder_path},
+                {"$inc": {"count": 1}, "$set": {
+                    "document_type": doc_type, "vendor": vendor, "vendor_lower": vendor.lower(),
+                    "folder_path": folder_path, "routing_reason": reason, "last_filed_at": now,
+                }},
+                upsert=True,
+            )
+
+            filed += 1
+            filing_counts[folder_path] = filing_counts.get(folder_path, 0) + 1
+        except Exception as e:
+            failed += 1
+            logger.warning("Bulk approve failed for %s: %s", doc.get("id", "?"), str(e)[:100])
+
+    # Sort filing counts by volume
+    top_folders = sorted(filing_counts.items(), key=lambda x: -x[1])[:10]
+
+    return {
+        "success": True,
+        "total_matching": total_matching,
+        "processed": filed + failed,
+        "filed": filed,
+        "failed": failed,
+        "remaining": max(0, total_matching - filed - failed),
+        "top_folders": [{"folder": f, "count": c} for f, c in top_folders],
+        "message": f"Approved & filed {filed} documents ({failed} failed). {max(0, total_matching - filed - failed)} remaining.",
+    }

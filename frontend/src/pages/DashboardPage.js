@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getDashboardStats, retryWorkflow, getWorkflowIntelligence, getStableVendorMetrics, getDailyIngestion } from '../lib/api';
+import { getDashboardStats, retryWorkflow, getWorkflowIntelligence, getStableVendorMetrics, getDailyIngestion, bulkApproveAndFile } from '../lib/api';
 import api from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -14,7 +14,7 @@ import {
   TrendingUp, Target, Zap, Clock, Users, Truck, Database, FolderArchive, 
   BarChart3, PieChart, Activity, Layers, Network, Building2, GitBranch,
   UserX, Link2Off, ClipboardCheck, Bell, ShieldCheck, Route,
-  Gauge, ShieldAlert, Eye, Ban, HelpCircle, Calendar, Inbox, Mail
+  Gauge, ShieldAlert, Eye, Ban, HelpCircle, Calendar, Inbox, Mail, Archive, Loader2
 } from 'lucide-react';
 import AutomationMetricsCard from '../components/AutomationMetricsCard';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, PieChart as RechartsPieChart, Pie, Legend } from 'recharts';
@@ -48,6 +48,9 @@ function formatPercent(value) {
 
 // Action Required Card - Shows the 3 actionable queues
 function ActionRequiredCard({ data, onNavigate }) {
+  const [processing, setProcessing] = useState(false);
+  const [result, setResult] = useState(null);
+  
   if (!data) return null;
   
   const queues = [
@@ -59,7 +62,8 @@ function ActionRequiredCard({ data, onNavigate }) {
       icon: UserX,
       color: 'text-red-500',
       bgColor: 'bg-red-500/10',
-      filter: 'vendor_pending'
+      filter: 'vendor_pending',
+      bulkCategory: 'needs_vendor_review',
     },
     {
       key: 'needs_po_match',
@@ -69,7 +73,8 @@ function ActionRequiredCard({ data, onNavigate }) {
       icon: Link2Off,
       color: 'text-amber-500',
       bgColor: 'bg-amber-500/10',
-      filter: 'po_pending'
+      filter: 'po_pending',
+      bulkCategory: null,
     },
     {
       key: 'needs_approval',
@@ -79,11 +84,29 @@ function ActionRequiredCard({ data, onNavigate }) {
       icon: ClipboardCheck,
       color: 'text-blue-500',
       bgColor: 'bg-blue-500/10',
-      filter: 'ready_for_approval'
+      filter: 'ready_for_approval',
+      bulkCategory: 'needs_approval',
     }
   ];
 
   const totalAction = data.total_action_needed || 0;
+
+  const handleBulkApprove = async (category, count) => {
+    if (!window.confirm(`Approve & file ${count} documents? They'll be routed to SharePoint and cleared.`)) return;
+    setProcessing(true);
+    setResult(null);
+    try {
+      const res = await bulkApproveAndFile(category, 500);
+      const d = res.data || res;
+      setResult(d);
+      toast.success(d.message || `Filed ${d.filed} documents`);
+      // Refresh the page after a short delay
+      setTimeout(() => window.location.reload(), 1500);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Bulk approve failed');
+    }
+    setProcessing(false);
+  };
 
   return (
     <Card className="border-2 border-amber-500/50 bg-gradient-to-br from-amber-500/5 to-transparent" data-testid="action-required-card">
@@ -105,7 +128,7 @@ function ActionRequiredCard({ data, onNavigate }) {
           <div
             key={queue.key}
             className={`${queue.bgColor} rounded-lg p-4 cursor-pointer hover:ring-2 hover:ring-offset-2 hover:ring-offset-background hover:ring-${queue.color.replace('text-', '')} transition-all`}
-            onClick={() => onNavigate && onNavigate(`/queue?filter=${queue.filter}`)}
+            onClick={() => onNavigate && onNavigate(`/documents?filter=${queue.filter}`)}
             data-testid={`action-${queue.key}`}
           >
             <div className="flex items-center justify-between">
@@ -116,8 +139,23 @@ function ActionRequiredCard({ data, onNavigate }) {
                   <div className="text-xs text-muted-foreground">{queue.description}</div>
                 </div>
               </div>
-              <div className={`text-2xl font-black ${queue.color}`} style={{ fontFamily: 'Chivo, sans-serif' }}>
-                {queue.count}
+              <div className="flex items-center gap-3">
+                {queue.bulkCategory && queue.count > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    disabled={processing}
+                    onClick={(e) => { e.stopPropagation(); handleBulkApprove(queue.bulkCategory, queue.count); }}
+                    data-testid={`bulk-approve-${queue.key}`}
+                  >
+                    {processing ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Archive className="w-3 h-3 mr-1" />}
+                    Approve & File All
+                  </Button>
+                )}
+                <div className={`text-2xl font-black ${queue.color}`} style={{ fontFamily: 'Chivo, sans-serif' }}>
+                  {queue.count}
+                </div>
               </div>
             </div>
           </div>

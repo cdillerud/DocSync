@@ -158,6 +158,7 @@ export const bulkDeleteDocuments = async (docIds) => {
 // File & Clear
 export const fileAndClearDocument = (docId) => api.post(`/documents/${docId}/file-and-clear`);
 export const bulkFileAndClear = (docIds) => api.post('/documents/bulk-file-and-clear', docIds);
+export const bulkApproveAndFile = (category, limit = 500) => api.post(`/documents/bulk-approve-and-file?category=${category || 'needs_approval'}&limit=${limit}`);
 export const getFilingStats = () => api.get('/documents/filing-actions/stats');
 
 // Workflows

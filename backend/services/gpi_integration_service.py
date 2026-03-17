@@ -262,6 +262,66 @@ async def add_sales_order_lines(
     return {"added": added, "total": len(lines), "errors": errors}
 
 
+async def attach_document_to_bc_record(
+    bc_record_id: str,
+    file_name: str,
+    file_content: bytes,
+    bc_entity: str = "purchaseInvoices",
+    content_type: str = None,
+) -> Dict[str, Any]:
+    """Attach a document to a BC record in the WRITE environment via documentAttachments API."""
+    _check_write_protection("attach_document_to_bc_record")
+    if not HAS_CREDENTIALS:
+        raise ValueError("BC credentials not configured")
+
+    token = await _get_token()
+    company_id = await _get_company_id_standard_api()
+
+    if not content_type:
+        ext = file_name.lower().rsplit('.', 1)[-1] if '.' in file_name else ''
+        ct_map = {'pdf': 'application/pdf', 'png': 'image/png', 'jpg': 'image/jpeg',
+                  'jpeg': 'image/jpeg', 'doc': 'application/msword', 'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                  'txt': 'text/plain'}
+        content_type = ct_map.get(ext, 'application/octet-stream')
+
+    base = f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/{BC_STANDARD_API}/companies({company_id})"
+    attach_url = f"{base}/{bc_entity}({bc_record_id})/documentAttachments"
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        # Step 1: Create attachment metadata
+        create_resp = await client.post(
+            attach_url,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"fileName": file_name},
+        )
+        if create_resp.status_code not in (200, 201):
+            error_msg = create_resp.text[:300]
+            try:
+                error_msg = create_resp.json().get("error", {}).get("message", error_msg)
+            except Exception:
+                pass
+            return {"success": False, "error": f"Failed to create attachment (HTTP {create_resp.status_code}): {error_msg}"}
+
+        attachment_data = create_resp.json()
+        attachment_id = attachment_data.get("id")
+        if not attachment_id:
+            return {"success": False, "error": "No attachment ID returned"}
+
+        # Step 2: Upload file content
+        content_url = f"{base}/{bc_entity}({bc_record_id})/documentAttachments({attachment_id})/attachmentContent"
+        upload_resp = await client.patch(
+            content_url,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": content_type, "If-Match": "*"},
+            content=file_content,
+        )
+        if upload_resp.status_code not in (200, 204):
+            error_msg = upload_resp.text[:300]
+            return {"success": False, "error": f"Failed to upload content (HTTP {upload_resp.status_code}): {error_msg}"}
+
+    logger.info("Attached '%s' to BC %s %s", file_name, bc_entity, bc_record_id)
+    return {"success": True, "method": "api", "attachment_id": attachment_id}
+
+
 # Fallback defaults for purchase invoice lines
 BC_PI_FALLBACK_GL_ACCOUNT = os.environ.get('BC_PI_FALLBACK_GL_ACCOUNT', '60500')
 BC_PI_FALLBACK_ITEM_CODE = os.environ.get('BC_PI_FALLBACK_ITEM_CODE', os.environ.get('BC_DEFAULT_ITEM_CODE', ''))

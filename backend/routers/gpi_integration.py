@@ -35,6 +35,7 @@ from services.gpi_integration_service import (
     create_purchase_invoice,
     add_purchase_invoice_lines,
     delete_purchase_invoice_lines,
+    attach_document_to_bc_record,
     create_customer,
     create_vendor,
     list_integration_logs,
@@ -1325,10 +1326,8 @@ async def create_purchase_invoice_from_document(
                     logger.warning("PI %s: SharePoint download error: %s", result.get("bc_record_no", ""), str(sp_err))
 
             if file_content:
-                share_link = doc.get("sharepoint_share_link_url", "")
-                link_result = await srv.link_document_to_bc(
+                link_result = await attach_document_to_bc_record(
                     bc_record_id=result["bc_system_id"],
-                    share_link=share_link,
                     file_name=doc.get("file_name", "document"),
                     file_content=file_content,
                     bc_entity="purchaseInvoices",

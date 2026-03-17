@@ -32,79 +32,72 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - Document-level folder suggestion, SharePoint file move (demo mode)
 
 ### P0 Fixes (Mar 2026)
-- **Multi-page PDF Classification**: Extract first page only
-- **BC Purchase Invoice Document Link**: Created `create_gpi_document_link` function that POSTs to `gpi/documents/v1.0` API to populate the GPI Documents factbox
-- **PI Retry-Lines Delete-Before-Add**: New `delete_purchase_invoice_lines` with per-line client isolation to handle BC connection reuse issues
-- **Duplicate _sanitize_lines**: Removed
+- Multi-page PDF Classification: Extract first page only
+- BC Purchase Invoice Document Link
+- PI Retry-Lines Delete-Before-Add
+- Duplicate _sanitize_lines removed
 
 ### File & Clear Feature (Mar 2026)
-- **Backend**: `POST /api/documents/{doc_id}/file-and-clear` — one-click suggest folder → move to SharePoint → mark cleared
-- **Backend**: `POST /api/documents/bulk-file-and-clear` — bulk version for queue page
-- **AI Learning**: `filing_actions` MongoDB collection records doc_type + vendor + folder patterns. After 3+ filings of the same pattern, new documents auto-file without intervention
-- **Auto-filing hook**: Added to `on_document_ingested` — checks `filing_actions` for learned patterns before setting NeedsReview
-- **Frontend**: "File & Clear" button on Document Detail page (green, in SharePoint card)
-- **Frontend**: Bulk "File & Clear" button on Queue page (green, in bulk actions bar)
-- **Filing Stats**: `GET /api/documents/filing-actions/stats` — shows learned patterns and auto-file candidates
+- One-click suggest folder → move to SharePoint → mark cleared
+- Bulk version for queue page
+- AI learning from filing patterns (auto-file after 3+ same patterns)
+
+### Bug Fix: Stable Vendors Count (Mar 2026)
+- Unified threshold logic across all code paths
+- Configuration-driven thresholds via stable_vendor_config collection
+
+### Bug Fix: Readiness Contradiction (Mar 2026)
+- Short-circuit in evaluate_readiness() for terminal docs
+- Live re-evaluation on document detail endpoint
+
+### Classification Learning Loop (Mar 2026)
+- User corrections stored and used as few-shot examples in Gemini prompt
+- Vendor-type patterns tracked for classification hints
+- Accuracy metrics API with confusion matrix
+- New document type: Warehouse_Receipt
+
+### Auto PI Creation Pipeline (Mar 2026)
+- Automatic Purchase Invoice creation in BC sandbox for AP_Invoice docs
+- Context-aware line items (PO/BOL in description for freight)
+- Configurable via BC_WRITE_ENABLED flag
+
+### Classification Bootstrap Sweep (Mar 2026)
+- POST /api/documents/classification/bootstrap-from-history — mines existing documents
+- 3-tier confidence model: manual corrections > high AI confidence > completed docs
+- Idempotent — safe to re-run without duplicates
+- Background task with status tracking endpoint
+- Result: 36 documents bootstrapped, 22 vendor patterns created, 41 total corrections
+
+### Document Type Alignment (Mar 2026)
+- Frontend dropdown updated to show all 15 AI classification types
+- Types: AP Invoice, AR Invoice, Remittance, Freight Document, Sales Order, Sales PO, Sales Quote, Order Confirmation, Purchase Order, Warehouse Receipt, Inventory Report, Shipping Document, Quality Issue, Return Request, Unknown
+- Warehouse_Receipt added to DEFAULT_JOB_TYPES backend config
 
 ## Key API Endpoints
 - `POST /api/documents/{doc_id}/file-and-clear` — File to SharePoint + mark cleared
 - `POST /api/documents/bulk-file-and-clear` — Bulk file & clear
 - `GET /api/documents/filing-actions/stats` — Filing pattern stats
-- `POST /api/gpi-integration/purchase-invoices/from-document/{doc_id}` — Creates PI in BC with GPI Document Link
-- `POST /api/gpi-integration/purchase-invoices/retry-lines/{doc_id}` — Deletes bad lines + adds correct ones
-- SharePoint routing endpoints, folder routing rules CRUD
+- `POST /api/gpi-integration/purchase-invoices/from-document/{doc_id}` — Creates PI in BC
+- `GET /api/documents/classification-accuracy` — Classification metrics
+- `POST /api/documents/classification/bootstrap-from-history` — Bootstrap learning model
+- `GET /api/documents/classification/bootstrap-status` — Bootstrap progress
 
 ## Database Collections
 - `hub_documents`, `document_intelligence_results`, `sharepoint_folder_rules`
 - `sharepoint_vendor_mappings`, `sharepoint_processor_assignments`
 - `filing_actions` — AI learning for auto-filing patterns
+- `classification_corrections` — User corrections + bootstrap data for few-shot learning
+- `vendor_type_patterns` — Vendor → document type associations
 
 ## Mocked Services
 - Microsoft Graph API (email ingestion - partial)
 - JWT Authentication (Entra ID)
 - SharePoint file move (demo mode)
 
-### Bug Fix: Stable Vendors Count (Mar 2026)
-- **Root Cause**: Three separate code paths set `stable_vendor_flag` with inconsistent thresholds
-- **Fix**: Unified all paths to read thresholds from `stable_vendor_config` collection
-- **Additional fixes**: Auto rate now counts all completed docs (not just auto_cleared), threshold caps prevent 100% values, vendor name dedup improved
-- **Files changed**: `backend/routers/vendor_profile_rebuild.py`, `backend/services/vendor_intelligence_service.py`, `backend/routers/stable_vendor.py`
-- **New endpoint**: `POST /api/stable-vendor/reset-config` — resets thresholds to sensible defaults
-
-### Bug Fix: Readiness Contradiction (Mar 2026)
-- **Root Cause**: Readiness was a point-in-time snapshot, never re-evaluated after auto-clear/completion
-- **Fix**: Short-circuit in `evaluate_readiness()` — terminal docs return "Ready Auto Link" at 100%. Document detail endpoint re-evaluates stale readiness on the fly.
-- **Files changed**: `backend/services/document_readiness_service.py`, `backend/routers/documents.py`
-
-### Classification Learning Loop (Mar 2026)
-- **Feature**: AI classification now improves from user corrections
-- **How it works**:
-  1. User corrects a document type → correction stored with doc context (filename, vendor, text snippet)
-  2. Next classification: few-shot examples from corrections injected into Gemini prompt
-  3. Vendor-type patterns tracked: if 70%+ of vendor's docs are one type, hint given to AI
-  4. Accuracy metrics API: confusion matrix, worst types, vendor patterns
-- **New document type**: `Warehouse_Receipt` (was previously lumped into Sales_Order)
-- **Collections**: `classification_corrections`, `vendor_type_patterns`
-- **Files**: `backend/services/classification_feedback_service.py` (new), `backend/services/document_intel_helpers.py` (updated prompt + few-shot injection), `backend/routers/documents.py` (accuracy endpoint), `backend/routers/ap_review.py` (correction recording)
-- **API**: `GET /api/documents/classification-accuracy`
-
-### Auto PI Creation Pipeline (Mar 2026)
-- **Feature**: When an AP_Invoice document passes auto-clear, the system automatically creates a Purchase Invoice in BC sandbox with line items and GPI document link
-- **PI Line Logic**: 
-  - Extracts ALL line items from the document
-  - PO/BOL reference goes in Description/Comment field (Square9/BC pattern)
-  - Default item = FREIGHT (configurable via `BC_DEFAULT_ITEM_CODE`)
-  - Explicit item numbers/SKUs from AI extraction are validated via item_mapping_service
-  - Mapping history recorded for learning
-- **Config**: `BC_WRITE_ENABLED=true`, writes target `Sandbox_11_3_2025` only
-- **Safety**: Production writes blocked via `BC_BLOCK_PRODUCTION_WRITES=true`
-- **Key functions**: `auto_create_pi_from_document()`, `_build_pi_lines_with_mapping()`, `_resolve_po_reference()` in `backend/routers/gpi_integration.py`
-- **Pipeline hook**: `backend/server.py` auto-clear flow → auto PI for AP_Invoice docs
-- **Production action**: Deploy, process a Tumalo Creek invoice, verify PI in BC sandbox
-
 ## P0/P1/P2 Backlog
 ### P1 - Upcoming
 - Admin UI for managing item mapping rules
+- Azure OpenAI integration (user deferred)
 
 ### P2 - Future
 - Vendor Inventory Dashboard and Sales module

@@ -3,9 +3,13 @@
 from fastapi import APIRouter, Query, Response
 from typing import Optional
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from deps import get_db, DEMO_MODE
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
+
+# GPI operates on US Central Time
+GPI_TZ = ZoneInfo("America/Chicago")
 
 
 async def _get_alias_metrics_safe(db, total_docs: int) -> dict:
@@ -40,21 +44,23 @@ async def _get_alias_metrics_safe(db, total_docs: int) -> dict:
 async def get_daily_ingestion(date: Optional[str] = None):
     """
     Get document ingestion stats for a specific day.
-    Defaults to today (UTC). Pass date=YYYY-MM-DD for other days.
+    Defaults to today (Central Time). Pass date=YYYY-MM-DD for other days.
     """
     db = get_db()
 
     if date:
         try:
-            day_start = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            day_start = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=GPI_TZ)
         except ValueError:
-            day_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            day_start = datetime.now(GPI_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
     else:
-        day_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        day_start = datetime.now(GPI_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
 
-    day_end = day_start + timedelta(days=1)
-    day_str_start = day_start.isoformat()
-    day_str_end = day_end.isoformat()
+    # Convert to UTC for DB queries (dates stored as UTC ISO strings)
+    day_start_utc = day_start.astimezone(timezone.utc)
+    day_end_utc = day_start_utc + timedelta(days=1)
+    day_str_start = day_start_utc.isoformat()
+    day_str_end = day_end_utc.isoformat()
 
     date_filter = {"created_utc": {"$gte": day_str_start, "$lt": day_str_end}}
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getDashboardStats, retryWorkflow, getWorkflowIntelligence, getStableVendorMetrics, getDailyIngestion, bulkApproveAndFile } from '../lib/api';
+import { getDashboardStats, retryWorkflow, getWorkflowIntelligence, getDailyIngestion, bulkApproveAndFile } from '../lib/api';
 import api from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -1129,7 +1129,6 @@ function DailyIngestionCard({ data, date, onDateChange }) {
 export default function DashboardPage() {
   const [stats, setStats] = useState(null);
   const [intelligence, setIntelligence] = useState(null);
-  const [stableVendorMetrics, setStableVendorMetrics] = useState(null);
   const [dailyIngestion, setDailyIngestion] = useState(null);
   const [ingestionDate, setIngestionDate] = useState(() => {
     const d = new Date(); return d.toISOString().split('T')[0];
@@ -1140,15 +1139,13 @@ export default function DashboardPage() {
   const fetchStats = async () => {
     setLoading(true);
     try {
-      const [statsRes, intelligenceRes, svRes, diRes] = await Promise.all([
+      const [statsRes, intelligenceRes, diRes] = await Promise.all([
         getDashboardStats(),
         getWorkflowIntelligence().catch(() => ({ data: null })),
-        getStableVendorMetrics().catch(() => ({ data: null })),
         getDailyIngestion(ingestionDate).catch(() => ({ data: null })),
       ]);
       setStats(statsRes.data);
       setIntelligence(intelligenceRes.data);
-      setStableVendorMetrics(svRes.data);
       setDailyIngestion(diRes.data);
     } catch (err) {
       toast.error('Failed to load dashboard');
@@ -1260,55 +1257,6 @@ export default function DashboardPage() {
 
       {/* Automation Intelligence Metrics */}
       <AutomationMetricsCard />
-
-      {/* Stable Vendor Auto-Ready KPIs */}
-      {stableVendorMetrics && stableVendorMetrics.feature_enabled && (
-        <Card className="border border-border" data-testid="stable-vendor-kpi-card">
-          <CardHeader className="pb-3">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-5 h-5 text-emerald-500" />
-              <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Stable Vendor Auto-Ready</CardTitle>
-              <span className="ml-auto text-xs text-muted-foreground hover:text-foreground cursor-pointer underline underline-offset-2"
-                onClick={() => navigate('/vendors?tab=stable')} data-testid="sv-view-all-link">View All</span>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-              <div className="text-center" data-testid="sv-stable-count">
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Stable Vendors</p>
-                <p className="text-2xl font-black" style={{ fontFamily: 'Chivo, sans-serif' }}>
-                  {stableVendorMetrics.stable_vendors_count}
-                  <span className="text-xs font-normal text-muted-foreground ml-1">/ {stableVendorMetrics.total_vendors}</span>
-                </p>
-              </div>
-              <div className="text-center" data-testid="sv-auto-ready-today">
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Auto Ready Today</p>
-                <p className="text-2xl font-black text-emerald-500" style={{ fontFamily: 'Chivo, sans-serif' }}>
-                  {stableVendorMetrics.auto_ready_today}
-                </p>
-              </div>
-              <div className="text-center" data-testid="sv-low-priority-today">
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Low Priority Today</p>
-                <p className="text-2xl font-black text-sky-500" style={{ fontFamily: 'Chivo, sans-serif' }}>
-                  {stableVendorMetrics.low_priority_today}
-                </p>
-              </div>
-              <div className="text-center" data-testid="sv-total-processed">
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Processed Today</p>
-                <p className="text-2xl font-black" style={{ fontFamily: 'Chivo, sans-serif' }}>
-                  {stableVendorMetrics.total_processed_today}
-                </p>
-              </div>
-              <div className="text-center" data-testid="sv-automation-rate">
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Auto-Ready Rate</p>
-                <p className="text-2xl font-black text-emerald-500" style={{ fontFamily: 'Chivo, sans-serif' }}>
-                  {(stableVendorMetrics.stable_vendor_automation_rate * 100).toFixed(0)}%
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Main Intelligence Grid */}
       <Tabs defaultValue="overview" className="w-full">

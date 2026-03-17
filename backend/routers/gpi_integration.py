@@ -1300,8 +1300,31 @@ async def create_purchase_invoice_from_document(
             import server as srv
             upload_dir = Path(os.environ.get("UPLOAD_DIR", "/app/backend/uploads"))
             file_path = upload_dir / doc_id
+            file_content = None
+
+            # Try loading from disk first
             if file_path.exists():
                 file_content = file_path.read_bytes()
+                logger.info("PI %s: loaded file from disk for BC link", result.get("bc_record_no", ""))
+            # Fallback: download from SharePoint if drive_id and item_id available
+            elif doc.get("sharepoint_drive_id") and doc.get("sharepoint_item_id"):
+                try:
+                    import httpx as _httpx
+                    sp_token = await srv.get_graph_token()
+                    sp_drive = doc["sharepoint_drive_id"]
+                    sp_item = doc["sharepoint_item_id"]
+                    dl_url = f"https://graph.microsoft.com/v1.0/drives/{sp_drive}/items/{sp_item}/content"
+                    async with _httpx.AsyncClient(timeout=30.0, follow_redirects=True) as sp_client:
+                        sp_resp = await sp_client.get(dl_url, headers={"Authorization": f"Bearer {sp_token}"})
+                        if sp_resp.status_code == 200:
+                            file_content = sp_resp.content
+                            logger.info("PI %s: downloaded file from SharePoint for BC link (%d bytes)", result.get("bc_record_no", ""), len(file_content))
+                        else:
+                            logger.warning("PI %s: SharePoint download failed HTTP %d", result.get("bc_record_no", ""), sp_resp.status_code)
+                except Exception as sp_err:
+                    logger.warning("PI %s: SharePoint download error: %s", result.get("bc_record_no", ""), str(sp_err))
+
+            if file_content:
                 share_link = doc.get("sharepoint_share_link_url", "")
                 link_result = await srv.link_document_to_bc(
                     bc_record_id=result["bc_system_id"],
@@ -1315,7 +1338,7 @@ async def create_purchase_invoice_from_document(
                 else:
                     logger.warning("PI %s: failed to link document to BC: %s", result.get("bc_record_no", ""), link_result.get("error", ""))
             else:
-                logger.warning("PI %s: file not found at %s, skipping BC document link", result.get("bc_record_no", ""), file_path)
+                logger.warning("PI %s: no file content available (not on disk, no SharePoint refs), skipping BC document link", result.get("bc_record_no", ""))
         except Exception as link_err:
             logger.warning("PI %s: exception linking document to BC: %s", result.get("bc_record_no", ""), str(link_err))
 

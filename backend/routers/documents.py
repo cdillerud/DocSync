@@ -254,6 +254,19 @@ async def get_document(doc_id: str, include_events: bool = Query(True)):
             derived_state = await derived_state_service.derive_state(doc_id, doc)
             derived_state["display"] = format_state_for_display(derived_state)
 
+    # Reconcile stale readiness with actual document state
+    doc_status = (doc.get("status") or "").lower()
+    workflow_status = (doc.get("workflow_status") or "").lower()
+    is_terminal = (
+        doc.get("auto_cleared")
+        or doc_status in ("completed", "posted", "archived")
+        or workflow_status in ("completed", "exported", "processed")
+    )
+    stored_readiness = doc.get("readiness") or {}
+    if is_terminal and stored_readiness.get("status") not in ("ready_auto_link", "ready_auto_draft"):
+        from services.document_readiness_service import evaluate_readiness
+        doc["readiness"] = evaluate_readiness(doc)
+
     # Reconcile stale ap_validation_result warnings with current vendor state
     ap_val = doc.get("ap_validation_result")
     if ap_val:

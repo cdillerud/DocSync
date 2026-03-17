@@ -138,6 +138,29 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
     Returns a canonical readiness object.
     """
     signals = compute_signals(doc)
+
+    # --- Short-circuit: already completed/auto-cleared docs ---
+    doc_status = (doc.get("status") or "").lower()
+    workflow_status = (doc.get("workflow_status") or "").lower()
+    is_terminal = (
+        doc.get("auto_cleared")
+        or doc_status in ("completed", "posted", "archived")
+        or workflow_status in ("completed", "exported", "processed")
+    )
+    if is_terminal:
+        return {
+            "status": STATUS_READY_AUTO_LINK,
+            "confidence": 1.0,
+            "recommended_action": ACTION_AUTO_LINK,
+            "blocking_reasons": [],
+            "warning_reasons": [],
+            "required_reviewer_actions": [],
+            "explanations": ["Document already processed and completed"],
+            "signals": signals,
+            "last_evaluated_at": datetime.now(timezone.utc).isoformat(),
+            "reviewed_override": signals.get("manually_overridden", False),
+        }
+
     blocking: List[str] = []
     warnings: List[str] = []
     reviewer_actions: List[str] = []

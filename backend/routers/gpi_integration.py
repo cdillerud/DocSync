@@ -961,6 +961,179 @@ def _build_pi_idempotency_key(doc_id: str) -> str:
     return f"PI_{hashlib.sha256(doc_id.encode()).hexdigest()[:24]}"
 
 
+async def auto_create_pi_from_document(doc_id: str, db) -> dict:
+    """Automatically create a Purchase Invoice in BC sandbox from an auto-cleared AP_Invoice.
+    
+    Called from the intake pipeline after a document is auto-cleared.
+    Returns a result dict with success/failure info. Never raises — all errors are caught.
+    """
+    try:
+        doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+        if not doc:
+            return {"success": False, "reason": "document_not_found"}
+
+        # Only AP_Invoice eligible
+        doc_type = doc.get("document_type") or doc.get("suggested_job_type") or ""
+        if doc_type not in PURCHASE_INVOICE_ELIGIBLE_TYPES:
+            return {"success": False, "reason": f"ineligible_type:{doc_type}", "skipped": True}
+
+        # Skip if PI already exists
+        if doc.get("bc_purchase_invoice"):
+            return {"success": True, "reason": "already_exists", "skipped": True,
+                    "bc_record_no": doc["bc_purchase_invoice"].get("bc_record_no", "")}
+
+        if not HAS_CREDENTIALS:
+            return {"success": False, "reason": "no_bc_credentials"}
+
+        # Check BC write safety guard
+        from services.bc_write_safety_guard import check_bc_write_allowed
+        write_ok = await check_bc_write_allowed(doc_id, "auto_create_purchase_invoice")
+        if not write_ok:
+            return {"success": False, "reason": "bc_writes_disabled"}
+
+        # Resolve vendor
+        vendor_info = await _resolve_vendor_no(doc)
+        vendor_no = vendor_info.get("vendor_no")
+        if not vendor_no:
+            return {"success": False, "reason": "no_vendor_resolved"}
+
+        ef = doc.get("extracted_fields") or {}
+        nf = doc.get("normalized_fields") or {}
+        vendor_invoice_no = ef.get("invoice_number") or nf.get("invoice_number") or ""
+        document_date = ef.get("invoice_date") or nf.get("invoice_date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        idempotency_key = _build_pi_idempotency_key(doc_id)
+        transaction_id = f"TXN_{uuid.uuid4().hex[:12]}"
+
+        # Step 1: Create PI header
+        result = await create_purchase_invoice(
+            vendor_no=vendor_no,
+            vendor_invoice_no=vendor_invoice_no,
+            document_date=document_date,
+            posting_date=document_date,
+            source_doc_id=doc_id,
+            idempotency_key=idempotency_key,
+            transaction_id=transaction_id,
+        )
+
+        if not result.get("success"):
+            logger.error("[AutoPI] Failed to create PI for doc %s: %s", doc_id, result.get("error_message", ""))
+            return {"success": False, "reason": "bc_api_error", "error": result.get("error_message", "")}
+
+        # Step 2: Add line items
+        line_results = None
+        if result.get("bc_system_id"):
+            line_items = ef.get("line_items") or nf.get("line_items") or []
+            if not line_items:
+                total_amount = float(nf.get("amount", 0) or ef.get("amount", 0) or 0)
+                if total_amount > 0:
+                    inv_no = vendor_invoice_no or ""
+                    desc = f"Per invoice {inv_no}" if inv_no else f"Invoice from {vendor_info.get('vendor_name', '')}"
+                    line_items = [{"description": desc[:100], "quantity": 1, "unit_price": total_amount}]
+
+            if line_items:
+                try:
+                    bc_lines = []
+                    for li in line_items:
+                        bc_line = {
+                            "description": li.get("description", ""),
+                            "quantity": float(li.get("quantity", 1) or 1),
+                            "unitCost": float(li.get("unit_price", 0) or li.get("unitCost", 0) or 0),
+                        }
+                        if li.get("item_number") or li.get("lineObjectNumber"):
+                            bc_line["lineObjectNumber"] = li.get("item_number") or li["lineObjectNumber"]
+                            bc_line["lineType"] = "Item"
+                        elif li.get("gl_account") or li.get("account_number"):
+                            bc_line["lineObjectNumber"] = li.get("gl_account") or li["account_number"]
+                            bc_line["lineType"] = "Account"
+                        bc_lines.append(bc_line)
+                    line_results = await add_purchase_invoice_lines(
+                        invoice_system_id=result["bc_system_id"],
+                        lines=bc_lines,
+                    )
+                except Exception as e:
+                    logger.error("[AutoPI] Failed to add lines for doc %s: %s", doc_id, str(e))
+                    line_results = {"added": 0, "total": len(line_items), "errors": [{"error": str(e)}]}
+
+        # Step 3: Create GPI Document Link
+        link_result = None
+        if result.get("bc_system_id"):
+            try:
+                link_result = await create_gpi_document_link(
+                    bc_system_id=result["bc_system_id"],
+                    bc_document_no=result.get("bc_record_no", ""),
+                    document_type="Purchase Invoice",
+                    sharepoint_url=doc.get("sharepoint_share_link_url", ""),
+                    sharepoint_drive_id=doc.get("sharepoint_drive_id", ""),
+                    sharepoint_item_id=doc.get("sharepoint_item_id", ""),
+                    uploaded_by="GPI Hub",
+                    source="GPIHub_Auto",
+                )
+            except Exception as link_err:
+                logger.warning("[AutoPI] GPI link failed for doc %s: %s", doc_id, str(link_err))
+
+        # Step 4: Write back to document
+        now = datetime.now(timezone.utc).isoformat()
+        bc_purchase_invoice = {
+            "bc_record_no": result.get("bc_record_no", ""),
+            "bc_system_id": result.get("bc_system_id", ""),
+            "idempotency_key": idempotency_key,
+            "transaction_id": transaction_id,
+            "status": result.get("status", ""),
+            "success": True,
+            "vendor_no": vendor_no,
+            "vendor_name": vendor_info.get("vendor_name", ""),
+            "vendor_invoice_no": vendor_invoice_no,
+            "document_date": document_date,
+            "posting_date": document_date,
+            "created_at": now,
+            "created_by": "auto_pipeline",
+            "lines_added": line_results["added"] if line_results else 0,
+            "lines_total": line_results["total"] if line_results else 0,
+            "document_linked": link_result.get("success", False) if link_result else False,
+        }
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {"bc_purchase_invoice": bc_purchase_invoice, "updated_utc": now}}
+        )
+
+        # Emit event
+        try:
+            from services.event_service import get_event_service
+            es = get_event_service()
+            if es:
+                await es.emit_event(
+                    document_id=doc_id,
+                    event_type="bc.purchase_invoice.auto_created",
+                    source_service="auto_pipeline",
+                    payload={
+                        "bc_record_no": result.get("bc_record_no", ""),
+                        "vendor_no": vendor_no,
+                        "vendor_invoice_no": vendor_invoice_no,
+                    },
+                    actor="system",
+                )
+        except Exception:
+            pass
+
+        logger.info("[AutoPI] Created PI %s for doc %s (lines: %d/%d, linked: %s)",
+                     result.get("bc_record_no", ""), doc_id,
+                     line_results["added"] if line_results else 0,
+                     line_results["total"] if line_results else 0,
+                     link_result.get("success", False) if link_result else False)
+
+        return {
+            "success": True,
+            "bc_record_no": result.get("bc_record_no", ""),
+            "bc_system_id": result.get("bc_system_id", ""),
+            "lines_added": line_results["added"] if line_results else 0,
+        }
+
+    except Exception as e:
+        logger.error("[AutoPI] Unexpected error for doc %s: %s", doc_id, str(e), exc_info=True)
+        return {"success": False, "reason": "unexpected_error", "error": str(e)}
+
+
+
 @router.post("/purchase-invoices/preflight/{doc_id}")
 async def purchase_invoice_preflight(doc_id: str):
     """Preflight validation: check if a document is ready for BC Purchase Invoice creation."""

@@ -3746,6 +3746,23 @@ async def _internal_intake_document(
             if auto_clear_decision == AutoClearDecision.CLEARED:
                 final_status = "Completed"  # Override final status
                 logger.info("[Auto-Clear] Document %s AUTO-CLEARED: %s", doc_id, auto_clear_reason)
+                
+                # AUTO-CREATE PURCHASE INVOICE in BC sandbox for AP_Invoice docs
+                try:
+                    doc_type = (doc_for_eval.get("document_type") or 
+                                doc_for_eval.get("suggested_job_type") or "")
+                    if doc_type == "AP_Invoice":
+                        from routers.gpi_integration import auto_create_pi_from_document
+                        pi_result = await auto_create_pi_from_document(doc_id, db)
+                        if pi_result.get("success") and not pi_result.get("skipped"):
+                            logger.info("[AutoPI] Purchase Invoice %s auto-created for doc %s",
+                                       pi_result.get("bc_record_no", ""), doc_id)
+                        elif pi_result.get("skipped"):
+                            logger.debug("[AutoPI] Skipped for doc %s: %s", doc_id, pi_result.get("reason", ""))
+                        else:
+                            logger.warning("[AutoPI] Failed for doc %s: %s", doc_id, pi_result.get("reason", ""))
+                except Exception as pi_err:
+                    logger.error("[AutoPI] Error auto-creating PI for doc %s: %s", doc_id, str(pi_err))
             else:
                 logger.debug("[Auto-Clear] Document %s NOT cleared: %s", doc_id, auto_clear_reason)
     except Exception as e:

@@ -65,13 +65,28 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - SharePoint file move (demo mode)
 
 ### Bug Fix: Stable Vendors Count (Mar 2026)
-- **Root Cause**: Three separate code paths set `stable_vendor_flag` with inconsistent thresholds:
-  - `vendor_profile_rebuild.py`: hardcoded `val_rate >= 0.4` + OR logic
-  - `vendor_intelligence_service.py`: legacy constants (only 2 of 5 criteria)
-  - `stable_vendor_service.py`: config-based (correct, uses `stable_vendor_config`)
+- **Root Cause**: Three separate code paths set `stable_vendor_flag` with inconsistent thresholds
 - **Fix**: Unified all paths to read thresholds from `stable_vendor_config` collection
-- **Files changed**: `backend/routers/vendor_profile_rebuild.py`, `backend/services/vendor_intelligence_service.py`
-- **Action required in production**: Run "Re-evaluate All" or trigger `/api/vendor-profiles/rebuild/run` to recalculate flags
+- **Additional fixes**: Auto rate now counts all completed docs (not just auto_cleared), threshold caps prevent 100% values, vendor name dedup improved
+- **Files changed**: `backend/routers/vendor_profile_rebuild.py`, `backend/services/vendor_intelligence_service.py`, `backend/routers/stable_vendor.py`
+- **New endpoint**: `POST /api/stable-vendor/reset-config` — resets thresholds to sensible defaults
+
+### Bug Fix: Readiness Contradiction (Mar 2026)
+- **Root Cause**: Readiness was a point-in-time snapshot, never re-evaluated after auto-clear/completion
+- **Fix**: Short-circuit in `evaluate_readiness()` — terminal docs return "Ready Auto Link" at 100%. Document detail endpoint re-evaluates stale readiness on the fly.
+- **Files changed**: `backend/services/document_readiness_service.py`, `backend/routers/documents.py`
+
+### Extracted Data Card Restored (Mar 2026)
+- Previous agent removed the extracted data display card during UI cleanup
+- Restored in `frontend/src/pages/DocumentDetailPage.js` — shows all extracted fields + line items
+
+### Auto PI Creation Pipeline (Mar 2026)
+- **Feature**: When an AP_Invoice document passes auto-clear, the system automatically creates a Purchase Invoice in BC sandbox with line items and GPI document link
+- **Config**: `BC_WRITE_ENABLED=true` enables the pipeline
+- **Safety**: Production writes blocked via `BC_BLOCK_PRODUCTION_WRITES=true`, writes target `Sandbox_11_3_2025` only
+- **New function**: `auto_create_pi_from_document()` in `backend/routers/gpi_integration.py`
+- **Pipeline hook**: Added to auto-clear flow in `backend/server.py` after `AutoClearDecision.CLEARED`
+- **Files changed**: `backend/.env`, `backend/routers/gpi_integration.py`, `backend/server.py`
 
 ## P0/P1/P2 Backlog
 ### P1 - Upcoming

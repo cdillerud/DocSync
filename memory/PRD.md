@@ -64,6 +64,15 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - JWT Authentication (Entra ID)
 - SharePoint file move (demo mode)
 
+### Bug Fix: Stable Vendors Count (Mar 2026)
+- **Root Cause**: Three separate code paths set `stable_vendor_flag` with inconsistent thresholds:
+  - `vendor_profile_rebuild.py`: hardcoded `val_rate >= 0.4` + OR logic
+  - `vendor_intelligence_service.py`: legacy constants (only 2 of 5 criteria)
+  - `stable_vendor_service.py`: config-based (correct, uses `stable_vendor_config`)
+- **Fix**: Unified all paths to read thresholds from `stable_vendor_config` collection
+- **Files changed**: `backend/routers/vendor_profile_rebuild.py`, `backend/services/vendor_intelligence_service.py`
+- **Action required in production**: Run "Re-evaluate All" or trigger `/api/vendor-profiles/rebuild/run` to recalculate flags
+
 ## P0/P1/P2 Backlog
 ### P1 - Upcoming
 - Admin UI for managing item mapping rules

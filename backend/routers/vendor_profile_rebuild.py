@@ -126,11 +126,15 @@ async def rebuild_run():
         resolution_rate = round(vendor_resolved / max(doc_count, 1), 4)
         ref_rate = round(ref_resolved / max(doc_count, 1), 4)
 
-        # Stable vendor check (relaxed thresholds for real data)
+        # Stable vendor check — use same config as StableVendorService
+        sv_cfg = await db.stable_vendor_config.find_one(
+            {"config_id": "stable_vendor_defaults"}, {"_id": 0}
+        ) or {}
         is_stable = (
-            doc_count >= 10
-            and (auto_rate >= 0.5 or resolution_rate >= 0.7)
-            and val_rate >= 0.4
+            doc_count >= sv_cfg.get("min_documents_processed", 10)
+            and auto_rate >= sv_cfg.get("min_automation_success_rate", 0.50)
+            and resolution_rate >= sv_cfg.get("min_reference_resolution_rate", 0.70)
+            and val_rate >= sv_cfg.get("min_validation_pass_rate", 0.05)
         )
 
         # Compute score (0-1)
@@ -187,11 +191,7 @@ async def rebuild_run():
 
     duration_ms = int((time.time() - start) * 1000)
 
-    stable_count = sum(1 for _, d in groups.items()
-                       if d["doc_count"] >= 10
-                       and (round(d["auto_cleared_count"] / max(d["doc_count"], 1), 4) >= 0.5
-                            or round(d["vendor_resolved_count"] / max(d["doc_count"], 1), 4) >= 0.7)
-                       and round(d["validation_passed_count"] / max(d["doc_count"], 1), 4) >= 0.4)
+    stable_count = await db.vendor_intelligence_profiles.count_documents({"stable_vendor_flag": True})
 
     return {
         "status": "completed",

@@ -75,7 +75,7 @@
   },
   "test_credentials": {
     "auth": "admin / admin",
-    "api_url": "https://bc-integration-debug.preview.emergentagent.com"
+    "api_url": "https://backlog-clearance.preview.emergentagent.com"
   },
   "seed_data_created": {},
   "retest_needed": false,

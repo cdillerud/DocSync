@@ -290,11 +290,19 @@ class VendorIntelligenceService:
         domain_counts[doc_domain] = domain_counts.get(doc_domain, 0) + 1
         typical_domain = max(domain_counts, key=domain_counts.get) if domain_counts else "unknown"
 
-        # Stable vendor check
+        # Stable vendor check — load thresholds from config
+        sv_cfg = await self.db.stable_vendor_config.find_one(
+            {"config_id": "stable_vendor_defaults"}, {"_id": 0}
+        ) or {}
         was_stable = existing.get("stable_vendor_flag", False)
+        auto_rate_val = auto_success / n if n > 0 else 0
+        res_rate_val = res_success / n if n > 0 else 0
+        val_rate_val = val_pass / n if n > 0 else 0
         is_stable = (
-            n >= STABLE_VENDOR_MIN_INVOICES
-            and (auto_success / n if n > 0 else 0) >= STABLE_VENDOR_MIN_AUTOMATION_RATE
+            n >= sv_cfg.get("min_documents_processed", STABLE_VENDOR_MIN_INVOICES)
+            and auto_rate_val >= sv_cfg.get("min_automation_success_rate", STABLE_VENDOR_MIN_AUTOMATION_RATE)
+            and res_rate_val >= sv_cfg.get("min_reference_resolution_rate", 0.70)
+            and val_rate_val >= sv_cfg.get("min_validation_pass_rate", 0.05)
         )
 
         update_doc = {

@@ -784,10 +784,10 @@ async def sweep_reclassify_bols(dry_run: bool = False, limit: int = 1000):
             if all_fields.get("weight"):
                 bol_indicators += 1
 
-            # Must have bol_number, OR 5+ indicators without invoice fields
-            if all_fields.get("bol_number"):
+            # Must have bol_number WITHOUT invoice fields, OR 5+ indicators without invoice fields
+            if all_fields.get("bol_number") and not has_invoice_fields:
                 is_bol = True
-                match_reason = f"bol_number+fields({bol_indicators})"
+                match_reason = f"bol_number+fields({bol_indicators}, no invoice fields)"
             elif bol_indicators >= 5 and not has_invoice_fields:
                 is_bol = True
                 match_reason = f"fields({bol_indicators}, no invoice fields)"

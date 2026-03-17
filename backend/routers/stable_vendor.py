@@ -237,11 +237,12 @@ async def diagnose_stable_vendors():
         val_rates = sorted([p.get("validation_pass_rate", 0) for p in profiles], reverse=True)
 
         # Find threshold at ~30th percentile (would qualify top 30%)
+        # Apply upper caps to prevent impossibly strict thresholds
         idx_30 = max(0, int(len(profiles) * 0.3) - 1)
         suggested = {
-            "min_documents_processed": max(3, inv_counts[idx_30] if idx_30 < len(inv_counts) else 3),
-            "min_automation_success_rate": round(max(0.3, auto_rates[idx_30] if idx_30 < len(auto_rates) else 0.3), 2),
-            "min_validation_pass_rate": round(max(0.01, val_rates[idx_30] if idx_30 < len(val_rates) else 0.01), 2),
+            "min_documents_processed": max(3, min(50, inv_counts[idx_30] if idx_30 < len(inv_counts) else 3)),
+            "min_automation_success_rate": round(max(0.3, min(0.80, auto_rates[idx_30] if idx_30 < len(auto_rates) else 0.3)), 2),
+            "min_validation_pass_rate": round(max(0.01, min(0.70, val_rates[idx_30] if idx_30 < len(val_rates) else 0.01)), 2),
         }
     else:
         suggested = {}
@@ -274,9 +275,9 @@ async def apply_suggested_thresholds():
         return {"status": "no_changes", "message": "No suggestions available"}
 
     updates = {
-        "min_documents_processed": suggested.get("min_documents_processed", 10),
-        "min_automation_success_rate": suggested.get("min_automation_success_rate", 0.50),
-        "min_validation_pass_rate": suggested.get("min_validation_pass_rate", 0.05),
+        "min_documents_processed": min(50, suggested.get("min_documents_processed", 10)),
+        "min_automation_success_rate": min(0.80, suggested.get("min_automation_success_rate", 0.50)),
+        "min_validation_pass_rate": min(0.70, suggested.get("min_validation_pass_rate", 0.05)),
     }
 
     updated_config = await svc.update_config(updates)
@@ -289,4 +290,19 @@ async def apply_suggested_thresholds():
         "thresholds_applied": updates,
         "reevaluation": reeval,
     }
+
+
+@router.post("/reset-config")
+async def reset_stable_vendor_config():
+    """Reset stable vendor config to sensible defaults. Use this if thresholds got corrupted."""
+    svc = _svc()
+    updates = {
+        "min_documents_processed": DEFAULT_STABLE_VENDOR_CONFIG["min_documents_processed"],
+        "min_automation_success_rate": DEFAULT_STABLE_VENDOR_CONFIG["min_automation_success_rate"],
+        "min_reference_resolution_rate": DEFAULT_STABLE_VENDOR_CONFIG["min_reference_resolution_rate"],
+        "max_correction_rate": DEFAULT_STABLE_VENDOR_CONFIG["max_correction_rate"],
+        "min_validation_pass_rate": DEFAULT_STABLE_VENDOR_CONFIG["min_validation_pass_rate"],
+    }
+    updated = await svc.update_config(updates)
+    return {"status": "reset", "config": updated}
 

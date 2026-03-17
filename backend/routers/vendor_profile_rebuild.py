@@ -25,14 +25,14 @@ router = APIRouter(prefix="/vendor-profiles", tags=["Vendor Profiles"])
 
 
 def _normalize_vendor_name(name: str) -> str:
-    """Normalize vendor name for dedup: lowercase, strip punctuation, collapse whitespace."""
+    """Normalize vendor name for dedup: lowercase, strip suffixes/punctuation, collapse whitespace."""
     if not name:
         return ""
     s = name.lower().strip()
-    # Remove common suffixes that vary
-    s = re.sub(r'\b(inc\.?|llc\.?|ltd\.?|corp\.?|co\.?|company|corporation)\b', '', s, flags=re.IGNORECASE)
-    # Remove punctuation
-    s = re.sub(r'[.,;:\'\"()\-/&]', ' ', s)
+    # Remove common business suffixes that vary
+    s = re.sub(r'\b(inc\.?|llc\.?|ltd\.?|corp\.?|co\.?|company|corporation|pte\.?|int\'?l\.?|international)\b', '', s, flags=re.IGNORECASE)
+    # Remove punctuation (including apostrophes, hyphens, etc.)
+    s = re.sub(r'[.,;:\'\"()\-/&!@#$%^*_+=\[\]{}|\\<>?~`]', ' ', s)
     # Collapse whitespace
     s = re.sub(r'\s+', ' ', s).strip()
     return s
@@ -273,14 +273,18 @@ async def _aggregate_vendor_data(db):
         if vno and not g["vendor_no"]:
             g["vendor_no"] = vno
 
-        # Auto-cleared
-        if doc.get("auto_cleared"):
+        # Automation success: doc was processed end-to-end successfully
+        # Includes auto-cleared, manually approved, or any terminal success status
+        status = (doc.get("status") or "").lower()
+        workflow_status = (doc.get("workflow_status") or "").lower()
+        if (doc.get("auto_cleared")
+            or status in ("completed", "posted", "linkedtobc", "storedinsp", "archived")
+            or workflow_status in ("completed", "processed", "exported", "validation_passed")):
             g["auto_cleared_count"] += 1
 
         # Validation passed
         val_state = (doc.get("validation_state") or "").lower()
         val_results = doc.get("validation_results") or {}
-        status = (doc.get("status") or "").lower()
         if (val_state == "pass"
             or val_results.get("all_passed")
             or status in ("validationpassed", "validated", "storedinsp", "readytolink", "linkedtobc", "completed", "posted")):

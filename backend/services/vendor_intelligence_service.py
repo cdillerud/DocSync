@@ -150,7 +150,12 @@ class VendorIntelligenceService:
                 break
 
         resolution_success = outcome in ("exact_match", "likely_match")
-        automation_success = resolution_success and doc.get("auto_cleared", False)
+        # Automation success: doc was processed end-to-end (auto-cleared OR completed/posted)
+        doc_status = (doc.get("status") or "").lower()
+        automation_success = (
+            doc.get("auto_cleared", False)
+            or doc_status in ("completed", "posted", "linkedtobc", "storedinsp", "archived")
+        )
 
         is_freight = doc_type in ("Freight_Invoice", "Freight Invoice", "Freight")
         is_shipping = doc_type in ("Shipping_Document", "Shipping Document", "BOL", "Bill_of_Lading")

@@ -51,29 +51,29 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
   // Entity resolution state
   const [resolutions, setResolutions] = useState([]);
   const [resolving, setResolving] = useState(false);
-  const [showResolutions, setShowResolutions] = useState(true);
+  const [showResolutions, setShowResolutions] = useState(false);
   const [correctingId, setCorrectingId] = useState(null);
   const [correctionInput, setCorrectionInput] = useState({ id: '', name: '' });
 
   // Transaction matching state
   const [txMatches, setTxMatches] = useState([]);
   const [matching, setMatching] = useState(false);
-  const [showMatches, setShowMatches] = useState(true);
+  const [showMatches, setShowMatches] = useState(false);
   const [linking, setLinking] = useState(false);
   const [linkResult, setLinkResult] = useState(null);
   const [confirmingMatchId, setConfirmingMatchId] = useState(null);
 
   // Bundle state
   const [bundleInfo, setBundleInfo] = useState(null);
-  const [showBundle, setShowBundle] = useState(true);
+  const [showBundle, setShowBundle] = useState(false);
 
   // Lifecycle state
-  const [showLifecycle, setShowLifecycle] = useState(true);
+  const [showLifecycle, setShowLifecycle] = useState(false);
   const [lifecycleValidating, setLifecycleValidating] = useState(false);
 
   // Decision state
   const [decisionData, setDecisionData] = useState(null);
-  const [showDecision, setShowDecision] = useState(true);
+  const [showDecision, setShowDecision] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
   const [executing, setExecuting] = useState(false);
 

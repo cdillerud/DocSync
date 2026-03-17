@@ -402,9 +402,14 @@ export default function DocumentDetailPage() {
               ) : (
                 <div className="space-y-3 text-sm">
                   <InfoRow label="Document Type" value={<Badge variant="secondary">{doc.document_type}</Badge>} />
-                  <InfoRow label="BC Record Type" value={doc.bc_record_type || '-'} />
-                  <InfoRow label="BC Document No" value={doc.bc_document_no || '-'} mono />
-                  <InfoRow label="BC Record ID" value={doc.bc_record_id ? doc.bc_record_id.slice(0, 12) + '...' : '-'} mono />
+                  {doc.bc_document_no && <InfoRow label="BC Document No" value={doc.bc_document_no} mono />}
+                  {doc.bc_record_id && <InfoRow label="BC Record ID" value={doc.bc_record_id.slice(0, 12) + '...'} mono />}
+                  {(doc.ai_confidence || doc.classification_method) && (
+                    <div className="border-t border-border pt-2 mt-2 space-y-1.5">
+                      {doc.classification_method && <InfoRow label="Method" value={doc.classification_method} mono />}
+                      {doc.ai_confidence !== undefined && <InfoRow label="Confidence" value={`${(doc.ai_confidence * 100).toFixed(0)}%`} />}
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>
@@ -602,31 +607,6 @@ export default function DocumentDetailPage() {
             </Card>
           )}
 
-          {/* AI Classification Card */}
-          {(doc.ai_confidence || doc.classification_method) && (
-            <Card className="border border-border" data-testid="doc-ai-classification-card">
-              <CardHeader className="pb-3">
-                <div className="flex items-center gap-2">
-                  <Receipt className="w-4 h-4 text-blue-500" />
-                  <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>
-                    AI Classification
-                  </CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                {doc.ai_model && (
-                  <InfoRow label="Model" value={doc.ai_model} mono />
-                )}
-                {doc.classification_method && (
-                  <InfoRow label="Method" value={doc.classification_method} mono />
-                )}
-                {doc.ai_confidence !== undefined && (
-                  <InfoRow label="Confidence" value={`${(doc.ai_confidence * 100).toFixed(0)}%`} />
-                )}
-              </CardContent>
-            </Card>
-          )}
-
           {/* Readiness Panel */}
           <ReadinessPanel readiness={doc.readiness} />
 
@@ -651,46 +631,58 @@ export default function DocumentDetailPage() {
             />
           )}
 
-          {/* BC Sales Order Panel - for eligible document types */}
+          {/* Document Intelligence Panel */}
           <DocumentIntelligencePanel
             document={doc}
             onUpdate={() => fetchDoc()}
           />
 
-          {/* BC Sales Order Panel - for eligible document types */}
-          <CreateBCSalesOrderPanel 
-            document={doc} 
-            onUpdate={() => fetchDoc()} 
-          />
+          {/* BC Sales Order Panel - only for sales-related document types */}
+          {(doc.document_type === 'Sales_Order' || doc.document_type === 'AR_Invoice' || doc.bc_sales_order) && (
+            <CreateBCSalesOrderPanel 
+              document={doc} 
+              onUpdate={() => fetchDoc()} 
+            />
+          )}
 
-          {/* BC Purchase Invoice Panel - for AP_Invoice document types */}
-          <CreateBCPurchaseInvoicePanel 
-            document={doc} 
-            onUpdate={() => fetchDoc()} 
-          />
+          {/* BC Purchase Invoice Panel - only for AP_Invoice documents */}
+          {(doc.document_type === 'AP_Invoice' || doc.bc_purchase_invoice) && (
+            <CreateBCPurchaseInvoicePanel 
+              document={doc} 
+              onUpdate={() => fetchDoc()} 
+            />
+          )}
 
-          {/* Reference Intelligence Panel */}
-          <ReferenceIntelligencePanel 
-            document={doc} 
-            onUpdate={() => fetchData()} 
-          />
+          {/* Reference Intelligence - only if not completed/filed or has data */}
+          {(doc.reference_intelligence || doc.status !== 'Completed') && (
+            <ReferenceIntelligencePanel 
+              document={doc} 
+              onUpdate={() => fetchDoc()} 
+            />
+          )}
 
-          {/* AP Validation Panel */}
-          <APValidationPanel
-            document={doc}
-            onUpdate={() => fetchData()}
-          />
+          {/* AP Validation - only for AP_Invoice */}
+          {(doc.document_type === 'AP_Invoice') && (
+            <APValidationPanel
+              document={doc}
+              onUpdate={() => fetchDoc()}
+            />
+          )}
 
-          {/* Freight G/L Routing Panel */}
-          <FreightGLRoutingPanel
-            document={doc}
-            onUpdate={() => fetchData()}
-          />
+          {/* Freight G/L Routing - only if has freight data or is a shipping doc */}
+          {(doc.freight_gl_routing || doc.document_type === 'Shipping_Document' || doc.document_type === 'BOL') && (
+            <FreightGLRoutingPanel
+              document={doc}
+              onUpdate={() => fetchDoc()}
+            />
+          )}
 
-          {/* Matching Debug Panel */}
-          <MatchingDebugPanel
-            document={doc}
-          />
+          {/* Matching Debug - only for active/pending documents */}
+          {doc.status !== 'Completed' && (
+            <MatchingDebugPanel
+              document={doc}
+            />
+          )}
 
           {/* Square9 Workflow Tracker */}
           <Square9WorkflowTracker 

@@ -45,6 +45,93 @@ const ACTION_LABELS = {
   hold: 'Hold for investigation',
 };
 
+
+// Top-level extraction fields to display (maps DB field → display label)
+const EXTRACTION_FIELD_MAP = {
+  vendor_canonical: 'Vendor (Canonical)',
+  vendor_raw: 'Vendor (Raw)',
+  matched_vendor_name: 'Vendor (Matched)',
+  matched_vendor_no: 'Vendor No.',
+  invoice_number_clean: 'Invoice Number',
+  amount_float: 'Amount',
+  po_number_clean: 'PO Number',
+  bol_number: 'Bill of Lading',
+  customer_canonical: 'Customer',
+  customer_bc_no: 'Customer No.',
+};
+
+function ExtractedDataCard({ doc }) {
+  // Consolidate extraction data from all sources
+  const ef = doc.extracted_fields || {};
+  const nf = doc.normalized_fields || {};
+  
+  // Build a merged field map — prioritize normalized > extracted > top-level
+  const fields = {};
+  
+  // 1. Top-level extraction fields (always available after intake)
+  Object.entries(EXTRACTION_FIELD_MAP).forEach(([key, label]) => {
+    const val = doc[key];
+    if (val != null && val !== '' && val !== 0) {
+      fields[label] = typeof val === 'number' ? val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : String(val);
+    }
+  });
+  
+  // 2. Normalized fields (from intelligence pipeline)
+  Object.entries(nf).forEach(([key, val]) => {
+    if (key === 'line_items' || val == null || val === '') return;
+    const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    if (!fields[label]) fields[label] = String(val);
+  });
+  
+  // 3. Extracted fields (from AI classification)
+  Object.entries(ef).forEach(([key, val]) => {
+    if (key === 'line_items' || val == null || val === '') return;
+    const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    if (!fields[label]) fields[label] = String(val);
+  });
+  
+  // Collect line items from any source
+  const lineItems = nf.line_items || ef.line_items || doc.line_items || [];
+  
+  if (Object.keys(fields).length === 0 && lineItems.length === 0) return null;
+  
+  return (
+    <Card data-testid="extracted-data-card">
+      <CardHeader className="pb-2">
+        <div className="flex items-center gap-2">
+          <FileSearch className="w-5 h-5 text-primary" />
+          <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Extracted Data</CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        {Object.entries(fields).map(([label, value]) => (
+          <div key={label} className="flex justify-between" data-testid={`extracted-field-${label.toLowerCase().replace(/\s+/g, '-')}`}>
+            <span className="text-muted-foreground">{label}</span>
+            <span className="font-mono text-right max-w-[60%] truncate">{value}</span>
+          </div>
+        ))}
+        {lineItems.length > 0 && (
+          <div className="border-t border-border pt-3 mt-2" data-testid="extracted-line-items">
+            <p className="text-xs font-medium mb-2 text-muted-foreground">Line Items ({lineItems.length})</p>
+            <div className="space-y-2">
+              {lineItems.map((item, idx) => (
+                <div key={idx} className="bg-muted/50 rounded p-2 text-xs space-y-1">
+                  {item.description && <div className="font-medium">{item.description}</div>}
+                  <div className="flex gap-4 text-muted-foreground">
+                    {item.quantity != null && <span>Qty: {item.quantity}</span>}
+                    {(item.unit_price != null || item.amount != null) && <span>Price: ${item.unit_price ?? item.amount}</span>}
+                    {item.total != null && <span className="font-semibold text-foreground">Total: ${item.total}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function ReadinessPanel({ readiness }) {
   if (!readiness) return null;
 
@@ -610,42 +697,8 @@ export default function DocumentDetailPage() {
           {/* Readiness Panel */}
           <ReadinessPanel readiness={doc.readiness} />
 
-          {/* Extracted Data Card */}
-          {doc.extracted_fields && Object.keys(doc.extracted_fields).length > 0 && (
-            <Card data-testid="extracted-data-card">
-              <CardHeader className="pb-2">
-                <div className="flex items-center gap-2">
-                  <FileSearch className="w-5 h-5 text-primary" />
-                  <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Extracted Data</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                {Object.entries(doc.extracted_fields).filter(([k]) => k !== 'line_items').map(([key, value]) => (
-                  <div key={key} className="flex justify-between" data-testid={`extracted-field-${key}`}>
-                    <span className="text-muted-foreground capitalize">{key.replace(/_/g, ' ')}</span>
-                    <span className="font-mono text-right max-w-[60%] truncate">{String(value || '—')}</span>
-                  </div>
-                ))}
-                {doc.extracted_fields.line_items?.length > 0 && (
-                  <div className="border-t border-border pt-3 mt-2" data-testid="extracted-line-items">
-                    <p className="text-xs font-medium mb-2 text-muted-foreground">Line Items ({doc.extracted_fields.line_items.length})</p>
-                    <div className="space-y-2">
-                      {doc.extracted_fields.line_items.map((item, idx) => (
-                        <div key={idx} className="bg-muted/50 rounded p-2 text-xs space-y-1">
-                          {item.description && <div className="font-medium">{item.description}</div>}
-                          <div className="flex gap-4 text-muted-foreground">
-                            {item.quantity != null && <span>Qty: {item.quantity}</span>}
-                            {(item.unit_price != null || item.amount != null) && <span>Price: ${item.unit_price ?? item.amount}</span>}
-                            {item.total != null && <span className="font-semibold text-foreground">Total: ${item.total}</span>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
+          {/* Extracted Data Card — consolidates extracted_fields, normalized_fields, and top-level fields */}
+          <ExtractedDataCard doc={doc} />
 
           {/* Decision Explainability Panel */}
           <DecisionExplainabilityPanel

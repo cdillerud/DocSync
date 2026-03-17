@@ -249,7 +249,7 @@ DEFAULT_JOB_TYPES = {
         "bc_entity": "salesShipments",
         "required_extractions": ["bol_number", "ship_date"],
         "optional_extractions": ["po_number", "tracking_number", "shipper", "consignee", "carrier", "weight", "pieces", "pro_number"],
-        "keywords": ["ship", "shipping", "delivery", "dispatch", "release", "pick up", "bill of lading", "bol", "tracking", "straight bill"],
+        "keywords": ["ship", "shipping", "delivery", "dispatch", "release", "pick up", "bill of lading", "bol", "tracking", "straight bill", "packing list", "packing slip", "pack list", "pick list", "pick qty"],
         "enabled": True
     },
     "Quality_Issue": {

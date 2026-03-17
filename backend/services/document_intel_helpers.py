@@ -42,6 +42,17 @@ _BOL_FILENAME_PATTERNS = _re.compile(
     r'\b(bol|b[/-]?l|bill[_ -]?of[_ -]?lading|straight[_ -]?bill)\b', _re.IGNORECASE
 )
 
+# Packing list patterns — check BEFORE BOL and Sales_Order to prevent misclassification
+_PL_FILENAME_PATTERNS = _re.compile(
+    r'(pack[_ -]?list|packing[_ -]?list|packing[_ -]?slip|pick[_ -]?list|packlist)', _re.IGNORECASE
+)
+
+_PL_TEXT_PATTERNS = _re.compile(
+    r'(packing\s+list|packing\s+slip|pick\s+list|pick\s+qty|'
+    r'lot\s+number.*(?:pick|qty|uom)|mfg\s+date.*pick\s+qty)',
+    _re.IGNORECASE,
+)
+
 # Warehouse receipt patterns — check BEFORE BOL to prevent misclassification
 _WR_FILENAME_PATTERNS = _re.compile(
     r'\b(warehouse[_ -]?receipt|wh[_ -]?receipt|wr[_ -]?\d|non[_ -]?negotiable)\b', _re.IGNORECASE
@@ -53,6 +64,53 @@ _WR_TEXT_PATTERNS = _re.compile(
     r'stored\s+(?:in|at)\s+warehouse|warehouse\s+no)',
     _re.IGNORECASE,
 )
+
+
+def _check_obvious_packing_list(file_path: str, file_name: str) -> dict | None:
+    """Fast heuristic: if filename or first-page text indicates a packing list/slip,
+    classify as Shipping_Document. Must run BEFORE Sales_Order to prevent misclassification."""
+    
+    fn_lower = file_name.lower()
+    if _PL_FILENAME_PATTERNS.search(fn_lower):
+        logger.info("Pre-AI packing list detection: filename match '%s'", file_name)
+        return {
+            "suggested_job_type": "Shipping_Document",
+            "confidence": 0.95,
+            "model": "heuristic-packlist-filename",
+            "extracted_fields": {"packing_list_detected_by": "filename_pattern"},
+        }
+    
+    ext = fn_lower.rsplit(".", 1)[-1] if "." in fn_lower else ""
+    if ext == "pdf":
+        try:
+            import fitz
+            with fitz.open(file_path) as pdf_doc:
+                if len(pdf_doc) > 0:
+                    page_text = pdf_doc[0].get_text()[:3000]
+                    matches = _PL_TEXT_PATTERNS.findall(page_text)
+                    if matches:
+                        logger.info("Pre-AI packing list detection: text match (%d indicators) in '%s'", len(matches), file_name)
+                        fields = {"packing_list_detected_by": "text_pattern"}
+                        # Extract PO reference
+                        po_m = _re.search(r'(?:customer\s+po|po\s*#?|purchase\s+order)\s*[:\s]*([A-Z0-9-]{2,20})', page_text, _re.IGNORECASE)
+                        order_m = _re.search(r'order\s+id\s*[:\s]*([A-Z0-9-]{3,20})', page_text, _re.IGNORECASE)
+                        customer_m = _re.search(r'customer\s+id\s*[:\s]*([A-Z0-9-]{3,20})', page_text, _re.IGNORECASE)
+                        if po_m:
+                            fields["po_number"] = po_m.group(1).strip()
+                        if order_m:
+                            fields["order_number"] = order_m.group(1).strip()
+                        if customer_m:
+                            fields["customer"] = customer_m.group(1).strip()
+                        return {
+                            "suggested_job_type": "Shipping_Document",
+                            "confidence": 0.92,
+                            "model": "heuristic-packlist-text",
+                            "extracted_fields": fields,
+                        }
+        except Exception as e:
+            logger.debug("Packing list text check failed for %s: %s", file_name, e)
+    
+    return None
 
 
 def _check_obvious_warehouse_receipt(file_path: str, file_name: str) -> dict | None:
@@ -171,7 +229,12 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
     For multi-page PDFs, extracts only the first page to avoid
     classification confusion from supporting documents on later pages.
     """
-    # Fast pre-AI heuristic: catch obvious warehouse receipts FIRST (before BOL check)
+    # Fast pre-AI heuristic: catch obvious packing lists FIRST
+    pl_result = _check_obvious_packing_list(file_path, file_name)
+    if pl_result:
+        return pl_result
+
+    # Fast pre-AI heuristic: catch obvious warehouse receipts (before BOL check)
     wr_result = _check_obvious_warehouse_receipt(file_path, file_name)
     if wr_result:
         return wr_result
@@ -622,6 +685,7 @@ MULTI-PAGE BUNDLE HANDLING:
   * Warehouse Receipt + BOL → classify as Warehouse_Receipt (the receipt is primary, NOT a Sales_Order)
   * Invoice + Packing Slip → classify as AP_Invoice (the invoice is primary)
   * Bill of Lading ONLY (no other lead doc) → classify as Shipping_Document
+  * Packing List / Packing Slip / Pick List → classify as Shipping_Document (NOT Sales_Order, even if it has a PO reference)
 - Key rule: If page 1 is a PO, order, receipt, or invoice, classify based on THAT — not the supporting shipping docs that follow
 
 DOCUMENT CATEGORIES AND TYPES:
@@ -653,6 +717,7 @@ Sales_Order: Customer purchase orders to us, PO confirmations
 - Extract: customer name, po_number, order_date, amount, ship_to address
 - Look for "Purchase Order", "PO#", "Order", "PO Confirmation", quantity, ship to
 - If a PDF starts with a PO Confirmation followed by BOLs/freight bills, this is a Sales_Order
+- NOT a Sales_Order: Packing lists, packing slips, pick lists — even if they reference a PO number. Those are Shipping_Documents.
 
 Sales_Quote: Price quotes or proposals to customers
 - Extract: customer, amount, valid_until
@@ -674,10 +739,12 @@ Inventory_Report: Stock/inventory status reports
 - Extract: warehouse, items, quantities
 - Look for "Inventory", "Stock", "On Hand", "Available"
 
-Shipping_Document: STANDALONE shipping documents — BOLs, Bills of Lading, delivery receipts
-- Only use this when the document is PURELY a shipping/transport document with NO leading PO, invoice, or receipt
+Shipping_Document: STANDALONE shipping documents — BOLs, Bills of Lading, delivery receipts, PACKING LISTS, packing slips, pick lists
+- Only use this when the document is PURELY a shipping/transport/packing document with NO leading PO, invoice, or receipt
+- PACKING LISTS (also called "Pack Lists", "Packing Slips", "Pick Lists") are Shipping_Documents — they show items being picked/shipped with quantities, lot numbers, barcodes
+- A packing list with "Customer PO" or "Order ID" fields is STILL a Shipping_Document, NOT a Sales_Order — the PO reference is just for tracking, the document itself is a shipping/packing record
 - Extract: bol_number, ship_date, po_number, shipper, consignee, carrier, tracking_number, pro_number, weight, pieces
-- Look for "Ship", "Delivery", "Dispatch", "Bill of Lading", "BOL", "Straight Bill", "Shipper", "Consignee"
+- Look for "Ship", "Delivery", "Dispatch", "Bill of Lading", "BOL", "Straight Bill", "Shipper", "Consignee", "Packing List", "Pack List", "Pick Qty", "Lot Number"
 - BOL Number is the primary document identifier (often labeled "B/L No" or "BOL#")
 - Pro Number is the carrier's tracking/reference number
 

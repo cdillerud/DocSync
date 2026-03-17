@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -235,6 +235,30 @@ async def get_classification_accuracy():
     """Get classification accuracy metrics — confusion matrix, worst types, vendor patterns."""
     from services.classification_feedback_service import get_accuracy_metrics
     return await get_accuracy_metrics()
+
+
+@router.post("/classification/bootstrap-from-history")
+async def bootstrap_classification_from_history(background_tasks: BackgroundTasks):
+    """One-time sweep: mine all existing documents for high-confidence classification
+    examples and populate the learning model. Runs as a background task.
+    
+    Idempotent — safe to re-run without creating duplicates."""
+    from services.classification_feedback_service import bootstrap_from_history, get_bootstrap_status
+
+    status = get_bootstrap_status()
+    if status.get("running"):
+        return {"message": "Bootstrap sweep already running", "status": status}
+
+    import asyncio
+    background_tasks.add_task(bootstrap_from_history)
+    return {"message": "Bootstrap sweep started in background", "status": "running"}
+
+
+@router.get("/classification/bootstrap-status")
+async def get_bootstrap_status_endpoint():
+    """Check the status of a running bootstrap sweep."""
+    from services.classification_feedback_service import get_bootstrap_status
+    return get_bootstrap_status()
 
 
 @router.get("/{doc_id}")

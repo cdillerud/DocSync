@@ -114,7 +114,7 @@ async def get_vendor_type_hint(vendor: str) -> Optional[str]:
     
     Returns the dominant type if one vendor consistently sends the same type.
     """
-    if not _db or not vendor:
+    if _db is None or not vendor:
         return None
 
     pattern = await _db.vendor_type_patterns.find_one(
@@ -230,3 +230,191 @@ async def get_accuracy_metrics() -> Dict[str, Any]:
         ],
         "vendor_patterns": vendor_patterns,
     }
+
+
+
+# ---------------------------------------------------------------------------
+# Bootstrap sweep — mine existing documents for learning data
+# ---------------------------------------------------------------------------
+
+_bootstrap_status = {"running": False, "progress": None}
+
+
+def get_bootstrap_status() -> Dict:
+    return dict(_bootstrap_status)
+
+
+async def bootstrap_from_history() -> Dict[str, Any]:
+    """One-time sweep of all existing documents to bootstrap the learning model.
+
+    Confidence tiers (highest → lowest):
+      Tier 1: Documents with manual corrections in intel results (gold standard).
+      Tier 2: High-AI-confidence (≥0.85) documents that were auto-cleared.
+      Tier 3: Completed documents with a valid (non-Unknown/None) type.
+
+    Idempotent — skips documents that already have an entry in classification_corrections.
+    Updates vendor_type_patterns for every new entry.
+    """
+    global _bootstrap_status
+    if _db is None:
+        return {"success": False, "reason": "db_not_initialized"}
+
+    _bootstrap_status = {"running": True, "progress": "starting"}
+
+    # Gather doc_ids already in corrections to avoid duplicates
+    existing_ids = set()
+    cursor = _db.classification_corrections.find({}, {"doc_id": 1, "_id": 0})
+    async for rec in cursor:
+        existing_ids.add(rec["doc_id"])
+
+    stats = {"tier1_manual": 0, "tier2_high_conf": 0, "tier3_completed": 0, "skipped_existing": 0, "skipped_invalid": 0, "total_processed": 0, "vendor_patterns_updated": 0}
+
+    valid_types = {
+        "AP_Invoice", "AR_Invoice", "Remittance", "Freight_Document",
+        "Sales_Order", "Sales_PO", "Sales_Quote", "Order_Confirmation",
+        "Purchase_Order", "Warehouse_Receipt", "Warehouse_Document",
+        "Inventory_Report", "Shipping_Document", "Quality_Issue",
+        "Return_Request",
+    }
+
+    # ---------- Tier 1: Manual corrections from intel results ----------
+    _bootstrap_status["progress"] = "tier1_manual_corrections"
+    intel_corrected = _db.document_intelligence_results.find(
+        {"manually_corrected": True, "correction_history": {"$exists": True, "$ne": []}},
+        {"_id": 0},
+    )
+    async for intel in intel_corrected:
+        doc_id = intel.get("document_id", "")
+        if doc_id in existing_ids:
+            stats["skipped_existing"] += 1
+            continue
+
+        history = intel.get("correction_history", [])
+        if not history:
+            continue
+
+        # Use the final corrected type from correction chain
+        final_type = intel.get("document_type", "")
+        original_type = history[0].get("changes", {}).get("document_type", {}).get("from", "Unknown")
+        if not final_type or final_type not in valid_types:
+            stats["skipped_invalid"] += 1
+            continue
+
+        # Get the hub document for context
+        hub_doc = await _db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_name": 1, "vendor_raw": 1, "vendor_canonical": 1})
+        hub_doc = hub_doc or {}
+
+        record = {
+            "doc_id": doc_id,
+            "original_type": original_type,
+            "corrected_type": final_type,
+            "corrected_by": "bootstrap_tier1_manual",
+            "corrected_at": datetime.now(timezone.utc).isoformat(),
+            "file_name": hub_doc.get("file_name", ""),
+            "vendor_raw": hub_doc.get("vendor_raw") or "",
+            "vendor_canonical": hub_doc.get("vendor_canonical") or "",
+            "text_snippet": f"[manual correction from intel history] file={hub_doc.get('file_name', '')}",
+            "classification_method": "manual_correction",
+            "classification_confidence": 1.0,
+        }
+        await _db.classification_corrections.insert_one(record)
+        existing_ids.add(doc_id)
+        stats["tier1_manual"] += 1
+        await _update_vendor_pattern(hub_doc.get("vendor_canonical") or hub_doc.get("vendor_raw") or "", final_type, stats)
+
+    # ---------- Tier 2: High confidence + auto-cleared ----------
+    _bootstrap_status["progress"] = "tier2_high_confidence"
+    high_conf_intels = _db.document_intelligence_results.find(
+        {"classification_confidence": {"$gte": 0.85}},
+        {"_id": 0, "document_id": 1, "document_type": 1, "classification_confidence": 1},
+    )
+    async for intel in high_conf_intels:
+        doc_id = intel.get("document_id", "")
+        doc_type = intel.get("document_type", "")
+        if doc_id in existing_ids:
+            stats["skipped_existing"] += 1
+            continue
+        if not doc_type or doc_type not in valid_types:
+            stats["skipped_invalid"] += 1
+            continue
+
+        # Check if auto-cleared in hub
+        hub_doc = await _db.hub_documents.find_one(
+            {"id": doc_id, "auto_cleared": True},
+            {"_id": 0, "file_name": 1, "vendor_raw": 1, "vendor_canonical": 1},
+        )
+        if not hub_doc:
+            continue  # Skip non-auto-cleared docs for tier 2
+
+        record = {
+            "doc_id": doc_id,
+            "original_type": doc_type,
+            "corrected_type": doc_type,
+            "corrected_by": "bootstrap_tier2_high_conf",
+            "corrected_at": datetime.now(timezone.utc).isoformat(),
+            "file_name": hub_doc.get("file_name", ""),
+            "vendor_raw": hub_doc.get("vendor_raw") or "",
+            "vendor_canonical": hub_doc.get("vendor_canonical") or "",
+            "text_snippet": f"[auto-cleared, confidence={intel.get('classification_confidence', 0):.2f}] file={hub_doc.get('file_name', '')}",
+            "classification_method": "ai_high_confidence",
+            "classification_confidence": intel.get("classification_confidence", 0),
+        }
+        await _db.classification_corrections.insert_one(record)
+        existing_ids.add(doc_id)
+        stats["tier2_high_conf"] += 1
+        await _update_vendor_pattern(hub_doc.get("vendor_canonical") or hub_doc.get("vendor_raw") or "", doc_type, stats)
+
+    # ---------- Tier 3: Completed documents with valid type ----------
+    _bootstrap_status["progress"] = "tier3_completed"
+    completed_docs = _db.hub_documents.find(
+        {"status": "Completed", "document_type": {"$in": list(valid_types)}},
+        {"_id": 0, "id": 1, "document_type": 1, "file_name": 1, "vendor_raw": 1, "vendor_canonical": 1},
+    )
+    async for doc in completed_docs:
+        doc_id = doc.get("id", "")
+        doc_type = doc.get("document_type", "")
+        if doc_id in existing_ids:
+            stats["skipped_existing"] += 1
+            continue
+
+        record = {
+            "doc_id": doc_id,
+            "original_type": doc_type,
+            "corrected_type": doc_type,
+            "corrected_by": "bootstrap_tier3_completed",
+            "corrected_at": datetime.now(timezone.utc).isoformat(),
+            "file_name": doc.get("file_name", ""),
+            "vendor_raw": doc.get("vendor_raw") or "",
+            "vendor_canonical": doc.get("vendor_canonical") or "",
+            "text_snippet": f"[completed doc, accepted type] file={doc.get('file_name', '')}",
+            "classification_method": "completed_lifecycle",
+            "classification_confidence": 0.75,
+        }
+        await _db.classification_corrections.insert_one(record)
+        existing_ids.add(doc_id)
+        stats["tier3_completed"] += 1
+        await _update_vendor_pattern(doc.get("vendor_canonical") or doc.get("vendor_raw") or "", doc_type, stats)
+
+    stats["total_processed"] = stats["tier1_manual"] + stats["tier2_high_conf"] + stats["tier3_completed"]
+    _bootstrap_status = {"running": False, "progress": "done", "stats": stats}
+    logger.info("Bootstrap sweep complete: %s", stats)
+    return {"success": True, "stats": stats}
+
+
+async def _update_vendor_pattern(vendor: str, doc_type: str, stats: Dict):
+    """Helper to update vendor_type_patterns during bootstrap."""
+    if not vendor or _db is None:
+        return
+    vendor_key = vendor.upper().strip()
+    if not vendor_key:
+        return
+    await _db.vendor_type_patterns.update_one(
+        {"vendor": vendor_key},
+        {
+            "$inc": {f"type_counts.{doc_type}": 1, "total_corrections": 1},
+            "$set": {"last_updated": datetime.now(timezone.utc).isoformat()},
+            "$setOnInsert": {"vendor": vendor_key, "created_at": datetime.now(timezone.utc).isoformat()},
+        },
+        upsert=True,
+    )
+    stats["vendor_patterns_updated"] += 1

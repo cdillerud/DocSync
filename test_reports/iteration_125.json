@@ -1,0 +1,113 @@
+{
+  "summary": "Classification Bootstrap Feature Testing Complete - All 13 backend tests passed, All frontend dropdown tests passed. Features verified: Bootstrap sweep endpoints (POST/GET), idempotency, classification accuracy metrics, Warehouse_Receipt in config, and frontend DOC_TYPES dropdown with all 15 AI-matching types.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Document Detail - BC Validation",
+        "issues": ["BC Connection shows 'Could not obtain BC token' - expected since BC API is sandbox/mock mode"]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_classification_bootstrap.py",
+    "/app/test_reports/pytest/classification_bootstrap_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Bootstrap endpoints correctly implemented in documents.py lines 240-261 using BackgroundTasks",
+    "Bootstrap sweep uses 3-tier confidence model: Tier1 (manual corrections), Tier2 (high AI confidence >=0.85), Tier3 (completed docs)",
+    "Idempotency ensured via existing_ids set check before inserting corrections",
+    "Warehouse_Receipt properly added to DEFAULT_JOB_TYPES at line 293-311 with category 'Warehouse'",
+    "Frontend DOC_TYPES array at line 240-256 correctly uses {value, label} format with all 15 types matching backend"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_classification_bootstrap.py"
+  ],
+  "success_rate": {
+    "backend": "100% (13/13 tests passed)",
+    "frontend": "100% (dropdown verified with 15 types)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "Bootstrap sweep already run - stats: tier1=0, tier2=7, tier3=29, total=36",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Classification bootstrap feature complete. Bootstrap already executed (total_corrections=41). Re-running bootstrap is idempotent (skips processed docs). Frontend dropdown shows all 15 AI-matching types including Warehouse Receipt.",
+  "verified_features": {
+    "backend_endpoints": {
+      "POST /api/documents/classification/bootstrap-from-history": {
+        "status": "PASS",
+        "returns": "Background task started, returns 'running' status"
+      },
+      "GET /api/documents/classification/bootstrap-status": {
+        "status": "PASS",
+        "returns": "Status object with running (bool), progress (string), stats (object when done)"
+      },
+      "GET /api/documents/classification-accuracy": {
+        "status": "PASS",
+        "returns": "total_corrections, confusion_matrix (dict), vendor_patterns (list)"
+      }
+    },
+    "bootstrap_idempotency": {
+      "status": "VERIFIED",
+      "details": "Second run shows total_processed=0 or low, skipped_existing > 0"
+    },
+    "warehouse_receipt_config": {
+      "status": "VERIFIED",
+      "location": "/app/backend/models/document_types.py lines 293-311",
+      "config": {
+        "job_type": "Warehouse_Receipt",
+        "category": "Warehouse",
+        "enabled": true,
+        "bc_entity": "warehouseReceipts"
+      }
+    },
+    "frontend_dropdown": {
+      "status": "VERIFIED",
+      "location": "/app/frontend/src/pages/DocumentDetailPage.js lines 240-256",
+      "types_count": 15,
+      "types": [
+        "AP Invoice", "AR Invoice", "Remittance", "Freight Document",
+        "Sales Order", "Sales PO", "Sales Quote", "Order Confirmation",
+        "Purchase Order", "Warehouse Receipt", "Inventory Report",
+        "Shipping Document", "Quality Issue", "Return Request", "Unknown"
+      ]
+    }
+  },
+  "tests_executed": {
+    "backend_tests": {
+      "test_classification_bootstrap.py": {
+        "passed": 13,
+        "failed": 0,
+        "test_classes": [
+          "TestBackendHealth: health endpoint",
+          "TestBootstrapFromHistory: endpoint exists, returns running status",
+          "TestBootstrapStatus: endpoint exists, structure, completed stats",
+          "TestBootstrapIdempotency: second run skips processed",
+          "TestClassificationAccuracy: endpoint exists, structure, has bootstrap data",
+          "TestWarehouseReceiptInConfig: via document list, code import verification",
+          "TestDocumentUpdateWithClassification: update records correction"
+        ]
+      }
+    },
+    "ui_tests": {
+      "playwright": {
+        "passed": "all",
+        "coverage": [
+          "Login with admin/admin",
+          "Navigate to document detail page",
+          "Click Edit Classification button",
+          "Open Document Type dropdown",
+          "Verify all 15 expected types present",
+          "Confirm Warehouse Receipt in dropdown"
+        ]
+      }
+    }
+  },
+  "mocked_api_note": "Microsoft Graph email, JWT Auth (Entra ID), BC API sandbox - as documented in review_request"
+}

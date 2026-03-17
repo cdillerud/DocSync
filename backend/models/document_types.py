@@ -290,6 +290,25 @@ DEFAULT_JOB_TYPES = {
         "keywords": ["return", "rma", "credit", "refund", "send back"],
         "enabled": True
     },
+    "Warehouse_Receipt": {
+        "job_type": "Warehouse_Receipt",
+        "display_name": "Warehouse Receipt",
+        "category": "Warehouse",
+        "automation_level": 1,
+        "min_confidence_to_auto_link": 0.80,
+        "min_confidence_to_auto_create_draft": 0.92,
+        "po_validation_mode": "PO_IF_PRESENT",
+        "allow_duplicate_check_override": False,
+        "requires_human_review_if_exception": True,
+        "vendor_match_threshold": 0.75,
+        "vendor_match_strategies": ["alias", "exact_no", "exact_name", "normalized", "fuzzy"],
+        "sharepoint_folder": "Warehouse_Receipts",
+        "bc_entity": "warehouseReceipts",
+        "required_extractions": ["receipt_number"],
+        "optional_extractions": ["customer", "location", "item_numbers", "quantities", "receipt_date"],
+        "keywords": ["warehouse receipt", "non-negotiable", "goods received", "stored in warehouse"],
+        "enabled": True
+    },
     "Unknown_Document": {
         "job_type": "Unknown_Document",
         "display_name": "Unknown / Unclassified",

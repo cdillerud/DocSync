@@ -236,7 +236,24 @@ const STATUS_CLASSES = {
   Completed: 'status-completed',
 };
 
-const DOC_TYPES = ['SalesOrder', 'SalesInvoice', 'PurchaseInvoice', 'PurchaseOrder', 'Shipment', 'Receipt', 'Other'];
+// Must match AI classification output types (see document_intel_helpers.py prompt)
+const DOC_TYPES = [
+  { value: 'AP_Invoice', label: 'AP Invoice' },
+  { value: 'AR_Invoice', label: 'AR Invoice' },
+  { value: 'Remittance', label: 'Remittance' },
+  { value: 'Freight_Document', label: 'Freight Document' },
+  { value: 'Sales_Order', label: 'Sales Order' },
+  { value: 'Sales_PO', label: 'Sales PO' },
+  { value: 'Sales_Quote', label: 'Sales Quote' },
+  { value: 'Order_Confirmation', label: 'Order Confirmation' },
+  { value: 'Purchase_Order', label: 'Purchase Order' },
+  { value: 'Warehouse_Receipt', label: 'Warehouse Receipt' },
+  { value: 'Inventory_Report', label: 'Inventory Report' },
+  { value: 'Shipping_Document', label: 'Shipping Document' },
+  { value: 'Quality_Issue', label: 'Quality Issue' },
+  { value: 'Return_Request', label: 'Return Request' },
+  { value: 'Unknown_Document', label: 'Unknown' },
+];
 
 const STEP_ICONS = {
   completed: <CheckCircle2 className="w-4 h-4 text-emerald-500" />,
@@ -473,7 +490,7 @@ export default function DocumentDetailPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {DOC_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                        {DOC_TYPES.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>

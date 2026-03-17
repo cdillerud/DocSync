@@ -82,11 +82,17 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 
 ### Auto PI Creation Pipeline (Mar 2026)
 - **Feature**: When an AP_Invoice document passes auto-clear, the system automatically creates a Purchase Invoice in BC sandbox with line items and GPI document link
-- **Config**: `BC_WRITE_ENABLED=true` enables the pipeline
-- **Safety**: Production writes blocked via `BC_BLOCK_PRODUCTION_WRITES=true`, writes target `Sandbox_11_3_2025` only
-- **New function**: `auto_create_pi_from_document()` in `backend/routers/gpi_integration.py`
-- **Pipeline hook**: Added to auto-clear flow in `backend/server.py` after `AutoClearDecision.CLEARED`
-- **Files changed**: `backend/.env`, `backend/routers/gpi_integration.py`, `backend/server.py`
+- **PI Line Logic**: 
+  - Extracts ALL line items from the document
+  - PO/BOL reference goes in Description/Comment field (Square9/BC pattern)
+  - Default item = FREIGHT (configurable via `BC_DEFAULT_ITEM_CODE`)
+  - Explicit item numbers/SKUs from AI extraction are validated via item_mapping_service
+  - Mapping history recorded for learning
+- **Config**: `BC_WRITE_ENABLED=true`, writes target `Sandbox_11_3_2025` only
+- **Safety**: Production writes blocked via `BC_BLOCK_PRODUCTION_WRITES=true`
+- **Key functions**: `auto_create_pi_from_document()`, `_build_pi_lines_with_mapping()`, `_resolve_po_reference()` in `backend/routers/gpi_integration.py`
+- **Pipeline hook**: `backend/server.py` auto-clear flow → auto PI for AP_Invoice docs
+- **Production action**: Deploy, process a Tumalo Creek invoice, verify PI in BC sandbox
 
 ## P0/P1/P2 Backlog
 ### P1 - Upcoming

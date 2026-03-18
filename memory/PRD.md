@@ -34,7 +34,7 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - Multi-page PDF Classification, BC PI Document Link, PI Retry-Lines
 
 ### File & Clear Feature (Mar 2026)
-- One-click suggest folder → move to SharePoint → mark cleared
+- One-click suggest folder -> move to SharePoint -> mark cleared
 
 ### Classification Learning Loop (Mar 2026)
 - User corrections stored and used as few-shot examples in Gemini prompt
@@ -46,8 +46,8 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - Automatic Purchase Invoice creation in BC sandbox for AP_Invoice docs
 
 ### Packing List Classification Fix (Mar 2026)
-- New heuristic: filename + text patterns catch packing lists → Shipping_Document
-- AI prompt updated with explicit anti-pattern (packing list ≠ Sales_Order)
+- New heuristic: filename + text patterns catch packing lists -> Shipping_Document
+- AI prompt updated with explicit anti-pattern (packing list != Sales_Order)
 
 ### Document Type Alignment (Mar 2026)
 - Frontend dropdown updated to show all 15 AI classification types
@@ -64,22 +64,21 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - Triggered on auto-clear for Shipping_Document, Warehouse_Receipt types
 - BC lookup for locationCode (GR=Dropship, GB=Warehouse) + InternationalGds
 - Auto-routes to correct SharePoint folder based on warehouse workflow rules
-- Falls back to heuristics if BC lookup fails (vendor patterns, text indicators)
-- Records filing pattern + classification confirmation for AI learning
+
+### P0 Data Extraction Fix (Mar 2026)
+- **Root Cause**: `process_document()` couldn't find files because documents don't store `local_file_path`, but files exist at `UPLOAD_DIR/doc_id`
+- **Fix 1**: Added `UPLOAD_DIR/doc_id` fallback in `document_intelligence_service.py` when `local_file_path` is missing
+- **Fix 2**: Clear ERROR logging when no file found anywhere (eliminates silent failures)
+- **Fix 3**: Refactored `classify_document_with_ai()` — heuristics now provide classification only, LLM always runs for full field extraction (heuristic+LLM merge)
+- **Result**: Documents that previously had 0 fields now extract 14+ fields
+- **Testing**: 16/16 backend tests passed, frontend verified
 
 ## Key API Endpoints
-- `POST /api/documents/classification/bootstrap-from-history` — Bootstrap learning model
-- `GET /api/documents/classification/bootstrap-status` — Bootstrap progress
-- `GET /api/dashboard/stats?date=YYYY-MM-DD` — Date-filtered dashboard stats
-- `GET /api/dashboard/workflow-intelligence?date=YYYY-MM-DD` — Date-filtered intelligence
-
-## SharePoint Folder Routing (Warehouse Workflow)
-| locationCode | InternationalGds | SharePoint Folder |
-|---|---|---|
-| GR | True | Dropship International Documents |
-| GR | False | Dropship Not International Documents |
-| GB | True | Warehouse International Documents |
-| GB | False | Warehouse Not International Documents |
+- `POST /api/documents/classification/bootstrap-from-history` -- Bootstrap learning model
+- `GET /api/documents/classification/bootstrap-status` -- Bootstrap progress
+- `GET /api/dashboard/stats?date=YYYY-MM-DD` -- Date-filtered dashboard stats
+- `GET /api/dashboard/workflow-intelligence?date=YYYY-MM-DD` -- Date-filtered intelligence
+- `POST /api/document-intelligence/process/{doc_id}` -- Run full intelligence pipeline
 
 ## Mocked Services
 - Microsoft Graph API (email ingestion - partial)
@@ -88,13 +87,15 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 
 ## P0/P1/P2 Backlog
 ### P1 - Upcoming
-- Admin UI for managing item mapping rules
+- AP Validation card on document detail page
 - Azure OpenAI integration (user deferred)
+- Admin UI for managing item mapping rules
 
 ### P2 - Future
 - Vendor Inventory Dashboard and Sales module
 - Product/BOM module
 - Refactor monolithic files (server.py, inventory_ledger.py, InventoryLedgerPage.js)
+- Redesign Extracted Data and Document Intelligence card layouts
 - Production email service and Entra ID SSO
 - Decommission legacy Zetadocs system
 

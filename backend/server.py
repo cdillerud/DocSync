@@ -4301,9 +4301,9 @@ async def intake_document(
             logger.info("Document %s eligible for draft creation: %s", doc_id, draft_reason)
             
             # Get vendor info for draft
-            vendor_info = validation_results.get("bc_record_info", {})
+            vendor_info = validation_results.get("bc_record_info") or {}
             vendor_no = vendor_info.get("number", "")
-            normalized_fields = validation_results.get("normalized_fields", {})
+            normalized_fields = validation_results.get("normalized_fields") or {}
             external_doc_no = normalized_fields.get("invoice_number") or extracted_fields.get("invoice_number", "")
             
             if vendor_no and external_doc_no:

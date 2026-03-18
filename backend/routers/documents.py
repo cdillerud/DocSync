@@ -306,7 +306,7 @@ async def get_document(doc_id: str, include_events: bool = Query(True)):
             ap_val.get("vendor_resolved")
             or doc.get("matched_vendor_no")
             or doc.get("vendor_id")
-            or (doc.get("validation_results", {}).get("bc_record_info", {}).get("number"))
+            or ((doc.get("validation_results") or {}).get("bc_record_info") or {}).get("number")
         )
         if vendor_resolved_now:
             # Filter stale vendor-dependent warnings
@@ -331,7 +331,7 @@ async def get_document(doc_id: str, include_events: bool = Query(True)):
             if not ap_val.get("vendor_resolved"):
                 ap_val["vendor_resolved"] = True
                 vendor_no = doc.get("matched_vendor_no") or doc.get("vendor_id") or \
-                    doc.get("validation_results", {}).get("bc_record_info", {}).get("number", "")
+                    ((doc.get("validation_results") or {}).get("bc_record_info") or {}).get("number", "")
                 if vendor_no:
                     ap_val["matched_vendor_no"] = vendor_no
 

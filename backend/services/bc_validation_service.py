@@ -717,15 +717,19 @@ async def validate_bc_match(
                                 order_number_str, matched_order.get("customerName"),
                             )
                         else:
+                            # Order number was present but NOT found in BC — this is a
+                            # hard failure, not a soft warning.  If we have a number to
+                            # look up and BC says it doesn't exist, we can't validate.
+                            validation_results["all_passed"] = False
                             validation_results["warnings"].append({
                                 "check_name": "sales_order_not_found",
-                                "details": f"No Sales Order found matching '{order_number_str}' - document will still be archived",
+                                "details": f"No Sales Order found matching '{order_number_str}' in BC",
                             })
                             validation_results["checks"].append({
                                 "check_name": "sales_order_match",
                                 "passed": False,
                                 "details": f"Sales Order '{order_number_str}' not found in BC",
-                                "required": False,
+                                "required": True,
                             })
                             logger.warning("[BC Validation] Shipping doc - Sales Order %s NOT FOUND", order_number_str)
                     else:

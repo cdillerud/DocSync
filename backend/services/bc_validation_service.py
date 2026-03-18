@@ -324,6 +324,21 @@ async def validate_bc_match(
         ),
     }
 
+    # ---- Extraction quality gate: reject documents with no real data ----
+    meaningful_fields = {
+        k: v for k, v in extracted_fields.items()
+        if v and not k.endswith("_detected_by")
+    }
+    if not meaningful_fields:
+        validation_results["all_passed"] = False
+        validation_results["checks"].append({
+            "check_name": "extraction_quality_gate",
+            "passed": False,
+            "details": "No meaningful data extracted from document — cannot validate",
+            "required": True,
+        })
+        return validation_results
+
     # ---- Demo mode early return ----
     if DEMO_MODE or not BC_CLIENT_ID:
         validation_results["checks"].append({

@@ -1,0 +1,93 @@
+{
+  "summary": "Verified 3 validation bug fixes: BC extraction_quality_gate, Auto-clear _detected_by filtering, Readiness terminal shortcut meaningful_count check. All 13 unit tests passed. UI renders correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "BC Validation",
+        "issue": "BC token cannot be obtained (expected - BC API is in demo/sandbox mode)",
+        "priority": "LOW"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Document Detail",
+        "issues": ["Document preview shows 'Unable to load document preview HTTP 404' for some documents (missing files on disk)"]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_validation_auto_clear_readiness_fixes.py",
+    "/app/test_reports/pytest/validation_auto_clear_readiness_fixes_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "bc_validation_service.py lines 328-340: extraction_quality_gate correctly filters _detected_by metadata and fails when no meaningful data",
+    "auto_clear_service.py lines 329-365: meaningful_extracted correctly excludes fields ending with _detected_by from count",
+    "document_readiness_service.py lines 152-168: Terminal shortcut now requires meaningful_count >= 1 before returning ready_auto_link"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_validation_auto_clear_readiness_fixes.py"
+  ],
+  "success_rate": {
+    "backend": "100% (13/13 unit tests passed)",
+    "frontend": "100% (Dashboard, Documents, Document Detail pages render correctly)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "No new seed data created - used existing documents",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "3 validation bugs fixed and verified: (1) BC validation now rejects docs with only _detected_by metadata via extraction_quality_gate check. (2) Auto-clear now excludes _detected_by fields from minimum extraction count. (3) Readiness terminal shortcut only fires for completed docs with meaningful_count >= 1. Unit tests created in test_validation_auto_clear_readiness_fixes.py cover all scenarios.",
+  "verified_features": {
+    "BC_validation_extraction_quality_gate": {
+      "status": "PASS",
+      "tests": [
+        "test_bc_validation_fails_when_only_metadata_fields - PASS",
+        "test_bc_validation_passes_with_real_data - PASS",
+        "test_bc_validation_fails_with_empty_extracted_fields - PASS"
+      ]
+    },
+    "auto_clear_minimum_extraction_filtering": {
+      "status": "PASS",
+      "tests": [
+        "test_auto_clear_returns_missing_data_for_only_metadata - PASS",
+        "test_auto_clear_returns_cleared_with_real_data - PASS",
+        "test_auto_clear_counts_real_fields_correctly - PASS",
+        "test_auto_clear_handles_mixed_empty_and_metadata - PASS"
+      ]
+    },
+    "readiness_terminal_shortcut": {
+      "status": "PASS",
+      "tests": [
+        "test_readiness_blocked_for_completed_with_zero_meaningful_fields - PASS",
+        "test_readiness_ready_auto_link_for_completed_with_real_data - PASS",
+        "test_readiness_terminal_shortcut_counts_meaningful_fields - PASS",
+        "test_readiness_does_not_shortcut_for_non_terminal_status - PASS"
+      ]
+    },
+    "integration_scenarios": {
+      "status": "PASS",
+      "tests": [
+        "test_bad_document_fails_all_checks - PASS",
+        "test_good_document_passes_all_checks - PASS"
+      ]
+    },
+    "GET_api_documents": {
+      "status": "PASS",
+      "verified": ["Returns document list with counts", "Filter by status works"]
+    },
+    "Frontend_Dashboard": {
+      "status": "PASS",
+      "verified": ["Dashboard loads with statistics", "Navigation works", "Automation Intelligence section displays"]
+    },
+    "Frontend_Document_Detail": {
+      "status": "PASS",
+      "verified": ["Document info displays", "Classification section visible", "BC Validation section shows status", "Extraction Quality displayed"]
+    }
+  },
+  "mocked_api_note": "Microsoft Graph email, JWT Auth (Entra ID), BC API (demo/sandbox mode) - as documented in review_request"
+}

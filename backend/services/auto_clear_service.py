@@ -325,21 +325,28 @@ def evaluate_auto_clear(
     if type_config.get("require_minimum_extraction"):
         extracted = doc.get("extracted_fields", {})
         normalized = doc.get("normalized_fields", {})
-        ai_ext = doc.get("ai_extraction", {})
         
-        # Must have at least ONE of: vendor name, order reference, or 3+ extracted fields
+        # Exclude metadata fields (e.g., bol_detected_by, packing_list_detected_by)
+        # from counting — these are heuristic markers, not real document data
+        meaningful_extracted = {
+            k: v for k, v in extracted.items()
+            if v and str(v).strip() and not k.endswith("_detected_by")
+        }
+        meaningful_normalized = {
+            k: v for k, v in normalized.items()
+            if v and str(v).strip()
+        }
+        
+        # Must have at least ONE of: vendor name, order reference, or 3+ REAL fields
         has_vendor = bool(
-            doc.get("vendor_canonical") or doc.get("vendor_raw") or
-            normalized.get("vendor") or extracted.get("vendor")
+            meaningful_extracted.get("vendor") or meaningful_normalized.get("vendor")
         )
         has_order = bool(
-            doc.get("po_number_extracted") or doc.get("bol_number_extracted") or
-            normalized.get("po_number") or normalized.get("bol_number") or
-            extracted.get("po_number") or extracted.get("bol_number") or
-            extracted.get("order_number") or extracted.get("so_number")
+            meaningful_extracted.get("po_number") or meaningful_normalized.get("po_number") or
+            meaningful_extracted.get("bol_number") or meaningful_normalized.get("bol_number") or
+            meaningful_extracted.get("order_number") or meaningful_extracted.get("so_number")
         )
-        non_empty_fields = sum(1 for v in list(extracted.values()) + list(normalized.values())
-                              if v and str(v).strip())
+        non_empty_fields = len(meaningful_extracted) + len(meaningful_normalized)
         has_enough_fields = non_empty_fields >= 3
         
         extraction_ok = has_vendor or has_order or has_enough_fields
@@ -353,7 +360,7 @@ def evaluate_auto_clear(
         if not extraction_ok:
             return (
                 AutoClearDecision.MISSING_DATA,
-                f"Insufficient data extracted (no vendor, no order ref, only {non_empty_fields} fields). Needs manual review.",
+                f"Insufficient data extracted (no vendor, no order ref, only {non_empty_fields} meaningful fields). Needs manual review.",
                 details
             )
 

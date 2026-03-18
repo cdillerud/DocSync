@@ -140,6 +140,8 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
     signals = compute_signals(doc)
 
     # --- Short-circuit: already completed/auto-cleared docs ---
+    # But NOT if the document has zero meaningful extracted data — that
+    # indicates it was cleared incorrectly and should surface the real state.
     doc_status = (doc.get("status") or "").lower()
     workflow_status = (doc.get("workflow_status") or "").lower()
     is_terminal = (
@@ -147,7 +149,12 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
         or doc_status in ("completed", "posted", "archived")
         or workflow_status in ("completed", "exported", "processed")
     )
-    if is_terminal:
+    extracted = doc.get("extracted_fields") or {}
+    meaningful_count = sum(
+        1 for k, v in extracted.items()
+        if v and not k.endswith("_detected_by")
+    )
+    if is_terminal and meaningful_count >= 1:
         return {
             "status": STATUS_READY_AUTO_LINK,
             "confidence": 1.0,

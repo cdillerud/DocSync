@@ -25,6 +25,13 @@ logger = logging.getLogger(__name__)
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "gpi_document_hub")
 
+# Credit memo indicators
+_CREDIT_MEMO_PATTERNS = re.compile(
+    r'(credit\s+invoice|credit\s+memo|credit\s+note|credit\s+memo\s+total|'
+    r'refund\s+amount|adjustment\s+memo|debit\s+memo)',
+    re.IGNORECASE,
+)
+
 # Invoice indicators — if a doc has 2+ of these, it's an AP_Invoice
 _INVOICE_INDICATORS = re.compile(
     r'(invoice\s*#|invoice\s+number|balance\s+due|terms\s*:\s*net\s+\d|'
@@ -86,6 +93,11 @@ def _detect_correct_type(doc: dict) -> tuple:
     
     # --- Check 1: Freight_Document that's actually an AP_Invoice ---
     if current_type == "Freight_Document":
+        # But check for credit memo first
+        credit_hits = _CREDIT_MEMO_PATTERNS.findall(text) if text else []
+        if credit_hits:
+            return "Credit_Memo", f"Freight_Document with credit memo indicators: {credit_hits[:3]}"
+        
         invoice_hits = _INVOICE_INDICATORS.findall(text)
         if len(invoice_hits) >= 2:
             return "AP_Invoice", f"Freight_Document with {len(invoice_hits)} invoice indicators: {invoice_hits[:3]}"
@@ -96,6 +108,16 @@ def _detect_correct_type(doc: dict) -> tuple:
         has_due_date = bool(ef.get("due_date") or ef.get("payment_terms"))
         if has_invoice_num and has_amount:
             return "AP_Invoice", f"Freight_Document with invoice_number + amount in extracted fields"
+    
+    # --- Check 1b: AP_Invoice that's actually a Credit_Memo ---
+    if current_type == "AP_Invoice":
+        credit_hits = _CREDIT_MEMO_PATTERNS.findall(text) if text else []
+        if credit_hits:
+            return "Credit_Memo", f"AP_Invoice with credit memo indicators: {credit_hits[:3]}"
+        # Also check extracted fields
+        is_credit = ef.get("is_credit_memo") or nf.get("is_credit_memo")
+        if is_credit and str(is_credit).lower() in ("true", "yes", "1"):
+            return "Credit_Memo", f"AP_Invoice with is_credit_memo=true in extracted fields"
     
     # --- Check 2: Sales_Order that's actually a Shipping_Document (packing list) ---
     if current_type in ("Sales_Order", "Order_Confirmation", "Unknown_Document"):
@@ -115,6 +137,11 @@ def _detect_correct_type(doc: dict) -> tuple:
     
     # --- Check 5: Any type with strong invoice indicators that isn't AP_Invoice ---
     if current_type not in ("AP_Invoice", "AR_Invoice", "Remittance", "Credit_Memo"):
+        # But check for credit memo FIRST
+        credit_hits = _CREDIT_MEMO_PATTERNS.findall(text) if text else []
+        if credit_hits:
+            return "Credit_Memo", f"{current_type} with credit memo indicators: {credit_hits[:3]}"
+        
         invoice_hits = _INVOICE_INDICATORS.findall(text)
         if len(invoice_hits) >= 3:
             # Very strong invoice signal on a non-invoice type

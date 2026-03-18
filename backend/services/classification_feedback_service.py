@@ -366,7 +366,7 @@ async def bootstrap_from_history() -> Dict[str, Any]:
     stats = {"tier1_manual": 0, "tier2_high_conf": 0, "tier3_completed": 0, "skipped_existing": 0, "skipped_invalid": 0, "total_processed": 0, "vendor_patterns_updated": 0}
 
     valid_types = {
-        "AP_Invoice", "AR_Invoice", "Remittance", "Freight_Document",
+        "AP_Invoice", "AR_Invoice", "Credit_Memo", "Remittance", "Freight_Document",
         "Sales_Order", "Sales_PO", "Sales_Quote", "Order_Confirmation",
         "Purchase_Order", "Warehouse_Receipt", "Warehouse_Document",
         "Inventory_Report", "Shipping_Document", "Quality_Issue",

@@ -240,6 +240,7 @@ const STATUS_CLASSES = {
 const DOC_TYPES = [
   { value: 'AP_Invoice', label: 'AP Invoice' },
   { value: 'AR_Invoice', label: 'AR Invoice' },
+  { value: 'Credit_Memo', label: 'Credit Memo' },
   { value: 'Remittance', label: 'Remittance' },
   { value: 'Freight_Document', label: 'Freight Document' },
   { value: 'Sales_Order', label: 'Sales Order' },

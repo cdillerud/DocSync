@@ -82,6 +82,25 @@ DEFAULT_JOB_TYPES = {
         "optional_extractions": ["due_date", "line_items"],
         "enabled": True
     },
+    "Credit_Memo": {
+        "job_type": "Credit_Memo",
+        "display_name": "Credit Memo",
+        "category": "Finance",
+        "automation_level": 2,
+        "min_confidence_to_auto_link": 0.85,
+        "min_confidence_to_auto_create_draft": 0.95,
+        "po_validation_mode": "OPTIONAL",
+        "allow_duplicate_check_override": False,
+        "requires_human_review_if_exception": True,
+        "vendor_match_threshold": 0.75,
+        "vendor_match_strategies": ["alias", "exact_no", "exact_name", "normalized", "fuzzy"],
+        "sharepoint_folder": "Credit_Memos",
+        "bc_entity": "purchaseCreditMemos",
+        "required_extractions": ["vendor", "amount"],
+        "optional_extractions": ["credit_memo_number", "original_invoice_reference", "reason", "date"],
+        "keywords": ["credit memo", "credit invoice", "credit note", "refund", "adjustment", "debit memo"],
+        "enabled": True
+    },
     "Remittance": {
         "job_type": "Remittance",
         "display_name": "Remittance Advice (Payment Confirmation)",

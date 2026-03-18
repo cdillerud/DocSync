@@ -74,12 +74,21 @@ _INVOICE_TEXT_PATTERNS = _re.compile(
 )
 
 
+# Credit memo patterns — catches credit invoices/memos before they get classified as AP_Invoice
+_CREDIT_MEMO_PATTERNS = re.compile(
+    r'(credit\s+invoice|credit\s+memo|credit\s+note|credit\s+memo\s+total|'
+    r'refund\s+amount|adjustment\s+memo|debit\s+memo)',
+    re.IGNORECASE,
+)
+
+
+
 
 
 def _check_obvious_ap_invoice(file_path: str, file_name: str) -> dict | None:
     """Fast heuristic: if PDF first page has clear invoice language (Invoice #, Balance Due,
-    Terms: Net 30, etc.), classify as AP_Invoice. This catches freight carrier invoices that
-    the AI might misclassify as Freight_Document."""
+    Terms: Net 30, etc.), classify as AP_Invoice — UNLESS it's a credit memo.
+    This catches freight carrier invoices that the AI might misclassify as Freight_Document."""
     fn_lower = file_name.lower()
     ext = fn_lower.rsplit(".", 1)[-1] if "." in fn_lower else ""
     if ext != "pdf":
@@ -90,6 +99,25 @@ def _check_obvious_ap_invoice(file_path: str, file_name: str) -> dict | None:
         with fitz.open(file_path) as pdf_doc:
             if len(pdf_doc) > 0:
                 page_text = pdf_doc[0].get_text()[:3000]
+
+                # Check for credit memo FIRST — takes priority over AP invoice
+                credit_matches = _CREDIT_MEMO_PATTERNS.findall(page_text)
+                if credit_matches:
+                    logger.info("Pre-AI credit memo detection: %d indicators in '%s'", len(credit_matches), file_name)
+                    fields = {"credit_memo_detected_by": "text_pattern"}
+                    inv_m = _re.search(r'(?:credit\s+)?(?:invoice|memo)\s*#?\s*[:\s]*([A-Z0-9-]{2,20})', page_text, _re.IGNORECASE)
+                    amt_m = _re.search(r'(?:credit\s+memo\s+total|total|amount)[:\s]*-?\$?([\d,]+\.?\d*)', page_text, _re.IGNORECASE)
+                    if inv_m:
+                        fields["credit_memo_number"] = inv_m.group(1).strip()
+                    if amt_m:
+                        fields["amount"] = amt_m.group(1).strip()
+                    return {
+                        "suggested_job_type": "Credit_Memo",
+                        "confidence": 0.94,
+                        "model": "heuristic-credit-memo-text",
+                        "extracted_fields": fields,
+                    }
+
                 invoice_matches = _INVOICE_TEXT_PATTERNS.findall(page_text)
                 if len(invoice_matches) >= 2:
                     # Strong invoice signal (at least 2 indicators)
@@ -111,7 +139,7 @@ def _check_obvious_ap_invoice(file_path: str, file_name: str) -> dict | None:
                         "extracted_fields": fields,
                     }
     except Exception as e:
-        logger.debug("AP invoice text check failed for %s: %s", file_name, e)
+        logger.debug("AP invoice/credit memo text check failed for %s: %s", file_name, e)
 
     return None
 
@@ -760,6 +788,12 @@ AR_Invoice: Invoices we send to customers (outgoing)
 - Our company name appears as the sender
 - Extract: customer name, invoice_number, invoice_date, amount, due_date
 
+Credit_Memo: Credit memos, credit invoices, credit notes, refunds, adjustments
+- If the document says "Credit Invoice", "Credit Memo", "Credit Note", "Credit Memo Total", "Refund", "Adjustment" — it is a Credit_Memo, NOT an AP_Invoice
+- A credit memo represents money coming BACK (negative amount or refund), not a payment due
+- Even if it looks like an invoice format, the word "Credit" makes it a Credit_Memo
+- Extract: vendor name, credit_memo_number, amount, reason, original_invoice_reference
+
 Remittance: Payment confirmations
 - Extract: vendor/customer, payment_amount, payment_date, invoice_references
 - Look for "Remittance Advice", "Payment", check numbers
@@ -819,7 +853,7 @@ Unknown_Document: Cannot determine type confidently
 
 Always respond with valid JSON in this exact format:
 {
-    "document_type": "AP_Invoice|AR_Invoice|Remittance|Freight_Document|Sales_Order|Sales_Quote|Order_Confirmation|Warehouse_Receipt|Inventory_Report|Shipping_Document|Quality_Issue|Return_Request|Unknown_Document",
+    "document_type": "AP_Invoice|AR_Invoice|Credit_Memo|Remittance|Freight_Document|Sales_Order|Sales_Quote|Order_Confirmation|Warehouse_Receipt|Inventory_Report|Shipping_Document|Quality_Issue|Return_Request|Unknown_Document",
     "confidence": 0.0-1.0,
     "extracted_fields": {
         "vendor": "...",

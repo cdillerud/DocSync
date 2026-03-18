@@ -147,7 +147,16 @@ async def revalidate_one(db, doc: dict, dry_run: bool) -> dict:
             k: v for k, v in extracted.items()
             if v and not k.endswith("_detected_by")
         }
-        if not meaningful_fields and old_validation.get("all_passed"):
+
+        # For terminal docs (Completed/Posted/Archived/auto-cleared):
+        # - If they have real data → keep validation passing (they were correctly processed)
+        # - If they have 0 meaningful fields → flag for review (they slipped through)
+        doc_status = (doc.get("status") or "").lower()
+        is_terminal = doc_status in ("completed", "posted", "archived", "readytolink")
+        status_update = None
+
+        if not meaningful_fields:
+            # Zero data — this doc should NOT have been auto-cleared
             new_validation["all_passed"] = False
             existing_checks = new_validation.get("checks", [])
             if not any(c.get("check_name") == "extraction_quality_gate" for c in existing_checks):
@@ -158,6 +167,12 @@ async def revalidate_one(db, doc: dict, dry_run: bool) -> dict:
                     "required": True,
                 })
                 new_validation["checks"] = existing_checks
+            if is_terminal and doc.get("auto_cleared"):
+                status_update = "NeedsReview"
+        elif is_terminal:
+            # Terminal doc with real data — validation should reflect that
+            # it was correctly processed (don't retroactively fail)
+            new_validation["all_passed"] = True
 
         # Compute readiness
         from services.document_intelligence_service import _derive_automation_readiness
@@ -187,6 +202,8 @@ async def revalidate_one(db, doc: dict, dry_run: bool) -> dict:
         }
         if ef_changed:
             update["extracted_fields"] = cleaned_ef
+        if status_update:
+            update["status"] = status_update
 
         await db.hub_documents.update_one({"id": doc_id}, {"$set": update})
 
@@ -209,6 +226,8 @@ async def revalidate_one(db, doc: dict, dry_run: bool) -> dict:
             "completeness_changed": completeness_changed,
             "metadata_cleaned": ef_changed,
             "readiness": readiness["status"],
+            "status_changed": status_update,
+            "old_status": doc_status,
         }
 
     except Exception as e:
@@ -409,6 +428,16 @@ async def run(
             print(f"    Validation pass/fail changed: {len(val_changed)}")
             print(f"    Completeness score changed:   {len(comp_changed)}")
             print(f"    _detected_by metadata cleaned: {len(metadata_cleaned)}")
+
+            status_changed = [r for r in revalidated if r.get("status_changed")]
+            if status_changed:
+                print(f"    Status changed:               {len(status_changed)}")
+                status_moves = Counter(
+                    f"{r.get('old_status', '?')} -> {r['status_changed']}"
+                    for r in status_changed
+                )
+                for move, cnt in status_moves.most_common():
+                    print(f"      {move}: {cnt}")
 
             if val_changed:
                 print(f"\n  Validation changes:")

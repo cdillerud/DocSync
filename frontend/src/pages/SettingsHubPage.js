@@ -3,11 +3,13 @@ import { useSearchParams } from 'react-router-dom';
 import SettingsPage from './SettingsPage';
 import EmailParserPage from './EmailParserPage';
 import AutomationRulesPage from './AutomationRulesPage';
+import ItemMappingsPage from './ItemMappingsPage';
 
 const TABS = [
   { key: 'general', label: 'General' },
   { key: 'email', label: 'Email Config' },
   { key: 'automation', label: 'Automation Rules' },
+  { key: 'item-mappings', label: 'Item Mappings' },
 ];
 
 export default function SettingsHubPage() {
@@ -37,6 +39,7 @@ export default function SettingsHubPage() {
       {activeTab === 'general' && <SettingsPage />}
       {activeTab === 'email' && <EmailParserPage />}
       {activeTab === 'automation' && <AutomationRulesPage />}
+      {activeTab === 'item-mappings' && <ItemMappingsPage />}
     </div>
   );
 }

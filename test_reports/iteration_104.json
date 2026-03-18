@@ -62,7 +62,7 @@
   },
   "test_credentials": {
     "auth": "admin / admin",
-    "api_url": "https://extract-heal.preview.emergentagent.com"
+    "api_url": "https://extraction-quality.preview.emergentagent.com"
   },
   "seed_data_created": {},
   "retest_needed": false,

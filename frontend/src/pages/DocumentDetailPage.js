@@ -29,6 +29,7 @@ import DocumentIntelligencePanel from '../components/DocumentIntelligencePanel';
 import ARReleaseGatePanel from '../components/ARReleaseGatePanel';
 import DecisionExplainabilityPanel from '../components/DecisionExplainabilityPanel';
 import ReviewerAssistPanel from '../components/ReviewerAssistPanel';
+import PipelineVisualization from '../components/PipelineVisualization';
 
 const READINESS_CONFIG = {
   ready_auto_draft: { label: 'Ready (Auto-Draft)', color: 'bg-emerald-500', textColor: 'text-emerald-500', icon: CheckCircle2 },
@@ -471,6 +472,9 @@ export default function DocumentDetailPage() {
               <InfoRow label="Updated" value={formatDate(doc.updated_utc)} mono />
             </CardContent>
           </Card>
+
+          {/* Processing Pipeline Visualization */}
+          <PipelineVisualization documentId={id} />
 
           <Card className="border border-border" data-testid="doc-classification-card">
             <CardHeader className="pb-3">

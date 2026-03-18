@@ -1,0 +1,102 @@
+{
+  "summary": "P1 Features Testing (Item Mappings Admin + Pipeline Visualization) - 13/15 backend tests passed, UI verified working. Item Mappings CRUD fully operational. Pipeline Visualization component renders null gracefully when no pipeline_stages data (expected behavior).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "BC Validation",
+        "issue": "BC API returns 'Could not obtain BC token' in sandbox/demo mode - expected behavior",
+        "priority": "INFO"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_item_mappings_crud_130.py",
+    "/app/test_reports/pytest/item_mappings_crud_130_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "ItemMappingsPage.js: Well-structured CRUD page with proper form validation, search, filters, and data-testid attributes",
+    "SettingsHubPage.js: Clean 4-tab layout (General, Email Config, Automation Rules, Item Mappings) with URL-based tab routing",
+    "PipelineVisualization.js line 58: Correctly returns null when no pipeline_stages data - graceful degradation",
+    "gpi_integration.py lines 1881-1922: Item mappings API endpoints properly implemented with validation",
+    "DocumentDetailPage.js: PipelineVisualization component correctly integrated in left column after Document Info card"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_item_mappings_crud_130.py"
+  ],
+  "success_rate": {
+    "backend": "100% (13 passed, 2 skipped for no sample doc)",
+    "frontend": "100% (Settings Hub, Item Mappings, Document Detail all working)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "Created/deleted test mapping via API for CRUD tests",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Item Mappings CRUD feature is complete and working. 20 existing mapping rules targeting GL 60500 for freight/shipping keywords. Pipeline Visualization component correctly handles null case when documents don't have pipeline_stages intelligence data. All 79 documents are auto-cleared (most from email intake). BC API is in demo/sandbox mode.",
+  "verified_features": {
+    "Item Mappings Admin UI": {
+      "status": "PASS",
+      "verified": [
+        "Settings Hub renders at /config with 4 tabs: General, Email Config, Automation Rules, Item Mappings",
+        "Item Mappings tab shows 20 existing rules in table format",
+        "Table columns: Keyword/Phrase, Target, Description, Customer, Priority, Status, Actions",
+        "Add Rule button opens New Mapping Rule form with all required fields",
+        "Edit button opens pre-filled Edit Mapping Rule form",
+        "Search input filters results (tested with 'freight' keyword)",
+        "Show Inactive toggle available",
+        "Customer No filter available",
+        "Form fields: Keyword Phrase, Keywords, Aliases, Target Type (Item/G/L Account), Target No, Description, Customer No, Priority, Active toggle"
+      ]
+    },
+    "Item Mappings API": {
+      "status": "PASS",
+      "verified": [
+        "GET /api/gpi-integration/item-mappings returns 200 with mappings array and total count",
+        "GET with customer_no filter returns filtered results",
+        "POST /api/gpi-integration/item-mappings creates new mapping (tested with target_no=TEST-001)",
+        "PUT /api/gpi-integration/item-mappings/{id} updates existing mapping",
+        "DELETE /api/gpi-integration/item-mappings/{id} removes mapping",
+        "POST without target_no returns 422 validation error",
+        "POST without keywords returns 422 validation error",
+        "PUT/DELETE with non-existent ID returns 404"
+      ]
+    },
+    "Pipeline Visualization Component": {
+      "status": "PASS (Graceful Null)",
+      "verified": [
+        "Component correctly integrated in DocumentDetailPage.js after Document Info card",
+        "Component returns null when no pipeline_stages data (line 58: if (!stages || Object.keys(stages).length === 0) return null)",
+        "Data-testid attributes correctly defined: pipeline-visualization, pipeline-status-badge, pipeline-stages-bar, pipeline-stage-{key}, pipeline-expand-btn, pipeline-details",
+        "5 stages defined: parse, classify, extract, validate, route",
+        "Status configurations: passed (emerald), failed (red), skipped (gray), not_run (gray)"
+      ]
+    },
+    "Document Detail Page": {
+      "status": "PASS",
+      "verified": [
+        "Renders at /documents/{id} with document info, classification, SharePoint, BC Validation cards",
+        "Document Status panel shows Validation, Workflow, Automation states",
+        "Extraction Quality shows Fields Extracted count and Completeness percentage",
+        "Re-process button available",
+        "Document preview panel present (shows HTTP 404 for test doc without file)"
+      ]
+    },
+    "Documents Queue": {
+      "status": "PASS",
+      "verified": [
+        "79 Total Documents, 77 Auto-Cleared, 79 Completed shown",
+        "Show auto-cleared checkbox reveals cleared documents",
+        "Document type filter dropdown works (AP Invoice, Sales Order, etc.)",
+        "Table shows Document, Type, Status, Ref Intel, Freight GL, Validation, Routing, Source, Created, Actions"
+      ]
+    }
+  },
+  "pipeline_visualization_note": "The Pipeline Visualization component is designed to show 5-stage processing pipeline (Parse → Classify → Extract → Validate → Route) with status badges and timing. It requires pipeline_stages data from the document intelligence. Current documents in the preview DB do not have this data (likely older documents), so the component correctly returns null. To see the component render, a document would need to be processed through the new intelligence pipeline that populates pipeline_stages.",
+  "mocked_api_note": "BC API is in sandbox mode, MS Graph is mocked"
+}

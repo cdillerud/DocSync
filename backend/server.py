@@ -380,7 +380,20 @@ async def upload_to_sharepoint(file_content: bytes, file_name: str, folder: str)
         if "error" in drives_data:
             raise Exception(f"Drive list error: {drives_data['error'].get('message', drives_data['error'])}")
         drives = drives_data.get("value", [])
-        drive = next((d for d in drives if d["name"] == SHAREPOINT_LIBRARY_NAME), drives[0] if drives else None)
+        # Match library by name — try exact, then case-insensitive, then common aliases
+        lib_name = SHAREPOINT_LIBRARY_NAME
+        drive = next((d for d in drives if d["name"] == lib_name), None)
+        if not drive:
+            drive = next((d for d in drives if d["name"].lower() == lib_name.lower()), None)
+        if not drive:
+            # "Documents" and "Shared Documents" are aliases for the same default library
+            alt_names = {"documents": "shared documents", "shared documents": "documents"}
+            alt = alt_names.get(lib_name.lower())
+            if alt:
+                drive = next((d for d in drives if d["name"].lower() == alt), None)
+        if not drive:
+            # Last resort: pick first documentLibrary type drive (never pick a List)
+            drive = next((d for d in drives if d.get("driveType") == "documentLibrary"), None)
         if not drive:
             raise Exception(f"Document library '{SHAREPOINT_LIBRARY_NAME}' not found. Available: {[d['name'] for d in drives]}")
         drive_id = drive["id"]
@@ -422,7 +435,17 @@ async def ensure_sharepoint_folder_exists(folder_path: str) -> bool:
             f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives",
             headers={"Authorization": f"Bearer {token}"})
         drives = drives_resp.json().get("value", [])
-        drive = next((d for d in drives if d["name"] == SHAREPOINT_LIBRARY_NAME), drives[0] if drives else None)
+        lib_name = SHAREPOINT_LIBRARY_NAME
+        drive = next((d for d in drives if d["name"] == lib_name), None)
+        if not drive:
+            drive = next((d for d in drives if d["name"].lower() == lib_name.lower()), None)
+        if not drive:
+            alt_names = {"documents": "shared documents", "shared documents": "documents"}
+            alt = alt_names.get(lib_name.lower())
+            if alt:
+                drive = next((d for d in drives if d["name"].lower() == alt), None)
+        if not drive:
+            drive = next((d for d in drives if d.get("driveType") == "documentLibrary"), None)
         if not drive:
             return False
         drive_id = drive["id"]

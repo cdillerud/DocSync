@@ -1,0 +1,90 @@
+{
+  "summary": "BC Validation 3-State Status Testing Complete - All tests passed. Badge correctly shows FAILED (red) when required checks fail. Pipeline Visualization renders correctly with all 5 stages. Item Mappings Admin still working.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "BC API Connection",
+        "issue": "BC API returns 'Could not obtain BC token' in preview environment (expected - no valid token)",
+        "priority": "INFO"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_bc_validation_3state_131.py",
+    "/app/test_reports/pytest/bc_validation_3state_131_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "bc_validation_service.py: Lines 314-330 correctly compute validation_status from checks (pass/warn/fail)",
+    "reprocess_all.py: Lines 178-185 correctly compute validation_status during revalidation",
+    "DocumentDetailPage.js: Lines 603-608 correctly compute validation_status client-side from checks array for backward compatibility",
+    "DocumentDetailPage.js: Lines 626-632 correctly render 3-state badge (PASSED green/WARNINGS amber/FAILED red)"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_bc_validation_3state_131.py"
+  ],
+  "success_rate": {
+    "backend": "100% (7 passed)",
+    "frontend": "100% (BC Validation badge, Pipeline Visualization, Item Mappings all working)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "N/A - Used existing document a959d504-fc69-420f-a0c1-2ae318211d76",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "BC Validation 3-state status feature is complete and working. Document a959d504 has validation_status='fail' with bc_connection required check failed. Pipeline Visualization shows all 5 stages with validate stage failed. Item Mappings Admin UI has 20 rules targeting GL 60500.",
+  "verified_features": {
+    "BC Validation 3-State Badge": {
+      "status": "PASS",
+      "verified": [
+        "validation_status field returned by backend API in validation_results",
+        "Badge shows 'FAILED' with red (destructive) styling when required check fails",
+        "bc_connection check has passed=False, required=True",
+        "Frontend computes validation_status from checks array for backward compatibility",
+        "derived_state.validation_state = 'fail' with blocking_issues=['bc_connection']"
+      ]
+    },
+    "Pipeline Visualization": {
+      "status": "PASS",
+      "verified": [
+        "Component renders on Document Detail page",
+        "Shows all 5 stages: Parse, Classify, Extract, Validate, Route",
+        "Pipeline status badge shows 'FAILED'",
+        "Validate stage shows as failed with error 'BC validation failed'",
+        "Stage timing shown (52ms parse, 4.1s classify, 0ms extract, 196ms validate, 0ms route)"
+      ]
+    },
+    "Item Mappings Admin": {
+      "status": "PASS",
+      "verified": [
+        "Settings Hub with 4 tabs renders at /config",
+        "Item Mappings tab shows 20 existing rules",
+        "Table shows Keyword/Phrase, Target (G/L 60500), Description, Customer, Priority, Status, Actions",
+        "Add Rule button visible",
+        "GET /api/gpi-integration/item-mappings returns mappings array"
+      ]
+    },
+    "Document Detail Page": {
+      "status": "PASS",
+      "verified": [
+        "Document Info card with file details",
+        "Document Status panel showing Validation=fail, Workflow=completed, Automation=autonomous",
+        "BC Validation card with FAILED badge and bc_connection check details",
+        "Extraction Quality showing 5/6 fields, 93% completeness",
+        "Readiness panel showing Ready (Auto-Link)",
+        "AP Invoice Review panel",
+        "Workflow Events timeline"
+      ]
+    }
+  },
+  "validation_status_computation_logic": {
+    "backend": "bc_validation_service.py returns validation_status based on check outcomes: fail (required failures), warn (optional failures only), pass (all passed)",
+    "frontend": "DocumentDetailPage.js computes validation_status client-side from checks array if not provided by backend, ensuring backward compatibility with older documents"
+  },
+  "mocked_api_note": "BC API cannot connect in preview environment (no valid token). MS Graph is mocked."
+}

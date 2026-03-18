@@ -597,20 +597,38 @@ export default function DocumentDetailPage() {
           </Card>
 
           {/* BC Validation Results Card */}
-          {doc.validation_results && (
+          {doc.validation_results && (() => {
+            // Compute honest validation status from checks array
+            // This works for all documents, not just newly processed ones
+            const checks = doc.validation_results.checks || [];
+            const failedChecks = checks.filter(c => !c.passed);
+            const requiredFailures = failedChecks.filter(c => c.required);
+            // Use backend validation_status if available, otherwise compute from checks
+            const vs = doc.validation_results.validation_status
+              || (requiredFailures.length > 0 ? 'fail' : failedChecks.length > 0 ? 'warn' : 'pass');
+            const isWarn = vs === 'warn';
+            const isFail = vs === 'fail';
+            const isPass = !isWarn && !isFail;
+            return (
             <Card className="border border-border" data-testid="doc-bc-validation-card">
               <CardHeader className="pb-3">
                 <div className="flex items-center gap-2">
-                  {doc.validation_results.all_passed ? (
+                  {isPass ? (
                     <ShieldCheck className="w-4 h-4 text-emerald-500" />
-                  ) : (
+                  ) : isWarn ? (
                     <ShieldAlert className="w-4 h-4 text-amber-500" />
+                  ) : (
+                    <ShieldAlert className="w-4 h-4 text-red-500" />
                   )}
                   <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>
                     BC Validation
                   </CardTitle>
-                  <Badge variant={doc.validation_results.all_passed ? "secondary" : "destructive"} className="text-[10px]">
-                    {doc.validation_results.all_passed ? 'PASSED' : 'FAILED'}
+                  <Badge
+                    variant={isPass ? "secondary" : isFail ? "destructive" : "outline"}
+                    className={`text-[10px] ${isWarn ? 'bg-amber-500/10 text-amber-500 border-amber-500/30' : ''}`}
+                    data-testid="bc-validation-status-badge"
+                  >
+                    {isPass ? 'PASSED' : isWarn ? 'WARNINGS' : 'FAILED'}
                   </Badge>
                 </div>
               </CardHeader>
@@ -714,7 +732,8 @@ export default function DocumentDetailPage() {
                 )}
               </CardContent>
             </Card>
-          )}
+            );
+          })()}
 
           {/* Readiness Panel */}
           <ReadinessPanel readiness={doc.readiness} />

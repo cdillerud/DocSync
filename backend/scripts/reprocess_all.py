@@ -174,6 +174,16 @@ async def revalidate_one(db, doc: dict, dry_run: bool) -> dict:
             # it was correctly processed (don't retroactively fail)
             new_validation["all_passed"] = True
 
+        # Compute validation_status (honest UI-facing summary)
+        failed_checks = [c for c in new_validation.get("checks", []) if not c.get("passed", True)]
+        required_failures = [c for c in failed_checks if c.get("required", False)]
+        if required_failures:
+            new_validation["validation_status"] = "fail"
+        elif failed_checks:
+            new_validation["validation_status"] = "warn"
+        else:
+            new_validation["validation_status"] = "pass"
+
         # Compute readiness
         from services.document_intelligence_service import _derive_automation_readiness
         readiness = _derive_automation_readiness(

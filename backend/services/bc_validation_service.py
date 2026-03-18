@@ -311,6 +311,32 @@ async def validate_bc_match(
     match_method values: exact_no, exact_name, normalized, alias, fuzzy,
                          manual, sales_order_number, none
     """
+    result = await _validate_bc_match_inner(job_type, extracted_fields, job_config)
+
+    # Compute UI-facing validation_status from actual check outcomes.
+    # all_passed tracks ONLY required failures (for automation).
+    # validation_status is the honest summary for UI display:
+    #   "pass"  = every check passed
+    #   "warn"  = some optional checks failed, all required passed
+    #   "fail"  = at least one required check failed
+    failed_checks = [c for c in result.get("checks", []) if not c.get("passed", True)]
+    required_failures = [c for c in failed_checks if c.get("required", False)]
+    if required_failures:
+        result["validation_status"] = "fail"
+    elif failed_checks:
+        result["validation_status"] = "warn"
+    else:
+        result["validation_status"] = "pass"
+
+    return result
+
+
+async def _validate_bc_match_inner(
+    job_type: str,
+    extracted_fields: dict,
+    job_config: dict,
+) -> dict:
+    """Inner implementation of validate_bc_match."""
     from services.document_intel_helpers import normalize_extracted_fields
     from deps import get_db, DEMO_MODE, BC_CLIENT_ID
     from services.bc_access import get_bc_adapter

@@ -30,65 +30,55 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 ### Phase 3 - SharePoint Folder Routing (Complete - Feb 2026)
 - 37 rules, 15 top-level folders, vendor mappings, processor assignments
 
-### P0 Fixes (Mar 2026)
-- Multi-page PDF Classification, BC PI Document Link, PI Retry-Lines
+### Classification Learning Loop (Complete - Mar 2026)
+- User corrections → few-shot examples in Gemini prompt
+- Bootstrap sweep: 1,874+ production docs
+- Positive confirmations from auto-clear, file-and-clear, BC posting
+- Vendor-type patterns for classification hints
 
-### File & Clear Feature (Mar 2026)
-- One-click suggest folder -> move to SharePoint -> mark cleared
+### AP Workflow Hardening (Complete - Mar 2026)
+- Duplicate PI check via live BC API
+- PO amount validation (10% tolerance)
+- Freight direction detection (inbound/outbound)
 
-### Classification Learning Loop (Mar 2026)
-- User corrections stored and used as few-shot examples in Gemini prompt
-- Bootstrap sweep: mined 1,874 production docs for learning data
-- Positive confirmations from: auto-clear, file-and-clear, bulk-file, BC posting, auto-file
-- Vendor-type patterns tracked for classification hints
+### Dashboard Date Filtering (Complete - Mar 2026)
+- ALL metrics filter by selected date (Central Time)
+- Date picker with prev/next day and "All Time" button
 
-### Auto PI Creation Pipeline (Mar 2026)
-- Automatic Purchase Invoice creation in BC sandbox for AP_Invoice docs
+### Shipping Document Auto-File (Complete - Mar 2026)
+- Auto-routes Shipping_Document/Warehouse_Receipt via BC lookup
+- Based on warehouse workflow rules (GR=Dropship, GB=Warehouse)
 
-### Packing List Classification Fix (Mar 2026)
-- New heuristic: filename + text patterns catch packing lists -> Shipping_Document
-- AI prompt updated with explicit anti-pattern (packing list != Sales_Order)
+### P0 Data Extraction Fix (Complete - Mar 18 2026)
+- **Root Cause**: `process_document()` couldn't find files — `local_file_path` was never stored, but files exist at `UPLOAD_DIR/doc_id`
+- **Fix**: Added `UPLOAD_DIR/doc_id` fallback in `document_intelligence_service.py`
+- **Fix**: Clear ERROR logging when no file found (eliminates silent failures)
+- **Fix**: Refactored `classify_document_with_ai()` — heuristics provide classification, LLM always runs for full extraction (heuristic+LLM merge)
+- **Result**: Documents previously with 0 fields now extract 14+ fields
+- **Testing**: 16/16 backend tests passed
 
-### Document Type Alignment (Mar 2026)
-- Frontend dropdown updated to show all 15 AI classification types
-- Queue page fixed: reads document_type (AI) not doc_type (legacy BC field)
-- Warehouse_Receipt added to DEFAULT_JOB_TYPES
-
-### Dashboard Date Filtering (Mar 2026)
-- ALL dashboard metrics now filter by selected date (Central Time)
-- Date picker in header with prev/next day and "All Time" button
-- /stats and /workflow-intelligence endpoints accept ?date=YYYY-MM-DD
-
-### Shipping Document Auto-File (Mar 2026)
-- New service: shipping_auto_file_service.py
-- Triggered on auto-clear for Shipping_Document, Warehouse_Receipt types
-- BC lookup for locationCode (GR=Dropship, GB=Warehouse) + InternationalGds
-- Auto-routes to correct SharePoint folder based on warehouse workflow rules
-
-### P0 Data Extraction Fix (Mar 2026)
-- **Root Cause**: `process_document()` couldn't find files because documents don't store `local_file_path`, but files exist at `UPLOAD_DIR/doc_id`
-- **Fix 1**: Added `UPLOAD_DIR/doc_id` fallback in `document_intelligence_service.py` when `local_file_path` is missing
-- **Fix 2**: Clear ERROR logging when no file found anywhere (eliminates silent failures)
-- **Fix 3**: Refactored `classify_document_with_ai()` — heuristics now provide classification only, LLM always runs for full field extraction (heuristic+LLM merge)
-- **Result**: Documents that previously had 0 fields now extract 14+ fields
-- **Testing**: 16/16 backend tests passed, frontend verified
+### Validation & Auto-Clear Hardening (Complete - Mar 18 2026)
+- **BC Validation extraction_quality_gate**: Rejects documents with 0 meaningful extracted fields (excludes `_detected_by` metadata)
+- **Auto-clear minimum extraction**: Filters out `_detected_by` metadata from field counting — only real data (vendor, bol_number, etc.) counts
+- **Readiness terminal shortcut fix**: Completed docs with 0 meaningful fields no longer get 100% readiness — falls through to full evaluation showing BLOCKED status
+- **Testing**: 13/13 unit tests passed + frontend verified
 
 ## Key API Endpoints
-- `POST /api/documents/classification/bootstrap-from-history` -- Bootstrap learning model
-- `GET /api/documents/classification/bootstrap-status` -- Bootstrap progress
-- `GET /api/dashboard/stats?date=YYYY-MM-DD` -- Date-filtered dashboard stats
-- `GET /api/dashboard/workflow-intelligence?date=YYYY-MM-DD` -- Date-filtered intelligence
-- `POST /api/document-intelligence/process/{doc_id}` -- Run full intelligence pipeline
+- `POST /api/document-intelligence/process/{doc_id}` — Full intelligence pipeline
+- `POST /api/documents/{doc_id}/reprocess?reclassify=true` — Re-classify document
+- `GET /api/dashboard/stats?date=YYYY-MM-DD` — Date-filtered dashboard stats
+- `GET /api/dashboard/workflow-intelligence?date=YYYY-MM-DD` — Date-filtered intelligence
+- `POST /api/documents/classification/bootstrap-from-history` — Bootstrap learning model
 
 ## Mocked Services
 - Microsoft Graph API (email ingestion - partial)
 - JWT Authentication (Entra ID)
-- SharePoint file move (demo mode in preview)
+- BC API (demo/sandbox mode in preview)
 
-## P0/P1/P2 Backlog
+## P1/P2 Backlog
 ### P1 - Upcoming
 - AP Validation card on document detail page
-- Azure OpenAI integration (user deferred)
+- Azure OpenAI integration alongside Gemini (user deferred)
 - Admin UI for managing item mapping rules
 
 ### P2 - Future

@@ -453,6 +453,51 @@ class BusinessCentralService:
                 "total": len(pos),
                 "mock": False
             }
+
+    async def find_purchase_order_by_number(self, po_number: str) -> Optional[Dict[str, Any]]:
+        """Look up a purchase order by its number. Returns the PO with amount and locationCode."""
+        if self.use_mock or not po_number:
+            return None
+
+        token = await get_bc_token(environment=BC_READ_ENVIRONMENT)
+        company_id = await self._get_company_id(environment=BC_READ_ENVIRONMENT)
+
+        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseOrders"
+        params = {
+            "$filter": f"number eq '{po_number}'",
+            "$select": "id,number,vendorNumber,vendorName,orderDate,status,totalAmountIncludingTax,totalAmountExcludingTax",
+            "$top": "1",
+        }
+        async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+            resp = await client.get(url, headers={"Authorization": f"Bearer {token}"}, params=params)
+            if resp.status_code == 200:
+                orders = resp.json().get("value", [])
+                return orders[0] if orders else None
+        return None
+
+    async def check_duplicate_purchase_invoice(self, vendor_no: str, vendor_invoice_no: str) -> Optional[Dict[str, Any]]:
+        """Check if a purchase invoice with the same vendor + invoice number already exists in BC.
+        Returns the existing PI if found, None otherwise."""
+        if self.use_mock or not vendor_no or not vendor_invoice_no:
+            return None
+
+        token = await get_bc_token(environment=BC_READ_ENVIRONMENT)
+        company_id = await self._get_company_id(environment=BC_READ_ENVIRONMENT)
+
+        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseInvoices"
+        params = {
+            "$filter": f"vendorNumber eq '{vendor_no}' and vendorInvoiceNumber eq '{vendor_invoice_no}'",
+            "$select": "id,number,vendorNumber,vendorInvoiceNumber,totalAmountIncludingTax,status",
+            "$top": "1",
+        }
+        async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+            resp = await client.get(url, headers={"Authorization": f"Bearer {token}"}, params=params)
+            if resp.status_code == 200:
+                invoices = resp.json().get("value", [])
+                return invoices[0] if invoices else None
+        return None
+
+
     
     # =========================================================================
     # PURCHASE INVOICE METHODS

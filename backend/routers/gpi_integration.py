@@ -1138,14 +1138,49 @@ async def auto_create_pi_from_document(doc_id: str, db) -> dict:
         if not write_ok:
             return {"success": False, "reason": "bc_writes_disabled"}
 
-        # Resolve vendor
-        vendor_info = await _resolve_vendor_no(doc)
-        vendor_no = vendor_info.get("vendor_no")
-        if not vendor_no:
-            return {"success": False, "reason": "no_vendor_resolved"}
+        # ---- AP Validation (duplicate check, PO amount within 10%, required fields) ----
+        from services.ap_validation_service import APValidationService
+        from services.business_central_service import BusinessCentralService
+        bc_svc = BusinessCentralService()
+        ap_validator = APValidationService(db, bc_service=bc_svc)
 
         ef = doc.get("extracted_fields") or {}
         nf = doc.get("normalized_fields") or {}
+
+        # Resolve vendor first (needed for validation)
+        vendor_info = await _resolve_vendor_no(doc)
+        vendor_no = vendor_info.get("vendor_no")
+        vendor_match_result = {
+            "matched": bool(vendor_no),
+            "bc_vendor_number": vendor_no,
+            "best_match": {"vendor_number": vendor_no, "name": vendor_info.get("vendor_name", "")},
+            "source": vendor_info.get("match_method", ""),
+            "score": vendor_info.get("match_score", 0),
+        }
+
+        validation = await ap_validator.validate_ap_invoice(doc, {**ef, **nf}, vendor_match_result)
+        val_dict = validation.to_dict()
+
+        # Store validation results on the document
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {"ap_validation": val_dict, "updated_utc": datetime.now(timezone.utc).isoformat()}}
+        )
+
+        if not val_dict["all_passed"]:
+            logger.warning("[AutoPI] AP validation FAILED for doc %s: %s", doc_id, val_dict["blocking_issues"])
+            return {
+                "success": False,
+                "reason": "ap_validation_failed",
+                "blocking_issues": val_dict["blocking_issues"],
+                "validation": val_dict,
+            }
+
+        logger.info("[AutoPI] AP validation passed for doc %s (state=%s, warnings=%d)",
+                    doc_id, val_dict["validation_state"], len(val_dict["warnings"]))
+        if not vendor_no:
+            return {"success": False, "reason": "no_vendor_resolved"}
+
         vendor_invoice_no = ef.get("invoice_number") or nf.get("invoice_number") or ""
         document_date = ef.get("invoice_date") or nf.get("invoice_date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
         idempotency_key = _build_pi_idempotency_key(doc_id)

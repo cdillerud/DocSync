@@ -336,6 +336,18 @@ class APValidationService:
         
         # Warning: PO reference not found
         po_number = extracted_fields.get("po_number") or document.get("po_number_clean")
+
+        # ============================================================
+        # CHECK 6: PO Amount Validation (10% tolerance)
+        # ============================================================
+        if po_number and total_amount is not None:
+            await self._validate_po_amount(result, po_number, total_amount)
+        elif po_number:
+            result.add_warning(
+                "po_amount_skip_no_invoice_amount",
+                f"PO '{po_number}' found but invoice amount missing — cannot validate",
+            )
+
         if po_number:
             # PO was extracted - check if it exists in BC (this is informational, not blocking)
             # Store for reference resolution
@@ -398,12 +410,76 @@ class APValidationService:
             return False
         
         try:
-            # Use BC service to check for existing invoice
-            existing = await self.bc_service.check_duplicate_invoice(vendor_no, invoice_number)
-            return existing
+            existing = await self.bc_service.check_duplicate_purchase_invoice(vendor_no, invoice_number)
+            return existing is not None
         except Exception as e:
             logger.error("[AP Validation] Duplicate check failed: %s", str(e))
             return False  # Assume not duplicate on error
+
+    async def _validate_po_amount(
+        self,
+        result: APValidationResult,
+        po_number: str,
+        invoice_amount,
+    ):
+        """
+        Check 6: PO Amount Validation (10% tolerance).
+        Looks up PO in BC and compares total against invoice amount.
+        """
+        if not self.bc_service or not po_number:
+            return
+
+        try:
+            po_data = await self.bc_service.find_purchase_order_by_number(po_number)
+            if not po_data:
+                result.add_warning(
+                    "po_not_found",
+                    f"PO '{po_number}' not found in Business Central — cannot validate amount",
+                    po_number=po_number,
+                )
+                return
+
+            po_amount = po_data.get("totalAmountIncludingTax") or po_data.get("totalAmountExcludingTax")
+            if not po_amount:
+                result.add_warning(
+                    "po_no_amount",
+                    f"PO '{po_number}' found but has no amount — cannot validate",
+                    po_number=po_number,
+                )
+                return
+
+            if not invoice_amount:
+                return  # Already flagged in check 4
+
+            diff_pct = abs(float(invoice_amount) - float(po_amount)) / float(po_amount) if float(po_amount) else 0
+            TOLERANCE = 0.10  # 10%
+
+            if diff_pct > TOLERANCE:
+                result.add_required_check(
+                    "po_amount_validation",
+                    False,
+                    f"Amount mismatch: invoice ${float(invoice_amount):,.2f} vs PO ${float(po_amount):,.2f} "
+                    f"({diff_pct*100:.1f}% diff, tolerance={TOLERANCE*100:.0f}%)",
+                    invoice_amount=float(invoice_amount),
+                    po_amount=float(po_amount),
+                    diff_pct=round(diff_pct * 100, 1),
+                )
+            else:
+                result.add_required_check(
+                    "po_amount_validation",
+                    True,
+                    f"Amount within tolerance: invoice ${float(invoice_amount):,.2f} vs PO ${float(po_amount):,.2f} "
+                    f"({diff_pct*100:.1f}% diff)",
+                    invoice_amount=float(invoice_amount),
+                    po_amount=float(po_amount),
+                    diff_pct=round(diff_pct * 100, 1),
+                )
+        except Exception as e:
+            logger.warning("[AP Validation] PO amount check failed for %s: %s", po_number, e)
+            result.add_warning(
+                "po_amount_check_failed",
+                f"PO amount validation failed: {e}",
+            )
 
 
 def validate_ap_invoice_sync(

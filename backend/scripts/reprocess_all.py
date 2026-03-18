@@ -70,14 +70,19 @@ def _meaningful_field_count(ef: dict) -> int:
 # =========================================================================
 
 async def revalidate_one(db, doc: dict, dry_run: bool) -> dict:
-    """Re-compute validation + quality metrics from existing extracted_fields."""
+    """Re-compute quality metrics and readiness from existing data.
+
+    Does NOT call BC API.  Only recomputes:
+      - extraction_quality (correct field lists per doc type)
+      - readiness score
+      - strips _detected_by metadata from extracted_fields
+    """
     doc_id = doc["id"]
     file_name = doc.get("file_name", "?")
     doc_type = doc.get("suggested_job_type") or doc.get("doc_type") or "Unknown"
-    confidence = doc.get("ai_confidence", 0.0)
+    confidence = doc.get("ai_confidence") or 0.0
     extracted = doc.get("extracted_fields") or {}
     old_validation = doc.get("validation_results") or {}
-    old_passed = old_validation.get("all_passed")
     old_eq = old_validation.get("extraction_quality", {})
     old_completeness = old_eq.get("completeness_score", 0)
     meaningful = _meaningful_field_count(extracted)
@@ -89,12 +94,13 @@ async def revalidate_one(db, doc: dict, dry_run: bool) -> dict:
             "action": "would_revalidate",
             "doc_type": doc_type,
             "meaningful_fields": meaningful,
-            "old_passed": old_passed,
+            "old_completeness": old_completeness,
         }
 
     try:
         from models.document_types import DEFAULT_JOB_TYPES
-        from services.bc_validation_service import validate_bc_match
+        from services.bc_validation_service import _compute_extraction_quality
+        from services.document_intel_helpers import normalize_extracted_fields
 
         # Resolve job config
         job_config = DEFAULT_JOB_TYPES.get(doc_type)
@@ -106,11 +112,32 @@ async def revalidate_one(db, doc: dict, dry_run: bool) -> dict:
             if not job_config:
                 job_config = DEFAULT_JOB_TYPES.get("AP_Invoice", {})
 
-        # Re-run validation (uses existing extracted_fields)
-        new_validation = await validate_bc_match(doc_type, extracted, job_config)
-        new_passed = new_validation.get("all_passed")
-        new_eq = new_validation.get("extraction_quality", {})
+        # Recompute extraction quality with correct field lists (NO BC calls)
+        normalized = normalize_extracted_fields(extracted)
+        new_eq = _compute_extraction_quality(normalized, extracted, job_config)
         new_completeness = new_eq.get("completeness_score", 0)
+
+        # Patch extraction_quality into existing validation_results
+        # (preserves BC match data, only updates the quality metric)
+        new_validation = dict(old_validation)
+        new_validation["extraction_quality"] = new_eq
+
+        # Check extraction quality gate (documents with 0 meaningful fields)
+        meaningful_fields = {
+            k: v for k, v in extracted.items()
+            if v and not k.endswith("_detected_by")
+        }
+        if not meaningful_fields and old_validation.get("all_passed"):
+            new_validation["all_passed"] = False
+            existing_checks = new_validation.get("checks", [])
+            if not any(c.get("check_name") == "extraction_quality_gate" for c in existing_checks):
+                existing_checks.append({
+                    "check_name": "extraction_quality_gate",
+                    "passed": False,
+                    "details": "No meaningful data extracted from document",
+                    "required": True,
+                })
+                new_validation["checks"] = existing_checks
 
         # Compute readiness
         from services.document_intelligence_service import _derive_automation_readiness
@@ -122,7 +149,7 @@ async def revalidate_one(db, doc: dict, dry_run: bool) -> dict:
             automation_decision=doc.get("automation_decision", "manual"),
         )
 
-        # Strip _detected_by from extracted_fields (clean up existing data)
+        # Strip _detected_by from extracted_fields
         cleaned_ef = {
             k: v for k, v in extracted.items()
             if not k.endswith("_detected_by")
@@ -143,8 +170,9 @@ async def revalidate_one(db, doc: dict, dry_run: bool) -> dict:
 
         await db.hub_documents.update_one({"id": doc_id}, {"$set": update})
 
-        validation_changed = old_passed != new_passed
         completeness_changed = abs(old_completeness - new_completeness) > 0.01
+        old_passed = old_validation.get("all_passed")
+        new_passed = new_validation.get("all_passed")
 
         return {
             "doc_id": doc_id,
@@ -154,7 +182,7 @@ async def revalidate_one(db, doc: dict, dry_run: bool) -> dict:
             "meaningful_fields": meaningful,
             "old_passed": old_passed,
             "new_passed": new_passed,
-            "validation_changed": validation_changed,
+            "validation_changed": old_passed != new_passed,
             "old_completeness": old_completeness,
             "new_completeness": new_completeness,
             "completeness_changed": completeness_changed,

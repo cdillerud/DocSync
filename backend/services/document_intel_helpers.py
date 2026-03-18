@@ -66,6 +66,56 @@ _WR_TEXT_PATTERNS = _re.compile(
 )
 
 
+# Invoice pattern — catches freight carrier invoices that should be AP_Invoice, not Freight_Document
+_INVOICE_TEXT_PATTERNS = _re.compile(
+    r'(invoice\s*#|invoice\s+number|balance\s+due|terms\s*:\s*net\s+\d|'
+    r'please\s+remit|amount\s+due|payment\s+terms|remit\s+to|pay\s+this\s+amount)',
+    _re.IGNORECASE,
+)
+
+
+
+
+def _check_obvious_ap_invoice(file_path: str, file_name: str) -> dict | None:
+    """Fast heuristic: if PDF first page has clear invoice language (Invoice #, Balance Due,
+    Terms: Net 30, etc.), classify as AP_Invoice. This catches freight carrier invoices that
+    the AI might misclassify as Freight_Document."""
+    fn_lower = file_name.lower()
+    ext = fn_lower.rsplit(".", 1)[-1] if "." in fn_lower else ""
+    if ext != "pdf":
+        return None
+
+    try:
+        import fitz
+        with fitz.open(file_path) as pdf_doc:
+            if len(pdf_doc) > 0:
+                page_text = pdf_doc[0].get_text()[:3000]
+                invoice_matches = _INVOICE_TEXT_PATTERNS.findall(page_text)
+                if len(invoice_matches) >= 2:
+                    # Strong invoice signal (at least 2 indicators)
+                    # But DON'T override if filename clearly says BOL, packing list, etc.
+                    if _PL_FILENAME_PATTERNS.search(fn_lower) or _BOL_FILENAME_PATTERNS.search(fn_lower):
+                        return None
+                    logger.info("Pre-AI AP invoice detection: %d text indicators in '%s'", len(invoice_matches), file_name)
+                    fields = {"ap_invoice_detected_by": "text_pattern"}
+                    inv_m = _re.search(r'invoice\s*#?\s*[:\s]*([A-Z0-9-]{2,20})', page_text, _re.IGNORECASE)
+                    amt_m = _re.search(r'(?:balance\s+due|amount\s+due|total)[:\s]*\$?([\d,]+\.?\d*)', page_text, _re.IGNORECASE)
+                    if inv_m:
+                        fields["invoice_number"] = inv_m.group(1).strip()
+                    if amt_m:
+                        fields["amount"] = amt_m.group(1).strip()
+                    return {
+                        "suggested_job_type": "AP_Invoice",
+                        "confidence": 0.92,
+                        "model": "heuristic-ap-invoice-text",
+                        "extracted_fields": fields,
+                    }
+    except Exception as e:
+        logger.debug("AP invoice text check failed for %s: %s", file_name, e)
+
+    return None
+
+
 def _check_obvious_packing_list(file_path: str, file_name: str) -> dict | None:
     """Fast heuristic: if filename or first-page text indicates a packing list/slip,
     classify as Shipping_Document. Must run BEFORE Sales_Order to prevent misclassification."""
@@ -229,6 +279,11 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
     For multi-page PDFs, extracts only the first page to avoid
     classification confusion from supporting documents on later pages.
     """
+    # Fast pre-AI heuristic: catch obvious AP invoices FIRST (freight carrier invoices etc.)
+    ap_result = _check_obvious_ap_invoice(file_path, file_name)
+    if ap_result:
+        return ap_result
+
     # Fast pre-AI heuristic: catch obvious packing lists FIRST
     pl_result = _check_obvious_packing_list(file_path, file_name)
     if pl_result:
@@ -694,6 +749,8 @@ DOCUMENT CATEGORIES AND TYPES:
 AP_Invoice: Vendor invoices we RECEIVE
 - The VENDOR is the company sending us the invoice (NOT Gamer Packaging)
 - If "Gamer Packaging" appears as Bill To/Customer, this is an AP_Invoice we received
+- CRITICAL: An invoice from a freight/transportation company (e.g., Tumalo Creek, UPS, FedEx, XPO, any carrier) is STILL an AP_Invoice — NOT a Freight_Document
+- If the document says "Invoice", "Balance Due", "Terms: Net 30", "Please remit payment" — it is an AP_Invoice regardless of the vendor's industry
 - Extract: vendor name (the sender), invoice_number, invoice_date, amount, po_number (if present), due_date
 - CRITICAL: Always extract invoice_date (the date on the invoice itself)
 - CRITICAL: Extract ALL line items with description, quantity, unit_price, and total
@@ -707,10 +764,12 @@ Remittance: Payment confirmations
 - Extract: vendor/customer, payment_amount, payment_date, invoice_references
 - Look for "Remittance Advice", "Payment", check numbers
 
-Freight_Document: Shipping/freight INVOICES specifically — freight bills requesting payment
+Freight_Document: Freight operational documents — rate confirmations, freight quotes, carrier rate sheets, load tenders
+- NOT for invoices from freight carriers — those are AP_Invoice (if it says "Invoice", "Balance Due", "Terms", it's AP_Invoice)
+- NOT for BOLs or delivery receipts — those are Shipping_Document
 - Extract: shipper, consignee, tracking_number, carrier, origin, destination, freight charges
-- Look for freight charges, rates, and billing — NOT just any BOL
-- A standalone Bill of Lading or BOL without an invoice component is a Shipping_Document, not a Freight_Document
+- Look for "Rate Confirmation", "Load Tender", "Rate Sheet", "Freight Quote"
+- A standalone Bill of Lading or BOL is a Shipping_Document, not a Freight_Document
 
 == Sales Category ==
 Sales_Order: Customer purchase orders to us, PO confirmations

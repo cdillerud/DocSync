@@ -665,15 +665,20 @@ def compute_ap_normalized_fields(extracted_fields: dict) -> dict:
         result["due_date_raw"] = None
         result["due_date_iso"] = None
 
-    # PO number normalization
+    # PO number normalization + candidates
     po_number = extracted_fields.get("po_number")
     if po_number:
         po_str = str(po_number).strip()
         result["po_number_raw"] = po_str
-        result["po_number_clean"] = re.sub(r"[\s,]+", "", po_str).upper()
+        # Use canonical normalizer from po_resolution_service
+        from services.po_resolution_service import normalize_po, extract_po_candidates
+        result["po_number_clean"] = normalize_po(po_str)
+        # Build po_candidates from extracted fields
+        result["po_candidates"] = extract_po_candidates("", extracted_fields)
     else:
         result["po_number_raw"] = None
         result["po_number_clean"] = None
+        result["po_candidates"] = []
 
     # Invoice date to ISO
     invoice_date = extracted_fields.get("invoice_date")

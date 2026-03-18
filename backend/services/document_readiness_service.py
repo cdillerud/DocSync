@@ -71,7 +71,23 @@ def compute_signals(doc: Dict[str, Any]) -> Dict[str, bool]:
         or doc.get("po_number_clean")
         or doc.get("po_number")
     )
-    po_resolved = bool(po_number and str(po_number).strip())
+    po_extracted = bool(po_number and str(po_number).strip())
+
+    # For shipping-style docs, PO resolution against BC is the authoritative signal
+    po_res = doc.get("po_resolution") or {}
+    po_resolution_status = po_res.get("status", "")
+    po_resolved_bc = po_resolution_status == "resolved"
+    po_ambiguous = po_resolution_status == "ambiguous"
+
+    # po_resolved = True if PO was resolved against BC, OR if we just have a PO number
+    # for non-shipping docs (where BC PO match is not critical)
+    from services.po_resolution_service import PO_REQUIRED_DOC_TYPES
+    doc_type = doc.get("document_type") or doc.get("suggested_job_type") or ""
+    if doc_type in PO_REQUIRED_DOC_TYPES:
+        # For shipping docs: require actual BC resolution, not just field presence
+        po_resolved = po_resolved_bc
+    else:
+        po_resolved = po_extracted
 
     duplicate_risk = bool(doc.get("possible_duplicate") or doc.get("is_duplicate"))
 

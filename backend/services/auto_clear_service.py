@@ -436,7 +436,35 @@ def evaluate_auto_clear(
             )
     
     # =================================================================
-    # CHECK 5: BC Draft Ready (for AP invoices)
+    # CHECK 5a: PO Resolution (shipping/freight/warehouse docs)
+    # =================================================================
+    from services.po_resolution_service import PO_REQUIRED_DOC_TYPES
+    if doc_type in PO_REQUIRED_DOC_TYPES:
+        po_res = doc.get("po_resolution") or {}
+        po_status = po_res.get("status", "")
+        po_resolved_ok = po_status == "resolved"
+        details["checks"].append({
+            "check": "po_resolution",
+            "passed": po_resolved_ok,
+            "value": {
+                "status": po_status,
+                "po_number": po_res.get("po_number"),
+                "confidence": po_res.get("confidence"),
+                "match_method": po_res.get("match_method"),
+            },
+            "message": f"PO resolution: {po_status} — {'PO ' + str(po_res.get('po_number', '')) if po_resolved_ok else 'unresolved'}",
+        })
+
+        if not po_resolved_ok:
+            reason = "po_ambiguous" if po_status == "ambiguous" else "po_not_found"
+            return (
+                AutoClearDecision.NEEDS_REVIEW,
+                f"Shipping doc cannot auto-clear: PO {po_status or 'not resolved'}",
+                details,
+            )
+
+    # =================================================================
+    # CHECK 5b: BC Draft Ready (for AP invoices)
     # =================================================================
     if type_config.get("require_bc_draft_ready"):
         draft_ready = doc.get("draft_candidate", False) or doc.get("bc_create_ready", False)

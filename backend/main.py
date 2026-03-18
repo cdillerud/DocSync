@@ -83,6 +83,7 @@ from routers.auto_clear_reprocess import router as auto_clear_reprocess_router
 from routers.file_integrity import router as file_integrity_router
 from routers.auto_approve import router as auto_approve_router
 from routers.sharepoint_routing import router as sharepoint_routing_router
+from routers.po_resolution import router as po_resolution_router
 
 # ==================== APP ====================
 app = FastAPI(title="GPI Document Hub API")
@@ -147,6 +148,7 @@ app.include_router(auto_clear_reprocess_router, prefix="/api")
 app.include_router(file_integrity_router, prefix="/api")
 app.include_router(auto_approve_router, prefix="/api")
 app.include_router(sharepoint_routing_router, prefix="/api")
+app.include_router(po_resolution_router, prefix="/api")
 
 # ==================== SALES MODULE ====================
 app.include_router(sales_router)

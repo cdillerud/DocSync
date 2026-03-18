@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from services.automation_helpers import utcnow
+from datetime import datetime, timezone
 
 logger = logging.getLogger("pipeline")
 
@@ -144,6 +145,7 @@ STAGE_ORDER = [
     "extraction",
     "layout",
     "entity_resolution",
+    "po_resolution",
     "transaction_match",
     "bundle_detection",
     "lifecycle_check",
@@ -248,6 +250,81 @@ async def _run_entity_resolution(doc_id: str, ctx: Dict) -> StageResult:
         "confidence_avg": result.get("summary", {}).get("confidence_avg"),
     }
     return StageResult(stage="entity_resolution", status="ok", output=summary)
+
+
+async def _run_po_resolution(doc_id: str, ctx: Dict) -> StageResult:
+    """Stage 5: Resolve PO numbers against BC for shipping/freight/warehouse docs."""
+    from services.po_resolution_service import resolve_po, extract_po_candidates, requires_po_resolution
+    from deps import get_db
+
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        return StageResult(stage="po_resolution", status="error", error="document not found")
+
+    doc_type = doc.get("document_type") or doc.get("suggested_job_type") or ""
+
+    if not requires_po_resolution(doc_type):
+        return StageResult(
+            stage="po_resolution", status="skipped",
+            output={"reason": f"doc_type '{doc_type}' does not require PO resolution"},
+        )
+
+    extracted = doc.get("extracted_fields") or {}
+    raw_text = doc.get("raw_text") or ""
+
+    # Build PO candidates from extracted fields + raw text
+    candidates = extract_po_candidates(raw_text, extracted)
+
+    # Also check po_candidates already stored on doc
+    existing_candidates = doc.get("po_candidates") or []
+    if existing_candidates:
+        seen = {c["normalized"] for c in candidates}
+        for ec in existing_candidates:
+            if ec.get("normalized") and ec["normalized"] not in seen:
+                candidates.append(ec)
+                seen.add(ec["normalized"])
+
+    # Get vendor info from resolutions or extracted fields
+    vendor_name = ""
+    vendor_no = ""
+    for res in ctx.get("resolutions", []):
+        if res.get("entity_kind") == "vendor" and res.get("status") == "resolved":
+            vendor_no = res.get("resolved_id") or res.get("entity_number") or ""
+            vendor_name = res.get("canonical_value") or res.get("entity_name") or ""
+            break
+    if not vendor_name:
+        vendor_name = extracted.get("vendor") or extracted.get("shipper") or extracted.get("carrier") or ""
+
+    result = await resolve_po(
+        po_candidates=candidates,
+        vendor_name=vendor_name,
+        vendor_no=vendor_no,
+        doc_type=doc_type,
+        document_id=doc_id,
+    )
+
+    # Persist po_resolution on the document
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "po_resolution": result,
+            "po_candidates": candidates,
+            "updated_utc": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+
+    ctx["po_resolution"] = result
+
+    summary = {
+        "status": result.get("status"),
+        "po_number": result.get("po_number"),
+        "confidence": result.get("confidence"),
+        "match_method": result.get("match_method"),
+        "lookup_source": result.get("lookup_source"),
+        "candidates_count": len(candidates),
+    }
+    return StageResult(stage="po_resolution", status="ok", output=summary)
 
 
 async def _run_transaction_match(doc_id: str, ctx: Dict) -> StageResult:
@@ -361,6 +438,7 @@ _STAGE_RUNNERS = {
     "extraction": _run_extraction,
     "layout": _run_layout,
     "entity_resolution": _run_entity_resolution,
+    "po_resolution": _run_po_resolution,
     "transaction_match": _run_transaction_match,
     "bundle_detection": _run_bundle_detection,
     "lifecycle_check": _run_lifecycle_check,

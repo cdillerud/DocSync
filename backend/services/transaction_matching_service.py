@@ -298,20 +298,64 @@ async def match_transactions(doc_id: str) -> Dict[str, Any]:
     fields = intel.get("extracted_fields", {})
     doc_type = intel.get("document_type", "")
 
-    # Determine which collections to search
+    # For shipping-style docs, use PO resolution as primary match source
+    from services.po_resolution_service import PO_REQUIRED_DOC_TYPES
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "po_resolution": 1})
+    po_resolution = (doc or {}).get("po_resolution") or {}
+
+    candidates = []
+
+    if doc_type in PO_REQUIRED_DOC_TYPES and po_resolution.get("status") == "resolved":
+        # PO resolved against BC — create a high-confidence match to the BC purchase order
+        bc_match = po_resolution.get("best_match") or {}
+        candidates.append(_build_candidate(
+            entity_type="purchase_order",
+            entity_id=bc_match.get("bc_record_id") or po_resolution.get("bc_record_id", ""),
+            display=f"BC PO: {po_resolution['po_number']} — {po_resolution.get('bc_vendor_name', '')}",
+            basis=f"po_resolution:{po_resolution.get('match_method', 'unknown')}",
+            confidence=po_resolution.get("confidence", 0.90),
+            raw=bc_match,
+        ))
+        logger.info(
+            "[TX_MATCH] doc=%s Shipping doc matched via PO resolution: PO=%s confidence=%.2f",
+            doc_id[:12], po_resolution["po_number"], po_resolution.get("confidence", 0),
+        )
+    elif doc_type in PO_REQUIRED_DOC_TYPES and po_resolution.get("status") == "ambiguous":
+        # Multiple PO matches — add all as ambiguous candidates
+        for match in po_resolution.get("matches", [])[:5]:
+            candidates.append(_build_candidate(
+                entity_type="purchase_order",
+                entity_id=match.get("bc_record_id", ""),
+                display=f"BC PO: {match.get('bc_document_no', '')} — {match.get('bc_vendor_name', '')}",
+                basis=f"po_resolution_ambiguous:{match.get('match_method', '')}",
+                confidence=match.get("confidence", 0.60),
+                raw=match,
+            ))
+        logger.warning(
+            "[TX_MATCH] doc=%s Shipping doc has ambiguous PO resolution: %d candidates",
+            doc_id[:12], len(po_resolution.get("matches", [])),
+        )
+    elif doc_type in PO_REQUIRED_DOC_TYPES:
+        # PO not found — log and fall through to legacy search as last resort
+        logger.warning(
+            "[TX_MATCH] doc=%s Shipping doc has no resolved PO (status=%s), falling back to legacy search",
+            doc_id[:12], po_resolution.get("status", "none"),
+        )
+
+    # Determine which collections to search (legacy path)
     targets = DOC_TYPE_TARGETS.get(doc_type, [])
 
     # Get entity resolution data for enrichment
     resolved = await db.entity_resolutions.find({"document_id": doc_id}, {"_id": 0}).to_list(20)
 
-    candidates = []
-
-    # Search based on document type
+    # Search based on document type (legacy fallback for non-PO-resolution matches)
     if any(t in ("sales_order_draft", "sales_order") for t in targets):
         candidates.extend(await _search_so_drafts(db, fields, resolved))
 
     if any(t in ("po_draft", "purchase_order") for t in targets):
-        candidates.extend(await _search_po_drafts(db, fields, resolved))
+        # Only do legacy PO draft search if PO resolution didn't already produce matches
+        if not any(c["candidate_entity_type"] == "purchase_order" for c in candidates):
+            candidates.extend(await _search_po_drafts(db, fields, resolved))
 
     if any(t in ("ap_intake_draft", "invoice") for t in targets):
         candidates.extend(await _search_ap_drafts(db, fields, resolved))

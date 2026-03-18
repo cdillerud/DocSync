@@ -14,7 +14,7 @@ import { toast } from 'sonner';
 import {
   RefreshCw, CheckCircle2, AlertCircle, Database, Cloud,
   Building2, Shield, Settings, Pencil, Eye, EyeOff, Loader2,
-  Zap, Save, RotateCcw
+  Zap, Save, RotateCcw, Wrench, Play
 } from 'lucide-react';
 
 const STATUS_ICON = {
@@ -64,6 +64,137 @@ const CONFIG_SECTIONS = [
     ],
   },
 ];
+
+const API = process.env.REACT_APP_BACKEND_URL;
+
+function MaintenanceSection() {
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState(null);
+  const [polling, setPolling] = useState(false);
+
+  const runRecompute = async (dryRun = false) => {
+    setRunning(true);
+    setResult(null);
+    try {
+      const res = await fetch(`${API}/api/admin/recompute-derived-states?dry_run=${dryRun}`, { method: 'POST' });
+      const data = await res.json();
+      toast.success(`Recompute ${dryRun ? '(dry run) ' : ''}started`);
+      // Poll for completion
+      setPolling(true);
+      const pollId = setInterval(async () => {
+        try {
+          const statusRes = await fetch(`${API}/api/admin/recompute-status/${data.run_id}`);
+          const statusData = await statusRes.json();
+          setResult(statusData);
+          if (statusData.status === 'completed' || statusData.status === 'failed') {
+            clearInterval(pollId);
+            setPolling(false);
+            setRunning(false);
+            if (statusData.status === 'completed') {
+              toast.success(`Recompute complete: ${statusData.changed} documents changed`);
+            } else {
+              toast.error('Recompute failed');
+            }
+          }
+        } catch { /* ignore poll errors */ }
+      }, 2000);
+    } catch (err) {
+      toast.error('Failed to start: ' + err.message);
+      setRunning(false);
+    }
+  };
+
+  return (
+    <Card className="border border-border" data-testid="maintenance-section">
+      <CardHeader className="pb-3">
+        <div className="flex items-center gap-2">
+          <Wrench className="w-4 h-4 text-primary" />
+          <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>
+            Data Maintenance
+          </CardTitle>
+        </div>
+        <CardDescription className="text-xs">
+          Administrative tools for data consistency and bulk operations
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-start justify-between p-3 rounded-md bg-muted/30 border border-border">
+          <div>
+            <h4 className="text-xs font-semibold">Recompute Derived States</h4>
+            <p className="text-[10px] text-muted-foreground mt-0.5 max-w-md">
+              Refresh validation, workflow, and automation state badges for all documents. 
+              Use after validation logic changes to update queue displays.
+            </p>
+          </div>
+          <div className="flex gap-1.5 shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => runRecompute(true)}
+              disabled={running}
+              data-testid="recompute-dry-run-btn"
+            >
+              {running && polling ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Eye className="w-3 h-3 mr-1" />}
+              Dry Run
+            </Button>
+            <Button
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => runRecompute(false)}
+              disabled={running}
+              data-testid="recompute-run-btn"
+            >
+              {running && !polling ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Play className="w-3 h-3 mr-1" />}
+              Run
+            </Button>
+          </div>
+        </div>
+
+        {result && (
+          <div className="text-xs space-y-1.5 p-3 rounded-md bg-muted/20 border border-border" data-testid="recompute-result">
+            <div className="flex items-center gap-2">
+              <Badge variant={result.status === 'completed' ? 'secondary' : result.status === 'running' ? 'outline' : 'destructive'} className="text-[10px]">
+                {result.status?.toUpperCase()}
+              </Badge>
+              {result.dry_run && <Badge variant="outline" className="text-[10px]">DRY RUN</Badge>}
+            </div>
+            <div className="grid grid-cols-4 gap-2 text-[11px]">
+              <div><span className="text-muted-foreground">Total:</span> <span className="font-mono">{result.total || 0}</span></div>
+              <div><span className="text-muted-foreground">Processed:</span> <span className="font-mono">{result.processed || 0}</span></div>
+              <div><span className="text-muted-foreground">Changed:</span> <span className="font-mono font-semibold text-amber-500">{result.changed || 0}</span></div>
+              <div><span className="text-muted-foreground">Errors:</span> <span className="font-mono">{result.errors || 0}</span></div>
+            </div>
+            {result.changes?.length > 0 && (
+              <div className="mt-2 max-h-40 overflow-y-auto">
+                <table className="w-full text-[10px]">
+                  <thead>
+                    <tr className="text-muted-foreground border-b border-border">
+                      <th className="text-left py-1 pr-2">File</th>
+                      <th className="text-left py-1 pr-2">Validation</th>
+                      <th className="text-left py-1 pr-2">Workflow</th>
+                      <th className="text-left py-1">Automation</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.changes.map((c, i) => (
+                      <tr key={i} className="border-b border-border/50">
+                        <td className="py-1 pr-2 font-mono truncate max-w-[150px]">{c.file_name || c.doc_id?.slice(0, 8)}</td>
+                        <td className="py-1 pr-2">{c.validation || '-'}</td>
+                        <td className="py-1 pr-2">{c.workflow || '-'}</td>
+                        <td className="py-1">{c.automation || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function SettingsPage() {
   const [status, setStatus] = useState(null);
@@ -291,6 +422,9 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* ==================== DATA MAINTENANCE ==================== */}
+      <MaintenanceSection />
 
       {/* ==================== CONFIG DIALOG ==================== */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

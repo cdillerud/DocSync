@@ -856,6 +856,16 @@ async def emit_bc_validation(
 ) -> WorkflowEvent:
     """Helper to emit bc.validation.completed or bc.validation.failed event."""
     checks_passed = sum(1 for c in checks if c.get("passed"))
+    failed_checks_list = [c for c in checks if not c.get("passed")]
+    required_failures = [c for c in failed_checks_list if c.get("required", False)]
+    
+    # Compute validation_status for derived state
+    if required_failures:
+        v_status = "fail"
+    elif failed_checks_list:
+        v_status = "warn"
+    else:
+        v_status = "pass"
     
     if passed:
         return await event_service.emit(
@@ -865,6 +875,7 @@ async def emit_bc_validation(
             correlation_id=correlation_id,
             payload={
                 "all_passed": True,
+                "validation_status": v_status,
                 "checks_passed": checks_passed,
                 "checks_total": len(checks),
                 "warnings": warnings or []

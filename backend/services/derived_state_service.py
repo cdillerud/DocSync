@@ -207,15 +207,34 @@ class DerivedStateService:
             # BC validation events
             elif event_type == "bc.validation.completed":
                 has_bc_validation = True
-                if payload.get("all_passed"):
-                    # BC validation passed — this is authoritative for vendor resolution.
-                    # Clear any stale vendor-related blocking issues from earlier events.
+                # Use validation_status if available (new 3-state field)
+                v_status = payload.get("validation_status")
+                if v_status == "warn":
+                    validation_state = ValidationState.WARNING.value
+                    blocking_issues = [i for i in blocking_issues if "Vendor" not in i and "vendor" not in i.lower()]
+                    if review_queue == "vendor_pending":
+                        review_queue = None
+                        needs_review = False
+                    warnings.extend(payload.get("warnings", []))
+                elif v_status == "fail":
+                    validation_state = ValidationState.FAIL.value
+                    needs_review = True
+                    review_queue = "bc_validation"
+                    blocking_issues.extend(payload.get("failed_checks", []))
+                elif payload.get("all_passed"):
+                    # Legacy path (no validation_status field)
                     blocking_issues = [i for i in blocking_issues if "Vendor" not in i and "vendor" not in i.lower()]
                     validation_state = ValidationState.PASS.value
                     if payload.get("warnings"):
                         validation_state = ValidationState.WARNING.value
                         warnings.extend(payload.get("warnings", []))
-                    # Clear vendor review queue if it was set
+                    if review_queue == "vendor_pending":
+                        review_queue = None
+                        needs_review = False
+                else:
+                    # all_passed is False and no validation_status — pass
+                    validation_state = ValidationState.PASS.value
+                    blocking_issues = [i for i in blocking_issues if "Vendor" not in i and "vendor" not in i.lower()]
                     if review_queue == "vendor_pending":
                         review_queue = None
                         needs_review = False
@@ -358,8 +377,21 @@ class DerivedStateService:
         # but stale events left vendor blocking issues, clear them.
         # ================================================================
         bc_val = document.get("validation_results", {})
-        if bc_val.get("all_passed") and bc_val.get("bc_record_info"):
-            # BC validation resolved the vendor — clear any stale vendor blocking
+        bc_vs = bc_val.get("validation_status")
+        if not bc_vs:
+            # Compute from checks for legacy docs
+            bc_checks = bc_val.get("checks", [])
+            bc_failed = [c for c in bc_checks if not c.get("passed", True)]
+            bc_req_failed = [c for c in bc_failed if c.get("required", False)]
+            if bc_req_failed:
+                bc_vs = "fail"
+            elif bc_failed:
+                bc_vs = "warn"
+            elif bc_val.get("all_passed"):
+                bc_vs = "pass"
+        
+        if bc_vs == "pass" and bc_val.get("bc_record_info"):
+            # BC validation fully passed and resolved vendor
             vendor_blocks = [i for i in blocking_issues if "Vendor" in i or "vendor" in i.lower()]
             if vendor_blocks:
                 blocking_issues = [i for i in blocking_issues if i not in vendor_blocks]
@@ -367,6 +399,15 @@ class DerivedStateService:
                     validation_state = ValidationState.PASS.value if not warnings else ValidationState.WARNING.value
                     needs_review = False
                     review_queue = None
+        elif bc_vs == "warn" and bc_val.get("bc_record_info"):
+            # BC validation passed with warnings — still resolved vendor
+            vendor_blocks = [i for i in blocking_issues if "Vendor" in i or "vendor" in i.lower()]
+            if vendor_blocks:
+                blocking_issues = [i for i in blocking_issues if i not in vendor_blocks]
+            if not blocking_issues:
+                validation_state = ValidationState.WARNING.value
+                needs_review = False
+                review_queue = None
 
         # Also check matched_vendor_no on the document
         if document.get("matched_vendor_no") or document.get("vendor_id"):
@@ -447,14 +488,31 @@ class DerivedStateService:
             blocking_issues = ap_val.get("blocking_issues", [])
             warnings = [w.get("details", str(w)) if isinstance(w, dict) else str(w) for w in ap_val.get("warnings", [])]
         elif validation_results:
-            if validation_results.get("all_passed"):
+            # Use validation_status (3-state) if available, otherwise compute from checks
+            v_status = validation_results.get("validation_status")
+            if not v_status:
+                # Compute from checks array for backward compatibility
+                checks = validation_results.get("checks", [])
+                failed = [c for c in checks if not c.get("passed", True)]
+                req_failed = [c for c in failed if c.get("required", False)]
+                if req_failed:
+                    v_status = "fail"
+                elif failed:
+                    v_status = "warn"
+                elif validation_results.get("all_passed"):
+                    v_status = "pass"
+                else:
+                    v_status = "fail"
+            
+            if v_status == "pass":
                 validation_state = ValidationState.PASS.value
-                warnings = validation_results.get("warnings", [])
-                if warnings:
-                    validation_state = ValidationState.WARNING.value
+            elif v_status == "warn":
+                validation_state = ValidationState.WARNING.value
+                for check in validation_results.get("checks", []):
+                    if not check.get("passed"):
+                        warnings.append(check.get("details") or check.get("check_name", "Unknown"))
             else:
                 validation_state = ValidationState.FAIL.value
-                # Extract failed checks as blocking issues
                 for check in validation_results.get("checks", []):
                     if not check.get("passed"):
                         blocking_issues.append(check.get("check_name", "Unknown check"))

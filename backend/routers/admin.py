@@ -119,3 +119,124 @@ async def migrate_sales_documents_to_unified():
         logger.error("[Migration:%s] Error: %s", run_id, str(e))
 
     return stats
+
+
+@router.post("/recompute-derived-states")
+async def recompute_derived_states(
+    background_tasks: BackgroundTasks,
+    dry_run: bool = Query(False),
+):
+    """Batch recompute derived states for all documents.
+    
+    This updates validation_state, workflow_state, and automation_state
+    on every document based on current event history and document fields.
+    Useful after validation logic changes to refresh queue badges.
+    """
+    run_id = str(uuid.uuid4())[:8]
+    logger.info("[RecomputeStates:%s] Starting (dry_run=%s)", run_id, dry_run)
+    
+    background_tasks.add_task(_recompute_states_task, run_id, dry_run)
+    return {
+        "run_id": run_id,
+        "status": "started",
+        "dry_run": dry_run,
+        "message": "Derived state recomputation started in background. Check /api/admin/recompute-status/{run_id} for progress."
+    }
+
+
+@router.get("/recompute-status/{run_id}")
+async def get_recompute_status(run_id: str):
+    """Check status of a recompute job."""
+    db = get_db()
+    job = await db.admin_jobs.find_one({"run_id": run_id}, {"_id": 0})
+    if not job:
+        return {"run_id": run_id, "status": "not_found"}
+    return job
+
+
+async def _recompute_states_task(run_id: str, dry_run: bool):
+    """Background task to recompute derived states."""
+    from services.derived_state_service import DerivedStateService
+    
+    db = get_db()
+    svc = DerivedStateService(db)
+    
+    stats = {
+        "run_id": run_id,
+        "status": "running",
+        "dry_run": dry_run,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "total": 0,
+        "processed": 0,
+        "changed": 0,
+        "errors": 0,
+        "changes": [],
+    }
+    
+    await db.admin_jobs.update_one(
+        {"run_id": run_id}, {"$set": stats}, upsert=True
+    )
+    
+    try:
+        docs = await db.hub_documents.find(
+            {},
+            {"_id": 0, "id": 1, "validation_state": 1, "workflow_state": 1, 
+             "automation_state": 1, "file_name": 1}
+        ).to_list(10000)
+        
+        stats["total"] = len(docs)
+        
+        for i, doc in enumerate(docs):
+            doc_id = doc["id"]
+            old_vs = doc.get("validation_state")
+            old_ws = doc.get("workflow_state")
+            old_as = doc.get("automation_state")
+            
+            try:
+                if dry_run:
+                    derived = await svc.derive_state(doc_id)
+                else:
+                    derived = await svc.update_document_derived_state(doc_id)
+                
+                new_vs = derived["validation_state"]
+                new_ws = derived["workflow_state"]
+                new_as = derived["automation_state"]
+                
+                changed = (old_vs != new_vs or old_ws != new_ws or old_as != new_as)
+                if changed:
+                    stats["changed"] += 1
+                    if len(stats["changes"]) < 100:  # Cap detail list
+                        stats["changes"].append({
+                            "doc_id": doc_id,
+                            "file_name": doc.get("file_name", ""),
+                            "validation": f"{old_vs} -> {new_vs}" if old_vs != new_vs else None,
+                            "workflow": f"{old_ws} -> {new_ws}" if old_ws != new_ws else None,
+                            "automation": f"{old_as} -> {new_as}" if old_as != new_as else None,
+                        })
+                
+                stats["processed"] += 1
+            except Exception as e:
+                stats["errors"] += 1
+                logger.error("[RecomputeStates:%s] Error on doc %s: %s", run_id, doc_id[:8], str(e))
+            
+            # Update progress every 50 docs
+            if (i + 1) % 50 == 0:
+                await db.admin_jobs.update_one(
+                    {"run_id": run_id}, {"$set": stats}
+                )
+        
+        stats["status"] = "completed"
+        stats["ended_at"] = datetime.now(timezone.utc).isoformat()
+        
+    except Exception as e:
+        stats["status"] = "failed"
+        stats["error_message"] = str(e)
+        logger.error("[RecomputeStates:%s] Fatal error: %s", run_id, str(e))
+    
+    await db.admin_jobs.update_one(
+        {"run_id": run_id}, {"$set": stats}
+    )
+    logger.info(
+        "[RecomputeStates:%s] Done: %d processed, %d changed, %d errors",
+        run_id, stats["processed"], stats["changed"], stats["errors"]
+    )

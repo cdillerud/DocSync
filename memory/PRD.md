@@ -25,48 +25,48 @@ ROUTE    -> Auto-clear / review / block with readiness score
 - Heuristic+LLM merge (heuristics classify, LLM always extracts)
 
 ### P0: Validation & Auto-Clear Hardening (Mar 18 2026)
-- extraction_quality_gate: rejects 0 meaningful fields in BC validation
+- extraction_quality_gate: rejects 0 meaningful fields
 - Auto-clear excludes _detected_by metadata from field counting
 
 ### P0: 5-Stage Classification Pipeline Refactor (Mar 18 2026)
 - classification_pipeline.py with explicit quality gates per stage
-- Pipeline metadata (stages, timing, failure_stage) in intelligence results
 
 ### P0: Batch Reprocessing Script (Mar 18 2026)
 - reprocess_all.py with --revalidate, --dry-run, --sparse-only modes
 - Now includes validation_status computation during revalidation
 
 ### P1: Pipeline Visualization Component (Mar 18 2026)
-- PipelineVisualization.js showing 5-stage pipeline on Document Detail page
-- Stage indicators with pass/fail/skipped/not_run, timing, quality gates
-- Expandable detail view
+- 5-stage pipeline status on Document Detail page
+- Expandable details with quality gates, timing, errors
 
 ### P1: Item Mapping Admin UI (Mar 18 2026)
 - Full CRUD page at Settings > Item Mappings tab
-- Table with search, filters, create/edit/delete for mapping rules
 
 ### P1: BC Validation 3-State Status (Mar 18 2026)
-- **Before**: Badge showed binary PASSED/FAILED based only on required check failures
-- **After**: 3-state display: PASSED (green), WARNINGS (amber), FAILED (red)
-- Backend: validate_bc_match now wraps inner function, computes validation_status (pass/warn/fail) from all check outcomes
-- Frontend: Client-side computation from checks array ensures backward compatibility with ALL existing documents (no re-processing needed)
-- Script: reprocess_all.py --revalidate now includes validation_status in stored results
-- Logic: `fail` = required check failed, `warn` = only optional checks failed, `pass` = all passed
+- 3-state badge: PASSED (green), WARNINGS (amber), FAILED (red)
+- Backend: validation_status field computed on every return path
+- Frontend: Client-side computation from checks array for backward compatibility
+- Derived state service: Updated event-driven + legacy paths to use validation_status
 
-### Reliability Fixes (Mar 18 2026)
-- _detected_by metadata hidden from UI
-- Extraction quality metrics fixed
-- Shipping_Document customer matching
-- 500 error: null-safe bc_record_info access
+### P1: Recompute Derived States Tool (Mar 18 2026)
+- POST /api/admin/recompute-derived-states endpoint (supports dry_run)
+- GET /api/admin/recompute-status/{run_id} for progress tracking
+- Background task processes all documents, updates validation/workflow/automation states
+- Settings > General > Data Maintenance section with Dry Run + Run buttons
+- Results panel shows total/processed/changed/errors with per-document change details
+- Event emission (event_service.py) now includes validation_status in bc.validation.completed payloads
 
 ## Key Files
 - `backend/services/classification_pipeline.py` - 5-stage pipeline
 - `backend/services/bc_validation_service.py` - BC validation + 3-state status
+- `backend/services/derived_state_service.py` - Derived state with 3-state validation support
+- `backend/services/event_service.py` - Event emission with validation_status
 - `backend/services/document_intelligence_service.py` - Orchestrator
 - `backend/scripts/reprocess_all.py` - Batch data maintenance
+- `backend/routers/admin.py` - Admin endpoints including recompute-derived-states
 - `frontend/src/components/PipelineVisualization.js` - Pipeline visualization
 - `frontend/src/pages/ItemMappingsPage.js` - Item mapping admin CRUD
-- `frontend/src/pages/SettingsHubPage.js` - Settings hub with 4 tabs
+- `frontend/src/pages/SettingsPage.js` - Settings with Data Maintenance section
 - `frontend/src/pages/DocumentDetailPage.js` - Document detail UI
 
 ## Mocked Services
@@ -77,7 +77,6 @@ ROUTE    -> Auto-clear / review / block with readiness score
 ## P1/P2 Backlog
 ### P1
 - Azure OpenAI integration alongside Gemini for classification
-- Derived state recomputation for queue validation badges (currently queue uses old derived state for existing docs)
 
 ### P2
 - Vendor Inventory Dashboard & Sales module

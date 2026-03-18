@@ -79,6 +79,8 @@ function ExtractedDataCard({ doc }) {
   // 2. Normalized fields (from intelligence pipeline)
   Object.entries(nf).forEach(([key, val]) => {
     if (key === 'line_items' || val == null || val === '') return;
+    // Filter out internal heuristic metadata — not user-facing
+    if (key.endsWith('_detected_by')) return;
     const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     if (!fields[label]) fields[label] = String(val);
   });
@@ -86,6 +88,8 @@ function ExtractedDataCard({ doc }) {
   // 3. Extracted fields (from AI classification)
   Object.entries(ef).forEach(([key, val]) => {
     if (key === 'line_items' || val == null || val === '') return;
+    // Filter out internal heuristic metadata — not user-facing
+    if (key.endsWith('_detected_by')) return;
     const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     if (!fields[label]) fields[label] = String(val);
   });
@@ -639,13 +643,9 @@ export default function DocumentDetailPage() {
                 {/* Extraction Quality */}
                 {doc.validation_results.extraction_quality && (() => {
                   const eq = doc.validation_results.extraction_quality;
-                  const reqFields = eq.required_fields || [];
-                  const optFields = eq.optional_fields || [];
-                  const totalFields = reqFields.length + optFields.length;
-                  const extractedCount = (eq.required_extracted || 0) + (eq.optional_extracted || 0);
-                  // Fallback to legacy keys if present
-                  const finalExtracted = extractedCount || eq.extracted_count || 0;
-                  const finalTotal = totalFields || eq.total_fields || 0;
+                  // Use total_defined/total_extracted (includes required + optional)
+                  const finalExtracted = eq.total_extracted ?? ((eq.required_extracted || 0) + (eq.optional_extracted || 0));
+                  const finalTotal = eq.total_defined ?? ((eq.required_fields?.length || 0) + (eq.optional_fields?.length || 0));
                   const completeness = eq.completeness_score || 0;
                   return (
                   <div className="border-t border-border pt-3 mt-3">

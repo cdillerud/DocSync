@@ -1,0 +1,113 @@
+{
+  "summary": "Reliability Fixes Testing (Iteration 129) - 8/11 backend tests passed (3 skipped due to no test data), Frontend _detected_by filter and document detail page verified working",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "BC Validation",
+        "issue": "BC API in demo/sandbox mode - 'Could not obtain BC token' expected behavior",
+        "priority": "INFO"
+      },
+      {
+        "endpoint": "Extraction Quality in DB",
+        "issue": "Existing documents have old extraction_quality format (missing total_defined/total_extracted). New validations will have correct fields.",
+        "priority": "INFO"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Document Detail - Extraction Quality",
+        "issues": ["Shows 'Fields Extracted: 2/3' for old data - this is from stored validation_results which uses old format. New validations will show correct total_defined/total_extracted."]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_reliability_fixes_129.py",
+    "/app/test_reports/pytest/reliability_fixes_129_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "DocumentDetailPage.js lines 83,93: _detected_by filter correctly filters out metadata fields from Extracted Data display",
+    "bc_validation_service.py lines 107-155: _compute_extraction_quality correctly returns total_defined and total_extracted based on job config",
+    "bc_validation_service.py lines 677-757: Shipping_Document validation includes customer/consignee matching via _match_customer_in_bc()",
+    "bc_validation_service.py lines 797-812: Sales Order NOT found is a HARD failure (all_passed=False, required=True)",
+    "bc_validation_service.py lines 820-823: No order number is only a WARNING (all_passed stays True)",
+    "bc_validation_service.py lines 337-349: extraction_quality_gate rejects documents with 0 meaningful fields"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_reliability_fixes_129.py"
+  ],
+  "success_rate": {
+    "backend": "100% (8 passed, 3 skipped)",
+    "frontend": "100% (Dashboard, Documents, Document Detail pages render correctly)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "Used existing documents: TEST-AMBIG-9DAB38BF, 1809aafb-3b28-49a7-9128-d655f11332b8 (hbl.pdf)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Three reliability fixes verified: (1) Frontend _detected_by filter works - no metadata fields shown in Extracted Data card, (2) _compute_extraction_quality() unit tested and returns correct total_defined/total_extracted for Shipping_Document (10 fields = 2 required + 8 optional), (3) BC validation for Shipping_Document includes customer matching and Sales Order hard failure. BC API is in demo mode so live BC calls fail with 'Could not obtain BC token'. Existing documents in DB have old extraction_quality format.",
+  "verified_features": {
+    "Frontend _detected_by filter": {
+      "status": "PASS",
+      "verified": [
+        "DocumentDetailPage.js filters _detected_by fields from both normalized_fields and extracted_fields (lines 83, 93)",
+        "Playwright test confirmed 13 fields visible, none with 'detected_by' in label",
+        "Filter uses key.endsWith('_detected_by') check"
+      ]
+    },
+    "_compute_extraction_quality accuracy": {
+      "status": "PASS",
+      "verified": [
+        "Unit test: Shipping_Document with full extraction returns total_defined=10, total_extracted=10",
+        "Unit test: Shipping_Document with partial extraction (4 fields) returns total_extracted=4",
+        "Unit test: _detected_by fields are NOT counted in extraction quality",
+        "Returns both total_defined and total_extracted for UI display"
+      ]
+    },
+    "Shipping_Document BC validation": {
+      "status": "PASS (code review)",
+      "verified": [
+        "Customer/consignee matching via _match_customer_in_bc() at line 693",
+        "Shipper matching via match_vendor_unified() at line 729",
+        "Sales Order NOT found = HARD failure (all_passed=False, required=True) at lines 801, 810",
+        "No order number = WARNING only (all_passed unchanged) at line 820",
+        "BC API demo mode returns 'Could not obtain BC token' as expected"
+      ]
+    },
+    "extraction_quality_gate": {
+      "status": "PASS",
+      "verified": [
+        "Unit test: Empty extraction returns total_extracted=0, ready_for_draft_candidate=False",
+        "Code at lines 337-349 rejects documents with no meaningful fields"
+      ]
+    },
+    "GET /api/documents/{doc_id}": {
+      "status": "PASS",
+      "verified": [
+        "Returns 200 for valid documents",
+        "Includes document, workflows, event_timeline, derived_state"
+      ]
+    },
+    "Dashboard page": {
+      "status": "PASS",
+      "verified": [
+        "Loads with 79 Total Documents, 77 Auto-Cleared",
+        "Automation Intelligence shows 5% Automation, 39% Review, 56% Blocked"
+      ]
+    },
+    "Document Detail page": {
+      "status": "PASS",
+      "verified": [
+        "Loads without 500 error",
+        "Shows document info, classification, BC validation, extraction quality",
+        "Extracted Data card displays fields without _detected_by metadata",
+        "PDF preview loads for documents with files"
+      ]
+    }
+  },
+  "mocked_api_note": "Email service, JWT Auth (mocked), BC API (demo/sandbox mode - 'Could not obtain BC token' expected)"
+}

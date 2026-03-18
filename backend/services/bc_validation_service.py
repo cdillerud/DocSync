@@ -109,32 +109,39 @@ def _compute_extraction_quality(
     extracted_fields: dict,
     job_config: dict,
 ) -> dict:
-    """Compute Phase 7 extraction quality metrics.
+    """Compute extraction quality metrics.
 
-    Returns a dict suitable for embedding in validation_results["extraction_quality"].
+    Uses the job-type-specific required/optional field lists and also
+    counts total meaningful (non-metadata) fields extracted.
     """
-    required_fields = job_config.get("required_extractions", ["vendor", "invoice_number", "amount"])
-    optional_fields = job_config.get("optional_extractions", ["po_number", "due_date"])
+    required_fields = job_config.get("required_extractions", [])
+    optional_fields = job_config.get("optional_extractions", [])
 
-    required_count = sum(
-        1 for f in required_fields
-        if normalized_fields.get(f) or extracted_fields.get(f)
-    )
-    optional_count = sum(
-        1 for f in optional_fields
-        if normalized_fields.get(f) or extracted_fields.get(f)
-    )
+    # Count how many required/optional fields are present
+    # Check both normalized and extracted, excluding heuristic metadata
+    def _has_value(field_name: str) -> bool:
+        nv = normalized_fields.get(field_name)
+        ev = extracted_fields.get(field_name)
+        return bool(nv) or bool(ev)
 
+    required_count = sum(1 for f in required_fields if _has_value(f))
+    optional_count = sum(1 for f in optional_fields if _has_value(f))
+
+    # Completeness: weighted score (required=80%, optional=20%)
     req_score = (required_count / len(required_fields)) * 0.8 if required_fields else 0.8
     opt_score = (optional_count / len(optional_fields)) * 0.2 if optional_fields else 0.2
     completeness = req_score + opt_score
 
+    # Total meaningful fields (for the "X/Y fields" display)
+    all_defined = required_fields + optional_fields
+    all_extracted = sum(1 for f in all_defined if _has_value(f))
+
     return {
-        "vendor_extracted": bool(normalized_fields.get("vendor")),
-        "invoice_number_extracted": bool(normalized_fields.get("invoice_number")),
-        "amount_extracted": normalized_fields.get("amount") is not None,
-        "po_detected": bool(normalized_fields.get("po_number")),
-        "due_date_extracted": bool(normalized_fields.get("due_date")),
+        "vendor_extracted": _has_value("vendor"),
+        "invoice_number_extracted": _has_value("invoice_number"),
+        "amount_extracted": _has_value("amount"),
+        "po_detected": _has_value("po_number"),
+        "due_date_extracted": _has_value("due_date"),
         "completeness_score": round(completeness, 2),
         "ready_for_draft_candidate": (
             required_count == len(required_fields) if required_fields else True
@@ -143,6 +150,8 @@ def _compute_extraction_quality(
         "required_extracted": required_count,
         "optional_fields": optional_fields,
         "optional_extracted": optional_count,
+        "total_defined": len(all_defined),
+        "total_extracted": all_extracted,
     }
 
 
@@ -663,9 +672,78 @@ async def validate_bc_match(
                         })
 
             # ============================================================
-            # Shipping / Warehouse — Sales Order validation
+            # Shipping / Warehouse — Customer match + Sales Order validation
             # ============================================================
             elif job_type in ("Shipping_Document", "Warehouse_Document", "SHIPMENT", "RECEIPT"):
+                # --- Customer/consignee matching ---
+                customer_name = (
+                    normalized_fields.get("consignee")
+                    or normalized_fields.get("customer")
+                    or extracted_fields.get("consignee")
+                    or extracted_fields.get("customer")
+                )
+                shipper_name = (
+                    normalized_fields.get("shipper")
+                    or extracted_fields.get("shipper")
+                    or normalized_fields.get("vendor")
+                    or extracted_fields.get("vendor")
+                )
+
+                if customer_name:
+                    customer_result = await _match_customer_in_bc(
+                        customer_name, match_strategies, match_threshold,
+                        token, company_id, _api_url,
+                    )
+                    validation_results["customer_candidates"] = customer_result.get("customer_candidates", [])
+
+                    if customer_result["matched"]:
+                        validation_results["match_method"] = customer_result["match_method"]
+                        validation_results["match_score"] = customer_result["score"]
+                        if customer_result["selected_customer"]:
+                            validation_results["bc_record_info"] = {
+                                "number": customer_result["selected_customer"].get("number"),
+                                "displayName": customer_result["selected_customer"].get("displayName"),
+                                "type": "customer",
+                            }
+                        validation_results["checks"].append({
+                            "check_name": "customer_match",
+                            "passed": True,
+                            "details": (
+                                f"Matched consignee '{customer_name}' to BC customer: "
+                                f"{customer_result['selected_customer'].get('displayName', '')} "
+                                f"({customer_result['score']:.0%})"
+                            ),
+                            "required": False,
+                        })
+                    else:
+                        validation_results["checks"].append({
+                            "check_name": "customer_match",
+                            "passed": False,
+                            "details": f"Consignee '{customer_name}' not found in BC customers",
+                            "required": False,
+                        })
+
+                # Also try to match shipper as a vendor (for tracking purposes)
+                if shipper_name:
+                    try:
+                        from services.unified_vendor_matcher import match_vendor_unified
+                        shipper_result = await match_vendor_unified(db, shipper_name, match_threshold)
+                        if shipper_result.get("matched"):
+                            # Don't override customer match info — store separately
+                            validation_results["shipper_match"] = {
+                                "matched": True,
+                                "name": shipper_result.get("best_match", {}).get("name", shipper_name),
+                                "score": shipper_result.get("score", 0),
+                                "source": shipper_result.get("source", ""),
+                            }
+                            # If we have no match_method yet, use the shipper match
+                            if validation_results["match_method"] == "none":
+                                validation_results["match_method"] = f"shipper:{shipper_result.get('source', 'vendor')}"
+                                validation_results["match_score"] = shipper_result.get("score", 0)
+                    except Exception as e:
+                        logger.debug("[BC Validation] Shipper matching skipped: %s", e)
+
+                # --- Sales Order lookup ---
                 order_number = (
                     normalized_fields.get("bol_number")
                     or normalized_fields.get("po_number")

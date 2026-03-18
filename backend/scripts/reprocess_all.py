@@ -118,9 +118,29 @@ async def revalidate_one(db, doc: dict, dry_run: bool) -> dict:
         new_completeness = new_eq.get("completeness_score", 0)
 
         # Patch extraction_quality into existing validation_results
-        # (preserves BC match data, only updates the quality metric)
+        # AND fix stale check data from previous runs
         new_validation = dict(old_validation)
         new_validation["extraction_quality"] = new_eq
+
+        # Fix stale checks: downgrade sales_order_match and customer_match
+        # to required=False (they were briefly set to required=True)
+        existing_checks = list(new_validation.get("checks", []))
+        checks_fixed = False
+        for check in existing_checks:
+            if check.get("check_name") in ("sales_order_match", "customer_match"):
+                if check.get("required") is True:
+                    check["required"] = False
+                    checks_fixed = True
+        new_validation["checks"] = existing_checks
+
+        # Recalculate all_passed from the corrected checks
+        if checks_fixed or new_validation.get("all_passed") is False:
+            required_checks = [c for c in existing_checks if c.get("required") is True]
+            if required_checks:
+                new_validation["all_passed"] = all(c.get("passed", False) for c in required_checks)
+            else:
+                # No required checks failed — only soft/optional failures
+                new_validation["all_passed"] = True
 
         # Check extraction quality gate (documents with 0 meaningful fields)
         meaningful_fields = {
@@ -173,6 +193,7 @@ async def revalidate_one(db, doc: dict, dry_run: bool) -> dict:
         completeness_changed = abs(old_completeness - new_completeness) > 0.01
         old_passed = old_validation.get("all_passed")
         new_passed = new_validation.get("all_passed")
+        validation_changed = old_passed != new_passed
 
         return {
             "doc_id": doc_id,

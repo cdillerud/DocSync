@@ -236,7 +236,7 @@ def evaluate_auto_clear(
             confidence = max(confidence, 0.85)  # Classified docs get at least 85%
     threshold = type_config.get("confidence_threshold", 0.90)
     
-    confidence_passed = confidence >= threshold
+    confidence_passed = (confidence or 0) >= threshold
     details["checks"].append({
         "check": "confidence",
         "passed": confidence_passed,

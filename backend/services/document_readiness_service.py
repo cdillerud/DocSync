@@ -255,7 +255,7 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
         status = STATUS_NEEDS_REVIEW
         action = ACTION_REVIEW
     elif warnings:
-        if confidence >= 0.8:
+        if (confidence or 0) >= 0.8:
             status = STATUS_READY_AUTO_DRAFT
             action = ACTION_AUTO_DRAFT
             explanations.append("High confidence despite minor warnings")

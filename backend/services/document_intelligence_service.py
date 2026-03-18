@@ -87,6 +87,9 @@ def _derive_automation_readiness(
     reasons: List[str] = []
     score = 0
 
+    # Guard against None confidence values
+    classification_confidence = classification_confidence if classification_confidence is not None else 0.0
+
     # 1) Classification confidence contributes up to 40 points
     if classification_confidence >= 0.90:
         score += 40

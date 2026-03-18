@@ -49,22 +49,25 @@ AUTO_CLEAR_CONFIG = {
             "auto_post_if_cleared": True,    # Auto-post to BC when cleared
         },
         "Freight_Document": {
-            "confidence_threshold": 0.0,
+            "confidence_threshold": 0.70,
             "require_vendor_match": False,
             "require_no_duplicate": False,
+            "require_minimum_extraction": True,
             "require_order_reference": False,
             "auto_post_if_cleared": False,   # Just archive
         },
         "Shipping_Document": {
-            "confidence_threshold": 0.0,
+            "confidence_threshold": 0.70,
             "require_vendor_match": False,
             "require_no_duplicate": False,
+            "require_minimum_extraction": True,  # Must extract at least vendor OR order ref
             "auto_post_if_cleared": False,   # Just archive
         },
         "Warehouse_Document": {
-            "confidence_threshold": 0.0,
+            "confidence_threshold": 0.70,
             "require_vendor_match": False,
             "require_no_duplicate": False,
+            "require_minimum_extraction": True,
             "auto_post_if_cleared": False,
         },
         "Quality_Doc": {
@@ -317,7 +320,45 @@ def evaluate_auto_clear(
             )
     
     # =================================================================
-    # CHECK 4: Required Fields (document-type specific)
+    # CHECK 4: Minimum Extraction Quality
+    # =================================================================
+    if type_config.get("require_minimum_extraction"):
+        extracted = doc.get("extracted_fields", {})
+        normalized = doc.get("normalized_fields", {})
+        ai_ext = doc.get("ai_extraction", {})
+        
+        # Must have at least ONE of: vendor name, order reference, or 3+ extracted fields
+        has_vendor = bool(
+            doc.get("vendor_canonical") or doc.get("vendor_raw") or
+            normalized.get("vendor") or extracted.get("vendor")
+        )
+        has_order = bool(
+            doc.get("po_number_extracted") or doc.get("bol_number_extracted") or
+            normalized.get("po_number") or normalized.get("bol_number") or
+            extracted.get("po_number") or extracted.get("bol_number") or
+            extracted.get("order_number") or extracted.get("so_number")
+        )
+        non_empty_fields = sum(1 for v in list(extracted.values()) + list(normalized.values())
+                              if v and str(v).strip())
+        has_enough_fields = non_empty_fields >= 3
+        
+        extraction_ok = has_vendor or has_order or has_enough_fields
+        details["checks"].append({
+            "check": "minimum_extraction",
+            "passed": extraction_ok,
+            "value": {"has_vendor": has_vendor, "has_order": has_order, "field_count": non_empty_fields},
+            "message": f"Extraction quality: vendor={has_vendor}, order_ref={has_order}, fields={non_empty_fields}"
+        })
+        
+        if not extraction_ok:
+            return (
+                AutoClearDecision.MISSING_DATA,
+                f"Insufficient data extracted (no vendor, no order ref, only {non_empty_fields} fields). Needs manual review.",
+                details
+            )
+
+    # =================================================================
+    # CHECK 5: Required Fields (document-type specific)
     # =================================================================
     extracted = doc.get("extracted_fields", {})
     normalized = doc.get("normalized_fields", {})

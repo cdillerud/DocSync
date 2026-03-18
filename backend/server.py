@@ -3803,6 +3803,25 @@ async def _internal_intake_document(
                             logger.warning("[AutoPI] Failed for doc %s: %s", doc_id, pi_result.get("reason", ""))
                 except Exception as pi_err:
                     logger.error("[AutoPI] Error auto-creating PI for doc %s: %s", doc_id, str(pi_err))
+
+                # AUTO-FILE shipping documents (Shipping_Document, Warehouse_Receipt)
+                try:
+                    doc_type = (doc_for_eval.get("document_type") or 
+                                doc_for_eval.get("suggested_job_type") or "")
+                    if doc_type in ("Shipping_Document", "Warehouse_Receipt", "Warehouse_Document"):
+                        from services.shipping_auto_file_service import auto_file_shipping_document
+                        file_result = await auto_file_shipping_document(doc_id, db)
+                        if file_result.get("success") and not file_result.get("skipped"):
+                            logger.info("[AutoFile] Shipping doc %s auto-filed to '%s' (loc=%s, intl=%s)",
+                                       doc_id, file_result.get("folder_path", ""),
+                                       file_result.get("location_code", "?"),
+                                       file_result.get("is_international", False))
+                        elif file_result.get("skipped"):
+                            logger.debug("[AutoFile] Skipped for doc %s: %s", doc_id, file_result.get("reason", ""))
+                        else:
+                            logger.warning("[AutoFile] Failed for doc %s: %s", doc_id, file_result.get("reason", ""))
+                except Exception as af_err:
+                    logger.error("[AutoFile] Error auto-filing doc %s: %s", doc_id, str(af_err))
             else:
                 logger.debug("[Auto-Clear] Document %s NOT cleared: %s", doc_id, auto_clear_reason)
     except Exception as e:

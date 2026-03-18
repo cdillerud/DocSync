@@ -29,70 +29,62 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 
 ### Phase 3 - SharePoint Folder Routing (Complete - Feb 2026)
 - 37 rules, 15 top-level folders, vendor mappings, processor assignments
-- Document-level folder suggestion, SharePoint file move (demo mode)
 
 ### P0 Fixes (Mar 2026)
-- Multi-page PDF Classification: Extract first page only
-- BC Purchase Invoice Document Link
-- PI Retry-Lines Delete-Before-Add
-- Duplicate _sanitize_lines removed
+- Multi-page PDF Classification, BC PI Document Link, PI Retry-Lines
 
 ### File & Clear Feature (Mar 2026)
 - One-click suggest folder → move to SharePoint → mark cleared
-- Bulk version for queue page
-- AI learning from filing patterns (auto-file after 3+ same patterns)
-
-### Bug Fix: Stable Vendors Count (Mar 2026)
-- Unified threshold logic across all code paths
-- Configuration-driven thresholds via stable_vendor_config collection
-
-### Bug Fix: Readiness Contradiction (Mar 2026)
-- Short-circuit in evaluate_readiness() for terminal docs
-- Live re-evaluation on document detail endpoint
 
 ### Classification Learning Loop (Mar 2026)
 - User corrections stored and used as few-shot examples in Gemini prompt
+- Bootstrap sweep: mined 1,874 production docs for learning data
+- Positive confirmations from: auto-clear, file-and-clear, bulk-file, BC posting, auto-file
 - Vendor-type patterns tracked for classification hints
-- Accuracy metrics API with confusion matrix
-- New document type: Warehouse_Receipt
 
 ### Auto PI Creation Pipeline (Mar 2026)
 - Automatic Purchase Invoice creation in BC sandbox for AP_Invoice docs
-- Context-aware line items (PO/BOL in description for freight)
-- Configurable via BC_WRITE_ENABLED flag
 
-### Classification Bootstrap Sweep (Mar 2026)
-- POST /api/documents/classification/bootstrap-from-history — mines existing documents
-- 3-tier confidence model: manual corrections > high AI confidence > completed docs
-- Idempotent — safe to re-run without duplicates
-- Background task with status tracking endpoint
-- Result: 36 documents bootstrapped, 22 vendor patterns created, 41 total corrections
+### Packing List Classification Fix (Mar 2026)
+- New heuristic: filename + text patterns catch packing lists → Shipping_Document
+- AI prompt updated with explicit anti-pattern (packing list ≠ Sales_Order)
 
 ### Document Type Alignment (Mar 2026)
 - Frontend dropdown updated to show all 15 AI classification types
-- Types: AP Invoice, AR Invoice, Remittance, Freight Document, Sales Order, Sales PO, Sales Quote, Order Confirmation, Purchase Order, Warehouse Receipt, Inventory Report, Shipping Document, Quality Issue, Return Request, Unknown
-- Warehouse_Receipt added to DEFAULT_JOB_TYPES backend config
+- Queue page fixed: reads document_type (AI) not doc_type (legacy BC field)
+- Warehouse_Receipt added to DEFAULT_JOB_TYPES
+
+### Dashboard Date Filtering (Mar 2026)
+- ALL dashboard metrics now filter by selected date (Central Time)
+- Date picker in header with prev/next day and "All Time" button
+- /stats and /workflow-intelligence endpoints accept ?date=YYYY-MM-DD
+
+### Shipping Document Auto-File (Mar 2026)
+- New service: shipping_auto_file_service.py
+- Triggered on auto-clear for Shipping_Document, Warehouse_Receipt types
+- BC lookup for locationCode (GR=Dropship, GB=Warehouse) + InternationalGds
+- Auto-routes to correct SharePoint folder based on warehouse workflow rules
+- Falls back to heuristics if BC lookup fails (vendor patterns, text indicators)
+- Records filing pattern + classification confirmation for AI learning
 
 ## Key API Endpoints
-- `POST /api/documents/{doc_id}/file-and-clear` — File to SharePoint + mark cleared
-- `POST /api/documents/bulk-file-and-clear` — Bulk file & clear
-- `GET /api/documents/filing-actions/stats` — Filing pattern stats
-- `POST /api/gpi-integration/purchase-invoices/from-document/{doc_id}` — Creates PI in BC
-- `GET /api/documents/classification-accuracy` — Classification metrics
 - `POST /api/documents/classification/bootstrap-from-history` — Bootstrap learning model
 - `GET /api/documents/classification/bootstrap-status` — Bootstrap progress
+- `GET /api/dashboard/stats?date=YYYY-MM-DD` — Date-filtered dashboard stats
+- `GET /api/dashboard/workflow-intelligence?date=YYYY-MM-DD` — Date-filtered intelligence
 
-## Database Collections
-- `hub_documents`, `document_intelligence_results`, `sharepoint_folder_rules`
-- `sharepoint_vendor_mappings`, `sharepoint_processor_assignments`
-- `filing_actions` — AI learning for auto-filing patterns
-- `classification_corrections` — User corrections + bootstrap data for few-shot learning
-- `vendor_type_patterns` — Vendor → document type associations
+## SharePoint Folder Routing (Warehouse Workflow)
+| locationCode | InternationalGds | SharePoint Folder |
+|---|---|---|
+| GR | True | Dropship International Documents |
+| GR | False | Dropship Not International Documents |
+| GB | True | Warehouse International Documents |
+| GB | False | Warehouse Not International Documents |
 
 ## Mocked Services
 - Microsoft Graph API (email ingestion - partial)
 - JWT Authentication (Entra ID)
-- SharePoint file move (demo mode)
+- SharePoint file move (demo mode in preview)
 
 ## P0/P1/P2 Backlog
 ### P1 - Upcoming

@@ -1,0 +1,130 @@
+{
+  "summary": "Classification Pipeline (5-stage) Integration Testing Complete - 15/15 backend tests passed, frontend Dashboard and Document Detail pages verified",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/documents/{doc_id}",
+        "issue": "Some test document IDs from previous iterations return 500 (c3bf1459-e48d-4905-a813-84b02386b9c4) - document may have been removed or renamed",
+        "priority": "LOW"
+      },
+      {
+        "endpoint": "BC Validation",
+        "issue": "BC API in demo/sandbox mode - 'Could not obtain BC token' is expected behavior",
+        "priority": "INFO"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Document Detail",
+        "issues": ["Document preview shows HTTP 404 for documents without physical files on disk (expected behavior for test docs)"]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_classification_pipeline_integration.py",
+    "/app/test_reports/pytest/classification_pipeline_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "classification_pipeline.py: 5-stage pipeline (PARSE, CLASSIFY, EXTRACT, VALIDATE, ROUTE) correctly implemented with quality gates",
+    "PARSE stage correctly uses UPLOAD_DIR/{doc_id} fallback when local_file_path is missing (line 116-119)",
+    "CLASSIFY stage correctly merges heuristic+LLM (heuristic for classification, LLM for extraction) with method like 'heuristic:bol_filename+llm'",
+    "EXTRACT stage quality gate filters _detected_by metadata fields and requires meaningful_count >= 1 (lines 534-538)",
+    "bc_validation_service.py: extraction_quality_gate check correctly rejects zero-data documents (lines 328-340)",
+    "Pipeline response includes: pipeline_status, pipeline_stages (dict with status/quality_gate/error/ms per stage), classification_method, meaningful_field_count"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_classification_pipeline_integration.py"
+  ],
+  "success_rate": {
+    "backend": "100% (15/15 tests passed)",
+    "frontend": "100% (Login, Dashboard, Documents, Document Detail pages all render correctly)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "Used existing test documents: TEST-AMBIG-9DAB38BF",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "5-stage classification pipeline verified. Pipeline returns: pipeline_status (passed/failed), pipeline_stages dict with parse/classify/extract/validate/route (each has status, quality_gate, error, ms), classification_method (e.g. 'heuristic:bol_filename+llm' or 'llm:gemini-3-flash-preview'), meaningful_field_count. BC API is in demo mode so validate stage fails with 'Could not obtain BC token' - this is expected. Test doc IDs may change between iterations - use status=Completed filter to find valid docs.",
+  "verified_features": {
+    "POST /api/document-intelligence/process/{doc_id}": {
+      "status": "PASS",
+      "verified": [
+        "Returns pipeline_status field (passed/failed)",
+        "Returns pipeline_stages dict with 5 stages: parse, classify, extract, validate, route",
+        "Each stage has: status, quality_gate, error, ms (duration)",
+        "Returns classification_method field",
+        "Returns meaningful_field_count field"
+      ]
+    },
+    "Pipeline PARSE stage": {
+      "status": "PASS",
+      "verified": [
+        "Finds files via UPLOAD_DIR/{doc_id} fallback when local_file_path is missing",
+        "Reports clear failure when no file exists with UPLOAD_DIR mentioned in error"
+      ]
+    },
+    "Pipeline CLASSIFY stage": {
+      "status": "PASS",
+      "verified": [
+        "Heuristic+LLM merge works (method contains 'heuristic' AND '+llm')",
+        "Pure LLM classification works when no heuristic matches",
+        "Returns document_type and classification_confidence"
+      ]
+    },
+    "Pipeline EXTRACT stage": {
+      "status": "PASS",
+      "verified": [
+        "Quality gate rejects documents with 0 meaningful fields",
+        "Quality gate excludes _detected_by metadata fields from count",
+        "Quality gate passes with real data (vendor, bol_number, etc.)"
+      ]
+    },
+    "Pipeline VALIDATE stage": {
+      "status": "PASS",
+      "verified": [
+        "extraction_quality_gate in bc_validation rejects zero-data documents",
+        "BC validation runs (fails in demo mode as expected)"
+      ]
+    },
+    "Pipeline ROUTE stage": {
+      "status": "PASS",
+      "verified": [
+        "Returns automation_decision (auto_link, auto_create, manual, blocked, needs_review)",
+        "Returns automation_readiness (ready, needs_review, blocked)"
+      ]
+    },
+    "POST /api/documents/{doc_id}/reprocess": {
+      "status": "PASS",
+      "verified": [
+        "Works independently of pipeline",
+        "Returns reprocessed, new_status, document fields"
+      ]
+    },
+    "Frontend Dashboard": {
+      "status": "PASS",
+      "verified": [
+        "Workflow Intelligence Dashboard loads with statistics",
+        "Automation Intelligence section shows percentages (5% Automation, 39% Review, 56% Blocked)",
+        "Operations Queue visible with pending items",
+        "Navigation sidebar works (Dashboard, Documents, Vendors, Intelligence, etc.)"
+      ]
+    },
+    "Frontend Document Detail": {
+      "status": "PASS",
+      "verified": [
+        "Document info displays (filename, source, created/updated dates)",
+        "Classification section shows Document Type and Confidence",
+        "BC Validation section shows status with blocking issues",
+        "Extraction Quality shows fields extracted and completeness score",
+        "Vendor Match Details visible",
+        "Document Status shows Validation, Workflow, Automation states"
+      ]
+    }
+  },
+  "mocked_api_note": "Email service, JWT Auth (mocked), BC API (demo/sandbox mode) - as documented in review_request"
+}

@@ -168,8 +168,8 @@ async def process_document(doc_id: str) -> Dict[str, Any]:
     """
     Run the full document intelligence pipeline on a document.
 
-    Orchestrates: classify → extract → validate → readiness → store → events
-    Returns the intelligence result dict.
+    Delegates to the 5-stage classification_pipeline, then persists results,
+    computes folder routing, and emits events.
     """
     db = get_db()
 
@@ -181,114 +181,26 @@ async def process_document(doc_id: str) -> Dict[str, Any]:
     started_at = datetime.now(timezone.utc)
     result_id = uuid.uuid4().hex[:12]
 
-    # 2) Classification — reuse existing AI result if present, or re-classify
-    classification_confidence = doc.get("ai_confidence", 0.0)
-    document_type = doc.get("suggested_job_type") or doc.get("doc_type") or "Unknown"
+    # 2) Run the 5-stage pipeline
+    from services.classification_pipeline import run_pipeline
+    pipeline = await run_pipeline(doc_id, doc)
 
-    # Resolve the on-disk file path.  Documents don't always store a
-    # "local_file_path" — the codebase convention is UPLOAD_DIR / doc_id.
-    file_path = doc.get("local_file_path") or doc.get("file_path")
-    if not file_path or not os.path.exists(str(file_path)):
-        # Fallback to the standard upload directory convention
-        candidate = UPLOAD_DIR / doc_id
-        if candidate.exists():
-            file_path = str(candidate)
-            logger.info("Resolved file via UPLOAD_DIR fallback for %s: %s", doc_id, file_path)
-        else:
-            file_path = None
+    document_type = pipeline.document_type
+    classification_confidence = pipeline.classification_confidence
+    ai_extracted_fields = pipeline.extracted_fields
+    validation_results = pipeline.validation_results
+    automation_decision = pipeline.automation_decision
+    automation_reasoning = pipeline.automation_reasoning
 
-    file_name = doc.get("file_name", "unknown")
-
-    ai_result = None
-    if file_path:
-        try:
-            from services.document_intel_helpers import classify_document_with_ai
-            ai_result = await classify_document_with_ai(str(file_path), file_name)
-            if ai_result and not ai_result.get("error"):
-                document_type = ai_result.get("suggested_job_type", document_type)
-                classification_confidence = ai_result.get("confidence", classification_confidence)
-                # Merge newly extracted fields
-                new_fields = ai_result.get("extracted_fields", {})
-                existing_fields = doc.get("extracted_fields") or {}
-                merged = {**existing_fields, **{k: v for k, v in new_fields.items() if v}}
-                ai_extracted_fields = merged
-            else:
-                logger.warning(
-                    "AI classification returned error for %s: %s",
-                    doc_id, ai_result.get("error") if ai_result else "null result",
-                )
-                ai_extracted_fields = doc.get("extracted_fields") or {}
-        except Exception as e:
-            logger.warning("AI classification failed for %s: %s", doc_id, e)
-            ai_extracted_fields = doc.get("extracted_fields") or {}
-    else:
-        logger.error(
-            "NO FILE FOUND for document %s (file_name=%s). "
-            "Checked local_file_path, file_path, and UPLOAD_DIR/%s. "
-            "Falling back to existing extracted_fields.",
-            doc_id, file_name, doc_id,
-        )
-        ai_extracted_fields = doc.get("extracted_fields") or {}
-
-    # Also merge top-level extracted fields from document
-    for fld in ["vendor_raw", "amount_raw", "invoice_number_raw"]:
-        clean_key = fld.replace("_raw", "")
-        if doc.get(fld) and not ai_extracted_fields.get(clean_key):
-            ai_extracted_fields[clean_key] = doc[fld]
-    if doc.get("po_number_clean") and not ai_extracted_fields.get("po_number"):
-        ai_extracted_fields["po_number"] = doc["po_number_clean"]
-    if doc.get("invoice_number_clean") and not ai_extracted_fields.get("invoice_number"):
-        ai_extracted_fields["invoice_number"] = doc["invoice_number_clean"]
-
-    # 3) Validation
-    validation_results = doc.get("validation_results")
-    try:
-        from services.document_intel_helpers import validate_bc_match, normalize_extracted_fields
-        job_config = DEFAULT_JOB_TYPES.get(document_type)
-        if not job_config:
-            # Map doc_type variants
-            for k, v in DEFAULT_JOB_TYPES.items():
-                if k.upper().replace("_", "") == document_type.upper().replace("_", ""):
-                    job_config = v
-                    break
-            if not job_config:
-                job_config = DEFAULT_JOB_TYPES.get("AP_Invoice", {})
-        validation_results = await validate_bc_match(
-            document_type, ai_extracted_fields, job_config
-        )
-    except Exception as e:
-        logger.warning("Validation failed for %s: %s", doc_id, e)
-        if not validation_results:
-            validation_results = {"all_passed": False, "checks": [], "error": str(e)}
-
-    # 4) Automation decision
-    automation_decision = doc.get("automation_decision", "manual")
-    automation_reasoning = ""
-    try:
-        from services.document_intel_helpers import make_automation_decision
-        if not job_config:
-            job_config = DEFAULT_JOB_TYPES.get("AP_Invoice", {})
-        decision, reasoning, _ = make_automation_decision(
-            job_config, classification_confidence, validation_results
-        )
-        automation_decision = decision
-        automation_reasoning = reasoning
-    except Exception as e:
-        logger.warning("Automation decision failed for %s: %s", doc_id, e)
-        automation_reasoning = str(e)
-
-    # 5) Derive automation readiness
-    readiness = _derive_automation_readiness(
-        classification_confidence=classification_confidence,
-        extracted_fields=ai_extracted_fields,
-        doc_type=document_type,
-        validation_results=validation_results,
-        automation_decision=automation_decision,
-    )
+    readiness = {
+        "status": pipeline.readiness_status,
+        "score": pipeline.readiness_score,
+        "reasons": pipeline.readiness_reasons,
+    }
 
     ended_at = datetime.now(timezone.utc)
 
-    # 6) Build intelligence result
+    # 3) Build intelligence result
     intelligence_result = {
         "result_id": result_id,
         "document_id": doc_id,
@@ -309,16 +221,31 @@ async def process_document(doc_id: str) -> Dict[str, Any]:
         "processing_duration_ms": int((ended_at - started_at).total_seconds() * 1000),
         "manually_corrected": False,
         "correction_history": [],
+        # Pipeline metadata for debugging
+        "pipeline_status": pipeline.final_status,
+        "pipeline_failure_stage": pipeline.failure_stage,
+        "pipeline_failure_reason": pipeline.failure_reason,
+        "pipeline_stages": {
+            name: {
+                "status": sr.status.value,
+                "quality_gate": sr.quality_gate_passed,
+                "error": sr.error,
+                "ms": sr.duration_ms,
+            }
+            for name, sr in pipeline.stages.items()
+        },
+        "classification_method": pipeline.classification_method,
+        "meaningful_field_count": pipeline.meaningful_field_count,
     }
 
-    # 7) Store in dedicated collection (upsert by document_id)
+    # 4) Store in dedicated collection (upsert by document_id)
     await db[INTELLIGENCE_COLLECTION].update_one(
         {"document_id": doc_id},
         {"$set": intelligence_result},
         upsert=True,
     )
 
-    # 8) Update hub_documents with key intelligence fields
+    # 5) Update hub_documents with key intelligence fields
     doc_update = {
         "intelligence_result_id": result_id,
         "automation_readiness": readiness["status"],

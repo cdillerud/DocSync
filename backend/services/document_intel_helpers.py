@@ -306,28 +306,23 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
 
     For multi-page PDFs, extracts only the first page to avoid
     classification confusion from supporting documents on later pages.
+
+    Heuristics provide fast classification for obvious types, but the LLM
+    is ALWAYS called for full field extraction so that documents never end
+    up with sparse/empty extracted_fields.
     """
-    # Fast pre-AI heuristic: catch obvious AP invoices FIRST (freight carrier invoices etc.)
-    ap_result = _check_obvious_ap_invoice(file_path, file_name)
-    if ap_result:
-        return ap_result
-
-    # Fast pre-AI heuristic: catch obvious packing lists FIRST
-    pl_result = _check_obvious_packing_list(file_path, file_name)
-    if pl_result:
-        return pl_result
-
-    # Fast pre-AI heuristic: catch obvious warehouse receipts (before BOL check)
-    wr_result = _check_obvious_warehouse_receipt(file_path, file_name)
-    if wr_result:
-        return wr_result
-    
-    # Fast pre-AI heuristic: catch obvious BOLs by filename before using LLM
-    bol_result = _check_obvious_bol(file_path, file_name)
-    if bol_result:
-        return bol_result
+    # Run heuristics first for classification hints
+    heuristic_result = (
+        _check_obvious_ap_invoice(file_path, file_name)
+        or _check_obvious_packing_list(file_path, file_name)
+        or _check_obvious_warehouse_receipt(file_path, file_name)
+        or _check_obvious_bol(file_path, file_name)
+    )
 
     if not EMERGENT_LLM_KEY:
+        # Without LLM key, return heuristic result or empty
+        if heuristic_result:
+            return heuristic_result
         return {
             "error": "EMERGENT_LLM_KEY not configured",
             "suggested_job_type": "Unknown",
@@ -335,6 +330,55 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
             "extracted_fields": {},
         }
 
+    # Always call the LLM for full field extraction
+    llm_result = await _call_llm_for_extraction(file_path, file_name)
+
+    if heuristic_result:
+        # Heuristic wins for classification, LLM provides richer extraction
+        heuristic_type = heuristic_result["suggested_job_type"]
+        heuristic_confidence = heuristic_result["confidence"]
+        heuristic_fields = heuristic_result.get("extracted_fields", {})
+
+        if llm_result and not llm_result.get("error"):
+            # Merge: start with LLM fields, overlay with heuristic fields
+            llm_fields = llm_result.get("extracted_fields", {})
+            merged_fields = {**llm_fields, **{k: v for k, v in heuristic_fields.items() if v}}
+            logger.info(
+                "Heuristic+LLM merge for '%s': heuristic=%s (%.2f), LLM fields=%d, merged=%d",
+                file_name, heuristic_type, heuristic_confidence,
+                len(llm_fields), len(merged_fields),
+            )
+            return {
+                "suggested_job_type": heuristic_type,
+                "confidence": heuristic_confidence,
+                "extracted_fields": merged_fields,
+                "reasoning": f"Heuristic classification ({heuristic_result.get('model', 'heuristic')}), LLM extraction",
+                "model": heuristic_result.get("model", "heuristic") + "+gemini-3-flash-preview",
+                "page_count": llm_result.get("page_count", 1),
+                "classified_from_page": llm_result.get("classified_from_page"),
+            }
+        else:
+            # LLM failed — fall back to heuristic-only (better than nothing)
+            logger.warning(
+                "LLM extraction failed for '%s', using heuristic-only result: %s",
+                file_name, llm_result.get("error") if llm_result else "null",
+            )
+            return heuristic_result
+
+    # No heuristic match — use LLM result directly
+    if llm_result:
+        return llm_result
+
+    return {
+        "error": "Both heuristic and LLM extraction failed",
+        "suggested_job_type": "Unknown",
+        "confidence": 0.0,
+        "extracted_fields": {},
+    }
+
+
+async def _call_llm_for_extraction(file_path: str, file_name: str) -> dict:
+    """Call the LLM (Gemini) to classify and extract fields from a document."""
     try:
         from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
 
@@ -445,17 +489,17 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
 
         extracted = result.get("extracted_fields", {})
         logger.info(
-            "AI Classification result - doc_type: %s, confidence: %s, pages: %d",
+            "LLM extraction result - doc_type: %s, confidence: %s, fields: %d, pages: %d",
             result.get("document_type"),
             result.get("confidence"),
+            len(extracted),
             page_count,
         )
-        logger.info("AI extracted invoice_date: %s", extracted.get("invoice_date"))
 
         return {
             "suggested_job_type": result.get("document_type", "Unknown"),
             "confidence": float(result.get("confidence", 0.0)),
-            "extracted_fields": result.get("extracted_fields", {}),
+            "extracted_fields": extracted,
             "reasoning": result.get("reasoning", ""),
             "model": "gemini-3-flash-preview",
             "page_count": page_count,
@@ -463,7 +507,7 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
         }
 
     except Exception as e:
-        logger.error("AI classification failed: %s", str(e))
+        logger.error("LLM extraction failed for '%s': %s", file_name, str(e))
         # Clean up temp file on error
         if 'temp_pdf_path' in dir() and temp_pdf_path:
             try:
@@ -475,7 +519,7 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
             "suggested_job_type": "Unknown",
             "confidence": 0.0,
             "extracted_fields": {},
-            "reasoning": f"Classification failed: {str(e)}",
+            "reasoning": f"Extraction failed: {str(e)}",
         }
 
 

@@ -1,0 +1,113 @@
+{
+  "summary": "P0 Document Intelligence Fix Verification Complete - All 16 backend tests passed, Frontend dashboard and document detail pages render correctly",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/documents",
+        "issue": "Default filter shows 0 documents (need to use status=Completed or check 'Show auto-cleared')",
+        "priority": "LOW"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Document Detail",
+        "issues": ["BC Validation shows 'Could not obtain BC token' - expected since BC API is sandbox/mock mode"]
+      },
+      {
+        "screen": "Assets",
+        "issues": ["Minor 404 errors for some static assets (fonts/icons) - non-blocking"]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_document_intelligence_p0_fix.py",
+    "/app/test_reports/pytest/document_intelligence_p0_fix_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "UPLOAD_DIR fallback correctly implemented in document_intelligence_service.py lines 189-199 - resolves file path via UPLOAD_DIR/{doc_id} when local_file_path missing",
+    "Clear ERROR logging added at lines 225-231 when NO file found anywhere",
+    "Heuristic+LLM merge pattern correctly implemented in document_intel_helpers.py lines 302-377 - heuristic provides classification, LLM always called for extraction",
+    "Extracted fields properly merged: LLM fields as base, heuristic fields overlay (line 345)",
+    "Reprocess endpoint at document_handlers.py line 934 uses UPLOAD_DIR/doc_id convention"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_document_intelligence_p0_fix.py"
+  ],
+  "success_rate": {
+    "backend": "100% (16/16 tests passed)",
+    "frontend": "100% (Dashboard, Documents, Document Detail pages all render correctly)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "Used existing test documents: 7c04212b-cdd5-4c7d-9eea-329daaaa3420 (W91.pdf with file), ae78e544-041d-4603-bb1c-1112403ef887 (no file on disk)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "P0 fix verified. document-intelligence/process endpoint correctly finds files via UPLOAD_DIR fallback. Heuristic-classified documents get full LLM extraction. Extracted_fields contain meaningful business data (vendor, invoice_date, etc). Reprocess with reclassify=true works.",
+  "verified_features": {
+    "POST /api/document-intelligence/process/{doc_id}": {
+      "status": "PASS",
+      "verified": [
+        "Finds files via UPLOAD_DIR/{doc_id} fallback when local_file_path not stored",
+        "Returns extracted_fields with meaningful data (vendor, invoice_date, ship_to, etc)",
+        "Returns automation_readiness scoring",
+        "Gracefully handles documents without files (uses existing extracted_fields)"
+      ]
+    },
+    "POST /api/documents/{doc_id}/reprocess?reclassify=true": {
+      "status": "PASS",
+      "verified": [
+        "Re-runs AI classification using UPLOAD_DIR convention",
+        "Updates document with new classification and extracted_fields"
+      ]
+    },
+    "GET /api/documents": {
+      "status": "PASS",
+      "verified": [
+        "Returns document list with counts",
+        "Filter by status works (status=Completed)"
+      ]
+    },
+    "Frontend Dashboard": {
+      "status": "PASS",
+      "verified": [
+        "Dashboard loads with statistics (79 Total Documents, 77 Auto-Cleared)",
+        "Navigation works (Documents, Dashboard, Vendors, etc)",
+        "Document Queue shows documents with proper columns"
+      ]
+    },
+    "Frontend Document Detail": {
+      "status": "PASS",
+      "verified": [
+        "Document info displays correctly (filename, size, dates)",
+        "Classification section shows type, method, confidence",
+        "SharePoint integration section visible",
+        "Document preview renders",
+        "Workflow events timeline visible"
+      ]
+    }
+  },
+  "p0_fix_verification": {
+    "issue_1_file_path_resolution": {
+      "status": "FIXED",
+      "details": "Documents without local_file_path now resolved via UPLOAD_DIR/{doc_id} fallback. Verified with doc 7c04212b-cdd5-4c7d-9eea-329daaaa3420"
+    },
+    "issue_2_silent_failure": {
+      "status": "FIXED",
+      "details": "When no file exists, ERROR is logged (lines 225-231) instead of silent failure. Document still returns result using existing extracted_fields"
+    },
+    "issue_3_heuristic_llm_extraction": {
+      "status": "FIXED",
+      "details": "Heuristic classification + LLM extraction merge pattern implemented. Heuristic wins for classification, LLM provides richer extraction"
+    },
+    "issue_4_meaningful_extracted_fields": {
+      "status": "FIXED",
+      "details": "extracted_fields contain meaningful business data: vendor='PROTIVITI INC', invoice_date='2026-01-18', ship_to, freight_direction etc"
+    }
+  },
+  "mocked_api_note": "Microsoft Graph email, JWT Auth (Entra ID), BC API (sandbox mode) - as documented in review_request"
+}

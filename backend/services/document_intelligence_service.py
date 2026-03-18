@@ -12,11 +12,15 @@ import os
 import uuid
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, Any, Optional, List
 
 from deps import get_db
 from models.document_types import DEFAULT_JOB_TYPES
 from services.automation_helpers import utcnow, create_activity
+
+# Upload directory — same convention as server.py / document_handlers.py
+UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/app/backend/uploads"))
 
 logger = logging.getLogger(__name__)
 
@@ -181,11 +185,22 @@ async def process_document(doc_id: str) -> Dict[str, Any]:
     classification_confidence = doc.get("ai_confidence", 0.0)
     document_type = doc.get("suggested_job_type") or doc.get("doc_type") or "Unknown"
 
+    # Resolve the on-disk file path.  Documents don't always store a
+    # "local_file_path" — the codebase convention is UPLOAD_DIR / doc_id.
     file_path = doc.get("local_file_path") or doc.get("file_path")
+    if not file_path or not os.path.exists(str(file_path)):
+        # Fallback to the standard upload directory convention
+        candidate = UPLOAD_DIR / doc_id
+        if candidate.exists():
+            file_path = str(candidate)
+            logger.info("Resolved file via UPLOAD_DIR fallback for %s: %s", doc_id, file_path)
+        else:
+            file_path = None
+
     file_name = doc.get("file_name", "unknown")
 
     ai_result = None
-    if file_path and os.path.exists(str(file_path)):
+    if file_path:
         try:
             from services.document_intel_helpers import classify_document_with_ai
             ai_result = await classify_document_with_ai(str(file_path), file_name)
@@ -198,11 +213,21 @@ async def process_document(doc_id: str) -> Dict[str, Any]:
                 merged = {**existing_fields, **{k: v for k, v in new_fields.items() if v}}
                 ai_extracted_fields = merged
             else:
+                logger.warning(
+                    "AI classification returned error for %s: %s",
+                    doc_id, ai_result.get("error") if ai_result else "null result",
+                )
                 ai_extracted_fields = doc.get("extracted_fields") or {}
         except Exception as e:
             logger.warning("AI classification failed for %s: %s", doc_id, e)
             ai_extracted_fields = doc.get("extracted_fields") or {}
     else:
+        logger.error(
+            "NO FILE FOUND for document %s (file_name=%s). "
+            "Checked local_file_path, file_path, and UPLOAD_DIR/%s. "
+            "Falling back to existing extracted_fields.",
+            doc_id, file_name, doc_id,
+        )
         ai_extracted_fields = doc.get("extracted_fields") or {}
 
     # Also merge top-level extracted fields from document

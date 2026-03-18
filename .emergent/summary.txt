@@ -1,0 +1,172 @@
+<analysis>**original_problem_statement:**
+The user's initial request was to fix two P0 regressions in the Business Central (BC) integration. However, the session evolved to address numerous user-discovered issues and new requirements, including:
+1.  **Classification Accuracy:** The user was frustrated with the AI misclassifying common document types. This led to adding new types (, ) and fixing logic to correctly distinguish  from  and  from .
+2.  **Classification Learning:** The user demanded the system learn from corrections. This resulted in a comprehensive few-shot learning loop, a one-time bootstrap script to train the AI on 2,000+ historical documents, and expanding the loop to learn from implicit confirmations (e.g., auto-clears, file-and-clears).
+3.  **AP Workflow Hardening:** The user requested the AP workflow be perfected. This involved adding BC-integrated checks for duplicate Purchase Invoices and validating invoice amounts against their corresponding Purchase Orders (within a 10% tolerance).
+4.  **Dashboard Overhaul:** The user required the dashboard's today view to use Central Time instead of UTC and for all dashboard metrics to be filterable by a selected date.
+5.  **Auto-Filing Shipping Documents:** The user requested that non-financial documents like shipping documents be automatically filed to SharePoint based on rules from their workflow documents.
+6.  **Critical Bug Fixes:** The user reported and the agent fixed a SharePoint upload error, inconsistent classification displays in the UI, and overly permissive validation rules that allowed blank documents to be auto-cleared.
+7.  **Data Extraction Failures:** The user's final and most critical issue is that some documents are being processed with zero extracted data, which undermines the entire system.
+
+**User's preferred language**: English
+
+**what currently exists?**
+The application is a full-stack document intelligence platform. The AI classification system is significantly more robust and now includes a comprehensive learning loop trained on historical data, which continuously improves by observing user corrections and successful system actions. The AP Invoice processing workflow is hardened with live Business Central validation checks. The main dashboard is now timezone-aware (Central Time) and fully interactive, allowing all metrics to be filtered by date. Critical bugs related to SharePoint uploads, UI consistency, and validation logic have been resolved.
+
+**Last working item**:
+-   **Last item agent was working:** Investigating the root cause of why some documents, despite clearly containing text and data, are resulting in an empty extraction result from the document intelligence pipeline. The user pointed out that All documents have data!, making this a critical failure.
+-   **Status:** IN PROGRESS
+-   **Agent Testing Done:** N
+-   **Which testing method agent to use?** backend testing agent
+-   **User Testing Done:** N
+
+**All Pending/In progress Issue list**:
+-   **Issue 1: Root cause of zero data extraction (P0)**
+
+**Issues Detail:**
+-   **Issue 1: Root cause of zero data extraction (P0)**
+    -   **Description:** The document intelligence pipeline is silently failing on some documents, leading to an empty  object. This happened to a document that was then incorrectly auto-cleared (the weak validation rule was fixed, but the extraction failure remains). The core data extraction process is unreliable.
+    -   **Attempted fixes:** The agent acknowledged the problem and was about to begin tracing the extraction pipeline in . No code has been changed yet.
+    -   **Next debug checklist:**
+        1.  Examine , focusing on  and .
+        2.  Check for any errors or empty text payloads during the PDF parsing step (using ).
+        3.  Add verbose logging around the text extraction and the subsequent call to the Gemini API to see what payload is being sent and what response is received.
+        4.  Attempt to re-process the exact document that failed to see if the error is reproducible.
+        5.  Investigate potential silent failures from the LLM API call (e.g., content filtering, malformed response JSON).
+    -   **Why fix this issue and what will be achieved with the fix?** Data extraction is the fundamental purpose of the application. Fixing this will restore core reliability and user trust.
+    -   **Status:** IN PROGRESS
+    -   **Is recurring issue?** Y
+    -   **Should Test frontend/backend/both after fix?** backend
+    -   **Blocked on other issue:** None
+
+**In progress Task List**:
+-   None
+
+**Upcoming and Future Tasks**
+**Upcoming Tasks:**
+-   **P1:** Add an AP Validation card to the document detail page to display the results of the new validation checks (vendor, duplicates, PO amount).
+-   **P1:** Implement Azure OpenAI in tandem with Gemini for classification (a deferred user request).
+-   **P1:** Build an admin UI for managing item mapping rules.
+
+**Future Tasks:**
+-   **P2:** Refactor monolithic files: , , and .
+-   **P2:** Look at redesigning the layout of the Extracted Data and Document Intelligence cards.
+-   **P2:** Build a Vendor Inventory Dashboard and Sales module.
+-   **P2:** Build a Product/BOM (Bill of Materials) module.
+-   **P2:** Implement a production-ready email service and Entra ID SSO to replace current mocks.
+-   **P2:** Decommission the legacy Zetadocs system.
+
+**Completed work in this session**
+-   **Comprehensive AI Learning (DONE):**
+    -   Created a bootstrap script () to train the model on 1,800+ historical documents.
+    -   Enhanced the learning loop to include positive reinforcement from auto-clears, file-and-clears, and BC postings.
+-   **Classification Accuracy Overhaul (DONE):**
+    -   Added  as a new document type and created a heuristic for it.
+    -   Fixed  vs.  misclassification with a new heuristic and refined AI prompts.
+    -   Fixed  vs.  misclassification.
+    -   Created a reclassification script () and ran it in production to fix historical data errors.
+-   **AP Workflow Hardening (DONE):**
+    -   Integrated a live BC check to prevent the creation of duplicate Purchase Invoices.
+    -   Added validation to ensure invoice amounts are within 10% of the corresponding PO amount.
+-   **Dashboard Overhaul (DONE):**
+    -   Converted all date calculations and displays to use Central Time ().
+    -   Implemented a universal date filter that controls all metrics on the dashboard, with an All Time reset button.
+-   **Auto-Filing of Shipping Docs (DONE):** Created  to automatically route and file  and  types based on BC lookup data, removing them from the manual AP queue.
+-   **Critical Bug Fixes (DONE):**
+    -   **SharePoint Upload Error:** Fixed a drive resolution bug in  that caused a JSON Content-Type error when the target library was not the first drive.
+    -   **Validation Logic:** Tightened auto-clear rules in  to prevent documents with insufficient extracted data from passing validation.
+    -   **UI Inconsistencies:** Corrected bugs where the queue and detail pages showed different classifications and the UI dropdown had stale document types.
+
+**Earlier issues found/mentioned but not fixed**
+-   **Issue 1: Monolithic Codebase (P2)**
+    -   **Debug checklist:** Examine , , .
+    -   **Why to solve this issue and what will be achieved with this?** To improve maintainability, testability, and developer velocity.
+    -   **Should Test frontend/backend/both after fix:** both
+    -   **Is recurring issue?** Y
+
+**Known issue recurrence from previous fork**
+-   None.
+
+**Code Architecture**
+
+
+**Key Technical Concepts**
+-   **Comprehensive AI Learning Loop:** The system now learns not only from explicit user corrections () but also from implicit positive confirmations from system actions like auto-clearing, filing, and posting to BC (), creating a self-improving pipeline.
+-   **Heuristic-First Classification:** Solidified a multi-layered classification strategy that uses fast, deterministic rules (for obvious invoices, packing lists, credit memos) to handle common cases before invoking the LLM, improving accuracy and performance.
+-   **Standalone Maintenance Scripts:** Established a pattern of creating isolated Python scripts in  for safe and repeatable bulk data operations (bootstrapping, reclassification), runnable via .
+-   **Timezone-Aware & Date-Filtered Analytics:** Refactored all dashboard queries to be both timezone-aware (using ) and filterable by a specific date, providing accurate, context-sensitive metrics.
+-   **Live API Validation:** Hardened the AP workflow by integrating live calls to the Business Central API to check for duplicate invoices and validate amounts against purchase orders before creating new records.
+
+**key DB schema**
+-   **classification_feedback:**  - The  field was added to track *how* a correction was learned (e.g., 'user', 'bootstrap_tier2', 'confirmed_auto_clear').
+-   **hub_documents:**  - The  field was added to store a structured summary of the AP validation checks (e.g., duplicate status, PO amount match).
+
+**changes in tech stack**
+-   Added  library for robust timezone handling.
+
+**All files of reference**
+-   : The heart of the classification logic, containing all AI prompts and heuristics.
+-   : Manages the entire learning loop, including bootstrap and confirmations.
+-   : Contains the AP validation logic that calls out to the BC API.
+-   : Defines the validation rules and required fields for each document type.
+-   : Contains all the logic for the date-filtered and timezone-aware dashboard metrics.
+-   : The main dashboard UI, containing the new universal date picker.
+-   : The one-time script for training the model on historical data.
+-   : The script used to fix misclassifications across the entire database.
+
+**Areas that need refactoring**:
+-   The monolithic files , , and  remain candidates for future refactoring to improve modularity and maintainability.
+
+**key api endpoints**
+-   : Returns top-level dashboard metrics, now filterable by a specific date.
+-   : Returns detailed dashboard metrics, now filterable by a specific date.
+-   : Serves as the primary trigger for the AI learning loop when a user manually changes a document's classification.
+
+**Critical Info for New Agent**
+-   Your P0 priority is to solve **why the data extraction pipeline is silently failing for some documents**. This is a critical system failure where documents with clear content are being processed as if they are blank. Start by investigating .
+-   The user is technically proficient, direct, and has high expectations. They are extremely frustrated by context loss from forking and having to repeat themselves. Be concise, justify your plans, and avoid asking for information that was already provided.
+-   For any future bulk data operations, follow the established pattern of creating a standalone script in  that can be executed via . This is the user's preferred method for running maintenance tasks.
+-   The AI learning loop is now a core system feature. Any new document processing workflows should be designed to provide feedback (positive or corrective) to the .
+
+**documents and test reports created in this job**
+-    (updated)
+-    (created)
+-    (created)
+-    (created)
+
+**Last 10 User Messages and any pending HUMAN messages**
+10. **User:** Asked to hone the AP workflow (validation, PI creation). (Status: DONE)
+9.  **User:** Pointed out a freight carrier's invoice was misclassified as a . (Status: FIXED)
+8.  **User:** Requested the classification fix be run against all documents. (Status: DONE)
+7.  **User:** Asked for the difference between two UI cards. (Status: ANSWERED)
+6.  **User:** Pointed out a  was misclassified. (Status: FIXED, new type added)
+5.  **User:** Reported the SharePoint upload error was still occurring in production. (Status: FIXED with a more robust solution)
+4.  **User:** Asked if  types could be auto-filed. (Status: DONE)
+3.  **User:** Re-uploaded workflow documents that were lost due to forking. (Status: ACKNOWLEDGED)
+2.  **User:** Pointed out a document with zero extracted data passed validation. (Status: FIXED validation rule, but not the root cause)
+1.  **User:** How is it extracting zero data?? All documents have data! (Status: **CURRENT P0 TASK, IN PROGRESS**)
+
+**Project Health Check:**
+-   **Broken:** The data extraction pipeline has a critical, unresolved flaw where it can fail silently on valid documents.
+-   **Mocked:** Email service (Microsoft Graph), JWT Auth (Entra ID), Business Central API (preview environment lacks full production credentials).
+
+**3rd Party Integrations**
+-   **Gemini (via Emergent LLM Key):** Used for document classification and extraction.
+-   **Dynamics 365 Business Central API:** Live for read/write to the user's sandbox environment.
+-   **Microsoft Graph API:** Used for SharePoint file operations.
+-   **APScheduler:** Used for background tasks.
+-   **rapidfuzz:** Used for fuzzy string matching.
+-   **pytz:** Used for timezone conversions.
+
+**Testing status**
+-   **Testing agent used after significant changes:** YES
+-   **Troubleshoot agent used after agent stuck in loop:** NO
+-   **Test files created:** None.
+-   **Known regressions:** None.
+
+**Credentials to test flow:**
+-   **Web UI:**  / 
+
+**What agent forgot to execute**
+-   The user's deferred request to integrate their Azure OpenAI key is still pending in the upcoming tasks list.
+-   The agent's suggestion to add a dedicated AP Validation card to the document detail page has not been explicitly approved by the user yet.</analysis>

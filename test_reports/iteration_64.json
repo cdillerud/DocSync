@@ -74,7 +74,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://smart-classifier-3.preview.emergentagent.com"
+    "api_url": "https://extract-heal.preview.emergentagent.com"
   },
   "seed_data_used": "Used existing Hormel Foods workspace (ID: 366bfcce-4d68-4daf-b9f4-cb05a35de8c8). Created test item settings during backend tests. Edited SPAM-LITE settings during frontend test (threshold: 600, buffer: 150).",
   "retest_needed": false,

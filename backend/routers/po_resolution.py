@@ -23,7 +23,13 @@ async def get_po_resolution_metrics():
         {"document_type": {"$in": doc_types}, "po_resolution": {"$exists": True}}
     )
     po_resolved = await db.hub_documents.count_documents(
+        {"document_type": {"$in": doc_types}, "po_resolution.status": {"$in": ["resolved", "resolved_shipment"]}}
+    )
+    po_resolved_po = await db.hub_documents.count_documents(
         {"document_type": {"$in": doc_types}, "po_resolution.status": "resolved"}
+    )
+    po_resolved_shipment = await db.hub_documents.count_documents(
+        {"document_type": {"$in": doc_types}, "po_resolution.status": "resolved_shipment"}
     )
     po_ambiguous = await db.hub_documents.count_documents(
         {"document_type": {"$in": doc_types}, "po_resolution.status": "ambiguous"}
@@ -53,6 +59,9 @@ async def get_po_resolution_metrics():
     )
     bc_linked_local = await db.hub_documents.count_documents(
         {"document_type": {"$in": doc_types}, "po_resolution.bc_link.status": "linked_local"}
+    )
+    bc_linked_shipment = await db.hub_documents.count_documents(
+        {"document_type": {"$in": doc_types}, "po_resolution.bc_link.status": "linked_shipment"}
     )
     bc_link_failed = await db.hub_documents.count_documents(
         {"document_type": {"$in": doc_types}, "po_resolution.bc_link.status": "failed"}
@@ -99,7 +108,7 @@ async def get_po_resolution_metrics():
     for dt in doc_types:
         dt_total = await db.hub_documents.count_documents({"document_type": dt})
         dt_resolved = await db.hub_documents.count_documents(
-            {"document_type": dt, "po_resolution.status": "resolved"}
+            {"document_type": dt, "po_resolution.status": {"$in": ["resolved", "resolved_shipment"]}}
         )
         dt_bc_linked = await db.hub_documents.count_documents(
             {"document_type": dt, "po_resolution.bc_link.status": "linked"}
@@ -115,6 +124,8 @@ async def get_po_resolution_metrics():
         "po_resolution": {
             "attempted": po_attempted,
             "resolved": po_resolved,
+            "resolved_po": po_resolved_po,
+            "resolved_shipment": po_resolved_shipment,
             "ambiguous": po_ambiguous,
             "not_found": po_not_found,
             "skipped": po_skipped,
@@ -124,9 +135,10 @@ async def get_po_resolution_metrics():
             "attempted": bc_link_attempted,
             "succeeded_real": bc_linked_real,
             "succeeded_local": bc_linked_local,
+            "succeeded_shipment": bc_linked_shipment,
             "failed": bc_link_failed,
             "rate_real": round(bc_linked_real / total * 100, 1) if total > 0 else 0,
-            "rate_total": round((bc_linked_real + bc_linked_local) / total * 100, 1) if total > 0 else 0,
+            "rate_total": round((bc_linked_real + bc_linked_local + bc_linked_shipment) / total * 100, 1) if total > 0 else 0,
         },
         "unresolved_by_miss_reason": unresolved_by_miss_reason,
         "bc_link_failures_by_reason": bc_link_failures_by_reason,
@@ -211,7 +223,7 @@ async def batch_resolve_po(
 
         status = result["status"]
         stats["processed"] += 1
-        if status == "resolved":
+        if status in ("resolved", "resolved_shipment"):
             stats["resolved"] += 1
         elif status == "ambiguous":
             stats["ambiguous"] += 1
@@ -222,7 +234,7 @@ async def batch_resolve_po(
         if miss:
             stats["miss_reasons"][miss] = stats["miss_reasons"].get(miss, 0) + 1
 
-        if bc_link.get("status") in ("linked", "linked_local"):
+        if bc_link.get("status") in ("linked", "linked_local", "linked_shipment"):
             stats["bc_link_succeeded"] += 1
             stats["bc_link_attempted"] += 1
         elif bc_link.get("status") == "failed":
@@ -235,7 +247,7 @@ async def batch_resolve_po(
         if dt not in stats["by_doc_type"]:
             stats["by_doc_type"][dt] = {"total": 0, "resolved": 0}
         stats["by_doc_type"][dt]["total"] += 1
-        if status == "resolved":
+        if status in ("resolved", "resolved_shipment"):
             stats["by_doc_type"][dt]["resolved"] += 1
 
         if len(stats["details"]) < 50:
@@ -246,6 +258,9 @@ async def batch_resolve_po(
                 "miss_reason": miss,
                 "po_number": result.get("po_number"),
                 "bc_link_status": bc_link.get("status"),
+                "bc_entity_type": result.get("bc_entity_type"),
+                "bc_customer_name": result.get("bc_customer_name"),
+                "bc_order_number": result.get("bc_order_number"),
             })
 
     stats["po_resolution_rate"] = round(

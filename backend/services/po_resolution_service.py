@@ -29,6 +29,7 @@ PO_REQUIRED_DOC_TYPES = frozenset({
 })
 
 STATUS_RESOLVED = "resolved"
+STATUS_RESOLVED_SHIPMENT = "resolved_shipment"
 STATUS_AMBIGUOUS = "ambiguous"
 STATUS_NOT_FOUND = "not_found"
 STATUS_SKIPPED = "skipped"
@@ -295,7 +296,7 @@ async def resolve_po(
 
         trace_entry = {"candidate": normalized, "lookups": []}
 
-        # ── Step 1: BC Reference Cache (fast, local) ──
+        # ── Step 1: BC Reference Cache — Purchase Orders (fast, local) ──
         cache_matches = await _search_bc_cache(db, normalized, vendor_no, vendor_name)
         trace_entry["lookups"].append({
             "source": "bc_cache", "query": normalized,
@@ -311,6 +312,24 @@ async def resolve_po(
                 document_id[:12], normalized, cm["bc_document_no"],
                 cm.get("bc_vendor_name", ""), cm["confidence"], cm.get("match_method", ""),
             )
+
+        # ── Step 1.5: BC Cache — Posted Sales Shipments (fallback) ──
+        if not cache_matches:
+            shipment_matches = await _search_bc_cache_shipments(db, normalized)
+            trace_entry["lookups"].append({
+                "source": "bc_cache_shipment", "query": normalized,
+                "hits": len(shipment_matches),
+                "result": [m.get("bc_document_no") for m in shipment_matches][:3],
+            })
+            for sm in shipment_matches:
+                sm["po_candidate"] = candidate
+                sm["lookup_source"] = "bc_cache_shipment"
+                all_matches.append(sm)
+                logger.info(
+                    "[PO_RESOLUTION] doc=%s SHIPMENT HIT: candidate=%s -> Shipment %s customer=%s order=%s",
+                    document_id[:12], normalized, sm["bc_document_no"],
+                    sm.get("bc_customer_name", ""), sm.get("bc_order_number", ""),
+                )
 
         # ── Step 2: Live BC API fallback (if no cache hit) ──
         if not cache_matches:
@@ -399,26 +418,40 @@ async def resolve_po(
             )
 
     # Single clear winner
-    result["status"] = STATUS_RESOLVED
+    is_shipment = best.get("bc_entity_type") == "posted_sales_shipment"
+    result["status"] = STATUS_RESOLVED_SHIPMENT if is_shipment else STATUS_RESOLVED
     result["po_number"] = best.get("bc_document_no", best.get("entity_id", ""))
     result["bc_record_id"] = best.get("bc_record_id", "")
+    result["bc_entity_type"] = best.get("bc_entity_type", "purchase_order")
     result["confidence"] = best["confidence"]
     result["match_method"] = best.get("match_method", "unknown")
     result["lookup_source"] = best.get("lookup_source", "")
     result["bc_vendor_no"] = best.get("bc_vendor_no", "")
     result["bc_vendor_name"] = best.get("bc_vendor_name", "")
+    result["bc_customer_no"] = best.get("bc_customer_no", "")
+    result["bc_customer_name"] = best.get("bc_customer_name", "")
+    result["bc_order_number"] = best.get("bc_order_number", "")
     result["bc_status"] = best.get("bc_status", "")
     result["best_match"] = _format_match(best)
     result["matches"] = [_format_match(m) for m in all_matches[:5]]
     result["miss_reason"] = None
 
-    logger.info(
-        "[PO_RESOLUTION] doc=%s RESOLVED: PO=%s bc_id=%s confidence=%.2f method=%s source=%s vendor=%s",
-        document_id[:12], result["po_number"],
-        result["bc_record_id"][:12] if result["bc_record_id"] else "-",
-        result["confidence"], result["match_method"], result["lookup_source"],
-        result.get("bc_vendor_name", ""),
-    )
+    if is_shipment:
+        logger.info(
+            "[PO_RESOLUTION] doc=%s RESOLVED (SHIPMENT): Shipment=%s bc_id=%s confidence=%.2f customer=%s order=%s",
+            document_id[:12], result["po_number"],
+            result["bc_record_id"][:12] if result["bc_record_id"] else "-",
+            result["confidence"], result.get("bc_customer_name", ""),
+            result.get("bc_order_number", ""),
+        )
+    else:
+        logger.info(
+            "[PO_RESOLUTION] doc=%s RESOLVED: PO=%s bc_id=%s confidence=%.2f method=%s source=%s vendor=%s",
+            document_id[:12], result["po_number"],
+            result["bc_record_id"][:12] if result["bc_record_id"] else "-",
+            result["confidence"], result["match_method"], result["lookup_source"],
+            result.get("bc_vendor_name", ""),
+        )
 
     return result
 
@@ -440,7 +473,7 @@ async def attempt_bc_link(document_id: str, po_resolution: Dict[str, Any]) -> Di
         "document_id": document_id,
     }
 
-    if po_resolution.get("status") != STATUS_RESOLVED:
+    if po_resolution.get("status") not in (STATUS_RESOLVED, STATUS_RESOLVED_SHIPMENT):
         link_result["error_code"] = BC_LINK_RECORD_NOT_FOUND
         link_result["error_message"] = f"PO not resolved (status={po_resolution.get('status')})"
         logger.warning(
@@ -452,6 +485,23 @@ async def attempt_bc_link(document_id: str, po_resolution: Dict[str, Any]) -> Di
     bc_record_id = po_resolution.get("bc_record_id", "")
     po_number = po_resolution.get("po_number", "")
     lookup_source = po_resolution.get("lookup_source", "")
+    bc_entity_type = po_resolution.get("bc_entity_type", "purchase_order")
+
+    # Shipment match — link directly from cache (no live BC verification needed)
+    if bc_entity_type == "posted_sales_shipment":
+        link_result["status"] = "linked_shipment"
+        link_result["bc_record_type"] = "posted_sales_shipment"
+        link_result["bc_record_id"] = bc_record_id or po_number
+        link_result["link_method"] = f"shipment_cache_match:{po_resolution.get('match_method', 'unknown')}"
+        link_result["bc_customer_name"] = po_resolution.get("bc_customer_name", "")
+        link_result["bc_order_number"] = po_resolution.get("bc_order_number", "")
+        logger.info(
+            "[BC_LINK] doc=%s SHIPMENT LINK: Shipment=%s customer=%s order=%s",
+            document_id[:12], po_number,
+            po_resolution.get("bc_customer_name", ""),
+            po_resolution.get("bc_order_number", ""),
+        )
+        return link_result
 
     if not bc_record_id:
         # PO resolved via local staging — no real BC record to link to
@@ -567,6 +617,36 @@ async def _search_bc_cache(
     return matches
 
 
+async def _search_bc_cache_shipments(
+    db, normalized_ref: str
+) -> List[Dict[str, Any]]:
+    """Search BC cache for posted_sales_shipment matches. Returns scored matches.
+    Used as fallback when no purchase_order match is found.
+    """
+    matches = []
+
+    query = {
+        "bc_entity_type": "posted_sales_shipment",
+        "$or": [
+            {"normalized_document_no": normalized_ref},
+            {"bc_document_no": normalized_ref},
+        ],
+    }
+    cache_hits = await db.bc_reference_cache.find(query, {"_id": 0}).to_list(5)
+
+    for hit in cache_hits:
+        matches.append({
+            **hit,
+            "confidence": 0.85,
+            "match_method": "bc_cache_shipment_exact",
+            "bc_customer_no": hit.get("bc_customer_no", ""),
+            "bc_customer_name": hit.get("bc_customer_name", ""),
+            "bc_order_number": hit.get("bc_order_number", ""),
+        })
+
+    return matches
+
+
 # ─── Live BC API Search ───────────────────────────────────────────────────────
 
 async def _search_bc_api(normalized_po: str, document_id: str) -> tuple:
@@ -651,11 +731,15 @@ def _empty_result(document_id: str, doc_type: str) -> Dict[str, Any]:
         "status": STATUS_SKIPPED,
         "po_number": None,
         "bc_record_id": None,
+        "bc_entity_type": None,
         "confidence": 0.0,
         "match_method": None,
         "lookup_source": None,
         "bc_vendor_no": None,
         "bc_vendor_name": None,
+        "bc_customer_no": None,
+        "bc_customer_name": None,
+        "bc_order_number": None,
         "bc_status": None,
         "miss_reason": None,
         "reason": None,
@@ -677,8 +761,12 @@ def _format_match(match: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "bc_document_no": match.get("bc_document_no", ""),
         "bc_record_id": match.get("bc_record_id", ""),
+        "bc_entity_type": match.get("bc_entity_type", ""),
         "bc_vendor_no": match.get("bc_vendor_no", ""),
         "bc_vendor_name": match.get("bc_vendor_name", ""),
+        "bc_customer_no": match.get("bc_customer_no", ""),
+        "bc_customer_name": match.get("bc_customer_name", ""),
+        "bc_order_number": match.get("bc_order_number", ""),
         "bc_status": match.get("bc_status", ""),
         "confidence": match.get("confidence", 0),
         "match_method": match.get("match_method", ""),

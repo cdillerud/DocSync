@@ -13,6 +13,7 @@ from services.po_resolution_service import (
     MISS_BC_LOOKUP_ERROR,
     MISS_VENDOR_CONFLICT,
     STATUS_RESOLVED,
+    STATUS_RESOLVED_SHIPMENT,
     STATUS_AMBIGUOUS,
     STATUS_NOT_FOUND,
     STATUS_SKIPPED,
@@ -222,6 +223,7 @@ class TestMissTaxonomy:
 
     def test_statuses_are_strings(self):
         assert isinstance(STATUS_RESOLVED, str)
+        assert isinstance(STATUS_RESOLVED_SHIPMENT, str)
         assert isinstance(STATUS_AMBIGUOUS, str)
         assert isinstance(STATUS_NOT_FOUND, str)
         assert isinstance(STATUS_SKIPPED, str)

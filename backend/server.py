@@ -3570,12 +3570,40 @@ async def _internal_intake_document(
     if not job_configs:
         job_configs = DEFAULT_JOB_TYPES.get(suggested_type, DEFAULT_JOB_TYPES["AP_Invoice"])
     
-    # Inject PO resolution result into extracted_fields for BC validation fallback
-    existing_po_res = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "po_resolution": 1})
-    if existing_po_res and existing_po_res.get("po_resolution", {}).get("po_number"):
-        extracted_fields["_po_resolution_number"] = existing_po_res["po_resolution"]["po_number"]
+    # ── PO Resolution: ALL sources, ALL doc types ──
+    # Extract PO candidates from every source (LLM extraction, filename, BOL, raw text)
+    # and match against BC cache (purchase orders + sales shipments).
+    # This runs for EVERY document, not just shipping docs.
+    try:
+        from services.po_resolution_service import resolve_po, attempt_bc_link, extract_po_candidates
+        current_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+        if current_doc:
+            po_result = await resolve_po(db, current_doc)
+            bc_link_result = await attempt_bc_link(db, doc_id, po_result)
+            po_result["bc_link"] = bc_link_result
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    "po_resolution": po_result,
+                    "po_candidates": po_result.get("candidates_raw", []),
+                }}
+            )
+            # Feed best resolved PO into validation
+            if po_result.get("po_number"):
+                extracted_fields["_po_resolution_number"] = po_result["po_number"]
+            # Also feed ALL valid candidates so validation can try each one
+            valid_candidates = [c["normalized"] for c in po_result.get("candidates_valid", []) if c.get("valid_format") and not c.get("is_non_po")]
+            if valid_candidates:
+                extracted_fields["_po_all_candidates"] = valid_candidates
+            logger.info(
+                "[INTAKE] PO resolution for %s: status=%s po=%s candidates=%d bc_link=%s",
+                doc_id[:8], po_result.get("status"), po_result.get("po_number"),
+                len(valid_candidates), bc_link_result.get("status"),
+            )
+    except Exception as po_err:
+        logger.warning("[INTAKE] PO resolution error for %s: %s", doc_id[:8], str(po_err))
 
-    # Run BC validation (existing logic)
+    # Run BC validation (existing logic — now enriched with PO resolution candidates)
     validation_results = await validate_bc_match(suggested_type, extracted_fields, job_configs)
     
     # Make automation decision
@@ -4728,10 +4756,26 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
     # Get extracted fields
     extracted_fields = doc.get("extracted_fields", {})
     
-    # Inject PO resolution result for BC validation fallback
-    po_res = doc.get("po_resolution", {})
-    if po_res.get("po_number"):
-        extracted_fields["_po_resolution_number"] = po_res["po_number"]
+    # Run PO resolution from ALL sources before validation
+    try:
+        from services.po_resolution_service import resolve_po, attempt_bc_link
+        po_result = await resolve_po(db, doc)
+        bc_link_result = await attempt_bc_link(db, doc_id, po_result)
+        po_result["bc_link"] = bc_link_result
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {
+                "po_resolution": po_result,
+                "po_candidates": po_result.get("candidates_raw", []),
+            }}
+        )
+        if po_result.get("po_number"):
+            extracted_fields["_po_resolution_number"] = po_result["po_number"]
+        valid_candidates = [c["normalized"] for c in po_result.get("candidates_valid", []) if c.get("valid_format") and not c.get("is_non_po")]
+        if valid_candidates:
+            extracted_fields["_po_all_candidates"] = valid_candidates
+    except Exception as po_err:
+        logger.warning("[REPROCESS] PO resolution error for %s: %s", doc_id[:8], str(po_err))
 
     # Re-run BC validation (this will use any new aliases)
     old_match_method = doc.get("match_method", "none")

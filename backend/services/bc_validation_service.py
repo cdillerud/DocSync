@@ -513,13 +513,17 @@ async def _validate_bc_match_inner(
                     normalized_fields.get("po_number")
                     or extracted_fields.get("po_number", "")
                 )
-                # Fallback: check PO resolution result if AI extraction missed it
+                # Gather ALL PO candidates from every source
                 po_resolution_number = extracted_fields.get("_po_resolution_number", "")
+                all_candidates = list(extracted_fields.get("_po_all_candidates", []))
+                
+                # Build ordered list: AI extraction first, then PO resolution best, then all candidates
                 po_candidates_to_check = []
-                if po_number:
-                    po_candidates_to_check.append(po_number)
-                if po_resolution_number and po_resolution_number != po_number:
-                    po_candidates_to_check.append(po_resolution_number)
+                seen = set()
+                for candidate in [po_number, po_resolution_number] + all_candidates:
+                    if candidate and candidate not in seen:
+                        seen.add(candidate)
+                        po_candidates_to_check.append(candidate)
 
                 if po_mode == "PO_REQUIRED":
                     if not po_candidates_to_check:
@@ -527,47 +531,54 @@ async def _validate_bc_match_inner(
                         validation_results["checks"].append({
                             "check_name": "po_validation",
                             "passed": False,
-                            "details": "PO number required but not extracted from document",
+                            "details": "PO number required but not found in any source (LLM, filename, BOL, text)",
                             "required": True,
                         })
                     else:
-                        # Try each candidate — pass if any matches
                         po_found = False
+                        tried = []
                         for candidate_po in po_candidates_to_check:
                             test_result = {"checks": [], "warnings": []}
                             await _validate_po(c, token, _api_url, company_id, candidate_po, test_result, required=True)
                             check = test_result["checks"][-1] if test_result["checks"] else {}
+                            tried.append(candidate_po)
                             if check.get("passed"):
                                 validation_results["checks"].append(check)
                                 po_found = True
                                 break
                         if not po_found:
-                            # Report the primary PO failure, note alternatives tried
+                            # Report primary failure with list of all sources tried
                             await _validate_po(c, token, _api_url, company_id, po_candidates_to_check[0], validation_results, required=True)
-                            if len(po_candidates_to_check) > 1:
+                            if len(tried) > 1:
                                 validation_results["warnings"].append({
-                                    "check_name": "po_resolution_fallback_tried",
-                                    "details": f"Also tried PO resolution candidate '{po_resolution_number}' — not found in BC either",
+                                    "check_name": "po_multi_source_tried",
+                                    "details": f"Tried {len(tried)} PO candidates from all sources: {', '.join(tried[:5])} — none found in BC",
                                 })
 
                 elif po_mode == "PO_IF_PRESENT":
                     if po_candidates_to_check:
-                        # Try each candidate — pass if any matches
                         po_found = False
+                        tried = []
                         for candidate_po in po_candidates_to_check:
                             test_result = {"checks": [], "warnings": []}
                             await _validate_po(c, token, _api_url, company_id, candidate_po, test_result, required=False)
                             check = test_result["checks"][-1] if test_result["checks"] else {}
+                            tried.append(candidate_po)
                             if check.get("passed"):
                                 validation_results["checks"].append(check)
                                 po_found = True
                                 break
                         if not po_found:
                             await _validate_po(c, token, _api_url, company_id, po_candidates_to_check[0], validation_results, required=False)
+                            if len(tried) > 1:
+                                validation_results["warnings"].append({
+                                    "check_name": "po_multi_source_tried",
+                                    "details": f"Tried {len(tried)} PO candidates from all sources: {', '.join(tried[:5])} — none found in BC",
+                                })
                     else:
                         validation_results["warnings"].append({
                             "check_name": "po_not_present",
-                            "details": "No PO number extracted - skipping PO validation",
+                            "details": "No PO number found in any source (LLM, filename, BOL, text) - skipping PO validation",
                         })
 
                 # ---- Duplicate invoice check ----

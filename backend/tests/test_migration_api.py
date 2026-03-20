@@ -10,7 +10,7 @@ sys.path.insert(0, '/app/backend')
 
 
 # Test configuration
-API_BASE_URL = "https://extraction-quality.preview.emergentagent.com"
+API_BASE_URL = "https://bc-linkage-boost.preview.emergentagent.com"
 
 
 @pytest.fixture

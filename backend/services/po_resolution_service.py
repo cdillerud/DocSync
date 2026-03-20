@@ -95,8 +95,13 @@ _PO_PATTERNS = [
 ]
 
 
-def extract_po_candidates(text: str, existing_fields: Dict[str, Any] = None) -> List[Dict[str, Any]]:
-    """Extract PO number candidates from raw text and existing extracted fields.
+def extract_po_candidates(
+    text: str,
+    existing_fields: Dict[str, Any] = None,
+    file_name: str = "",
+) -> List[Dict[str, Any]]:
+    """Extract PO number candidates from raw text, existing extracted fields,
+    BOL number, and source filename.
     Returns a list of {value, normalized, source, confidence, valid_format} sorted by confidence desc.
     """
     candidates: List[Dict[str, Any]] = []
@@ -133,6 +138,15 @@ def extract_po_candidates(text: str, existing_fields: Dict[str, Any] = None) -> 
         if order and str(order).strip():
             _add(str(order), "extracted_field:order_number", 0.80)
 
+        # BOL number often contains the real PO in shipping docs
+        bol = existing_fields.get("bol_number")
+        if bol and str(bol).strip():
+            _add(str(bol).strip(), "extracted_field:bol_number", 0.75)
+
+    # Extract PO-like tokens from file_name
+    if file_name:
+        _extract_from_filename(file_name, _add)
+
     if text:
         for pattern in _PO_PATTERNS:
             for match in pattern.finditer(text[:5000]):
@@ -142,6 +156,42 @@ def extract_po_candidates(text: str, existing_fields: Dict[str, Any] = None) -> 
 
     candidates.sort(key=lambda c: c["confidence"], reverse=True)
     return candidates
+
+
+# Regex for PO-like tokens inside filenames
+_FILENAME_PO_PATTERNS = [
+    # Explicit PO label in filename: PO_107459, PO-107459, PO107459
+    re.compile(r"P\.?O\.?[\s_\-]?(\d{4,7}[A-Z]?)", re.IGNORECASE),
+    # Alpha-prefix POs: W117397, WA1848, WR106124, PR10088
+    re.compile(r"\b([A-Z]{1,3}\d{4,7})\b"),
+    # Standalone 5-7 digit numbers (common PO format)
+    re.compile(r"(?:^|[_\-\s.])(\d{5,7})(?:[_\-\s.]|$)"),
+]
+
+
+def _extract_from_filename(file_name: str, add_fn) -> None:
+    """Parse PO candidates from a document filename."""
+    # Strip file extension
+    base = re.sub(r"\.[a-zA-Z]{2,5}$", "", file_name)
+    if not base:
+        return
+
+    # Try structured patterns first
+    for pattern in _FILENAME_PO_PATTERNS:
+        for match in pattern.finditer(base):
+            raw = match.group(1).strip()
+            if len(raw) >= 4:
+                add_fn(raw, f"filename:{pattern.pattern[:30]}", 0.65)
+
+    # Fallback: split on common delimiters and test each token
+    tokens = re.split(r"[_\-\s.]+", base)
+    for token in tokens:
+        token = token.strip()
+        if len(token) < 4 or len(token) > 10:
+            continue
+        norm = normalize_po(token)
+        if norm and is_valid_po_format(norm) and not is_known_non_po(norm):
+            add_fn(token, "filename:token_split", 0.60)
 
 
 def normalize_po(raw: str) -> str:

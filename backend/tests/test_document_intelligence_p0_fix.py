@@ -20,7 +20,7 @@ import time
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 if not BASE_URL:
     # Fallback for local testing
-    BASE_URL = "https://extraction-quality.preview.emergentagent.com"
+    BASE_URL = "https://bc-linkage-boost.preview.emergentagent.com"
 
 # Test document IDs from the review request
 DOC_WITH_FILE = "7c04212b-cdd5-4c7d-9eea-329daaaa3420"  # W91.pdf exists

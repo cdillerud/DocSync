@@ -275,8 +275,8 @@ async def _run_po_resolution(doc_id: str, ctx: Dict) -> StageResult:
     extracted = doc.get("extracted_fields") or {}
     raw_text = doc.get("raw_text") or ""
 
-    # Build PO candidates from extracted fields + raw text
-    candidates = extract_po_candidates(raw_text, extracted)
+    # Build PO candidates from extracted fields + raw text + filename
+    candidates = extract_po_candidates(raw_text, extracted, file_name=doc.get("file_name", ""))
 
     # Also check po_candidates already stored on doc
     existing_candidates = doc.get("po_candidates") or []

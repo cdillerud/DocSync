@@ -7,7 +7,7 @@ import pytest
 import requests
 import os
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://extraction-quality.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://bc-linkage-boost.preview.emergentagent.com').rstrip('/')
 
 
 class TestBCEnvironmentStatus:

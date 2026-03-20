@@ -61,7 +61,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://extraction-quality.preview.emergentagent.com"
+    "api_url": "https://bc-linkage-boost.preview.emergentagent.com"
   },
   "seed_data_used": "SO-107040 (SPAM-12OZ with 200 committed, 7 released, 193 remaining). Previous shipments visible in history: SHP-FABBBBBB (SHP-BC-FIELDS-TEST), SHP-23512642 (SHP-RELEASE-TEST), SHP-52BAS98A (SHP-PARTIAL-5). Hormel Foods workspace (HORMEL).",
   "retest_needed": false,

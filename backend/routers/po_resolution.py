@@ -192,7 +192,7 @@ async def batch_resolve_po(
         ef = doc.get("extracted_fields") or {}
         raw_text = doc.get("raw_text") or ""
 
-        candidates = extract_po_candidates(raw_text, ef)
+        candidates = extract_po_candidates(raw_text, ef, file_name=doc.get("file_name", ""))
 
         result = await resolve_po(
             po_candidates=candidates,

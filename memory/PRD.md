@@ -85,12 +85,24 @@ POST /api/po-resolution/batch-resolve?force=true&limit=N returns:
 - per-document details (doc_id, file_name, status, miss_reason, po_number, bc_link_status)
 
 ### Results (Preview, 10 shipping docs, v2 hardened)
-| Metric | v1 | v2 | Why |
-|--------|----|----|-----|
-| Resolved | 7 (70%) | 4 (40%) | v2 correctly rejects non-PO refs |
-| Not Found | 3 | 6 | 5 invalid_po_format + 1 bc_lookup_error |
-| BC Cache matches | 4 | 4 | Same real BC matches |
-| False positives | 3 | 0 | Non-PO refs no longer match |
+| Metric | v1 | v2 | v2.1 (BOL+filename) | Why |
+|--------|----|----|---------------------|-----|
+| Resolved | 7 (70%) | 4 (40%) | 4 (40%) preview | v2.1 adds BOL/filename candidates; preview blocked by BC auth |
+| Not Found | 3 | 6 | 6 (5 bc_lookup_error + 1 invalid) | bc_lookup_error would resolve on prod with live BC |
+| BC Cache matches | 4 | 4 | 4 | Same real BC matches in preview |
+| False positives | 3 | 0 | 0 | Non-PO refs still correctly rejected |
+
+### v2.1 PO Candidate Sources (Mar 20 2026)
+1. `extracted_field:po_number` (0.90 confidence)
+2. `extracted_field:purchase_order_number` (0.90)
+3. `extracted_field:customer_po` (0.90)
+4. `extracted_field:order_number` (0.80)
+5. **NEW** `extracted_field:bol_number` (0.75) — BOL often contains the real PO
+6. **NEW** `filename:PO_prefix` (0.65) — Explicit PO label in filename
+7. **NEW** `filename:alpha_prefix` (0.65) — Alpha-prefix POs (W, WA, WR, PR) in filename
+8. **NEW** `filename:digits` (0.65) — Standalone 5-7 digit numbers in filename
+9. **NEW** `filename:token_split` (0.60) — Delimiter-split tokens validated as PO format
+10. `regex:text_patterns` (0.70) — Regex matches in raw text
 
 ## Key Files
 - `backend/services/po_resolution_service.py` - PO resolution v2 (hardened)

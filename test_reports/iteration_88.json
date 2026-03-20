@@ -69,7 +69,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://extraction-quality.preview.emergentagent.com"
+    "api_url": "https://bc-linkage-boost.preview.emergentagent.com"
   },
   "seed_data_used": {
     "test_so": "SO-NOOP-0a8987 with escalation set to 2026-01-20 (overdue)",

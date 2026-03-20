@@ -152,6 +152,63 @@ class TestExtractPOCandidates:
         candidates = extract_po_candidates("", {})
         assert candidates == []
 
+    def test_bol_number_as_candidate(self):
+        """BOL number field should be treated as a PO candidate."""
+        fields = {"bol_number": "107346"}
+        candidates = extract_po_candidates("", fields)
+        assert any(c["normalized"] == "107346" for c in candidates)
+        bol_cand = [c for c in candidates if c["normalized"] == "107346"]
+        assert bol_cand[0]["source"] == "extracted_field:bol_number"
+        assert bol_cand[0]["valid_format"] is True
+
+    def test_bol_number_non_po_downgraded(self):
+        """BOL that looks like a shipping ref should be downgraded."""
+        fields = {"bol_number": "SI-02-26-31488"}
+        candidates = extract_po_candidates("", fields)
+        si_cand = [c for c in candidates if "SI" in c["normalized"]]
+        assert si_cand[0]["is_non_po"] is True
+        assert si_cand[0]["confidence"] <= 0.15
+
+    def test_filename_with_po_prefix(self):
+        """Filename containing PO prefix should extract the PO number."""
+        candidates = extract_po_candidates("", {}, file_name="PO_107459_ShippingDoc.pdf")
+        norms = {c["normalized"] for c in candidates}
+        assert "107459" in norms
+
+    def test_filename_with_alpha_po(self):
+        """Filename containing alpha-prefix PO like W117397."""
+        candidates = extract_po_candidates("", {}, file_name="W117397_delivery_note.pdf")
+        norms = {c["normalized"] for c in candidates}
+        assert "W117397" in norms
+
+    def test_filename_standalone_digits(self):
+        """Filename with standalone 5-7 digit number should yield candidate."""
+        candidates = extract_po_candidates("", {}, file_name="shipping_109023_receipt.pdf")
+        norms = {c["normalized"] for c in candidates}
+        assert "109023" in norms
+
+    def test_filename_no_false_positive_short(self):
+        """Short tokens in filename should NOT become candidates."""
+        candidates = extract_po_candidates("", {}, file_name="doc_AB_12.pdf")
+        # No valid candidates from such a short filename
+        valid = [c for c in candidates if c["valid_format"]]
+        assert len(valid) == 0
+
+    def test_bol_and_filename_combined(self):
+        """Both BOL and filename candidates should appear."""
+        fields = {"bol_number": "107346"}
+        candidates = extract_po_candidates("", fields, file_name="W117397_receipt.pdf")
+        norms = {c["normalized"] for c in candidates}
+        assert "107346" in norms
+        assert "W117397" in norms
+
+    def test_filename_dedup_with_extracted_field(self):
+        """If PO in filename is same as extracted field, should not duplicate."""
+        fields = {"po_number": "109023"}
+        candidates = extract_po_candidates("", fields, file_name="shipping_109023.pdf")
+        count_109023 = sum(1 for c in candidates if c["normalized"] == "109023")
+        assert count_109023 == 1
+
 
 class TestMissTaxonomy:
     """Verify miss reason constants exist and are string values."""

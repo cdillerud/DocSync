@@ -41,9 +41,13 @@ RESOLVER_VERSION = "1.0.0"
 ELIGIBLE_DOC_TYPES = {
     "AP_Invoice", "AP Invoice",
     "Freight_Invoice", "Freight Invoice", "Freight",
+    "Freight_Document", "Freight Document",
     "Shipping_Document", "Shipping Document", "Shipping",
     "BOL", "Bill_of_Lading", "Bill of Lading",
     "Sales_Order", "Sales Order",
+    "Quality_Issue", "Quality Issue",
+    "Order_Confirmation", "Order Confirmation", "Order_Confirm",
+    "Warehouse_Receipt", "Warehouse Receipt",
 }
 
 # Minimum classification confidence for auto-run
@@ -444,6 +448,36 @@ class AutoResolutionService:
                             )
                 except Exception as sve:
                     logger.warning("[AutoResolve:W%d] Stable vendor eval error: %s", worker_id, str(sve))
+
+            # ---------------------------------------------------------
+            # PO RESOLUTION (for shipping/freight docs, async, non-blocking)
+            # Extracts PO candidates and matches against BC cache
+            # ---------------------------------------------------------
+            try:
+                from services.po_resolution_service import (
+                    resolve_po, attempt_bc_link, requires_po_resolution, PO_REQUIRED_DOC_TYPES
+                )
+                refreshed_doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+                if refreshed_doc and requires_po_resolution(refreshed_doc.get("document_type", "")):
+                    po_result = await resolve_po(self.db, refreshed_doc)
+                    bc_link_result = await attempt_bc_link(self.db, doc_id, po_result)
+                    po_result["bc_link"] = bc_link_result
+                    await self.db.hub_documents.update_one(
+                        {"id": doc_id},
+                        {"$set": {
+                            "po_resolution": po_result,
+                            "po_candidates": po_result.get("candidates_raw", []),
+                            "updated_utc": utcnow(),
+                        }}
+                    )
+                    logger.info(
+                        "[AutoResolve:W%d] PO resolution for %s: status=%s po=%s bc_link=%s",
+                        worker_id, doc_id[:8],
+                        po_result.get("status"), po_result.get("po_number"),
+                        bc_link_result.get("status"),
+                    )
+            except Exception as pre:
+                logger.warning("[AutoResolve:W%d] PO resolution error: %s", worker_id, str(pre))
 
         except Exception as e:
             logger.error("[AutoResolve:W%d] Failed %s: %s", worker_id, doc_id[:8], str(e))

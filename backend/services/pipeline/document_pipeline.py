@@ -254,7 +254,9 @@ async def _run_entity_resolution(doc_id: str, ctx: Dict) -> StageResult:
 
 async def _run_po_resolution(doc_id: str, ctx: Dict) -> StageResult:
     """Stage 5: Resolve PO numbers against BC for shipping/freight/warehouse docs."""
-    from services.po_resolution_service import resolve_po, extract_po_candidates, requires_po_resolution
+    from services.po_resolution_service import (
+        resolve_po, extract_po_candidates, requires_po_resolution, attempt_bc_link,
+    )
     from deps import get_db
 
     db = get_db()
@@ -302,7 +304,12 @@ async def _run_po_resolution(doc_id: str, ctx: Dict) -> StageResult:
         vendor_no=vendor_no,
         doc_type=doc_type,
         document_id=doc_id,
+        source_filename=doc.get("file_name", ""),
     )
+
+    # Attempt BC link if resolved
+    bc_link = await attempt_bc_link(doc_id, result)
+    result["bc_link"] = bc_link
 
     # Persist po_resolution on the document
     await db.hub_documents.update_one(
@@ -318,11 +325,15 @@ async def _run_po_resolution(doc_id: str, ctx: Dict) -> StageResult:
 
     summary = {
         "status": result.get("status"),
+        "miss_reason": result.get("miss_reason"),
         "po_number": result.get("po_number"),
         "confidence": result.get("confidence"),
         "match_method": result.get("match_method"),
         "lookup_source": result.get("lookup_source"),
         "candidates_count": len(candidates),
+        "valid_candidates_count": len(result.get("candidates_valid", [])),
+        "bc_link_status": bc_link.get("status"),
+        "bc_link_error": bc_link.get("error_code"),
     }
     return StageResult(stage="po_resolution", status="ok", output=summary)
 

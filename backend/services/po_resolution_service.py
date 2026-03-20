@@ -1,11 +1,14 @@
 """
-GPI Document Hub - PO Resolution Service
+GPI Document Hub - PO Resolution Service (v2 — Hardened)
 
 Resolves Purchase Order numbers extracted from documents against Business Central.
 Primary lookup: BC reference cache → live BC API fallback → local staging fallback.
 
 Used by the document pipeline for Shipping_Document, Warehouse_Receipt,
 and Freight_Document types to achieve real BC linkage.
+
+Miss taxonomy: every unresolved case stores an explicit miss_reason for debugging.
+BC link results are standardized and categorized.
 """
 
 import re
@@ -17,41 +20,84 @@ from deps import get_db
 
 logger = logging.getLogger("po_resolution")
 
-# Document types that require PO resolution for BC linkage
+# ─── Constants ─────────────────────────────────────────────────────────────────
+
 PO_REQUIRED_DOC_TYPES = frozenset({
     "Shipping_Document",
     "Warehouse_Receipt",
     "Freight_Document",
 })
 
-# Resolution statuses
 STATUS_RESOLVED = "resolved"
 STATUS_AMBIGUOUS = "ambiguous"
 STATUS_NOT_FOUND = "not_found"
 STATUS_SKIPPED = "skipped"
 
+# Miss reasons (taxonomy)
+MISS_NO_PO_EXTRACTED = "no_po_extracted"
+MISS_NORMALIZED_EMPTY = "normalized_po_empty"
+MISS_INVALID_FORMAT = "invalid_po_format"
+MISS_CACHE_NO_MATCH = "cache_no_match"
+MISS_LIVE_BC_NO_MATCH = "live_bc_no_match"
+MISS_VENDOR_CONFLICT = "vendor_conflict"
+MISS_MULTIPLE_BC = "multiple_bc_matches"
+MISS_BC_LOOKUP_ERROR = "bc_lookup_error"
+MISS_NO_BC_MATCH = "no_bc_match"
+
+# BC link failure reasons
+BC_LINK_RECORD_NOT_FOUND = "bc_record_not_found"
+BC_LINK_AUTH_ERROR = "bc_auth_error"
+BC_LINK_VALIDATION_ERROR = "bc_validation_error"
+BC_LINK_NETWORK_ERROR = "network_error"
+BC_LINK_SANDBOX_ONLY = "sandbox_only_path"
+BC_LINK_UNKNOWN = "unknown_error"
+
+# Valid BC PO format patterns (from real cache data analysis):
+#   pure numeric: 100092, 109023 (5-6 digits)
+#   W-prefix: W102008, W117397
+#   WA-prefix: WA1848
+#   WR-prefix: WR106124
+#   PR-prefix: PR10088
+#   T-prefix: T1126
+#   WTR-prefix: WTR1012
+#   Suffix variants: 104718B, 111597_1
+_VALID_BC_PO_PATTERN = re.compile(
+    r"^(?:"
+    r"\d{4,7}"                     # pure numeric 4-7 digits
+    r"|[A-Z]{1,3}\d{3,7}"         # alpha prefix (1-3 letters) + digits
+    r"|\d{5,7}[A-Z_]\w{0,3}"     # digits + suffix letter/underscore
+    r")$"
+)
+
+# Patterns that are clearly NOT POs (shipping references, BOL numbers, etc.)
+_NON_PO_PATTERNS = [
+    re.compile(r"^SI-", re.IGNORECASE),        # Shipping Invoice refs
+    re.compile(r"^SSH-", re.IGNORECASE),       # SSH shipping refs
+    re.compile(r"^SHL", re.IGNORECASE),        # Shipping line refs
+    re.compile(r"^YMJA", re.IGNORECASE),       # YMJA container refs
+    re.compile(r"^MSKU", re.IGNORECASE),       # Container refs
+    re.compile(r"^TCNU", re.IGNORECASE),       # Container refs
+    re.compile(r"^[A-Z]{4}\d{7}$"),            # Container number pattern
+    re.compile(r"^\d{2}-\d{2}-\d{2}-\d+$"),   # Date-based refs
+    re.compile(r"^INV-", re.IGNORECASE),       # Invoice refs
+    re.compile(r"^BOL-", re.IGNORECASE),       # BOL refs
+]
+
+
 # ─── PO Extraction ────────────────────────────────────────────────────────────
 
-# Regex patterns for extracting PO numbers from raw text.
-# Order matters — more specific patterns first.
 _PO_PATTERNS = [
-    # "Purchase Order 107346" / "Purchase Order: 107346"
     re.compile(r"Purchase\s+Order\s*[:#]?\s*(\S+)", re.IGNORECASE),
-    # "PO.107459" / "PO #107346" / "PO: 107346" / "P.O. 107346"
     re.compile(r"P\.?O\.?\s*[:#]?\s*(\S+)", re.IGNORECASE),
-    # "Customer PO 107346" / "Customer PO: 107346"
     re.compile(r"Customer\s+P\.?O\.?\s*[:#]?\s*(\S+)", re.IGNORECASE),
-    # "Order No 107346" / "Order No: 107346" / "Order Number: 107346"
     re.compile(r"Order\s+(?:No|Number|#)\s*[:#]?\s*(\S+)", re.IGNORECASE),
-    # Standalone 5-6 digit number on a line that looks like a reference
     re.compile(r"(?:^|\s)(\d{5,7})(?:\s|$)", re.MULTILINE),
 ]
 
 
 def extract_po_candidates(text: str, existing_fields: Dict[str, Any] = None) -> List[Dict[str, Any]]:
     """Extract PO number candidates from raw text and existing extracted fields.
-
-    Returns a list of {value, normalized, source, confidence} sorted by confidence desc.
+    Returns a list of {value, normalized, source, confidence, valid_format} sorted by confidence desc.
     """
     candidates: List[Dict[str, Any]] = []
     seen_normalized = set()
@@ -61,35 +107,37 @@ def extract_po_candidates(text: str, existing_fields: Dict[str, Any] = None) -> 
         if not norm or norm in seen_normalized:
             return
         seen_normalized.add(norm)
+        is_valid = is_valid_po_format(norm)
+        is_non_po = is_known_non_po(norm)
+        # Downgrade confidence for non-PO patterns
+        adj_confidence = 0.10 if is_non_po else (confidence if is_valid else confidence * 0.5)
         candidates.append({
             "value": raw_value.strip(),
             "normalized": norm,
             "source": source,
-            "confidence": round(confidence, 3),
+            "confidence": round(adj_confidence, 3),
+            "valid_format": is_valid,
+            "is_non_po": is_non_po,
         })
 
-    # From existing extracted fields (highest confidence — LLM or heuristic output)
     if existing_fields:
         for field_name in ("po_number", "purchase_order_number", "customer_po"):
             val = existing_fields.get(field_name)
             if val and str(val).strip():
-                # Handle comma-separated POs (e.g., "PO.107459,107460")
                 for part in str(val).split(","):
                     part = part.strip()
                     if part:
                         _add(part, f"extracted_field:{field_name}", 0.90)
 
-        # order_number can also be a PO for shipping docs
         order = existing_fields.get("order_number")
         if order and str(order).strip():
             _add(str(order), "extracted_field:order_number", 0.80)
 
-    # From raw text via regex
     if text:
         for pattern in _PO_PATTERNS:
             for match in pattern.finditer(text[:5000]):
                 raw = match.group(1).strip()
-                if len(raw) >= 3:  # Skip very short matches
+                if len(raw) >= 3:
                     _add(raw, f"regex:{pattern.pattern[:30]}", 0.70)
 
     candidates.sort(key=lambda c: c["confidence"], reverse=True)
@@ -98,37 +146,43 @@ def extract_po_candidates(text: str, existing_fields: Dict[str, Any] = None) -> 
 
 def normalize_po(raw: str) -> str:
     """Normalize a PO value for matching against BC cache.
-
-    Strategy:
-    - Strip whitespace
-    - Remove label noise: PO, P.O., Purchase Order, #
-    - Uppercase
-    - Preserve hyphens and alphanumeric chars (BC may use alphanumeric POs)
-    - If result is purely numeric, strip leading zeros
+    - Strip whitespace, remove label noise (PO, P.O., Purchase Order, #)
+    - Uppercase, preserve hyphens and alphanumeric chars
+    - If purely numeric, strip leading zeros but keep at least 1 digit
     """
     if not raw:
         return ""
     s = str(raw).strip()
-
-    # Remove common label prefixes
     s = re.sub(r"^(?:Purchase\s*Order|P\.?O\.?)\s*[:#]?\s*", "", s, flags=re.IGNORECASE)
     s = re.sub(r"^#\s*", "", s)
-
-    # Strip surrounding whitespace
     s = s.strip()
-
-    # Remove characters that are never part of a PO number
-    # Keep: alphanumeric, hyphens, dots (some PO formats use them)
     s = re.sub(r"[^\w\-.]", "", s)
-
-    # Uppercase
     s = s.upper()
-
-    # If purely numeric, strip leading zeros but keep at least 1 digit
     if s.isdigit():
         s = s.lstrip("0") or "0"
-
     return s
+
+
+def is_valid_po_format(normalized: str) -> bool:
+    """Check if a normalized value matches known BC PO formats."""
+    if not normalized:
+        return False
+    return bool(_VALID_BC_PO_PATTERN.match(normalized))
+
+
+def is_known_non_po(normalized: str) -> bool:
+    """Check if a normalized value is a known non-PO reference (shipping ref, container, etc.)."""
+    if not normalized:
+        return True
+    for pattern in _NON_PO_PATTERNS:
+        if pattern.match(normalized):
+            return True
+    return False
+
+
+def requires_po_resolution(doc_type: str) -> bool:
+    """Check if a document type requires PO resolution."""
+    return doc_type in PO_REQUIRED_DOC_TYPES
 
 
 # ─── PO Resolution ────────────────────────────────────────────────────────────
@@ -139,108 +193,152 @@ async def resolve_po(
     vendor_no: str = "",
     doc_type: str = "",
     document_id: str = "",
+    source_filename: str = "",
 ) -> Dict[str, Any]:
-    """Resolve PO candidates against BC.
-
-    Lookup order:
-    1. BC reference cache (exact + normalized)
-    2. Live BC API fallback
-    3. Local staging collections (po_drafts) as final fallback
-
-    Returns the canonical po_resolution object.
+    """Resolve PO candidates against BC. Returns the canonical po_resolution object.
+    Lookup order: BC cache → live BC API → local staging fallback.
+    Every miss is explained with a miss_reason.
     """
     db = get_db()
     result = _empty_result(document_id, doc_type)
+    result["source_filename"] = source_filename
+    result["vendor_name"] = vendor_name
+    result["vendor_no"] = vendor_no
 
     if not po_candidates:
         logger.info("[PO_RESOLUTION] doc=%s No PO candidates to resolve", document_id[:12])
         result["status"] = STATUS_NOT_FOUND
-        result["reason"] = "no_po_candidates"
+        result["miss_reason"] = MISS_NO_PO_EXTRACTED
+        return result
+
+    # Filter to valid-format candidates only for BC lookup; keep all for audit
+    valid_candidates = [c for c in po_candidates if c.get("valid_format") and not c.get("is_non_po")]
+    result["candidates_raw"] = [c["normalized"] for c in po_candidates]
+    result["candidates_valid"] = [c["normalized"] for c in valid_candidates]
+
+    if not valid_candidates:
+        logger.info(
+            "[PO_RESOLUTION] doc=%s All %d candidates invalid format or non-PO: %s",
+            document_id[:12], len(po_candidates), [c["normalized"] for c in po_candidates],
+        )
+        result["status"] = STATUS_NOT_FOUND
+        result["miss_reason"] = MISS_INVALID_FORMAT
+        result["candidates_tried"] = [c["normalized"] for c in po_candidates]
         return result
 
     logger.info(
-        "[PO_RESOLUTION] doc=%s Resolving %d candidates: %s",
-        document_id[:12],
-        len(po_candidates),
-        [c["normalized"] for c in po_candidates[:5]],
+        "[PO_RESOLUTION] doc=%s Resolving %d valid candidates (of %d total): %s",
+        document_id[:12], len(valid_candidates), len(po_candidates),
+        [c["normalized"] for c in valid_candidates[:5]],
     )
 
     all_matches: List[Dict[str, Any]] = []
+    lookup_trace: List[Dict[str, Any]] = []  # Audit trail for every lookup
 
-    for candidate in po_candidates[:10]:  # Cap at 10 candidates
+    for candidate in valid_candidates[:10]:
         normalized = candidate["normalized"]
         if not normalized:
             continue
 
+        trace_entry = {"candidate": normalized, "lookups": []}
+
         # ── Step 1: BC Reference Cache (fast, local) ──
         cache_matches = await _search_bc_cache(db, normalized, vendor_no, vendor_name)
+        trace_entry["lookups"].append({
+            "source": "bc_cache", "query": normalized,
+            "hits": len(cache_matches),
+            "result": [m.get("bc_document_no") for m in cache_matches][:3],
+        })
         for cm in cache_matches:
             cm["po_candidate"] = candidate
             cm["lookup_source"] = "bc_cache"
             all_matches.append(cm)
             logger.info(
-                "[PO_RESOLUTION] doc=%s CACHE HIT: candidate=%s → BC PO %s vendor=%s confidence=%.2f",
-                document_id[:12], normalized, cm["bc_document_no"], cm.get("bc_vendor_name", ""), cm["confidence"],
+                "[PO_RESOLUTION] doc=%s CACHE HIT: candidate=%s -> BC PO %s vendor=%s confidence=%.2f method=%s",
+                document_id[:12], normalized, cm["bc_document_no"],
+                cm.get("bc_vendor_name", ""), cm["confidence"], cm.get("match_method", ""),
             )
 
         # ── Step 2: Live BC API fallback (if no cache hit) ──
         if not cache_matches:
-            bc_matches = await _search_bc_api(normalized, document_id)
+            bc_matches, bc_error = await _search_bc_api(normalized, document_id)
+            trace_entry["lookups"].append({
+                "source": "bc_api", "query": normalized,
+                "hits": len(bc_matches),
+                "error": bc_error,
+            })
             for bm in bc_matches:
                 bm["po_candidate"] = candidate
                 bm["lookup_source"] = "bc_api"
                 all_matches.append(bm)
                 logger.info(
-                    "[PO_RESOLUTION] doc=%s BC API HIT: candidate=%s → PO %s",
+                    "[PO_RESOLUTION] doc=%s BC API HIT: candidate=%s -> PO %s",
                     document_id[:12], normalized, bm["bc_document_no"],
                 )
 
         # ── Step 3: Local staging fallback ──
         if not cache_matches and not [m for m in all_matches if m.get("po_candidate") == candidate]:
             local_matches = await _search_local_staging(db, normalized)
+            trace_entry["lookups"].append({
+                "source": "local_staging", "query": normalized,
+                "hits": len(local_matches),
+            })
             for lm in local_matches:
                 lm["po_candidate"] = candidate
                 lm["lookup_source"] = "local_staging"
                 all_matches.append(lm)
                 logger.info(
-                    "[PO_RESOLUTION] doc=%s LOCAL HIT: candidate=%s → %s",
+                    "[PO_RESOLUTION] doc=%s LOCAL HIT: candidate=%s -> %s",
                     document_id[:12], normalized, lm.get("entity_id", ""),
                 )
 
+        lookup_trace.append(trace_entry)
+
+    result["lookup_trace"] = lookup_trace
+
     if not all_matches:
+        # Determine specific miss reason
+        had_bc_errors = any(
+            lu.get("error") for te in lookup_trace for lu in te.get("lookups", [])
+            if lu.get("source") == "bc_api"
+        )
+        if had_bc_errors:
+            miss_reason = MISS_BC_LOOKUP_ERROR
+        else:
+            miss_reason = MISS_NO_BC_MATCH
+
+        po_cache_count = await db.bc_reference_cache.count_documents({"bc_entity_type": "purchase_order"})
         logger.warning(
-            "[PO_RESOLUTION] doc=%s NOT FOUND: tried %d candidates against BC cache (%d POs), BC API, local staging",
-            document_id[:12], len(po_candidates),
-            await db.bc_reference_cache.count_documents({"bc_entity_type": "purchase_order"}),
+            "[PO_RESOLUTION] doc=%s NOT FOUND (reason=%s): tried %d valid candidates against BC cache (%d POs), BC API, local staging",
+            document_id[:12], miss_reason, len(valid_candidates), po_cache_count,
         )
         result["status"] = STATUS_NOT_FOUND
-        result["reason"] = "no_bc_match"
-        result["candidates_tried"] = [c["normalized"] for c in po_candidates[:5]]
+        result["miss_reason"] = miss_reason
+        result["candidates_tried"] = [c["normalized"] for c in valid_candidates[:5]]
         return result
 
     # Deduplicate and rank
     all_matches.sort(key=lambda m: m["confidence"], reverse=True)
     best = all_matches[0]
 
-    # Check for ambiguity: multiple distinct BC records with similar confidence
+    # Check for ambiguity
     distinct_po_nos = {m["bc_document_no"] for m in all_matches if m.get("bc_document_no")}
     if len(distinct_po_nos) > 1 and len(all_matches) > 1:
-        # Multiple POs from SAME vendor is normal (multi-PO shipment) — not ambiguous
         distinct_vendors = {m.get("bc_vendor_no") or m.get("bc_vendor_name", "") for m in all_matches if m.get("bc_document_no")}
         distinct_vendors.discard("")
         second = all_matches[1]
         if len(distinct_vendors) > 1 and second["bc_document_no"] != best["bc_document_no"] and second["confidence"] >= 0.70:
             result["status"] = STATUS_AMBIGUOUS
-            result["reason"] = f"multiple_po_matches: {len(distinct_po_nos)} distinct POs from {len(distinct_vendors)} vendors"
-            result["matches"] = all_matches[:5]
+            result["miss_reason"] = MISS_VENDOR_CONFLICT if len(distinct_vendors) > 1 else MISS_MULTIPLE_BC
+            result["reason"] = f"multiple_po_matches: {len(distinct_po_nos)} POs from {len(distinct_vendors)} vendors"
+            result["matches"] = [_format_match(m) for m in all_matches[:5]]
             result["best_match"] = _format_match(best)
             logger.warning(
-                "[PO_RESOLUTION] doc=%s AMBIGUOUS: %d distinct POs from %d vendors",
-                document_id[:12], len(distinct_po_nos), len(distinct_vendors),
+                "[PO_RESOLUTION] doc=%s AMBIGUOUS (reason=%s): %d distinct POs from %d vendors",
+                document_id[:12], result["miss_reason"], len(distinct_po_nos), len(distinct_vendors),
             )
             return result
         elif len(distinct_vendors) <= 1:
-            # Same vendor, multiple POs — resolve to the first (highest confidence)
             logger.info(
                 "[PO_RESOLUTION] doc=%s Multi-PO shipment: %d POs from same vendor (%s), using first: %s",
                 document_id[:12], len(distinct_po_nos),
@@ -258,15 +356,109 @@ async def resolve_po(
     result["bc_vendor_name"] = best.get("bc_vendor_name", "")
     result["bc_status"] = best.get("bc_status", "")
     result["best_match"] = _format_match(best)
-    result["matches"] = all_matches[:5]
+    result["matches"] = [_format_match(m) for m in all_matches[:5]]
+    result["miss_reason"] = None
 
     logger.info(
-        "[PO_RESOLUTION] doc=%s RESOLVED: PO=%s bc_id=%s confidence=%.2f method=%s source=%s",
-        document_id[:12], result["po_number"], result["bc_record_id"][:12] if result["bc_record_id"] else "-",
+        "[PO_RESOLUTION] doc=%s RESOLVED: PO=%s bc_id=%s confidence=%.2f method=%s source=%s vendor=%s",
+        document_id[:12], result["po_number"],
+        result["bc_record_id"][:12] if result["bc_record_id"] else "-",
         result["confidence"], result["match_method"], result["lookup_source"],
+        result.get("bc_vendor_name", ""),
     )
 
     return result
+
+
+# ─── BC Link Execution ────────────────────────────────────────────────────────
+
+async def attempt_bc_link(document_id: str, po_resolution: Dict[str, Any]) -> Dict[str, Any]:
+    """Attempt to link a document to a BC purchase order.
+    Returns a standardized BC link result object.
+    """
+    link_result = {
+        "status": "failed",
+        "bc_record_type": None,
+        "bc_record_id": None,
+        "link_method": None,
+        "error_code": None,
+        "error_message": None,
+        "attempted_at": datetime.now(timezone.utc).isoformat(),
+        "document_id": document_id,
+    }
+
+    if po_resolution.get("status") != STATUS_RESOLVED:
+        link_result["error_code"] = BC_LINK_RECORD_NOT_FOUND
+        link_result["error_message"] = f"PO not resolved (status={po_resolution.get('status')})"
+        logger.warning(
+            "[BC_LINK] doc=%s SKIP: PO not resolved (status=%s)",
+            document_id[:12], po_resolution.get("status"),
+        )
+        return link_result
+
+    bc_record_id = po_resolution.get("bc_record_id", "")
+    po_number = po_resolution.get("po_number", "")
+    lookup_source = po_resolution.get("lookup_source", "")
+
+    if not bc_record_id:
+        # PO resolved via local staging — no real BC record to link to
+        if lookup_source == "local_staging":
+            link_result["status"] = "linked_local"
+            link_result["bc_record_type"] = "local_draft"
+            link_result["bc_record_id"] = po_number
+            link_result["link_method"] = "local_staging_match"
+            logger.info(
+                "[BC_LINK] doc=%s LOCAL LINK: PO=%s (local draft, not real BC)",
+                document_id[:12], po_number,
+            )
+            return link_result
+
+        link_result["error_code"] = BC_LINK_RECORD_NOT_FOUND
+        link_result["error_message"] = "Resolved PO has no bc_record_id"
+        logger.warning("[BC_LINK] doc=%s FAIL: No bc_record_id for PO=%s", document_id[:12], po_number)
+        return link_result
+
+    # Real BC record — attempt link
+    try:
+        from services.business_central_service import get_bc_service
+        svc = get_bc_service()
+
+        # Verify the PO still exists in BC
+        po = await svc.find_purchase_order_by_number(po_number)
+        if not po:
+            link_result["error_code"] = BC_LINK_RECORD_NOT_FOUND
+            link_result["error_message"] = f"BC PO {po_number} no longer found in live BC"
+            logger.warning("[BC_LINK] doc=%s FAIL: BC PO %s not found in live BC", document_id[:12], po_number)
+            return link_result
+
+        # Successfully verified — mark as linked
+        link_result["status"] = "linked"
+        link_result["bc_record_type"] = "purchaseOrder"
+        link_result["bc_record_id"] = po.get("id", bc_record_id)
+        link_result["link_method"] = f"bc_po_verified:{po_resolution.get('match_method', 'unknown')}"
+        logger.info(
+            "[BC_LINK] doc=%s SUCCESS: Linked to BC PO %s (bc_id=%s, vendor=%s)",
+            document_id[:12], po_number, link_result["bc_record_id"][:20],
+            po.get("vendorName", ""),
+        )
+
+    except Exception as e:
+        err_str = str(e).lower()
+        if "token" in err_str or "auth" in err_str or "unauthorized" in err_str:
+            link_result["error_code"] = BC_LINK_AUTH_ERROR
+        elif "timeout" in err_str or "connect" in err_str:
+            link_result["error_code"] = BC_LINK_NETWORK_ERROR
+        elif "sandbox" in err_str:
+            link_result["error_code"] = BC_LINK_SANDBOX_ONLY
+        else:
+            link_result["error_code"] = BC_LINK_UNKNOWN
+        link_result["error_message"] = str(e)[:200]
+        logger.error(
+            "[BC_LINK] doc=%s FAIL (%s): PO=%s error=%s",
+            document_id[:12], link_result["error_code"], po_number, str(e)[:100],
+        )
+
+    return link_result
 
 
 # ─── BC Cache Search ──────────────────────────────────────────────────────────
@@ -274,9 +466,7 @@ async def resolve_po(
 async def _search_bc_cache(
     db, normalized_po: str, vendor_no: str = "", vendor_name: str = ""
 ) -> List[Dict[str, Any]]:
-    """Search the BC reference cache for a PO number.
-    Returns scored matches.
-    """
+    """Search the BC reference cache for a PO number. Returns scored matches."""
     matches = []
 
     # Exact match on document number
@@ -290,29 +480,27 @@ async def _search_bc_cache(
     cache_hits = await db.bc_reference_cache.find(query, {"_id": 0}).to_list(10)
 
     for hit in cache_hits:
-        confidence = 0.95  # Exact cache match
+        confidence = 0.95
         method = "bc_cache_exact"
 
-        # Boost confidence if vendor also matches
         if vendor_no and hit.get("bc_vendor_no") == vendor_no:
             confidence = min(1.0, confidence + 0.05)
             method = "bc_cache_exact+vendor_no"
         elif vendor_name and hit.get("bc_vendor_name"):
-            from services.reference_helpers import fuzzy_ratio, normalize_text
-            v_score = fuzzy_ratio(vendor_name, hit["bc_vendor_name"], normalizer=normalize_text)
-            if v_score >= 0.80:
-                confidence = min(1.0, confidence + 0.03)
-                method = f"bc_cache_exact+vendor_fuzzy({v_score:.0%})"
+            try:
+                from services.reference_helpers import fuzzy_ratio, normalize_text
+                v_score = fuzzy_ratio(vendor_name, hit["bc_vendor_name"], normalizer=normalize_text)
+                if v_score >= 0.80:
+                    confidence = min(1.0, confidence + 0.03)
+                    method = f"bc_cache_exact+vendor_fuzzy({v_score:.0%})"
+            except Exception:
+                pass
 
-        matches.append({
-            **hit,
-            "confidence": confidence,
-            "match_method": method,
-        })
+        matches.append({**hit, "confidence": confidence, "match_method": method})
 
-    # If no exact match, try partial/suffix match (last N digits)
-    if not matches and len(normalized_po) >= 4:
-        suffix = normalized_po[-5:] if len(normalized_po) >= 5 else normalized_po
+    # Suffix match (last 5 digits) — only when no exact hit
+    if not matches and len(normalized_po) >= 5 and normalized_po.isdigit():
+        suffix = normalized_po[-5:]
         fuzzy_query = {
             "bc_entity_type": "purchase_order",
             "normalized_document_no": {"$regex": f"{re.escape(suffix)}$"},
@@ -320,9 +508,7 @@ async def _search_bc_cache(
         fuzzy_hits = await db.bc_reference_cache.find(fuzzy_query, {"_id": 0}).limit(5).to_list(5)
         for hit in fuzzy_hits:
             matches.append({
-                **hit,
-                "confidence": 0.65,
-                "match_method": f"bc_cache_suffix({suffix})",
+                **hit, "confidence": 0.55, "match_method": f"bc_cache_suffix({suffix})",
             })
 
     return matches
@@ -330,8 +516,8 @@ async def _search_bc_cache(
 
 # ─── Live BC API Search ───────────────────────────────────────────────────────
 
-async def _search_bc_api(normalized_po: str, document_id: str) -> List[Dict[str, Any]]:
-    """Fallback: search live BC API for a purchase order by number."""
+async def _search_bc_api(normalized_po: str, document_id: str) -> tuple:
+    """Fallback: search live BC API. Returns (matches_list, error_string_or_None)."""
     try:
         from services.business_central_service import get_bc_service
         svc = get_bc_service()
@@ -350,13 +536,14 @@ async def _search_bc_api(normalized_po: str, document_id: str) -> List[Dict[str,
                 "bc_posting_date": po.get("orderDate", ""),
                 "confidence": 0.90,
                 "match_method": "bc_api_exact",
-            }]
+            }], None
+        return [], None
     except Exception as e:
         logger.warning(
             "[PO_RESOLUTION] doc=%s BC API search failed for PO=%s: %s",
-            document_id[:12], normalized_po, str(e),
+            document_id[:12], normalized_po, str(e)[:100],
         )
-    return []
+        return [], str(e)[:200]
 
 
 # ─── Local Staging Fallback ───────────────────────────────────────────────────
@@ -364,37 +551,40 @@ async def _search_bc_api(normalized_po: str, document_id: str) -> List[Dict[str,
 async def _search_local_staging(db, normalized_po: str) -> List[Dict[str, Any]]:
     """Final fallback: search local po_drafts and so_drafts."""
     matches = []
+    try:
+        po = await db.po_drafts.find_one(
+            {"$or": [
+                {"po_draft_id": {"$regex": f"^{re.escape(normalized_po)}$", "$options": "i"}},
+                {"source_reference": {"$regex": f"^{re.escape(normalized_po)}$", "$options": "i"}},
+            ]},
+            {"_id": 0},
+        )
+        if po:
+            matches.append({
+                "entity_id": po.get("po_draft_id", ""),
+                "bc_document_no": po.get("po_draft_id", ""),
+                "bc_vendor_name": po.get("vendor_name", ""),
+                "confidence": 0.60,
+                "match_method": "local_po_draft",
+            })
+    except Exception:
+        pass
 
-    # PO drafts
-    po = await db.po_drafts.find_one(
-        {"$or": [
-            {"po_draft_id": {"$regex": f"^{re.escape(normalized_po)}$", "$options": "i"}},
-            {"source_reference": {"$regex": f"^{re.escape(normalized_po)}$", "$options": "i"}},
-        ]},
-        {"_id": 0},
-    )
-    if po:
-        matches.append({
-            "entity_id": po.get("po_draft_id", ""),
-            "bc_document_no": po.get("po_draft_id", ""),
-            "bc_vendor_name": po.get("vendor_name", ""),
-            "confidence": 0.60,
-            "match_method": "local_po_draft",
-        })
-
-    # SO drafts (customer PO)
-    so = await db.so_drafts.find_one(
-        {"customer_po_number": {"$regex": f"^{re.escape(normalized_po)}$", "$options": "i"}},
-        {"_id": 0},
-    )
-    if so:
-        matches.append({
-            "entity_id": so.get("so_draft_id", ""),
-            "bc_document_no": so.get("so_draft_id", ""),
-            "bc_vendor_name": so.get("customer_name", ""),
-            "confidence": 0.55,
-            "match_method": "local_so_draft",
-        })
+    try:
+        so = await db.so_drafts.find_one(
+            {"customer_po_number": {"$regex": f"^{re.escape(normalized_po)}$", "$options": "i"}},
+            {"_id": 0},
+        )
+        if so:
+            matches.append({
+                "entity_id": so.get("so_draft_id", ""),
+                "bc_document_no": so.get("so_draft_id", ""),
+                "bc_vendor_name": so.get("customer_name", ""),
+                "confidence": 0.55,
+                "match_method": "local_so_draft",
+            })
+    except Exception:
+        pass
 
     return matches
 
@@ -414,10 +604,18 @@ def _empty_result(document_id: str, doc_type: str) -> Dict[str, Any]:
         "bc_vendor_no": None,
         "bc_vendor_name": None,
         "bc_status": None,
+        "miss_reason": None,
         "reason": None,
         "best_match": None,
         "matches": [],
+        "candidates_raw": [],
+        "candidates_valid": [],
         "candidates_tried": [],
+        "lookup_trace": [],
+        "source_filename": None,
+        "vendor_name": None,
+        "vendor_no": None,
+        "bc_link": None,
         "resolved_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -433,8 +631,3 @@ def _format_match(match: Dict[str, Any]) -> Dict[str, Any]:
         "match_method": match.get("match_method", ""),
         "lookup_source": match.get("lookup_source", ""),
     }
-
-
-def requires_po_resolution(doc_type: str) -> bool:
-    """Check if a document type requires PO resolution."""
-    return doc_type in PO_REQUIRED_DOC_TYPES

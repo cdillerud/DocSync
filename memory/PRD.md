@@ -9,15 +9,6 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - **AI**: Gemini via Emergent LLM Key
 - **External APIs**: Microsoft Graph, Business Central (read+write), SharePoint
 
-## Classification Pipeline (5-stage + PO resolution)
-```
-PARSE    -> Extract text (pypdf), resolve file
-CLASSIFY -> Heuristic-first (6 patterns), then LLM
-EXTRACT  -> Merge LLM+existing fields. Gate: >=1 meaningful field
-VALIDATE -> BC validation + extraction_quality_gate
-ROUTE    -> Auto-clear / review / block with readiness score
-```
-
 ## Document Pipeline (11-stage)
 ```
 classification -> extraction -> layout -> entity_resolution -> po_resolution
@@ -25,108 +16,107 @@ classification -> extraction -> layout -> entity_resolution -> po_resolution
 -> policy_decision -> document_routing -> learning_capture
 ```
 
-## PO Resolution Pipeline (New - Mar 18 2026)
+## PO Resolution System (Hardened v2 — Mar 20 2026)
 
-### Problem
-- Shipping docs = largest volume (~1000+)
-- BC Link Rate was ~0.5%
-- PO resolution signal = 0%
-- Most NeedsReview = shipping docs with missing PO
+### Miss Taxonomy
+Every unresolved PO stores an explicit miss_reason:
+- `no_po_extracted` — no PO candidates found in document
+- `normalized_po_empty` — PO normalized to empty string
+- `invalid_po_format` — candidate doesn't match known BC PO patterns
+- `cache_no_match` — not found in BC reference cache
+- `live_bc_no_match` — not found via live BC API
+- `multiple_bc_matches` — multiple distinct POs found
+- `vendor_conflict` — ambiguous POs from different vendors
+- `bc_lookup_error` — BC API call failed
+- `no_bc_match` — exhausted all lookup paths
 
-### Solution
-1. **PO Extraction Hardening** (`document_intel_helpers.py`)
-   - Regex patterns: PO, P.O., Purchase Order, Order No, 5-7 digit numbers
-   - Comma-separated PO splitting (e.g., PO.107459,107460 → two candidates)
-   - Normalization: strip label noise, uppercase, preserve alphanumeric + hyphens
-   - BC PO format: pure numeric (e.g., 109023, 107346)
+### PO Format Validation (from real BC cache analysis of 1616 POs)
+Valid BC PO patterns:
+- Pure numeric 4-7 digits: 100092, 109023
+- W-prefix: W102008, W117397
+- WA-prefix: WA1848
+- WR-prefix: WR106124
+- PR-prefix: PR10088
+- T-prefix: T1126
+- Suffix variants: 104718B, 111597_1
 
-2. **PO Resolution Service** (NEW: `services/po_resolution_service.py`)
-   - Lookup order: BC reference cache → live BC API → local staging fallback
-   - BC cache: exact match on normalized_document_no → confidence 0.95
-   - BC cache suffix: last 5 digits → confidence 0.65
-   - BC API: exact search → confidence 0.90
-   - Local staging: po_drafts/so_drafts → confidence 0.60/0.55
-   - Multi-PO same vendor: resolves to first PO (not ambiguous)
-   - Result statuses: resolved, ambiguous, not_found, skipped
-   - Vendor boost: +0.05 confidence for vendor match
+Non-PO patterns (rejected):
+- SI- prefixes (shipping invoice refs)
+- SSH- prefixes (shipping refs)
+- Container numbers (MSKU, TCNU, YMJA)
+- Date-based refs, BOL refs, INV refs
 
-3. **Pipeline Integration** (`pipeline/document_pipeline.py`)
-   - Added `po_resolution` stage after entity_resolution, before transaction_match
-   - Persists po_resolution and po_candidates on document
-   - Uses vendor info from entity_resolution for scoring
+### BC Link Result (Standardized)
+```json
+{
+  "status": "linked" | "linked_local" | "failed",
+  "bc_record_type": "purchaseOrder" | "local_draft" | null,
+  "bc_record_id": "...",
+  "link_method": "bc_po_verified:bc_cache_exact" | "local_staging_match" | null,
+  "error_code": "bc_auth_error" | "bc_record_not_found" | "network_error" | ...,
+  "error_message": "..."
+}
+```
 
-4. **Transaction Matching** (`transaction_matching_service.py`)
-   - Shipping docs: use PO resolution as primary match source
-   - Resolved → high-confidence BC PO candidate
-   - Ambiguous → multiple candidates for review
-   - Not found → legacy fallback search
+### Lookup Trace (Audit Trail)
+Every PO resolution stores a complete lookup_trace array showing:
+- Each candidate tried
+- Each lookup source queried (bc_cache, bc_api, local_staging)
+- Hit count and result per source
+- Errors encountered
 
-5. **Auto-Clear Gate** (`auto_clear_service.py`)
-   - CHECK 5a: Shipping docs cannot auto-clear without resolved PO
-   - Blocks with reason: po_ambiguous or po_not_found
+### Metrics API
+GET /api/po-resolution/metrics returns:
+- po_resolution: attempted, resolved, ambiguous, not_found, skipped, rate
+- bc_link: attempted, succeeded_real, succeeded_local, failed, rate_real, rate_total
+- unresolved_by_miss_reason: {miss_reason: count}
+- bc_link_failures_by_reason: {error_code: count}
+- lookup_sources: {bc_cache, bc_api, local_staging}
+- match_methods distribution
+- multi_po_count
+- by_doc_type breakdown
 
-6. **Readiness Engine** (`document_readiness_service.py`)
-   - Shipping docs: po_resolved requires actual BC resolution (not just field presence)
-   - Non-shipping docs: po_resolved = field presence (backward compatible)
+### Batch Resolve API
+POST /api/po-resolution/batch-resolve?force=true&limit=N returns:
+- processed, resolved, ambiguous, not_found counts
+- po_resolution_rate, bc_link_success_rate
+- miss_reasons breakdown
+- bc_link_failures breakdown
+- per-document details (doc_id, file_name, status, miss_reason, po_number, bc_link_status)
 
-7. **Metrics Endpoint** (NEW: `routers/po_resolution.py`)
-   - GET /api/po-resolution/metrics
-   - po_resolution: attempted, resolved, ambiguous, not_found, skipped, rate
-   - bc_link: attempted, succeeded, rate
-   - match_methods distribution
-   - by_doc_type breakdown
-
-### Results (Preview environment, 10 shipping docs)
-- PO Resolution Rate: 70% (7/10) — up from 0%
-- BC Link Rate: 40% (4/10) — up from ~0.5%
-- Ambiguous: 0
-- Not Found: 3 (docs with no PO or non-BC references)
-- Match methods: bc_cache_exact (4), local_po_draft (3)
-
-### Logging
-Every document logs:
-- [PO_RESOLUTION] extracted candidates
-- [PO_RESOLUTION] normalized PO
-- [PO_RESOLUTION] BC cache lookup result
-- [PO_RESOLUTION] live BC fallback result  
-- [PO_RESOLUTION] final resolution status
-- [TX_MATCH] shipping doc match via PO resolution
+### Results (Preview, 10 shipping docs, v2 hardened)
+| Metric | v1 | v2 | Why |
+|--------|----|----|-----|
+| Resolved | 7 (70%) | 4 (40%) | v2 correctly rejects non-PO refs |
+| Not Found | 3 | 6 | 5 invalid_po_format + 1 bc_lookup_error |
+| BC Cache matches | 4 | 4 | Same real BC matches |
+| False positives | 3 | 0 | Non-PO refs no longer match |
 
 ## Key Files
-- `backend/services/po_resolution_service.py` - Core PO resolution (NEW)
-- `backend/routers/po_resolution.py` - Metrics endpoint (NEW)
+- `backend/services/po_resolution_service.py` - PO resolution v2 (hardened)
+- `backend/routers/po_resolution.py` - Metrics + batch-resolve endpoints
 - `backend/services/pipeline/document_pipeline.py` - Pipeline with po_resolution stage
 - `backend/services/transaction_matching_service.py` - TX matching using PO resolution
 - `backend/services/document_readiness_service.py` - Readiness with BC PO signal
 - `backend/services/auto_clear_service.py` - Auto-clear PO gate
 - `backend/services/classification_pipeline.py` - 5-stage processing pipeline
 - `backend/services/bc_validation_service.py` - BC validation + 3-state status
-- `backend/services/bc_reference_cache_service.py` - BC cache with 1616 POs
-- `backend/services/business_central_service.py` - Live BC API
-- `backend/tests/test_po_resolution.py` - 16 unit tests
-- `backend/tests/test_po_resolution_api.py` - 22 API tests
-
-## Completed Work (This Session)
-- P1: Pipeline Visualization component
-- P1: Item Mapping Admin UI  
-- P1: BC Validation 3-state status (PASSED/WARNINGS/FAILED)
-- P1: Recompute Derived States tool
-- P0: PO Resolution Service (extraction, resolution, pipeline, metrics)
+- `backend/tests/test_po_resolution.py` - 34 unit tests
 
 ## Mocked Services
 - Microsoft Graph API (email ingestion - partial)
 - JWT Authentication (Entra ID)
-- BC API (demo/sandbox mode in preview — production uses real BC)
+- BC API (preview can't authenticate; production uses real BC)
 
 ## P1/P2 Backlog
 ### P1
+- Run PO resolution on production data (batch-resolve endpoint ready)
 - Azure OpenAI integration alongside Gemini for classification
-- Run PO resolution on production data (backfill)
 
 ### P2
 - Vendor Inventory Dashboard & Sales module
 - Product/BOM module
-- Refactor monolithic files (server.py, inventory_ledger.py, InventoryLedgerPage.js)
+- Refactor monolithic files
 - Production email service & Entra ID SSO
 - Decommission legacy Zetadocs
 

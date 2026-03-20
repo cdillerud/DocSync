@@ -41,6 +41,8 @@ def register_server_routes(app=None):
         rerun_matching_with_diagnostics,
     )
 
+    from server import batch_auto_resolve
+
     # BC reference resolution (standalone)
     app.add_api_route(
         "/api/bc/resolve-reference", resolve_bc_reference,
@@ -74,6 +76,13 @@ def register_server_routes(app=None):
         "/api/documents/{doc_id}/auto-resolve", trigger_auto_resolve,
         methods=["POST"], tags=["Reference Intelligence"],
         summary="Trigger auto-resolution for a document"
+    )
+
+    # Batch auto-resolve for pending documents
+    app.add_api_route(
+        "/api/admin/batch-auto-resolve", batch_auto_resolve,
+        methods=["POST"], tags=["Reference Intelligence"],
+        summary="Batch enqueue pending documents for full auto-resolution"
     )
 
     # Matching debug

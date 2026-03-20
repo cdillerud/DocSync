@@ -257,6 +257,7 @@ const DOC_TYPES = [
   { value: 'Inventory_Report', label: 'Inventory Report' },
   { value: 'Shipping_Document', label: 'Shipping Document' },
   { value: 'Quality_Issue', label: 'Quality Issue' },
+  { value: 'Inspection_Form', label: 'Inspection Form' },
   { value: 'Return_Request', label: 'Return Request' },
   { value: 'Unknown_Document', label: 'Unknown' },
 ];

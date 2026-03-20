@@ -85,12 +85,20 @@ POST /api/po-resolution/batch-resolve?force=true&limit=N returns:
 - per-document details (doc_id, file_name, status, miss_reason, po_number, bc_link_status)
 
 ### Results (Preview, 10 shipping docs, v2 hardened)
-| Metric | v1 | v2 | v2.1 (BOL+filename) | Why |
-|--------|----|----|---------------------|-----|
-| Resolved | 7 (70%) | 4 (40%) | 4 (40%) preview | v2.1 adds BOL/filename candidates; preview blocked by BC auth |
-| Not Found | 3 | 6 | 6 (5 bc_lookup_error + 1 invalid) | bc_lookup_error would resolve on prod with live BC |
-| BC Cache matches | 4 | 4 | 4 | Same real BC matches in preview |
-| False positives | 3 | 0 | 0 | Non-PO refs still correctly rejected |
+| Metric | v1 | v2 | v2.1 (BOL+filename) | v2.2 (shipment fallback) |
+|--------|----|----|---------------------|--------------------------|
+| Resolved | 7 (70%) | 4 (40%) | 4 (40%) preview | **23 (46%) PROD** |
+| BC Linked | 0 | 0 | 0 preview | **20 (40%) PROD** |
+| Not Found | 3 | 6 | 6 | 27 |
+| False positives | 3 | 0 | 0 | 0 |
+
+### v2.2 Shipment Resolution (Mar 20 2026)
+When no purchase_order match is found, the system now falls back to matching against
+`posted_sales_shipment` records (127K+ in BC cache). Results include:
+- `status: "resolved_shipment"` (distinct from `"resolved"` for PO matches)
+- `bc_link_status: "linked_shipment"`
+- `bc_entity_type: "posted_sales_shipment"`
+- `bc_customer_name`, `bc_order_number` for full context
 
 ### v2.1 PO Candidate Sources (Mar 20 2026)
 1. `extracted_field:po_number` (0.90 confidence)
@@ -122,7 +130,7 @@ POST /api/po-resolution/batch-resolve?force=true&limit=N returns:
 
 ## P1/P2 Backlog
 ### P1
-- Run PO resolution on production data (batch-resolve endpoint ready)
+- ~~Run PO resolution on production data~~ DONE (46% resolution, 40% BC link rate)
 - Azure OpenAI integration alongside Gemini for classification
 
 ### P2

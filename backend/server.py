@@ -3570,6 +3570,11 @@ async def _internal_intake_document(
     if not job_configs:
         job_configs = DEFAULT_JOB_TYPES.get(suggested_type, DEFAULT_JOB_TYPES["AP_Invoice"])
     
+    # Inject PO resolution result into extracted_fields for BC validation fallback
+    existing_po_res = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "po_resolution": 1})
+    if existing_po_res and existing_po_res.get("po_resolution", {}).get("po_number"):
+        extracted_fields["_po_resolution_number"] = existing_po_res["po_resolution"]["po_number"]
+
     # Run BC validation (existing logic)
     validation_results = await validate_bc_match(suggested_type, extracted_fields, job_configs)
     
@@ -4723,6 +4728,11 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
     # Get extracted fields
     extracted_fields = doc.get("extracted_fields", {})
     
+    # Inject PO resolution result for BC validation fallback
+    po_res = doc.get("po_resolution", {})
+    if po_res.get("po_number"):
+        extracted_fields["_po_resolution_number"] = po_res["po_number"]
+
     # Re-run BC validation (this will use any new aliases)
     old_match_method = doc.get("match_method", "none")
     validation_results = await validate_bc_match(job_type, extracted_fields, job_configs)

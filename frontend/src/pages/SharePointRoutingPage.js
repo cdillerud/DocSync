@@ -128,7 +128,7 @@ export default function SharePointRoutingPage() {
 
   if (loading) return <div className="flex items-center justify-center h-64"><RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" /></div>;
 
-  const docTypes = ['AP_Invoice', 'Sales_Order', 'Shipping_Document', 'Freight_Document', 'Order_Confirmation', 'Remittance', 'Return_Request', 'Quality_Issue', 'Unknown_Document'];
+  const docTypes = ['AP_Invoice', 'Sales_Order', 'Shipping_Document', 'Freight_Document', 'Order_Confirmation', 'Remittance', 'Return_Request', 'Quality_Issue', 'Inspection_Form', 'Unknown_Document'];
 
   return (
     <div className="space-y-6" data-testid="sharepoint-routing-page">

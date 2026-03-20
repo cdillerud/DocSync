@@ -894,6 +894,11 @@ Quality_Issue: Quality complaints or issues
 - Extract: customer, item, description
 - Look for "Quality", "Defect", "Complaint", "NCR", "Claim"
 
+Inspection_Form: Trailer inspection forms, inbound/outbound inspection checklists, QA disposition forms
+- Extract: inspector, date, trailer_number, seal_number, disposition
+- Look for "Inspection", "Trailer Inspection", "Inbound Inspection", "Outbound Inspection", "QA Disposition", "Receiving Disposition", "Unacceptable Inspection", "Inspector", "Seal Number", "Temperature"
+- These are NOT Quality_Issue — they are routine inspection checklists/forms, not complaints
+
 Return_Request: Return requests / RMAs / Credit Memos
 - Extract: customer, amount, reason
 - Look for "Return", "RMA", "Credit", "Refund", "Credit Memo", "Adjustment"
@@ -902,7 +907,7 @@ Unknown_Document: Cannot determine type confidently
 
 Always respond with valid JSON in this exact format:
 {
-    "document_type": "AP_Invoice|AR_Invoice|Credit_Memo|Remittance|Freight_Document|Sales_Order|Sales_Quote|Order_Confirmation|Warehouse_Receipt|Inventory_Report|Shipping_Document|Quality_Issue|Return_Request|Unknown_Document",
+    "document_type": "AP_Invoice|AR_Invoice|Credit_Memo|Remittance|Freight_Document|Sales_Order|Sales_Quote|Order_Confirmation|Warehouse_Receipt|Inventory_Report|Shipping_Document|Quality_Issue|Inspection_Form|Return_Request|Unknown_Document",
     "confidence": 0.0-1.0,
     "extracted_fields": {
         "vendor": "...",

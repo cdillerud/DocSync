@@ -42,6 +42,7 @@ const DOC_TYPE_LABELS = {
   Inventory_Report: "Inventory Report",
   Shipping_Document: "Shipping Doc",
   Quality_Issue: "Quality Issue",
+  Inspection_Form: "Inspection Form",
   Return_Request: "Return Request",
   Unknown_Document: "Unknown",
   // Legacy BC-style types (fallback)

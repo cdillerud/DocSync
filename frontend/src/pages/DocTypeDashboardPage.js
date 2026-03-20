@@ -23,6 +23,8 @@ const DOC_TYPE_CONFIG = {
   REMINDER: { label: 'Reminder', icon: AlertCircle, color: 'bg-red-400', description: 'Payment reminders' },
   FINANCE_CHARGE_MEMO: { label: 'Finance Charge', icon: FileText, color: 'bg-pink-500', description: 'Finance charges' },
   QUALITY_DOC: { label: 'Quality Doc', icon: CheckCircle, color: 'bg-teal-500', description: 'Quality documents' },
+  Quality_Issue: { label: 'Quality Issue', icon: AlertCircle, color: 'bg-red-500', description: 'Quality complaints' },
+  Inspection_Form: { label: 'Inspection Form', icon: CheckCircle, color: 'bg-emerald-500', description: 'Trailer/QA inspection forms' },
   Warehouse_Receipt: { label: 'Warehouse Receipt', icon: Package, color: 'bg-cyan-500', description: 'Warehouse receiving docs' },
   Freight_Document: { label: 'Freight Doc', icon: FileText, color: 'bg-indigo-500', description: 'Freight/shipping documents' },
   OTHER: { label: 'Other', icon: HelpCircle, color: 'bg-gray-500', description: 'Unclassified' },

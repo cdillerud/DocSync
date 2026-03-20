@@ -17,6 +17,7 @@ import {
   Gauge, ShieldAlert, Eye, Ban, HelpCircle, Calendar, Inbox, Mail, Archive, Loader2
 } from 'lucide-react';
 import AutomationMetricsCard from '../components/AutomationMetricsCard';
+import BCResolutionWidget from '../components/BCResolutionWidget';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, PieChart as RechartsPieChart, Pie, Legend } from 'recharts';
 import { Square9StageSummary } from '../components/Square9WorkflowTracker';
 
@@ -1359,6 +1360,9 @@ export default function DashboardPage() {
             <BCIntegrationCard data={intelligence?.bc_integration} />
             <SharePointCard data={intelligence?.sharepoint_archival} />
           </div>
+
+          {/* BC Document Resolution */}
+          <BCResolutionWidget />
 
           {/* Quick Actions + Type Distribution */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

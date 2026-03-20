@@ -121,7 +121,8 @@ When no purchase_order match is found, the system now falls back to matching aga
 - `backend/services/auto_clear_service.py` - Auto-clear PO gate
 - `backend/services/classification_pipeline.py` - 5-stage processing pipeline
 - `backend/services/bc_validation_service.py` - BC validation + 3-state status
-- `backend/tests/test_po_resolution.py` - 34 unit tests
+- `backend/tests/test_po_resolution.py` - 42 unit tests + 22 API tests
+- `frontend/src/components/BCResolutionWidget.js` - Dashboard widget for resolution metrics
 
 ## Mocked Services
 - Microsoft Graph API (email ingestion - partial)

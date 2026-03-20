@@ -64,7 +64,7 @@ BC_LINK_UNKNOWN = "unknown_error"
 _VALID_BC_PO_PATTERN = re.compile(
     r"^(?:"
     r"\d{4,7}"                     # pure numeric 4-7 digits
-    r"|[A-Z]{1,3}\d{3,7}"         # alpha prefix (1-3 letters) + digits
+    r"|[A-Z]{1,3}\d{3,7}[A-Z]?"  # alpha prefix (1-3 letters) + digits + optional alpha suffix
     r"|\d{5,7}[A-Z_]\w{0,3}"     # digits + suffix letter/underscore
     r")$"
 )
@@ -73,14 +73,17 @@ _VALID_BC_PO_PATTERN = re.compile(
 _NON_PO_PATTERNS = [
     re.compile(r"^SI-", re.IGNORECASE),        # Shipping Invoice refs
     re.compile(r"^SSH-", re.IGNORECASE),       # SSH shipping refs
+    re.compile(r"^SSZ-", re.IGNORECASE),       # SSZ shipping refs
     re.compile(r"^SHL", re.IGNORECASE),        # Shipping line refs
     re.compile(r"^YMJA", re.IGNORECASE),       # YMJA container refs
     re.compile(r"^MSKU", re.IGNORECASE),       # Container refs
     re.compile(r"^TCNU", re.IGNORECASE),       # Container refs
+    re.compile(r"^TGBU", re.IGNORECASE),       # Container refs
     re.compile(r"^[A-Z]{4}\d{7}$"),            # Container number pattern
     re.compile(r"^\d{2}-\d{2}-\d{2}-\d+$"),   # Date-based refs
     re.compile(r"^INV-", re.IGNORECASE),       # Invoice refs
     re.compile(r"^BOL-", re.IGNORECASE),       # BOL refs
+    re.compile(r"^CN\d{6}", re.IGNORECASE),    # CN container/consignment refs
 ]
 
 
@@ -162,8 +165,8 @@ def extract_po_candidates(
 _FILENAME_PO_PATTERNS = [
     # Explicit PO label in filename: PO_107459, PO-107459, PO107459
     re.compile(r"P\.?O\.?[\s_\-]?(\d{4,7}[A-Z]?)", re.IGNORECASE),
-    # Alpha-prefix POs: W117397, WA1848, WR106124, PR10088
-    re.compile(r"\b([A-Z]{1,3}\d{4,7})\b"),
+    # Alpha-prefix POs: W117397, WA1848, WR106124, PR10088, WTR1005A
+    re.compile(r"\b([A-Z]{1,3}\d{4,7}[A-Z]?)\b"),
     # Standalone 5-7 digit numbers (common PO format)
     re.compile(r"(?:^|[_\-\s.])(\d{5,7})(?:[_\-\s.]|$)"),
 ]

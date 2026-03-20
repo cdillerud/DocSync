@@ -1,0 +1,129 @@
+{
+  "summary": "PO Resolution v2 Hardening Testing Complete - All 56 tests passed (34 unit + 22 API). Extended metrics endpoint returns miss_reason breakdown, BC link failure categorization, lookup_sources, and multi_po_count. Batch-resolve endpoint processes shipping docs with summary including miss_reasons, bc_link_failures, po_resolution_rate, bc_link_success_rate. Document detail API includes full po_resolution object with bc_link standardized fields.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "BC API Connection",
+        "issue": "BC API cannot connect in preview environment (invalid tenant). BC reference cache has 1616 real POs from production sync. All BC link attempts fail with bc_auth_error or bc_record_not_found.",
+        "priority": "INFO"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_po_resolution.py",
+    "/app/backend/tests/test_po_resolution_v2_api.py",
+    "/app/test_reports/pytest/po_resolution_v2_api_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "po_resolution_service.py: Miss taxonomy correctly implemented with 9 distinct miss_reason values",
+    "po_resolution_service.py: is_valid_po_format correctly validates BC PO patterns (numeric, W/WA/WR/PR prefix)",
+    "po_resolution_service.py: is_known_non_po correctly flags SI-, SSH-, container patterns with confidence downgrade to 0.10",
+    "po_resolution_service.py: extract_po_candidates returns valid_format and is_non_po flags for each candidate",
+    "po_resolution_service.py: attempt_bc_link returns standardized result with status, bc_record_type, bc_record_id, link_method, error_code, error_message",
+    "po_resolution.py router: Extended metrics includes unresolved_by_miss_reason, bc_link_failures_by_reason, lookup_sources, multi_po_count",
+    "po_resolution.py router: batch-resolve returns summary with miss_reasons, bc_link_failures, po_resolution_rate, bc_link_success_rate",
+    "document_pipeline.py: po_resolution stage correctly positioned and persists po_resolution with bc_link to hub_documents"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_po_resolution_v2_api.py"
+  ],
+  "success_rate": {
+    "backend": "100% (56 tests passed - 34 unit + 22 API tests)",
+    "frontend": "N/A (backend-only testing requested)"
+  },
+  "test_credentials": "N/A - API tests used public endpoints",
+  "seed_data_creation": "N/A - Used existing 10 shipping-style documents in database",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "PO Resolution v2 hardening complete. GET /api/po-resolution/metrics returns: 10 shipping docs, 40% resolution rate (4/10), 0% BC link rate (BC auth fails in preview). Miss reasons: invalid_po_format (5), bc_lookup_error (1). BC link failures: bc_record_not_found (6), bc_auth_error (4). Resolved POs: 109023, 107346, 107459, W117397 (all via bc_cache_exact). POST /api/po-resolution/batch-resolve?force=true&limit=N processes docs and returns detailed summary.",
+  "verified_features": {
+    "Extended Metrics API": {
+      "status": "PASS",
+      "verified": [
+        "GET /api/po-resolution/metrics returns 200",
+        "Response has unresolved_by_miss_reason breakdown",
+        "Response has bc_link_failures_by_reason breakdown",
+        "Response has lookup_sources (bc_cache, bc_api, local_staging)",
+        "Response has multi_po_count",
+        "All miss_reason values are from valid taxonomy"
+      ]
+    },
+    "Batch Resolve API": {
+      "status": "PASS",
+      "verified": [
+        "POST /api/po-resolution/batch-resolve returns 200",
+        "Response has miss_reasons breakdown",
+        "Response has bc_link_failures breakdown",
+        "Response has po_resolution_rate percentage",
+        "Response has bc_link_success_rate percentage",
+        "Response has details array with doc_id, file_name, status, miss_reason, po_number, bc_link_status"
+      ]
+    },
+    "PO Format Validation": {
+      "status": "PASS",
+      "verified": [
+        "is_valid_po_format accepts numeric 5-7 digits",
+        "is_valid_po_format accepts W-prefix (W102008, W117397)",
+        "is_valid_po_format accepts WA-prefix (WA1848)",
+        "is_valid_po_format accepts WR-prefix (WR106124)",
+        "is_valid_po_format accepts PR-prefix (PR10088)",
+        "is_valid_po_format rejects too short (<4 digits)",
+        "is_valid_po_format rejects pure alpha strings"
+      ]
+    },
+    "Non-PO Detection": {
+      "status": "PASS",
+      "verified": [
+        "is_known_non_po flags SI- prefix patterns",
+        "is_known_non_po flags SSH- prefix patterns",
+        "is_known_non_po flags container patterns (MSKU, TCNU)",
+        "Non-PO patterns get confidence downgraded to 0.10 in extract_po_candidates"
+      ]
+    },
+    "Document Detail PO Resolution": {
+      "status": "PASS",
+      "verified": [
+        "Document detail includes po_resolution object",
+        "po_resolution has miss_reason field (null for resolved, set for not_found)",
+        "po_resolution has bc_link object with standardized fields",
+        "po_resolution has lookup_trace array",
+        "po_resolution has candidates_raw and candidates_valid arrays"
+      ]
+    },
+    "BC Link Result Structure": {
+      "status": "PASS",
+      "verified": [
+        "bc_link has status (linked, linked_local, failed)",
+        "bc_link has bc_record_type",
+        "bc_link has bc_record_id",
+        "bc_link has link_method",
+        "bc_link has error_code (categorized: bc_auth_error, bc_record_not_found, etc.)",
+        "bc_link has error_message"
+      ]
+    },
+    "Unit Tests": {
+      "status": "PASS",
+      "verified": [
+        "34 unit tests pass for normalize_po, is_valid_po_format, is_known_non_po, extract_po_candidates",
+        "Miss taxonomy constants are strings",
+        "Status constants are strings",
+        "requires_po_resolution correctly identifies Shipping_Document, Warehouse_Receipt, Freight_Document"
+      ]
+    },
+    "Backend Health": {
+      "status": "PASS",
+      "verified": [
+        "/api/health returns healthy",
+        "/api/documents endpoint working"
+      ]
+    }
+  },
+  "mocked_api_note": "BC API cannot connect in preview environment (invalid tenant). BC reference cache has 1616 purchase orders from production sync. All BC link attempts fail with bc_auth_error."
+}

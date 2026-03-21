@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import AutomationMetricsCard from '../components/AutomationMetricsCard';
 import BCResolutionWidget from '../components/BCResolutionWidget';
+import DocTypeDashboardPage from './DocTypeDashboardPage';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, PieChart as RechartsPieChart, Pie, Legend } from 'recharts';
 import { Square9StageSummary } from '../components/Square9WorkflowTracker';
 
@@ -1331,6 +1332,9 @@ export default function DashboardPage() {
           <TabsTrigger value="workflows" data-testid="tab-workflows">
             <Activity className="w-4 h-4 mr-2" /> Workflows
           </TabsTrigger>
+          <TabsTrigger value="doctypes" data-testid="tab-doctypes">
+            <Layers className="w-4 h-4 mr-2" /> Document Types
+          </TabsTrigger>
         </TabsList>
 
         {/* Overview Tab */}
@@ -1531,6 +1535,11 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
           )}
+        </TabsContent>
+
+        {/* Document Types Tab */}
+        <TabsContent value="doctypes" className="space-y-6">
+          <DocTypeDashboardPage />
         </TabsContent>
       </Tabs>
     </div>

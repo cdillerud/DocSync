@@ -11,7 +11,7 @@ import uuid
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 if not BASE_URL:
-    BASE_URL = "https://ap-automation-core.preview.emergentagent.com"
+    BASE_URL = "https://unified-queue-hub.preview.emergentagent.com"
 
 
 class TestItemMappingsAPI:

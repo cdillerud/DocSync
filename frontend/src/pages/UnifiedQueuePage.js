@@ -11,7 +11,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { 
   Search, Filter, RefreshCw, FileText, Clock, CheckCircle2, 
-  AlertCircle, Archive, ChevronRight, Inbox, FileCheck, Play, Trash2, Brain, Truck
+  AlertCircle, Archive, ChevronRight, Inbox, FileCheck, Play, Trash2, Brain, Truck,
+  CalendarDays, ShoppingCart, Receipt, Package
 } from "lucide-react";
 
 const INTEL_STATUS_CONFIG = {
@@ -143,9 +144,20 @@ export default function UnifiedQueuePage() {
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("pending");
+  const [workflowCategory, setWorkflowCategory] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [showCleared, setShowCleared] = useState(false);  // Toggle for auto-cleared docs
   const [queueCounts, setQueueCounts] = useState({ total_all: 0, auto_cleared: 0, pending_review: 0, completed: 0 });
   const [filterOptions, setFilterOptions] = useState({ types: [], statuses: [] });
+
+  // Workflow category presets
+  const WORKFLOW_CATEGORIES = {
+    all: { label: "All Documents", types: [] },
+    ap: { label: "AP Workflow", types: ["AP_Invoice", "AP_INVOICE", "Purchase_Order", "PURCHASE_ORDER", "Remittance", "REMITTANCE", "Credit_Memo", "PURCHASE_CREDIT_MEMO"] },
+    sales: { label: "Sales Workflow", types: ["Sales_Order", "SALES_ORDER", "Sales_PO", "Sales_Quote", "Order_Confirmation", "SALES_INVOICE", "SALES_CREDIT_MEMO"] },
+    ops: { label: "Operations", types: ["Freight_Document", "Shipping_Document", "Warehouse_Receipt", "Warehouse_Document", "Quality_Issue", "Inspection_Form", "BOL", "Packing_List"] },
+  };
   
   // Selection for bulk actions
   const [selectedDocs, setSelectedDocs] = useState(new Set());
@@ -159,6 +171,8 @@ export default function UnifiedQueuePage() {
       const params = new URLSearchParams();
       if (docTypeFilter !== "ALL") params.append("document_type", docTypeFilter);
       if (searchQuery) params.append("search", searchQuery);
+      if (dateFrom) params.append("date_from", dateFrom);
+      if (dateTo) params.append("date_to", dateTo);
       
       // Use new queue_view and include_cleared params
       if (activeTab === "pending") {
@@ -176,7 +190,20 @@ export default function UnifiedQueuePage() {
       if (statusFilter !== "ALL") params.append("status", statusFilter);
       
       const response = await api.get(`/documents?${params.toString()}`);
-      setDocuments(response.data.documents || []);
+      let docs = response.data.documents || [];
+
+      // Client-side workflow category filtering
+      if (workflowCategory !== "all") {
+        const allowedTypes = WORKFLOW_CATEGORIES[workflowCategory]?.types || [];
+        if (allowedTypes.length > 0) {
+          docs = docs.filter(d => {
+            const dt = d.document_type || d.doc_type || "";
+            return allowedTypes.includes(dt);
+          });
+        }
+      }
+
+      setDocuments(docs);
       setSelectedDocs(new Set()); // Clear selection on refresh
       
       // Update counts
@@ -193,7 +220,7 @@ export default function UnifiedQueuePage() {
     } finally {
       setLoading(false);
     }
-  }, [docTypeFilter, statusFilter, searchQuery, activeTab, showCleared]);
+  }, [docTypeFilter, statusFilter, searchQuery, activeTab, showCleared, workflowCategory, dateFrom, dateTo]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -418,6 +445,27 @@ export default function UnifiedQueuePage() {
         </Card>
       </div>
 
+      {/* Workflow Category Selector */}
+      <div className="flex items-center gap-2" data-testid="workflow-category-bar">
+        {Object.entries(WORKFLOW_CATEGORIES).map(([key, { label }]) => {
+          const icons = { all: FileText, ap: Receipt, sales: ShoppingCart, ops: Package };
+          const Icon = icons[key] || FileText;
+          return (
+            <Button
+              key={key}
+              variant={workflowCategory === key ? "default" : "outline"}
+              size="sm"
+              onClick={() => setWorkflowCategory(key)}
+              data-testid={`workflow-${key}`}
+              className="gap-1.5"
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {label}
+            </Button>
+          );
+        })}
+      </div>
+
       {/* Filters */}
       <Card>
         <CardContent className="pt-4">
@@ -467,9 +515,36 @@ export default function UnifiedQueuePage() {
                 />
               </div>
             </div>
-            
-            {/* Show Auto-Cleared Toggle */}
-            <div className="flex items-center gap-2 ml-4 px-3 py-1.5 bg-muted/50 rounded-lg">
+          </div>
+
+          {/* Second row: date range + toggles */}
+          <div className="flex flex-wrap gap-4 items-center mt-3 pt-3 border-t border-border/50">
+            <div className="flex items-center gap-2">
+              <CalendarDays className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">Date Range:</span>
+            </div>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="text-xs h-8 px-2 bg-muted/40 border border-border rounded-md font-mono"
+              data-testid="date-from-input"
+            />
+            <span className="text-xs text-muted-foreground">to</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="text-xs h-8 px-2 bg-muted/40 border border-border rounded-md font-mono"
+              data-testid="date-to-input"
+            />
+            {(dateFrom || dateTo) && (
+              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setDateFrom(""); setDateTo(""); }} data-testid="clear-dates-btn">
+                Clear dates
+              </Button>
+            )}
+
+            <div className="flex items-center gap-2 ml-auto px-3 py-1.5 bg-muted/50 rounded-lg">
               <Checkbox 
                 id="show-cleared"
                 checked={showCleared}

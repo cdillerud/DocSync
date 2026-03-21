@@ -6,17 +6,16 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator
 } from '../components/ui/dropdown-menu';
 import {
-  LayoutDashboard, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, Users, ShoppingCart, ClipboardList, Brain, FolderTree, ArrowLeftRight
+  LayoutDashboard, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, ShoppingCart, ClipboardList, Brain, FolderTree, ArrowLeftRight
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
-// Consolidated navigation — 8 items instead of 19
+// Consolidated navigation — 7 items (vendors moved to Settings)
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', exact: true },
   { to: '/documents', icon: Files, label: 'Documents' },
-  { to: '/vendors', icon: Users, label: 'Vendors' },
   { to: '/sales-inventory', icon: ShoppingCart, label: 'Sales & Inventory' },
   { to: '/intelligence', icon: Brain, label: 'Intelligence' },
   { to: '/operations-queue', icon: ClipboardList, label: 'Operations' },
@@ -69,7 +68,6 @@ export default function Layout() {
     const path = location.pathname;
     if (path === '/') return 'Dashboard';
     if (path === '/documents') return 'Documents';
-    if (path === '/vendors') return 'Vendors';
     if (path === '/sales-inventory') return 'Sales & Inventory';
     if (path === '/intelligence') return 'Intelligence';
     if (path === '/operations-queue') return 'Operations';

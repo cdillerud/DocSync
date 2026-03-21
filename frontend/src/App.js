@@ -9,11 +9,9 @@ import LoginPage from "@/pages/LoginPage";
 import DashboardPage from "@/pages/DashboardPage";
 import DocumentDetailPage from "@/pages/DocumentDetailPage";
 import OperationsQueuePage from "@/pages/OperationsQueuePage";
-import TemplatesPage from "@/pages/TemplatesPage";
 
 // Hub pages (consolidated)
 import DocumentsHubPage from "@/pages/DocumentsHubPage";
-import VendorsHubPage from "@/pages/VendorsHubPage";
 import SalesInventoryHubPage from "@/pages/SalesInventoryHubPage";
 import IntelligenceHubPage from "@/pages/IntelligenceHubPage";
 import IntegrationsHubPage from "@/pages/IntegrationsHubPage";
@@ -33,19 +31,18 @@ function AppRoutes() {
         <Route index element={<DashboardPage />} />
         <Route path="documents" element={<DocumentsHubPage />} />
         <Route path="documents/:id" element={<DocumentDetailPage />} />
-        <Route path="vendors" element={<VendorsHubPage />} />
         <Route path="sales-inventory" element={<SalesInventoryHubPage />} />
         <Route path="intelligence" element={<IntelligenceHubPage />} />
         <Route path="operations-queue" element={<OperationsQueuePage />} />
         <Route path="integrations" element={<IntegrationsHubPage />} />
         <Route path="config" element={<SettingsHubPage />} />
-        <Route path="templates" element={<TemplatesPage />} />
         {/* Redirects for old URLs */}
         <Route path="queue" element={<Navigate to="/documents" replace />} />
         <Route path="upload" element={<Navigate to="/documents?tab=upload" replace />} />
         <Route path="file-import" element={<Navigate to="/documents?tab=import" replace />} />
-        <Route path="vendor-intelligence" element={<Navigate to="/vendors" replace />} />
-        <Route path="stable-vendors" element={<Navigate to="/vendors?tab=stable" replace />} />
+        <Route path="vendors" element={<Navigate to="/config?tab=vendors" replace />} />
+        <Route path="vendor-intelligence" element={<Navigate to="/config?tab=vendors" replace />} />
+        <Route path="stable-vendors" element={<Navigate to="/config?tab=stable-vendors" replace />} />
         <Route path="sales-orders" element={<Navigate to="/sales-inventory" replace />} />
         <Route path="inventory-ledger" element={<Navigate to="/sales-inventory?tab=inventory" replace />} />
         <Route path="document-review" element={<Navigate to="/intelligence" replace />} />
@@ -58,6 +55,7 @@ function AppRoutes() {
         <Route path="email-parser" element={<Navigate to="/config?tab=email" replace />} />
         <Route path="settings" element={<Navigate to="/config" replace />} />
         <Route path="automation-rules" element={<Navigate to="/config?tab=automation" replace />} />
+        <Route path="templates" element={<Navigate to="/config" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

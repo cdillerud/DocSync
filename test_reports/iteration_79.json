@@ -66,7 +66,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://ap-automation-core.preview.emergentagent.com"
+    "api_url": "https://unified-queue-hub.preview.emergentagent.com"
   },
   "seed_data_used": "Used existing Hormel Foods workspace (customer_id: 366bfcce-4d68-4daf-b9f4-cb05a35de8c8). Draft PO-DRAFT-20260314163256-689B67 (has vendor V10045/Acme Bottle Supply, bc_response_status=created with bc_po_number=PO-9999, has 2 linked supply records SPAM-LITE and TEST-ITEM-WARN both at status=ordered with bc_po_number=PO-9999).",
   "retest_needed": false,

@@ -783,3 +783,233 @@ async def reconcile_sales_order(
         sales_order_id, cancelled, result["adjustments"], len(result["per_line"]),
     )
     return result
+
+
+# ═══════════════════════════════════════════════════════════════
+# BC SHIPMENT SYNC → INVENTORY LEDGER
+# ═══════════════════════════════════════════════════════════════
+
+import os
+import httpx
+from datetime import datetime, timezone, timedelta
+
+BC_SHIPMENT_SYNC_COLL = "bc_shipment_sync"
+_SYNC_STATUS_KEY = "bc_shipment_sync_status"
+
+
+async def _fetch_bc_shipment_lines(since_iso: str) -> list:
+    """Query BC Sales Shipment Lines API for shipments since a given ISO timestamp.
+
+    Uses the standard BC v2.0 OData API (read-only, Production environment).
+    Returns a list of shipment line dicts, or [] if BC is unavailable.
+    """
+    from services.gpi_integration_service import (
+        _get_token, GPI_API_BASE, BC_TENANT_ID, BC_READ_ENVIRONMENT,
+        BC_COMPANY_ID, BC_STANDARD_API, HAS_CREDENTIALS, REQUEST_TIMEOUT,
+    )
+
+    if not HAS_CREDENTIALS:
+        logger.warning("[ShipmentSync] BC credentials not configured — skipping fetch")
+        return []
+
+    try:
+        token = await _get_token()
+    except Exception as e:
+        logger.warning("[ShipmentSync] BC token acquisition failed: %s", e)
+        return []
+
+    # Standard BC OData v2.0 endpoint for posted sales shipment lines
+    base = f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/{BC_STANDARD_API}"
+    if BC_COMPANY_ID:
+        url = f"{base}/companies({BC_COMPANY_ID})/salesShipmentLines"
+    else:
+        url = f"{base}/salesShipmentLines"
+
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    params = {
+        "$filter": f"shipmentDate ge {since_iso[:10]}",
+        "$orderby": "shipmentDate desc",
+        "$top": "500",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+            resp = await client.get(url, headers=headers, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("value", [])
+    except Exception as e:
+        logger.warning("[ShipmentSync] BC shipment lines fetch failed: %s", e)
+        return []
+
+
+async def _is_shipment_already_synced(db, shipment_key: str) -> bool:
+    """Check if a shipment line has already been synced (idempotency guard)."""
+    existing = await db[BC_SHIPMENT_SYNC_COLL].find_one(
+        {"shipment_key": shipment_key}, {"_id": 0, "shipment_key": 1}
+    )
+    return existing is not None
+
+
+async def _mark_shipment_synced(db, shipment_key: str, movement_id: str, line_data: dict):
+    """Record that a shipment line has been synced to the inventory ledger."""
+    import uuid as _uuid
+    await db[BC_SHIPMENT_SYNC_COLL].insert_one({
+        "id": str(_uuid.uuid4()),
+        "shipment_key": shipment_key,
+        "movement_id": movement_id,
+        "document_no": line_data.get("documentNo", ""),
+        "line_no": line_data.get("lineNo", 0),
+        "item_no": line_data.get("number", ""),
+        "quantity": line_data.get("quantity", 0),
+        "shipment_date": line_data.get("shipmentDate", ""),
+        "synced_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+async def _update_sync_status(db, shipments_processed: int = 0, error: str = ""):
+    """Update the persistent sync status record."""
+    now = datetime.now(timezone.utc).isoformat()
+    update = {
+        "_key": _SYNC_STATUS_KEY,
+        "last_sync_at": now,
+        "updated_utc": now,
+    }
+    if error:
+        update["last_error"] = error
+        update["last_error_at"] = now
+    else:
+        update["last_error"] = ""
+
+    # Increment today's counter
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    await db.hub_config.update_one(
+        {"_key": _SYNC_STATUS_KEY},
+        {
+            "$set": update,
+            "$inc": {"shipments_processed_today": shipments_processed},
+            "$setOnInsert": {"today_date": today},
+        },
+        upsert=True,
+    )
+
+    # Reset counter if day rolled over
+    status = await db.hub_config.find_one({"_key": _SYNC_STATUS_KEY}, {"_id": 0})
+    if status and status.get("today_date") != today:
+        await db.hub_config.update_one(
+            {"_key": _SYNC_STATUS_KEY},
+            {"$set": {"today_date": today, "shipments_processed_today": shipments_processed}},
+        )
+
+
+async def get_sync_status(db) -> dict:
+    """Return the current BC shipment sync status."""
+    status = await db.hub_config.find_one({"_key": _SYNC_STATUS_KEY}, {"_id": 0})
+    if not status:
+        return {
+            "last_sync_at": None,
+            "shipments_processed_today": 0,
+            "last_error": "",
+        }
+    return {
+        "last_sync_at": status.get("last_sync_at"),
+        "shipments_processed_today": status.get("shipments_processed_today", 0),
+        "last_error": status.get("last_error", ""),
+    }
+
+
+async def sync_bc_shipments(db, lookback_hours: int = 24) -> dict:
+    """Sync recent BC Sales Shipment Lines into inventory outbound_shipment movements.
+
+    Workflow:
+      1. Fetch recent shipment lines from BC (last `lookback_hours` hours).
+      2. For each line, build a unique shipment_key (documentNo + lineNo).
+      3. Skip lines already synced (idempotency).
+      4. Resolve the inventory workspace from the shipment's customer number.
+      5. Create an outbound_shipment movement (negative qty_delta).
+      6. Mark as synced.
+
+    Returns: {synced: int, skipped: int, errors: [], total_fetched: int}
+    """
+    result = {"synced": 0, "skipped": 0, "errors": [], "total_fetched": 0}
+
+    since = (datetime.now(timezone.utc) - timedelta(hours=lookback_hours)).isoformat()
+    lines = await _fetch_bc_shipment_lines(since)
+    result["total_fetched"] = len(lines)
+
+    if not lines:
+        await _update_sync_status(db, error="" if lines is not None else "No shipment data returned")
+        return result
+
+    for line in lines:
+        doc_no = line.get("documentNo", "")
+        line_no = line.get("lineNo", 0)
+        shipment_key = f"{doc_no}_{line_no}"
+
+        # Idempotency check
+        if await _is_shipment_already_synced(db, shipment_key):
+            result["skipped"] += 1
+            continue
+
+        # Extract line data
+        item_no = line.get("number", "") or line.get("No", "")
+        description = line.get("description", "") or ""
+        quantity = float(line.get("quantity", 0))
+        uom = line.get("unitOfMeasureCode", "units") or "units"
+        shipment_date = line.get("shipmentDate", "")
+
+        # The sell-to customer number comes from the shipment header
+        # In standard BC API, salesShipmentLines may carry sellToCustomerNo
+        customer_no = line.get("sellToCustomerNo", "") or line.get("billToCustomerNo", "")
+
+        if not item_no or quantity <= 0:
+            result["skipped"] += 1
+            continue
+
+        # Resolve inventory workspace
+        ws_result = await resolve_inventory_workspace(db, customer_no=customer_no)
+        workspace = ws_result.get("workspace")
+        if not workspace:
+            result["errors"].append(
+                f"Shipment {doc_no} line {line_no}: no inventory workspace for customer '{customer_no}'"
+            )
+            continue
+
+        workspace_id = workspace["id"]
+
+        # The order number is the linked sales order (stored as orderNo in the shipment)
+        order_no = line.get("orderNo", doc_no)
+        location_code = line.get("locationCode", "MAIN") or "MAIN"
+
+        try:
+            mv_result = await create_movement(
+                db, workspace_id,
+                item=item_no,
+                item_description=description[:100],
+                warehouse=location_code,
+                ownership_type="customer_owned",
+                movement_type="outbound_shipment",
+                quantity_delta=-quantity,  # Negative: goods leaving warehouse
+                unit_of_measure=uom,
+                source_type="bc_shipment",
+                reference_type="sales_order",
+                reference_id=order_no,
+                notes=f"BC Shipment {doc_no} line {line_no} (shipped {shipment_date})",
+                created_by="bc_shipment_sync",
+                skip_balance_check=True,
+            )
+            if mv_result["success"]:
+                await _mark_shipment_synced(db, shipment_key, mv_result["movement"]["id"], line)
+                result["synced"] += 1
+            else:
+                result["errors"].append(f"Shipment {doc_no} line {line_no}: movement creation failed")
+        except Exception as e:
+            result["errors"].append(f"Shipment {doc_no} line {line_no}: {str(e)}")
+
+    await _update_sync_status(db, shipments_processed=result["synced"])
+
+    logger.info(
+        "[ShipmentSync] Completed: synced=%d skipped=%d errors=%d total_fetched=%d",
+        result["synced"], result["skipped"], len(result["errors"]), result["total_fetched"],
+    )
+    return result

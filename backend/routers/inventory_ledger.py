@@ -2334,6 +2334,35 @@ async def api_reconcile_sales_order(body: ReconcileSOReq):
 
 
 # ═══════════════════════════════════════════════════════════════
+# BC SHIPMENT SYNC → INVENTORY LEDGER
+# ═══════════════════════════════════════════════════════════════
+
+
+@router.post("/sync-bc-shipments")
+async def api_sync_bc_shipments(lookback_hours: int = 24):
+    """Trigger a manual sync of BC Sales Shipment Lines into inventory movements.
+
+    Creates outbound_shipment movements for each new shipment line.
+    Idempotent: duplicate shipments are skipped.
+    """
+    db = get_db()
+    from services.inventory_so_integration import sync_bc_shipments
+    result = await sync_bc_shipments(db, lookback_hours=lookback_hours)
+    return result
+
+
+@router.get("/sync-status")
+async def api_get_sync_status():
+    """Return the current BC shipment sync status.
+
+    Fields: last_sync_at, shipments_processed_today, last_error.
+    """
+    db = get_db()
+    from services.inventory_so_integration import get_sync_status
+    return await get_sync_status(db)
+
+
+# ═══════════════════════════════════════════════════════════════
 # INCOMING SUPPLY FROM SHORTAGE (separate prefix)
 # ═══════════════════════════════════════════════════════════════
 

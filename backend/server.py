@@ -8220,6 +8220,22 @@ async def startup():
             await asyncio.sleep(24 * 3600)  # Sleep 24 hours
     asyncio.create_task(_catalog_sync_scheduler())
     logger.info("BC Catalog Sync scheduler started (interval: 24h)")
+
+    # Start BC Shipment Sync scheduler (every 1h)
+    async def _shipment_sync_scheduler():
+        """Background worker: sync BC shipment lines into inventory every 1 hour."""
+        await asyncio.sleep(120)  # Initial delay
+        while True:
+            try:
+                from services.inventory_so_integration import sync_bc_shipments
+                logger.info("[ShipmentSync] Starting scheduled BC shipment sync")
+                result = await sync_bc_shipments(db, lookback_hours=24)
+                logger.info("[ShipmentSync] Completed: %s", result)
+            except Exception as e:
+                logger.warning("[ShipmentSync] Scheduled sync failed: %s", e)
+            await asyncio.sleep(3600)  # 1 hour
+    asyncio.create_task(_shipment_sync_scheduler())
+    logger.info("BC Shipment Sync scheduler started (interval: 1h)")
     
     # Initialize Auto-Resolution Service
     ref_intel_service = get_reference_intelligence_service()

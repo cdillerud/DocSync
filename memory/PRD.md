@@ -93,6 +93,20 @@ Only use branch: `conflict_150326_1947`
 - Config stored in hub_config collection with _key="notification_config"
 - 32 tests — all passing (content builders, dry-run, mock send, config CRUD, API endpoints)
 
+### P4-A: BC Shipment Sync → Inventory Ledger (COMPLETED Feb 2026)
+- Added `outbound_shipment` movement type and `bc_shipment` source type to inventory_ledger_service.py
+- Implemented `sync_bc_shipments(db, lookback_hours)` in inventory_so_integration.py:
+  - Fetches BC Sales Shipment Lines via standard OData v2.0 API (last N hours)
+  - For each line: resolves inventory workspace by customer number, creates outbound_shipment movement (negative qty)
+  - Idempotency: tracks synced shipments in bc_shipment_sync collection via (documentNo + lineNo) key
+  - Skips zero-qty lines, items without numbers, and unknown customers (with error logging)
+  - Updates sync status in hub_config (_key="bc_shipment_sync_status")
+- Added `POST /api/inventory-ledger/sync-bc-shipments` for manual trigger
+- Added `GET /api/inventory-ledger/sync-status` returning last_sync_at, shipments_processed_today, last_error
+- Added 1-hour background scheduler in server.py startup
+- Gracefully handles BC credential failures (preview env)
+- 17 tests — all passing (sync logic, idempotency, status tracking, endpoints)
+
 ## P0/P1/P2 Backlog
 
 ### Completed
@@ -106,6 +120,7 @@ Only use branch: `conflict_150326_1947`
 - ✅ BC catalog sync scheduling + health
 - ✅ Drop-Ship vs Warehouse SO type routing
 - ✅ Warehouse SO booked notifications (receiving notice + SO confirmation)
+- ✅ BC Shipment Sync → Inventory Ledger (outbound_shipment movements)
 
 ### Remaining
 - P0: server.py monolith refactor (partially done — services extracted but ~7 functions still imported from server.py)
@@ -124,5 +139,6 @@ Only use branch: `conflict_150326_1947`
 - test_catalog_sync.py: 7 tests
 - test_so_type_routing.py: 27 tests
 - test_so_type_routing_api.py: 11 tests (created by testing agent)
+- test_bc_shipment_sync.py: 17 tests
 - test_warehouse_so_notifications.py: 32 tests
-- Total passing: 160+ tests
+- Total passing: 180+ tests

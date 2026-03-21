@@ -23,12 +23,14 @@ logger = logging.getLogger(__name__)
 MOVEMENT_TYPES = {
     "opening_balance", "receipt", "order_commitment", "order_release",
     "manual_adjustment", "transfer", "writeoff", "correction",
+    "outbound_shipment",
 }
 
 # ── Source types (provenance tracking) ──
 SOURCE_TYPES = {
     "manual_entry", "spreadsheet_import", "sales_order_commitment",
     "sales_order_release", "incoming_supply", "receipt", "correction",
+    "bc_shipment",
 }
 
 # ── Ownership types ──

@@ -121,6 +121,16 @@ Only use branch: `conflict_150326_1947`
   - override_rep_for_customer(db, customer_no, rep_email, rep_name): stores manual overrides in customer_rep_overrides collection
 - 20 tests — all passing
 
+### P4-C: Frontend Consolidation (COMPLETED Mar 21 2026)
+- Reduced page files from 38 to 29 (deleted 9 dead/orphaned pages)
+- Navigation consolidated to 7 items (removed standalone Vendors nav)
+- UnifiedQueuePage: Added workflow category buttons (All/AP/Sales/Ops) and date range picker (from/to)
+- SettingsHubPage: Added Vendor Intelligence and Stable Vendors tabs (absorbed from VendorsHubPage)
+- DashboardPage: Added Document Types tab embedding DocTypeDashboardPage
+- App.js: Cleaned routes, old /vendors → /config?tab=vendors redirect
+- Deleted: APWorkflowsPage, AuditDashboardPage, OperationsWorkflowsPage, PilotDashboardPage, QueuePage, SalesWorkflowsPage, SimulationDashboardPage, WorkflowQueuesPage, VendorsHubPage
+- 24 frontend tests — all passing
+
 ## P0/P1/P2 Backlog
 
 ### Completed
@@ -135,10 +145,14 @@ Only use branch: `conflict_150326_1947`
 - ✅ Drop-Ship vs Warehouse SO type routing
 - ✅ Warehouse SO booked notifications (receiving notice + SO confirmation)
 - ✅ BC Shipment Sync → Inventory Ledger (outbound_shipment movements)
+- ✅ BC Customer + Salesperson Cache Sync & Rep Assignment Service
+- ✅ server.py extraction Pass 2 (upload/SharePoint/BC link handlers)
+- ✅ **[P4-C] Frontend consolidation** — 38 pages → 8 primary pages (Mar 21 2026)
 
 ### Remaining
-- P0: server.py monolith refactor — Pass 2 DONE (7,740 lines, down from 8,358). 2 functions remain on lazy import.
+- P1: Wire rep assignment into SO creation flow (Step 2)
 - P1: Investigate remaining `no_bc_match` failures from 500-doc batch
+- P1: Continue server.py extraction (classification, email polling)
 - P2: Vendor Inventory Dashboard & Sales module
 - P2: Product/BOM module
 - P2: Production email service & Entra ID SSO

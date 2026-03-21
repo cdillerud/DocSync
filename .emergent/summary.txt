@@ -1,144 +1,166 @@
 <analysis>**original_problem_statement**: 
-The core objective was shifted by the user to fix a critical workflow gap preventing document-to-ERP completion. Specifically: Resolving Purchase Orders (PO) reliably from shipping documents, successfully linking documents to existing Business Central (BC) records, and increasing the BC Link Rate from ~0.5% to a target of 50%+. After an initial implementation, the user requested a strict hardening pass to build a PO miss taxonomy, reduce not-found cases, harden BC link reliability, and expose truthful metrics using production data.
+The core objective is to fix workflow gaps preventing document-to-ERP completion, increase Business Central (BC) link rates, resolve FastAPI dependency anti-patterns, and build an automated pipeline for AP invoices and Sales Orders. The overarching goal is a complete hardening pass of the document intelligence platform, including decoupling from legacy systems (Square9) and supporting robust multi-source PO extraction.
+PRODUCT REQUIREMENTS: 
+- Increase BC link rate via multi-source PO extraction (including document descriptions/subjects).
+- Refactor global DB injection anti-patterns.
+- Wire auto-post for high-confidence AP invoices from stable vendors.
+- Add Azure OpenAI as a tandem/fallback classifier to Gemini.
+- Align Freight GL Routing with live chart of accounts (Dropship, DO NOT PAY, Freight Issues).
+- Decommission Square9, routing all documents exclusively through GPI Hub.
+- Automatically sync BC item catalogs for SO line resolution.
+- Improve customer PO classification to distinguish and correctly route Drop-Ship SOs vs. Warehouse SOs.
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
 **what currently exists?** 
-The application features a robust 5-stage classification pipeline (Parse -> Classify -> Extract -> Validate -> Route) which now includes a visual UI component on the Document Detail page. BC Validation logic has been upgraded to a 3-state system (Pass, Warnings, Fail) to prevent misleading Passed badges when optional checks fail. A Data Maintenance UI exists to batch-recompute derived states. Most importantly, a new  is integrated into the pipeline, featuring strict PO normalization, fallback to local drafts, a comprehensive miss taxonomy (), and a dedicated metrics API to track BC linkage success.
+A FastAPI/React application with a robust 5-stage document classification and validation pipeline. The system extracts PO candidates from LLMs, regex, BOLs, filenames, and description/subject fields. It includes auto-resolution workers, an auto-post service for stable vendors, Azure OpenAI fallback classification, automated BC item catalog background syncing, and a finalized Freight GL routing schema. Square9 integration has been formally decommissioned in favor of the Hub.
 
-**Last working item**:
-- **Last item agent was working**: Fixing PO extraction logic based on real production data. The user ran the batch script on production and got a 6.2% resolution rate. The agent analyzed the failure JSON and identified three specific gaps to fix: 1)  often contains the real PO, 2) The filename often contains the PO, 3) Docs failing with  need their BOL/filenames tested as fallback PO candidates. 
-- **Status**: IN PROGRESS
-- **Agent Testing Done**: N
-- **Which testing method agent to use?** main agent to test via curl / python -c by running the extraction logic against the specific failing document payloads the user provided, followed by backend testing agent.
-- **User Testing Done**: N
+**Last working item**: 
+    - Last item agent was working: **[P3-B] Improve customer PO classification — Drop-Ship vs Warehouse SO routing**. The agent updated the Gemini prompt ( in ) to extract a new  field (, , or ). The agent was about to modify  in  to route BC fields conditionally based on this type, and add auto-approve logic for Drop-Ship POs in .
+    - Status: IN PROGRESS
+    - Agent Testing Done: N
+    - Which testing method agent to use? backend testing agent (pytest)
+    - User Testing Done: N
 
-**All Pending/In progress Issue list**:
-Issue 1: Update PO Candidate Extraction Logic (P0)
-Issue 2: Verify status of Completed documents after re-validation (P2)
+**All Pending/In progress Issue list**: 
+  Issue 1: P0 - Complete [P3-B] Customer PO Classification Routing (Highest Priority)
+  Issue 2: P0 - Refactor monolithic 
+  
+  Issues Detail:
+  - Issue 1: 
+     - Attempted fixes: Successfully modified the AI classification prompt to extract .
+     - Next debug checklist: 
+         - In  , use  to set the correct BC SO fields (Dropship: set Ship-to Code to customer address. Warehouse: set Ship-to Code to warehouse location code).
+         - In , add logic: after BC SO creation with status Released, if , trigger .
+         - Write pytest tests for these routing differences.
+     - Why fix this issue and what will be achieved with the fix? Fulfills user request to route Sales Orders automatically based on inventory destination, skipping manual touchpoints for dropships.
+     - Status: IN PROGRESS
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? backend
+     - Blocked on other issue: None
+  - Issue 2: 
+     - Attempted fixes: None in this session (though dependencies/email polling issues were extracted successfully).
+     - Next debug checklist:  is still over 8,300 lines long. Identify logical domains (like intake processing) to break into dedicated services/routers.
+     - Why fix this issue and what will be achieved with the fix? P0 Tech Debt explicitly identified by user to ensure maintainability.
+     - Status: NOT STARTED
+     - Is recurring issue? Y (Ongoing tech debt)
+     - Should Test frontend/backend/both after fix? both
+     - Blocked on other issue: None
 
-Issues Detail:
-- Issue 1:
-  - Attempted fixes: Agent was just about to edit  to add  and filename parsing to the PO candidate generator.
-  - Next debug checklist: Edit  in  to:
-    1. Append  as a PO candidate.
-    2. Extract PO candidates from the  string.
-    3. Ensure these new candidates are yielded and tested against the BC Cache.
-  - Why fix this issue and what will be achieved with the fix? This directly addresses the user's production data failures, specifically fixing 6  errors and potentially resolving several  errors, dramatically increasing the real-world BC link rate.
-  - Status: IN PROGRESS
-  - Is recurring issue? N
-  - Should Test frontend/backend/both after fix? backend
-  - Blocked on other issue: None
+**In progress Task List**: 
+  Task 1: Route Drop-Ship vs Warehouse Sales Orders into BC
+  
+ Task Detail:
+  - Task 1: 
+     - Where to resume:  around  and .
+     - What will be achieved with this? End-to-end automation for Drop-Ship vs Warehouse POs.
+     - Status: IN PROGRESS
+     - Should Test frontend/backend/both after fix? backend
+     - Blocked on something: None
 
-- Issue 2:
-  - Attempted fixes: Fix was implemented in a prior session (), but the user never explicitly verified if Completed documents no longer show a fail status in the validation column on the UI.
-  - Next debug checklist: Ask the user to confirm if the historical queue statuses look correct after the recent batch runs.
-  - Why fix this issue and what will be achieved with the fix? Cleans up UI clutter and restores user trust.
-  - Status: USER VERIFICATION PENDING
-  - Is recurring issue? N
-  - Should Test frontend/backend/both after fix? NA
-  - Blocked on other issue: None
+**Upcoming and Future Tasks**
+    Upcoming Tasks:
+    - P1: Investigate remaining  failures from the user's 500-doc batch run.
+    Future Tasks:
+    - P2: Vendor Inventory Dashboard and Sales module.
+    - P2: Product/BOM (Bill of Materials) module.
+    - P2: Implement a production-ready email service and Entra ID SSO.
 
-**In progress Task List**:
-None.
+**Completed work in this session**
+- Unify  signatures and pass new extraction fields (/) to PO resolution pipeline (DONE)
+- [P1-A] Fix PO Candidate Extraction — added , , and  to extraction logic (DONE)
+- [P1-B] Fix NameError in square9.py /stage-counts endpoint — Regression test added (DONE)
+- [P1-C] Fix global DB injection anti-pattern — Removed  in  and  (DONE)
+- [P1-D] Wire auto-post AP invoices for stable vendors into  (DONE)
+- [P1-E] Add Azure OpenAI as tandem/fallback classifier via  (DONE)
+- [P2-A] Validate and extend freight GL routing service against live chart of accounts (Added DO NOT PAY, Dropship, S&H) (DONE)
+- [P2-B] Decommission Square9 — Hub is authoritative; endpoints and UI banner added, documented in  (DONE)
+- [P3-A] Populate BC item catalog sync — 24h schedule job added with health checks (DONE)
 
-**Upcoming and Future Tasks**:
-Upcoming Tasks:
-- P1: Azure OpenAI integration in tandem with Gemini for classification.
-- P1: PO resolution backfill on production shipping docs (User needs to run this after Issue 1 is fixed).
+**Earlier issues found/mentioned but not fixed**
+   - Issue 1: 19 Pre-existing integration tests fail
+     - Debug checklist: Tests like  fail due to missing  env var mocking in the test runner.
+     - Why to solve this issue and what will be achieved with this? Clean test suite runs.
+     - Should Test frontend/backend/both after fix: backend
+     - Is recurring issue? Y
 
-Future Tasks:
-- P2: Vendor Inventory Dashboard and Sales module.
-- P2: Product/BOM (Bill of Materials) module.
-- P2: Refactor monolithic files (, ).
-- P2: Implement a production-ready email service and Entra ID SSO.
-- P2: Decommission the legacy Zetadocs system.
+**Known issue recurrence from previous fork**
+  - Issue recurrence in previous fork: BC API authentication fails in the preview environment (throws 400/500 on Vendor/GL searches).
+  - Recurrence count: Ongoing
+  - Status: BLOCKED (Environment limitation)
+  Note: This is expected as the preview env doesn't have live BC credentials. Do not attempt to fix; rely on unit tests and user's prod testing.
 
-**Completed work in this session**:
-- Document Detail Pipeline Visualization Component (DONE)
-- Settings Hub: Item Mappings Admin UI (CRUD) (DONE)
-- BC Validation 3-State Logic (Pass/Warning/Fail) & UI Update (DONE)
-- Settings Hub: Data Maintenance tool to batch-recompute derived states (DONE)
-- PO Resolution Service v1 & v2 (Miss Taxonomy, BC Cache matching) (DONE)
-- PO Resolution Metrics API & Batch Reprocessing endpoints (DONE)
-
-**Earlier issues found/mentioned but not fixed**:
-None.
-
-**Known issue recurrence from previous fork**:
-- Issue recurrence in previous fork: Preview environment BC API cannot authenticate ().
-- Recurrence count: Ongoing
-- Status: BLOCKED (by environment limitation)
-Note: This is expected. BC linkage testing requires the user to run scripts on their production VM. Do not attempt to fix the preview BC token issue.
-
-**Code Architecture**:
+**Code Architecture**
 
 
-**Key Technical Concepts**:
-- **PO Resolution Pipeline**: Runs *after* entity resolution and *before* transaction matching. Uses regex, normalized formats, and exact string matching against a local MongoDB BC Reference Cache (syncs from live BC).
-- **Miss Taxonomy**: Standardized string reasons () for why a PO didn't link (e.g., , , ) to make failures explainable.
-- **Client-Side Derived Statuses**: Frontend dynamically computes  to determine if a document has PASSED vs WARNINGS based on whether failed checks were strictly  or optional.
+**Key Technical Concepts**
+- **Fallback AI Classification**: Gemini operates as the primary LLM; if confidence < 0.70 or it crashes,  steps in automatically.
+- **Auto-Post AP Invoices**: Invoices reaching  with >0.85 stable vendor score and  PO status automatically execute .
+- **GL Account Routing**: Rules apply priority parsing to map Freight, Storage/Handling, Dropships, and completely bypass 'DO NOT PAY' invoices.
+- **Background Syncing**: A server loop automatically caches BC's Item/GL Catalog locally to enable off-line SO Line Resolution.
 
-**key DB schema**:
-- : Now contains  object (status, miss_reason, po_number, bc_link status, lookup_trace) and  array.
+**key DB schema**
+  - : Holds  state.
+  -  / : Stores BC items synced periodically for offline matching.
+  - : Now populated with , , , and potentially  properties.
 
-**changes in tech stack**:
-- None.
+**changes in tech stack**
+  - None strictly, but Azure OpenAI API is now a configurable fallback (requires , , ).
 
-**All files of reference**:
-- : Current focus. Needs update to add  and  to PO candidate generation.
-- : Handles batch resolution and metrics.
-- : UI for pipeline and validation.
+**All files of reference** 
+  - : Updated with  in the prompt.
+  - : Next to edit for .
+  - : Next to edit for DS PO auto-approvals.
+  - : Created for AI fallback.
+  - : Updated with robust rules.
+  - : Updated with cutover logic.
 
-**Areas that need refactoring**:
--  remains a monolith candidate for future refactoring.
+**Areas that need refactoring**: 
+  -  remains too large (8300+ lines).
 
-**key api endpoints**:
-- : Runs bulk PO resolution (used by user on prod VM).
-- : Returns taxonomy of PO misses and link rates.
-- : Background task to update legacy document states.
+**key api endpoints**
+  - 
+  - 
+  - 
+  - 
 
-**Critical Info for New Agent**:
-- **IMMEDIATE TASK**: You are mid-thought fixing . You need to edit the  function so that it also tests  and extracts candidates from the  string. The user's production JSON explicitly proved that PO numbers are hiding in these two fields.
-- **Environment**: Do not waste time debugging BC Connection errors in the preview environment. The sandbox token is invalid. Rely on the user's terminal output from their production VM to gauge true BC linking success.
-- **Constraint**: Do NOT add new dashboards, do not expand vendor logic, and do not redesign readiness. Keep scope strictly to fixing the PO resolution extraction gaps.
+**Critical Info for New Agent** 
+- **IMMEDIATE START POINT:** Resume task **[P3-B]**. The  in  has *just* been updated to extract  ('dropship' or 'warehouse'). You must complete steps 3, 4, and 5 from the user's latest message prompt: conditionally map the BC Sales Order Ship-To address inside , set up  to auto-approve DS POs when Released, and write tests for this logic.
+- Do not let integration test failures ( hitting live endpoints) derail you. Focus on isolated unit tests for the new changes.
 
-**documents and test reports created in this job**:
-- 
-- 
-- 
-- 
--  (Updated)
+**documents and test reports created in this job** 
+  -  (Updated)
+  -  (Updated)
+  - 
 
-**Last 10 User Messages and any pending HUMAN messages**:
-10. **User**: 1. Treat this as shipping-doc / warehouse-receipt / freight-doc critical path... (Provided strict requirements for PO hardening).
-9. **User**: where we did leave off?
-8. **Agent**: Summarized state, asked to proceed.
-7. **User**: proceed
-6. **Agent**: Ran v2 batch resolve on preview, showed tests passed. Updated PRD. Told user to run command on prod VM.
-5. **User**: Provided output of  from prod VM showing 16 docs, 1 resolved, 15 failed.
-4. **Agent**: Diagnosed issue, provided python script  to extract raw candidate data from the prod DB to see *why* they failed.
-3. **User**: Attempted to run python one-liner, got bash syntax error.
-2. **Agent**: Provided clean  script.
-1. **User**: Provided the JSON output from . (This output clearly shows  and  hold the missing POs).
-*Pending*: Agent needs to implement the fixes based on this JSON output.
+**Last 10 User Messages and any pending HUMAN messages** 
+ - **User [P1-A]**: Request to extract POs from description/filename. (Done)
+ - **User [P1-B]**: Fix NameError in square9.py. (Done)
+ - **User [P1-C]**: Fix global DB injection anti-pattern in ap_review.py & spiro.py. (Done)
+ - **User [P1-D]**: Wire auto-post AP invoices for stable vendors into the pipeline. (Done)
+ - **User [P1-E]**: Add Azure OpenAI as tandem/fallback classifier. (Done)
+ - **User [P2-A]**: Validate and extend freight GL routing service. (Done)
+ - **User [P2-B]**: Decommission Square9. (Done)
+ - **User [P3-A]**: Populate BC item catalog sync for SO line resolution. (Done)
+ - **User [P3-B]**: Improve customer PO classification — Drop-Ship vs Warehouse SO routing. **(IN PROGRESS)**
 
-**Project Health Check**:
-- Broken: Preview BC API authentication.
-- Mocked: MS Graph (Emails), JWT Auth.
+**Project Health Check:**
+  - Mocked/Broken: BC API connectivity in the sandbox environment limits endpoint checks. Ensure robust local unit testing.
+  - Failing Tests: 19 Pre-existing integration tests fail due to an unconfigured .
 
-**3rd Party Integrations**:
-- Emergent LLM Key: Gemini 3 Flash / GPT (Used for document classification and extraction).
-- User API Key / Live: Dynamics 365 Business Central API (Fails in preview, works in user's production VM).
+**3rd Party Integrations** 
+  - OpenAI GPT-4o / Gemini 3 — uses Emergent LLM Key
+  - Azure OpenAI — requires User LLM Key ( etc.)
+  - Dynamics 365 BC — requires User API Key
 
-**Testing status**:
-- Testing agent used after significant changes: YES (Ran 56 tests, 100% pass rate).
-- Troubleshoot agent used after agent stuck in loop: NO
-- Test files created: 
-- Known regressions: None.
+**Testing status** 
+  - Testing agent used after significant changes: YES
+  - Troubleshoot agent used after agent stuck in loop: NO
+  - Test files created: , , .
+  - Known regressions: None introduced in this run.
 
-**Credentials to test flow**:
-- Web UI:  / 
+**Credentials to test flow:**
+  - admin / admin
 
-**What agent forgot to execute**:
-- The agent was interrupted by the fork right before editing  to implement the three fixes identified from the user's production data snippet. Finish this edit immediately.</analysis>
+**What agent forgot to execute**
+  - None. It was legitimately cut off by context limit in the middle of executing P3-B. The prompt changes for P3-B were completed, but the backend implementation wiring in  and  needs to be finalized immediately.</analysis>

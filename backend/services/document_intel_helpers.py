@@ -922,10 +922,14 @@ Freight_Document: Freight operational documents — rate confirmations, freight 
 
 == Sales Category ==
 Sales_Order: Customer purchase orders to us, PO confirmations
-- Extract: customer name, po_number, order_date, amount, ship_to address
+- Extract: customer name, po_number, order_date, amount, ship_to address, location_code
 - Look for "Purchase Order", "PO#", "Order", "PO Confirmation", quantity, ship to
 - If a PDF starts with a PO Confirmation followed by BOLs/freight bills, this is a Sales_Order
 - NOT a Sales_Order: Packing lists, packing slips, pick lists — even if they reference a PO number. Those are Shipping_Documents.
+- IMPORTANT: Determine so_type (dropship | warehouse | unknown) based on:
+  * dropship: Ship-to is a customer address (not GPI warehouse), "drop ship" language, "direct ship"
+  * warehouse: Ship-to is a GPI warehouse address, "warehouse", location codes like "MAIN", "WH-01", warehouse agreement references
+  * unknown: Cannot determine from document content
 
 Sales_Quote: Price quotes or proposals to customers
 - Extract: customer, amount, valid_until

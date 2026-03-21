@@ -77,7 +77,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://po-candidate-hub.preview.emergentagent.com"
+    "api_url": "https://ap-automation-core.preview.emergentagent.com"
   },
   "seed_data_used": {
     "queue_items": "120 total items in operations queue",

@@ -410,6 +410,17 @@ class TestBackendHealth:
         assert "by_type" in data
         print(f"PASS: Dashboard stats endpoint returns {data['total_documents']} documents")
 
+    def test_square9_stage_counts_endpoint(self):
+        """Square9 stage-counts should return 200 with stages array (regression for NameError fix)"""
+        resp = requests.get(f"{BASE_URL}/api/square9/stage-counts", timeout=30)
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        data = resp.json()
+        assert "stages" in data, "Response missing 'stages' key"
+        assert isinstance(data["stages"], list), "stages should be a list"
+        assert len(data["stages"]) > 0, "stages should not be empty"
+        assert "total_documents" in data, "Response missing 'total_documents'"
+        print(f"PASS: Square9 stage-counts returns {len(data['stages'])} stages, {data['total_documents']} docs")
+
 
 # ---------------------------------------------------------------------------
 # Run with pytest

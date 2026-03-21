@@ -1,9 +1,18 @@
 """GPI Document Hub - Email Polling & Graph Webhook Router"""
 
 import logging
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Body, Query, Request, BackgroundTasks
-from datetime import datetime, timezone
-from deps import get_db
+from deps import (
+    get_db,
+    EMAIL_POLLING_ENABLED,
+    EMAIL_POLLING_INTERVAL_MINUTES,
+    EMAIL_POLLING_USER,
+    EMAIL_POLLING_LOOKBACK_MINUTES,
+    EMAIL_POLLING_MAX_MESSAGES,
+    EMAIL_POLLING_MAX_ATTACHMENT_MB,
+    EMAIL_CLIENT_ID,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Email Polling"])
@@ -18,6 +27,7 @@ async def trigger_email_poll():
     if not EMAIL_POLLING_ENABLED:
         return {"error": "EMAIL_POLLING_ENABLED is false. Set to true to enable polling."}
     
+    from server import poll_mailbox_for_attachments
     stats = await poll_mailbox_for_attachments()
     return stats
 

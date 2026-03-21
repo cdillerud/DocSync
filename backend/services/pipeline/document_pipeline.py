@@ -272,8 +272,16 @@ async def _run_po_resolution(doc_id: str, ctx: Dict) -> StageResult:
             output={"reason": f"doc_type '{doc_type}' does not require PO resolution"},
         )
 
-    extracted = doc.get("extracted_fields") or {}
+    extracted = dict(doc.get("extracted_fields") or {})
     raw_text = doc.get("raw_text") or ""
+
+    # Merge doc-level email metadata so regex scans subject/body for POs
+    if doc.get("email_subject") and "subject" not in extracted:
+        extracted["subject"] = doc["email_subject"]
+    if doc.get("email_body") and "description" not in extracted:
+        extracted["description"] = doc["email_body"]
+    if doc.get("notes") and "notes" not in extracted:
+        extracted["notes"] = doc["notes"]
 
     # Build PO candidates from extracted fields + raw text + filename
     candidates = extract_po_candidates(raw_text, extracted, file_name=doc.get("file_name", ""))

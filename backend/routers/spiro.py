@@ -20,13 +20,12 @@ logger = logging.getLogger(__name__)
 # Create router
 spiro_router = APIRouter(prefix="/spiro", tags=["Spiro Integration"])
 
-# Database reference (set during app startup)
-db = None
+from deps import get_db
 
-def set_spiro_routes_db(database):
-    """Set database reference for Spiro routes."""
-    global db
-    db = database
+# Database reference (legacy no-op kept for backward compat)
+def set_spiro_routes_db(database=None):
+    """Legacy no-op — all routes now use deps.get_db()."""
+    pass
 
 
 # =============================================================================
@@ -66,7 +65,7 @@ async def get_spiro_status():
         "configured": client.is_configured(),
         "has_token": client.token_manager.get_access_token() is not None,
         "has_refresh_token": client.token_manager.get_refresh_token() is not None,
-        "sync_status": await get_spiro_sync_status() if db is not None else {"error": "DB not initialized"}
+        "sync_status": await get_spiro_sync_status()
     }
 
 
@@ -187,8 +186,7 @@ async def trigger_sync(request: SyncRequest = None):
     if not is_spiro_enabled():
         raise HTTPException(status_code=400, detail="Spiro integration is disabled")
     
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not initialized")
+    db = get_db()
     
     request = request or SyncRequest()
     service = SpiroSyncService(db)
@@ -246,8 +244,7 @@ async def list_spiro_companies(
         search: Optional search term for company name
         limit: Maximum results to return
     """
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not initialized")
+    db = get_db()
     
     query = {}
     if search:
@@ -276,8 +273,7 @@ async def list_spiro_contacts(
         company_id: Filter by Spiro company ID
         limit: Maximum results to return
     """
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not initialized")
+    db = get_db()
     
     query = {}
     if search:
@@ -303,8 +299,7 @@ async def list_spiro_opportunities(
     limit: int = Query(50, le=200)
 ):
     """List synced Spiro opportunities."""
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not initialized")
+    db = get_db()
     
     query = {}
     if company_id:
@@ -332,8 +327,7 @@ async def get_document_spiro_context(doc_id: str):
     """
     from services.spiro import get_spiro_context_for_document
     
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not initialized")
+    db = get_db()
     
     # Get document
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
@@ -397,6 +391,7 @@ async def spiro_match_vendor(vendor_name: str = Form(...), min_score: float = Fo
     Uses fuzzy matching to find the best match.
     """
     from services.spiro_vendor_matcher import match_vendor_with_spiro
+    db = get_db()
     result = await match_vendor_with_spiro(db, vendor_name, min_score)
     return result
 
@@ -405,6 +400,7 @@ async def spiro_match_vendor(vendor_name: str = Form(...), min_score: float = Fo
 async def spiro_search_companies(query: str = Query(...), limit: int = Query(10)):
     """Search Spiro companies by name."""
     from services.spiro_vendor_matcher import get_spiro_matcher
+    db = get_db()
     matcher = get_spiro_matcher(db)
     companies = await matcher.search_companies(query, limit)
     return {
@@ -418,6 +414,7 @@ async def spiro_search_companies(query: str = Query(...), limit: int = Query(10)
 async def spiro_get_freight_carriers():
     """Get all freight carriers from Spiro."""
     from services.spiro_vendor_matcher import get_spiro_matcher
+    db = get_db()
     matcher = get_spiro_matcher(db)
     carriers = await matcher.get_freight_carriers()
     return {
@@ -430,6 +427,7 @@ async def spiro_get_freight_carriers():
 async def spiro_is_freight_carrier(vendor_name: str = Form(...)):
     """Check if a vendor is a freight carrier based on Spiro data."""
     from services.spiro_vendor_matcher import get_spiro_matcher
+    db = get_db()
     matcher = get_spiro_matcher(db)
     is_freight, company = await matcher.is_freight_carrier(vendor_name)
     return {

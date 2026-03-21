@@ -147,6 +147,18 @@ def extract_po_candidates(
         if bol and str(bol).strip():
             _add(str(bol).strip(), "extracted_field:bol_number", 0.75)
 
+        # Description/subject/notes fields often contain PO references
+        for desc_field in ("description", "subject", "notes", "remarks", "reference", "memo"):
+            desc_val = existing_fields.get(desc_field)
+            if desc_val and str(desc_val).strip():
+                desc_text = str(desc_val).strip()
+                # Run PO regex patterns against the description text
+                for pattern in _PO_PATTERNS:
+                    for match in pattern.finditer(desc_text[:2000]):
+                        raw = match.group(1).strip()
+                        if len(raw) >= 3:
+                            _add(raw, f"extracted_field:{desc_field}", 0.72)
+
     # Extract PO-like tokens from file_name
     if file_name:
         _extract_from_filename(file_name, _add)
@@ -237,6 +249,54 @@ def is_known_non_po(normalized: str) -> bool:
 def requires_po_resolution(doc_type: str) -> bool:
     """Check if a document type requires PO resolution."""
     return doc_type in PO_REQUIRED_DOC_TYPES
+
+
+# ─── Convenience: resolve from a full document dict ───────────────────────────
+
+async def resolve_po_from_document(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """High-level wrapper: extract PO candidates from a document dict and resolve.
+
+    Merges doc-level metadata (email_subject, email_body) into extracted_fields
+    so that `extract_po_candidates` can search subject/description text.
+    Callers that already have pre-built candidates should use `resolve_po` directly.
+    """
+    extracted = dict(doc.get("extracted_fields") or {})
+
+    # Merge top-level doc fields into extracted so regex scans them
+    if doc.get("email_subject") and "subject" not in extracted:
+        extracted["subject"] = doc["email_subject"]
+    if doc.get("email_body") and "description" not in extracted:
+        extracted["description"] = doc["email_body"]
+    if doc.get("notes") and "notes" not in extracted:
+        extracted["notes"] = doc["notes"]
+
+    raw_text = doc.get("raw_text") or ""
+    file_name = doc.get("file_name") or ""
+
+    candidates = extract_po_candidates(raw_text, extracted, file_name=file_name)
+
+    # Merge any candidates already persisted on the document
+    existing_candidates = doc.get("po_candidates") or []
+    if existing_candidates:
+        seen = {c["normalized"] for c in candidates}
+        for ec in existing_candidates:
+            if isinstance(ec, dict) and ec.get("normalized") and ec["normalized"] not in seen:
+                candidates.append(ec)
+                seen.add(ec["normalized"])
+
+    doc_type = doc.get("document_type") or doc.get("suggested_job_type") or ""
+    doc_id = doc.get("id") or ""
+    vendor_name = extracted.get("vendor") or extracted.get("shipper") or extracted.get("carrier") or ""
+    vendor_no = extracted.get("vendor_no") or ""
+
+    return await resolve_po(
+        po_candidates=candidates,
+        vendor_name=vendor_name,
+        vendor_no=vendor_no,
+        doc_type=doc_type,
+        document_id=doc_id,
+        source_filename=file_name,
+    )
 
 
 # ─── PO Resolution ────────────────────────────────────────────────────────────

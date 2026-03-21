@@ -1,0 +1,142 @@
+{
+  "summary": "PO Resolution Workflow Fix Testing Complete - All 65 tests passed (23 new workflow fix tests + 42 existing PO resolution tests). Fixed bug in batch-resolve endpoint (undefined 'candidates' variable). Verified all features: PO extraction from subject/description/notes, resolve_po_from_document wrapper, server.py intake/reprocess endpoints, auto_resolution_service, document_pipeline, ap_review/spiro dependency injection, email_polling imports.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "BC API Connection",
+        "issue": "BC API cannot connect in preview environment (expected). BC reference cache has real POs from production sync. All BC link attempts fail with bc_auth_error.",
+        "priority": "INFO"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_po_resolution_workflow_fix.py",
+    "/app/backend/tests/test_po_resolution.py",
+    "/app/test_reports/pytest/po_resolution_workflow_fix_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "FIXED: routers/po_resolution.py line 214 had undefined 'candidates' variable - changed to result.get('candidates_raw', [])",
+    "VERIFIED: po_resolution_service.py resolve_po_from_document correctly merges email_subject → subject, email_body → description, notes → notes",
+    "VERIFIED: server.py _internal_intake_document (line 3578-3604) uses resolve_po_from_document(current_doc)",
+    "VERIFIED: server.py reprocess_document (line 4764) uses resolve_po_from_document(doc)",
+    "VERIFIED: auto_resolution_service.py (line 458-462) uses resolve_po_from_document(refreshed_doc)",
+    "VERIFIED: document_pipeline.py (line 275-285) merges email_subject/body before calling resolve_po",
+    "VERIFIED: routers/po_resolution.py batch_resolve_po uses resolve_po_from_document(doc)",
+    "VERIFIED: ap_review.py uses get_db() from deps (line 79)",
+    "VERIFIED: spiro.py uses get_db() from deps (line 23)",
+    "VERIFIED: email_polling.py has required imports from deps (lines 1-14)"
+  ],
+  "updated_files": [
+    "/app/backend/routers/po_resolution.py",
+    "/app/backend/tests/test_po_resolution_workflow_fix.py"
+  ],
+  "success_rate": {
+    "backend": "100% (65 tests passed - 23 workflow fix + 42 existing PO resolution)",
+    "frontend": "N/A (backend-only testing requested)"
+  },
+  "test_credentials": "N/A - API tests used public endpoints",
+  "seed_data_creation": "N/A - Used existing documents in database",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "PO Resolution Workflow Fix verified. All function signatures correct. Key endpoints tested: GET /api/health (200), GET /api/po-resolution/metrics (200), GET /api/documents (200), GET /api/email-polling/status (200), GET /api/ap-review/vendors (200), GET /api/spiro/status (200), POST /api/po-resolution/batch-resolve (200). Fixed bug in batch-resolve where 'candidates' was undefined.",
+  "verified_features": {
+    "PO Candidate Extraction from Subject/Description/Notes": {
+      "status": "PASS",
+      "verified": [
+        "extract_po_candidates scans subject field for PO patterns",
+        "extract_po_candidates scans description field for PO patterns",
+        "extract_po_candidates scans notes field for PO patterns",
+        "extract_po_candidates scans remarks field for PO patterns"
+      ]
+    },
+    "resolve_po_from_document Wrapper": {
+      "status": "PASS",
+      "verified": [
+        "Merges doc.email_subject into extracted['subject']",
+        "Merges doc.email_body into extracted['description']",
+        "Merges doc.notes into extracted['notes']",
+        "Correct function signature: resolve_po_from_document(doc: Dict)"
+      ]
+    },
+    "server.py Intake Endpoint": {
+      "status": "PASS",
+      "verified": [
+        "_internal_intake_document uses resolve_po_from_document(current_doc)",
+        "Correctly imports from services.po_resolution_service"
+      ]
+    },
+    "server.py Reprocess Endpoint": {
+      "status": "PASS",
+      "verified": [
+        "reprocess_document uses resolve_po_from_document(doc)",
+        "Correctly imports from services.po_resolution_service"
+      ]
+    },
+    "auto_resolution_service.py": {
+      "status": "PASS",
+      "verified": [
+        "Uses resolve_po_from_document(refreshed_doc)",
+        "Correctly imports from services.po_resolution_service"
+      ]
+    },
+    "document_pipeline.py": {
+      "status": "PASS",
+      "verified": [
+        "Merges email_subject into extracted['subject'] before extraction",
+        "Merges email_body into extracted['description'] before extraction",
+        "po_resolution stage exists in STAGE_ORDER"
+      ]
+    },
+    "routers/po_resolution.py Batch Resolver": {
+      "status": "PASS",
+      "verified": [
+        "Uses resolve_po_from_document(doc)",
+        "FIXED: Now uses result.get('candidates_raw', []) instead of undefined 'candidates'"
+      ]
+    },
+    "ap_review.py Dependency Injection": {
+      "status": "PASS",
+      "verified": [
+        "Imports get_db from deps",
+        "Uses get_db() instead of global db",
+        "Imports get_bc_service from services.business_central_service"
+      ]
+    },
+    "spiro.py Dependency Injection": {
+      "status": "PASS",
+      "verified": [
+        "Imports get_db from deps",
+        "Uses get_db() instead of global db"
+      ]
+    },
+    "email_polling.py Imports": {
+      "status": "PASS",
+      "verified": [
+        "Has required imports from deps",
+        "/api/email-polling/status endpoint returns valid JSON"
+      ]
+    },
+    "Core API Endpoints": {
+      "status": "PASS",
+      "verified": [
+        "/api/health returns 200",
+        "/api/po-resolution/metrics returns 200 with expected structure",
+        "/api/documents returns 200",
+        "/api/email-polling/status returns 200"
+      ]
+    }
+  },
+  "bug_fixed": {
+    "file": "/app/backend/routers/po_resolution.py",
+    "line": 214,
+    "issue": "Undefined variable 'candidates' in batch_resolve_po function",
+    "fix": "Changed 'candidates' to 'result.get(\"candidates_raw\", [])'"
+  }
+}

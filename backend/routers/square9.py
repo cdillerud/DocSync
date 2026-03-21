@@ -3,7 +3,8 @@
 from fastapi import APIRouter, Query
 from deps import get_db
 from services.square9_workflow import (
-    Square9Stage, DEFAULT_WORKFLOW_CONFIG, get_square9_stage_info
+    Square9Stage, DEFAULT_WORKFLOW_CONFIG, get_square9_stage_info,
+    determine_square9_stage,
 )
 
 router = APIRouter(prefix="/square9", tags=["Square9"])

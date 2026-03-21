@@ -165,7 +165,7 @@ async def batch_resolve_po(
     db = get_db()
 
     from services.po_resolution_service import (
-        extract_po_candidates, resolve_po, attempt_bc_link, PO_REQUIRED_DOC_TYPES,
+        resolve_po_from_document, attempt_bc_link, PO_REQUIRED_DOC_TYPES,
     )
 
     types = [t.strip() for t in doc_types.split(",") if t.strip()]
@@ -181,7 +181,9 @@ async def batch_resolve_po(
     docs = await db.hub_documents.find(
         query,
         {"_id": 0, "id": 1, "file_name": 1, "document_type": 1,
-         "extracted_fields": 1, "raw_text": 1, "po_candidates": 1}
+         "extracted_fields": 1, "raw_text": 1, "po_candidates": 1,
+         "email_subject": 1, "email_body": 1, "notes": 1,
+         "suggested_job_type": 1}
     ).limit(limit).to_list(limit)
 
     stats = {
@@ -201,24 +203,15 @@ async def batch_resolve_po(
     for doc in docs:
         doc_id = doc["id"]
         doc_type = doc.get("document_type", "")
-        ef = doc.get("extracted_fields") or {}
-        raw_text = doc.get("raw_text") or ""
 
-        candidates = extract_po_candidates(raw_text, ef, file_name=doc.get("file_name", ""))
-
-        result = await resolve_po(
-            po_candidates=candidates,
-            doc_type=doc_type,
-            document_id=doc_id,
-            source_filename=doc.get("file_name", ""),
-        )
+        result = await resolve_po_from_document(doc)
 
         bc_link = await attempt_bc_link(doc_id, result)
         result["bc_link"] = bc_link
 
         await db.hub_documents.update_one(
             {"id": doc_id},
-            {"$set": {"po_resolution": result, "po_candidates": candidates}},
+            {"$set": {"po_resolution": result, "po_candidates": result.get("candidates_raw", [])}},
         )
 
         status = result["status"]

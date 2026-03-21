@@ -455,12 +455,12 @@ class AutoResolutionService:
             # ---------------------------------------------------------
             try:
                 from services.po_resolution_service import (
-                    resolve_po, attempt_bc_link, requires_po_resolution, PO_REQUIRED_DOC_TYPES
+                    resolve_po_from_document, attempt_bc_link, requires_po_resolution, PO_REQUIRED_DOC_TYPES
                 )
                 refreshed_doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
                 if refreshed_doc and requires_po_resolution(refreshed_doc.get("document_type", "")):
-                    po_result = await resolve_po(self.db, refreshed_doc)
-                    bc_link_result = await attempt_bc_link(self.db, doc_id, po_result)
+                    po_result = await resolve_po_from_document(refreshed_doc)
+                    bc_link_result = await attempt_bc_link(doc_id, po_result)
                     po_result["bc_link"] = bc_link_result
                     await self.db.hub_documents.update_one(
                         {"id": doc_id},

@@ -73,18 +73,16 @@ class PostToBCResponse(BaseModel):
 
 
 # =============================================================================
-# DEPENDENCY: Get DB and BC Service
+# DEPENDENCIES
 # =============================================================================
 
-# These will be set by the main server.py when including this router
-db = None
-bc_service = None
+from deps import get_db
+from services.business_central_service import get_bc_service
 
-def set_dependencies(database, business_central_service):
-    """Set dependencies injected from main server."""
-    global db, bc_service
-    db = database
-    bc_service = business_central_service
+
+def set_dependencies(database=None, business_central_service=None):
+    """Legacy no-op kept for backward compatibility with main.py startup."""
+    pass
 
 
 # =============================================================================
@@ -100,14 +98,8 @@ async def search_vendors(
     Search vendors from Business Central.
     Returns list of vendors matching the search criteria.
     """
-    if bc_service is None:
-        # Fallback to importing the service
-        from services.business_central_service import get_bc_service
-        service = get_bc_service()
-    else:
-        service = bc_service
-    
     try:
+        service = get_bc_service()
         result = await service.get_vendors(filter_text=q, limit=limit)
         return {
             "vendors": result.get("vendors", []),
@@ -122,13 +114,8 @@ async def search_vendors(
 @ap_review_router.get("/vendors/{vendor_id}")
 async def get_vendor(vendor_id: str):
     """Get a specific vendor by ID or number."""
-    if bc_service is None:
-        from services.business_central_service import get_bc_service
-        service = get_bc_service()
-    else:
-        service = bc_service
-    
     try:
+        service = get_bc_service()
         vendor = await service.get_vendor_by_id(vendor_id)
         if not vendor:
             raise HTTPException(status_code=404, detail="Vendor not found")
@@ -153,13 +140,8 @@ async def search_purchase_orders(
     Search open purchase orders from Business Central.
     Optionally filter by vendor.
     """
-    if bc_service is None:
-        from services.business_central_service import get_bc_service
-        service = get_bc_service()
-    else:
-        service = bc_service
-    
     try:
+        service = get_bc_service()
         result = await service.get_open_purchase_orders(vendor_id=vendor_id, limit=limit)
         return {
             "purchaseOrders": result.get("purchaseOrders", []),
@@ -183,9 +165,7 @@ async def save_ap_review(doc_id: str, data: APReviewData):
     """
     logger.info(f"AP Review Save: doc_id={doc_id}, vendor_id={data.vendor_id}, invoice={data.invoice_number}")
     
-    if db is None:
-        logger.error("AP Review Save failed: Database not initialized")
-        raise HTTPException(status_code=500, detail="Database not initialized")
+    db = get_db()
     
     # Find document
     doc = await db.hub_documents.find_one({"id": doc_id})
@@ -315,9 +295,7 @@ async def mark_ready_for_post(doc_id: str):
     """
     logger.info(f"AP Review Mark Ready: doc_id={doc_id}")
     
-    if db is None:
-        logger.error("AP Review Mark Ready failed: Database not initialized")
-        raise HTTPException(status_code=500, detail="Database not initialized")
+    db = get_db()
     
     # Find document
     doc = await db.hub_documents.find_one({"id": doc_id})
@@ -377,8 +355,7 @@ async def post_document_to_bc(doc_id: str, request: Optional[PostToBCRequest] = 
     """
     logger.info(f"AP Review Post to BC: doc_id={doc_id}")
     
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not initialized")
+    db = get_db()
     
     # Find document
     doc = await db.hub_documents.find_one({"id": doc_id})
@@ -403,11 +380,7 @@ async def post_document_to_bc(doc_id: str, request: Optional[PostToBCRequest] = 
         )
     
     # Get BC service
-    if bc_service is None:
-        from services.business_central_service import get_bc_service
-        service = get_bc_service()
-    else:
-        service = bc_service
+    service = get_bc_service()
     
     # Build invoice data from document or request
     extracted = doc.get("extracted_fields", {})
@@ -575,8 +548,7 @@ async def post_document_to_bc(doc_id: str, request: Optional[PostToBCRequest] = 
 @ap_review_router.get("/documents/{doc_id}/bc-status")
 async def get_bc_posting_status(doc_id: str):
     """Get the BC posting status for a document."""
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not initialized")
+    db = get_db()
     
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
@@ -614,9 +586,7 @@ async def extract_invoice_data_endpoint(doc_id: str):
     """
     logger.info(f"AI Invoice Extraction: doc_id={doc_id}")
     
-    if db is None:
-        logger.error("AI Invoice Extraction failed: Database not initialized")
-        raise HTTPException(status_code=500, detail="Database not initialized")
+    db = get_db()
     
     # Find document
     doc = await db.hub_documents.find_one({"id": doc_id})
@@ -691,8 +661,7 @@ async def extract_invoice_data_endpoint(doc_id: str):
 @ap_review_router.get("/documents/{doc_id}/extraction-status")
 async def get_extraction_status(doc_id: str):
     """Get the AI extraction status for a document."""
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not initialized")
+    db = get_db()
     
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:

@@ -123,15 +123,21 @@ from services.bc_api_helpers import get_bc_companies as _get_bc_companies
 
 # ---------------------------------------------------------------------------
 # Server.py functions still needed (remaining extraction targets)
-# Used for: run_upload_and_link_workflow, link_document_to_bc,
-#   classify_document_type, upload_to_sharepoint, create_sharing_link,
-#   get_bc_token, check_duplicate_purchase_invoice, create_purchase_invoice_header
+# Used for: classify_document_type, get_bc_token (remaining lazy imports)
 # ---------------------------------------------------------------------------
 
 def _server():
     """Lazy import of server module for functions not yet extracted."""
     import server
     return server
+
+# Extracted service imports
+from services.document_orchestration_service import run_upload_and_link_workflow as _run_upload_and_link_workflow
+from services.sharepoint_service import upload_to_sharepoint as _upload_to_sharepoint
+from services.sharepoint_service import create_sharing_link as _create_sharing_link
+from services.bc_link_service import link_document_to_bc as _link_document_to_bc
+from services.bc_draft_service import check_duplicate_purchase_invoice as _check_duplicate_purchase_invoice
+from services.bc_draft_service import create_purchase_invoice_header as _create_purchase_invoice_header
 
 
 # ---------------------------------------------------------------------------
@@ -148,7 +154,6 @@ async def upload_document(
     source: str = Form("manual_upload"),
 ):
     db = get_db()
-    srv = _server()
     DocType, SourceSystem, CaptureChannel, WorkflowStatus, WorkflowEvent, DocumentClassifier = _get_workflow_enums()
 
     file_content = await file.read()
@@ -224,7 +229,7 @@ async def upload_document(
             len(file_content), correlation_id,
         )
 
-    workflow_id, final_status = await srv.run_upload_and_link_workflow(
+    workflow_id, final_status = await _run_upload_and_link_workflow(
         doc_id, file_content, file.filename, document_type, bc_record_id, bc_document_no,
     )
 
@@ -239,7 +244,6 @@ async def upload_document(
 
 async def retry_document(doc_id: str):
     db = get_db()
-    srv = _server()
 
     from services.square9_workflow import (
         should_retry, increment_retry, DEFAULT_WORKFLOW_CONFIG,
@@ -276,7 +280,7 @@ async def retry_document(doc_id: str):
 
     file_content = file_path.read_bytes()
 
-    workflow_id, final_status = await srv.run_upload_and_link_workflow(
+    workflow_id, final_status = await _run_upload_and_link_workflow(
         doc_id, file_content, doc["file_name"],
         doc.get("document_type", "Other"),
         doc.get("bc_record_id"), doc.get("bc_document_no"),
@@ -299,7 +303,6 @@ async def retry_document(doc_id: str):
 
 async def resubmit_document(doc_id: str):
     db = get_db()
-    srv = _server()
 
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
@@ -318,7 +321,7 @@ async def resubmit_document(doc_id: str):
         "updated_utc": datetime.now(timezone.utc).isoformat(),
     }})
 
-    workflow_id, final_status = await srv.run_upload_and_link_workflow(
+    workflow_id, final_status = await _run_upload_and_link_workflow(
         doc_id, file_content, doc["file_name"],
         doc.get("document_type", "Other"),
         doc.get("bc_record_id"), doc.get("bc_document_no"),
@@ -330,7 +333,6 @@ async def resubmit_document(doc_id: str):
 
 async def link_document(doc_id: str, bc_record_id: str):
     db = get_db()
-    srv = _server()
 
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
@@ -344,7 +346,7 @@ async def link_document(doc_id: str, bc_record_id: str):
     share_link = doc.get("sharepoint_share_link_url", "")
     bc_entity = doc.get("bc_entity", "salesOrders")
 
-    link_result = await srv.link_document_to_bc(
+    link_result = await _link_document_to_bc(
         bc_record_id=bc_record_id,
         share_link=share_link,
         file_name=doc["file_name"],
@@ -499,8 +501,8 @@ async def intake_document(
     sp_error = None
 
     try:
-        sp_result = await srv.upload_to_sharepoint(file_content, final_filename, folder)
-        share_link = await srv.create_sharing_link(sp_result["drive_id"], sp_result["item_id"])
+        sp_result = await _upload_to_sharepoint(file_content, final_filename, folder)
+        share_link = await _create_sharing_link(sp_result["drive_id"], sp_result["item_id"])
         logger.info("Document %s stored in SharePoint: %s", doc_id, sp_result.get("web_url"))
     except Exception as e:
         sp_error = str(e)
@@ -626,7 +628,7 @@ async def intake_document(
                 companies = await _get_bc_companies()
                 company_id = companies[0]["id"] if companies else None
 
-                dup_check = await srv.check_duplicate_purchase_invoice(
+                dup_check = await _check_duplicate_purchase_invoice(
                     vendor_no=vendor_no, external_doc_no=external_doc_no,
                     company_id=company_id, token=token,
                 )
@@ -641,7 +643,7 @@ async def intake_document(
                         "updated_utc": datetime.now(timezone.utc).isoformat(),
                     }})
                 else:
-                    draft_result = await srv.create_purchase_invoice_header(
+                    draft_result = await _create_purchase_invoice_header(
                         vendor_no=vendor_no, external_doc_no=external_doc_no,
                         document_date=norm_fields.get("invoice_date") or norm_fields.get("due_date_raw"),
                         due_date=norm_fields.get("due_date"),
@@ -674,7 +676,7 @@ async def intake_document(
                 logger.warning("Missing vendor_no or external_doc_no for draft, falling back to link")
                 if bc_record_id:
                     try:
-                        link_result = await srv.link_document_to_bc(
+                        link_result = await _link_document_to_bc(
                             bc_record_id=bc_record_id, share_link=share_link,
                             file_name=final_filename, file_content=file_content,
                             bc_entity=bc_entity,
@@ -693,7 +695,7 @@ async def intake_document(
 
         elif bc_record_id:
             try:
-                link_result = await srv.link_document_to_bc(
+                link_result = await _link_document_to_bc(
                     bc_record_id=bc_record_id, share_link=share_link,
                     file_name=final_filename, file_content=file_content,
                     bc_entity=bc_entity,
@@ -804,7 +806,6 @@ async def classify_document(doc_id: str):
 async def resolve_and_link_document(doc_id: str, resolve: ResolveRequest):
     """Resolve a NeedsReview document and link to BC."""
     db = get_db()
-    srv = _server()
     DEFAULT_JOB_TYPES = _get_default_job_types()
 
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
@@ -840,8 +841,8 @@ async def resolve_and_link_document(doc_id: str, resolve: ResolveRequest):
         folder = job_configs.get("sharepoint_folder", "Incoming")
         bc_entity = job_configs.get("bc_entity", "salesOrders")
         try:
-            sp_result = await srv.upload_to_sharepoint(file_content, doc["file_name"], folder)
-            share_link = await srv.create_sharing_link(sp_result["drive_id"], sp_result["item_id"])
+            sp_result = await _upload_to_sharepoint(file_content, doc["file_name"], folder)
+            share_link = await _create_sharing_link(sp_result["drive_id"], sp_result["item_id"])
 
             await db.hub_documents.update_one({"id": doc_id}, {"$set": {
                 "sharepoint_drive_id": sp_result["drive_id"],
@@ -859,7 +860,7 @@ async def resolve_and_link_document(doc_id: str, resolve: ResolveRequest):
 
     if bc_record_id and file_content:
         try:
-            link_result = await srv.link_document_to_bc(
+            link_result = await _link_document_to_bc(
                 bc_record_id=bc_record_id, share_link=share_link or "",
                 file_name=doc["file_name"], file_content=file_content,
                 bc_entity=bc_entity,

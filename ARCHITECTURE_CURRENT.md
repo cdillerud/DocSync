@@ -606,10 +606,10 @@ All handler implementations have been extracted from server.py into dedicated se
 
 ### Known follow-up debt
 
-- **~8 router/service modules** still import helpers from server.py (settings config vars, email/mailbox orchestration, link_document, ensure_sharepoint_folder_exists)
-- **document_handlers.py** still uses `_server()` lazy import for ~20+ orchestration functions (dedicated extraction pass needed)
-- server.py retains orchestration logic (run_upload_and_link_workflow, email polling, BC integration helpers, AI classification)
-- server.py retains module-level DB connection, startup/shutdown lifecycle, and background workers
+- **~8 router/service modules** still import helpers from server.py (settings config vars, email/mailbox orchestration)
+- **document_handlers.py** still uses `_server()` lazy import for `classify_document_type` and `get_bc_token` only (2 remaining functions)
+- server.py retains email polling, AI classification, and module-level DB connection/lifecycle
+- server.py reduced from ~8,350 to ~7,740 lines via Pass 2 extraction
 
 ### 5d. Document Handler Extraction (March 2026)
 
@@ -653,16 +653,30 @@ These functions are still called via lazy `import server`:
 
 | Function | Domain | Lines in server.py |
 |----------|--------|-------------------|
-| `run_upload_and_link_workflow` | Document orchestration | ~130 |
-| `classify_document_with_ai` | AI/Gemini classification | ~20 |
 | `classify_document_type` | Deterministic classification | ~50 |
-| `upload_to_sharepoint` | SharePoint integration | ~80 |
-| `create_sharing_link` | SharePoint integration | ~30 |
-| `link_document_to_bc` | BC linking | ~60 |
 | `get_bc_token` / `get_bc_companies` | BC auth | ~40 |
-| `check_duplicate_purchase_invoice` | BC duplicate check | ~40 |
-| `create_purchase_invoice_header` | BC draft creation | ~60 |
-| `is_eligible_for_draft_creation` | Draft eligibility | ~50 |
+
+**Extracted in Pass 2 (March 2026):**
+
+| Function | Extracted to | Lines saved |
+|----------|-------------|-------------|
+| `run_upload_and_link_workflow` | `services/document_orchestration_service.py` | ~130 |
+| `upload_to_sharepoint` | `services/sharepoint_service.py` | ~80 |
+| `create_sharing_link` | `services/sharepoint_service.py` | ~30 |
+| `ensure_sharepoint_folder_exists` | `services/sharepoint_service.py` | ~60 |
+| `upload_to_sharepoint_with_routing` | `services/sharepoint_service.py` | ~30 |
+| `link_document_to_bc` | `services/bc_link_service.py` | ~80 |
+| `check_duplicate_purchase_invoice` | `services/bc_draft_service.py` | ~40 |
+| `create_purchase_invoice_header` | `services/bc_draft_service.py` | ~80 |
+| `is_eligible_for_draft_creation` | `services/bc_draft_service.py` | ~10 |
+
+server.py thin wrappers retained for all 9 extracted functions (3-line delegation).
+
+#### Still on next-pass list (not yet extracted)
+
+| Function | Domain | Lines in server.py |
+|----------|--------|-------------------|
+| `classify_document_with_ai` | AI/Gemini classification | ~20 |
 | `compute_ap_normalized_fields` | AP normalization | ~20 |
 | `lookup_vendor_alias` | Alias resolution | ~30 |
 | `check_duplicate_document` | Document dedup | ~40 |

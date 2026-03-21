@@ -137,7 +137,7 @@ Only use branch: `conflict_150326_1947`
 - ✅ BC Shipment Sync → Inventory Ledger (outbound_shipment movements)
 
 ### Remaining
-- P0: server.py monolith refactor (partially done — services extracted but ~7 functions still imported from server.py)
+- P0: server.py monolith refactor — Pass 2 DONE (7,740 lines, down from 8,358). 2 functions remain on lazy import.
 - P1: Investigate remaining `no_bc_match` failures from 500-doc batch
 - P2: Vendor Inventory Dashboard & Sales module
 - P2: Product/BOM module

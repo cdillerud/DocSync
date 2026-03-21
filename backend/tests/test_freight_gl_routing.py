@@ -410,3 +410,189 @@ class TestDocumentIntegration:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# =============================================================================
+# NEW TESTS: do_not_pay, freight_issues, dropship_international, storage_handling
+# =============================================================================
+
+from services.freight_gl_routing_service import (
+    DEFAULT_GL_ACCOUNTS,
+    DO_NOT_PAY_KEYWORDS,
+    FREIGHT_ISSUES_KEYWORDS,
+    STORAGE_HANDLING_KEYWORDS,
+    FreightGLRoutingService,
+)
+from unittest.mock import AsyncMock, MagicMock
+import asyncio as _asyncio
+
+
+def _make_freight_doc(**overrides):
+    base = {
+        "id": "test-freight-001",
+        "document_type": "Freight_Document",
+        "file_name": "freight_invoice.pdf",
+        "vendor_canonical": "XPO Logistics",
+        "extracted_fields": {},
+        "email_subject": "",
+        "email_body_snippet": "",
+    }
+    base.update(overrides)
+    return base
+
+
+class TestDoNotPayRouting:
+    def test_do_not_pay_keyword_in_text(self):
+        from unittest.mock import MagicMock
+        db = MagicMock()
+        service = FreightGLRoutingService(db)
+        doc = _make_freight_doc(
+            extracted_fields={"description": "DO NOT PAY - duplicate freight bill"},
+        )
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(service.classify_document(doc))
+        assert result["do_not_pay"] is True
+        assert result["recommended_gl"] is None
+        assert result["sub_type"] == "do_not_pay"
+        print("PASS: do_not_pay keyword → no GL posting")
+
+    def test_do_not_pay_folder_path(self):
+        from unittest.mock import MagicMock
+        db = MagicMock()
+        service = FreightGLRoutingService(db)
+        doc = _make_freight_doc(folder_path="DO NOT PAY/2026")
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(service.classify_document(doc))
+        assert result["do_not_pay"] is True
+        assert result["recommended_gl"] is None
+        print("PASS: DO NOT PAY folder → no GL posting")
+
+    def test_do_not_pay_explicit_flag(self):
+        from unittest.mock import MagicMock
+        db = MagicMock()
+        service = FreightGLRoutingService(db)
+        doc = _make_freight_doc(do_not_pay=True)
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(service.classify_document(doc))
+        assert result["do_not_pay"] is True
+        print("PASS: explicit do_not_pay flag → respected")
+
+
+class TestFreightIssuesRouting:
+    def test_freight_issues_keyword(self):
+        from unittest.mock import AsyncMock, MagicMock
+        db = MagicMock()
+        db.freight_gl_accounts = MagicMock()
+        db.freight_gl_accounts.find = MagicMock(return_value=MagicMock(
+            sort=MagicMock(return_value=MagicMock(
+                to_list=AsyncMock(return_value=DEFAULT_GL_ACCOUNTS)
+            ))
+        ))
+        service = FreightGLRoutingService(db)
+        doc = _make_freight_doc(
+            extracted_fields={"description": "Freight claim for damaged shipment"},
+        )
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(service.classify_document(doc))
+        assert result["freight_issues"] is True
+        assert result.get("workflow_status_override") == "needs_logistics_approval"
+        print("PASS: freight_issues → needs_logistics_approval")
+
+    def test_freight_issues_folder(self):
+        from unittest.mock import AsyncMock, MagicMock
+        db = MagicMock()
+        db.freight_gl_accounts = MagicMock()
+        db.freight_gl_accounts.find = MagicMock(return_value=MagicMock(
+            sort=MagicMock(return_value=MagicMock(
+                to_list=AsyncMock(return_value=DEFAULT_GL_ACCOUNTS)
+            ))
+        ))
+        service = FreightGLRoutingService(db)
+        doc = _make_freight_doc(folder_path="Freight Issues/2026-03")
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(service.classify_document(doc))
+        assert result["freight_issues"] is True
+        print("PASS: Freight Issues folder → flag set")
+
+
+class TestDropshipInternational:
+    def test_dropship_international_combined(self):
+        from unittest.mock import AsyncMock, MagicMock
+        db = MagicMock()
+        db.freight_gl_accounts = MagicMock()
+        db.freight_gl_accounts.find = MagicMock(return_value=MagicMock(
+            sort=MagicMock(return_value=MagicMock(
+                to_list=AsyncMock(return_value=DEFAULT_GL_ACCOUNTS)
+            ))
+        ))
+        service = FreightGLRoutingService(db)
+        doc = _make_freight_doc(
+            extracted_fields={"description": "International drop ship order #W12345"},
+        )
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(service.classify_document(doc))
+        assert result["sub_type"] == "dropship_international"
+        gl = result.get("recommended_gl") or {}
+        assert gl.get("gl_number") == "6115-00", f"Expected 6115-00, got {gl.get('gl_number')}"
+        print("PASS: dropship + international → 6115-00")
+
+
+class TestStorageHandling:
+    def test_storage_handling_keyword(self):
+        from unittest.mock import AsyncMock, MagicMock
+        db = MagicMock()
+        db.freight_gl_accounts = MagicMock()
+        db.freight_gl_accounts.find = MagicMock(return_value=MagicMock(
+            sort=MagicMock(return_value=MagicMock(
+                to_list=AsyncMock(return_value=DEFAULT_GL_ACCOUNTS)
+            ))
+        ))
+        service = FreightGLRoutingService(db)
+        doc = _make_freight_doc(
+            extracted_fields={"description": "Warehouse storage & handling charge for March"},
+        )
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(service.classify_document(doc))
+        assert result["sub_type"] == "storage_handling"
+        gl = result.get("recommended_gl") or {}
+        assert gl.get("gl_number") == "5260-00", f"Expected 5260-00, got {gl.get('gl_number')}"
+        print("PASS: storage & handling → 5260-00")
+
+
+class TestGLAccountSeeder:
+    def test_all_folder_categories_have_gl_accounts(self):
+        account_ids = {a["account_id"] for a in DEFAULT_GL_ACCOUNTS}
+        sub_types = {a["sub_type"] for a in DEFAULT_GL_ACCOUNTS}
+        assert "gl-storage-handling" in account_ids
+        assert "gl-dropship-international" in account_ids
+        assert "gl-dunnage-return" in account_ids
+        assert "gl-outbound-dropship" in account_ids
+        assert "storage_handling" in sub_types
+        assert "dropship_international" in sub_types
+        print("PASS: All folder categories have GL accounts")
+
+    def test_keyword_lists_not_empty(self):
+        assert len(DO_NOT_PAY_KEYWORDS) > 0
+        assert len(FREIGHT_ISSUES_KEYWORDS) > 0
+        assert len(STORAGE_HANDLING_KEYWORDS) > 0
+        print("PASS: Keyword lists populated")
+
+
+class TestNonFreightUnchanged:
+    def test_non_freight_has_false_flags(self):
+        from unittest.mock import MagicMock
+        db = MagicMock()
+        service = FreightGLRoutingService(db)
+        doc = {
+            "id": "test-ap-001",
+            "document_type": "AP_Invoice",
+            "file_name": "invoice_12345.pdf",
+            "vendor_canonical": "Acme Widgets Inc",
+            "extracted_fields": {"vendor": "Acme Widgets Inc"},
+        }
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(service.classify_document(doc))
+        assert result["is_freight"] is False
+        assert result.get("do_not_pay", False) is False
+        assert result.get("freight_issues", False) is False
+        print("PASS: Non-freight doc unaffected by new flags")

@@ -117,6 +117,28 @@ DEFAULT_GL_ACCOUNTS = [
         "priority": 3,
     },
     {
+        "account_id": "gl-storage-handling",
+        "gl_number": "5260-00",
+        "gl_name": "Storage & Handling Charges",
+        "direction": "inbound",
+        "sub_type": "storage_handling",
+        "description": "Warehouse storage and handling charges (S&H Invoices Approved)",
+        "keywords": ["storage", "handling", "warehousing", "s&h", "storage & handling"],
+        "enabled": True,
+        "priority": 4,
+    },
+    {
+        "account_id": "gl-dropship-international",
+        "gl_number": "6115-00",
+        "gl_name": "Drop Ship Freight - International",
+        "direction": "outbound",
+        "sub_type": "dropship_international",
+        "description": "International drop-ship freight (Dropship International → by Order)",
+        "keywords": ["drop ship international", "dropship international", "international drop"],
+        "enabled": True,
+        "priority": 3,
+    },
+    {
         "account_id": "gl-unclassified",
         "gl_number": "5900-00",
         "gl_name": "Freight - Unclassified",
@@ -180,6 +202,22 @@ DUNNAGE_KEYWORDS = [
 DROP_SHIP_KEYWORDS = [
     "drop ship", "dropship", "drop-ship", "direct ship",
     "blind ship",
+]
+
+STORAGE_HANDLING_KEYWORDS = [
+    "storage", "handling", "warehousing", "s&h", "storage & handling",
+    "warehouse charge", "storage charge", "handling charge",
+]
+
+DO_NOT_PAY_KEYWORDS = [
+    "do not pay", "do-not-pay", "donotpay", "void", "cancelled",
+    "duplicate payment", "no payment required",
+]
+
+FREIGHT_ISSUES_KEYWORDS = [
+    "freight issue", "freight claim", "freight dispute",
+    "overcharge", "damage claim", "shortage claim",
+    "freight problem", "carrier issue",
 ]
 
 
@@ -298,10 +336,37 @@ class FreightGLRoutingService:
                 "sub_type": None,
                 "recommended_gl": None,
                 "confidence": 0.0,
+                "do_not_pay": False,
+                "freight_issues": False,
                 "reasoning": ["Document is not freight-related"],
                 "signals": signals,
                 "classified_at": datetime.now(timezone.utc).isoformat(),
             }
+
+        # --- Step 2a: Check DO NOT PAY / Freight Issues flags ---
+        text_blob = self._build_text_blob(doc).lower()
+        do_not_pay = self._detect_do_not_pay(doc, text_blob)
+        freight_issues = self._detect_freight_issues(doc, text_blob)
+
+        if do_not_pay:
+            signals.append({"source": "routing_flag", "signal": "DO NOT PAY detected",
+                            "direction": "none", "weight": 10.0})
+            return {
+                "is_freight": True,
+                "direction": None,
+                "sub_type": "do_not_pay",
+                "recommended_gl": None,
+                "confidence": 1.0,
+                "do_not_pay": True,
+                "freight_issues": False,
+                "reasoning": ["Document flagged as DO NOT PAY — no GL posting"],
+                "signals": signals,
+                "classified_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+        if freight_issues:
+            signals.append({"source": "routing_flag", "signal": "Freight Issues detected",
+                            "direction": "unknown", "weight": 8.0})
 
         # --- Step 2: Determine direction ---
         # 2a. From reference resolution
@@ -330,9 +395,7 @@ class FreightGLRoutingService:
                         direction_scores["outbound"] += 2.0
                         signals.append({"source": "vendor_intel", "signal": f"Typical domain: {domain}", "direction": "outbound", "weight": 2.0})
 
-        # 2c. From extracted text/keywords
-        text_blob = self._build_text_blob(doc).lower()
-
+        # 2c. From extracted text/keywords (text_blob already built in Step 2a)
         for kw in INBOUND_KEYWORDS:
             if kw in text_blob:
                 direction_scores["inbound"] += 1.0
@@ -355,10 +418,10 @@ class FreightGLRoutingService:
         folder_path = doc.get("folder_path") or doc.get("routing_details", {}).get("folder_path") or ""
         if "dropship" in folder_path.lower() or "drop ship" in folder_path.lower():
             direction_scores["inbound"] += 1.5
-            signals.append({"source": "folder", "signal": f"Folder: dropship", "direction": "inbound", "weight": 1.5})
+            signals.append({"source": "folder", "signal": "Folder: dropship", "direction": "inbound", "weight": 1.5})
         elif "warehouse" in folder_path.lower():
             direction_scores["inbound"] += 1.0
-            signals.append({"source": "folder", "signal": f"Folder: warehouse", "direction": "inbound", "weight": 1.0})
+            signals.append({"source": "folder", "signal": "Folder: warehouse", "direction": "inbound", "weight": 1.0})
 
         # Determine winning direction
         best_direction = max(direction_scores, key=direction_scores.get)
@@ -391,10 +454,16 @@ class FreightGLRoutingService:
             "sub_type": sub_type,
             "recommended_gl": recommended,
             "confidence": round(confidence, 3),
+            "do_not_pay": False,
+            "freight_issues": freight_issues,
             "reasoning": reasoning,
             "signals": signals,
             "classified_at": datetime.now(timezone.utc).isoformat(),
         }
+
+        # If freight issues detected, override workflow status suggestion
+        if freight_issues:
+            result["workflow_status_override"] = "needs_logistics_approval"
 
         return result
 
@@ -426,10 +495,22 @@ class FreightGLRoutingService:
                 "direction": result.get("direction"),
                 "sub_type": result.get("sub_type"),
                 "confidence": result.get("confidence"),
+                "do_not_pay": result.get("do_not_pay", False),
+                "freight_issues": result.get("freight_issues", False),
                 "classified_at": result.get("classified_at"),
             },
             "updated_utc": datetime.now(timezone.utc).isoformat(),
         }
+
+        # Persist top-level routing flags
+        if result.get("do_not_pay"):
+            update_fields["do_not_pay"] = True
+        if result.get("freight_issues"):
+            update_fields["freight_issues"] = True
+            update_fields["needs_logistics_approval"] = True
+        if result.get("workflow_status_override"):
+            update_fields["workflow_status"] = result["workflow_status_override"]
+
         if result.get("recommended_gl"):
             update_fields["freight_gl_classification"]["gl_number"] = result["recommended_gl"]["gl_number"]
             update_fields["freight_gl_classification"]["gl_name"] = result["recommended_gl"]["gl_name"]
@@ -743,26 +824,43 @@ class FreightGLRoutingService:
         return False, signals
 
     def _detect_sub_type(self, doc: Dict, text: str, direction: str) -> Tuple[str, List[Dict]]:
-        """Detect freight sub-type (international, drop-ship, dunnage, etc.)."""
+        """Detect freight sub-type (international, drop-ship, dunnage, storage, etc.)."""
         signals = []
 
-        # Dunnage/returns check first (highest priority sub-type)
+        # Storage & handling check (S&H Invoices)
+        for kw in STORAGE_HANDLING_KEYWORDS:
+            if kw in text:
+                signals.append({"source": "sub_type", "signal": f"Storage/handling keyword: '{kw}'", "direction": direction, "weight": 2.0})
+                return "storage_handling", signals
+
+        # Dunnage/returns check (highest priority sub-type)
         for kw in DUNNAGE_KEYWORDS:
             if kw in text:
                 signals.append({"source": "sub_type", "signal": f"Dunnage keyword: '{kw}'", "direction": direction, "weight": 2.0})
                 return "dunnage_return", signals
 
+        # Combined drop-ship + international check (Dropship International)
+        has_dropship = any(kw in text for kw in DROP_SHIP_KEYWORDS)
+        has_international = any(kw in text for kw in INTERNATIONAL_KEYWORDS)
+        if has_dropship and has_international:
+            signals.append({"source": "sub_type", "signal": "Drop ship + international detected", "direction": direction, "weight": 3.0})
+            return "dropship_international", signals
+
         # Drop ship check
-        for kw in DROP_SHIP_KEYWORDS:
-            if kw in text:
-                signals.append({"source": "sub_type", "signal": f"Drop ship keyword: '{kw}'", "direction": direction, "weight": 2.0})
-                return "drop_ship", signals
+        if has_dropship:
+            for kw in DROP_SHIP_KEYWORDS:
+                if kw in text:
+                    signals.append({"source": "sub_type", "signal": f"Drop ship keyword: '{kw}'", "direction": direction, "weight": 2.0})
+                    break
+            return "drop_ship", signals
 
         # International check
-        for kw in INTERNATIONAL_KEYWORDS:
-            if kw in text:
-                signals.append({"source": "sub_type", "signal": f"International keyword: '{kw}'", "direction": direction, "weight": 1.5})
-                return "international", signals
+        if has_international:
+            for kw in INTERNATIONAL_KEYWORDS:
+                if kw in text:
+                    signals.append({"source": "sub_type", "signal": f"International keyword: '{kw}'", "direction": direction, "weight": 1.5})
+                    break
+            return "international", signals
 
         # Transfer check
         for kw in TRANSFER_KEYWORDS:
@@ -789,7 +887,15 @@ class FreightGLRoutingService:
             if acct.get("direction") == direction and acct.get("sub_type") == sub_type:
                 return {"gl_number": acct["gl_number"], "gl_name": acct["gl_name"], "account_id": acct["account_id"]}
 
-        # Second: direction match (first by priority)
+        # Second: sub_type match (any direction) — covers cases where direction
+        # can't be determined but sub_type is definitive (e.g. storage_handling)
+        for acct in accounts:
+            if not acct.get("enabled", True):
+                continue
+            if acct.get("sub_type") == sub_type:
+                return {"gl_number": acct["gl_number"], "gl_name": acct["gl_name"], "account_id": acct["account_id"]}
+
+        # Third: direction match (first by priority)
         for acct in accounts:
             if not acct.get("enabled", True):
                 continue
@@ -802,6 +908,42 @@ class FreightGLRoutingService:
                 return {"gl_number": acct["gl_number"], "gl_name": acct["gl_name"], "account_id": acct["account_id"]}
 
         return None
+
+    def _detect_do_not_pay(self, doc: Dict, text_blob: str) -> bool:
+        """Detect if document should be routed to DO NOT PAY folder."""
+        # Check folder routing hint
+        folder = doc.get("folder_path") or doc.get("routing_details", {}).get("folder_path") or ""
+        if "do not pay" in folder.lower() or "donotpay" in folder.lower():
+            return True
+
+        # Check explicit flag from upstream classification
+        if doc.get("do_not_pay"):
+            return True
+
+        # Check text for do-not-pay signals
+        for kw in DO_NOT_PAY_KEYWORDS:
+            if kw in text_blob:
+                return True
+
+        return False
+
+    def _detect_freight_issues(self, doc: Dict, text_blob: str) -> bool:
+        """Detect if document has freight issues requiring logistics approval."""
+        # Check folder routing hint
+        folder = doc.get("folder_path") or doc.get("routing_details", {}).get("folder_path") or ""
+        if "freight issue" in folder.lower():
+            return True
+
+        # Check explicit flag from upstream
+        if doc.get("freight_issues") or doc.get("has_freight_issue"):
+            return True
+
+        # Check text for freight issue signals
+        for kw in FREIGHT_ISSUES_KEYWORDS:
+            if kw in text_blob:
+                return True
+
+        return False
 
     def _get_vendor_name(self, doc: Dict) -> str:
         """Extract vendor name from document using all available sources."""

@@ -16,7 +16,31 @@ classification -> extraction -> layout -> entity_resolution -> po_resolution
 -> policy_decision -> document_routing -> learning_capture
 ```
 
-## PO Resolution System (Hardened v2 — Mar 20 2026)
+## PO Resolution System (Hardened v2.3 — Mar 21 2026)
+
+### Multi-Source PO Candidate Extraction
+The system extracts PO candidates from ALL available sources:
+1. `extracted_field:po_number` (0.90 confidence) — AI-extracted PO fields
+2. `extracted_field:purchase_order_number` (0.90)
+3. `extracted_field:customer_po` (0.90)
+4. `extracted_field:order_number` (0.80)
+5. `extracted_field:bol_number` (0.75) — BOL often contains the real PO
+6. **NEW v2.3** `extracted_field:subject` (0.72) — Email subject scanned for PO patterns
+7. **NEW v2.3** `extracted_field:description` (0.72) — Description/email body scanned
+8. **NEW v2.3** `extracted_field:notes` (0.72) — Notes field scanned
+9. `filename:PO_prefix` (0.65) — Explicit PO label in filename
+10. `filename:alpha_prefix` (0.65) — Alpha-prefix POs (W, WA, WR, PR) in filename
+11. `filename:digits` (0.65) — Standalone 5-7 digit numbers in filename
+12. `filename:token_split` (0.60) — Delimiter-split tokens validated as PO format
+13. `regex:text_patterns` (0.70) — Regex matches in raw text
+
+### v2.3 resolve_po_from_document Wrapper (Mar 21 2026)
+Unified document-level resolver that:
+- Merges `email_subject` → `subject` in extraction fields
+- Merges `email_body` → `description` in extraction fields
+- Merges top-level `notes` → `notes` in extraction fields
+- Handles existing `po_candidates` deduplication
+- Used consistently by: server.py (intake + reprocess), auto_resolution_service.py, po_resolution router batch
 
 ### Miss Taxonomy
 Every unresolved PO stores an explicit miss_reason:
@@ -40,106 +64,78 @@ Valid BC PO patterns:
 - T-prefix: T1126
 - Suffix variants: 104718B, 111597_1
 
-Non-PO patterns (rejected):
-- SI- prefixes (shipping invoice refs)
-- SSH- prefixes (shipping refs)
-- Container numbers (MSKU, TCNU, YMJA)
-- Date-based refs, BOL refs, INV refs
-
-### BC Link Result (Standardized)
-```json
-{
-  "status": "linked" | "linked_local" | "failed",
-  "bc_record_type": "purchaseOrder" | "local_draft" | null,
-  "bc_record_id": "...",
-  "link_method": "bc_po_verified:bc_cache_exact" | "local_staging_match" | null,
-  "error_code": "bc_auth_error" | "bc_record_not_found" | "network_error" | ...,
-  "error_message": "..."
-}
-```
-
-### Lookup Trace (Audit Trail)
-Every PO resolution stores a complete lookup_trace array showing:
-- Each candidate tried
-- Each lookup source queried (bc_cache, bc_api, local_staging)
-- Hit count and result per source
-- Errors encountered
-
-### Metrics API
-GET /api/po-resolution/metrics returns:
-- po_resolution: attempted, resolved, ambiguous, not_found, skipped, rate
-- bc_link: attempted, succeeded_real, succeeded_local, failed, rate_real, rate_total
-- unresolved_by_miss_reason: {miss_reason: count}
-- bc_link_failures_by_reason: {error_code: count}
-- lookup_sources: {bc_cache, bc_api, local_staging}
-- match_methods distribution
-- multi_po_count
-- by_doc_type breakdown
-
-### Batch Resolve API
-POST /api/po-resolution/batch-resolve?force=true&limit=N returns:
-- processed, resolved, ambiguous, not_found counts
-- po_resolution_rate, bc_link_success_rate
-- miss_reasons breakdown
-- bc_link_failures breakdown
-- per-document details (doc_id, file_name, status, miss_reason, po_number, bc_link_status)
-
-### Results (Preview, 10 shipping docs, v2 hardened)
-| Metric | v1 | v2 | v2.1 (BOL+filename) | v2.2 (shipment fallback) |
-|--------|----|----|---------------------|--------------------------|
-| Resolved | 7 (70%) | 4 (40%) | 4 (40%) preview | **23 (46%) PROD** |
-| BC Linked | 0 | 0 | 0 preview | **20 (40%) PROD** |
-| Not Found | 3 | 6 | 6 | 27 |
-| False positives | 3 | 0 | 0 | 0 |
-
-### v2.2 Shipment Resolution (Mar 20 2026)
-When no purchase_order match is found, the system now falls back to matching against
+### v2.2 Shipment Resolution
+When no purchase_order match is found, the system falls back to matching against
 `posted_sales_shipment` records (127K+ in BC cache). Results include:
 - `status: "resolved_shipment"` (distinct from `"resolved"` for PO matches)
 - `bc_link_status: "linked_shipment"`
 - `bc_entity_type: "posted_sales_shipment"`
 - `bc_customer_name`, `bc_order_number` for full context
 
-### v2.1 PO Candidate Sources (Mar 20 2026)
-1. `extracted_field:po_number` (0.90 confidence)
-2. `extracted_field:purchase_order_number` (0.90)
-3. `extracted_field:customer_po` (0.90)
-4. `extracted_field:order_number` (0.80)
-5. **NEW** `extracted_field:bol_number` (0.75) — BOL often contains the real PO
-6. **NEW** `filename:PO_prefix` (0.65) — Explicit PO label in filename
-7. **NEW** `filename:alpha_prefix` (0.65) — Alpha-prefix POs (W, WA, WR, PR) in filename
-8. **NEW** `filename:digits` (0.65) — Standalone 5-7 digit numbers in filename
-9. **NEW** `filename:token_split` (0.60) — Delimiter-split tokens validated as PO format
-10. `regex:text_patterns` (0.70) — Regex matches in raw text
+### Production Results
+| Metric | v2.2 Prod (500 docs) |
+|--------|---------------------|
+| Resolved | 64% |
+| BC Linked | ~40% |
+| Not Found | ~36% |
+
+## Dependency Injection Fix (Mar 21 2026)
+- `routers/ap_review.py`: Replaced global `db`/`bc_service` injection with `deps.get_db()` and `get_bc_service()`
+- `routers/spiro.py`: Replaced global `db` injection with `deps.get_db()`
+- `routers/email_polling.py`: Fixed missing imports from `deps`
 
 ## Key Files
-- `backend/services/po_resolution_service.py` - PO resolution v2 (hardened)
+- `backend/services/po_resolution_service.py` - PO resolution v2.3 (hardened + subject/description/notes)
 - `backend/routers/po_resolution.py` - Metrics + batch-resolve endpoints
 - `backend/services/pipeline/document_pipeline.py` - Pipeline with po_resolution stage
-- `backend/services/transaction_matching_service.py` - TX matching using PO resolution
-- `backend/services/document_readiness_service.py` - Readiness with BC PO signal
-- `backend/services/auto_clear_service.py` - Auto-clear PO gate
-- `backend/services/classification_pipeline.py` - 5-stage processing pipeline
-- `backend/services/bc_validation_service.py` - BC validation + 3-state status
-- `backend/tests/test_po_resolution.py` - 42 unit tests + 22 API tests
-- `frontend/src/components/BCResolutionWidget.js` - Dashboard widget for resolution metrics
+- `backend/services/auto_resolution_service.py` - Auto-resolve with PO resolution
+- `backend/services/document_handlers.py` - Extracted document handlers
+- `backend/services/workflow_handlers.py` - Extracted workflow handlers
+- `backend/routers/ap_review.py` - AP Review (refactored deps)
+- `backend/routers/spiro.py` - Spiro integration (refactored deps)
+- `backend/routers/email_polling.py` - Email polling (fixed imports)
+- `backend/tests/test_po_resolution.py` - 42 unit tests
+- `backend/tests/test_po_resolution_workflow_fix.py` - 23 integration tests
+- `frontend/src/components/BCResolutionWidget.js` - Dashboard widget
 
 ## Mocked Services
 - Microsoft Graph API (email ingestion - partial)
 - JWT Authentication (Entra ID)
 - BC API (preview can't authenticate; production uses real BC)
 
-## P1/P2 Backlog
+## Completed Work
+- ✅ PO extraction from bol_number and file_name (v2.1)
+- ✅ Sales Shipment fallback (v2.2, prod 6% → 64%)
+- ✅ BC Resolution Dashboard Widget
+- ✅ Auto-resolve PO step on intake
+- ✅ Inspection_Form document type
+- ✅ BC Validation checks ALL PO candidates
+- ✅ Square9 import bug fix
+- ✅ PO extraction from subject/description/notes (v2.3, Mar 21 2026)
+- ✅ resolve_po signature unification (Mar 21 2026)
+- ✅ FastAPI dependency injection fix for ap_review.py and spiro.py (Mar 21 2026)
+- ✅ email_polling.py missing imports fix (Mar 21 2026)
+
+## P0/P1/P2 Backlog
+
+### P0
+- ~~PO extraction from subject/description/notes~~ DONE
+- ~~resolve_po signature unification~~ DONE
+- server.py monolith refactor (IN PROGRESS — wrappers and duplicate code remain)
+
 ### P1
-- ~~Run PO resolution on production data~~ DONE (46% resolution, 40% BC link rate)
+- ~~FastAPI dependency anti-patterns in ap_review.py, spiro.py~~ DONE
 - Azure OpenAI integration alongside Gemini for classification
+- Investigate remaining `no_bc_match` failures from 500-doc batch
 
 ### P2
 - Vendor Inventory Dashboard & Sales module
 - Product/BOM module
-- Refactor monolithic files
 - Production email service & Entra ID SSO
 - Decommission legacy Zetadocs
+
+## Branch Constraint
+Only use branch: `conflict_150326_1947`
 
 ## Credentials
 - Web UI: admin / admin

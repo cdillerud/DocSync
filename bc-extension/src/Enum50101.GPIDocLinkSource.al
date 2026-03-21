@@ -15,4 +15,12 @@ enum 50101 "GPI Doc Link Source"
     {
         Caption = 'Manual';
     }
+    value(2; "BCDrop")
+    {
+        Caption = 'BC Drop';
+    }
+    value(3; "ZetadocsLegacy")
+    {
+        Caption = 'Legacy';
+    }
 }

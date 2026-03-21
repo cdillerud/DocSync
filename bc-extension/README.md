@@ -4,7 +4,7 @@
 
 A comprehensive Business Central extension that provides:
 
-1. **GPI Documents Factbox** — SharePoint document link viewer on Purchase Invoices, Sales Orders, and Posted document pages
+1. **GPI Documents Factbox** — SharePoint document link viewer with **upload capability** on Purchase Invoices, Purchase Orders, Sales Orders, and Posted document pages. Full Zetadocs replacement.
 2. **GPI Integration API** — Stable, idempotent REST API endpoints for creating Sales Orders, Purchase Invoices, Customers, and Vendors from GPI Document Hub
 3. **Audit Logging** — Every integration transaction is logged with source system, idempotency key, and result
 
@@ -31,8 +31,8 @@ A comprehensive Business Central extension that provides:
 ### Enums
 | ID | Name | Values |
 |----|------|--------|
-| 50100 | GPI Doc Link Type | Purchase Invoice, Posted Purchase Invoice, Sales Invoice, Posted Sales Invoice, Sales Order, Posted Sales Order |
-| 50101 | GPI Doc Link Source | GPIHub, Manual |
+| 50100 | GPI Doc Link Type | Purchase Invoice, Posted Purchase Invoice, Sales Invoice, Posted Sales Invoice, Sales Order, Posted Sales Order, **Purchase Order** |
+| 50101 | GPI Doc Link Source | GPIHub, Manual, **BCDrop**, **ZetadocsLegacy** |
 | 50100 | GPI Record Type | Sales Order, Purchase Invoice, Customer, Vendor, Company |
 | 50101 | GPI Request Status | Pending, Created, Already Exists, Failed, Validation Error |
 
@@ -44,6 +44,7 @@ A comprehensive Business Central extension that provides:
 | 50102 | GPI Purchase Invoice Mgt | Purchase Invoice creation with vendor validation |
 | 50103 | GPI Customer Mgt | Customer creation with address validation |
 | 50104 | GPI Vendor Mgt | Vendor creation with address validation |
+| **50105** | **GPI Document Link Mgt** | **Hub API client: refresh links, upload files, remove links, migrate Zetadocs** |
 
 ### API Pages (Custom REST API)
 | ID | Name | Entity Set | Methods |
@@ -59,7 +60,7 @@ A comprehensive Business Central extension that provides:
 ### Pages (UI)
 | ID | Name | Type |
 |----|------|------|
-| 50100 | GPI Document Link Factbox | CardPart (factbox on document pages) |
+| 50100 | GPI Document Link Factbox | **ListPart** (multi-doc view with Upload, Remove, Refresh actions) |
 | 50101 | GPI Document Link List | List (admin view) |
 | 50102 | GPI Document Link Card | Card (admin detail view) |
 
@@ -70,6 +71,7 @@ A comprehensive Business Central extension that provides:
 | 50101 | GPI Posted Purch Inv Extension | Posted Purchase Invoice |
 | 50102 | GPI Sales Order Extension | Sales Order |
 | 50103 | GPI Posted Sales Inv Extension | Posted Sales Invoice |
+| **50104** | **GPI Purch Order Extension** | **Purchase Order** |
 
 ### Permission Set
 | ID | Name | Description |
@@ -204,8 +206,25 @@ The Python backend provides a bridge layer:
 | POST | `/api/gpi-integration/customers` | Create customer |
 | POST | `/api/gpi-integration/vendors` | Create vendor |
 | GET | `/api/gpi-integration/logs` | Query integration audit logs |
+| GET | `/api/gpi-integration/document-links/{entity}/{docNo}` | List all documents linked to a BC record |
+| POST | `/api/gpi-integration/document-links/{entity}/{docNo}/upload` | Upload file to SharePoint + create BC link |
+| DELETE | `/api/gpi-integration/document-links/{entity}/{docNo}/{docId}` | Soft-delete a document link |
+| POST | `/api/gpi-integration/document-links/migrate-from-zetadocs` | Import legacy Zetadocs links |
 
 ## Version History
+
+- **2.0.0.0** - Full Zetadocs replacement (current)
+  - Factbox upgraded from CardPart → ListPart (shows multiple documents)
+  - Upload action: files go through GPI Hub → SharePoint → BC link (round-trip)
+  - Remove action: soft-delete link (SharePoint file preserved for audit)
+  - Refresh action: syncs document list from GPI Hub API
+  - New Purchase Order page extension (PageExt 50104)
+  - New `GPI Document Link Mgt` codeunit (50105) — HTTP client for Hub API
+  - Enum additions: `Purchase Order` type, `BCDrop` + `ZetadocsLegacy` sources
+  - `File Name` field added to GPI Document Link table
+  - All page extensions updated with `SetContext()` for vendor/customer context
+  - Folder resolution: matches existing folder from hub first, falls back to routing rules
+  - Zetadocs migration support via Hub API
 
 - **1.0.0.0** - Initial release
   - GPI Document Link factbox and API

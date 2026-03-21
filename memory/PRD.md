@@ -172,6 +172,7 @@ Only use branch: `conflict_150326_1947`
 - ✅ App versioning system with changelog dialog (v1.5.0) (Mar 21 2026)
 - ✅ **Intake Benchmark: GPI Hub vs Square 9 comparison workspace** (v1.6.0) (Mar 21 2026)
 - ✅ **BC Factbox Document Links — Zetadocs Replacement** (Mar 21 2026)
+- ✅ **BC AL Extension v2.0.0.0 — Full factbox rewrite** (Mar 21 2026)
 
 ### Remaining
 - P1: Wire rep assignment into SO creation flow (Step 2)

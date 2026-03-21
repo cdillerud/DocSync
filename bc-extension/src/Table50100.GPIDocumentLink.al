@@ -61,6 +61,11 @@ table 50100 "GPI Document Link"
         {
             Caption = 'Last Error';
         }
+        field(240; "File Name"; Text[250])
+        {
+            Caption = 'File Name';
+            Description = 'Display name of the linked document';
+        }
     }
 
     keys

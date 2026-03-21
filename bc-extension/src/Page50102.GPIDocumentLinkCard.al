@@ -38,6 +38,11 @@ page 50102 "GPI Document Link Card"
                     ApplicationArea = All;
                     ToolTip = 'The BC document number';
                 }
+                field(FileName; Rec."File Name")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Name of the linked document';
+                }
             }
             group(SharePoint)
             {

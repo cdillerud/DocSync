@@ -1,19 +1,19 @@
 /// <summary>
-/// Page Extension 50100 "GPI Purch Invoice Extension"
-/// Adds the GPI Documents factbox to the Purchase Invoice page.
-/// Supports viewing, uploading, and removing document links.
+/// Page Extension 50104 "GPI Purch Order Extension"
+/// Adds the GPI Documents factbox to the Purchase Order page.
+/// Enables viewing linked documents, uploading new files, and removing links.
 /// </summary>
-pageextension 50100 "GPI Purch Invoice Extension" extends "Purchase Invoice"
+pageextension 50104 "GPI Purch Order Extension" extends "Purchase Order"
 {
     layout
     {
-        addafter("PurchaseDocCheckFactbox")
+        addlast(FactBoxes)
         {
             part(GPIDocuments; "GPI Document Link Factbox")
             {
                 ApplicationArea = All;
                 Caption = 'GPI Documents';
-                SubPageLink = "Document Type" = const("Purchase Invoice"),
+                SubPageLink = "Document Type" = const("Purchase Order"),
                               "BC Document No." = field("No.");
                 UpdatePropagation = Both;
             }
@@ -24,10 +24,11 @@ pageextension 50100 "GPI Purch Invoice Extension" extends "Purchase Invoice"
     var
         VendorCtx: Text;
     begin
+        // Pass vendor context for folder routing fallback
         if Rec."Buy-from Vendor Name" <> '' then
             VendorCtx := Rec."Buy-from Vendor Name";
         CurrPage.GPIDocuments.Page.SetContext(
-            "GPI Doc Link Type"::"Purchase Invoice",
+            "GPI Doc Link Type"::"Purchase Order",
             Rec."No.",
             VendorCtx
         );

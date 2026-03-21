@@ -66,6 +66,18 @@ Only use branch: `conflict_150326_1947`
 - 24-hour scheduled background catalog sync
 - 7 tests covering health, staleness, item search
 
+### P3-B: Drop-Ship vs Warehouse SO Type Routing (COMPLETED Feb 2026)
+- Updated _CLASSIFY_SYSTEM_PROMPT to extract so_type (dropship/warehouse/unknown)
+- Added _resolve_so_type() to normalize variants (drop_ship, drop-ship, wh → canonical)
+- Added _resolve_so_routing_fields() for conditional BC field mapping:
+  - Dropship: ship_to_code, ship_to_name from document; no location_code
+  - Warehouse: location_code from doc or BC_DEFAULT_WAREHOUSE_CODE (default "MAIN")
+- Extended create_sales_order() service to accept ship_to_code, ship_to_name, location_code
+- Preflight endpoint returns so_type in document_summary and so_routing in mapped_values
+- create_sales_order_from_document stores so_type and so_routing in audit and bc_sales_order
+- Dropship auto-approve: _auto_approve_dropship_so() advances workflow to approved
+- 38 tests (27 unit + 11 integration) — all passing
+
 ## P0/P1/P2 Backlog
 
 ### Completed
@@ -77,10 +89,11 @@ Only use branch: `conflict_150326_1947`
 - ✅ Freight GL routing extensions
 - ✅ Square9 decommission
 - ✅ BC catalog sync scheduling + health
+- ✅ Drop-Ship vs Warehouse SO type routing
 
 ### Remaining
 - P0: server.py monolith refactor (partially done — services extracted but ~7 functions still imported from server.py)
-- P2: Investigate remaining `no_bc_match` failures from 500-doc batch
+- P1: Investigate remaining `no_bc_match` failures from 500-doc batch
 - P2: Vendor Inventory Dashboard & Sales module
 - P2: Product/BOM module
 - P2: Production email service & Entra ID SSO
@@ -93,4 +106,6 @@ Only use branch: `conflict_150326_1947`
 - test_azure_fallback.py: 6 tests
 - test_freight_gl_routing.py: 29 tests (10 new + 19 pre-existing)
 - test_catalog_sync.py: 7 tests
-- Total passing: 99+ tests
+- test_so_type_routing.py: 27 tests
+- test_so_type_routing_api.py: 11 tests (created by testing agent)
+- Total passing: 130+ tests

@@ -71,7 +71,7 @@ from routers.workflows import router as workflows_router, register_server_routes
 from routers.reference_intelligence import router as ref_intel_router, register_server_routes as register_ri_routes
 from routers.document_intelligence import router as document_intelligence_router
 from routers.auth import router as auth_router
-from routers.ap_review import ap_review_router, set_dependencies as set_ap_review_deps
+from routers.ap_review import ap_review_router
 from routers.spiro import spiro_router
 from routers.ar_release import router as ar_release_router
 from routers.automation_intelligence import router as automation_intelligence_router

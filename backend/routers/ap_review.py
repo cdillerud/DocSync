@@ -80,11 +80,6 @@ from deps import get_db
 from services.business_central_service import get_bc_service
 
 
-def set_dependencies(database=None, business_central_service=None):
-    """Legacy no-op kept for backward compatibility with main.py startup."""
-    pass
-
-
 # =============================================================================
 # VENDOR SEARCH ENDPOINTS
 # =============================================================================

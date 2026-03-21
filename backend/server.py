@@ -229,7 +229,7 @@ _pilot_summary_task = None
 from routers.auth import router as auth_router
 
 # ==================== AP REVIEW ====================
-from routers.ap_review import ap_review_router, set_dependencies as set_ap_review_deps
+from routers.ap_review import ap_review_router
 from services.business_central_service import BusinessCentralService, get_bc_service
 
 # ==================== AUTO-POST SERVICE ====================
@@ -249,7 +249,7 @@ sharepoint_migration_router = None
 sharepoint_migration_module = None
 
 # ==================== SPIRO INTEGRATION ====================
-from routers.spiro import spiro_router, set_spiro_routes_db
+from routers.spiro import spiro_router
 from services.spiro.spiro_sync import set_spiro_db
 
 import jwt as pyjwt
@@ -8036,8 +8036,6 @@ async def startup():
     await db.hub_documents.create_index("review_status")
     await db.hub_documents.create_index("bc_posting_status")
     await db.hub_documents.create_index("vendor_id")
-    # Initialize AP Review router dependencies
-    set_ap_review_deps(db, get_bc_service())
     # Legacy indexes (keep for backward compat)
     await db.hub_documents.create_index([("canonical_fields.vendor_normalized", 1)])
     await db.hub_workflow_runs.create_index("id", unique=True)
@@ -8082,7 +8080,6 @@ async def startup():
     set_deps_db(db)
     # Spiro Integration: Initialize database
     set_spiro_db(db)
-    set_spiro_routes_db(db)
     # Create Spiro indexes
     await db.spiro_contacts.create_index("spiro_id", unique=True)
     await db.spiro_contacts.create_index("email")

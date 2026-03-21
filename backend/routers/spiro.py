@@ -22,11 +22,6 @@ spiro_router = APIRouter(prefix="/spiro", tags=["Spiro Integration"])
 
 from deps import get_db
 
-# Database reference (legacy no-op kept for backward compat)
-def set_spiro_routes_db(database=None):
-    """Legacy no-op — all routes now use deps.get_db()."""
-    pass
-
 
 # =============================================================================
 # MODELS

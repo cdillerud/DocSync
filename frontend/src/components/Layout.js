@@ -27,7 +27,7 @@ const navItems = [
   { to: '/operations-queue', icon: ClipboardList, label: 'Operations' },
   { to: '/integrations', icon: ArrowLeftRight, label: 'Integrations' },
   { to: '/config', icon: Settings, label: 'Settings' },
-  { to: '/bakeoff', icon: FlaskConical, label: 'Bake-Off' },
+  { to: '/intake-benchmark', icon: FlaskConical, label: 'Intake Benchmark' },
 ];
 
 export default function Layout() {
@@ -80,7 +80,7 @@ export default function Layout() {
     if (path === '/operations-queue') return 'Operations';
     if (path === '/integrations') return 'Integrations';
     if (path === '/config') return 'Settings';
-    if (path === '/bakeoff') return 'Bake-Off';
+    if (path === '/intake-benchmark') return 'Intake Benchmark';
     if (path.startsWith('/documents/')) return 'Document Detail';
     return 'GPI Document Hub';
   };

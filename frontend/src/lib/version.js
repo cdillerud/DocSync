@@ -4,10 +4,10 @@ export const CHANGELOG = [
   {
     version: "1.6.0",
     date: "2026-03-21",
-    title: "Bake-Off: GPI Hub vs Square 9 Comparison",
+    title: "Intake Benchmark: GPI Hub vs Square 9",
     changes: [
-      { type: "feature", text: "Bake-Off workspace for side-by-side document processing comparison" },
-      { type: "feature", text: "Run management: create, complete, archive bake-off runs" },
+      { type: "feature", text: "Intake Benchmark workspace for side-by-side document processing comparison" },
+      { type: "feature", text: "Run management: create, complete, archive benchmark runs" },
       { type: "feature", text: "Per-document scoring with truth values, GPI auto-population, and Square 9 manual entry" },
       { type: "feature", text: "Auto-scoring with normalization (case-insensitive, PO prefix removal, amount tolerance)" },
       { type: "feature", text: "Results dashboard with KPI comparison, breakdowns, and key insights" },

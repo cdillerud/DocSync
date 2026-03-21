@@ -17,7 +17,7 @@ import {
   Zap, Eye, Pencil, RefreshCw, AlertTriangle, ChevronDown
 } from 'lucide-react';
 
-const API = '/bakeoff';
+const API = '/intake-benchmark';
 
 const STATUS_COLORS = {
   draft: 'bg-slate-500/15 text-slate-600 border-slate-300',
@@ -49,7 +49,7 @@ export default function BakeOffPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight" style={{ fontFamily: 'Chivo, sans-serif' }}>
-            Bake-Off
+            Intake Benchmark
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             GPI Hub vs Square 9 — side-by-side comparison workspace
@@ -140,13 +140,13 @@ function RunSetup({ onOpenRun }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Bake-Off Runs</h2>
+        <h2 className="text-lg font-semibold">Benchmark Runs</h2>
         <Dialog open={showCreate} onOpenChange={setShowCreate}>
           <DialogTrigger asChild>
             <Button data-testid="create-run-btn" className="gap-1.5"><Plus className="w-4 h-4" /> New Run</Button>
           </DialogTrigger>
           <DialogContent data-testid="create-run-dialog">
-            <DialogHeader><DialogTitle>Create Bake-Off Run</DialogTitle></DialogHeader>
+            <DialogHeader><DialogTitle>Create Benchmark Run</DialogTitle></DialogHeader>
             <div className="space-y-3">
               <Input placeholder="Run Name" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} data-testid="run-name-input" />
               <Textarea placeholder="Description / Notes" value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} rows={2} />
@@ -173,7 +173,7 @@ function RunSetup({ onOpenRun }) {
       {loading ? (
         <p className="text-sm text-muted-foreground py-8 text-center">Loading...</p>
       ) : runs.length === 0 ? (
-        <Card><CardContent className="py-12 text-center text-muted-foreground">No bake-off runs yet. Create one to get started.</CardContent></Card>
+        <Card><CardContent className="py-12 text-center text-muted-foreground">No benchmark runs yet. Create one to get started.</CardContent></Card>
       ) : (
         <div className="grid gap-3">
           {runs.map(r => (

@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from deps import get_db
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/bakeoff", tags=["Bake-Off"])
+router = APIRouter(prefix="/intake-benchmark", tags=["Intake Benchmark"])
 
 RUNS_COLL = "bakeoff_runs"
 DOCS_COLL = "bakeoff_documents"

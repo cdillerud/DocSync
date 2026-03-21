@@ -37,7 +37,7 @@ function AppRoutes() {
         <Route path="operations-queue" element={<OperationsQueuePage />} />
         <Route path="integrations" element={<IntegrationsHubPage />} />
         <Route path="config" element={<SettingsHubPage />} />
-        <Route path="bakeoff" element={<BakeOffPage />} />
+        <Route path="intake-benchmark" element={<BakeOffPage />} />
         {/* Redirects for old URLs */}
         <Route path="queue" element={<Navigate to="/documents" replace />} />
         <Route path="upload" element={<Navigate to="/documents?tab=upload" replace />} />

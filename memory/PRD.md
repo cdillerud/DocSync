@@ -121,8 +121,8 @@ Only use branch: `conflict_150326_1947`
   - override_rep_for_customer(db, customer_no, rep_email, rep_name): stores manual overrides in customer_rep_overrides collection
 - 20 tests — all passing
 
-### Bake-Off Feature (v1.6.0 — COMPLETED Mar 21 2026)
-- New top-level nav item "Bake-Off" (temporary benchmarking workspace)
+### Intake Benchmark Feature (v1.6.0 — COMPLETED Mar 21 2026)
+- New top-level nav item "Intake Benchmark" (temporary benchmarking workspace)
 - **Run Setup**: Create/list/complete/archive/delete bake-off runs
 - **Document Scoring**: Add docs manually or via CSV import, side-by-side Truth/GPI/S9 fields
   - GPI auto-populate from hub_documents collection
@@ -131,7 +131,7 @@ Only use branch: `conflict_150326_1947`
   - Manual override tracking (auto-linked vs manually-edited flags)
 - **Results Summary**: KPI comparison table (Ingest Rate, Classification/Vendor/Amount/PO/Folder Accuracy, No-Touch Rate, Usable Output Rate), Why Wrong breakdowns, accuracy by doc type/vendor, Key Insights panel
 - **Export**: Excel file with Documents + Summary sheets (openpyxl)
-- Backend: `/api/bakeoff/*` endpoints (15 endpoints)
+- Backend: `/api/intake-benchmark/*` endpoints (15 endpoints)
 - Collections: `bakeoff_runs`, `bakeoff_documents`
 - 25 backend tests passing, all frontend UI tests passing
 - Reduced page files from 38 to 29 (deleted 9 dead/orphaned pages)
@@ -161,7 +161,7 @@ Only use branch: `conflict_150326_1947`
 - ✅ server.py extraction Pass 2 (upload/SharePoint/BC link handlers)
 - ✅ **[P4-C] Frontend consolidation** — 38 pages → 8 primary pages (Mar 21 2026)
 - ✅ App versioning system with changelog dialog (v1.5.0) (Mar 21 2026)
-- ✅ **Bake-Off: GPI Hub vs Square 9 comparison workspace** (v1.6.0) (Mar 21 2026)
+- ✅ **Intake Benchmark: GPI Hub vs Square 9 comparison workspace** (v1.6.0) (Mar 21 2026)
 
 ### Remaining
 - P1: Wire rep assignment into SO creation flow (Step 2)

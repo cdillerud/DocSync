@@ -148,6 +148,7 @@ Only use branch: `conflict_150326_1947`
 - ✅ BC Customer + Salesperson Cache Sync & Rep Assignment Service
 - ✅ server.py extraction Pass 2 (upload/SharePoint/BC link handlers)
 - ✅ **[P4-C] Frontend consolidation** — 38 pages → 8 primary pages (Mar 21 2026)
+- ✅ App versioning system with changelog dialog (v1.5.0) (Mar 21 2026)
 
 ### Remaining
 - P1: Wire rep assignment into SO creation flow (Step 2)

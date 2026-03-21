@@ -6,9 +6,15 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator
 } from '../components/ui/dropdown-menu';
 import {
-  LayoutDashboard, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, ShoppingCart, ClipboardList, Brain, FolderTree, ArrowLeftRight
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger
+} from '../components/ui/dialog';
+import { ScrollArea } from '../components/ui/scroll-area';
+import { Badge } from '../components/ui/badge';
+import {
+  LayoutDashboard, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, ShoppingCart, ClipboardList, Brain, FolderTree, ArrowLeftRight, Sparkles, Tag, Wrench, Bug
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { APP_VERSION, CHANGELOG } from '../lib/version';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -174,6 +180,56 @@ export default function Layout() {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Version badge with changelog */}
+            <Dialog>
+              <DialogTrigger asChild>
+                <button
+                  className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 hover:bg-primary/20 transition-colors cursor-pointer"
+                  data-testid="version-badge"
+                >
+                  <Tag className="w-3 h-3 text-primary" />
+                  <span className="text-xs font-mono font-semibold text-primary">v{APP_VERSION}</span>
+                </button>
+              </DialogTrigger>
+              <DialogContent className="max-w-lg max-h-[80vh]" data-testid="changelog-dialog">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2 text-lg" style={{ fontFamily: 'Chivo, sans-serif' }}>
+                    <Sparkles className="w-5 h-5 text-primary" />
+                    What's New
+                  </DialogTitle>
+                </DialogHeader>
+                <ScrollArea className="h-[60vh] pr-4">
+                  <div className="space-y-6">
+                    {CHANGELOG.map((release) => (
+                      <div key={release.version} className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="font-mono text-xs">v{release.version}</Badge>
+                          <span className="text-xs text-muted-foreground">{release.date}</span>
+                        </div>
+                        <h3 className="text-sm font-semibold">{release.title}</h3>
+                        <ul className="space-y-1.5">
+                          {release.changes.map((change, i) => {
+                            const iconMap = { feature: Sparkles, improvement: Wrench, fix: Bug };
+                            const colorMap = { feature: 'text-emerald-500', improvement: 'text-blue-500', fix: 'text-amber-500' };
+                            const ChangeIcon = iconMap[change.type] || Sparkles;
+                            return (
+                              <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+                                <ChangeIcon className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${colorMap[change.type] || 'text-muted-foreground'}`} />
+                                <span>{change.text}</span>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                        {release.version !== CHANGELOG[CHANGELOG.length - 1].version && (
+                          <div className="border-b border-border/50 pt-2" />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </DialogContent>
+            </Dialog>
+
             <Button
               variant="ghost"
               size="icon"

@@ -8205,6 +8205,22 @@ async def startup():
     cache_service.start_background_sync()
     logger.info("BC Reference Cache Service initialized (background sync enabled)")
     
+    # Start BC Catalog Sync scheduler (every 24h)
+    async def _catalog_sync_scheduler():
+        """Background worker: sync BC item catalog and GL accounts every 24 hours."""
+        await asyncio.sleep(60)  # Initial delay — let other services start first
+        while True:
+            try:
+                from services.bc_catalog_sync_service import sync_all
+                logger.info("[CatalogSync] Starting scheduled BC catalog sync")
+                result = await sync_all(db)
+                logger.info("[CatalogSync] Completed: %s", result)
+            except Exception as e:
+                logger.warning("[CatalogSync] Scheduled sync failed: %s", e)
+            await asyncio.sleep(24 * 3600)  # Sleep 24 hours
+    asyncio.create_task(_catalog_sync_scheduler())
+    logger.info("BC Catalog Sync scheduler started (interval: 24h)")
+    
     # Initialize Auto-Resolution Service
     ref_intel_service = get_reference_intelligence_service()
     auto_resolve = set_auto_resolve_service(db, ref_intel_service, event_service)

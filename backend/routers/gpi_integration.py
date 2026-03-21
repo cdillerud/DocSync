@@ -1924,6 +1924,14 @@ async def delete_mapping_endpoint(mapping_id: str):
 
 # ── BC Catalog Sync Endpoints ──
 
+@router.get("/catalog/health")
+async def get_catalog_health_endpoint():
+    """Get catalog sync health summary (last sync, staleness, counts)."""
+    from services.bc_catalog_sync_service import get_catalog_health
+    db = get_db()
+    return await get_catalog_health(db)
+
+
 @router.post("/catalog/sync")
 async def trigger_catalog_sync(entity: str = Query("all", description="Sync entity: items, gl_accounts, or all")):
     """Trigger a manual BC catalog sync. Reads from Production environment."""

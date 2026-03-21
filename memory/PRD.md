@@ -6,136 +6,91 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 ## Architecture
 - **Backend**: FastAPI (Python) with MongoDB
 - **Frontend**: React with Shadcn/UI components
-- **AI**: Gemini via Emergent LLM Key
-- **External APIs**: Microsoft Graph, Business Central (read+write), SharePoint
-
-## Document Pipeline (11-stage)
-```
-classification -> extraction -> layout -> entity_resolution -> po_resolution
--> transaction_match -> bundle_detection -> lifecycle_check
--> policy_decision -> document_routing -> learning_capture
-```
-
-## PO Resolution System (Hardened v2.3 — Mar 21 2026)
-
-### Multi-Source PO Candidate Extraction
-The system extracts PO candidates from ALL available sources:
-1. `extracted_field:po_number` (0.90 confidence) — AI-extracted PO fields
-2. `extracted_field:purchase_order_number` (0.90)
-3. `extracted_field:customer_po` (0.90)
-4. `extracted_field:order_number` (0.80)
-5. `extracted_field:bol_number` (0.75) — BOL often contains the real PO
-6. **NEW v2.3** `extracted_field:subject` (0.72) — Email subject scanned for PO patterns
-7. **NEW v2.3** `extracted_field:description` (0.72) — Description/email body scanned
-8. **NEW v2.3** `extracted_field:notes` (0.72) — Notes field scanned
-9. `filename:PO_prefix` (0.65) — Explicit PO label in filename
-10. `filename:alpha_prefix` (0.65) — Alpha-prefix POs (W, WA, WR, PR) in filename
-11. `filename:digits` (0.65) — Standalone 5-7 digit numbers in filename
-12. `filename:token_split` (0.60) — Delimiter-split tokens validated as PO format
-13. `regex:text_patterns` (0.70) — Regex matches in raw text
-
-### v2.3 resolve_po_from_document Wrapper (Mar 21 2026)
-Unified document-level resolver that:
-- Merges `email_subject` → `subject` in extraction fields
-- Merges `email_body` → `description` in extraction fields
-- Merges top-level `notes` → `notes` in extraction fields
-- Handles existing `po_candidates` deduplication
-- Used consistently by: server.py (intake + reprocess), auto_resolution_service.py, po_resolution router batch
-
-### Miss Taxonomy
-Every unresolved PO stores an explicit miss_reason:
-- `no_po_extracted` — no PO candidates found in document
-- `normalized_po_empty` — PO normalized to empty string
-- `invalid_po_format` — candidate doesn't match known BC PO patterns
-- `cache_no_match` — not found in BC reference cache
-- `live_bc_no_match` — not found via live BC API
-- `multiple_bc_matches` — multiple distinct POs found
-- `vendor_conflict` — ambiguous POs from different vendors
-- `bc_lookup_error` — BC API call failed
-- `no_bc_match` — exhausted all lookup paths
-
-### PO Format Validation (from real BC cache analysis of 1616 POs)
-Valid BC PO patterns:
-- Pure numeric 4-7 digits: 100092, 109023
-- W-prefix: W102008, W117397
-- WA-prefix: WA1848
-- WR-prefix: WR106124
-- PR-prefix: PR10088
-- T-prefix: T1126
-- Suffix variants: 104718B, 111597_1
-
-### v2.2 Shipment Resolution
-When no purchase_order match is found, the system falls back to matching against
-`posted_sales_shipment` records (127K+ in BC cache). Results include:
-- `status: "resolved_shipment"` (distinct from `"resolved"` for PO matches)
-- `bc_link_status: "linked_shipment"`
-- `bc_entity_type: "posted_sales_shipment"`
-- `bc_customer_name`, `bc_order_number` for full context
-
-### Production Results
-| Metric | v2.2 Prod (500 docs) |
-|--------|---------------------|
-| Resolved | 64% |
-| BC Linked | ~40% |
-| Not Found | ~36% |
-
-## Dependency Injection Fix (Mar 21 2026)
-- `routers/ap_review.py`: Replaced global `db`/`bc_service` injection with `deps.get_db()` and `get_bc_service()`
-- `routers/spiro.py`: Replaced global `db` injection with `deps.get_db()`
-- `routers/email_polling.py`: Fixed missing imports from `deps`
-
-## Key Files
-- `backend/services/po_resolution_service.py` - PO resolution v2.3 (hardened + subject/description/notes)
-- `backend/routers/po_resolution.py` - Metrics + batch-resolve endpoints
-- `backend/services/pipeline/document_pipeline.py` - Pipeline with po_resolution stage
-- `backend/services/auto_resolution_service.py` - Auto-resolve with PO resolution
-- `backend/services/document_handlers.py` - Extracted document handlers
-- `backend/services/workflow_handlers.py` - Extracted workflow handlers
-- `backend/routers/ap_review.py` - AP Review (refactored deps)
-- `backend/routers/spiro.py` - Spiro integration (refactored deps)
-- `backend/routers/email_polling.py` - Email polling (fixed imports)
-- `backend/tests/test_po_resolution.py` - 42 unit tests
-- `backend/tests/test_po_resolution_workflow_fix.py` - 23 integration tests
-- `frontend/src/components/BCResolutionWidget.js` - Dashboard widget
-
-## Mocked Services
-- Microsoft Graph API (email ingestion - partial)
-- JWT Authentication (Entra ID)
-- BC API (preview can't authenticate; production uses real BC)
-
-## Completed Work
-- ✅ PO extraction from bol_number and file_name (v2.1)
-- ✅ Sales Shipment fallback (v2.2, prod 6% → 64%)
-- ✅ BC Resolution Dashboard Widget
-- ✅ Auto-resolve PO step on intake
-- ✅ Inspection_Form document type
-- ✅ BC Validation checks ALL PO candidates
-- ✅ Square9 import bug fix
-- ✅ PO extraction from subject/description/notes (v2.3, Mar 21 2026)
-- ✅ resolve_po signature unification (Mar 21 2026)
-- ✅ FastAPI dependency injection fix for ap_review.py and spiro.py (Mar 21 2026)
-- ✅ email_polling.py missing imports fix (Mar 21 2026)
-
-## P0/P1/P2 Backlog
-
-### P0
-- ~~PO extraction from subject/description/notes~~ DONE
-- ~~resolve_po signature unification~~ DONE
-- server.py monolith refactor (IN PROGRESS — wrappers and duplicate code remain)
-
-### P1
-- ~~FastAPI dependency anti-patterns in ap_review.py, spiro.py~~ DONE
-- Azure OpenAI integration alongside Gemini for classification
-- Investigate remaining `no_bc_match` failures from 500-doc batch
-
-### P2
-- Vendor Inventory Dashboard & Sales module
-- Product/BOM module
-- Production email service & Entra ID SSO
-- Decommission legacy Zetadocs
+- **AI**: Gemini via Emergent LLM Key + Azure OpenAI fallback
+- **External APIs**: Microsoft Graph, Business Central, SharePoint
 
 ## Branch Constraint
 Only use branch: `conflict_150326_1947`
 
 ## Credentials
 - Web UI: admin / admin
+
+## Completed Work (This Session — Mar 21 2026)
+
+### P1-A: PO Candidate Extraction from description/filename
+- Direct extraction from `description` (0.72), `invoice_description` (0.65), `line_description` (0.65) with PO format pre-validation
+- Added to regex scan loop for embedded PO references
+- 3 new tests: direct extraction, invoice_description, non-PO text filtering
+
+### P1-B: Square9 stage-counts NameError fix
+- Import was already fixed in prior session; added regression test
+
+### P1-C: FastAPI dependency injection fix
+- Removed global db/bc_service injection from ap_review.py and spiro.py
+- All endpoints now use deps.get_db() and get_bc_service()
+- Cleaned up set_dependencies/set_spiro_routes_db stubs and calls from main.py and server.py
+
+### P1-D: Auto-post AP invoices for stable vendors
+- Wired check_auto_post_eligibility + stable vendor score (>= 0.85) + bc_link_status == "linked" gate
+- Calls auto_create_pi_from_document on success
+- Stores auto_posted/auto_post_failed/auto_post_result on document
+- Logs activity via create_activity; never blocks pipeline
+- 6 tests covering all gate conditions and failure modes
+
+### P1-E: Azure OpenAI fallback classifier
+- Created azure_openai_classifier.py with classify_document_with_azure_openai()
+- Wired into classify_document_with_ai(): falls back when Gemini confidence < 0.70 or errors
+- Config: AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY, AZURE_OPENAI_DEPLOYMENT
+- Gracefully skips if not configured
+- 6 tests covering all fallback paths
+
+### P2-A: Freight GL routing extensions
+- Added gl-storage-handling (5260-00) and gl-dropship-international (6115-00) GL accounts
+- Added do_not_pay routing flag (no GL posting, DO NOT PAY folder)
+- Added freight_issues routing flag (needs_logistics_approval workflow status)
+- Added dropship_international combined sub-type detection
+- Added storage_handling sub-type detection
+- Sub-type-only fallback in _match_gl_account
+- 10 new tests
+
+### P2-B: Square9 decommission
+- GET /api/square9/migration-status endpoint
+- POST /api/admin/square9-cutover endpoint (idempotent)
+- Dashboard green banner when square9_active=false
+- DEPLOYMENT.md section for mailbox redirection
+
+### P3-A: BC catalog sync for Sales Order line resolution
+- get_catalog_health() function for sync staleness reporting
+- GET /api/gpi-integration/catalog/health endpoint
+- catalog_sync_health in dashboard stats
+- 24-hour scheduled background catalog sync
+- 7 tests covering health, staleness, item search
+
+## P0/P1/P2 Backlog
+
+### Completed
+- ✅ PO extraction from subject/description/notes (v2.3)
+- ✅ resolve_po signature unification
+- ✅ FastAPI dependency injection fix
+- ✅ Auto-post AP invoices
+- ✅ Azure OpenAI fallback classifier
+- ✅ Freight GL routing extensions
+- ✅ Square9 decommission
+- ✅ BC catalog sync scheduling + health
+
+### Remaining
+- P0: server.py monolith refactor (partially done — services extracted but ~7 functions still imported from server.py)
+- P2: Investigate remaining `no_bc_match` failures from 500-doc batch
+- P2: Vendor Inventory Dashboard & Sales module
+- P2: Product/BOM module
+- P2: Production email service & Entra ID SSO
+- P2: Decommission legacy Zetadocs
+
+## Test Coverage
+- test_po_resolution.py: 42 tests
+- test_po_resolution_api.py: 28 tests
+- test_auto_post_wiring.py: 6 tests
+- test_azure_fallback.py: 6 tests
+- test_freight_gl_routing.py: 29 tests (10 new + 19 pre-existing)
+- test_catalog_sync.py: 7 tests
+- Total passing: 99+ tests

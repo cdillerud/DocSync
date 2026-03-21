@@ -176,11 +176,19 @@ async def get_dashboard_stats(date: Optional[str] = None):
         key = r["_id"] or "unrouted"
         routing_counts[key] = {"count": r["count"], "avg_score": round(r.get("avg_score") or 0, 1)}
 
+    # Catalog sync health
+    try:
+        from services.bc_catalog_sync_service import get_catalog_health
+        catalog_health = await get_catalog_health(db)
+    except Exception:
+        catalog_health = None
+
     return {
         "total_documents": total, "by_status": by_status, "by_type": by_type,
         "recent_workflows": recent_workflows, "failed_workflows": failed_workflows,
         "demo_mode": DEMO_MODE,
         "routing_summary": routing_counts,
+        "catalog_sync_health": catalog_health,
     }
 
 

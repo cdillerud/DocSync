@@ -302,3 +302,50 @@ async def get_sync_status(db) -> Dict[str, Any]:
     status["gl_accounts_count"] = await db[GL_ACCOUNTS_COLLECTION].count_documents({})
 
     return status
+
+
+async def get_catalog_health(db) -> Dict[str, Any]:
+    """Return a health summary suitable for dashboard embedding.
+
+    Returns:
+        {
+            last_sync_at: str | None,
+            item_count: int,
+            gl_account_count: int,
+            sync_age_hours: float | None,
+            is_stale: bool,      # True if sync_age_hours > 25
+        }
+    """
+    item_count = await db[ITEMS_COLLECTION].count_documents({})
+    gl_count = await db[GL_ACCOUNTS_COLLECTION].count_documents({})
+
+    metas = await db[SYNC_META_COLLECTION].find({}, {"_id": 0}).to_list(10)
+    last_sync_at = None
+    for m in metas:
+        ts = m.get("synced_at")
+        if ts and (not last_sync_at or ts > last_sync_at):
+            last_sync_at = ts
+
+    sync_age_hours = None
+    is_stale = True  # stale by default if never synced
+    if last_sync_at:
+        try:
+            if isinstance(last_sync_at, str):
+                synced = datetime.fromisoformat(last_sync_at.replace("Z", "+00:00"))
+            else:
+                synced = last_sync_at
+            if synced.tzinfo is None:
+                synced = synced.replace(tzinfo=timezone.utc)
+            age = datetime.now(timezone.utc) - synced
+            sync_age_hours = round(age.total_seconds() / 3600, 2)
+            is_stale = sync_age_hours > 25
+        except Exception:
+            pass
+
+    return {
+        "last_sync_at": last_sync_at,
+        "item_count": item_count,
+        "gl_account_count": gl_count,
+        "sync_age_hours": sync_age_hours,
+        "is_stale": is_stale,
+    }

@@ -147,8 +147,24 @@ def extract_po_candidates(
         if bol and str(bol).strip():
             _add(str(bol).strip(), "extracted_field:bol_number", 0.75)
 
-        # Description/subject/notes fields often contain PO references
-        for desc_field in ("description", "subject", "notes", "remarks", "reference", "memo"):
+        # Direct extraction from description-like fields.
+        # Production data shows these often contain the PO number as-is.
+        # Only add if the normalized value passes PO format validation
+        # (filters out long prose like "Invoice for services").
+        for _df, _dc in (
+            ("description", 0.72),
+            ("invoice_description", 0.65),
+            ("line_description", 0.65),
+        ):
+            _dv = existing_fields.get(_df)
+            if _dv and isinstance(_dv, str) and len(_dv.strip()) >= 3:
+                _norm = normalize_po(_dv.strip())
+                if _norm and is_valid_po_format(_norm):
+                    _add(_dv.strip(), f"extracted_field:{_df}", _dc)
+
+        # Regex-scan description/subject/notes fields for embedded PO references
+        for desc_field in ("description", "subject", "notes", "remarks", "reference",
+                           "memo", "invoice_description", "line_description"):
             desc_val = existing_fields.get(desc_field)
             if desc_val and str(desc_val).strip():
                 desc_text = str(desc_val).strip()

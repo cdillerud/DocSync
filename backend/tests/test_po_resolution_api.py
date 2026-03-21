@@ -184,6 +184,45 @@ class TestPOCandidateExtraction:
         assert norms.count("109023") == 1, "Should deduplicate"
         print("PASS: Duplicate candidates are deduplicated")
 
+    def test_extracts_from_description_field(self):
+        """Should directly extract PO number from description field when value is PO-shaped"""
+        from services.po_resolution_service import extract_po_candidates
+
+        fields = {"description": "107459"}
+        candidates = extract_po_candidates("", fields)
+        direct = [c for c in candidates if c["source"] == "extracted_field:description"]
+        assert len(direct) >= 1, "description='107459' should produce a direct candidate"
+        assert direct[0]["normalized"] == "107459"
+        assert direct[0]["confidence"] >= 0.70
+        print("PASS: Extracts PO number directly from description field")
+
+    def test_extracts_from_invoice_description_field(self):
+        """Should extract PO from invoice_description and line_description fields"""
+        from services.po_resolution_service import extract_po_candidates
+
+        fields = {"invoice_description": "W117397", "line_description": "PR10088"}
+        candidates = extract_po_candidates("", fields)
+        norms = {c["normalized"] for c in candidates}
+        assert "W117397" in norms, "invoice_description='W117397' should be extracted"
+        assert "PR10088" in norms, "line_description='PR10088' should be extracted"
+        inv_desc = [c for c in candidates if c["source"] == "extracted_field:invoice_description"]
+        assert len(inv_desc) >= 1
+        assert inv_desc[0]["confidence"] >= 0.60
+        print("PASS: Extracts PO from invoice_description and line_description")
+
+    def test_description_non_po_text_no_candidate(self):
+        """Non-PO descriptive text in description should NOT generate a direct candidate"""
+        from services.po_resolution_service import extract_po_candidates
+
+        fields = {"description": "Invoice for services"}
+        candidates = extract_po_candidates("", fields)
+        direct = [c for c in candidates if c["source"] == "extracted_field:description"]
+        assert len(direct) == 0, (
+            f"'Invoice for services' should not produce a direct description candidate, "
+            f"got {direct}"
+        )
+        print("PASS: Non-PO description text does not generate a direct candidate")
+
 
 # ---------------------------------------------------------------------------
 # MODULE: Pipeline Stage Order

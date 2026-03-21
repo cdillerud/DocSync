@@ -1079,6 +1079,17 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
         except Exception as ds_err:
             logger.warning("Dropship auto-approve failed for SO %s: %s", bc_record_no, ds_err)
 
+    # ── Warehouse SO Booked Notifications ──
+    notification_results = None
+    if so_type == "warehouse" and result.get("success") and result.get("status") != "already_exists":
+        try:
+            from services.notification_service import on_warehouse_so_booked
+            notification_results = await on_warehouse_so_booked(
+                doc, bc_sales_order, dry_run=False, db=db,
+            )
+        except Exception as notif_err:
+            logger.warning("Warehouse SO notification failed for SO %s: %s", bc_record_no, notif_err)
+
     return {
         "success": result.get("success", False),
         "already_exists": result.get("status") == "already_exists",
@@ -1097,6 +1108,7 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
         "line_errors": line_result["errors"],
         "created_at": now,
         "inventory_commitments": commitment_result,
+        "notification_results": notification_results,
     }
 
 

@@ -78,6 +78,21 @@ Only use branch: `conflict_150326_1947`
 - Dropship auto-approve: _auto_approve_dropship_so() advances workflow to approved
 - 38 tests (27 unit + 11 integration) — all passing
 
+### P3-C: Warehouse SO Booked Notifications (COMPLETED Feb 2026)
+- Created `services/notification_service.py` with:
+  - `send_warehouse_receiving_notice(doc, so_data, dry_run)` — Warehouse Receiving Notice to Logistics
+  - `send_so_confirmation_to_customer(doc, so_data, customer_email, dry_run)` — SO Confirmation to Customer
+  - `on_warehouse_so_booked(doc, so_data, dry_run)` — orchestrator that calls both
+  - `get_notification_config()` / `save_notification_config()` — CRUD for hub_config
+  - Content builders: HTML tables with SO number, customer, line items, delivery/ship dates, warehouse location
+  - Customer email resolved from: explicit param > extracted_fields.customer_email > spiro_data.email
+  - dry_run=True logs content without sending; non-dry-run sends via email_service (Mock provider in dev, MS Graph in prod)
+  - Guards: skips when disabled, skips when no recipient configured
+- Wired into `create_sales_order_from_document()` in gpi_integration.py: when so_type=warehouse and SO created successfully, calls on_warehouse_so_booked()
+- Added `GET/PUT /api/settings/notification-config` endpoints to settings.py for admin config
+- Config stored in hub_config collection with _key="notification_config"
+- 32 tests — all passing (content builders, dry-run, mock send, config CRUD, API endpoints)
+
 ## P0/P1/P2 Backlog
 
 ### Completed
@@ -90,6 +105,7 @@ Only use branch: `conflict_150326_1947`
 - ✅ Square9 decommission
 - ✅ BC catalog sync scheduling + health
 - ✅ Drop-Ship vs Warehouse SO type routing
+- ✅ Warehouse SO booked notifications (receiving notice + SO confirmation)
 
 ### Remaining
 - P0: server.py monolith refactor (partially done — services extracted but ~7 functions still imported from server.py)
@@ -108,4 +124,5 @@ Only use branch: `conflict_150326_1947`
 - test_catalog_sync.py: 7 tests
 - test_so_type_routing.py: 27 tests
 - test_so_type_routing_api.py: 11 tests (created by testing agent)
-- Total passing: 130+ tests
+- test_warehouse_so_notifications.py: 32 tests
+- Total passing: 160+ tests

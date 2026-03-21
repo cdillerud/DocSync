@@ -372,3 +372,34 @@ async def subscribe_email_watcher(webhook_url: str = Query(...)):
 # ==================== AP INVOICE WORKFLOW QUEUES ====================
 
 
+
+
+# ==================== NOTIFICATION CONFIG ====================
+
+
+class NotificationConfigUpdate(BaseModel):
+    warehouse_receiving_email: Optional[str] = None
+    from_address: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+@router.get("/notification-config")
+async def get_notification_config_endpoint():
+    """Read notification email configuration (warehouse receiving address, etc.)."""
+    db = get_db()
+    from services.notification_service import get_notification_config
+    config = await get_notification_config(db)
+    return {"notification_config": config}
+
+
+@router.put("/notification-config")
+async def update_notification_config_endpoint(body: NotificationConfigUpdate):
+    """Update notification email configuration."""
+    db = get_db()
+    from services.notification_service import get_notification_config, save_notification_config
+    current = await get_notification_config(db)
+    new_wh = body.warehouse_receiving_email if body.warehouse_receiving_email is not None else current.get("warehouse_receiving_email", "")
+    new_from = body.from_address if body.from_address is not None else current.get("from_address", "")
+    new_enabled = body.enabled if body.enabled is not None else current.get("enabled", True)
+    saved = await save_notification_config(db, warehouse_receiving_email=new_wh, from_address=new_from, enabled=new_enabled)
+    return {"notification_config": saved}

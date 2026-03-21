@@ -479,6 +479,119 @@ class AutoResolutionService:
             except Exception as pre:
                 logger.warning("[AutoResolve:W%d] PO resolution error: %s", worker_id, str(pre))
 
+            # ---------------------------------------------------------
+            # AUTO-POST AP INVOICES (stable vendors with linked POs)
+            # Wires existing services: check_auto_post_eligibility,
+            # stable_vendor_routing, po_resolution, and
+            # auto_create_pi_from_document.
+            # Never blocks pipeline — all errors caught and logged.
+            # ---------------------------------------------------------
+            try:
+                from services.auto_post_service import check_auto_post_eligibility
+                from routers.gpi_integration import auto_create_pi_from_document
+                from services.automation_helpers import create_activity
+
+                ap_doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+                if ap_doc:
+                    doc_type = ap_doc.get("document_type") or ""
+
+                    if doc_type in ("AP_Invoice", "AP Invoice"):
+                        # Stable vendor score check
+                        sv_routing = ap_doc.get("stable_vendor_routing") or {}
+                        vendor_score = sv_routing.get("vendor_score", 0)
+
+                        # PO → BC link status check
+                        po_res = ap_doc.get("po_resolution") or {}
+                        bc_link = po_res.get("bc_link") or {}
+                        bc_link_status = bc_link.get("status", "")
+
+                        # check_auto_post_eligibility expects 'doc_type' key
+                        elig_doc = {**ap_doc, "doc_type": doc_type}
+                        eligible, elig_reason = check_auto_post_eligibility(elig_doc)
+
+                        if eligible and vendor_score >= 0.85 and bc_link_status == "linked":
+                            logger.info(
+                                "[AutoResolve:W%d] Auto-post eligible for %s "
+                                "(vendor_score=%.2f, bc_link=%s)",
+                                worker_id, doc_id[:8], vendor_score, bc_link_status,
+                            )
+                            try:
+                                result = await auto_create_pi_from_document(doc_id, self.db)
+
+                                if result.get("success"):
+                                    await self.db.hub_documents.update_one(
+                                        {"id": doc_id},
+                                        {"$set": {
+                                            "auto_posted": True,
+                                            "auto_post_result": result,
+                                            "auto_post_at": utcnow(),
+                                            "updated_utc": utcnow(),
+                                        }},
+                                    )
+                                    await create_activity(
+                                        self.db, doc_id, "document",
+                                        "auto_post_success",
+                                        title="Auto-posted to BC",
+                                        body=f"Purchase invoice created: {result.get('bc_record_no', 'N/A')}",
+                                        metadata=result,
+                                    )
+                                    logger.info(
+                                        "[AutoResolve:W%d] Auto-post SUCCESS for %s: %s",
+                                        worker_id, doc_id[:8], result.get("bc_record_no"),
+                                    )
+                                else:
+                                    await self.db.hub_documents.update_one(
+                                        {"id": doc_id},
+                                        {"$set": {
+                                            "auto_post_failed": True,
+                                            "auto_post_error": result.get("reason", "unknown"),
+                                            "auto_post_result": result,
+                                            "updated_utc": utcnow(),
+                                        }},
+                                    )
+                                    await create_activity(
+                                        self.db, doc_id, "document",
+                                        "auto_post_failed",
+                                        title="Auto-post failed",
+                                        body=f"Reason: {result.get('reason', 'unknown')}",
+                                        metadata=result,
+                                    )
+                                    logger.warning(
+                                        "[AutoResolve:W%d] Auto-post FAILED for %s: %s",
+                                        worker_id, doc_id[:8], result.get("reason"),
+                                    )
+                            except Exception as ap_exec_err:
+                                await self.db.hub_documents.update_one(
+                                    {"id": doc_id},
+                                    {"$set": {
+                                        "auto_post_failed": True,
+                                        "auto_post_error": str(ap_exec_err),
+                                        "updated_utc": utcnow(),
+                                    }},
+                                )
+                                await create_activity(
+                                    self.db, doc_id, "document",
+                                    "auto_post_error",
+                                    title="Auto-post exception",
+                                    body=str(ap_exec_err),
+                                )
+                                logger.error(
+                                    "[AutoResolve:W%d] Auto-post exception for %s: %s",
+                                    worker_id, doc_id[:8], str(ap_exec_err),
+                                )
+                        else:
+                            logger.debug(
+                                "[AutoResolve:W%d] Auto-post skip for %s: "
+                                "eligible=%s vendor_score=%.2f bc_link=%s reason=%s",
+                                worker_id, doc_id[:8], eligible,
+                                vendor_score, bc_link_status, elig_reason,
+                            )
+            except Exception as auto_post_err:
+                logger.warning(
+                    "[AutoResolve:W%d] Auto-post check error: %s",
+                    worker_id, str(auto_post_err),
+                )
+
         except Exception as e:
             logger.error("[AutoResolve:W%d] Failed %s: %s", worker_id, doc_id[:8], str(e))
             self._stats["failed"] += 1

@@ -121,7 +121,16 @@ Only use branch: `conflict_150326_1947`
   - override_rep_for_customer(db, customer_no, rep_email, rep_name): stores manual overrides in customer_rep_overrides collection
 - 20 tests — all passing
 
-### Intake Benchmark Feature (v1.6.0 — COMPLETED Mar 21 2026)
+### BC Factbox Document Links — Zetadocs Replacement (COMPLETED Mar 21 2026)
+- **Step 1**: GET `/api/gpi-integration/document-links/{bc_entity}/{bc_document_no}` — lists docs linked to a BC record (hub + BC API + legacy Zetadocs), deduplicated on SP URL
+- **Step 2**: POST `.../upload` — multipart file upload → SP, folder resolution (existing match first, routing rules fallback), creates hub_documents + BC link. 25MB max enforced (413).
+- **Step 3**: DELETE `.../document-links/{entity}/{no}/{doc_id}` — soft-delete (deleted=True), SP file preserved
+- **Step 4**: `docs/bc_extension_factbox_spec.md` — complete AL extension spec for BC developer (GET/POST/DELETE calls, factbox UI, multipart construction)
+- **Step 5**: POST `.../migrate-from-zetadocs` — idempotent import of legacy Zetadocs links from BC documentLinks API into hub_documents
+- 17 backend tests — all passing
+- **MOCKED**: SharePoint uploads and BC API calls mocked in DEMO_MODE (preview env limitation)
+
+
 - New top-level nav item "Intake Benchmark" (temporary benchmarking workspace)
 - **Run Setup**: Create/list/complete/archive/delete bake-off runs
 - **Document Scoring**: Add docs manually or via CSV import, side-by-side Truth/GPI/S9 fields
@@ -162,6 +171,7 @@ Only use branch: `conflict_150326_1947`
 - ✅ **[P4-C] Frontend consolidation** — 38 pages → 8 primary pages (Mar 21 2026)
 - ✅ App versioning system with changelog dialog (v1.5.0) (Mar 21 2026)
 - ✅ **Intake Benchmark: GPI Hub vs Square 9 comparison workspace** (v1.6.0) (Mar 21 2026)
+- ✅ **BC Factbox Document Links — Zetadocs Replacement** (Mar 21 2026)
 
 ### Remaining
 - P1: Wire rep assignment into SO creation flow (Step 2)

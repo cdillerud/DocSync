@@ -24,6 +24,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
@@ -2166,3 +2167,375 @@ async def suggest_items_for_line(request: Request):
     db = get_db()
     suggestions = await suggest_items_for_description(db, description, limit=limit)
     return {"description": description, "suggestions": suggestions, "total": len(suggestions)}
+
+
+
+# =========================================================================
+# Document Links — BC Factbox Integration (Zetadocs Replacement)
+# Steps 1-3, 5: GET links, POST upload, DELETE link, migrate
+# =========================================================================
+
+MAX_UPLOAD_SIZE = 25 * 1024 * 1024  # 25 MB
+
+DEMO_MODE = os.environ.get('DEMO_MODE', 'true').lower() == 'true'
+
+def bc_entity_to_doc_type(entity: str) -> str:
+    """Map BC entity set names to GPI Hub document types."""
+    return {
+        "purchaseOrders": "Purchase_Order",
+        "purchaseInvoices": "AP_Invoice",
+        "salesOrders": "Sales_Order",
+    }.get(entity, "Document")
+
+
+async def _fetch_bc_document_links(bc_document_no: str) -> list:
+    """Fetch documentLinks from BC gpi/documents/v1.0 API for a given document number.
+    Returns list of dicts. In DEMO_MODE returns empty list."""
+    if DEMO_MODE or not HAS_CREDENTIALS:
+        logger.info("[DocLinks] DEMO_MODE — skipping BC documentLinks read for %s", bc_document_no)
+        return []
+
+    try:
+        from services.gpi_integration_service import _get_token, _get_company_id_standard_api, GPI_API_BASE, BC_TENANT_ID, BC_READ_ENVIRONMENT
+        token = await _get_token()
+        company_id = await _get_company_id_standard_api()
+        doc_link_api = "gpi/documents/v1.0"
+        url = (f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/{doc_link_api}/"
+               f"companies({company_id})/documentLinks"
+               f"?$filter=bcDocumentNo eq '{bc_document_no}'")
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(url, headers={
+                "Authorization": f"Bearer {token}", "Accept": "application/json"
+            })
+            if resp.status_code != 200:
+                logger.warning("[DocLinks] BC API returned %d for %s", resp.status_code, bc_document_no)
+                return []
+            return resp.json().get("value", [])
+    except Exception as e:
+        logger.warning("[DocLinks] Failed to fetch BC document links for %s: %s", bc_document_no, e)
+        return []
+
+
+# --- STEP 1: GET document links for a BC record ---
+
+@router.get("/document-links/{bc_entity}/{bc_document_no}")
+async def get_document_links(bc_entity: str, bc_document_no: str):
+    """List all documents linked to a BC record (hub + BC API + legacy Zetadocs).
+
+    Returns a combined, deduplicated list sorted by created_utc desc.
+    """
+    db = get_db()
+
+    # 1) Query hub_documents for docs linked to this BC document
+    hub_docs = await db.hub_documents.find(
+        {
+            "bc_document_no": bc_document_no,
+            "sharepoint_web_url": {"$nin": [None, ""]},
+            "$or": [{"deleted": {"$exists": False}}, {"deleted": False}],
+        },
+        {"_id": 0}
+    ).sort("created_utc", -1).to_list(200)
+
+    seen_urls = set()
+    results = []
+
+    for d in hub_docs:
+        sp_url = d.get("sharepoint_web_url") or d.get("sharepoint_share_link_url") or ""
+        if not sp_url or sp_url in seen_urls:
+            continue
+        seen_urls.add(sp_url)
+        results.append({
+            "doc_id": d.get("id", ""),
+            "file_name": d.get("file_name", ""),
+            "sharepoint_web_url": sp_url,
+            "sharepoint_folder_path": d.get("sharepoint_folder_path", ""),
+            "uploaded_by": d.get("uploaded_by", ""),
+            "created_utc": d.get("created_utc", ""),
+            "file_size_bytes": d.get("file_size_bytes"),
+            "document_type": d.get("document_type", ""),
+            "source": d.get("source", "hub"),
+        })
+
+    # 2) Query BC documentLinks API for this document number
+    bc_links = await _fetch_bc_document_links(bc_document_no)
+    for link in bc_links:
+        sp_url = link.get("sharePointUrl", "")
+        if not sp_url or sp_url in seen_urls:
+            continue
+        seen_urls.add(sp_url)
+        source_val = link.get("source", "")
+        if source_val in ("BCDrop", "GPIHub", "GPIHub_Auto"):
+            display_source = "hub" if "GPI" in source_val else "bc_drop"
+        else:
+            display_source = "zetadocs_legacy"
+        results.append({
+            "doc_id": link.get("id", ""),
+            "file_name": link.get("fileName", sp_url.rsplit("/", 1)[-1] if sp_url else ""),
+            "sharepoint_web_url": sp_url,
+            "sharepoint_folder_path": "",
+            "uploaded_by": link.get("uploadedBy", ""),
+            "created_utc": link.get("createdAt", ""),
+            "file_size_bytes": None,
+            "document_type": link.get("documentType", ""),
+            "source": display_source,
+        })
+
+    # Sort combined list
+    results.sort(key=lambda x: x.get("created_utc", ""), reverse=True)
+
+    return {
+        "bc_entity": bc_entity,
+        "bc_document_no": bc_document_no,
+        "documents": results,
+        "total": len(results),
+    }
+
+
+# --- STEP 2: POST upload file from BC to SharePoint ---
+
+from fastapi import UploadFile, File, Form
+
+@router.post("/document-links/{bc_entity}/{bc_document_no}/upload")
+async def upload_document_to_bc_record(
+    bc_entity: str,
+    bc_document_no: str,
+    file: UploadFile = File(...),
+    uploaded_by: str = Form("BC Drop"),
+    vendor_context: str = Form(""),
+):
+    """Upload a file to SharePoint and link it to a BC record.
+
+    1. Resolve the SP folder from existing hub_documents or routing rules.
+    2. Upload to SharePoint.
+    3. Create GPI Document Link in BC factbox.
+    4. Create hub_documents record.
+    """
+    db = get_db()
+
+    # Read file and enforce 25MB max
+    file_content = await file.read()
+    if len(file_content) > MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds 25MB limit ({len(file_content) / (1024*1024):.1f}MB)"
+        )
+
+    # --- FOLDER RESOLUTION ---
+    folder_source = "routing_rules"
+    folder_path = ""
+
+    # Try to find existing folder from hub_documents for this BC record
+    existing = await db.hub_documents.find_one(
+        {
+            "bc_document_no": bc_document_no,
+            "sharepoint_folder_path": {"$nin": [None, ""]},
+        },
+        {"sharepoint_folder_path": 1, "sharepoint_drive_id": 1, "_id": 0},
+        sort=[("created_utc", -1)],
+    )
+
+    if existing and existing.get("sharepoint_folder_path"):
+        folder_path = existing["sharepoint_folder_path"]
+        folder_source = "matched"
+        logger.info("[DocLinks] Folder matched from existing doc for %s: %s", bc_document_no, folder_path)
+    else:
+        # Fallback: use folder routing rules
+        try:
+            from services.folder_routing_service import determine_folder_path
+            doc_type = bc_entity_to_doc_type(bc_entity)
+            fake_doc = {
+                "document_type": doc_type,
+                "extracted_fields": {"vendor": vendor_context},
+                "normalized_fields": {},
+            }
+            folder_path, _reason, _details = determine_folder_path(fake_doc)
+            logger.info("[DocLinks] Folder from routing rules for %s: %s (%s)", bc_document_no, folder_path, _reason)
+        except Exception as e:
+            logger.warning("[DocLinks] Folder routing failed, using default: %s", e)
+            folder_path = f"BC_Drops/{bc_entity}/{bc_document_no}"
+
+    # --- UPLOAD TO SHAREPOINT ---
+    try:
+        from services.sharepoint_service import upload_to_sharepoint
+        sp_result = await upload_to_sharepoint(file_content, file.filename, folder_path)
+    except Exception as e:
+        logger.error("[DocLinks] SharePoint upload failed for %s: %s", bc_document_no, e)
+        raise HTTPException(status_code=502, detail=f"SharePoint upload failed: {str(e)}")
+
+    # --- CREATE GPI DOCUMENT LINK IN BC ---
+    bc_link_created = False
+    try:
+        link_result = await create_gpi_document_link(
+            bc_system_id="",
+            bc_document_no=bc_document_no,
+            document_type=bc_entity_to_doc_type(bc_entity),
+            sharepoint_url=sp_result.get("web_url", ""),
+            sharepoint_drive_id=sp_result.get("drive_id", ""),
+            sharepoint_item_id=sp_result.get("item_id", ""),
+            uploaded_by=uploaded_by,
+            source="BCDrop",
+        )
+        bc_link_created = link_result.get("success", False)
+    except Exception as e:
+        logger.warning("[DocLinks] BC link creation failed (non-blocking): %s", e)
+
+    # --- CREATE HUB_DOCUMENTS RECORD ---
+    now = datetime.now(timezone.utc).isoformat()
+    new_doc_id = str(uuid.uuid4())
+    hub_record = {
+        "id": new_doc_id,
+        "file_name": file.filename,
+        "bc_document_no": bc_document_no,
+        "bc_entity_type": bc_entity,
+        "sharepoint_folder_path": folder_path,
+        "sharepoint_web_url": sp_result.get("web_url", ""),
+        "sharepoint_drive_id": sp_result.get("drive_id", ""),
+        "sharepoint_item_id": sp_result.get("item_id", ""),
+        "source": "bc_drop",
+        "uploaded_by": uploaded_by,
+        "created_utc": now,
+        "updated_utc": now,
+        "document_type": bc_entity_to_doc_type(bc_entity),
+        "folder_source": folder_source,
+        "file_size_bytes": len(file_content),
+    }
+    await db.hub_documents.insert_one(hub_record)
+    hub_record.pop("_id", None)
+
+    logger.info("[DocLinks] Uploaded %s to %s for %s/%s (folder_source=%s, bc_link=%s)",
+                file.filename, folder_path, bc_entity, bc_document_no, folder_source, bc_link_created)
+
+    return {
+        "success": True,
+        "doc_id": new_doc_id,
+        "file_name": file.filename,
+        "sharepoint_url": sp_result.get("web_url", ""),
+        "folder_path": folder_path,
+        "folder_source": folder_source,
+        "bc_link_created": bc_link_created,
+    }
+
+
+# --- STEP 3: DELETE a document link (soft delete) ---
+
+@router.delete("/document-links/{bc_entity}/{bc_document_no}/{doc_id_or_sp_item}")
+async def delete_document_link(bc_entity: str, bc_document_no: str, doc_id_or_sp_item: str):
+    """Soft-delete a document link. The SharePoint file remains for audit."""
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Find by id or sharepoint_item_id
+    doc = await db.hub_documents.find_one(
+        {"$or": [
+            {"id": doc_id_or_sp_item, "bc_document_no": bc_document_no},
+            {"sharepoint_item_id": doc_id_or_sp_item, "bc_document_no": bc_document_no},
+        ]},
+        {"_id": 0}
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document link not found")
+
+    await db.hub_documents.update_one(
+        {"id": doc.get("id")},
+        {"$set": {"deleted": True, "deleted_utc": now, "deleted_by": "user"}}
+    )
+
+    logger.info("[DocLinks] Soft-deleted link %s for %s/%s", doc.get("id"), bc_entity, bc_document_no)
+    return {"success": True, "message": f"Link removed for {doc.get('file_name', '')}. SharePoint file preserved."}
+
+
+# --- STEP 5: Migrate existing Zetadocs links ---
+
+@router.post("/document-links/migrate-from-zetadocs")
+async def migrate_zetadocs_links():
+    """Import existing Zetadocs-written links from BC into hub_documents.
+
+    Idempotent — safe to run multiple times. Skips records that already exist.
+    """
+    if DEMO_MODE or not HAS_CREDENTIALS:
+        return {
+            "migrated": 0, "skipped": 0, "errors": [],
+            "message": "DEMO_MODE active — no BC API calls made. In production this fetches all Zetadocs links."
+        }
+
+    try:
+        from services.gpi_integration_service import _get_token, _get_company_id_standard_api, GPI_API_BASE, BC_TENANT_ID, BC_READ_ENVIRONMENT
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=f"Import error: {e}")
+
+    db = get_db()
+    token = await _get_token()
+    company_id = await _get_company_id_standard_api()
+    doc_link_api = "gpi/documents/v1.0"
+    base_url = (f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/{doc_link_api}/"
+                f"companies({company_id})/documentLinks")
+
+    migrated = 0
+    skipped = 0
+    errors = []
+    page_url = f"{base_url}?$top=100&$filter=source ne 'BCDrop' and source ne 'GPIHub' and source ne 'GPIHub_Auto'"
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            while page_url:
+                resp = await client.get(page_url, headers={
+                    "Authorization": f"Bearer {token}", "Accept": "application/json"
+                })
+                if resp.status_code != 200:
+                    errors.append(f"BC API returned {resp.status_code}: {resp.text[:200]}")
+                    break
+
+                data = resp.json()
+                links = data.get("value", [])
+
+                for link in links:
+                    sp_item_id = link.get("sharePointItemId", "")
+                    sp_url = link.get("sharePointUrl", "")
+                    bc_doc_no = link.get("bcDocumentNo", "")
+
+                    if not sp_url:
+                        continue
+
+                    # Check if already exists
+                    existing = await db.hub_documents.find_one(
+                        {"$or": [
+                            {"sharepoint_item_id": sp_item_id} if sp_item_id else {"sharepoint_web_url": sp_url},
+                            {"sharepoint_web_url": sp_url},
+                        ]},
+                        {"_id": 0, "id": 1}
+                    )
+                    if existing:
+                        skipped += 1
+                        continue
+
+                    # Create stub record
+                    now = datetime.now(timezone.utc).isoformat()
+                    stub = {
+                        "id": str(uuid.uuid4()),
+                        "source": "zetadocs_legacy",
+                        "bc_document_no": bc_doc_no,
+                        "sharepoint_web_url": sp_url,
+                        "sharepoint_drive_id": link.get("sharePointDriveId", ""),
+                        "sharepoint_item_id": sp_item_id,
+                        "migrated_utc": now,
+                        "created_utc": link.get("createdAt", now),
+                        "document_type": link.get("documentType", ""),
+                        "file_name": link.get("fileName", sp_url.rsplit("/", 1)[-1] if sp_url else ""),
+                        "uploaded_by": link.get("uploadedBy", "Zetadocs"),
+                    }
+                    try:
+                        await db.hub_documents.insert_one(stub)
+                        stub.pop("_id", None)
+                        migrated += 1
+                    except Exception as e:
+                        errors.append(f"Insert failed for {bc_doc_no}: {str(e)[:100]}")
+
+                # Next page
+                page_url = data.get("@odata.nextLink")
+
+    except Exception as e:
+        errors.append(f"Migration error: {str(e)[:200]}")
+
+    logger.info("[DocLinks] Zetadocs migration: migrated=%d, skipped=%d, errors=%d", migrated, skipped, len(errors))
+    return {"migrated": migrated, "skipped": skipped, "errors": errors}

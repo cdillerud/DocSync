@@ -1,0 +1,90 @@
+{
+  "summary": "BC Factbox Document Links API (Zetadocs Replacement) - All 17 backend tests passed. Tested 5 new endpoints: GET document-links, POST upload, DELETE soft-delete, migrate-from-zetadocs, and bc_entity_to_doc_type mapping. DEMO_MODE was enabled for upload tests (SharePoint mocked).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_bc_factbox_document_links.py",
+    "/app/test_reports/pytest/bc_factbox_document_links_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_bc_factbox_document_links.py"
+  ],
+  "success_rate": {
+    "backend": "100% (17/17 tests passed)",
+    "frontend": "N/A (backend only testing)"
+  },
+  "test_credentials": "N/A - no auth required for these endpoints",
+  "seed_data_creation": "Test documents created with TEST- prefix during testing, cleaned up via soft-delete tests",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "BC Factbox Document Links API fully tested. All 5 endpoints working: (1) GET /api/gpi-integration/document-links/{bc_entity}/{bc_document_no} returns empty list for unknown docs, (2) POST upload creates hub_documents with source=bc_drop and correct document_type mapping, (3) Second upload to same bc_document_no returns folder_source=matched, (4) DELETE soft-deletes records (SharePoint file preserved), (5) migrate-from-zetadocs returns migrated/skipped/errors fields. bc_entity_to_doc_type mapping verified: purchaseInvoices→AP_Invoice, purchaseOrders→Purchase_Order, salesOrders→Sales_Order. docs/bc_extension_factbox_spec.md exists with endpoint documentation.",
+  "verified_features": {
+    "get_document_links": {
+      "status": "PASS",
+      "verified": [
+        "GET /api/gpi-integration/document-links/purchaseInvoices/{doc_no} returns empty list for unknown doc",
+        "GET /api/gpi-integration/document-links/salesOrders/{doc_no} works",
+        "GET /api/gpi-integration/document-links/purchaseOrders/{doc_no} works",
+        "Response contains bc_entity, bc_document_no, documents array, total count"
+      ]
+    },
+    "upload_endpoint": {
+      "status": "PASS",
+      "verified": [
+        "POST upload with small file succeeds (DEMO_MODE mocked SharePoint)",
+        "Response contains success=true, file_name, sharepoint_url, folder_path, folder_source",
+        "Second upload to same bc_document_no returns folder_source=matched (not routing_rules)",
+        "Upload with 26MB+ file returns HTTP 413",
+        "Hub documents record created with source=bc_drop, bc_entity_type, document_type, folder_source"
+      ]
+    },
+    "delete_endpoint": {
+      "status": "PASS",
+      "verified": [
+        "DELETE soft-deletes the record (sets deleted=True)",
+        "Response contains success=true and 'SharePoint file preserved' message",
+        "GET after delete shows fewer documents (soft-deleted docs filtered out)",
+        "DELETE nonexistent document returns 404"
+      ]
+    },
+    "migrate_endpoint": {
+      "status": "PASS",
+      "verified": [
+        "POST migrate-from-zetadocs returns response with migrated/skipped/errors fields",
+        "In DEMO_MODE returns migrated=0, skipped=0 with message"
+      ]
+    },
+    "entity_mapping": {
+      "status": "PASS",
+      "verified": [
+        "purchaseInvoices maps to AP_Invoice",
+        "purchaseOrders maps to Purchase_Order",
+        "salesOrders maps to Sales_Order"
+      ]
+    },
+    "documentation": {
+      "status": "PASS",
+      "verified": [
+        "docs/bc_extension_factbox_spec.md exists",
+        "Contains endpoint documentation for GET, POST, DELETE, migrate-from-zetadocs",
+        "Documents all three BC entity types: purchaseInvoices, purchaseOrders, salesOrders"
+      ]
+    }
+  },
+  "mocked_apis": {
+    "note": "SharePoint uploads are MOCKED when DEMO_MODE=true. BC documentLinks API is MOCKED in DEMO_MODE.",
+    "mocked_list": [
+      "SharePoint Graph API (upload_to_sharepoint mocked in DEMO_MODE)",
+      "BC documentLinks API (mocked in DEMO_MODE)"
+    ]
+  }
+}

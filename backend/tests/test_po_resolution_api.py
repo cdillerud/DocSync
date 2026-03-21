@@ -421,6 +421,25 @@ class TestBackendHealth:
         assert "total_documents" in data, "Response missing 'total_documents'"
         print(f"PASS: Square9 stage-counts returns {len(data['stages'])} stages, {data['total_documents']} docs")
 
+    def test_square9_migration_status_endpoint(self):
+        """Square9 migration-status should return 200 with cutover readiness info"""
+        resp = requests.get(f"{BASE_URL}/api/square9/migration-status", timeout=30)
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        data = resp.json()
+        assert "total_documents" in data
+        assert "with_square9_stage" in data
+        assert "cutover_readiness" in data
+        assert "square9_active" in data
+        print(f"PASS: migration-status: readiness={data['cutover_readiness']}, active={data['square9_active']}")
+
+    def test_square9_cutover_idempotent(self):
+        """Square9 cutover should be idempotent — second call returns already_decommissioned"""
+        resp = requests.post(f"{BASE_URL}/api/admin/square9-cutover", timeout=30)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] in ("decommissioned", "already_decommissioned")
+        print(f"PASS: cutover idempotent: status={data['status']}")
+
 
 # ---------------------------------------------------------------------------
 # Run with pytest

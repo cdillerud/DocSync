@@ -1131,6 +1131,7 @@ export default function DashboardPage() {
   const [stats, setStats] = useState(null);
   const [intelligence, setIntelligence] = useState(null);
   const [dailyIngestion, setDailyIngestion] = useState(null);
+  const [square9Cutover, setSquare9Cutover] = useState(null);
   const [ingestionDate, setIngestionDate] = useState(() => {
     const d = new Date(); return d.toISOString().split('T')[0];
   });
@@ -1149,6 +1150,8 @@ export default function DashboardPage() {
       setStats(statsRes.data);
       setIntelligence(intelligenceRes.data);
       setDailyIngestion(diRes.data);
+      // Fetch Square9 cutover status (non-blocking)
+      api.get('/api/square9/migration-status').then(r => setSquare9Cutover(r.data)).catch(() => {});
     } catch (err) {
       toast.error('Failed to load dashboard');
     } finally {
@@ -1209,6 +1212,19 @@ export default function DashboardPage() {
           <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
           <p className="text-sm text-amber-800 dark:text-amber-200">
             <span className="font-semibold">Demo Mode Active</span> - Microsoft APIs are simulated. Configure Entra ID credentials in Settings to connect live.
+          </p>
+        </div>
+      )}
+
+      {/* Square9 decommission banner */}
+      {square9Cutover && !square9Cutover.square9_active && (
+        <div className="bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 rounded-lg px-4 py-3 flex items-center gap-3" data-testid="square9-cutover-banner">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+          <p className="text-sm text-emerald-800 dark:text-emerald-200">
+            <span className="font-semibold">Square9 Decommissioned</span> — GPI Hub is now the authoritative document system.
+            {square9Cutover.cutover_info?.cutover_at && (
+              <span className="ml-1">Cutover: {new Date(square9Cutover.cutover_info.cutover_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+            )}
           </p>
         </div>
       )}

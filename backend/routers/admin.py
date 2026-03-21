@@ -121,6 +121,54 @@ async def migrate_sales_documents_to_unified():
     return stats
 
 
+@router.post("/square9-cutover")
+async def execute_square9_cutover():
+    """Decommission Square9 — GPI Hub becomes the authoritative document system.
+
+    Sets square9_active=false in hub_config, records timestamp,
+    and logs a system activity record. Idempotent.
+    """
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+
+    existing = await db.hub_config.find_one({"_key": "square9_cutover"}, {"_id": 0})
+    if existing and existing.get("square9_active") is False:
+        return {
+            "status": "already_decommissioned",
+            "cutover_at": existing.get("cutover_at"),
+            "message": "Square9 was already decommissioned.",
+        }
+
+    await db.hub_config.update_one(
+        {"_key": "square9_cutover"},
+        {"$set": {
+            "_key": "square9_cutover",
+            "square9_active": False,
+            "cutover_at": now,
+            "cutover_by": "admin",
+        }},
+        upsert=True,
+    )
+
+    await db.activity_log.insert_one({
+        "id": uuid.uuid4().hex,
+        "entity_type": "system",
+        "entity_id": "square9_cutover",
+        "action": "square9_decommissioned",
+        "title": "Square9 Decommissioned",
+        "body": "GPI Hub is now the authoritative document system. Square9 stages are archived as historical metadata.",
+        "created_utc": now,
+    })
+
+    logger.info("[Admin] Square9 cutover executed at %s", now)
+
+    return {
+        "status": "decommissioned",
+        "cutover_at": now,
+        "message": "Square9 decommissioned. GPI Hub is now the authoritative document system.",
+    }
+
+
 @router.post("/recompute-derived-states")
 async def recompute_derived_states(
     background_tasks: BackgroundTasks,

@@ -140,3 +140,67 @@ Internet → :80 (nginx) → Frontend (React)
 ```
 
 All services run in isolated Docker containers on a private network.
+
+
+
+---
+
+## Square9 Decommission Procedure
+
+### Overview
+
+GPI Hub replaces Square9 as the authoritative document management system.
+After cutover, all document intake, classification, filing, and approval
+happens exclusively in GPI Hub. Square9 stage data is preserved as
+historical metadata on `hub_documents.square9_stage`.
+
+### Pre-Cutover Checklist
+
+1. **Verify Hub readiness**
+   ```
+   GET /api/square9/migration-status
+   ```
+   Confirm `cutover_readiness: "ready"` and review `unique_stages` for any
+   documents still in active Square9 processing.
+
+2. **Validate mailbox sources** — ensure all AP and Sales mailboxes are
+   configured in GPI Hub (`/api/mailbox-sources`).
+
+3. **Test email polling** — trigger a manual poll:
+   ```
+   POST /api/email-polling/trigger
+   ```
+
+### Execute Cutover
+
+```
+POST /api/admin/square9-cutover
+```
+
+This endpoint:
+- Sets `square9_active=false` in `hub_config`
+- Records the cutover timestamp
+- Logs a system activity record
+- Is idempotent (safe to call multiple times)
+
+The dashboard will show a green banner confirming decommission.
+
+### Redirect Email Mailboxes from Square9 to GPI Hub
+
+| Mailbox | Purpose | GPI Hub Config |
+|---------|---------|----------------|
+| `ap@gamerpackaging.com` | AP invoices, freight bills | mailbox source `category: "AP"` |
+| `sales@gamerpackaging.com` | Sales orders, confirmations | mailbox source `category: "Sales"` |
+| `logistics@gamerpackaging.com` | Shipping docs, BOLs, PODs | mailbox source `category: "Logistics"` |
+| `warehouse@gamerpackaging.com` | Warehouse receipts, storage | mailbox source `category: "Warehouse"` |
+
+**Steps per mailbox:**
+1. Disable Square9 inbox rule in Exchange Admin
+2. Add GPI Hub mailbox source via `/api/mailbox-sources`
+3. Configure Graph API credentials (`EMAIL_CLIENT_ID`, `EMAIL_CLIENT_SECRET`, `EMAIL_TENANT_ID`)
+4. Set `EMAIL_POLLING_ENABLED=true` and restart backend
+5. Verify via `GET /api/email-polling/status`
+
+### Rollback
+
+Re-enable Square9: set `square9_active=true` in `hub_config`, re-enable inbox rules.

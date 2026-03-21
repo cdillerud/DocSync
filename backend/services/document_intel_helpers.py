@@ -358,16 +358,43 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
                 "classified_from_page": llm_result.get("classified_from_page"),
             }
         else:
-            # LLM failed — fall back to heuristic-only (better than nothing)
+            # LLM failed — try Azure for extraction before falling back to heuristic-only
             logger.warning(
-                "LLM extraction failed for '%s', using heuristic-only result: %s",
+                "LLM extraction failed for '%s', trying Azure fallback: %s",
                 file_name, llm_result.get("error") if llm_result else "null",
             )
+            azure_result = await _try_azure_fallback(file_path, file_name, "gemini_extraction_failed")
+            if azure_result and not azure_result.get("error"):
+                # Use heuristic type but merge Azure extracted fields
+                azure_fields = azure_result.get("extracted_fields", {})
+                merged_fields = {**azure_fields, **{k: v for k, v in heuristic_fields.items() if v}}
+                return {
+                    "suggested_job_type": heuristic_type,
+                    "confidence": heuristic_confidence,
+                    "extracted_fields": merged_fields,
+                    "reasoning": "Heuristic classification, Azure OpenAI extraction",
+                    "model": heuristic_result.get("model", "heuristic") + f"+{azure_result.get('model', 'azure')}",
+                }
             return heuristic_result
 
     # No heuristic match — use LLM result directly
     if llm_result:
+        # If Gemini confidence is below threshold, try Azure OpenAI fallback
+        gemini_confidence = llm_result.get("confidence", 0.0) if not llm_result.get("error") else 0.0
+        if gemini_confidence < 0.70:
+            azure_result = await _try_azure_fallback(file_path, file_name, "gemini_low_confidence")
+            if azure_result and azure_result.get("confidence", 0) > gemini_confidence:
+                logger.info(
+                    "Azure fallback selected for '%s': azure=%.2f > gemini=%.2f",
+                    file_name, azure_result["confidence"], gemini_confidence,
+                )
+                return azure_result
         return llm_result
+
+    # Both heuristic and Gemini failed — try Azure as last resort
+    azure_result = await _try_azure_fallback(file_path, file_name, "gemini_null_result")
+    if azure_result and not azure_result.get("error"):
+        return azure_result
 
     return {
         "error": "Both heuristic and LLM extraction failed",
@@ -375,6 +402,45 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
         "confidence": 0.0,
         "extracted_fields": {},
     }
+
+
+async def _try_azure_fallback(file_path: str, file_name: str, trigger_reason: str) -> dict:
+    """Attempt Azure OpenAI classification as a fallback.
+
+    Extracts raw text from the document, then calls Azure OpenAI.
+    Returns None if Azure is not configured or fails entirely.
+    """
+    from services.azure_openai_classifier import (
+        is_azure_configured, classify_document_with_azure_openai,
+    )
+    if not is_azure_configured():
+        logger.debug("Azure OpenAI fallback skipped (not configured), trigger=%s", trigger_reason)
+        return None
+
+    # Extract text from the document for Azure (text-only API)
+    raw_text = ""
+    try:
+        ext = file_name.lower().rsplit(".", 1)[-1] if "." in file_name else ""
+        if ext == "pdf":
+            from pypdf import PdfReader
+            reader = PdfReader(file_path)
+            pages_text = []
+            for page in reader.pages[:3]:  # first 3 pages
+                pages_text.append(page.extract_text() or "")
+            raw_text = "\n".join(pages_text)
+        else:
+            with open(file_path, "r", errors="ignore") as f:
+                raw_text = f.read(15000)
+    except Exception as te:
+        logger.warning("Azure fallback: text extraction failed for '%s': %s", file_name, te)
+
+    if not raw_text.strip():
+        logger.debug("Azure fallback: no text extracted from '%s'", file_name)
+        return None
+
+    logger.info("Azure fallback triggered for '%s' (reason=%s)", file_name, trigger_reason)
+    result = await classify_document_with_azure_openai(raw_text, file_name)
+    return result
 
 
 async def _call_llm_for_extraction(file_path: str, file_name: str) -> dict:

@@ -150,6 +150,42 @@ ENTITY_CONFIGS = {
             "bc_order_number": r.get("orderNumber", ""),
         }
     },
+    "customers": {
+        "entity_type": "customer",
+        "domain": "master",
+        "number_field": "number",
+        "external_ref_field": None,
+        "select_fields": "id,number,displayName,salespersonCode,email,phoneNumber,lastModifiedDateTime",
+        "extract_fields": lambda r: {
+            "bc_record_id": r.get("id", ""),
+            "bc_document_no": r.get("number", ""),
+            "bc_customer_no": r.get("number", ""),
+            "bc_customer_name": r.get("displayName", ""),
+            "displayName": r.get("displayName", ""),
+            "salesperson_code": r.get("salespersonCode", ""),
+            "email": r.get("email", ""),
+            "phone_number": r.get("phoneNumber", ""),
+            "entity_type": "customer",
+            "number": r.get("number", ""),
+            "bc_last_modified": r.get("lastModifiedDateTime"),
+        }
+    },
+    "salespeople": {
+        "entity_type": "salesperson",
+        "domain": "master",
+        "number_field": "code",
+        "external_ref_field": None,
+        "select_fields": "code,name,email,lastModifiedDateTime",
+        "extract_fields": lambda r: {
+            "bc_record_id": r.get("code", ""),
+            "bc_document_no": r.get("code", ""),
+            "code": r.get("code", ""),
+            "name": r.get("name", ""),
+            "email": r.get("email", ""),
+            "entity_type": "salesperson",
+            "bc_last_modified": r.get("lastModifiedDateTime"),
+        }
+    },
 }
 
 
@@ -198,6 +234,9 @@ class BCReferenceCacheService:
             ("normalized_document_no", 1),
             ("bc_entity_type", 1),
         ])
+        # Indexes for customer/salesperson lookup
+        await self.collection.create_index("salesperson_code", sparse=True)
+        await self.collection.create_index("code", sparse=True)
 
         self._initialized = True
         logger.info("[BC Cache] Indexes created on bc_reference_cache")
@@ -420,7 +459,12 @@ class BCReferenceCacheService:
         return count
 
     def _build_cache_document(self, record: Dict, config: Dict) -> Optional[Dict]:
-        """Transform a BC record into a cache document."""
+        """Transform a BC record into a cache document.
+
+        Standard fields are always included. Entity-specific extra fields
+        (e.g. salesperson_code, email for customers) are merged in from
+        the extract_fields result.
+        """
         fields = config["extract_fields"](record)
         if not fields.get("bc_record_id"):
             return None
@@ -428,9 +472,9 @@ class BCReferenceCacheService:
         doc_no = fields.get("bc_document_no", "")
         ext_ref = fields.get("bc_external_document_no", "") or ""
 
-        return {
+        doc = {
             "bc_entity_type": config["entity_type"],
-            "bc_domain": config["domain"],
+            "bc_domain": config.get("domain", ""),
             "bc_record_id": fields["bc_record_id"],
             "bc_document_no": doc_no,
             "normalized_document_no": normalize_document_no(doc_no),
@@ -447,6 +491,19 @@ class BCReferenceCacheService:
             "bc_order_number": fields.get("bc_order_number", ""),
             "cached_at": datetime.now(timezone.utc).isoformat(),
         }
+
+        # Carry through entity-specific extra fields
+        _standard_keys = {
+            "bc_record_id", "bc_document_no", "bc_external_document_no",
+            "bc_vendor_no", "bc_vendor_name", "bc_customer_no", "bc_customer_name",
+            "bc_posting_date", "bc_status", "bc_amount", "bc_last_modified",
+            "bc_order_number",
+        }
+        for key, val in fields.items():
+            if key not in _standard_keys and key not in doc:
+                doc[key] = val
+
+        return doc
 
     # =========================================================================
     # BACKGROUND SYNC SCHEDULER
@@ -473,6 +530,42 @@ class BCReferenceCacheService:
             self._sync_task.cancel()
             self._sync_task = None
             logger.info("[BC Cache] Background sync stopped")
+
+    async def sync_entities(self, entity_table_names: List[str], incremental: bool = False) -> Dict[str, Any]:
+        """Sync only the specified entity types (e.g. ['customers', 'salespeople']).
+
+        Uses the same logic as sync_all but limited to the given table names.
+        """
+        token = await self._get_token()
+        if not token:
+            return {"status": "error", "error": "Failed to get BC token"}
+
+        company_id = await self._get_company_id(token)
+        if not company_id:
+            return {"status": "error", "error": "Failed to get company ID"}
+
+        last_sync = None
+        if incremental:
+            meta = await self.meta_collection.find_one({"_id": "last_sync"})
+            if meta:
+                last_sync = meta.get("timestamp")
+
+        results = {}
+        total = 0
+        for name in entity_table_names:
+            config = ENTITY_CONFIGS.get(name)
+            if not config:
+                results[name] = "unknown_entity"
+                continue
+            try:
+                count = await self._sync_entity(token, company_id, name, config, last_sync)
+                results[config["entity_type"]] = count
+                total += count
+            except Exception as e:
+                logger.error("[BC Cache] Error syncing %s: %s", name, e)
+                results[config["entity_type"]] = f"error: {e}"
+
+        return {"status": "completed", "total_records": total, "entity_counts": results}
 
     # =========================================================================
     # SEARCH / QUERY METHODS

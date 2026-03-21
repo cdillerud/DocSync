@@ -107,6 +107,20 @@ Only use branch: `conflict_150326_1947`
 - Gracefully handles BC credential failures (preview env)
 - 17 tests — all passing (sync logic, idempotency, status tracking, endpoints)
 
+### STEP 1: BC Customer + Salesperson Cache Sync & Rep Assignment (COMPLETED Feb 2026)
+- Extended ENTITY_CONFIGS in bc_reference_cache_service.py with:
+  - "customers": entity_type=customer, syncs id/number/displayName/salespersonCode/email/phoneNumber
+  - "salespeople": entity_type=salesperson, syncs code/name/email
+- Extended _build_cache_document to carry entity-specific extra fields (salesperson_code, code, name, email, etc.)
+- Added sync_entities() method to BCReferenceCacheService for partial entity-type syncs
+- Added salesperson_code and code indexes
+- Created services/rep_assignment_service.py with:
+  - get_rep_for_customer(db, customer_no): override → BC cache → salesperson lookup chain
+  - sync_reps_from_bc(db): triggers cache sync for customers + salespeople only
+  - list_rep_assignments(db): aggregates customer counts per salesperson
+  - override_rep_for_customer(db, customer_no, rep_email, rep_name): stores manual overrides in customer_rep_overrides collection
+- 20 tests — all passing
+
 ## P0/P1/P2 Backlog
 
 ### Completed
@@ -139,6 +153,7 @@ Only use branch: `conflict_150326_1947`
 - test_catalog_sync.py: 7 tests
 - test_so_type_routing.py: 27 tests
 - test_so_type_routing_api.py: 11 tests (created by testing agent)
+- test_rep_assignment.py: 20 tests
 - test_bc_shipment_sync.py: 17 tests
 - test_warehouse_so_notifications.py: 32 tests
-- Total passing: 180+ tests
+- Total passing: 200+ tests

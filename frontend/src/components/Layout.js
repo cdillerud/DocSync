@@ -11,14 +11,14 @@ import {
 import { ScrollArea } from '../components/ui/scroll-area';
 import { Badge } from '../components/ui/badge';
 import {
-  LayoutDashboard, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, ShoppingCart, ClipboardList, Brain, FolderTree, ArrowLeftRight, Sparkles, Tag, Wrench, Bug
+  LayoutDashboard, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, ShoppingCart, ClipboardList, Brain, FolderTree, ArrowLeftRight, Sparkles, Tag, Wrench, Bug, FlaskConical
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { APP_VERSION, CHANGELOG } from '../lib/version';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
-// Consolidated navigation — 7 items (vendors moved to Settings)
+// Consolidated navigation — 7 items + temporary Bake-Off
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', exact: true },
   { to: '/documents', icon: Files, label: 'Documents' },
@@ -27,6 +27,7 @@ const navItems = [
   { to: '/operations-queue', icon: ClipboardList, label: 'Operations' },
   { to: '/integrations', icon: ArrowLeftRight, label: 'Integrations' },
   { to: '/config', icon: Settings, label: 'Settings' },
+  { to: '/bakeoff', icon: FlaskConical, label: 'Bake-Off' },
 ];
 
 export default function Layout() {
@@ -79,6 +80,7 @@ export default function Layout() {
     if (path === '/operations-queue') return 'Operations';
     if (path === '/integrations') return 'Integrations';
     if (path === '/config') return 'Settings';
+    if (path === '/bakeoff') return 'Bake-Off';
     if (path.startsWith('/documents/')) return 'Document Detail';
     return 'GPI Document Hub';
   };

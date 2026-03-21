@@ -1,0 +1,128 @@
+{
+  "summary": "Bake-Off v1.6.0 Feature Testing Complete - 25/25 backend tests passed, all frontend UI tests passed. Fixed PO normalization bug in auto-scoring. Verified: Run CRUD, Document CRUD, Scoring with correctness toggles, Needs Review/Final Status dropdowns, Why Wrong tags, KPI comparison table, Excel export, Auto-populate GPI.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_bakeoff.py",
+    "/app/test_reports/pytest/bakeoff_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "FIXED: PO normalization regex in bakeoff.py now handles hyphen after PO prefix (e.g., 'PO-12345' matches '12345')"
+  ],
+  "updated_files": [
+    "/app/backend/routers/bakeoff.py",
+    "/app/backend/tests/test_bakeoff.py"
+  ],
+  "success_rate": {
+    "backend": "100% (25/25 tests passed)",
+    "frontend": "100% (all UI tests passed)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "Test runs created and cleaned up during testing. 'Day 1 Test' run preserved.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Bake-Off v1.6.0 fully tested. All features working: Run management (create/list/complete/archive/delete), Document scoring with truth/GPI/S9 fields, correctness toggles, dropdowns, why wrong tags, KPI comparison, Excel export, auto-populate. PO normalization bug fixed.",
+  "verified_features": {
+    "navigation": {
+      "status": "PASS",
+      "verified": [
+        "Bake-Off nav item visible in sidebar with Flask icon",
+        "Version badge in header shows v1.6.0",
+        "Sidebar now has 8 items including Bake-Off"
+      ]
+    },
+    "bakeoff_page": {
+      "status": "PASS",
+      "verified": [
+        "Bake-Off page loads with Runs/Scoring/Results tabs",
+        "Scoring and Results tabs disabled until run selected"
+      ]
+    },
+    "run_management": {
+      "status": "PASS",
+      "verified": [
+        "Create Run dialog opens via New Run button",
+        "Run created successfully with name, description, date, expected doc count",
+        "Runs list shows runs with name, status badge, date, doc count",
+        "Click run opens Scoring tab",
+        "Archive run action works",
+        "Complete run action works",
+        "Delete draft run works",
+        "Delete non-draft run blocked with error message"
+      ]
+    },
+    "document_scoring": {
+      "status": "PASS",
+      "verified": [
+        "Add Document dialog works",
+        "Document appears in scoring table after adding",
+        "Click document shows detail panel with Truth/GPI/S9 sections side-by-side",
+        "Truth fields editable (Vendor, Doc Type, Amount, PO, Folder, Notes)",
+        "GPI and S9 fields editable",
+        "Ingested checkbox works",
+        "Correctness toggle buttons cycle through true/false/null states",
+        "Needs Review dropdown works (None/Minor/Major)",
+        "Final Status dropdown works (Usable/Partial/Failed)",
+        "Why Wrong tag buttons toggle on/off",
+        "Save button saves changes with toast notification",
+        "Manually edited badge appears after manual edits",
+        "Progress bar updates (0/1 scored -> 1/1 scored)"
+      ]
+    },
+    "results_summary": {
+      "status": "PASS",
+      "verified": [
+        "Results tab shows KPI comparison table with GPI Hub vs Square 9 columns",
+        "Metrics: Ingest Rate, Classification/Vendor/Amount/PO/Folder Accuracy, No-Touch Rate, Usable Output",
+        "Delta column shows difference between systems",
+        "Why Wrong breakdowns for both systems",
+        "Accuracy by Document Type table",
+        "Accuracy by Vendor table",
+        "Export Excel button present"
+      ]
+    },
+    "backend_apis": {
+      "status": "PASS",
+      "verified": [
+        "POST /api/bakeoff/runs - creates run",
+        "GET /api/bakeoff/runs - lists runs",
+        "GET /api/bakeoff/runs/{id} - gets single run",
+        "PUT /api/bakeoff/runs/{id} - updates run",
+        "POST /api/bakeoff/runs/{id}/complete - marks complete",
+        "POST /api/bakeoff/runs/{id}/archive - archives run",
+        "DELETE /api/bakeoff/runs/{id} - deletes draft run",
+        "POST /api/bakeoff/runs/{id}/documents - adds document",
+        "GET /api/bakeoff/runs/{id}/documents - lists documents",
+        "PUT /api/bakeoff/runs/{id}/documents/{uid} - updates scoring",
+        "DELETE /api/bakeoff/runs/{id}/documents/{uid} - deletes document",
+        "GET /api/bakeoff/runs/{id}/metrics - returns metrics and breakdowns",
+        "GET /api/bakeoff/runs/{id}/export - returns Excel file",
+        "POST /api/bakeoff/runs/{id}/auto-populate - auto-populates GPI data",
+        "GET /api/bakeoff/why-wrong-tags - returns available tags"
+      ]
+    },
+    "auto_scoring": {
+      "status": "PASS",
+      "verified": [
+        "Auto-scoring calculates correctness when truth and system values match",
+        "Case-insensitive comparison works",
+        "PO normalization removes prefixes (PO-, PO#, etc.) - BUG FIXED",
+        "Amount tolerance (0.01) works"
+      ]
+    }
+  },
+  "bug_fixed": {
+    "description": "PO normalization regex did not handle hyphen after PO prefix",
+    "file": "/app/backend/routers/bakeoff.py",
+    "line": 123,
+    "fix": "Changed regex from r'^(PO|P\\.O\\.?|PO#|P\\.O\\.#|#)\\s*' to r'^(PO|P\\.O\\.?|PO#|P\\.O\\.#|#)[-\\s]*' to include optional hyphen"
+  }
+}

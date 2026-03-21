@@ -1,6 +1,20 @@
-export const APP_VERSION = "1.5.0";
+export const APP_VERSION = "1.6.0";
 
 export const CHANGELOG = [
+  {
+    version: "1.6.0",
+    date: "2026-03-21",
+    title: "Bake-Off: GPI Hub vs Square 9 Comparison",
+    changes: [
+      { type: "feature", text: "Bake-Off workspace for side-by-side document processing comparison" },
+      { type: "feature", text: "Run management: create, complete, archive bake-off runs" },
+      { type: "feature", text: "Per-document scoring with truth values, GPI auto-population, and Square 9 manual entry" },
+      { type: "feature", text: "Auto-scoring with normalization (case-insensitive, PO prefix removal, amount tolerance)" },
+      { type: "feature", text: "Results dashboard with KPI comparison, breakdowns, and key insights" },
+      { type: "feature", text: "Excel export with Documents + Summary sheets" },
+      { type: "feature", text: "CSV import for bulk document seeding" },
+    ],
+  },
   {
     version: "1.5.0",
     date: "2026-03-21",

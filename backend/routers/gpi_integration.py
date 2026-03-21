@@ -69,6 +69,9 @@ BC_PI_FREIGHT_ITEM = os.environ.get("BC_PI_FREIGHT_ITEM", os.environ.get("BC_DEF
 # Document types that are primarily freight/transportation
 FREIGHT_DOC_TYPES = {"AP_Invoice", "Freight_Document", "Bill_of_Lading", "FreightInvoice"}
 
+# Default GPI warehouse location code used when so_type == "warehouse"
+BC_DEFAULT_WAREHOUSE_CODE = os.environ.get("BC_DEFAULT_WAREHOUSE_CODE", "MAIN")
+
 
 def _resolve_po_reference(doc: dict) -> str:
     """Extract the PO/BOL reference number from a document for use in BC PI line description.
@@ -105,6 +108,58 @@ def _resolve_po_reference(doc: dict) -> str:
         return str(ref).strip()
     
     return ""
+
+
+def _resolve_so_type(doc: dict) -> str:
+    """Extract so_type from a document's extracted fields.
+
+    Returns 'dropship', 'warehouse', or 'unknown'.
+    """
+    ef = doc.get("extracted_fields") or {}
+    so_type = ef.get("so_type", "").lower().strip()
+    if so_type in ("dropship", "drop_ship", "drop-ship"):
+        return "dropship"
+    if so_type in ("warehouse", "wh"):
+        return "warehouse"
+    return so_type if so_type else "unknown"
+
+
+def _resolve_so_routing_fields(doc: dict, so_type: str) -> dict:
+    """Return conditional BC Sales Order header fields based on so_type.
+
+    For dropship orders:
+      - ship_to_code: derived from the customer's ship-to address on the doc
+      - ship_to_name: customer or consignee name
+    For warehouse orders:
+      - location_code: GPI warehouse code (env var BC_DEFAULT_WAREHOUSE_CODE)
+    """
+    ef = doc.get("extracted_fields") or {}
+    nf = doc.get("normalized_fields") or {}
+
+    routing = {"so_type": so_type}
+
+    if so_type == "dropship":
+        # Dropship: Ship-to is the customer address, not GPI warehouse
+        ship_to = ef.get("ship_to") or nf.get("ship_to") or ""
+        ship_to_name = ef.get("customer") or nf.get("customer") or ""
+        location_code = ef.get("location_code") or nf.get("location_code") or ""
+        routing["ship_to_code"] = location_code  # BC alt-address code if present
+        routing["ship_to_name"] = ship_to_name
+        routing["ship_to_address"] = ship_to
+        # Do NOT set location_code — dropship ships direct to customer
+    elif so_type == "warehouse":
+        # Warehouse: Ship-to is a GPI warehouse
+        location_code = ef.get("location_code") or nf.get("location_code") or BC_DEFAULT_WAREHOUSE_CODE
+        routing["location_code"] = location_code
+        routing["ship_to_code"] = ""
+        routing["ship_to_name"] = ""
+    else:
+        # Unknown — no special routing
+        routing["ship_to_code"] = ""
+        routing["ship_to_name"] = ""
+        routing["location_code"] = ""
+
+    return routing
 
 
 async def _build_pi_lines_with_mapping(doc: dict, db) -> list:
@@ -654,6 +709,11 @@ async def sales_order_preflight(doc_id: str):
         "extraction_completeness": extraction_completeness,
     }
 
+    # ── SO Type Routing ──
+    so_type = _resolve_so_type(doc)
+    so_routing = _resolve_so_routing_fields(doc, so_type)
+    document_summary["so_type"] = so_type
+
     # ── Duplicate Check ──
     duplicate_found = False
     duplicate_detail = "No duplicate found"
@@ -699,6 +759,8 @@ async def sales_order_preflight(doc_id: str):
             "bc_write_environment": BC_WRITE_ENVIRONMENT,
             "bc_environment": f"Read: {BC_READ_ENVIRONMENT} / Write: {BC_WRITE_ENVIRONMENT}",
             "idempotency_key": idempotency_key,
+            "so_type": so_type,
+            "so_routing": so_routing,
         },
         "resolved_lines": resolved_lines,
         "line_count": len(resolved_lines),
@@ -843,6 +905,10 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
     external_doc_no = ef.get("po_number") or nf.get("po_number") or ""
     order_date = ef.get("order_date") or nf.get("order_date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
+    # Resolve SO type routing (Drop-Ship vs Warehouse)
+    so_type = _resolve_so_type(doc)
+    so_routing = _resolve_so_routing_fields(doc, so_type)
+
     idempotency_key = _build_idempotency_key(doc_id)
     transaction_id = f"TXN_{uuid.uuid4().hex[:12]}"
 
@@ -855,6 +921,9 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
             source_doc_id=doc_id,
             idempotency_key=idempotency_key,
             transaction_id=transaction_id,
+            ship_to_code=so_routing.get("ship_to_code", ""),
+            ship_to_name=so_routing.get("ship_to_name", ""),
+            location_code=so_routing.get("location_code", ""),
         )
     except Exception as e:
         logger.error("Failed to create sales order header from doc %s: %s", doc_id, str(e))
@@ -905,6 +974,8 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
         "order_date": order_date,
         "idempotency_key": idempotency_key,
         "transaction_id": transaction_id,
+        "so_type": so_type,
+        "so_routing": so_routing,
         "original_resolved_lines": _sanitize_lines(original_resolved_lines),
         "submitted_lines": _sanitize_lines(submitted_lines),
         "lines_were_edited": user_edited_lines is not None and len(user_edited_lines) > 0,
@@ -954,6 +1025,8 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
         "customer_name": customer_info["customer_name"],
         "external_doc_no": external_doc_no,
         "order_date": order_date,
+        "so_type": so_type,
+        "so_routing": so_routing,
         "lines_added": line_result["added"],
         "lines_total": line_result["total"],
         "line_errors": line_result["errors"],
@@ -968,6 +1041,7 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
         {"id": doc_id},
         {"$set": {
             "bc_sales_order": bc_sales_order,
+            "so_type": so_type,
             "updated_utc": now,
         }}
     )
@@ -990,11 +1064,20 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
                     "lines_added": line_result["added"],
                     "lines_total": line_result["total"],
                     "lines_were_edited": user_edited_lines is not None,
+                    "so_type": so_type,
                 },
                 actor="system",
             )
     except Exception as evt_err:
         logger.warning("Failed to emit BC sales order event: %s", evt_err)
+
+    # ── Auto-approve dropship SOs ──
+    ds_auto_approved = False
+    if so_type == "dropship" and result.get("success") and result.get("status") != "already_exists":
+        try:
+            ds_auto_approved = await _auto_approve_dropship_so(db, doc_id, bc_record_no, so_type)
+        except Exception as ds_err:
+            logger.warning("Dropship auto-approve failed for SO %s: %s", bc_record_no, ds_err)
 
     return {
         "success": result.get("success", False),
@@ -1006,12 +1089,82 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
         "status": result.get("status", ""),
         "message": f"Sales Order {bc_record_no} created with {line_result['added']}/{line_result['total']} lines" if result.get("success") else result.get("error_message", "Creation failed"),
         "error_message": result.get("error_message", ""),
+        "so_type": so_type,
+        "so_routing": so_routing,
+        "ds_auto_approved": ds_auto_approved,
         "lines_added": line_result["added"],
         "lines_total": line_result["total"],
         "line_errors": line_result["errors"],
         "created_at": now,
         "inventory_commitments": commitment_result,
     }
+
+
+async def _auto_approve_dropship_so(db, doc_id: str, bc_record_no: str, so_type: str) -> bool:
+    """Auto-approve a Drop-Ship Sales Order after successful BC creation.
+
+    Drop-Ship POs bypass the normal warehouse approval workflow because
+    goods ship directly from the vendor to the customer. The SO is
+    auto-advanced to 'approved' status in the workflow engine.
+
+    Returns True if auto-approve succeeded.
+    """
+    if so_type != "dropship":
+        return False
+
+    from services.workflow_engine import WorkflowEngine, WorkflowEvent
+
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        logger.warning("[DS-AutoApprove] Document %s not found", doc_id)
+        return False
+
+    current_status = doc.get("workflow_status")
+
+    # Try to advance through the approval path
+    # The document may be in various states; we try the most likely transitions
+    engine = WorkflowEngine()
+    advanced = False
+
+    # First try: mark ready for approval (if in extracted/classified state)
+    if current_status in ("extracted", "classified", "captured"):
+        _, _, ok = engine.advance_workflow(
+            doc, WorkflowEvent.ON_MARK_READY_FOR_APPROVAL.value,
+            context={"reason": f"Drop-ship SO {bc_record_no} auto-approved", "metadata": {"so_type": "dropship", "bc_record_no": bc_record_no}},
+            actor="ds_auto_approve",
+        )
+        if ok:
+            current_status = doc.get("workflow_status")
+            advanced = True
+
+    # Second try: auto-approve (if in ready_for_approval state)
+    if current_status == "ready_for_approval":
+        _, _, ok = engine.advance_workflow(
+            doc, WorkflowEvent.ON_APPROVED.value,
+            context={"reason": f"Drop-ship SO {bc_record_no} auto-approved — direct ship to customer", "metadata": {"so_type": "dropship", "bc_record_no": bc_record_no}},
+            actor="ds_auto_approve",
+        )
+        if ok:
+            advanced = True
+
+    if advanced:
+        now = datetime.now(timezone.utc).isoformat()
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {
+                "workflow_status": doc.get("workflow_status"),
+                "workflow_history": doc.get("workflow_history", []),
+                "workflow_status_updated_utc": now,
+                "ds_auto_approved": True,
+                "ds_auto_approved_at": now,
+                "updated_utc": now,
+            }}
+        )
+        logger.info("[DS-AutoApprove] SO %s (doc %s) auto-approved as dropship", bc_record_no, doc_id)
+        return True
+
+    logger.info("[DS-AutoApprove] Could not auto-approve SO %s (doc %s) — current status: %s", bc_record_no, doc_id, current_status)
+    return False
 
 
 def _sanitize_lines(lines: list) -> list:

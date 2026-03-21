@@ -157,8 +157,17 @@ async def create_sales_order(
     source_doc_id: str = "",
     idempotency_key: str = "",
     transaction_id: str = "",
+    ship_to_code: str = "",
+    ship_to_name: str = "",
+    location_code: str = "",
 ) -> Dict[str, Any]:
-    """Create a Sales Order in BC WRITE environment (Sandbox) via GPI custom API."""
+    """Create a Sales Order in BC WRITE environment (Sandbox) via GPI custom API.
+
+    Optional fields for Drop-Ship vs Warehouse routing:
+      ship_to_code  – BC Ship-to Code (customer alt-address for dropships)
+      ship_to_name  – Ship-to name override
+      location_code – BC Location Code (warehouse code, e.g. "MAIN")
+    """
     _check_write_protection("create_sales_order")
     if not idempotency_key:
         idempotency_key = _generate_idempotency_key("SO", source_doc_id)
@@ -174,6 +183,14 @@ async def create_sales_order(
         "externalDocumentNo": external_doc_no or "",
         "orderDate": order_date or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
     }
+
+    # Conditional routing fields for Drop-Ship vs Warehouse
+    if ship_to_code:
+        payload["shipToCode"] = ship_to_code
+    if ship_to_name:
+        payload["shipToName"] = ship_to_name
+    if location_code:
+        payload["locationCode"] = location_code
 
     result = await _api_request("POST", "salesOrderRequests", payload, environment=BC_WRITE_ENVIRONMENT)
     return {

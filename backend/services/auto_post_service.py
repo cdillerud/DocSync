@@ -164,16 +164,22 @@ def check_auto_post_eligibility(doc: Dict[str, Any]) -> tuple[bool, str]:
 async def attempt_auto_post(doc_id: str, doc: Dict[str, Any], db, bc_service) -> AutoPostResult:
     """
     Attempt to auto-post a document to Business Central.
-    
-    Args:
-        doc_id: Document ID
-        doc: Document data
-        db: MongoDB database reference
-        bc_service: BusinessCentralService instance
-        
-    Returns:
-        AutoPostResult with outcome details
     """
+    # Enrich doc with stable vendor data if not already present
+    if not doc.get("stable_vendor_flag") and db:
+        vendor_id = doc.get("vendor_canonical") or doc.get("vendor_id") or doc.get("vendor_no")
+        if vendor_id:
+            try:
+                vip = await db.vendor_intelligence_profiles.find_one(
+                    {"vendor_no": vendor_id},
+                    {"_id": 0, "stable_vendor_flag": 1, "stable_vendor_score": 1}
+                )
+                if vip:
+                    doc["stable_vendor_flag"] = vip.get("stable_vendor_flag", False)
+                    doc["stable_vendor_score"] = vip.get("stable_vendor_score", 0)
+            except Exception:
+                pass
+
     # Check eligibility
     eligible, reason = check_auto_post_eligibility(doc)
     

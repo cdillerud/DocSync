@@ -1183,6 +1183,32 @@ async def get_auto_post_readiness(run_id: str):
             stable_score = hub_doc.get("stable_vendor_score", 0) or 0
             stable_flag = hub_doc.get("stable_vendor_flag", False)
 
+        # If stable data not on hub_doc, look up vendor_intelligence_profiles
+        if not stable_flag and vendor_canonical:
+            vip = await db.vendor_intelligence_profiles.find_one(
+                {"$or": [
+                    {"vendor_no": vendor_canonical},
+                    {"vendor_no": {"$regex": f"^{re.escape(vendor_canonical)}$", "$options": "i"}},
+                ]},
+                {"_id": 0, "stable_vendor_flag": 1, "stable_vendor_score": 1}
+            )
+            if vip:
+                stable_flag = vip.get("stable_vendor_flag", False)
+                stable_score = vip.get("stable_vendor_score", 0) or 0
+
+        # Also try by vendor name if vendor_canonical didn't match
+        if not stable_flag and vendor:
+            vip2 = await db.vendor_intelligence_profiles.find_one(
+                {"$or": [
+                    {"vendor_name": {"$regex": f"^{re.escape(vendor)}$", "$options": "i"}},
+                    {"display_name": {"$regex": f"^{re.escape(vendor)}$", "$options": "i"}},
+                ]},
+                {"_id": 0, "stable_vendor_flag": 1, "stable_vendor_score": 1}
+            )
+            if vip2:
+                stable_flag = vip2.get("stable_vendor_flag", False)
+                stable_score = vip2.get("stable_vendor_score", 0) or 0
+
         # THE FEEDBACK LOOP: stable vendor flag = earned trust
         if stable_flag and stable_score >= 0.85:
             effective_confidence = max(raw_confidence, stable_score)
@@ -1193,6 +1219,8 @@ async def get_auto_post_readiness(run_id: str):
 
         threshold = 0.90
         criteria["confidence_ok"] = effective_confidence >= threshold
+        criteria["stable_vendor"] = stable_flag
+        criteria["stable_score"] = round(stable_score, 3)
         if effective_confidence < threshold and hub_doc:
             if stable_flag:
                 blockers.append(f"low_confidence (stable vendor but score={stable_score:.2f})")

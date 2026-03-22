@@ -2,7 +2,7 @@ table 50101 "GPI Integration Log"
 {
     Caption = 'GPI Integration Log';
     DataClassification = CustomerContent;
-    LookupPageId = "GPI Integration Log API";
+    // LookupPageId temporarily removed — API page excluded from compilation
 
     fields
     {

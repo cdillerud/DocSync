@@ -488,7 +488,7 @@ async def auto_populate_gpi(run_id: str):
         hub_doc = None
         if did:
             hub_doc = await db.hub_documents.find_one(
-                {"$or": [{"document_id": did}, {"doc_id": did}]},
+                {"$or": [{"document_id": did}, {"doc_id": did}, {"id": did}]},
                 {"_id": 0}
             )
         if not hub_doc and fname:
@@ -498,15 +498,39 @@ async def auto_populate_gpi(run_id: str):
             )
 
         if hub_doc:
+            # Pull from extracted_fields and normalized_fields as well as top-level
+            ef = hub_doc.get("extracted_fields") or {}
+            nf = hub_doc.get("normalized_fields") or {}
+
+            gpi_vendor = (hub_doc.get("vendor_name") or hub_doc.get("vendor_no")
+                          or nf.get("vendor") or ef.get("vendor") or "")
+            gpi_doc_type = (hub_doc.get("document_type") or hub_doc.get("doc_type") or "")
+            gpi_po = (hub_doc.get("po_number") or hub_doc.get("purchase_order_number")
+                       or nf.get("po_number") or ef.get("po_number") or "")
+
+            # Amount: try normalized first (numeric), then extracted, then top-level
+            gpi_amount = None
+            for amt_src in [nf.get("amount"), ef.get("amount"),
+                            hub_doc.get("total_amount"), hub_doc.get("invoice_amount")]:
+                if amt_src is not None:
+                    try:
+                        gpi_amount = float(str(amt_src).replace(",", ""))
+                        break
+                    except (ValueError, TypeError):
+                        continue
+
+            gpi_folder = (hub_doc.get("sharepoint_folder_path") or hub_doc.get("sharepoint_folder")
+                          or hub_doc.get("filed_to") or "")
+
             gpi_updates = {
                 "gpi_ingested": True,
-                "gpi_doc_type": hub_doc.get("document_type") or hub_doc.get("doc_type", ""),
-                "gpi_vendor": hub_doc.get("vendor_name") or hub_doc.get("vendor_no", ""),
-                "gpi_amount": hub_doc.get("total_amount") or hub_doc.get("invoice_amount"),
-                "gpi_po": hub_doc.get("po_number") or hub_doc.get("purchase_order_number", ""),
-                "gpi_folder_output": hub_doc.get("sharepoint_folder") or hub_doc.get("filed_to", ""),
+                "gpi_doc_type": gpi_doc_type,
+                "gpi_vendor": gpi_vendor,
+                "gpi_amount": gpi_amount,
+                "gpi_po": gpi_po,
+                "gpi_folder_output": gpi_folder,
                 "gpi_auto_linked": True,
-                "gpi_source_document_id": hub_doc.get("document_id") or hub_doc.get("doc_id", ""),
+                "gpi_source_document_id": hub_doc.get("id") or hub_doc.get("document_id") or hub_doc.get("doc_id", ""),
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
             # Map status
@@ -514,12 +538,13 @@ async def auto_populate_gpi(run_id: str):
             if status in ("Completed", "Filed", "Posted"):
                 gpi_updates["gpi_final_status"] = "Usable"
                 gpi_updates["gpi_needs_review"] = "None"
-            elif status in ("Pending", "In_Review"):
+            elif status in ("Pending", "In_Review", "captured"):
                 gpi_updates["gpi_final_status"] = "Partial"
                 gpi_updates["gpi_needs_review"] = "Minor"
-            elif status in ("Failed", "Error"):
-                gpi_updates["gpi_final_status"] = "Failed"
-                gpi_updates["gpi_needs_review"] = "Major"
+            elif status in ("Failed", "Error", "Exception"):
+                gpi_updates["gpi_final_status"] = "Partial"
+                gpi_updates["gpi_needs_review"] = "Minor"
+                gpi_updates["gpi_notes"] = f"Pipeline status: {status}"
 
             await db[DOCS_COLL].update_one(
                 {"run_id": run_id, "doc_uid": doc["doc_uid"]},

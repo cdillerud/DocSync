@@ -13,8 +13,6 @@ pageextension 50102 "GPI Sales Order Extension" extends "Sales Order"
             {
                 ApplicationArea = All;
                 Caption = 'GPI Documents';
-                SubPageLink = "Document Type" = const("Sales Order"),
-                              "BC Document No." = field("No.");
                 UpdatePropagation = Both;
             }
         }

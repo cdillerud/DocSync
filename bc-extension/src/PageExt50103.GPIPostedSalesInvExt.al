@@ -13,8 +13,6 @@ pageextension 50103 "GPI Posted Sales Inv Extension" extends "Posted Sales Invoi
             {
                 ApplicationArea = All;
                 Caption = 'GPI Documents';
-                SubPageLink = "Document Type" = const("Posted Sales Invoice"),
-                              "BC Document No." = field("No.");
                 UpdatePropagation = Both;
             }
         }

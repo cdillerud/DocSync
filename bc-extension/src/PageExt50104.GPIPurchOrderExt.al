@@ -13,8 +13,6 @@ pageextension 50104 "GPI Purch Order Extension" extends "Purchase Order"
             {
                 ApplicationArea = All;
                 Caption = 'GPI Documents';
-                SubPageLink = "Document Type" = const("Purchase Order"),
-                              "BC Document No." = field("No.");
                 UpdatePropagation = Both;
             }
         }

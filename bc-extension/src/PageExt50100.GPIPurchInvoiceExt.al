@@ -13,8 +13,6 @@ pageextension 50100 "GPI Purch Invoice Extension" extends "Purchase Invoice"
             {
                 ApplicationArea = All;
                 Caption = 'GPI Documents';
-                SubPageLink = "Document Type" = const("Purchase Invoice"),
-                              "BC Document No." = field("No.");
                 UpdatePropagation = Both;
             }
         }

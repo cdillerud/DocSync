@@ -13,8 +13,6 @@ pageextension 50101 "GPI Posted Purch Inv Extension" extends "Posted Purchase In
             {
                 ApplicationArea = All;
                 Caption = 'GPI Documents';
-                SubPageLink = "Document Type" = const("Posted Purchase Invoice"),
-                              "BC Document No." = field("No.");
                 UpdatePropagation = Both;
             }
         }

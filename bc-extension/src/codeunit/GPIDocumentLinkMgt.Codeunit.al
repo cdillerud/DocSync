@@ -329,12 +329,12 @@ codeunit 50105 "GPI Document Link Mgt"
 
     // === JSON Helpers ===
 
-    local procedure GetJsonText(JObj: JsonObject; Key: Text): Text
+    local procedure GetJsonText(JObj: JsonObject; FieldName: Text): Text
     var
         JToken: JsonToken;
         JValue: JsonValue;
     begin
-        if not JObj.Get(Key, JToken) then
+        if not JObj.Get(FieldName, JToken) then
             exit('');
         if JToken.IsValue() then begin
             JValue := JToken.AsValue();

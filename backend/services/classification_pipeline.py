@@ -278,10 +278,18 @@ def stage_classify_heuristic(
 
 
 async def stage_classify_llm(
-    file_path: str, file_name: str, page_count: int
+    file_path: str, file_name: str, page_count: int,
+    doc: Optional[Dict[str, Any]] = None,
 ) -> StageResult:
-    """Use Gemini to classify the document type."""
+    """Use Gemini to classify the document type.
+
+    Now receives the full doc dict so we can:
+    1. Extract vendor context from previous processing / filename patterns
+    2. Pass vendor_id to the feedback loop for targeted learning injection
+    3. Pass vendor name (not filename) to vendor type hints
+    """
     t0 = datetime.now(timezone.utc)
+    doc = doc or {}
 
     if not EMERGENT_LLM_KEY:
         return StageResult(
@@ -314,8 +322,38 @@ async def stage_classify_llm(
             except Exception:
                 actual_path = file_path
 
-        # Build dynamic prompt with learned examples
+        # ── Resolve vendor context BEFORE prompt building ──
+        # Try multiple sources: doc history → filename inference → extracted fields
+        vendor_id = ""
+        vendor_name = ""
+        existing_doc_type = doc.get("suggested_job_type") or doc.get("doc_type") or ""
+
+        # Source 1: Previous processing stored on the document
+        vendor_id = doc.get("vendor_no") or doc.get("vendor_id") or ""
+        vendor_name = doc.get("vendor_canonical") or doc.get("vendor_raw") or ""
+
+        # Source 2: Quick filename-based vendor inference (no DB needed)
+        if not vendor_name:
+            try:
+                from services.vendor_inference_service import infer_vendor
+                inferred, _ = infer_vendor(file_name)
+                if inferred:
+                    vendor_name = inferred
+                    vendor_id = vendor_id or inferred
+            except Exception:
+                pass
+
+        logger.info(
+            "[CLASSIFY:LLM] Preparing prompt — vendor_id=%s vendor_name=%s doc_type=%s",
+            vendor_id[:20] if vendor_id else "(none)",
+            vendor_name[:20] if vendor_name else "(none)",
+            existing_doc_type or "(none)",
+        )
+
+        # ── Build dynamic prompt with ALL learning signals ──
         dynamic_prompt = _CLASSIFY_SYSTEM_PROMPT
+
+        # 1. Few-shot examples from classification corrections
         try:
             from services.classification_feedback_service import (
                 build_few_shot_prompt_section,
@@ -324,28 +362,42 @@ async def stage_classify_llm(
             few_shot = await build_few_shot_prompt_section()
             if few_shot:
                 dynamic_prompt += "\n" + few_shot
-            vendor_hint = await build_vendor_hints_prompt_section(file_name)
-            if vendor_hint:
-                dynamic_prompt += "\n" + vendor_hint
-        except Exception:
-            pass
+                logger.info("[CLASSIFY:LLM] Injected %d chars of few-shot examples", len(few_shot))
 
-        # Add feedback loop context — learned corrections from user interactions
+            # FIX: Pass vendor NAME (not filename) for vendor type hints
+            if vendor_name:
+                vendor_hint = await build_vendor_hints_prompt_section(vendor_name)
+                if vendor_hint:
+                    dynamic_prompt += "\n" + vendor_hint
+                    logger.info("[CLASSIFY:LLM] Injected vendor type hint for %s", vendor_name)
+        except Exception as e:
+            logger.debug("[CLASSIFY:LLM] Classification feedback injection failed: %s", e)
+
+        # 2. Feedback loop context — learned corrections from user interactions
+        # FIX: Now passes vendor_id AND doc_type for targeted learning injection
         try:
             from services.feedback_loop_service import build_feedback_context_for_prompt
             from deps import get_db
             feedback_db = get_db()
-            feedback_context = await build_feedback_context_for_prompt(feedback_db)
+            feedback_context = await build_feedback_context_for_prompt(
+                feedback_db,
+                vendor_id=vendor_id or vendor_name,
+                doc_type=existing_doc_type,
+            )
             if feedback_context:
                 dynamic_prompt += "\n\n" + feedback_context
-        except Exception:
-            pass
+                logger.info(
+                    "[CLASSIFY:LLM] Injected %d chars of feedback loop context for vendor=%s",
+                    len(feedback_context), vendor_id or vendor_name,
+                )
+        except Exception as e:
+            logger.debug("[CLASSIFY:LLM] Feedback loop injection failed: %s", e)
 
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=f"classify-{uuid.uuid4()}",
             system_message=dynamic_prompt,
-        ).with_model("gemini", "gemini-3-flash-preview")
+        ).with_model("gemini", "gemini-3-pro-preview")
 
         file_content = FileContentWithMimeType(
             file_path=actual_path, mime_type=mime_type
@@ -358,14 +410,18 @@ async def stage_classify_llm(
                 "Classify based on THIS page only."
             )
 
+        # Enhanced user prompt with chain-of-thought reasoning
         response = await chat.send_message(UserMessage(
             text=(
-                "Please analyze this business document. "
-                "Classify the document and extract all relevant fields. "
-                "Also extract routing fields: is_international, is_tooling, "
-                "is_storage_handling, is_credit_memo, is_dunnage, freight_direction."
+                "Analyze this business document step by step:\n"
+                "1. IDENTIFY: What company sent this document? What company is it addressed to?\n"
+                "2. CLASSIFY: Based on the content (not just headers), what type of document is this?\n"
+                "3. EXTRACT: Pull every field you can find — vendor/customer, amounts, dates, PO numbers, invoice numbers, line items.\n"
+                "4. ROUTE: Determine routing flags (is_international, is_tooling, is_storage_handling, is_credit_memo, is_dunnage, freight_direction).\n"
+                "Think carefully about classification — an invoice from a freight carrier is STILL an AP_Invoice, not a Freight_Document.\n"
+                "A packing list with a PO reference is STILL a Shipping_Document, not a Sales_Order."
                 + bundle_note
-                + " Respond with JSON only."
+                + "\nRespond with JSON only."
             ),
             file_contents=[file_content],
         ))
@@ -409,7 +465,7 @@ async def stage_classify_llm(
             data={
                 "document_type": doc_type,
                 "confidence": confidence,
-                "method": "llm:gemini-3-flash-preview",
+                "method": "llm:gemini-3-pro-preview",
                 "reasoning": result.get("reasoning", ""),
                 "llm_extracted_fields": extracted,
                 "page_count": page_count,
@@ -453,8 +509,8 @@ async def stage_classify(
     if text_content and len(text_content) >= 10:
         heuristic = stage_classify_heuristic(text_content, file_name)
 
-    # Always call LLM for classification + extraction
-    llm_result = await stage_classify_llm(file_path, file_name, page_count)
+    # Always call LLM for classification + extraction (pass doc for feedback context)
+    llm_result = await stage_classify_llm(file_path, file_name, page_count, doc=doc)
 
     if heuristic:
         # Heuristic provides type; LLM provides extraction fields

@@ -38,7 +38,7 @@ VALID_DOC_TYPES = [
 
 # AI Model configuration
 AI_MODEL_PROVIDER = "gemini"
-AI_MODEL_NAME = "gemini-3-flash-preview"
+AI_MODEL_NAME = "gemini-3-pro-preview"
 
 # Default confidence threshold for accepting AI classification
 DEFAULT_CONFIDENCE_THRESHOLD = 0.8

@@ -353,7 +353,7 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
                 "confidence": heuristic_confidence,
                 "extracted_fields": merged_fields,
                 "reasoning": f"Heuristic classification ({heuristic_result.get('model', 'heuristic')}), LLM extraction",
-                "model": heuristic_result.get("model", "heuristic") + "+gemini-3-flash-preview",
+                "model": heuristic_result.get("model", "heuristic") + "+gemini-3-pro-preview",
                 "page_count": llm_result.get("page_count", 1),
                 "classified_from_page": llm_result.get("classified_from_page"),
             }
@@ -492,18 +492,42 @@ async def _call_llm_for_extraction(file_path: str, file_name: str) -> dict:
                 dynamic_prompt = dynamic_prompt + "\n" + few_shot_section
                 logger.info("Injected few-shot examples into classification prompt")
             
-            # If we can detect the vendor from filename, add vendor hint
-            vendor_hint = await build_vendor_hints_prompt_section(file_name)
-            if vendor_hint:
-                dynamic_prompt = dynamic_prompt + "\n" + vendor_hint
+            # FIX: Try to infer vendor from filename for vendor hint
+            vendor_for_hint = ""
+            try:
+                from services.vendor_inference_service import infer_vendor
+                inferred, _ = infer_vendor(file_name)
+                if inferred:
+                    vendor_for_hint = inferred
+            except Exception:
+                pass
+            if vendor_for_hint:
+                vendor_hint = await build_vendor_hints_prompt_section(vendor_for_hint)
+                if vendor_hint:
+                    dynamic_prompt = dynamic_prompt + "\n" + vendor_hint
         except Exception as e:
             logger.debug("Few-shot injection skipped: %s", e)
+
+        # FIX: Add feedback loop context (learned corrections from user interactions)
+        try:
+            from services.feedback_loop_service import build_feedback_context_for_prompt
+            from deps import get_db
+            feedback_db = get_db()
+            feedback_context = await build_feedback_context_for_prompt(
+                feedback_db,
+                vendor_id=vendor_for_hint if 'vendor_for_hint' in dir() else "",
+            )
+            if feedback_context:
+                dynamic_prompt = dynamic_prompt + "\n\n" + feedback_context
+                logger.info("Injected feedback loop context into classification prompt")
+        except Exception as e:
+            logger.debug("Feedback loop injection skipped: %s", e)
 
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=f"classify-{uuid.uuid4()}",
             system_message=dynamic_prompt,
-        ).with_model("gemini", "gemini-3-flash-preview")
+        ).with_model("gemini", "gemini-3-pro-preview")
 
         file_content = FileContentWithMimeType(file_path=actual_file_path, mime_type=mime_type)
 
@@ -567,7 +591,7 @@ async def _call_llm_for_extraction(file_path: str, file_name: str) -> dict:
             "confidence": float(result.get("confidence", 0.0)),
             "extracted_fields": extracted,
             "reasoning": result.get("reasoning", ""),
-            "model": "gemini-3-flash-preview",
+            "model": "gemini-3-pro-preview",
             "page_count": page_count,
             "classified_from_page": 1 if page_count > 1 else None,
         }

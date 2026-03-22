@@ -37,7 +37,7 @@ READINESS_NEEDS_REVIEW = "needs_review"
 READINESS_BLOCKED = "blocked"
 
 # Model metadata
-MODEL_NAME = "gemini-3-flash-preview"
+MODEL_NAME = "gemini-3-pro-preview"
 MODEL_PROVIDER = "gemini"
 PROMPT_VERSION = "1.0"
 

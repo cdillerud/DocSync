@@ -1,0 +1,90 @@
+{
+  "summary": "LLM Pipeline Fixes & Model Upgrade - All 15 backend tests passed + frontend UI verified. Tested: (1) Model upgraded to gemini-3-pro-preview in all 4 files, (2) stage_classify_llm now receives doc dict and extracts vendor context, (3) build_feedback_context_for_prompt called with vendor_id, (4) build_vendor_hints_prompt_section called with vendor NAME (not filename), (5) General recent corrections always included in prompt, (6) Secondary LLM path also has feedback injection. Frontend Feedback Loop tab renders correctly with seeded data (51 events, 46 applied, 3 aliases, 2 classification examples, 1 routing correction).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_llm_pipeline_fixes_140.py",
+    "/app/backend/tests/test_feedback_loop_health.py",
+    "/app/test_reports/pytest/llm_pipeline_fixes_140_results.xml",
+    "/app/test_reports/pytest/feedback_loop_health_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_llm_pipeline_fixes_140.py"
+  ],
+  "success_rate": {
+    "backend": "100% (25/25 tests passed - 15 new + 10 existing)",
+    "frontend": "100% (Feedback Loop tab renders with data)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "MongoDB has 51 feedback_events, 3 vendor_aliases, 2 classification_feedback, 1 routing_feedback (pre-seeded)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "LLM pipeline fixes verified. Key code locations: (1) classification_pipeline.py:280-400 - stage_classify_llm with doc parameter and vendor context extraction, (2) feedback_loop_service.py:275-376 - build_feedback_context_for_prompt with general recent corrections section, (3) document_intel_helpers.py:446-614 - secondary LLM path with feedback injection. All models upgraded to gemini-3-pro-preview. No remaining gemini-3-flash-preview references in backend services.",
+  "verified_features": {
+    "model_upgrade": {
+      "status": "PASS",
+      "verified": [
+        "classification_pipeline.py uses gemini-3-pro-preview",
+        "ai_classifier.py AI_MODEL_NAME = gemini-3-pro-preview",
+        "document_intelligence_service.py MODEL_NAME = gemini-3-pro-preview",
+        "document_intel_helpers.py uses gemini-3-pro-preview",
+        "No gemini-3-flash-preview references in backend services"
+      ]
+    },
+    "feedback_loop_fixes": {
+      "status": "PASS",
+      "verified": [
+        "stage_classify_llm has doc: Optional[Dict[str, Any]] = None parameter",
+        "stage_classify_llm extracts vendor_id from doc.vendor_no/vendor_id",
+        "stage_classify_llm extracts vendor_name from doc.vendor_canonical/vendor_raw",
+        "build_feedback_context_for_prompt called with vendor_id=vendor_id or vendor_name",
+        "build_vendor_hints_prompt_section called with vendor_name (not filename)",
+        "General recent corrections section queries all records (empty filter {})"
+      ]
+    },
+    "secondary_llm_path": {
+      "status": "PASS",
+      "verified": [
+        "_call_llm_for_extraction has feedback loop injection",
+        "Secondary path infers vendor from filename for vendor hint"
+      ]
+    },
+    "feedback_loop_health_api": {
+      "status": "PASS",
+      "verified": [
+        "GET /api/feedback-loop/health returns 200",
+        "total_events: 51",
+        "applied_events: 46",
+        "vendor_aliases_learned: 3",
+        "classification_examples: 2",
+        "routing_corrections: 1"
+      ]
+    },
+    "frontend_feedback_loop_tab": {
+      "status": "PASS",
+      "verified": [
+        "Settings page loads with Feedback Loop tab",
+        "Feedback Loop tab is clickable",
+        "FeedbackLoopHealthPage renders with data",
+        "Summary cards show correct metrics",
+        "Events by Type chart displays",
+        "Most Corrected Vendors table displays",
+        "Daily Activity chart displays",
+        "Recent Events list displays"
+      ]
+    }
+  },
+  "mocked_apis": {
+    "note": "No mocked APIs - all data from MongoDB",
+    "mocked_list": []
+  }
+}

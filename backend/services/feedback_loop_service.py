@@ -282,6 +282,7 @@ async def build_feedback_context_for_prompt(db, vendor_id: str = "", doc_type: s
     - Recent corrections for this vendor
     - Classification patterns the AI got wrong before
     - Vendor aliases learned from corrections
+    - General recent corrections (even without vendor context)
     
     This is HOW the AI gets smarter — every correction becomes a few-shot example.
     """
@@ -289,17 +290,24 @@ async def build_feedback_context_for_prompt(db, vendor_id: str = "", doc_type: s
     
     # 1. Vendor-specific corrections
     if vendor_id:
+        # Try both exact match and case-insensitive
+        vendor_upper = vendor_id.upper().strip()
         corrections = await db.classification_feedback.find(
-            {"vendor": vendor_id},
+            {"$or": [
+                {"vendor": vendor_id},
+                {"vendor": vendor_upper},
+                {"vendor_id": vendor_id},
+                {"vendor_id": vendor_upper},
+            ]},
             {"_id": 0, "ai_predicted": 1, "human_corrected": 1, "file_name": 1}
         ).sort("learned_at", -1).limit(5).to_list(5)
         
         if corrections:
-            context_parts.append("LEARNED CORRECTIONS for this vendor:")
+            context_parts.append(f"LEARNED CORRECTIONS for vendor '{vendor_id}':")
             for c in corrections:
                 context_parts.append(
                     f"  - File '{c.get('file_name', '?')}' was misclassified as "
-                    f"'{c['ai_predicted']}', correct type is '{c['human_corrected']}'"
+                    f"'{c.get('ai_predicted', '?')}', correct type is '{c.get('human_corrected', '?')}'"
                 )
     
     # 2. General classification corrections (recent)
@@ -312,19 +320,23 @@ async def build_feedback_context_for_prompt(db, vendor_id: str = "", doc_type: s
         if type_corrections:
             context_parts.append(f"NOTE: Documents predicted as '{doc_type}' are sometimes actually:")
             for c in type_corrections:
-                context_parts.append(f"  - '{c['human_corrected']}'")
+                context_parts.append(f"  - '{c.get('human_corrected', '?')}'")
     
     # 3. Vendor aliases
     if vendor_id:
+        vendor_upper = vendor_id.upper().strip()
         aliases = await db.vendor_aliases.find(
-            {"vendor_no": vendor_id, "source": "user_correction"},
+            {"$or": [
+                {"vendor_no": vendor_id, "source": "user_correction"},
+                {"vendor_no": vendor_upper, "source": "user_correction"},
+            ]},
             {"_id": 0, "alias": 1, "canonical_name": 1}
         ).limit(10).to_list(10)
         
         if aliases:
             context_parts.append("KNOWN VENDOR NAME VARIATIONS:")
             for a in aliases:
-                context_parts.append(f"  - '{a['alias']}' = '{a['canonical_name']}'")
+                context_parts.append(f"  - '{a.get('alias', '?')}' = '{a.get('canonical_name', '?')}'")
     
     # 4. Routing corrections for this vendor
     if vendor_id:
@@ -337,14 +349,31 @@ async def build_feedback_context_for_prompt(db, vendor_id: str = "", doc_type: s
             context_parts.append("ROUTING CORRECTIONS for this vendor:")
             for r in routing:
                 context_parts.append(
-                    f"  - Was routed to '{r['ai_routed_to']}', "
-                    f"should be '{r['human_moved_to']}'"
+                    f"  - Was routed to '{r.get('ai_routed_to', '?')}', "
+                    f"should be '{r.get('human_moved_to', '?')}'"
                 )
+    
+    # 5. General recent corrections (always included, even without vendor context)
+    # This ensures EVERY LLM call benefits from the feedback loop
+    recent = await db.classification_feedback.find(
+        {},
+        {"_id": 0, "ai_predicted": 1, "human_corrected": 1, "file_name": 1, "vendor": 1}
+    ).sort("learned_at", -1).limit(5).to_list(5)
+    
+    if recent:
+        context_parts.append("RECENT SYSTEM-WIDE CORRECTIONS (learn from these):")
+        for c in recent:
+            vendor_label = c.get("vendor", "unknown")
+            context_parts.append(
+                f"  - Vendor '{vendor_label}': '{c.get('ai_predicted', '?')}' → '{c.get('human_corrected', '?')}'"
+                f" (file: {c.get('file_name', '?')})"
+            )
     
     if not context_parts:
         return ""
     
-    return "\n".join(context_parts)
+    header = "\n== FEEDBACK LOOP — LEARNED PATTERNS FROM USER CORRECTIONS =="
+    return header + "\n" + "\n".join(context_parts)
 
 
 # ═══════════════════════════════════════════════════════════════

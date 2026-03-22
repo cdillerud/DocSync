@@ -10,7 +10,7 @@ sys.path.insert(0, '/app/backend')
 
 
 # Test configuration
-API_BASE_URL = "https://unified-queue-hub.preview.emergentagent.com"
+API_BASE_URL = "https://extraction-hardening.preview.emergentagent.com"
 
 
 @pytest.fixture

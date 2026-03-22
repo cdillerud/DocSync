@@ -802,7 +802,107 @@ function ResultsSummary({ runId, runName }) {
 
       {/* Folder Alignment Report */}
       <FolderAlignment runId={runId} />
+
+      {/* Auto-Post Readiness */}
+      <AutoPostReadiness runId={runId} />
     </div>
+  );
+}
+
+function AutoPostReadiness({ runId }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetch = async () => {
+      try {
+        const { data: d } = await api.get(`${API}/runs/${runId}/auto-post-readiness`);
+        setData(d);
+      } catch { /* endpoint may not have AP invoices */ }
+      finally { setLoading(false); }
+    };
+    fetch();
+  }, [runId]);
+
+  if (loading || !data || data.summary.ap_invoices === 0) return null;
+
+  const s = data.summary;
+  const rates = data.criteria_pass_rates;
+  const blockers = data.blockers_distribution;
+
+  const readyPct = s.auto_post_ready_pct;
+  const barColor = readyPct >= 70 ? 'bg-emerald-500' : readyPct >= 40 ? 'bg-amber-500' : 'bg-red-500';
+
+  return (
+    <Card data-testid="auto-post-readiness">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Play className="w-4 h-4 text-emerald-500" /> Auto-Post Readiness — AP Invoices
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">
+          If auto-posting were enabled today, how many AP invoices could auto-create a Purchase Invoice in BC?
+        </p>
+      </CardHeader>
+      <CardContent>
+        {/* Hero metric */}
+        <div className="flex items-center gap-4 mb-4">
+          <div className="text-3xl font-bold text-emerald-500">{s.auto_post_ready}</div>
+          <div>
+            <div className="text-sm font-medium">of {s.ap_invoices} AP invoices ready ({readyPct}%)</div>
+            <div className="w-48 h-2 bg-muted/50 rounded-full overflow-hidden mt-1">
+              <div className={`h-full rounded-full ${barColor}`} style={{ width: `${readyPct}%` }} />
+            </div>
+          </div>
+        </div>
+
+        {/* Tiers */}
+        <div className="grid grid-cols-3 gap-3 mb-4">
+          <div className="bg-emerald-500/10 rounded-lg p-2.5 text-center">
+            <div className="text-lg font-bold text-emerald-500">{s.auto_post_ready}</div>
+            <div className="text-[10px] text-muted-foreground">Ready Now</div>
+          </div>
+          <div className="bg-amber-500/10 rounded-lg p-2.5 text-center">
+            <div className="text-lg font-bold text-amber-500">{s.one_blocker_away}</div>
+            <div className="text-[10px] text-muted-foreground">1 Blocker Away</div>
+          </div>
+          <div className="bg-red-500/10 rounded-lg p-2.5 text-center">
+            <div className="text-lg font-bold text-red-400">{s.multiple_blockers}</div>
+            <div className="text-[10px] text-muted-foreground">Multiple Blockers</div>
+          </div>
+        </div>
+
+        {/* Criteria pass rates */}
+        <div className="space-y-1.5 mb-4">
+          <p className="text-xs font-medium text-muted-foreground mb-1">Criteria Pass Rates</p>
+          {Object.entries(rates).map(([key, pct]) => (
+            <div key={key} className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground w-32 truncate">{key.replace(/_/g, ' ')}</span>
+              <div className="flex-1 h-3 bg-muted/50 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${pct >= 80 ? 'bg-emerald-500/70' : pct >= 50 ? 'bg-amber-500/70' : 'bg-red-400/70'}`}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <span className="text-xs font-mono w-12 text-right">{pct}%</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Blockers */}
+        {Object.keys(blockers).length > 0 && (
+          <div>
+            <p className="text-xs font-medium text-muted-foreground mb-1">Top Blockers</p>
+            <div className="flex flex-wrap gap-1.5">
+              {Object.entries(blockers).slice(0, 8).map(([tag, cnt]) => (
+                <span key={tag} className="text-[10px] bg-red-500/10 text-red-400 px-2 py-0.5 rounded-full">
+                  {tag.replace(/_/g, ' ')} ({cnt})
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

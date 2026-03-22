@@ -1052,6 +1052,186 @@ async def get_folder_alignment(run_id: str):
     }
 
 
+
+# ═══════════════════════════════════════════════════════════════
+# AUTO-POST READINESS ANALYSIS
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/runs/{run_id}/auto-post-readiness")
+async def get_auto_post_readiness(run_id: str):
+    """
+    Analyze what % of AP invoices in a benchmark run could auto-create
+    a purchase invoice in BC today.
+    
+    Checks each AP invoice against the auto-post criteria:
+    1. Document classified as AP_Invoice
+    2. Vendor matched to BC (vendor_canonical present)
+    3. Invoice number extracted
+    4. Invoice date extracted
+    5. Amount extracted
+    6. PO number extracted (for matching to BC purchase order)
+    7. Document in SharePoint
+    
+    Cross-references hub_documents for full extraction data.
+    """
+    db = get_db()
+    docs = await db[DOCS_COLL].find({"run_id": run_id}, {"_id": 0}).to_list(2000)
+    if not docs:
+        raise HTTPException(404, "No documents in this run")
+
+    # Filter to AP invoices only
+    ap_invoices = [d for d in docs if (d.get("gpi_doc_type") or d.get("doc_type_truth") or "").upper().replace(" ", "_") in ("AP_INVOICE",)]
+    non_ap = len(docs) - len(ap_invoices)
+
+    results = []
+    ready_count = 0
+    blockers_summary = {}
+
+    for doc in ap_invoices:
+        fname = doc.get("file_name", "")
+        vendor = doc.get("gpi_vendor", "")
+        po = doc.get("gpi_po", "")
+        amount = doc.get("gpi_amount")
+        
+        # Try to get richer data from hub_documents
+        hub_doc = None
+        doc_id_from_name = ""
+        id_m = re.match(r'^(\d{4,})', fname)
+        if id_m:
+            doc_id_from_name = id_m.group(1)
+        hub_doc = await _find_hub_document(db, doc_id_from_name, fname)
+
+        # Build criteria checklist
+        criteria = {}
+        blockers = []
+
+        # 1. Vendor matched to BC
+        vendor_canonical = None
+        if hub_doc:
+            vendor_canonical = hub_doc.get("vendor_canonical") or hub_doc.get("vendor_id") or hub_doc.get("vendor_no")
+        criteria["vendor_matched_bc"] = bool(vendor_canonical)
+        if not vendor_canonical:
+            if vendor:
+                blockers.append("vendor_name_only")  # Have name but not BC match
+            else:
+                blockers.append("no_vendor")
+
+        # 2. Invoice number
+        invoice_no = None
+        if hub_doc:
+            invoice_no = (
+                hub_doc.get("invoice_number_clean")
+                or (hub_doc.get("extracted_fields") or {}).get("invoice_number")
+                or (hub_doc.get("ai_extraction") or {}).get("invoice_number")
+            )
+        criteria["invoice_number"] = bool(invoice_no)
+        if not invoice_no:
+            blockers.append("no_invoice_number")
+
+        # 3. Invoice date
+        invoice_date = None
+        if hub_doc:
+            invoice_date = (
+                hub_doc.get("invoice_date")
+                or (hub_doc.get("extracted_fields") or {}).get("invoice_date")
+                or (hub_doc.get("ai_extraction") or {}).get("invoice_date")
+            )
+        criteria["invoice_date"] = bool(invoice_date)
+        if not invoice_date:
+            blockers.append("no_invoice_date")
+
+        # 4. Amount
+        has_amount = amount is not None
+        if not has_amount and hub_doc:
+            for k in ["amount_float", "total_amount", "invoice_amount"]:
+                if hub_doc.get(k):
+                    has_amount = True
+                    break
+            if not has_amount:
+                ef = hub_doc.get("extracted_fields") or {}
+                ai = hub_doc.get("ai_extraction") or {}
+                has_amount = bool(ef.get("amount") or ef.get("total_amount") or ai.get("total_amount"))
+        criteria["amount"] = has_amount
+        if not has_amount:
+            blockers.append("no_amount")
+
+        # 5. PO number (for BC order matching)
+        has_po = bool(po)
+        if not has_po and hub_doc:
+            has_po = bool(
+                hub_doc.get("po_number_extracted") or hub_doc.get("po_number")
+                or (hub_doc.get("extracted_fields") or {}).get("po_number")
+            )
+        criteria["po_number"] = has_po
+        if not has_po:
+            blockers.append("no_po")
+
+        # 6. In SharePoint
+        in_sp = False
+        if hub_doc:
+            in_sp = bool(hub_doc.get("sharepoint_share_link_url") or hub_doc.get("sharepoint_web_url"))
+        criteria["in_sharepoint"] = in_sp
+        if not in_sp:
+            blockers.append("not_in_sharepoint")
+
+        # 7. Confidence
+        confidence = 0
+        if hub_doc:
+            confidence = (hub_doc.get("ai_extraction") or {}).get("confidence", 0) or hub_doc.get("classification_confidence", 0)
+        criteria["confidence_ok"] = confidence >= 0.85
+        if confidence < 0.85 and hub_doc:
+            blockers.append("low_confidence")
+
+        # Overall readiness
+        is_ready = all(criteria.values())
+        if is_ready:
+            ready_count += 1
+
+        # Count blockers
+        for b in blockers:
+            blockers_summary[b] = blockers_summary.get(b, 0) + 1
+
+        results.append({
+            "file_name": fname,
+            "vendor": vendor,
+            "criteria": criteria,
+            "blockers": blockers,
+            "ready": is_ready,
+            "hub_doc_found": hub_doc is not None,
+        })
+
+    # Calculate readiness tiers
+    tier_ready = ready_count
+    tier_one_blocker = sum(1 for r in results if len(r["blockers"]) == 1)
+    tier_multiple = sum(1 for r in results if len(r["blockers"]) > 1)
+    tier_no_hub = sum(1 for r in results if not r["hub_doc_found"])
+
+    total_ap = len(ap_invoices)
+    pct_ready = round(ready_count / total_ap * 100, 1) if total_ap else 0
+
+    return {
+        "summary": {
+            "total_documents": len(docs),
+            "ap_invoices": total_ap,
+            "non_ap_documents": non_ap,
+            "auto_post_ready": ready_count,
+            "auto_post_ready_pct": pct_ready,
+            "one_blocker_away": tier_one_blocker,
+            "multiple_blockers": tier_multiple,
+            "no_hub_data": tier_no_hub,
+        },
+        "blockers_distribution": dict(sorted(blockers_summary.items(), key=lambda x: -x[1])),
+        "criteria_pass_rates": {
+            "vendor_matched_bc": round(sum(1 for r in results if r["criteria"]["vendor_matched_bc"]) / total_ap * 100, 1) if total_ap else 0,
+            "invoice_number": round(sum(1 for r in results if r["criteria"]["invoice_number"]) / total_ap * 100, 1) if total_ap else 0,
+            "invoice_date": round(sum(1 for r in results if r["criteria"]["invoice_date"]) / total_ap * 100, 1) if total_ap else 0,
+            "amount": round(sum(1 for r in results if r["criteria"]["amount"]) / total_ap * 100, 1) if total_ap else 0,
+            "po_number": round(sum(1 for r in results if r["criteria"]["po_number"]) / total_ap * 100, 1) if total_ap else 0,
+            "in_sharepoint": round(sum(1 for r in results if r["criteria"]["in_sharepoint"]) / total_ap * 100, 1) if total_ap else 0,
+        },
+        "documents": results,
+    }
+
 # ═══════════════════════════════════════════════════════════════
 # EXPORT (Excel)
 # ═══════════════════════════════════════════════════════════════

@@ -1,102 +1,111 @@
 # GPI Document Hub - Product Requirements Document
 
 ## Original Problem Statement
-Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that automates document classification, routing, approval workflows, and integration with Business Central and SharePoint.
+Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that automates document classification, routing, approval workflows, and integration with Business Central and SharePoint. The system should serve as a continuous feedback loop where every interaction makes the AI smarter.
+
+## Core Principle
+**Every interaction is training data. Every correction makes the system smarter.**
 
 ## Architecture
 - **Backend**: FastAPI (Python) with MongoDB
 - **Frontend**: React with Shadcn/UI components
 - **AI**: Gemini via Emergent LLM Key + Azure OpenAI fallback
 - **External APIs**: Microsoft Graph, Business Central, SharePoint
-
-## Branch Constraint
-Only use branch: `conflict_150326_1947`
+- **Feedback Loop**: Unified feedback capture → learning signals → AI prompt enrichment
 
 ## Credentials
 - Web UI: admin / admin
 
 ## Completed Work
 
-### P1-A: PO Candidate Extraction from description/filename
-- Direct extraction from `description`, `invoice_description`, `line_description` with PO format pre-validation
-- Added to regex scan loop for embedded PO references
+### Core Platform
+- PO Candidate Extraction, Square9 stage-counts fix, FastAPI dependency injection fix
+- Auto-post AP invoices for stable vendors (with stable vendor confidence boost)
+- Azure OpenAI fallback classifier (confidence < 0.70 triggers fallback)
+- Freight GL routing extensions, Square9 decommission endpoints
+- BC catalog sync, Drop-Ship vs Warehouse SO routing
+- Warehouse SO Booked Notifications, BC Shipment Sync
+- BC Customer + Salesperson Cache Sync & Rep Assignment (Step 1)
+- BC Factbox Document Links (Zetadocs Replacement) + AL Extension
+- Frontend Consolidation (38 → 8 pages), App Versioning (v1.6.0)
 
-### P1-B: Square9 stage-counts NameError fix
-- Import fix + regression test
+### Intake Benchmark (Mar 2026)
+- Full benchmark workspace: run setup, scoring, auto-population, results, Excel export
+- SharePoint folder scan (scan S9 output folders via Graph API)
+- Folder Alignment Report (S9 vs GPI Hub folder comparison)
+- Auto-Post Readiness Panel (criteria pass rates, blocker analysis)
+- Truth auto-seeding from GPI extraction
+- Hierarchical folder comparison (subfolder = bonus, not error)
 
-### P1-C: FastAPI dependency injection fix
-- Removed global db/bc_service injection from ap_review.py and spiro.py
+### Vendor Intelligence (Mar 2026)
+- Vendor Inference Service — 6 strategies:
+  1. Filename vendor patterns (30+ known vendors)
+  2. Invoice number range mapping (TUMALOC 030xxxx, CCF_ → SMC, INUS → Air Menzies)
+  3. Document number patterns (R66xx/W117xxx → CITICARGO)
+  4. Email sender patterns (copier@buske.com → BUSKE)
+  5. BC reference cache cross-reference (BOL/shipment/PO numbers)
+  6. Sibling batch inference
+- "No Vendor Expected" classification (Letters of Auth, W9 forms, etc.)
+- Noise file detection (PNGs, QR codes)
+- Vendor name casing normalization
 
-### P1-D: Auto-post AP invoices for stable vendors
-- Wired check_auto_post_eligibility + stable vendor score gate + bc_link_status gate
+### Feedback Loop Architecture (Mar 22, 2026)
+- Unified Feedback Loop Service (`feedback_loop_service.py`)
+- Every user action captured: vendor corrections, reclassifications, amount/PO edits, approvals, folder moves
+- Immediate learning signal application:
+  - Vendor corrections → vendor_aliases collection
+  - Classification corrections → classification_feedback (few-shot examples)
+  - Folder corrections → routing_feedback
+  - Approvals/rejections → vendor track record
+- AI prompt enrichment via `build_feedback_context_for_prompt()`
+- Wired into documents.py update flow and ap_review.py save flow
 
-### P1-E: Azure OpenAI fallback classifier
-- Created azure_openai_classifier.py, falls back when Gemini confidence < 0.70
+### Auto-Post Confidence (Mar 22, 2026)
+- Stable vendor score now wired into auto-post eligibility
+- `attempt_auto_post()` queries vendor_intelligence_profiles for stable data
+- Confidence formula: stable_flag + score >= 0.85 → max(raw, stable_score)
+- Benchmark readiness check also queries stable vendor profiles
+- TUMALOC (0.985 stable score) → 53 invoices should now be auto-post eligible
 
-### P2-A: Freight GL routing extensions
-- Added gl-storage-handling, gl-dropship-international GL accounts, do_not_pay routing
-
-### P2-B: Square9 decommission
-- Migration status + cutover endpoints
-
-### P3-A: BC catalog sync for Sales Order line resolution
-- Health endpoint, 24-hour background sync
-
-### P3-B: Drop-Ship vs Warehouse SO Type Routing
-- _resolve_so_type(), conditional BC field mapping, dropship auto-approve
-
-### P3-C: Warehouse SO Booked Notifications
-- send_warehouse_receiving_notice, send_so_confirmation_to_customer
-
-### P4-A: BC Shipment Sync to Inventory Ledger
-- outbound_shipment movements, 1-hour background scheduler
-
-### STEP 1: BC Customer + Salesperson Cache Sync & Rep Assignment
-- sync_entities(), rep_assignment_service.py
-
-### BC Factbox Document Links (Zetadocs Replacement)
-- GET/POST/DELETE document-links endpoints, AL extension spec, migrate-from-zetadocs
-
-### Frontend Consolidation
-- Reduced 38 pages to 8 core routing pages
-
-### App Versioning
-- v1.6.0 badge with changelog dialog
-
-### Intake Benchmark: GPI Hub vs Square 9
-- Run setup, document scoring, auto-population, results summary, Excel export
-- 15 API endpoints under /api/intake-benchmark/*
-
-### SharePoint Folder Scan for Intake Benchmark (Mar 22 2026)
-- `POST /api/intake-benchmark/runs/{run_id}/scan-sharepoint` — walks S9 output folders on SharePoint
-- Graceful Graph API failure handling (falls back to demo mode)
-- Demo data generator for preview environment testing
-- Frontend "Scan S9 Folders" button on Scoring tab
-- Fixed international detection bug ("Not International" false positive)
-- Answered Fevisa routing question: GPI routes to `Dropship International Documents/ML179859`
+## Production Benchmark Results (Test2 — 122 docs)
+- Classification Accuracy: GPI 100%, S9 0%
+- Vendor Accuracy: GPI 100%, S9 0%
+- PO Accuracy: GPI 100%, S9 0%
+- Folder Accuracy: GPI 100%, S9 96.7%
+- No-Touch Rate: GPI 70.5%, S9 0%
+- Stable vendors: TUMALOC (0.985), CARGOMO (0.904), ARK (0.877), GROUPWA (0.865), ROTONDO (0.865)
 
 ## P0/P1/P2 Backlog
 
-### Remaining
-- P1: Wire rep assignment into SO creation flow (Step 2)
-- P1: Investigate remaining `no_bc_match` failures from 500-doc batch
-- P1: Continue server.py extraction (classification, email polling)
-- P2: Vendor Inventory Dashboard & Sales module
-- P2: Product/BOM module
-- P2: Production email service & Entra ID SSO
-- P2: Decommission legacy Zetadocs
+### P0
+- Verify auto-post readiness shows ~59/71 AP invoices ready (user to refresh)
+
+### P1
+- Wire rep assignment into SO creation flow (Step 2)
+- Investigate remaining `no_bc_match` failures from batch run
+- Continue server.py extraction (classification, email polling services)
+
+### P2
+- Vendor Inventory Dashboard & Sales module
+- Product/BOM module
+- Production email service & Entra ID SSO
+- Feedback Loop Health dashboard (events, aliases learned, accuracy trends)
 
 ## Key API Endpoints
 - `GET /api/intake-benchmark/runs`
 - `POST /api/intake-benchmark/runs/{id}/auto-populate`
 - `POST /api/intake-benchmark/runs/{id}/scan-sharepoint`
+- `GET /api/intake-benchmark/runs/{id}/folder-alignment`
+- `GET /api/intake-benchmark/runs/{id}/auto-post-readiness`
 - `GET /api/gpi-integration/document-links/{entity}/{doc_no}`
-- `POST /api/gpi-integration/document-links/{entity}/{doc_no}/upload`
 
-## Test Coverage
-- 200+ backend tests passing across all service modules
-- Frontend consolidation tests passing
-- Intake Benchmark: 14-document demo scan validated
+## Key Collections
+- `feedback_events` — every user interaction
+- `vendor_aliases` — learned vendor name mappings
+- `classification_feedback` — few-shot examples from corrections
+- `routing_feedback` — folder routing corrections
+- `vendor_intelligence_profiles` — stable vendor scores and flags
+- `bakeoff_runs` / `bakeoff_documents` — benchmark data
 
 ## Known Issues
 - Preview env: Graph API token fails (expected — use DEMO_MODE fallback)

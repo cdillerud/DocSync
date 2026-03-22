@@ -270,6 +270,42 @@ async def save_ap_review(doc_id: str, data: APReviewData):
         {"$set": update_data}
     )
     
+    # ── UNIFIED FEEDBACK LOOP: Record ALL AP review corrections ──
+    try:
+        from services.feedback_loop_service import record_feedback
+        vendor_id = data.vendor_id or doc.get("vendor_canonical") or ""
+        
+        if data.vendor_id and data.vendor_id != doc.get("vendor_canonical"):
+            await record_feedback(db, "vendor_correction", doc_id, vendor_id,
+                before={"vendor": doc.get("vendor_canonical", "")},
+                after={"vendor": data.vendor_id},
+                source="ap_review")
+        
+        if data.total_amount is not None and data.total_amount != doc.get("amount_float"):
+            await record_feedback(db, "amount_correction", doc_id, vendor_id,
+                before={"amount": doc.get("amount_float")},
+                after={"amount": data.total_amount},
+                source="ap_review")
+        
+        if data.po_number and data.po_number != doc.get("po_number_clean"):
+            await record_feedback(db, "po_correction", doc_id, vendor_id,
+                before={"po": doc.get("po_number_clean", "")},
+                after={"po": data.po_number},
+                source="ap_review")
+        
+        if data.invoice_number and data.invoice_number != doc.get("invoice_number_clean"):
+            await record_feedback(db, "field_edit", doc_id, vendor_id,
+                before={"invoice_number": doc.get("invoice_number_clean", "")},
+                after={"invoice_number": data.invoice_number},
+                source="ap_review")
+        
+        # The act of completing an AP review = approval signal
+        await record_feedback(db, "approval", doc_id, vendor_id,
+            metadata={"review_type": "ap_review"},
+            source="ap_review")
+    except Exception as e:
+        logger.debug("Feedback recording skipped: %s", e)
+    
     # Fetch updated document
     updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     

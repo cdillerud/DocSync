@@ -330,6 +330,17 @@ async def stage_classify_llm(
         except Exception:
             pass
 
+        # Add feedback loop context — learned corrections from user interactions
+        try:
+            from services.feedback_loop_service import build_feedback_context_for_prompt
+            from deps import get_db
+            feedback_db = get_db()
+            feedback_context = await build_feedback_context_for_prompt(feedback_db)
+            if feedback_context:
+                dynamic_prompt += "\n\n" + feedback_context
+        except Exception:
+            pass
+
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=f"classify-{uuid.uuid4()}",

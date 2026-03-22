@@ -472,6 +472,44 @@ async def update_document(doc_id: str, update: DocumentUpdate):
             except Exception as e:
                 logger.warning("Failed to record classification correction: %s", e)
     
+    # ── UNIFIED FEEDBACK LOOP: Record ALL field corrections ──
+    try:
+        from services.feedback_loop_service import record_feedback
+        vendor_id = doc.get("vendor_canonical") or doc.get("vendor_no") or ""
+        
+        # Vendor correction
+        if update.vendor_canonical is not None or update.vendor_name is not None:
+            old_vendor = doc.get("vendor_canonical") or doc.get("vendor_name") or ""
+            new_vendor = update.vendor_canonical or update.vendor_name or ""
+            if old_vendor != new_vendor:
+                await record_feedback(db, "vendor_correction", doc_id, vendor_id,
+                    before={"vendor": old_vendor}, after={"vendor": new_vendor})
+        
+        # Amount correction
+        for amt_field in ("total_amount", "invoice_amount"):
+            new_val = getattr(update, amt_field, None)
+            if new_val is not None and new_val != doc.get(amt_field):
+                await record_feedback(db, "amount_correction", doc_id, vendor_id,
+                    before={"amount": doc.get(amt_field)}, after={"amount": new_val})
+                break
+        
+        # PO correction
+        if getattr(update, "po_number_extracted", None) is not None:
+            old_po = doc.get("po_number_extracted", "")
+            if update.po_number_extracted != old_po:
+                await record_feedback(db, "po_correction", doc_id, vendor_id,
+                    before={"po": old_po}, after={"po": update.po_number_extracted})
+        
+        # Folder/routing correction
+        for folder_field in ("sharepoint_folder_path", "filed_to"):
+            new_val = getattr(update, folder_field, None)
+            if new_val is not None and new_val != doc.get(folder_field):
+                await record_feedback(db, "folder_correction", doc_id, vendor_id,
+                    before={"folder": doc.get(folder_field, "")}, after={"folder": new_val})
+                break
+    except Exception as e:
+        logger.debug("Feedback recording skipped: %s", e)
+    
     await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
     updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     return updated_doc

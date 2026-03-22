@@ -65,7 +65,7 @@ class AutoPostResult:
         }
 
 
-def check_auto_post_eligibility(doc: Dict[str, Any]) -> tuple[bool, str]:
+async def check_auto_post_eligibility(doc: Dict[str, Any]) -> tuple[bool, str]:
     """
     Check if a document is eligible for auto-posting.
     
@@ -157,7 +157,28 @@ def check_auto_post_eligibility(doc: Dict[str, Any]) -> tuple[bool, str]:
     bc_posting_status = doc.get("bc_posting_status")
     if bc_posting_status == "posted":
         return False, "Already posted to BC"
-    
+
+    # Soft block: check if resolved GL account is validated against BC catalog
+    freight_gl = doc.get("freight_gl_classification", {})
+    resolved_gl = freight_gl.get("gl_number", "")
+    if resolved_gl:
+        try:
+            from deps import get_db
+            _db = get_db()
+            gl_validation = await _db.hub_config.find_one(
+                {"key": "freight_gl_validation"}, {"_id": 0}
+            )
+            if gl_validation:
+                invalid_gls = gl_validation.get("invalid_gl_numbers", [])
+                if resolved_gl in invalid_gls:
+                    logger.warning(
+                        "GL account %s not validated against BC catalog — blocking auto-post",
+                        resolved_gl,
+                    )
+                    return False, f"gl_account_not_validated (GL {resolved_gl} not in BC chart of accounts)"
+        except Exception as e:
+            logger.debug("GL validation check failed (non-blocking): %s", e)
+
     return True, "All criteria met"
 
 
@@ -181,7 +202,7 @@ async def attempt_auto_post(doc_id: str, doc: Dict[str, Any], db, bc_service) ->
                 pass
 
     # Check eligibility
-    eligible, reason = check_auto_post_eligibility(doc)
+    eligible, reason = await check_auto_post_eligibility(doc)
     
     if not eligible:
         logger.debug("Document %s not eligible for auto-post: %s", doc_id, reason)

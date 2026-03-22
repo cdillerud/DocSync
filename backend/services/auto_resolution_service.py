@@ -507,7 +507,7 @@ class AutoResolutionService:
 
                         # check_auto_post_eligibility expects 'doc_type' key
                         elig_doc = {**ap_doc, "doc_type": doc_type}
-                        eligible, elig_reason = check_auto_post_eligibility(elig_doc)
+                        eligible, elig_reason = await check_auto_post_eligibility(elig_doc)
 
                         if eligible and vendor_score >= 0.85 and bc_link_status == "linked":
                             logger.info(

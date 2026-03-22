@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File, Form, Query, Body
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -683,7 +683,7 @@ async def file_and_clear_document(doc_id: str):
 
 
 @router.post("/bulk-file-and-clear")
-async def bulk_file_and_clear(doc_ids: list = None):
+async def bulk_file_and_clear(doc_ids: list = Body(None)):
     """Bulk file & clear: route each document to SharePoint and mark cleared."""
     from services.folder_routing_service import determine_folder_path
 

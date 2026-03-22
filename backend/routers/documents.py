@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File, Form, Query, Body
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from deps import get_db
@@ -531,24 +531,182 @@ async def delete_document(doc_id: str):
 
 @router.get("/{doc_id}/file")
 async def get_document_file(doc_id: str):
+    """Serve a document file — local disk first, SharePoint fallback."""
+    import httpx
+
     db = get_db()
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    file_path = UPLOAD_DIR / doc_id
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="File not found on disk")
-
     content_type = doc.get("content_type", "application/octet-stream")
     filename = doc.get("file_name", f"{doc_id}.bin")
 
-    return FileResponse(
-        path=file_path,
-        media_type=content_type,
-        filename=filename,
-        headers={"Content-Disposition": f'inline; filename="{filename}"'}
+    # 1. Local file takes priority
+    file_path = UPLOAD_DIR / doc_id
+    if file_path.exists():
+        return FileResponse(
+            path=file_path,
+            media_type=content_type,
+            filename=filename,
+            headers={"Content-Disposition": f'inline; filename="{filename}"'}
+        )
+
+    # 2. SharePoint fallback
+    drive_id = doc.get("sharepoint_drive_id", "")
+    item_id = doc.get("sharepoint_item_id", "")
+
+    if not drive_id or not item_id:
+        # No SharePoint fields — check for share link
+        share_url = doc.get("sharepoint_share_link_url") or doc.get("sharepoint_web_url", "")
+        if share_url:
+            raise HTTPException(
+                status_code=404,
+                detail="File not on disk. SharePoint drive/item IDs missing but web URL available.",
+                headers={"X-SharePoint-Url": share_url},
+            )
+        raise HTTPException(
+            status_code=404,
+            detail="File not available - not on disk and no SharePoint link",
+        )
+
+    # DEMO_MODE or credentials invalid: redirect to share link instead of calling Graph
+    from services.config_service import DEMO_MODE
+    if DEMO_MODE:
+        share_url = (doc.get("sharepoint_share_link_url")
+                     or doc.get("sharepoint_web_url", ""))
+        if share_url:
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(url=share_url)
+        raise HTTPException(
+            status_code=404,
+            detail="File not on disk. Demo mode - no Graph API available.",
+        )
+
+    # Live: fetch from MS Graph
+    try:
+        from services.config_service import get_graph_token
+        token = await get_graph_token()
+        if token == "mock-graph-token":
+            # Credentials not configured — fall back to share link
+            share_url = (doc.get("sharepoint_share_link_url")
+                         or doc.get("sharepoint_web_url", ""))
+            if share_url:
+                from fastapi.responses import RedirectResponse
+                return RedirectResponse(url=share_url)
+            raise HTTPException(
+                status_code=404,
+                detail="File not on disk. SharePoint credentials not configured.",
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("[FileServe] Graph token error for %s: %s", doc_id[:8], str(e))
+        # Fall back to share link on auth failure
+        share_url = (doc.get("sharepoint_share_link_url")
+                     or doc.get("sharepoint_web_url", ""))
+        if share_url:
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(url=share_url)
+        raise HTTPException(status_code=502, detail="SharePoint authentication failed")
+
+    graph_url = (
+        f"https://graph.microsoft.com/v1.0/drives/{drive_id}"
+        f"/items/{item_id}/content"
     )
+
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+            resp = await client.get(
+                graph_url,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        if resp.status_code in (401, 403):
+            raise HTTPException(status_code=502, detail="SharePoint authentication failed")
+        if resp.status_code == 404:
+            raise HTTPException(status_code=404, detail="File not found in SharePoint")
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=502,
+                detail=f"SharePoint returned HTTP {resp.status_code}",
+            )
+
+        # Stream the response back
+        sp_content_type = resp.headers.get("content-type", content_type)
+        return StreamingResponse(
+            iter([resp.content]),
+            media_type=sp_content_type,
+            headers={
+                "Content-Disposition": f'inline; filename="{filename}"',
+                "X-Served-From": "sharepoint",
+            },
+        )
+
+    except HTTPException:
+        raise
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="SharePoint request timed out (30s)")
+    except Exception as e:
+        logger.error("[FileServe] Graph API error for %s: %s", doc_id[:8], str(e))
+        raise HTTPException(status_code=502, detail=f"SharePoint API error: {str(e)[:200]}")
+
+
+@router.get("/{doc_id}/preview-url")
+async def get_preview_url(doc_id: str):
+    """Return the best available URL for previewing the document."""
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Priority 1: local file
+    file_path = UPLOAD_DIR / doc_id
+    if file_path.exists():
+        return {
+            "method": "local",
+            "url": f"/api/documents/{doc_id}/file",
+            "available": True,
+            "doc_id": doc_id,
+        }
+
+    # Priority 2: SharePoint item content (via our proxy endpoint)
+    drive_id = doc.get("sharepoint_drive_id", "")
+    item_id = doc.get("sharepoint_item_id", "")
+    if drive_id and item_id:
+        return {
+            "method": "sharepoint",
+            "url": f"/api/documents/{doc_id}/file",
+            "available": True,
+            "doc_id": doc_id,
+        }
+
+    # Priority 3: share link URL
+    share_url = doc.get("sharepoint_share_link_url", "")
+    if share_url:
+        return {
+            "method": "share_link",
+            "url": share_url,
+            "available": True,
+            "doc_id": doc_id,
+        }
+
+    # Priority 4: web URL (view-only, may require auth)
+    web_url = doc.get("sharepoint_web_url", "")
+    if web_url:
+        return {
+            "method": "share_link",
+            "url": web_url,
+            "available": True,
+            "doc_id": doc_id,
+        }
+
+    return {
+        "method": "none",
+        "url": "",
+        "available": False,
+        "doc_id": doc_id,
+    }
 
 
 # =============================================================================

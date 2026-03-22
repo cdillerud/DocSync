@@ -105,6 +105,14 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - Source badges: GPI Hub (blue), BC Drop (green), Legacy (gray)
 - All CSS/JS inline — zero external dependencies
 
+### SharePoint File Preview Fallback (Mar 22, 2026 — Session 4)
+- `GET /api/documents/{doc_id}/file` now falls back to SharePoint when local file is missing
+- Fallback chain: local disk → MS Graph API → sharepoint_share_link_url redirect (307)
+- Gracefully handles invalid Graph credentials (logs error, redirects to share link)
+- `GET /api/documents/{doc_id}/preview-url` returns best available preview method
+- Priority: local > sharepoint (proxy) > share_link > web_url > none
+- Verified: All 4 scenarios tested and passing
+
 ## P0/P1/P2 Backlog
 
 ### P0

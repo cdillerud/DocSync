@@ -1,22 +1,22 @@
 <analysis>**original_problem_statement**: 
-The overarching goal is a complete hardening pass of the document intelligence platform (GPI Hub) to automate document-to-ERP completions, decouple legacy systems, and improve automated multi-source PO extraction. 
+The overarching goal is a complete hardening pass of the document intelligence platform (GPI Hub) to automate document-to-ERP completions, decouple legacy systems, and improve automated multi-source PO extraction.
 PRODUCT REQUIREMENTS: 
-- Create an Intake Benchmark internal workspace to compare GPI Hub extraction vs Square 9 side-by-side using the same documents.
-- Implement app versioning and UI consolidation.
-- Ensure the AI classification engine utilizes a true Feedback Loop, where user interactions and corrections feed back into the prompt to dynamically improve future AI extraction.
-- Create automated processing pipelines for Sales Orders (differentiating Drop-Ship vs Warehouse) and Freight G/L routing.
+- Create an Intake Benchmark internal workspace to compare GPI Hub extraction vs Square 9 side-by-side.
+- Ensure the AI classification engine utilizes a true Feedback Loop.
+- Create automated processing pipelines for Sales Orders (Drop-Ship vs Warehouse) and Freight G/L routing.
 - Decommission Square9 data paths.
+- Add PDF splitting and page deletion capabilities matching Square9 parity.
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
 **what currently exists?** 
-A FastAPI/React document intelligence platform heavily integrated with Business Central and SharePoint. It features Intake Benchmarking, robust Vendor Inference, a true AI Feedback Loop (injecting user corrections directly into the  context), Vendor Extraction Profiles to guide LLM extraction, A/B pipeline reprocess comparison tools, bulk UI actions, intelligent PO caching/resolution, Freight G/L validation, and automatic Sales Order subtype classification (Drop-Ship vs Warehouse).
+A FastAPI/React document intelligence platform heavily integrated with Business Central and SharePoint. It features Drop-Ship PO auto-creation, SH_Invoice (Storage & Handling) cost-only SO generation, a BC Factbox UI embedded via iframe/native AL, PDF page manipulation (split/delete), and robust vendor AI resolution.
 
 **Last working item**: 
-    - Last item agent was working: Implementing Square9 archive/restore endpoints and Drop-Ship (DS) PO auto-creation. The agent successfully added the  and  endpoints, added  to , and was in the middle of inserting the  endpoint into .
-    - Status: IN PROGRESS
-    - Agent Testing Done: N
-    - Which testing method agent to use? backend testing agent (needs to run pytest on new tests the agent must write, and test idempotency).
+    - Last item agent was working: Modifying  and adding  to support SharePoint fallback. If a local file is deleted (filed to SP), the system attempts to stream it via MS Graph API. If the Graph token fails (e.g., invalid preview credentials), it falls back to redirecting to the . 
+    - Status: IN PROGRESS (Agent just applied the Graph token error fallback fix in  but hasn't run the final verification).
+    - Agent Testing Done: N (Needs final verification after the last  fix).
+    - Which testing method agent to use? manual testing by curl (Verify both  and  endpoints gracefully handle missing local files and Graph auth errors without returning 500/502).
     - User Testing Done: N
 
 **All Pending/In progress Issue list**: 
@@ -24,13 +24,13 @@ A FastAPI/React document intelligence platform heavily integrated with Business 
      - Attempted fixes: None in this session.
      - Next debug checklist: Check test runner environment variable mocking for .
      - Why fix this issue and what will be achieved with the fix? Clean full test suite runs for CI/CD confidence.
-     - Status: BLOCKED (Low priority compared to feature work)
+     - Status: NOT STARTED (Low priority)
      - Is recurring issue? Y
      - Should Test frontend/backend/both after fix? backend
      - Blocked on other issue: None
 
-  Issue 2: Investigate remaining  failures from the batch run.
-     - Attempted fixes: Partially resolved via the PO Resolution Cache trust bypass, but total failure rate needs review on production batch sizes.
+  Issue 2: Investigate remaining 205  failures from the batch run.
+     - Attempted fixes: Partially resolved previously via PO Resolution Cache trust bypass.
      - Next debug checklist: Analyze production logs for lingering  reasons.
      - Why fix this issue and what will be achieved with the fix? Maximize auto-posting eligibility.
      - Status: NOT STARTED
@@ -39,116 +39,94 @@ A FastAPI/React document intelligence platform heavily integrated with Business 
      - Blocked on other issue: None
 
 **In progress Task List**: 
-  Task 1: Square9 Archive & DS PO Auto-Creation (Part B Wiring)
-     - Where to resume: 
-       1. Finish adding the  endpoint in .
-       2. Wire the trigger into : when a  document transitions to  released or approved, call the auto-create endpoint as a background task.
-       3. Write unit tests (DS PO creation with mock SO status=Released; Idempotency check).
-     - What will be achieved with this? Drop Ship Purchase Orders will automatically be created and approved in BC when their corresponding Sales Order is released, eliminating manual entry.
+  Task 1: Finalize SharePoint File Preview Fallback
+     - Where to resume: . Verify that the  and  endpoints work correctly following the last fix applied for MS Graph token errors.
+     - What will be achieved with this? Users can preview documents in the UI even after the local file is moved to SharePoint.
      - Status: IN PROGRESS
-     - Should Test frontend/backend/both after fix? backend (via pytest)
+     - Should Test frontend/backend/both after fix? backend (via curl)
      - Blocked on something: None
 
-**Upcoming and Future Tasks**
+**Upcoming and Future Tasks**:
     Upcoming Tasks:
     - P1: Continue  extraction pass 3 (classification decoupling, email polling refactor).
+
     Future Tasks:
     - P2: Vendor Inventory Dashboard and Sales module.
     - P2: Product/BOM (Bill of Materials) module.
     - P2: Implement a production-ready email service and Entra ID SSO.
 
 **Completed work in this session**
-- Feedback Loop Health Dashboard UI & API (DONE)
-- Critical bug fixes in  to ensure feedback context/vendor hints actually inject into LLM prompts (DONE)
-- Global LLM upgrade from  to  (DONE)
-- Before/After Reprocess Comparison Dashboard (A/B testing architecture) (DONE)
-- Added File (bulk route) and Run Ref Intel UI buttons to Document Queue + fixed FastAPI body param parsing (DONE)
-- Ref Intel Startup Requeue (prevents  docs from getting stuck in memory) (DONE)
-- PO Resolution bypass to trust BC Cache ID without redundant live BC lookup (DONE)
-- Code cleanup: re-wired  direct imports & fixed  circular import (DONE)
-- Vendor Extraction Profiles (VEP) generation, pipeline wiring, and coverage API (DONE)
-- Freight GL Account validation API and Auto-Post soft block wiring (DONE)
-- Sales Order Subtype Classification ( vs ) with workflow transitions (DONE)
+- Drop-Ship (DS) PO auto-creation endpoint and background task wiring in  (DONE)
+- SH_Invoice (Storage & Handling) document type, workflow, and cost-only BC Sales Order generation endpoint (DONE)
+- Reprocess comparison execution (Evaluated 94 docs; proved AI feedback loop works, though heuristic baselines showed artificial regressions) (DONE)
+- Self-contained HTML Factbox UI endpoint () with drag-and-drop file upload for Business Central (DONE)
+- Massive BC AL Extension compilation fixes (Removed , excluded  write-API tables to fix schema errors, converted Page50100 to a native AL , and refactored  codeunit) (DONE)
+- PDF Page Operations: Added , , and  endpoints using  with full unit test coverage (DONE)
 
 **Earlier issues found/mentioned but not fixed**
    - None
 
 **Known issue recurrence from previous fork**
-  - Issue recurrence in previous fork (Check 1st <LLM message history> array entry): BC API authentication and SharePoint Graph API uploads throw errors in the preview sandbox due to restricted/missing credentials.
+  - Issue recurrence in previous fork: BC API authentication and SharePoint Graph API uploads throw errors in the preview sandbox due to restricted/missing credentials.
   - Recurrence count: Ongoing
   - Status: BLOCKED (Environment Limitation)
-  - Note:  gracefully handles these API failures. It is expected behavior in the preview sandbox. Proceed with logic trusting .
+  - Note:  gracefully handles these API failures. If  but credentials are bad, fallback logic is required (as seen in the current working task).
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
-- **LLM Context Injection**: Historical corrections (Feedback Loop) and pre-computed Vendor Extraction Profiles (VEP) are dynamically injected into the system prompt of  before classification/extraction.
-- **A/B Snapshotting**: The  takes a snapshot of current extraction data, runs the document through the live pipeline, and compares  vs  confidence/amounts without writing to the live schema.
-- **SO Subtype Divergence**: Single  type splits into  (Drop Ship) and  (Warehouse) based on keywords and location codes. This dictates PO auto-approval paths vs Logistics notification paths.
+- **PDF Manipulation**: Using  to split documents or extract specific pages, creating new  database records with  to restart processing.
+- **AL Extension Native Factbox**: BC SaaS restricts  control add-ins, so the AL factbox fetches document counts via  and opens the full React/HTML UI in a browser tab via .
+- **Cost-Only SOs**: SH_Invoices are processed as Sales Orders in BC but use  mapped to specific G/L numbers to register cost without revenue.
 
 **key DB schema**
-  - : Stores document state, , , , etc.
-  - : Stores system-wide toggles like , .
-  - : Synced chart of accounts from BC.
-  - : Local mappings for freight GL routing.
+  - : Added fields for PDF operations (, , , , ).
+  - :  is the unique index used for looking up configuration like .
 
 **changes in tech stack**
-  - Upgraded main extraction LLM across the system from  to  via .
+  - None strictly new, but heavier reliance on  for native document mutations.
 
 **All files of reference** 
-  -  (Current focus: Finish DS PO endpoint)
-  -  (Current focus: Wire DS PO trigger)
-  -  (Updated to trust BC cache IDs)
-  -  (Updated prompt injection logic)
-  -  (Created)
+  -  (Current focus: Verify Graph fallback logic in )
+  - 
+  - 
+  - 
 
 **Areas that need refactoring**: 
   -  extraction orchestration logic (Pass 3) needs to be decoupled into independent services.
 
 **key api endpoints**
-  - 
-  - 
-  - 
-  - 
-  - 
+  -  (WIP - SharePoint fallback)
   -  (WIP)
+  - 
+  - 
+  - 
+  - 
 
 **Critical Info for New Agent** 
-- **IMMEDIATE START POINT:** You must finish the user's last task (Part B: DS PO auto-approval). The  service method is already written. You need to finish writing the  endpoint in , and then trigger it from  when a  document hits  released or approved. Then write the requested Pytest test cases.
-- **FastAPI Body Bug:** In , earlier  caused an error because FastAPI treated it as a Query Param. It was fixed via . Remember this pattern for list inputs in POST endpoints.
-- Continue to leverage  to gracefully bypass Graph API issues in the environment.
+- **IMMEDIATE START POINT:** The agent was actively editing  to fix a Graph API token error when a local file doesn't exist and the system attempts to fetch from SharePoint. The fix added a fallback to redirect to  if the Graph token request fails. You need to curl both  and  on a document missing its local file to verify the fallback logic holds up and doesn't crash.
+- **BC Extension Maintenance**: The  folder in the AL extension was intentionally moved out/deleted to bypass compilation errors regarding missing request tables. Do not try to restore those tables right now unless explicitly requested.
 
 **documents and test reports created in this job** 
   - 
-  - 
 
 **Last 10 User Messages and any pending HUMAN messages** 
- - User: what does the learning signal application rate mean... Feel like we have wasted time, cycles, resources and credits.
- - Agent: Clarified the UI is purely a metric viewer and the actual AI injection *was* working. Found bugs in the existing pipeline that prevented injection, fixed them, and upgraded to .
- - User: lets re-run everything, but I just want to know if the results are better or worse.
- - Agent: Built a Before/After comparison pipeline and UI.
- - User: can we get a file button right next to the Show auto cleared so that we can file multiple docs at once?
- - Agent: Added File button to the Queue page.
- - User: is there a reason that ref intel is not run on all docs??
- - Agent: Found that the in-memory auto-resolve queue dropped items on server restart. Added a startup re-queue job and a manual Run Ref Intel button.
- - User: Uploaded image showing Bulk file failed: doc_ids required.
- - Agent: Fixed FastAPI  param parsing for .
- - User: Provided instructions to fix PO Resolution  to trust cache IDs over live verification for closed POs.
- - Agent: Implemented bypass logic.
- - User: Requested cleanup: rewire  imports directly, remove wrapper, and fix  circular import.
- - Agent: Performed rewiring and cleanup.
- - User: Requested wiring  into  prompt injection.
- - Agent: Implemented profile creation, coverage endpoint, and dynamic prompt hint injection.
- - User: Requested Freight GL validation endpoints and Auto-Post blocking logic for invalid accounts.
- - Agent: Implemented validation API and wired soft block into .
- - User: Requested  subtypes ( vs ) with specific workflow rules and classifiers.
- - Agent: Implemented subtypes and rules, passed all tests.
- - **User (PENDING ACTION):** Requested 1) Square9 Archive endpoint, and 2) DS PO Auto-Approval endpoint wired into  upon DS_Sales_Order released status.
+ - User: Provided instructions to build Factbox UI in FastAPI.
+ - Agent: Built UI, tested with screenshots.
+ - User: Uploaded compiler errors for BC AL Extension .
+ - Agent: Guided user through AL extension cleanup, removing missing dependencies and  folder.
+ - User: WebPageViewer control add-in is not permitted. Contact your system admin.
+ - Agent: Refactored  from an iframe viewer to a pure AL native  that queries the Hub API and opens links via browser.
+ - User: still problems... (API path missing  in BC setup).
+ - Agent: Updated BC codeunit setup URL to append .
+ - User: seems I cannot just drag a file in, we need to use the upload dalog?
+ - Agent: Clarified BC SaaS limits native drag/drop, pointed to View All HTML UI for that. User confirmed Excellent.
+ - **User (PENDING ACTION)**: Provided a prompt to build PDF page splitting (, , ). Agent implemented and tested successfully.
+ - **User (PENDING ACTION)**: Provided a prompt to add MS Graph SharePoint fallback to  and add a  endpoint. Agent implemented it, hit a token bug in preview, applied the fix, but the session ended before final test.
 
 **Project Health Check:**
-  - Broken: External graph/BC calls without Mock data (Expected)
-  - Mocked:  bypassing missing preview environment credentials.
+  - Mocked/Broken:  combined with invalid Graph credentials in the pod causes standard Graph calls to fail. Ensure fallback logic works smoothly.
 
 **3rd Party Integrations**
 	• OpenAI GPT-4o / Gemini 3 Pro — uses Emergent LLM Key
@@ -156,13 +134,10 @@ A FastAPI/React document intelligence platform heavily integrated with Business 
 	• MS Graph (Email/SharePoint) — requires User API Key
 
 **Testing status** 
-  - Testing agent used after significant changes: YES (Verified LLM pipeline upgrade).
+  - Testing agent used after significant changes: NO (Self-tested via exhaustive Pytest suites).
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: 
+  - Test files created: , , 
   - Known regressions: None
 
-**Credentials to test flow:**
-  - admin / admin
-
 **What agent forgot to execute**
-  - The agent cut off right after injecting code into  for the DS PO Auto-approval endpoint. It did NOT wire the trigger into  and did NOT write the unit tests for DS PO auto-creation. You must finish these steps.</analysis>
+  - Final curl verification of the  Graph fallback logic after writing the last fix.</analysis>

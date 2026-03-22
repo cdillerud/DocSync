@@ -118,3 +118,9 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - Preview env: Graph API token fails (expected — use DEMO_MODE fallback)
 - 19 pre-existing integration tests fail due to missing BASE_URL env var
 - Before/After comparison on preview test docs shows "regression" because test files are plain text stubs with heuristic-assigned 1.0 confidence — real PDFs will show true improvement
+
+### Bulk File Button (Mar 22, 2026 — Session 2)
+- "File" button added to Documents Queue, right next to "Show auto-cleared"
+- Select multiple documents via checkboxes → click "File (N)" → routes all selected to their destination SharePoint folders and marks as completed
+- Uses existing `POST /api/documents/bulk-file-and-clear` endpoint
+- Also records filing actions for AI learning and positive classification confirmation

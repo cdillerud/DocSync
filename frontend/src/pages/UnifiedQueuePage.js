@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import { 
   Search, Filter, RefreshCw, FileText, Clock, CheckCircle2, 
   AlertCircle, Archive, ChevronRight, Inbox, FileCheck, Play, Trash2, Brain, Truck,
-  CalendarDays, ShoppingCart, Receipt, Package
+  CalendarDays, ShoppingCart, Receipt, Package, FolderInput
 } from "lucide-react";
 
 const INTEL_STATUS_CONFIG = {
@@ -23,7 +23,7 @@ const INTEL_STATUS_CONFIG = {
   retry_scheduled: { label: 'Retry', cls: 'bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/30 dark:text-orange-300' },
   not_run: { label: 'Not Run', cls: 'bg-gray-100 text-gray-500 border-gray-200 dark:bg-gray-800 dark:text-gray-400' },
 };
-import api, { bulkResubmitDocuments, bulkDeleteDocuments, deleteDocument } from "@/lib/api";
+import api, { bulkResubmitDocuments, bulkDeleteDocuments, deleteDocument, bulkFileAndClear } from "@/lib/api";
 import BatchFreightClassifyDialog from "@/components/BatchFreightClassifyDialog";
 
 // Document types and their display names (fallback labels for known types)
@@ -303,6 +303,32 @@ export default function UnifiedQueuePage() {
     }
   };
 
+  // Bulk file handler — route selected docs to their destination folders
+  const handleBulkFile = async () => {
+    if (selectedDocs.size === 0) return;
+    if (!window.confirm(`File ${selectedDocs.size} document(s) to their destination folders? This will route them to SharePoint and mark as completed.`)) return;
+    
+    setBulkProcessing(true);
+    try {
+      const res = await bulkFileAndClear([...selectedDocs]);
+      const results = res.data || res;
+      toast.success(`Filed ${results.success?.length || 0} documents. ${results.failed?.length || 0} failed.`);
+      if (results.failed?.length > 0) {
+        console.error('Failed filings:', results.failed);
+        results.failed.forEach(f => {
+          toast.error(`Failed: ${f.doc_id} — ${f.error}`);
+        });
+      }
+      setSelectedDocs(new Set());
+      fetchDocuments();
+      fetchStats();
+    } catch (err) {
+      toast.error('Bulk file failed: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setBulkProcessing(false);
+    }
+  };
+
   // Single delete handler
   const handleSingleDelete = async (e, docId, fileName) => {
     e.stopPropagation();
@@ -558,6 +584,22 @@ export default function UnifiedQueuePage() {
                 Show auto-cleared ({queueCounts.auto_cleared || 0})
               </label>
             </div>
+
+            <Button
+              variant="default"
+              size="sm"
+              className="h-8 gap-1.5"
+              onClick={handleBulkFile}
+              disabled={selectedDocs.size === 0 || bulkProcessing}
+              data-testid="bulk-file-btn"
+            >
+              {bulkProcessing ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <FolderInput className="w-3.5 h-3.5" />
+              )}
+              File ({selectedDocs.size})
+            </Button>
           </div>
         </CardContent>
       </Card>

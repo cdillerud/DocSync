@@ -14,7 +14,8 @@ import { Textarea } from '../components/ui/textarea';
 import {
   Plus, Trash2, Archive, CheckCircle2, Play, Upload, Download,
   Search, ChevronRight, X, FileText, BarChart3, ClipboardList,
-  Zap, Eye, Pencil, RefreshCw, AlertTriangle, ChevronDown
+  Zap, Eye, Pencil, RefreshCw, AlertTriangle, ChevronDown,
+  FolderSearch, Loader2
 } from 'lucide-react';
 
 const API = '/intake-benchmark';
@@ -284,6 +285,23 @@ function DocumentScoring({ runId }) {
     } catch { toast.error('Auto-populate failed'); }
   };
 
+  const [scanning, setScanning] = useState(false);
+  const scanSharePoint = async () => {
+    setScanning(true);
+    try {
+      const { data } = await api.post(`${API}/runs/${runId}/scan-sharepoint`, {
+        max_files_per_folder: 50,
+        include_subfolders: true,
+        auto_match_gpi: true,
+        auto_route_gpi: true,
+      });
+      toast.success(data.message);
+      fetchDocs();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'SharePoint scan failed');
+    } finally { setScanning(false); }
+  };
+
   const deleteDoc = async (uid) => {
     try {
       await api.delete(`${API}/runs/${runId}/documents/${uid}`);
@@ -314,6 +332,10 @@ function DocumentScoring({ runId }) {
           </div>
           <Button variant="outline" size="sm" className="gap-1 h-8 text-xs" onClick={autoPopulate} data-testid="auto-populate-btn">
             <Zap className="w-3 h-3" /> Auto-Populate GPI
+          </Button>
+          <Button variant="outline" size="sm" className="gap-1 h-8 text-xs" onClick={scanSharePoint} disabled={scanning} data-testid="scan-sp-btn">
+            {scanning ? <Loader2 className="w-3 h-3 animate-spin" /> : <FolderSearch className="w-3 h-3" />}
+            {scanning ? 'Scanning...' : 'Scan S9 Folders'}
           </Button>
           <Button variant="outline" size="sm" className="gap-1 h-8 text-xs" onClick={() => fileInputRef.current?.click()}>
             <Upload className="w-3 h-3" /> Import CSV

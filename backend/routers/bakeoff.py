@@ -797,3 +797,376 @@ async def export_run(run_id: str):
 @router.get("/why-wrong-tags")
 async def get_why_wrong_tags():
     return {"tags": WHY_WRONG_TAGS}
+
+
+
+# ═══════════════════════════════════════════════════════════════
+# SHAREPOINT FOLDER SCAN — S9 vs GPI "Folder Diff" Builder
+# ═══════════════════════════════════════════════════════════════
+
+class ScanSharePointReq(BaseModel):
+    """Configuration for scanning Square 9 output folders on SharePoint."""
+    s9_root_folder: str = ""  # Root folder where S9 files documents. Empty = use library root.
+    folder_names: Optional[List[str]] = None  # Specific folders to scan. None = scan all known folders.
+    max_files_per_folder: int = 50  # Limit per folder to avoid huge scans.
+    include_subfolders: bool = True  # Recurse into subfolders.
+    auto_match_gpi: bool = True  # Try to match files against hub_documents.
+    auto_route_gpi: bool = True  # Run GPI routing logic on matched documents.
+
+
+async def _resolve_sp_drive():
+    """Resolve SharePoint site_id and drive_id. Returns (drive_id, error_msg)."""
+    import os, httpx
+    from services.sharepoint_service import (
+        DEMO_MODE, GRAPH_CLIENT_ID, SHAREPOINT_SITE_HOSTNAME,
+        SHAREPOINT_SITE_PATH, SHAREPOINT_LIBRARY_NAME,
+    )
+
+    if DEMO_MODE or not GRAPH_CLIENT_ID:
+        return None, "DEMO_MODE"
+
+    try:
+        from services.sharepoint_service import _get_graph_token
+        token = await _get_graph_token()
+    except Exception as e:
+        logger.warning("Graph token failed, falling back to DEMO_MODE: %s", str(e)[:200])
+        return None, "DEMO_MODE"
+
+    async with httpx.AsyncClient(timeout=30.0) as c:
+        site_resp = await c.get(
+            f"https://graph.microsoft.com/v1.0/sites/{SHAREPOINT_SITE_HOSTNAME}:{SHAREPOINT_SITE_PATH}:",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        if site_resp.status_code != 200:
+            return None, f"Site resolve failed (HTTP {site_resp.status_code})"
+        site_id = site_resp.json()["id"]
+
+        drives_resp = await c.get(
+            f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        drives = drives_resp.json().get("value", [])
+        lib = SHAREPOINT_LIBRARY_NAME
+        drive = next((d for d in drives if d["name"].lower() == lib.lower()), None)
+        if not drive:
+            drive = next((d for d in drives if d.get("driveType") == "documentLibrary"), None)
+        if not drive:
+            return None, f"Drive '{lib}' not found. Available: {[d['name'] for d in drives]}"
+        return drive["id"], None
+
+
+async def _list_folder_files(drive_id: str, folder_path: str, max_files: int = 50, recurse: bool = True):
+    """List files in a SharePoint folder via Graph API. Returns list of (file_name, folder_path, file_metadata)."""
+    import httpx
+    from services.sharepoint_service import _get_graph_token
+
+    token = await _get_graph_token()
+    files = []
+
+    async with httpx.AsyncClient(timeout=30.0) as c:
+        url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{folder_path}:/children?$top={max_files}"
+        resp = await c.get(url, headers={"Authorization": f"Bearer {token}"})
+
+        if resp.status_code == 404:
+            return []  # Folder doesn't exist
+        if resp.status_code != 200:
+            logger.warning("Failed to list %s: HTTP %s", folder_path, resp.status_code)
+            return []
+
+        items = resp.json().get("value", [])
+        for item in items:
+            if "file" in item:
+                files.append({
+                    "file_name": item["name"],
+                    "s9_folder": folder_path,
+                    "size": item.get("size", 0),
+                    "created": item.get("createdDateTime", ""),
+                    "modified": item.get("lastModifiedDateTime", ""),
+                    "web_url": item.get("webUrl", ""),
+                })
+            elif "folder" in item and recurse:
+                sub_path = f"{folder_path}/{item['name']}"
+                sub_files = await _list_folder_files(drive_id, sub_path, max_files, recurse=True)
+                files.extend(sub_files)
+
+            if len(files) >= max_files:
+                break
+
+    return files[:max_files]
+
+
+def _generate_demo_files(folder_names, max_per_folder):
+    """Generate realistic demo file listings for DEMO_MODE preview testing."""
+    from services.folder_routing_service import FOLDER_STRUCTURE
+    demo_vendors = {
+        "Dropship International Documents": [
+            ("112148_Fevisa_ML179859_031192026.pdf", "FEVISA INDUSTRIAL S.A. DE C.V."),
+            ("112201_Vitrocrisa_ML180021_031192026.pdf", "VITROCRISA S.A. DE C.V."),
+            ("112305_Envases_PO44821_031192026.pdf", "ENVASES UNIVERSALES DE MEXICO"),
+        ],
+        "Dropship Not International Documents": [
+            ("112089_Ball_PO88432_031192026.pdf", "BALL CORPORATION"),
+            ("112095_Anchor_PO88501_031192026.pdf", "ANCHOR GLASS CONTAINER"),
+            ("112102_OI_PO88612_031192026.pdf", "OWENS-ILLINOIS INC"),
+        ],
+        "Freight Issues": [
+            ("FRT_XPO_BOL8834521_031192026.pdf", "XPO LOGISTICS"),
+            ("FRT_SAIA_BOL7721034_031192026.pdf", "SAIA INC"),
+        ],
+        "Warehouse International Documents": [
+            ("WH_112411_Fevisa_ML180102_031192026.pdf", "FEVISA INDUSTRIAL S.A. DE C.V."),
+        ],
+        "Warehouse Not International Documents": [
+            ("WH_112320_Ball_PO88701_031192026.pdf", "BALL CORPORATION"),
+            ("WH_112321_GTs_PO88702_031192026.pdf", "GT'S LIVING FOODS"),
+        ],
+        "Vendor Credit Memos": [
+            ("CM_Ball_Dunnage_112501_031192026.pdf", "BALL CORPORATION"),
+        ],
+        "Tooling Invoices": [
+            ("TOOL_112601_Ball_Mold_031192026.pdf", "BALL CORPORATION"),
+        ],
+        "S&H Invoices Approved Documents": [
+            ("SH_112701_Warehouse_031192026.pdf", "GAMER PACKAGING WAREHOUSE"),
+        ],
+    }
+
+    folders_to_scan = folder_names or list(FOLDER_STRUCTURE.values())
+    if not folder_names:
+        folders_to_scan = [v["path"] for v in FOLDER_STRUCTURE.values()]
+
+    files = []
+    for folder_path in folders_to_scan:
+        vendor_files = demo_vendors.get(folder_path, [])
+        for fname, vendor in vendor_files[:max_per_folder]:
+            files.append({
+                "file_name": fname,
+                "s9_folder": folder_path,
+                "size": 245000,
+                "created": "2026-03-19T10:30:00Z",
+                "modified": "2026-03-19T10:30:00Z",
+                "web_url": f"https://gamerpackaging.sharepoint.com/sites/GPI-DocumentHub-Test/Shared Documents/{folder_path}/{fname}",
+                "demo_vendor": vendor,
+            })
+    return files
+
+
+@router.post("/runs/{run_id}/scan-sharepoint")
+async def scan_sharepoint_folders(run_id: str, req: ScanSharePointReq):
+    """
+    Scan Square 9 output folders on SharePoint and auto-create benchmark entries.
+
+    For each file found:
+    1. The S9 folder path IS the S9 classification
+    2. Match against hub_documents for GPI Hub extraction data
+    3. Run GPI routing logic to determine where GPI Hub would file it
+    4. Create a benchmark document entry with both sides pre-filled
+    """
+    db = get_db()
+    run = await db[RUNS_COLL].find_one({"run_id": run_id})
+    if not run:
+        raise HTTPException(404, "Run not found")
+
+    from services.folder_routing_service import FOLDER_STRUCTURE, determine_folder_path
+
+    # Determine which folders to scan
+    if req.folder_names:
+        folders_to_scan = req.folder_names
+    else:
+        folders_to_scan = [v["path"] for v in FOLDER_STRUCTURE.values()]
+
+    # Prepend S9 root if provided
+    if req.s9_root_folder:
+        folders_to_scan = [f"{req.s9_root_folder}/{f}" for f in folders_to_scan]
+
+    # Resolve SharePoint drive
+    drive_id, err = await _resolve_sp_drive()
+
+    all_files = []
+    is_demo = err == "DEMO_MODE"
+
+    if is_demo:
+        # In DEMO_MODE, generate realistic test data
+        raw_folders = req.folder_names or [v["path"] for v in FOLDER_STRUCTURE.values()]
+        all_files = _generate_demo_files(raw_folders, req.max_files_per_folder)
+        logger.info("[Benchmark SP Scan] DEMO_MODE: generated %d mock files", len(all_files))
+    elif err:
+        raise HTTPException(502, f"SharePoint connection failed: {err}")
+    else:
+        # Live SharePoint scan
+        for folder_path in folders_to_scan:
+            files = await _list_folder_files(
+                drive_id, folder_path,
+                max_files=req.max_files_per_folder,
+                recurse=req.include_subfolders,
+            )
+            all_files.extend(files)
+            logger.info("[Benchmark SP Scan] %s: %d files", folder_path, len(files))
+
+    if not all_files:
+        return {"scanned_folders": len(folders_to_scan), "files_found": 0, "documents_created": 0,
+                "message": "No files found in scanned folders"}
+
+    # Deduplicate by filename (same file may appear in subfolders)
+    seen = set()
+    unique_files = []
+    for f in all_files:
+        if f["file_name"] not in seen:
+            seen.add(f["file_name"])
+            unique_files.append(f)
+
+    # Create benchmark document entries
+    created = 0
+    matched_gpi = 0
+    routed_gpi = 0
+
+    for file_info in unique_files:
+        fname = file_info["file_name"]
+        s9_folder = file_info["s9_folder"]
+
+        # Check if doc already exists in this run
+        existing = await db[DOCS_COLL].find_one({"run_id": run_id, "file_name": fname})
+        if existing:
+            continue
+
+        # Build base document
+        doc_data = {
+            "file_name": fname,
+            "source_path": file_info.get("web_url", s9_folder),
+            "received_date": (file_info.get("created") or "")[:10],
+            "folder_truth": "",  # User fills this in (ground truth)
+        }
+
+        # Use demo_vendor hint if available
+        demo_vendor = file_info.get("demo_vendor", "")
+
+        doc = _make_doc(run_id, doc_data)
+
+        # S9 fields — the folder IS the classification
+        doc["s9_ingested"] = True
+        doc["s9_folder_output"] = s9_folder
+
+        # Try to match against hub_documents for GPI data
+        hub_doc = None
+        if req.auto_match_gpi:
+            hub_doc = await db.hub_documents.find_one(
+                {"file_name": {"$regex": re.escape(fname), "$options": "i"}},
+                {"_id": 0}
+            )
+
+        if hub_doc:
+            ef = hub_doc.get("extracted_fields") or {}
+            nf = hub_doc.get("normalized_fields") or {}
+            doc["gpi_ingested"] = True
+            doc["gpi_auto_linked"] = True
+            doc["gpi_source_document_id"] = hub_doc.get("id") or hub_doc.get("document_id", "")
+            doc["gpi_doc_type"] = hub_doc.get("document_type") or hub_doc.get("doc_type") or ""
+            doc["gpi_vendor"] = (hub_doc.get("vendor_name") or hub_doc.get("vendor_no")
+                                 or nf.get("vendor") or ef.get("vendor") or "")
+            doc["gpi_po"] = (hub_doc.get("po_number") or nf.get("po_number") or ef.get("po_number") or "")
+
+            gpi_amount = None
+            for amt_src in [nf.get("amount"), ef.get("amount"),
+                            hub_doc.get("total_amount"), hub_doc.get("invoice_amount")]:
+                if amt_src is not None:
+                    try:
+                        gpi_amount = float(str(amt_src).replace(",", ""))
+                        break
+                    except (ValueError, TypeError):
+                        continue
+            doc["gpi_amount"] = gpi_amount
+
+            # Run GPI routing logic
+            if req.auto_route_gpi:
+                is_intl = hub_doc.get("is_international", False)
+                try:
+                    folder_path, reason, details = determine_folder_path(hub_doc, is_international=is_intl)
+                    doc["gpi_folder_output"] = folder_path
+                    doc["gpi_notes"] = f"Auto-routed: {reason}"
+                    routed_gpi += 1
+                except Exception as e:
+                    doc["gpi_notes"] = f"Routing error: {str(e)}"
+
+            matched_gpi += 1
+        elif demo_vendor and is_demo:
+            # In DEMO_MODE, simulate GPI extraction from filename patterns
+            doc["gpi_ingested"] = True
+            doc["gpi_vendor"] = demo_vendor
+
+            # Parse PO from filename pattern (e.g., _PO88432_ or _ML179859_)
+            po_match = re.search(r'[_]((?:PO|ML|SO)\d+)[_]', fname, re.IGNORECASE)
+            if po_match:
+                doc["gpi_po"] = po_match.group(1)
+
+            # Infer doc type from filename
+            if fname.startswith("CM_"):
+                doc["gpi_doc_type"] = "Credit_Memo"
+            elif fname.startswith("FRT_"):
+                doc["gpi_doc_type"] = "Freight_Document"
+            elif fname.startswith("SH_"):
+                doc["gpi_doc_type"] = "S&H_Invoice"
+            elif fname.startswith("TOOL_"):
+                doc["gpi_doc_type"] = "Tooling_Invoice"
+            elif fname.startswith("WH_"):
+                doc["gpi_doc_type"] = "AP_Invoice"
+            else:
+                doc["gpi_doc_type"] = "AP_Invoice"
+
+            doc["vendor_truth"] = demo_vendor
+            doc["doc_type_truth"] = doc["gpi_doc_type"]
+
+            # Run routing logic with simulated data
+            if req.auto_route_gpi:
+                sim_doc = {
+                    "file_name": fname,
+                    "document_type": doc["gpi_doc_type"],
+                    "vendor_canonical": demo_vendor,
+                    "extracted_fields": {"vendor": demo_vendor, "po_number": doc.get("gpi_po", "")},
+                    "normalized_fields": {"vendor": demo_vendor, "po_number": doc.get("gpi_po", "")},
+                    "po_number_extracted": doc.get("gpi_po", ""),
+                }
+                is_intl = "S.A. DE C.V." in demo_vendor.upper() or (
+                    "international" in s9_folder.lower() and "not international" not in s9_folder.lower()
+                )
+                try:
+                    folder_path, reason, details = determine_folder_path(sim_doc, is_international=is_intl)
+                    doc["gpi_folder_output"] = folder_path
+                    doc["gpi_notes"] = f"Demo auto-routed: {reason}"
+                    routed_gpi += 1
+                except Exception as e:
+                    doc["gpi_notes"] = f"Routing error: {str(e)}"
+
+            matched_gpi += 1
+
+        await db[DOCS_COLL].insert_one(doc)
+        doc.pop("_id", None)
+        created += 1
+
+    # Auto-score all new docs
+    all_docs = await db[DOCS_COLL].find({"run_id": run_id}).to_list(2000)
+    for d in all_docs:
+        d.pop("_id", None)
+        scores = auto_score_correctness(d)
+        if scores:
+            await db[DOCS_COLL].update_one(
+                {"run_id": run_id, "doc_uid": d["doc_uid"]},
+                {"$set": scores}
+            )
+
+    # Update run status
+    now = datetime.now(timezone.utc).isoformat()
+    await db[RUNS_COLL].update_one(
+        {"run_id": run_id},
+        {"$set": {"status": "in_progress", "updated_at": now}}
+    )
+
+    return {
+        "scanned_folders": len(folders_to_scan),
+        "files_found": len(unique_files),
+        "documents_created": created,
+        "gpi_matched": matched_gpi,
+        "gpi_routed": routed_gpi,
+        "demo_mode": is_demo,
+        "message": f"Scanned {len(folders_to_scan)} folders, found {len(unique_files)} files, created {created} benchmark entries"
+            + (f" (DEMO_MODE: using simulated data)" if is_demo else ""),
+    }

@@ -1174,13 +1174,32 @@ async def get_auto_post_readiness(run_id: str):
         if not in_sp:
             blockers.append("not_in_sharepoint")
 
-        # 7. Confidence
-        confidence = 0
+        # 7. Confidence — BLENDED with stable vendor score (the feedback loop)
+        raw_confidence = 0
+        stable_score = 0
+        stable_flag = False
         if hub_doc:
-            confidence = (hub_doc.get("ai_extraction") or {}).get("confidence", 0) or hub_doc.get("classification_confidence", 0)
-        criteria["confidence_ok"] = confidence >= 0.85
-        if confidence < 0.85 and hub_doc:
-            blockers.append("low_confidence")
+            raw_confidence = (hub_doc.get("ai_extraction") or {}).get("confidence", 0) or hub_doc.get("classification_confidence", 0)
+            stable_score = hub_doc.get("stable_vendor_score", 0) or 0
+            stable_flag = hub_doc.get("stable_vendor_flag", False)
+
+        # THE FEEDBACK LOOP: stable vendor flag = earned trust
+        if stable_flag and stable_score >= 0.85:
+            effective_confidence = max(raw_confidence, stable_score)
+        elif stable_score > 0:
+            effective_confidence = (raw_confidence * 0.4) + (stable_score * 0.6)
+        else:
+            effective_confidence = raw_confidence
+
+        threshold = 0.90
+        criteria["confidence_ok"] = effective_confidence >= threshold
+        if effective_confidence < threshold and hub_doc:
+            if stable_flag:
+                blockers.append(f"low_confidence (stable vendor but score={stable_score:.2f})")
+            elif stable_score > 0:
+                blockers.append(f"low_confidence (building history: raw={raw_confidence:.2f} stable={stable_score:.2f})")
+            else:
+                blockers.append("low_confidence (no vendor history)")
 
         # Overall readiness
         is_ready = all(criteria.values())

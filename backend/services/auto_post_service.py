@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 # Configuration
 AUTO_POST_ENABLED = os.environ.get("AUTO_POST_ENABLED", "true").lower() in ("true", "1", "yes")
 AUTO_POST_CONFIDENCE_THRESHOLD = float(os.environ.get("AUTO_POST_CONFIDENCE_THRESHOLD", "0.90"))
+# Stable vendor boost: weight given to vendor track record vs raw AI confidence
+# effective_confidence = (raw * RAW_WEIGHT) + (stable_score * STABLE_WEIGHT)
+CONFIDENCE_RAW_WEIGHT = 0.4
+CONFIDENCE_STABLE_WEIGHT = 0.6
 
 
 class AutoPostResult:
@@ -65,6 +69,13 @@ def check_auto_post_eligibility(doc: Dict[str, Any]) -> tuple[bool, str]:
     """
     Check if a document is eligible for auto-posting.
     
+    Confidence is calculated as a BLEND of:
+    - Raw AI extraction confidence (40% weight)
+    - Stable vendor score from historical accuracy (60% weight)
+    
+    This IS the feedback loop: the more a vendor's docs are extracted correctly,
+    the higher the stable vendor score, the more the system trusts the AI.
+    
     Returns:
         (eligible: bool, reason: str)
     """
@@ -76,11 +87,36 @@ def check_auto_post_eligibility(doc: Dict[str, Any]) -> tuple[bool, str]:
     if doc_type not in ("AP_INVOICE", "AP_Invoice"):
         return False, f"Not an AP invoice (doc_type={doc_type})"
     
-    # Check AI extraction confidence
+    # Check AI extraction confidence — BLENDED with stable vendor score
     ai_extraction = doc.get("ai_extraction", {})
-    confidence = ai_extraction.get("confidence", 0) or doc.get("classification_confidence", 0)
-    if confidence < AUTO_POST_CONFIDENCE_THRESHOLD:
-        return False, f"Confidence too low ({confidence:.2f} < {AUTO_POST_CONFIDENCE_THRESHOLD})"
+    raw_confidence = ai_extraction.get("confidence", 0) or doc.get("classification_confidence", 0)
+    
+    # Get stable vendor score (the feedback loop)
+    stable_score = doc.get("stable_vendor_score", 0) or 0
+    stable_flag = doc.get("stable_vendor_flag", False)
+    
+    # THE FEEDBACK LOOP:
+    # If a vendor is flagged as stable (earned through consistent correct extractions),
+    # the system trusts it. The stable flag IS the earned confidence.
+    if stable_flag and stable_score >= 0.85:
+        # Stable vendor with good track record — trust it
+        effective_confidence = max(raw_confidence, stable_score)
+    elif stable_score > 0:
+        # Has some history but not yet stable — blend
+        effective_confidence = (raw_confidence * CONFIDENCE_RAW_WEIGHT) + (stable_score * CONFIDENCE_STABLE_WEIGHT)
+    else:
+        # No vendor history yet — use raw confidence only
+        effective_confidence = raw_confidence
+    
+    if effective_confidence < AUTO_POST_CONFIDENCE_THRESHOLD:
+        detail = f"Effective confidence {effective_confidence:.2f} < {AUTO_POST_CONFIDENCE_THRESHOLD}"
+        if stable_flag:
+            detail += f" (stable vendor, score={stable_score:.2f}, raw={raw_confidence:.2f})"
+        elif stable_score > 0:
+            detail += f" (building history, raw={raw_confidence:.2f}, stable={stable_score:.2f})"
+        else:
+            detail += f" (raw={raw_confidence:.2f}, no vendor history yet)"
+        return False, detail
     
     # Check required fields extracted
     invoice_number = (

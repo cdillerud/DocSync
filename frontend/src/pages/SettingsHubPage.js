@@ -6,6 +6,7 @@ import AutomationRulesPage from './AutomationRulesPage';
 import ItemMappingsPage from './ItemMappingsPage';
 import VendorIntelligencePage from './VendorIntelligencePage';
 import StableVendorsPage from './StableVendorsPage';
+import FeedbackLoopHealthPage from './FeedbackLoopHealthPage';
 
 const TABS = [
   { key: 'general', label: 'General' },
@@ -14,6 +15,7 @@ const TABS = [
   { key: 'item-mappings', label: 'Item Mappings' },
   { key: 'vendors', label: 'Vendor Intelligence' },
   { key: 'stable-vendors', label: 'Stable Vendors' },
+  { key: 'feedback-loop', label: 'Feedback Loop' },
 ];
 
 export default function SettingsHubPage() {
@@ -46,6 +48,7 @@ export default function SettingsHubPage() {
       {activeTab === 'item-mappings' && <ItemMappingsPage />}
       {activeTab === 'vendors' && <VendorIntelligencePage />}
       {activeTab === 'stable-vendors' && <StableVendorsPage />}
+      {activeTab === 'feedback-loop' && <FeedbackLoopHealthPage />}
     </div>
   );
 }

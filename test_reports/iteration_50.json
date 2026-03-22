@@ -44,7 +44,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://extraction-hardening.preview.emergentagent.com"
+    "api_url": "https://ai-learning-metrics.preview.emergentagent.com"
   },
   "seed_data_creation": "Catalog already synced: 1000 BC items (glass bottles, jars, etc) and 169 GL accounts from Production. Known items: 10004785, 12001210. 20 item mapping rules configured pointing to FREIGHT.",
   "retest_needed": false,

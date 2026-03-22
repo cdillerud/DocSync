@@ -58,7 +58,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://extraction-hardening.preview.emergentagent.com"
+    "api_url": "https://ai-learning-metrics.preview.emergentagent.com"
   },
   "seed_data_used": "Each test creates unique workspace with UUID prefix (TEST_RECONCILE_*, TEST_REGRESSION_*). Items seeded with opening_balance movements, then order_commitment movements created. Workspace deactivated on teardown.",
   "retest_needed": false,

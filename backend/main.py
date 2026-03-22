@@ -86,6 +86,7 @@ from routers.sharepoint_routing import router as sharepoint_routing_router
 from routers.po_resolution import router as po_resolution_router
 from routers.bakeoff import router as bakeoff_router
 from routers.feedback_health import router as feedback_health_router
+from routers.reprocess_comparison import router as reprocess_comparison_router
 
 # ==================== APP ====================
 app = FastAPI(title="GPI Document Hub API")
@@ -153,6 +154,7 @@ app.include_router(sharepoint_routing_router, prefix="/api")
 app.include_router(po_resolution_router, prefix="/api")
 app.include_router(bakeoff_router, prefix="/api")
 app.include_router(feedback_health_router, prefix="/api")
+app.include_router(reprocess_comparison_router, prefix="/api")
 
 # ==================== SALES MODULE ====================
 app.include_router(sales_router)

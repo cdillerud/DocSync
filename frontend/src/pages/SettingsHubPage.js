@@ -7,6 +7,7 @@ import ItemMappingsPage from './ItemMappingsPage';
 import VendorIntelligencePage from './VendorIntelligencePage';
 import StableVendorsPage from './StableVendorsPage';
 import FeedbackLoopHealthPage from './FeedbackLoopHealthPage';
+import ReprocessComparisonPage from './ReprocessComparisonPage';
 
 const TABS = [
   { key: 'general', label: 'General' },
@@ -16,6 +17,7 @@ const TABS = [
   { key: 'vendors', label: 'Vendor Intelligence' },
   { key: 'stable-vendors', label: 'Stable Vendors' },
   { key: 'feedback-loop', label: 'Feedback Loop' },
+  { key: 'reprocess', label: 'Before/After' },
 ];
 
 export default function SettingsHubPage() {
@@ -49,6 +51,7 @@ export default function SettingsHubPage() {
       {activeTab === 'vendors' && <VendorIntelligencePage />}
       {activeTab === 'stable-vendors' && <StableVendorsPage />}
       {activeTab === 'feedback-loop' && <FeedbackLoopHealthPage />}
+      {activeTab === 'reprocess' && <ReprocessComparisonPage />}
     </div>
   );
 }

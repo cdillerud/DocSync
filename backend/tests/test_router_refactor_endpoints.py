@@ -21,7 +21,7 @@ import pytest
 import requests
 import os
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://ai-learning-metrics.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://po-extraction-ai.preview.emergentagent.com').rstrip('/')
 
 
 class TestHealthCheck:

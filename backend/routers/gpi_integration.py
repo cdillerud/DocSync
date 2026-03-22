@@ -1083,10 +1083,21 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
         try:
             await db.hub_documents.update_one(
                 {"id": doc_id},
-                {"$set": {"ds_po_pending": True, "so_subtype": "DS_Sales_Order"}},
+                {"$set": {
+                    "ds_po_pending": True,
+                    "so_subtype": "DS_Sales_Order",
+                    "bc_record_id": bc_system_id,
+                    "bc_record_no": bc_record_no,
+                }},
             )
         except Exception:
             pass
+        # Fire DS PO auto-creation as a background task
+        try:
+            import asyncio
+            asyncio.create_task(_ds_po_auto_create_background(db, doc_id, bc_record_no))
+        except Exception as ds_bg_err:
+            logger.warning("DS PO background task spawn failed for SO %s: %s", bc_record_no, ds_bg_err)
 
     # ── Warehouse SO Booked Notifications ──
     notification_results = None
@@ -1127,6 +1138,23 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
         "inventory_commitments": commitment_result,
         "notification_results": notification_results,
     }
+
+
+async def _ds_po_auto_create_background(db, doc_id: str, bc_so_no: str):
+    """Background task: wait briefly for BC to process the SO release, then auto-create the DS PO."""
+    import asyncio
+    # Small delay to allow BC to process the SO approval/release
+    await asyncio.sleep(2)
+    try:
+        result = await ds_po_auto_create(doc_id)
+        if result.get("success"):
+            logger.info("[DS-PO-BG] Auto-created PO %s for SO %s (doc %s)",
+                        result.get("ds_po_id"), bc_so_no, doc_id[:8])
+        else:
+            logger.info("[DS-PO-BG] PO not created for SO %s: %s",
+                        bc_so_no, result.get("reason", result.get("status", "unknown")))
+    except Exception as e:
+        logger.warning("[DS-PO-BG] Auto-create failed for SO %s: %s", bc_so_no, str(e))
 
 
 async def _auto_approve_dropship_so(db, doc_id: str, bc_record_no: str, so_type: str) -> bool:
@@ -1194,6 +1222,156 @@ async def _auto_approve_dropship_so(db, doc_id: str, bc_record_no: str, so_type:
 
     logger.info("[DS-AutoApprove] Could not auto-approve SO %s (doc %s) — current status: %s", bc_record_no, doc_id, current_status)
     return False
+
+
+@router.post("/ds-purchase-orders/auto-create/{doc_id}")
+async def ds_po_auto_create(doc_id: str):
+    """Auto-create a Drop-Ship Purchase Order from a DS_Sales_Order document.
+
+    Requires: doc_type=DS_Sales_Order, ds_po_pending=True, BC SO status=Released.
+    Idempotent: if ds_po_created is already True, returns existing PO info.
+    """
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    doc_type = doc.get("suggested_job_type") or doc.get("document_type") or ""
+    if doc_type != "DS_Sales_Order":
+        raise HTTPException(status_code=400, detail=f"Not a DS_Sales_Order (type={doc_type})")
+
+    # Idempotency check
+    if doc.get("ds_po_created"):
+        return {
+            "success": True,
+            "status": "already_created",
+            "ds_po_id": doc.get("ds_po_id", ""),
+            "doc_id": doc_id,
+        }
+
+    if not doc.get("ds_po_pending"):
+        raise HTTPException(status_code=400, detail="ds_po_pending is not True — SO not yet created in BC")
+
+    # Verify BC SO status is Released
+    bc_so_id = doc.get("bc_record_id") or doc.get("bc_system_id") or ""
+    bc_so_no = doc.get("bc_record_no") or ""
+    if not bc_so_id and not bc_so_no:
+        raise HTTPException(status_code=400, detail="No BC SO record linked to this document")
+
+    so_status = "unknown"
+    if HAS_CREDENTIALS:
+        try:
+            from services.gpi_integration_service import _api_request
+            if bc_so_id:
+                so_data = await _api_request("GET", f"salesOrders({bc_so_id})")
+            else:
+                so_data = await _api_request("GET", "salesOrders", params={"$filter": f"number eq '{bc_so_no}'"})
+                if isinstance(so_data, dict) and "value" in so_data:
+                    so_data = so_data["value"][0] if so_data["value"] else {}
+            so_status = (so_data.get("status") or so_data.get("resultStatus") or "").lower()
+        except Exception as e:
+            logger.warning("[DS-PO] Failed to verify SO status for %s: %s", doc_id, e)
+            # In demo mode, allow proceeding
+            if os.environ.get("DEMO_MODE", "").lower() == "true":
+                so_status = "released"
+            else:
+                raise HTTPException(status_code=502, detail=f"Cannot verify SO status: {e}")
+    else:
+        # No BC credentials — check demo mode
+        if os.environ.get("DEMO_MODE", "").lower() == "true":
+            so_status = "released"
+        else:
+            raise HTTPException(status_code=503, detail="BC credentials not configured")
+
+    if so_status != "released":
+        return {
+            "success": False,
+            "reason": "so_not_released",
+            "so_status": so_status,
+            "doc_id": doc_id,
+        }
+
+    # Resolve vendor number
+    vendor_no = doc.get("vendor_no") or doc.get("vendor_canonical") or ""
+    if not vendor_no:
+        ef = doc.get("extracted_fields") or {}
+        vendor_no = ef.get("vendor_no") or ef.get("vendor") or ""
+    if not vendor_no:
+        raise HTTPException(status_code=400, detail="No vendor resolved for DS PO creation")
+
+    # Resolve external doc number (SO number or customer PO)
+    ef = doc.get("extracted_fields") or {}
+    ext_doc_no = bc_so_no or ef.get("po_number") or ef.get("external_document_number") or ""
+
+    # Create the PO in BC
+    now = datetime.now(timezone.utc).isoformat()
+    if HAS_CREDENTIALS:
+        try:
+            from services.gpi_integration_service import create_purchase_order
+            po_result = await create_purchase_order(
+                vendor_no=vendor_no,
+                external_doc_no=ext_doc_no,
+                source_doc_id=doc_id,
+            )
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"BC PO creation failed: {e}")
+    else:
+        # Demo mode — simulate
+        import uuid as _uuid
+        po_result = {
+            "success": True,
+            "bc_record_no": f"PO-DEMO-{_uuid.uuid4().hex[:6]}",
+            "bc_system_id": f"demo-{_uuid.uuid4().hex[:8]}",
+            "status": "created",
+        }
+
+    if not po_result.get("success"):
+        return {
+            "success": False,
+            "reason": "bc_creation_failed",
+            "error_message": po_result.get("error_message", "Unknown"),
+            "doc_id": doc_id,
+        }
+
+    # Update document
+    ds_po_id = po_result.get("bc_record_no") or po_result.get("bc_system_id") or ""
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "ds_po_created": True,
+            "ds_po_id": ds_po_id,
+            "ds_po_bc_system_id": po_result.get("bc_system_id", ""),
+            "ds_po_pending": False,
+            "ds_po_created_at": now,
+            "ds_po_vendor_no": vendor_no,
+        }},
+    )
+
+    # Create activity record
+    await db.document_activities.insert_one({
+        "document_id": doc_id,
+        "activity_type": "ds_po_created",
+        "details": {
+            "po_number": ds_po_id,
+            "vendor_no": vendor_no,
+            "so_number": bc_so_no,
+            "external_doc_no": ext_doc_no,
+        },
+        "created_at": now,
+        "actor": "ds_auto_create",
+    })
+
+    logger.info("[DS-PO] Created PO %s for DS SO doc=%s vendor=%s", ds_po_id, doc_id[:8], vendor_no)
+
+    return {
+        "success": True,
+        "status": "created",
+        "ds_po_id": ds_po_id,
+        "ds_po_bc_system_id": po_result.get("bc_system_id", ""),
+        "vendor_no": vendor_no,
+        "so_number": bc_so_no,
+        "doc_id": doc_id,
+    }
 
 
 def _sanitize_lines(lines: list) -> list:

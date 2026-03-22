@@ -63,7 +63,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://ai-learning-metrics.preview.emergentagent.com"
+    "api_url": "https://po-extraction-ai.preview.emergentagent.com"
   },
   "seed_data_used": {
     "existing_so": "SO-TEST-DROP-001 (drop-ship SO with documents linked)",

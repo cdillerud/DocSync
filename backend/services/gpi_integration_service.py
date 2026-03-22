@@ -204,6 +204,48 @@ async def create_sales_order(
     }
 
 
+
+async def create_purchase_order(
+    vendor_no: str,
+    external_doc_no: str = "",
+    order_date: str = "",
+    source_doc_id: str = "",
+    idempotency_key: str = "",
+    transaction_id: str = "",
+) -> Dict[str, Any]:
+    """Create a Purchase Order in BC WRITE environment.
+
+    Used for Drop-Ship PO auto-creation — mirrors create_sales_order()
+    but posts to purchaseOrderRequests with vendorNumber.
+    """
+    _check_write_protection("create_purchase_order")
+    if not idempotency_key:
+        idempotency_key = _generate_idempotency_key("PO", source_doc_id)
+    if not transaction_id:
+        transaction_id = f"TXN_{uuid.uuid4().hex[:12]}"
+
+    payload = {
+        "idempotencyKey": idempotency_key,
+        "sourceSystem": SOURCE_SYSTEM,
+        "sourceDocumentId": source_doc_id or "",
+        "transactionId": transaction_id,
+        "vendorNo": vendor_no,
+        "externalDocumentNo": external_doc_no or "",
+        "orderDate": order_date or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+    }
+
+    result = await _api_request("POST", "purchaseOrderRequests", payload, environment=BC_WRITE_ENVIRONMENT)
+    return {
+        "success": result.get("resultSuccess", False),
+        "bc_record_no": result.get("resultRecordNo", ""),
+        "bc_system_id": result.get("resultSystemId", ""),
+        "status": result.get("resultStatus", ""),
+        "error_message": result.get("errorMessage", ""),
+        "idempotency_key": idempotency_key,
+        "transaction_id": transaction_id,
+    }
+
+
 async def _get_company_id_standard_api() -> str:
     """Get the BC company ID using the standard API (for line creation)."""
     token = await _get_token()

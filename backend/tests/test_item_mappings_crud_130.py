@@ -11,7 +11,7 @@ import uuid
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 if not BASE_URL:
-    BASE_URL = "https://ai-learning-metrics.preview.emergentagent.com"
+    BASE_URL = "https://po-extraction-ai.preview.emergentagent.com"
 
 
 class TestItemMappingsAPI:

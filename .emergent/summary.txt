@@ -1,175 +1,168 @@
 <analysis>**original_problem_statement**: 
 The overarching goal is a complete hardening pass of the document intelligence platform (GPI Hub) to automate document-to-ERP completions, decouple legacy systems, and improve automated multi-source PO extraction. 
 PRODUCT REQUIREMENTS: 
-- Route Drop-Ship vs. Warehouse Sales Orders into BC automatically based on extracted .
-- Automate warehouse receiving notifications when WH SO is booked.
-- Wire BC Sales Order shipment events directly into the Inventory Ledger as outbound movements.
-- Sync customers and salespeople from BC to auto-assign reps to SO creation flows.
-- Refactor the monolithic  file by extracting domain orchestration functions.
-- Consolidate the overly complex frontend structure from 38 pages to 8, utilizing a robust Unified Queue Page.
+- Create an Intake Benchmark internal workspace to compare GPI Hub extraction vs Square 9 side-by-side using the same documents.
+- Implement app versioning and UI consolidation.
+- Ensure the AI classification engine utilizes a true Feedback Loop, where user interactions and corrections feed back into the prompt to dynamically improve future AI extraction.
+- Create automated processing pipelines for Sales Orders (differentiating Drop-Ship vs Warehouse) and Freight G/L routing.
+- Decommission Square9 data paths.
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
 **what currently exists?** 
-A FastAPI/React application with a robust document classification and workflow pipeline. Recent work has significantly extended BC integrations (syncing shipments, catalogs, and salespeople to local MongoDB caches), automated warehouse email notifications via MS Graph/Mock services, and extracted large portions of  into dedicated domain services (e.g., SharePoint, BC Links). The backend is currently healthy and modularized.
+A FastAPI/React document intelligence platform heavily integrated with Business Central and SharePoint. It features Intake Benchmarking, robust Vendor Inference, a true AI Feedback Loop (injecting user corrections directly into the  context), Vendor Extraction Profiles to guide LLM extraction, A/B pipeline reprocess comparison tools, bulk UI actions, intelligent PO caching/resolution, Freight G/L validation, and automatic Sales Order subtype classification (Drop-Ship vs Warehouse).
 
 **Last working item**: 
-    - Last item agent was working: **[P4-C] Frontend consolidation — reduce 38 pages to 8 with unified QueuePage**. The agent had successfully completed backend orchestration refactoring and received the prompt for P4-C. It spent the rest of its context window analyzing the existing frontend routing (), , and mapping out how to merge  and Vendor pages. It was just about to execute the file modifications before context limits.
+    - Last item agent was working: Implementing Square9 archive/restore endpoints and Drop-Ship (DS) PO auto-creation. The agent successfully added the  and  endpoints, added  to , and was in the middle of inserting the  endpoint into .
     - Status: IN PROGRESS
     - Agent Testing Done: N
-    - Which testing method agent to use? frontend testing agent / screenshot tool (Frontend UI changes)
+    - Which testing method agent to use? backend testing agent (needs to run pytest on new tests the agent must write, and test idempotency).
     - User Testing Done: N
 
 **All Pending/In progress Issue list**: 
-  Issue 1: P0 - Complete [P4-C] Frontend Consolidation (Highest Priority)
-  Issue 2: P1 - Investigate remaining  failures from the 500-doc batch run
-  
-  Issues Detail:
-  - Issue 1: 
-     - Attempted fixes: Agent analyzed , ,  and vendor pages, establishing a plan, but did not write the code yet. 
-     - Next debug checklist: 
-         - Modify  to add a date range picker and specific workflow view tabs (absorbing AP/Sales/Ops dedicated pages).
-         - Move  and  content into  as tabs.
-         - Merge  stats into .
-         - Update  routes to remove obsolete pages (Pilot/Simulation dashboards) and clean up navigation in .
-     - Why fix this issue and what will be achieved with the fix? Meets user requirement to drastically reduce frontend complexity and bloat down to 8 primary pages.
-     - Status: IN PROGRESS
-     - Is recurring issue? N
-     - Should Test frontend/backend/both after fix? frontend
-     - Blocked on other issue: None
-  - Issue 2: 
+  Issue 1: 19 Pre-existing integration tests fail due to missing environment variables.
      - Attempted fixes: None in this session.
-     - Next debug checklist: Check system logs or test batch for why  occurs even with catalog sync in place.
-     - Why fix this issue and what will be achieved with the fix? Improves auto-link rate and system reliability for PO lines.
+     - Next debug checklist: Check test runner environment variable mocking for .
+     - Why fix this issue and what will be achieved with the fix? Clean full test suite runs for CI/CD confidence.
+     - Status: BLOCKED (Low priority compared to feature work)
+     - Is recurring issue? Y
+     - Should Test frontend/backend/both after fix? backend
+     - Blocked on other issue: None
+
+  Issue 2: Investigate remaining  failures from the batch run.
+     - Attempted fixes: Partially resolved via the PO Resolution Cache trust bypass, but total failure rate needs review on production batch sizes.
+     - Next debug checklist: Analyze production logs for lingering  reasons.
+     - Why fix this issue and what will be achieved with the fix? Maximize auto-posting eligibility.
      - Status: NOT STARTED
      - Is recurring issue? N
      - Should Test frontend/backend/both after fix? backend
      - Blocked on other issue: None
 
 **In progress Task List**: 
-  Task 1: [P4-C] Frontend page consolidation
-  Task 2: STEP 2: Wire rep assignment into SO creation flow and add API endpoints
-  Task 3: Continue  extraction pass 3
-
- Task Detail:
-  - Task 1: 
-     - Where to resume:  and  routing.
-     - What will be achieved with this? Simplified UI and UX.
+  Task 1: Square9 Archive & DS PO Auto-Creation (Part B Wiring)
+     - Where to resume: 
+       1. Finish adding the  endpoint in .
+       2. Wire the trigger into : when a  document transitions to  released or approved, call the auto-create endpoint as a background task.
+       3. Write unit tests (DS PO creation with mock SO status=Released; Idempotency check).
+     - What will be achieved with this? Drop Ship Purchase Orders will automatically be created and approved in BC when their corresponding Sales Order is released, eliminating manual entry.
      - Status: IN PROGRESS
-     - Should Test frontend/backend/both after fix? frontend
-     - Blocked on something: None
-  - Task 2: 
-     - Where to resume:  (or related SO creation handlers) utilizing the newly built .
-     - What will be achieved with this? End-to-end rep assignment on SO documents based on BC salesperson records.
-     - Status: NOT STARTED
-     - Should Test frontend/backend/both after fix? backend
-     - Blocked on something: None
-  - Task 3: 
-     - Where to resume: Extract  and email polling from .
-     - What will be achieved with this? Further reduction of technical debt.
-     - Status: NOT STARTED
-     - Should Test frontend/backend/both after fix? backend
+     - Should Test frontend/backend/both after fix? backend (via pytest)
      - Blocked on something: None
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - P1: Wire rep assignment into SO creation flow (Step 2).
-    - P1: Investigate remaining  failures.
-    - P1: Continue  reduction (classification, polling).
+    - P1: Continue  extraction pass 3 (classification decoupling, email polling refactor).
     Future Tasks:
     - P2: Vendor Inventory Dashboard and Sales module.
     - P2: Product/BOM (Bill of Materials) module.
     - P2: Implement a production-ready email service and Entra ID SSO.
 
 **Completed work in this session**
-- [P3-B] Complete PO classification routing (so_type extraction mapped to Dropship/Warehouse SO fields) (DONE)
-- [P3-C] Automate warehouse receiving notice when WH SO is booked () (DONE)
-- [P4-A] Wire BC Sales Order shipment events into the Inventory Ledger as  via background sync (DONE)
-- STEP 1 — Sync customers + salesperson codes from BC into cache & created  (DONE)
-- [P4-B] Extract  orchestration functions (Upload/SharePoint/BC Link handlers extracted into modules, saving ~600 lines) (DONE)
+- Feedback Loop Health Dashboard UI & API (DONE)
+- Critical bug fixes in  to ensure feedback context/vendor hints actually inject into LLM prompts (DONE)
+- Global LLM upgrade from  to  (DONE)
+- Before/After Reprocess Comparison Dashboard (A/B testing architecture) (DONE)
+- Added File (bulk route) and Run Ref Intel UI buttons to Document Queue + fixed FastAPI body param parsing (DONE)
+- Ref Intel Startup Requeue (prevents  docs from getting stuck in memory) (DONE)
+- PO Resolution bypass to trust BC Cache ID without redundant live BC lookup (DONE)
+- Code cleanup: re-wired  direct imports & fixed  circular import (DONE)
+- Vendor Extraction Profiles (VEP) generation, pipeline wiring, and coverage API (DONE)
+- Freight GL Account validation API and Auto-Post soft block wiring (DONE)
+- Sales Order Subtype Classification ( vs ) with workflow transitions (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-   - Issue 1: 19 Pre-existing integration tests fail due to missing environment variables.
-     - Debug checklist: Tests fail due to missing  env var mocking in the test runner.
-     - Why to solve this issue and what will be achieved with this? Clean full test suite runs.
-     - Should Test frontend/backend/both after fix: backend
-     - Is recurring issue? Y
+   - None
 
 **Known issue recurrence from previous fork**
-  - Issue recurrence in previous fork: BC API authentication throws 400/500 errors in the preview sandbox due to restricted/missing credentials.
+  - Issue recurrence in previous fork (Check 1st <LLM message history> array entry): BC API authentication and SharePoint Graph API uploads throw errors in the preview sandbox due to restricted/missing credentials.
   - Recurrence count: Ongoing
   - Status: BLOCKED (Environment Limitation)
-  Note: Do not try to fix this. It is a known limitation of the preview env. Handle external API failures gracefully with  and rely heavily on unit testing (mocking).
+  - Note:  gracefully handles these API failures. It is expected behavior in the preview sandbox. Proceed with logic trusting .
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
-- **Split Environment API Model**: BC calls use Production for Reads and Sandbox for Writes. Handled gracefully despite sandbox auth limitations.
-- **Inventory Ledger Sync**: A 1-hour cron job queries BC Sales Shipment Lines and directly commits  movements to the local MongoDB  collection.
-- **Reference Caching**: Heavily relies on  to index BC entities locally in Mongo, avoiding slow live OData queries for SO validation and Salesperson lookups.
+- **LLM Context Injection**: Historical corrections (Feedback Loop) and pre-computed Vendor Extraction Profiles (VEP) are dynamically injected into the system prompt of  before classification/extraction.
+- **A/B Snapshotting**: The  takes a snapshot of current extraction data, runs the document through the live pipeline, and compares  vs  confidence/amounts without writing to the live schema.
+- **SO Subtype Divergence**: Single  type splits into  (Drop Ship) and  (Warehouse) based on keywords and location codes. This dictates PO auto-approval paths vs Logistics notification paths.
 
 **key DB schema**
-  - : Tracks quantity adjustments. Added  movement type.
-  - : Extended to support  and .
-  - : Stores  and workflow tracking information.
+  - : Stores document state, , , , etc.
+  - : Stores system-wide toggles like , .
+  - : Synced chart of accounts from BC.
+  - : Local mappings for freight GL routing.
 
 **changes in tech stack**
-  - None strictly.
+  - Upgraded main extraction LLM across the system from  to  via .
 
 **All files of reference** 
-  - : Target for filtering additions.
-  - : Target for stats merge.
-  - : Target for Vendor tabs.
-  -  & : Route and nav cleanup.
-  - : BC Shipment sync.
-  - : Rep mapping logic.
+  -  (Current focus: Finish DS PO endpoint)
+  -  (Current focus: Wire DS PO trigger)
+  -  (Updated to trust BC cache IDs)
+  -  (Updated prompt injection logic)
+  -  (Created)
 
 **Areas that need refactoring**: 
-  -  is down to ~7,740 lines but still contains orchestration logic like classification and email polling that should be extracted.
+  -  extraction orchestration logic (Pass 3) needs to be decoupled into independent services.
 
 **key api endpoints**
   - 
   - 
   - 
   - 
+  - 
+  -  (WIP)
 
 **Critical Info for New Agent** 
-- **IMMEDIATE START POINT:** Resume **[P4-C] Frontend consolidation**. Do not change the backend! You need to implement the frontend modifications in  (add specific dropdowns, tab components for distinct workflows), move vendor views to , merge stats to , and prune the  routes down to ~8 pages.
-- After completing P4-C, utilize the screenshot tool or  for Frontend tests before declaring finish.
-- Remember: NEVER hardcode test emails. Continue to use  services or  when testing backend notification endpoints.
+- **IMMEDIATE START POINT:** You must finish the user's last task (Part B: DS PO auto-approval). The  service method is already written. You need to finish writing the  endpoint in , and then trigger it from  when a  document hits  released or approved. Then write the requested Pytest test cases.
+- **FastAPI Body Bug:** In , earlier  caused an error because FastAPI treated it as a Query Param. It was fixed via . Remember this pattern for list inputs in POST endpoints.
+- Continue to leverage  to gracefully bypass Graph API issues in the environment.
 
 **documents and test reports created in this job** 
-  -  (Updated continuously)
-  -  (Updated with new service extraction details)
-  -  (Testing agent report for P3-B)
+  - 
+  - 
 
 **Last 10 User Messages and any pending HUMAN messages** 
- - **User [P3-B]**: Improve customer PO classification — Drop-Ship vs Warehouse SO routing. (Done)
- - **User [P3-C]**: Automate warehouse receiving notice when WH SO is booked. (Done)
- - **User [P4-A]**: Wire BC Sales Order shipment events into the Inventory Ledger. (Done)
- - **User STEP 1**: Sync customers + salesperson codes from BC into cache. (Done)
- - **User [P4-B]**: Extract server.py orchestration functions — Pass 2 (upload/SharePoint/BC link). (Done)
- - **User [P4-C]**: Frontend consolidation — reduce 38 pages to 8 with unified QueuePage. **(IN PROGRESS)**
+ - User: what does the learning signal application rate mean... Feel like we have wasted time, cycles, resources and credits.
+ - Agent: Clarified the UI is purely a metric viewer and the actual AI injection *was* working. Found bugs in the existing pipeline that prevented injection, fixed them, and upgraded to .
+ - User: lets re-run everything, but I just want to know if the results are better or worse.
+ - Agent: Built a Before/After comparison pipeline and UI.
+ - User: can we get a file button right next to the Show auto cleared so that we can file multiple docs at once?
+ - Agent: Added File button to the Queue page.
+ - User: is there a reason that ref intel is not run on all docs??
+ - Agent: Found that the in-memory auto-resolve queue dropped items on server restart. Added a startup re-queue job and a manual Run Ref Intel button.
+ - User: Uploaded image showing Bulk file failed: doc_ids required.
+ - Agent: Fixed FastAPI  param parsing for .
+ - User: Provided instructions to fix PO Resolution  to trust cache IDs over live verification for closed POs.
+ - Agent: Implemented bypass logic.
+ - User: Requested cleanup: rewire  imports directly, remove wrapper, and fix  circular import.
+ - Agent: Performed rewiring and cleanup.
+ - User: Requested wiring  into  prompt injection.
+ - Agent: Implemented profile creation, coverage endpoint, and dynamic prompt hint injection.
+ - User: Requested Freight GL validation endpoints and Auto-Post blocking logic for invalid accounts.
+ - Agent: Implemented validation API and wired soft block into .
+ - User: Requested  subtypes ( vs ) with specific workflow rules and classifiers.
+ - Agent: Implemented subtypes and rules, passed all tests.
+ - **User (PENDING ACTION):** Requested 1) Square9 Archive endpoint, and 2) DS PO Auto-Approval endpoint wired into  upon DS_Sales_Order released status.
 
 **Project Health Check:**
-  - **Broken**: Pre-existing integration tests fail due to missing  in the Pytest mock environment.
-  - **Mocked**:  uses mock provider in test/dev modes. BC API endpoints for shipments fail locally/in preview due to strict auth but are handled with try/except wrappers.
+  - Broken: External graph/BC calls without Mock data (Expected)
+  - Mocked:  bypassing missing preview environment credentials.
 
-**3rd Party Integrations** 
-  - OpenAI GPT-4o / Gemini 3 — uses Emergent LLM Key
-  - Azure OpenAI — requires User LLM Key 
-  - Dynamics 365 BC — requires User API Key
-  - MS Graph (Email/SharePoint) — requires User API Key (, etc.)
+**3rd Party Integrations**
+	• OpenAI GPT-4o / Gemini 3 Pro — uses Emergent LLM Key
+	• Dynamics 365 BC — requires User API Key
+	• MS Graph (Email/SharePoint) — requires User API Key
 
 **Testing status** 
-  - Testing agent used after significant changes: YES (After P3-B)
+  - Testing agent used after significant changes: YES (Verified LLM pipeline upgrade).
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: , , , .
-  - Known regressions: None. (Test suite ran at 115 passing unit tests for newly implemented backends).
+  - Test files created: 
+  - Known regressions: None
 
 **Credentials to test flow:**
   - admin / admin
 
 **What agent forgot to execute**
-  - The agent was successfully analyzing the frontend React code for P4-C but ran out of context before making the edits. Continue directly with updating , , , and .</analysis>
+  - The agent cut off right after injecting code into  for the DS PO Auto-approval endpoint. It did NOT wire the trigger into  and did NOT write the unit tests for DS PO auto-creation. You must finish these steps.</analysis>

@@ -436,6 +436,52 @@ class AutoResolutionService:
                     logger.warning("[AutoResolve:W%d] SO subtype classification error: %s", worker_id, str(ste))
 
             # ---------------------------------------------------------
+            # DS PO AUTO-CREATION (Drop-Ship Purchase Order)
+            # If this is a DS_Sales_Order with ds_po_pending=True and
+            # workflow_status is "released" or "approved", auto-create
+            # the corresponding Purchase Order in BC.
+            # ---------------------------------------------------------
+            try:
+                refreshed_for_ds = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+                if refreshed_for_ds:
+                    ds_doc_type = refreshed_for_ds.get("suggested_job_type") or refreshed_for_ds.get("document_type") or ""
+                    ds_po_pending = refreshed_for_ds.get("ds_po_pending", False)
+                    ds_po_created = refreshed_for_ds.get("ds_po_created", False)
+                    ds_wf_status = refreshed_for_ds.get("workflow_status", "")
+
+                    if (
+                        ds_doc_type == "DS_Sales_Order"
+                        and ds_po_pending
+                        and not ds_po_created
+                        and ds_wf_status in ("released", "approved", "ready_for_approval")
+                    ):
+                        logger.info(
+                            "[AutoResolve:W%d] DS PO auto-create eligible: doc=%s wf=%s",
+                            worker_id, doc_id[:8], ds_wf_status,
+                        )
+                        try:
+                            from routers.gpi_integration import ds_po_auto_create
+                            po_result = await ds_po_auto_create(doc_id)
+                            if po_result.get("success"):
+                                logger.info(
+                                    "[AutoResolve:W%d] DS PO created: %s for doc=%s",
+                                    worker_id, po_result.get("ds_po_id"), doc_id[:8],
+                                )
+                            else:
+                                logger.info(
+                                    "[AutoResolve:W%d] DS PO not created for doc=%s: %s",
+                                    worker_id, doc_id[:8],
+                                    po_result.get("reason", po_result.get("status", "unknown")),
+                                )
+                        except Exception as ds_create_err:
+                            logger.warning(
+                                "[AutoResolve:W%d] DS PO auto-create error for %s: %s",
+                                worker_id, doc_id[:8], str(ds_create_err),
+                            )
+            except Exception as ds_check_err:
+                logger.warning("[AutoResolve:W%d] DS PO check error: %s", worker_id, str(ds_check_err))
+
+            # ---------------------------------------------------------
             # AP VALIDATION (authoritative validation step)
             # Only for AP-relevant document types
             # ---------------------------------------------------------

@@ -78,6 +78,15 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - Stable vendor score wired into auto-post eligibility
 - Confidence formula: stable_flag + score >= 0.85 → max(raw, stable_score)
 
+### DS PO Auto-Creation (Mar 22, 2026 — Session 3)
+- `POST /api/gpi-integration/ds-purchase-orders/auto-create/{doc_id}` — Creates a Drop-Ship Purchase Order in BC when a DS_Sales_Order is approved/released
+- Preconditions: doc_type=DS_Sales_Order, ds_po_pending=True, BC SO status=Released
+- Idempotent: returns existing PO info if ds_po_created=True
+- DEMO_MODE bypass for preview env (simulates PO creation)
+- **Auto-resolution trigger**: `auto_resolution_service.py` checks DS PO eligibility during background processing and fires auto-create when conditions met
+- **Router trigger**: `create_sales_order_from_document` spawns background task for DS PO auto-creation immediately after DS SO auto-approval
+- Tests: 9 pytest cases covering happy path, idempotency, rejection, vendor validation, BC SO linkage
+
 ## P0/P1/P2 Backlog
 
 ### P0
@@ -94,6 +103,7 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - Production email service & Entra ID SSO
 
 ## Key API Endpoints
+- `POST /api/gpi-integration/ds-purchase-orders/auto-create/{doc_id}`
 - `GET /api/feedback-loop/health`
 - `POST /api/reprocess-comparison/run`
 - `GET /api/reprocess-comparison/status`

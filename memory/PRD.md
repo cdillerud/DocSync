@@ -126,6 +126,9 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - `POST /api/admin/sh-invoice/{doc_id}/assign-processor`
 - `GET /api/admin/sh-invoice/queue`
 - `GET /api/gpi-integration/factbox-ui/{bc_entity}/{bc_document_no}` (self-contained HTML for BC iframe)
+- `GET /api/documents/{doc_id}/pages` (page count + text previews)
+- `POST /api/documents/{doc_id}/split` (split PDF at page boundaries)
+- `POST /api/documents/{doc_id}/delete-pages` (remove pages in place)
 - `GET /api/feedback-loop/health`
 - `POST /api/reprocess-comparison/run`
 - `GET /api/reprocess-comparison/status`

@@ -551,6 +551,312 @@ async def get_document_file(doc_id: str):
     )
 
 
+# =============================================================================
+# PDF PAGE OPERATIONS — Split, Delete Pages, Page Preview
+# =============================================================================
+
+def _resolve_file_path(doc_id: str, file_name: str = "") -> Optional[Path]:
+    """Resolve the file path for a document on disk."""
+    path = UPLOAD_DIR / doc_id
+    if path.exists():
+        return path
+    if file_name:
+        ext = Path(file_name).suffix
+        if ext:
+            path_with_ext = UPLOAD_DIR / f"{doc_id}{ext}"
+            if path_with_ext.exists():
+                return path_with_ext
+    return None
+
+
+@router.get("/{doc_id}/pages")
+async def get_document_pages(doc_id: str):
+    """Return page count and per-page text preview for a PDF document."""
+    from pypdf import PdfReader
+
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    file_path = _resolve_file_path(doc_id, doc.get("file_name", ""))
+    if not file_path:
+        return {
+            "page_count": None,
+            "error": "file_not_on_disk",
+            "sharepoint_url": doc.get("sharepoint_web_url", ""),
+            "doc_id": doc_id,
+        }
+
+    try:
+        reader = PdfReader(str(file_path))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Cannot read PDF: {str(e)[:200]}")
+
+    pages = []
+    for i, page in enumerate(reader.pages):
+        try:
+            text = page.extract_text() or ""
+        except Exception:
+            text = ""
+        pages.append({
+            "page_number": i + 1,
+            "text_preview": text[:200].strip(),
+        })
+
+    return {
+        "page_count": len(reader.pages),
+        "pages": pages,
+        "doc_id": doc_id,
+        "file_name": doc.get("file_name", ""),
+    }
+
+
+class SplitSpec(BaseModel):
+    pages: list
+    label: str = ""
+
+
+class SplitRequest(BaseModel):
+    splits: list
+
+
+@router.post("/{doc_id}/split")
+async def split_document(doc_id: str, request: SplitRequest, background_tasks: BackgroundTasks):
+    """Split a multi-page PDF into multiple independent documents."""
+    from pypdf import PdfReader, PdfWriter
+
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    file_path = _resolve_file_path(doc_id, doc.get("file_name", ""))
+    if not file_path:
+        raise HTTPException(
+            status_code=400,
+            detail="File not on disk (may have been filed to SharePoint). Cannot split.",
+        )
+
+    splits = request.splits
+    if len(splits) < 2:
+        raise HTTPException(status_code=400, detail="At least 2 splits required")
+
+    try:
+        reader = PdfReader(str(file_path))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Cannot read PDF: {str(e)[:200]}")
+
+    total_pages = len(reader.pages)
+
+    # Validate splits
+    all_pages = []
+    for i, split in enumerate(splits):
+        pages = split.get("pages") if isinstance(split, dict) else split.pages
+        label = split.get("label", "") if isinstance(split, dict) else split.label
+        if not pages or len(pages) == 0:
+            raise HTTPException(status_code=400, detail=f"Split {i+1} has no pages")
+        for p in pages:
+            if not isinstance(p, int) or p < 1 or p > total_pages:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid page {p} in split {i+1}. Valid range: 1-{total_pages}",
+                )
+            if p in all_pages:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Page {p} appears in multiple splits. Each page can only appear once.",
+                )
+            all_pages.append(p)
+
+    # Create split documents
+    now = datetime.now(timezone.utc).isoformat()
+    original_name = doc.get("file_name", "document.pdf")
+    base_name = Path(original_name).stem
+    new_docs = []
+
+    for i, split in enumerate(splits):
+        pages = split.get("pages") if isinstance(split, dict) else split.pages
+        label = split.get("label", "") if isinstance(split, dict) else split.label
+
+        # Write PDF with selected pages
+        writer = PdfWriter()
+        for p in sorted(pages):
+            writer.add_page(reader.pages[p - 1])  # 1-indexed → 0-indexed
+
+        new_doc_id = str(uuid.uuid4())
+        new_file_path = UPLOAD_DIR / new_doc_id
+        with open(new_file_path, "wb") as f:
+            writer.write(f)
+
+        # Build file name
+        if label:
+            new_file_name = f"{label}.pdf"
+        else:
+            new_file_name = f"{base_name}_part{i+1}.pdf"
+
+        # Extract text from the new split
+        split_text = ""
+        for p in sorted(pages):
+            try:
+                split_text += (reader.pages[p - 1].extract_text() or "") + "\n"
+            except Exception:
+                pass
+
+        # Create new hub_documents record
+        new_doc = {
+            "id": new_doc_id,
+            "file_name": new_file_name,
+            "content_type": doc.get("content_type", "application/pdf"),
+            "parent_doc_id": doc_id,
+            "split_from": doc_id,
+            "split_pages": sorted(pages),
+            "raw_text": split_text.strip(),
+            "workflow_status": "received",
+            "created_utc": now,
+            "updated_utc": now,
+            # Copy metadata from parent
+            "document_type": doc.get("document_type", ""),
+            "suggested_job_type": doc.get("suggested_job_type", ""),
+            "vendor_canonical": doc.get("vendor_canonical", ""),
+            "vendor_no": doc.get("vendor_no", ""),
+            "email_sender": doc.get("email_sender", ""),
+            "email_subject": doc.get("email_subject", ""),
+            "source": doc.get("source", "split"),
+            "ingestion_source": "split",
+        }
+        await db.hub_documents.insert_one(new_doc)
+
+        # Trigger classification pipeline in background
+        background_tasks.add_task(_trigger_classification, new_doc_id)
+
+        new_docs.append({
+            "doc_id": new_doc_id,
+            "file_name": new_file_name,
+            "pages": sorted(pages),
+        })
+
+    # Mark original as split
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "split_into": [d["doc_id"] for d in new_docs],
+            "workflow_status": "split",
+            "updated_utc": now,
+        }},
+    )
+
+    logger.info("[Split] doc=%s split into %d parts: %s",
+                doc_id[:8], len(new_docs), [d["doc_id"][:8] for d in new_docs])
+
+    return {
+        "success": True,
+        "original_doc_id": doc_id,
+        "new_documents": new_docs,
+    }
+
+
+@router.post("/{doc_id}/delete-pages")
+async def delete_pages(doc_id: str, payload: dict = Body(...)):
+    """Delete specific pages from a PDF, creating a new version in place."""
+    from pypdf import PdfReader, PdfWriter
+
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    file_path = _resolve_file_path(doc_id, doc.get("file_name", ""))
+    if not file_path:
+        raise HTTPException(
+            status_code=400,
+            detail="File not on disk (may have been filed to SharePoint). Cannot delete pages.",
+        )
+
+    pages_to_delete = payload.get("pages_to_delete", [])
+    if not pages_to_delete:
+        raise HTTPException(status_code=400, detail="pages_to_delete is required and must not be empty")
+
+    try:
+        reader = PdfReader(str(file_path))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Cannot read PDF: {str(e)[:200]}")
+
+    total_pages = len(reader.pages)
+
+    # Validate
+    for p in pages_to_delete:
+        if not isinstance(p, int) or p < 1 or p > total_pages:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid page {p}. Valid range: 1-{total_pages}",
+            )
+
+    if len(set(pages_to_delete)) >= total_pages:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete all pages. At least one page must remain.",
+        )
+
+    delete_set = set(pages_to_delete)
+
+    # Write remaining pages
+    writer = PdfWriter()
+    remaining_pages = []
+    remaining_text = ""
+    for i, page in enumerate(reader.pages):
+        if (i + 1) not in delete_set:
+            writer.add_page(page)
+            remaining_pages.append(i + 1)
+            try:
+                remaining_text += (page.extract_text() or "") + "\n"
+            except Exception:
+                pass
+
+    # Overwrite the file
+    with open(file_path, "wb") as f:
+        writer.write(f)
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "pages_deleted": sorted(pages_to_delete),
+            "page_count_original": total_pages,
+            "page_count_current": len(remaining_pages),
+            "raw_text": remaining_text.strip(),
+            "updated_utc": now,
+        }},
+    )
+
+    # Re-trigger classification
+    try:
+        await _trigger_classification(doc_id)
+    except Exception as e:
+        logger.warning("[DeletePages] Re-classification failed for %s: %s", doc_id[:8], str(e))
+
+    logger.info("[DeletePages] doc=%s deleted pages %s, %d remaining",
+                doc_id[:8], sorted(pages_to_delete), len(remaining_pages))
+
+    return {
+        "success": True,
+        "doc_id": doc_id,
+        "pages_deleted": sorted(pages_to_delete),
+        "pages_remaining": remaining_pages,
+        "page_count_original": total_pages,
+        "page_count_current": len(remaining_pages),
+    }
+
+
+async def _trigger_classification(doc_id: str):
+    """Trigger the AI classification pipeline on a document."""
+    try:
+        from server import classify_document
+        await classify_document(doc_id)
+    except Exception as e:
+        logger.warning("[Classification] Failed for %s: %s", doc_id[:8], str(e))
+
+
 @router.get("/{doc_id}/square9-status")
 async def get_square9_status(doc_id: str):
     from services.square9_workflow import get_workflow_summary

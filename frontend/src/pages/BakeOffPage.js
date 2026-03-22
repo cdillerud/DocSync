@@ -799,7 +799,96 @@ function ResultsSummary({ runId, runName }) {
           </CardContent>
         </Card>
       )}
+
+      {/* Folder Alignment Report */}
+      <FolderAlignment runId={runId} />
     </div>
+  );
+}
+
+function FolderAlignment({ runId }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetch = async () => {
+      try {
+        const { data: d } = await api.get(`${API}/runs/${runId}/folder-alignment`);
+        setData(d);
+      } catch { /* no data yet */ }
+      finally { setLoading(false); }
+    };
+    fetch();
+  }, [runId]);
+
+  if (loading || !data) return null;
+
+  const { summary, alignment, gpi_only_folders } = data;
+
+  return (
+    <Card data-testid="folder-alignment">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <FolderSearch className="w-4 h-4 text-blue-500" /> Folder Alignment — S9 vs GPI Hub
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">
+          {summary.matched_to_gpi}/{summary.total_s9_folders} S9 folders matched to GPI Hub
+          {summary.gaps > 0 && <span className="text-amber-500 ml-1">({summary.gaps} gaps)</span>}
+        </p>
+      </CardHeader>
+      <CardContent>
+        <ScrollArea className="h-56">
+          <table className="w-full text-xs">
+            <thead><tr className="text-muted-foreground border-b">
+              <th className="text-left py-1.5 font-medium">S9 Folder</th>
+              <th className="text-center py-1.5 font-medium w-12">Docs</th>
+              <th className="text-center py-1.5 font-medium w-16">Match</th>
+              <th className="text-left py-1.5 font-medium">GPI Routes To</th>
+              <th className="text-center py-1.5 font-medium w-16 text-emerald-600">GPI OK</th>
+              <th className="text-center py-1.5 font-medium w-16 text-orange-600">S9 OK</th>
+            </tr></thead>
+            <tbody>
+              {alignment.map((row) => (
+                <tr key={row.s9_folder} className="border-b border-border/20">
+                  <td className="py-1 truncate max-w-[200px]" title={row.s9_folder}>{row.s9_folder}</td>
+                  <td className="text-center py-1 font-mono">{row.doc_count}</td>
+                  <td className="text-center py-1">
+                    {row.gpi_match === 'exact' && <span className="text-emerald-600 font-medium">Exact</span>}
+                    {row.gpi_match === 'partial' && <span className="text-blue-500 font-medium">Partial</span>}
+                    {row.gpi_match === 'fuzzy' && <span className="text-amber-500 font-medium">Fuzzy</span>}
+                    {row.gpi_match === 'none' && <span className="text-red-500 font-medium">Gap</span>}
+                  </td>
+                  <td className="py-1 truncate max-w-[200px]" title={Object.keys(row.gpi_routing_destinations).join(', ')}>
+                    {Object.entries(row.gpi_routing_destinations).map(([folder, cnt]) => (
+                      <span key={folder} className="inline-block mr-1">
+                        {folder} <span className="text-muted-foreground">({cnt})</span>
+                      </span>
+                    ))}
+                    {Object.keys(row.gpi_routing_destinations).length === 0 && <span className="text-muted-foreground">--</span>}
+                  </td>
+                  <td className="text-center py-1 font-mono">{row.gpi_folder_correct}/{row.doc_count}</td>
+                  <td className="text-center py-1 font-mono">{row.s9_folder_correct}/{row.doc_count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </ScrollArea>
+
+        {gpi_only_folders.length > 0 && (
+          <div className="mt-3 pt-3 border-t">
+            <p className="text-xs text-muted-foreground mb-1 font-medium">GPI Hub folders not seen in S9 data:</p>
+            <div className="flex flex-wrap gap-1">
+              {gpi_only_folders.slice(0, 15).map(f => (
+                <span key={f} className="text-[10px] bg-muted/60 px-1.5 py-0.5 rounded">{f}</span>
+              ))}
+              {gpi_only_folders.length > 15 && (
+                <span className="text-[10px] text-muted-foreground">+{gpi_only_folders.length - 15} more</span>
+              )}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

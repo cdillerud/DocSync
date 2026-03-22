@@ -930,6 +930,128 @@ async def get_run_metrics(run_id: str):
     return {"metrics": metrics, "breakdowns": breakdowns}
 
 
+@router.get("/runs/{run_id}/folder-alignment")
+async def get_folder_alignment(run_id: str):
+    """
+    Folder Alignment Report: compares S9 output folders vs GPI Hub folder structure.
+    
+    For each folder appearing in the benchmark data, shows:
+    - S9 folder path and doc count
+    - Matching GPI Hub folder (if any)
+    - GPI routing accuracy for that folder
+    - Gaps: S9 folders with no GPI match
+    """
+    from services.folder_routing_service import FOLDER_STRUCTURE, get_all_folder_paths
+
+    db = get_db()
+    docs = await db[DOCS_COLL].find({"run_id": run_id}, {"_id": 0}).to_list(2000)
+    if not docs:
+        raise HTTPException(404, "No documents in this run")
+
+    gpi_folders = set(get_all_folder_paths())
+
+    # Collect unique S9 folders and GPI folders from the data
+    s9_folder_docs = {}  # s9_folder -> list of docs
+    gpi_folder_docs = {}  # gpi_folder -> list of docs
+    
+    for d in docs:
+        s9f = d.get("s9_folder_output", "").strip()
+        gpif = d.get("gpi_folder_output", "").strip()
+        
+        if s9f:
+            s9_folder_docs.setdefault(s9f, []).append(d)
+        if gpif:
+            # Normalize: strip PO subfolder for comparison
+            base_gpif = gpif.split("/")[0] if "/" in gpif else gpif
+            gpi_folder_docs.setdefault(base_gpif, []).append(d)
+
+    def _folder_match(s9_path: str) -> dict:
+        """Check if S9 folder has a corresponding GPI Hub folder."""
+        s9_lower = s9_path.lower().strip().rstrip("/")
+        
+        # Exact match
+        for gf in gpi_folders:
+            if gf.lower() == s9_lower:
+                return {"match": "exact", "gpi_folder": gf}
+        
+        # Partial/contains match
+        for gf in gpi_folders:
+            gf_lower = gf.lower()
+            if s9_lower in gf_lower or gf_lower in s9_lower:
+                return {"match": "partial", "gpi_folder": gf}
+        
+        # Word overlap match
+        s9_words = set(re.split(r'[\s/\\-]+', s9_lower))
+        best_overlap = 0
+        best_folder = None
+        for gf in gpi_folders:
+            gf_words = set(re.split(r'[\s/\\-]+', gf.lower()))
+            overlap = len(s9_words & gf_words)
+            if overlap > best_overlap and overlap >= 2:
+                best_overlap = overlap
+                best_folder = gf
+        if best_folder:
+            return {"match": "fuzzy", "gpi_folder": best_folder}
+        
+        return {"match": "none", "gpi_folder": None}
+
+    # Build alignment report
+    alignment = []
+    for s9_folder, folder_docs in sorted(s9_folder_docs.items(), key=lambda x: -len(x[1])):
+        match = _folder_match(s9_folder)
+        
+        # Count folder accuracy for this S9 folder
+        gpi_correct = sum(1 for d in folder_docs if d.get("gpi_folder_correct"))
+        s9_correct = sum(1 for d in folder_docs if d.get("s9_folder_correct"))
+        
+        # What GPI actually routes these docs to
+        gpi_destinations = {}
+        for d in folder_docs:
+            dest = d.get("gpi_folder_output", "")
+            if dest:
+                base = dest.split("/")[0] if "/" in dest else dest
+                gpi_destinations[base] = gpi_destinations.get(base, 0) + 1
+        
+        alignment.append({
+            "s9_folder": s9_folder,
+            "doc_count": len(folder_docs),
+            "gpi_match": match["match"],
+            "gpi_matched_folder": match["gpi_folder"],
+            "gpi_folder_correct": gpi_correct,
+            "s9_folder_correct": s9_correct,
+            "gpi_routing_destinations": gpi_destinations,
+        })
+
+    # Identify GPI folders not seen in S9 data
+    s9_folder_set = set(s9_folder_docs.keys())
+    gpi_only_folders = []
+    for gf in sorted(gpi_folders):
+        found = False
+        for s9f in s9_folder_set:
+            if gf.lower() in s9f.lower() or s9f.lower() in gf.lower():
+                found = True
+                break
+        if not found:
+            gpi_only_folders.append(gf)
+
+    # Summary stats
+    total_s9_folders = len(s9_folder_docs)
+    matched = sum(1 for a in alignment if a["gpi_match"] != "none")
+    gaps = sum(1 for a in alignment if a["gpi_match"] == "none")
+
+    return {
+        "summary": {
+            "total_s9_folders": total_s9_folders,
+            "matched_to_gpi": matched,
+            "gaps": gaps,
+            "gpi_total_folders": len(gpi_folders),
+            "gpi_only_folders": len(gpi_only_folders),
+        },
+        "alignment": alignment,
+        "gpi_only_folders": gpi_only_folders,
+    }
+
+
 # ═══════════════════════════════════════════════════════════════
 # EXPORT (Excel)
 # ═══════════════════════════════════════════════════════════════

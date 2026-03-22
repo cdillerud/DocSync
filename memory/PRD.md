@@ -9,7 +9,7 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 ## Architecture
 - **Backend**: FastAPI (Python) with MongoDB
 - **Frontend**: React with Shadcn/UI components
-- **AI**: Gemini via Emergent LLM Key + Azure OpenAI fallback
+- **AI**: Gemini 3 Pro via Emergent LLM Key + Azure OpenAI fallback
 - **External APIs**: Microsoft Graph, Business Central, SharePoint
 - **Feedback Loop**: Unified feedback capture → learning signals → AI prompt enrichment
 
@@ -60,6 +60,25 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - AI prompt enrichment via `build_feedback_context_for_prompt()`
 - Wired into documents.py update flow and ap_review.py save flow
 
+### LLM Optimization (Mar 22, 2026 — Session 2)
+**Critical bugs fixed:**
+1. **Feedback context was never injected** — `build_feedback_context_for_prompt()` was called without `vendor_id` or `doc_type` params, so it always returned empty string. Fixed: now passes vendor context extracted from doc history + filename inference.
+2. **Vendor hints used filename instead of vendor name** — `build_vendor_hints_prompt_section(file_name)` was passing the filename, but the function expects a vendor name. Fixed: now infers vendor from filename first, passes vendor name.
+3. **Secondary LLM path had no feedback injection** — `_call_llm_for_extraction()` in `document_intel_helpers.py` had the same two bugs. Fixed: added feedback loop context and correct vendor hint.
+4. **Model upgraded** — All classification paths upgraded from `gemini-3-flash-preview` to `gemini-3-pro-preview` for maximum accuracy.
+5. **Chain-of-thought prompting** — User message now instructs the LLM to think step-by-step: IDENTIFY → CLASSIFY → EXTRACT → ROUTE.
+6. **General recent corrections** — `build_feedback_context_for_prompt()` now always includes system-wide recent corrections, even when no vendor is known. Every LLM call benefits from the feedback loop.
+
+### Feedback Loop Health Dashboard (Mar 22, 2026 — Session 2)
+- New Settings tab: "Feedback Loop" (view-only)
+- Backend endpoint: `GET /api/feedback-loop/health`
+- Displays: total events, applied events, pending, vendor aliases learned, classification examples, routing corrections
+- Learning Signal Application Rate progress bar
+- Events by Type breakdown with color-coded badges
+- Most Corrected Vendors table
+- Daily Activity bar chart (last 30 days)
+- Recent Events timeline with source badges
+
 ### Auto-Post Confidence (Mar 22, 2026)
 - Stable vendor score now wired into auto-post eligibility
 - `attempt_auto_post()` queries vendor_intelligence_profiles for stable data
@@ -89,7 +108,6 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - Vendor Inventory Dashboard & Sales module
 - Product/BOM module
 - Production email service & Entra ID SSO
-- Feedback Loop Health dashboard (events, aliases learned, accuracy trends)
 
 ## Key API Endpoints
 - `GET /api/intake-benchmark/runs`
@@ -98,6 +116,7 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - `GET /api/intake-benchmark/runs/{id}/folder-alignment`
 - `GET /api/intake-benchmark/runs/{id}/auto-post-readiness`
 - `GET /api/gpi-integration/document-links/{entity}/{doc_no}`
+- `GET /api/feedback-loop/health`
 
 ## Key Collections
 - `feedback_events` — every user interaction

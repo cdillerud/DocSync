@@ -1712,10 +1712,6 @@ async def match_customer_in_bc(
         customer_name, strategies, threshold, token, company_id, _api_url,
     )
 
-async def validate_bc_match(job_type: str, extracted_fields: dict, job_config: dict) -> dict:
-    """Compatibility wrapper — delegates to bc_validation_service."""
-    from services.bc_validation_service import validate_bc_match as _impl
-    return await _impl(job_type, extracted_fields, job_config)
 
 # ==================== AUTOMATION DECISION ENGINE ====================
 
@@ -1940,6 +1936,7 @@ async def on_document_ingested(doc_id: str, source: str = "unknown"):
             job_configs = DEFAULT_JOB_TYPES.get(job_type, DEFAULT_JOB_TYPES["AP_Invoice"])
         
         # Run BC validation
+        from services.bc_validation_service import validate_bc_match
         validation_results = await validate_bc_match(job_type, extracted_fields, job_configs)
         
         # Make automation decision
@@ -2990,6 +2987,7 @@ async def _internal_intake_document(
         logger.warning("[INTAKE] PO resolution error for %s: %s", doc_id[:8], str(po_err))
 
     # Run BC validation (existing logic — now enriched with PO resolution candidates)
+    from services.bc_validation_service import validate_bc_match
     validation_results = await validate_bc_match(suggested_type, extracted_fields, job_configs)
     
     # Make automation decision
@@ -3590,6 +3588,7 @@ async def intake_document(
         job_configs = DEFAULT_JOB_TYPES.get(suggested_type, DEFAULT_JOB_TYPES["AP_Invoice"])
     
     # Run BC validation
+    from services.bc_validation_service import validate_bc_match
     validation_results = await validate_bc_match(suggested_type, extracted_fields, job_configs)
     
     # Make automation decision (returns 3-tuple with metadata)
@@ -3910,6 +3909,7 @@ async def classify_document(doc_id: str):
         job_configs = DEFAULT_JOB_TYPES.get(suggested_type, DEFAULT_JOB_TYPES["AP_Invoice"])
     
     # Run BC validation
+    from services.bc_validation_service import validate_bc_match
     validation_results = await validate_bc_match(suggested_type, extracted_fields, job_configs)
     
     # Make automation decision
@@ -4165,6 +4165,7 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
 
     # Re-run BC validation (this will use any new aliases)
     old_match_method = doc.get("match_method", "none")
+    from services.bc_validation_service import validate_bc_match
     validation_results = await validate_bc_match(job_type, extracted_fields, job_configs)
     new_match_method = validation_results.get("match_method", "none")
     
@@ -4341,6 +4342,7 @@ async def batch_revalidate_documents(
             old_validation_passed = doc.get("validation_results", {}).get("all_passed", False)
             
             # Re-run BC validation (now uses Production)
+            from services.bc_validation_service import validate_bc_match
             validation_results = await validate_bc_match(job_type, extracted_fields, job_configs)
             new_match_method = validation_results.get("match_method", "none")
             new_validation_passed = validation_results.get("all_passed", False)
@@ -4877,6 +4879,7 @@ async def process_incoming_email(email_id: str, mailbox_address: str):
             if not job_configs:
                 job_configs = DEFAULT_JOB_TYPES.get(suggested_type, DEFAULT_JOB_TYPES["AP_Invoice"])
             
+            from services.bc_validation_service import validate_bc_match
             validation_results = await validate_bc_match(suggested_type, extracted_fields, job_configs)
             decision, reasoning = make_automation_decision(job_configs, confidence, validation_results)
             

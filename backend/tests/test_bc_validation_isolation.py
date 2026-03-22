@@ -272,7 +272,7 @@ class TestServerWrapper:
         from unittest.mock import patch
         with patch("deps.DEMO_MODE", True), \
              patch("deps.BC_CLIENT_ID", ""):
-            from server import validate_bc_match as server_fn
+            from services.bc_validation_service import validate_bc_match as server_fn
             result = await server_fn("AP_Invoice", {"vendor": "Acme"}, {})
 
         assert "checks" in result

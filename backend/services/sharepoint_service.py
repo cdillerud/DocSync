@@ -31,8 +31,8 @@ SHAREPOINT_LIBRARY_NAME = os.environ.get('SHAREPOINT_LIBRARY_NAME', 'Shared Docu
 
 
 async def _get_graph_token():
-    """Lazy import to avoid circular dependency with server.py."""
-    from server import get_graph_token
+    """Import from config_service to avoid circular dependency with server.py."""
+    from services.config_service import get_graph_token
     return await get_graph_token()
 
 

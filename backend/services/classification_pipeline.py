@@ -760,6 +760,24 @@ async def run_pipeline(doc_id: str, doc: Dict[str, Any]) -> PipelineResult:
     result.extracted_fields = extract.data.get("extracted_fields", {})
     result.meaningful_field_count = extract.data.get("meaningful_count", 0)
 
+    # ----- Stage 3b: VENDOR INFERENCE FALLBACK -----
+    # If vendor wasn't extracted by LLM, try filename/number pattern inference
+    vendor_field = result.extracted_fields.get("vendor", "")
+    if not vendor_field or vendor_field.lower() in ("", "unknown", "n/a"):
+        try:
+            from services.vendor_inference_service import infer_vendor
+            file_name = doc.get("file_name") or doc.get("original_filename") or ""
+            inferred_vendor, infer_method = infer_vendor(file_name, result.extracted_fields)
+            if inferred_vendor:
+                result.extracted_fields["vendor"] = inferred_vendor
+                result.extracted_fields["vendor_inferred_by"] = infer_method
+                logger.info(
+                    "[PIPELINE] Vendor inferred for %s: %s (method=%s)",
+                    doc_id, inferred_vendor, infer_method,
+                )
+        except Exception as e:
+            logger.debug("[PIPELINE] Vendor inference skipped: %s", e)
+
     if not extract.quality_gate_passed:
         logger.warning(
             "[PIPELINE] EXTRACT quality gate failed for %s: %s",

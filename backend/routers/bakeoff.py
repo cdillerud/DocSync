@@ -580,6 +580,7 @@ async def auto_populate_gpi(run_id: str, seed_truth: bool = Query(True, descript
 
     linked = 0
     truth_seeded = 0
+    vendor_inferred = 0
     for doc in docs:
         did = doc.get("document_id", "")
         fname = doc.get("file_name", "")
@@ -610,6 +611,17 @@ async def auto_populate_gpi(run_id: str, seed_truth: bool = Query(True, descript
                 or nf.get("po_number") or ef.get("po_number") or nf.get("bol_number")
                 or ef.get("bol_number") or ai.get("po_number") or ""
             )
+
+            # Vendor inference fallback: if hub_doc didn't have a vendor, try filename
+            if not gpi_vendor:
+                try:
+                    from services.vendor_inference_service import infer_vendor
+                    inferred, method = infer_vendor(fname, ef)
+                    if inferred:
+                        gpi_vendor = inferred
+                        vendor_inferred += 1
+                except Exception:
+                    pass
 
             # Amount: try multiple sources
             gpi_amount = None
@@ -697,13 +709,39 @@ async def auto_populate_gpi(run_id: str, seed_truth: bool = Query(True, descript
             )
             linked += 1
         else:
-            # No hub_doc match — still seed folder_truth from S9 if available
+            # No hub_doc match — try vendor inference from filename/patterns
+            fname = doc.get("file_name", "")
+            infer_updates = {"updated_at": datetime.now(timezone.utc).isoformat()}
+            try:
+                from services.vendor_inference_service import infer_vendor, is_noise_file
+                if is_noise_file(fname):
+                    infer_updates["gpi_doc_type"] = "Not_Document"
+                    infer_updates["doc_type_truth"] = "Not_Document"
+                    infer_updates["gpi_notes"] = "Noise file (not a business document)"
+                else:
+                    inferred_vendor, infer_method = infer_vendor(fname)
+                    if inferred_vendor:
+                        infer_updates["gpi_vendor"] = inferred_vendor
+                        infer_updates["gpi_ingested"] = True
+                        infer_updates["gpi_notes"] = f"Vendor inferred: {infer_method}"
+                        if seed_truth and not doc.get("vendor_truth"):
+                            infer_updates["vendor_truth"] = inferred_vendor
+                            truth_seeded += 1
+                        vendor_inferred += 1
+            except Exception:
+                pass
+
+            # Seed folder_truth from S9 if available
             if seed_truth and not doc.get("folder_truth") and doc.get("s9_folder_output"):
+                infer_updates["folder_truth"] = doc["s9_folder_output"]
+                if "vendor_truth" not in infer_updates:
+                    truth_seeded += 1
+
+            if len(infer_updates) > 1:  # More than just updated_at
                 await db[DOCS_COLL].update_one(
                     {"run_id": run_id, "doc_uid": doc["doc_uid"]},
-                    {"$set": {"folder_truth": doc["s9_folder_output"], "updated_at": datetime.now(timezone.utc).isoformat()}}
+                    {"$set": infer_updates}
                 )
-                truth_seeded += 1
 
     # Auto-score all docs in run
     all_docs = await db[DOCS_COLL].find({"run_id": run_id}).to_list(2000)
@@ -723,7 +761,7 @@ async def auto_populate_gpi(run_id: str, seed_truth: bool = Query(True, descript
             {"$set": {"status": "in_progress", "updated_at": datetime.now(timezone.utc).isoformat()}}
         )
 
-    return {"linked": linked, "total": len(docs), "truth_seeded": truth_seeded}
+    return {"linked": linked, "total": len(docs), "truth_seeded": truth_seeded, "vendor_inferred": vendor_inferred}
 
 
 # ═══════════════════════════════════════════════════════════════

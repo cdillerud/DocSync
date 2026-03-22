@@ -597,7 +597,20 @@ async def attempt_bc_link(document_id: str, po_resolution: Dict[str, Any]) -> Di
         logger.warning("[BC_LINK] doc=%s FAIL: No bc_record_id for PO=%s", document_id[:12], po_number)
         return link_result
 
-    # Real BC record — attempt link
+    # Purchase order with bc_record_id from cache — trust it directly (mirrors shipment path)
+    if bc_record_id:
+        link_result["status"] = "linked"
+        link_result["bc_record_type"] = "purchaseOrder"
+        link_result["bc_record_id"] = bc_record_id
+        link_result["link_method"] = f"bc_cache_match:{po_resolution.get('match_method', 'unknown')}"
+        logger.info(
+            "[BC_LINK] doc=%s CACHE LINK: PO=%s bc_id=%s method=%s",
+            document_id[:12], po_number, bc_record_id[:20],
+            po_resolution.get("match_method", "unknown"),
+        )
+        return link_result
+
+    # No bc_record_id — fallback to live BC verification
     try:
         from services.business_central_service import get_bc_service
         svc = get_bc_service()

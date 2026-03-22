@@ -280,7 +280,10 @@ function DocumentScoring({ runId }) {
   const autoPopulate = async () => {
     try {
       const { data } = await api.post(`${API}/runs/${runId}/auto-populate`);
-      toast.success(`Linked ${data.linked} of ${data.total} documents to GPI Hub data`);
+      const parts = [`Linked ${data.linked} of ${data.total} docs`];
+      if (data.vendor_inferred > 0) parts.push(`${data.vendor_inferred} vendors inferred`);
+      if (data.truth_seeded > 0) parts.push(`${data.truth_seeded} truth fields seeded`);
+      toast.success(parts.join(' | '));
       fetchDocs();
     } catch { toast.error('Auto-populate failed'); }
   };

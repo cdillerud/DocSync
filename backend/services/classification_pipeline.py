@@ -761,13 +761,18 @@ async def run_pipeline(doc_id: str, doc: Dict[str, Any]) -> PipelineResult:
     result.meaningful_field_count = extract.data.get("meaningful_count", 0)
 
     # ----- Stage 3b: VENDOR INFERENCE FALLBACK -----
-    # If vendor wasn't extracted by LLM, try filename/number pattern inference
+    # If vendor wasn't extracted by LLM, try filename/number pattern inference + BC cross-ref
     vendor_field = result.extracted_fields.get("vendor", "")
     if not vendor_field or vendor_field.lower() in ("", "unknown", "n/a"):
         try:
-            from services.vendor_inference_service import infer_vendor
+            from services.vendor_inference_service import infer_vendor_async
+            from deps import get_db
+            db = get_db()
             file_name = doc.get("file_name") or doc.get("original_filename") or ""
-            inferred_vendor, infer_method = infer_vendor(file_name, result.extracted_fields)
+            batch_id = doc.get("batch_id") or doc.get("email_message_id")
+            inferred_vendor, infer_method = await infer_vendor_async(
+                db, file_name, result.extracted_fields, batch_id
+            )
             if inferred_vendor:
                 result.extracted_fields["vendor"] = inferred_vendor
                 result.extracted_fields["vendor_inferred_by"] = infer_method

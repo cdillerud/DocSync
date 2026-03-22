@@ -172,7 +172,7 @@ def infer_vendor_from_document_numbers(filename: str) -> Optional[str]:
 
 def infer_vendor(filename: str, extracted_fields: Optional[Dict] = None) -> Tuple[Optional[str], str]:
     """
-    Multi-strategy vendor inference.
+    Multi-strategy vendor inference (synchronous — no DB).
     
     Returns (vendor_name, method) where method describes how the vendor was inferred.
     Returns (None, "none") if no vendor could be inferred.
@@ -180,6 +180,10 @@ def infer_vendor(filename: str, extracted_fields: Optional[Dict] = None) -> Tupl
     # Skip noise files
     if is_noise_file(filename):
         return None, "noise_file"
+    
+    # Check if vendor is "not expected" for this document type
+    if is_no_vendor_expected(filename):
+        return None, "no_vendor_expected"
     
     # Strategy 1: Filename vendor patterns
     vendor = infer_vendor_from_filename(filename)
@@ -207,30 +211,176 @@ def infer_vendor(filename: str, extracted_fields: Optional[Dict] = None) -> Tupl
     return None, "none"
 
 
-async def infer_vendor_from_siblings(db, filename: str, batch_id: str = None) -> Optional[str]:
+# ---------------------------------------------------------------------------
+# "No vendor expected" classification (Option C)
+# ---------------------------------------------------------------------------
+
+# Document types/patterns where a vendor is genuinely not present
+NO_VENDOR_EXPECTED_PATTERNS = [
+    # Internal documents
+    re.compile(r'Letter\s+of\s+Authorization', re.IGNORECASE),
+    re.compile(r'AR\s+Aging\s+Details', re.IGNORECASE),
+    re.compile(r'Page_\d+_\d+\.pdf$', re.IGNORECASE),  # Generic scan pages
+    re.compile(r'^W9\b', re.IGNORECASE),  # W-9 tax forms (vendor identity IS the doc)
+    re.compile(r'Payment\s+Advice', re.IGNORECASE),  # Remittance/payment docs
+    re.compile(r'Remittance', re.IGNORECASE),
+]
+
+
+def is_no_vendor_expected(filename: str) -> bool:
+    """Check if a document is a type where vendor extraction is N/A."""
+    for pattern in NO_VENDOR_EXPECTED_PATTERNS:
+        if pattern.search(filename):
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# BC Cross-Reference for BOL/Shipment Numbers (Option A)
+# ---------------------------------------------------------------------------
+
+def extract_reference_numbers(filename: str) -> list:
     """
-    Try to infer vendor from sibling documents in the same batch/email.
+    Extract potential BOL/shipment/order reference numbers from a filename.
     
-    If other documents in the same email or upload batch have a known vendor,
-    this document likely belongs to the same vendor.
+    Returns a list of (reference, ref_type) tuples.
     """
-    if not batch_id or not db:
-        return None
+    refs = []
+    stem = re.sub(r'\.[^.]+$', '', filename)  # strip extension
     
-    # Find other docs in the same batch with a resolved vendor
-    sibling = await db.hub_documents.find_one(
-        {
-            "batch_id": batch_id,
-            "file_name": {"$ne": filename},
-            "vendor_canonical": {"$ne": None, "$exists": True},
-        },
-        {"_id": 0, "vendor_canonical": 1, "vendor_resolved_name": 1},
-    )
+    # BOL number pattern: "BOL 111574" or "BOL 1111645"
+    bol_match = re.findall(r'BOL\s*(\d{5,})', stem, re.IGNORECASE)
+    for m in bol_match:
+        refs.append((m, "bol"))
     
-    if sibling:
-        vendor = sibling.get("vendor_resolved_name") or sibling.get("vendor_canonical")
-        if vendor:
-            logger.info("[VendorInfer] Sibling match for %s -> %s (from batch %s)", filename, vendor, batch_id)
-            return vendor
+    # Shipment reference: S-number like "S174310" or "S8830"
+    s_match = re.findall(r'\bS(\d{4,})', stem)
+    for m in s_match:
+        refs.append((m, "shipment"))
+        refs.append(("S" + m, "shipment"))
     
-    return None
+    # WTR (Warehouse Transfer Receipt): "WTR 1010", "WTR1011"
+    wtr_match = re.findall(r'WTR\s*(\d{3,})', stem, re.IGNORECASE)
+    for m in wtr_match:
+        refs.append((m, "wtr"))
+        refs.append(("WTR" + m, "wtr"))
+    
+    # PO reference: "P0023772" or similar
+    po_match = re.findall(r'\b(P\d{6,})', stem, re.IGNORECASE)
+    for m in po_match:
+        refs.append((m, "po"))
+    
+    # Standalone 6-digit numbers (could be shipment/order numbers)
+    # Be selective: only if no other refs found and filename suggests shipping
+    if not refs:
+        standalone = re.findall(r'\b(\d{6})\b', stem)
+        for m in standalone:
+            refs.append((m, "standalone"))
+    
+    # W-numbers: W117543
+    w_match = re.findall(r'\b(W\d{5,})', stem, re.IGNORECASE)
+    for m in w_match:
+        refs.append((m, "warehouse"))
+    
+    # CN numbers: CN000107C
+    cn_match = re.findall(r'\b(CN\d{4,}\w*)', stem, re.IGNORECASE)
+    for m in cn_match:
+        refs.append((m, "container"))
+    
+    return refs
+
+
+async def infer_vendor_from_bc_references(db, filename: str) -> Tuple[Optional[str], str, list]:
+    """
+    Cross-reference document numbers from filename against BC cache.
+    
+    Searches bc_reference_cache for posted shipments, sales orders, and
+    purchase orders that match reference numbers found in the filename.
+    
+    Returns (vendor_name, method, matched_refs) or (None, "none", []).
+    """
+    refs = extract_reference_numbers(filename)
+    if not refs:
+        return None, "none", []
+    
+    for ref_value, ref_type in refs:
+        normalized = ref_value.strip().upper()
+        if not normalized:
+            continue
+        
+        # Search bc_reference_cache for this reference
+        query = {
+            "$or": [
+                {"normalized_document_no": normalized},
+                {"bc_document_no": normalized},
+                {"bc_external_document_no": normalized},
+                {"normalized_external_ref": normalized},
+                {"bc_order_number": normalized},
+            ]
+        }
+        
+        hit = await db.bc_reference_cache.find_one(query, {"_id": 0})
+        
+        if hit:
+            # Extract vendor info from the BC record
+            vendor = (
+                hit.get("bc_vendor_name") or hit.get("bc_customer_name")
+                or hit.get("bc_sell_to_customer_name") or hit.get("bc_buy_from_vendor_name")
+                or ""
+            )
+            vendor_no = hit.get("bc_vendor_no") or hit.get("bc_customer_no") or ""
+            entity_type = hit.get("bc_entity_type", "")
+            
+            if vendor:
+                logger.info(
+                    "[VendorInfer:BC] %s -> ref=%s type=%s -> vendor=%s (%s)",
+                    filename[:40], normalized, entity_type, vendor, ref_type,
+                )
+                return vendor, f"bc_cache_{ref_type}", [(ref_value, entity_type, vendor)]
+            elif vendor_no:
+                logger.info(
+                    "[VendorInfer:BC] %s -> ref=%s -> vendor_no=%s (no name)",
+                    filename[:40], normalized, vendor_no,
+                )
+                return vendor_no, f"bc_cache_{ref_type}_no", [(ref_value, entity_type, vendor_no)]
+    
+    return None, "none", []
+
+
+async def infer_vendor_async(
+    db, filename: str, extracted_fields: Optional[Dict] = None,
+    batch_id: Optional[str] = None,
+) -> Tuple[Optional[str], str]:
+    """
+    Full async vendor inference including DB-backed strategies.
+    
+    Tries all synchronous strategies first, then:
+    5. BC reference cache cross-reference (BOL/shipment numbers)
+    6. Sibling document inference (same batch/email)
+    
+    Returns (vendor_name, method).
+    """
+    # Try synchronous strategies first
+    vendor, method = infer_vendor(filename, extracted_fields)
+    if vendor or method in ("noise_file", "no_vendor_expected"):
+        return vendor, method
+    
+    # Strategy 5: BC reference cache cross-reference
+    if db is not None:
+        try:
+            vendor, method, refs = await infer_vendor_from_bc_references(db, filename)
+            if vendor:
+                return vendor, method
+        except Exception as e:
+            logger.debug("[VendorInfer:BC] Error: %s", e)
+    
+    # Strategy 6: Sibling document inference
+    if db is not None and batch_id:
+        try:
+            vendor = await infer_vendor_from_siblings(db, filename, batch_id)
+            if vendor:
+                return vendor, "sibling_batch"
+        except Exception as e:
+            logger.debug("[VendorInfer:Sibling] Error: %s", e)
+    
+    return None, "none"

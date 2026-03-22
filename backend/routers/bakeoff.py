@@ -568,6 +568,37 @@ async def _find_hub_document(db, document_id: str, file_name: str):
 
 
 
+async def _normalize_vendor_casing(db, run_id: str, vendor_name: str) -> str:
+    """
+    Check if a vendor name already exists in this benchmark run with different casing.
+    If so, return the existing casing to avoid duplicate vendor entries in breakdowns.
+    """
+    existing = await db[DOCS_COLL].find_one(
+        {
+            "run_id": run_id,
+            "gpi_vendor": {"$regex": f"^{re.escape(vendor_name)}$", "$options": "i"},
+            "gpi_vendor": {"$ne": vendor_name},
+        },
+        {"_id": 0, "gpi_vendor": 1}
+    )
+    if existing and existing.get("gpi_vendor"):
+        return existing["gpi_vendor"]
+    
+    # Also check vendor_truth
+    existing2 = await db[DOCS_COLL].find_one(
+        {
+            "run_id": run_id,
+            "vendor_truth": {"$regex": f"^{re.escape(vendor_name)}$", "$options": "i"},
+        },
+        {"_id": 0, "vendor_truth": 1}
+    )
+    if existing2 and existing2.get("vendor_truth"):
+        return existing2["vendor_truth"]
+    
+    return vendor_name
+
+
+
 @router.post("/runs/{run_id}/auto-populate")
 async def auto_populate_gpi(run_id: str, seed_truth: bool = Query(True, description="Seed empty truth fields from GPI extraction")):
     """Auto-populate GPI fields from existing hub_documents collection.
@@ -709,27 +740,37 @@ async def auto_populate_gpi(run_id: str, seed_truth: bool = Query(True, descript
             )
             linked += 1
         else:
-            # No hub_doc match — try vendor inference from filename/patterns
+            # No hub_doc match — try vendor inference from filename/patterns + BC cross-ref
             fname = doc.get("file_name", "")
             infer_updates = {"updated_at": datetime.now(timezone.utc).isoformat()}
             try:
-                from services.vendor_inference_service import infer_vendor, is_noise_file
+                from services.vendor_inference_service import (
+                    infer_vendor, infer_vendor_async, is_noise_file, is_no_vendor_expected,
+                )
                 if is_noise_file(fname):
                     infer_updates["gpi_doc_type"] = "Not_Document"
                     infer_updates["doc_type_truth"] = "Not_Document"
                     infer_updates["gpi_notes"] = "Noise file (not a business document)"
+                elif is_no_vendor_expected(fname):
+                    infer_updates["gpi_notes"] = "No vendor expected for this document type"
+                    infer_updates["vendor_truth"] = "N/A"
                 else:
-                    inferred_vendor, infer_method = infer_vendor(fname)
+                    # Try sync inference first, then async BC cross-reference
+                    inferred_vendor, infer_method = await infer_vendor_async(
+                        db, fname, doc.get("extracted_fields")
+                    )
                     if inferred_vendor:
-                        infer_updates["gpi_vendor"] = inferred_vendor
+                        # Normalize casing: check if vendor exists in run with different case
+                        normalized_vendor = await _normalize_vendor_casing(db, run_id, inferred_vendor)
+                        infer_updates["gpi_vendor"] = normalized_vendor
                         infer_updates["gpi_ingested"] = True
                         infer_updates["gpi_notes"] = f"Vendor inferred: {infer_method}"
                         if seed_truth and not doc.get("vendor_truth"):
-                            infer_updates["vendor_truth"] = inferred_vendor
+                            infer_updates["vendor_truth"] = normalized_vendor
                             truth_seeded += 1
                         vendor_inferred += 1
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("[AutoPopulate] Inference error for %s: %s", fname, e)
 
             # Seed folder_truth from S9 if available
             if seed_truth and not doc.get("folder_truth") and doc.get("s9_folder_output"):

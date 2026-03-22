@@ -39,6 +39,14 @@ codeunit 50105 "GPI Document Link Mgt"
     end;
 
     /// <summary>
+    /// Public accessor for the Hub base URL. Used by the factbox iframe.
+    /// </summary>
+    procedure GetHubBaseUrl(): Text
+    begin
+        exit(GetGPIHubUrl());
+    end;
+
+    /// <summary>
     /// Map a GPI Doc Link Type enum to the Hub API entity path segment.
     /// </summary>
     procedure DocTypeToEntity(DocType: Enum "GPI Doc Link Type"): Text
@@ -300,6 +308,7 @@ codeunit 50105 "GPI Document Link Mgt"
     procedure MigrateZetadocsLinks(): Text
     var
         Client: HttpClient;
+        EmptyContent: HttpContent;
         Response: HttpResponseMessage;
         ResponseText: Text;
         RequestUrl: Text;
@@ -307,7 +316,7 @@ codeunit 50105 "GPI Document Link Mgt"
         Initialize();
         RequestUrl := GPIHubBaseUrl + '/gpi-integration/document-links/migrate-from-zetadocs';
 
-        if not Client.Post(RequestUrl, Response) then
+        if not Client.Post(RequestUrl, EmptyContent, Response) then
             exit('Failed to connect to GPI Hub.');
 
         Response.Content().ReadAs(ResponseText);

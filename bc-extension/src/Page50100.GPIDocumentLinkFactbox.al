@@ -72,7 +72,7 @@ page 50100 "GPI Document Link Factbox"
 
     local procedure NavigateToFactbox()
     var
-        GPISetup: Codeunit "GPI Document Link Mgt";
+        GPILinkMgt: Codeunit "GPI Document Link Mgt";
         HubBaseUrl: Text;
         BCEntity: Text;
         FactboxUrl: Text;
@@ -82,7 +82,7 @@ page 50100 "GPI Document Link Factbox"
         if CurrentBCDocumentNo = '' then
             exit;
 
-        HubBaseUrl := GPISetup.GetHubBaseUrl();
+        HubBaseUrl := GPILinkMgt.GetHubBaseUrl();
         BCEntity := GetBCEntityFromDocType(CurrentDocType);
 
         FactboxUrl := HubBaseUrl + '/api/gpi-integration/factbox-ui/' + BCEntity + '/' + CurrentBCDocumentNo;

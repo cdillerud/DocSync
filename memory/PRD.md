@@ -97,6 +97,14 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - **Workflow engine**: Added `SH_INVOICE` DocType, `PENDING_APPROVAL` status, `SH_APPROVED`/`SH_REJECTED` events
 - Tests: 20 pytest cases covering doc type, workflow, cost-only SO, processor assignment, queue
 
+### BC Factbox UI (Mar 22, 2026 — Session 3)
+- Self-contained HTML page at `GET /api/gpi-integration/factbox-ui/{bc_entity}/{bc_document_no}`
+- Embeddable in BC control add-in iframe (cross-origin: `X-Frame-Options: ALLOWALL`, `frame-ancestors *`)
+- Shows linked documents list (file name link, date, source badge, delete button)
+- Drag-and-drop + click-to-browse upload zone (25MB limit, FormData POST, auto-refresh)
+- Source badges: GPI Hub (blue), BC Drop (green), Legacy (gray)
+- All CSS/JS inline — zero external dependencies
+
 ## P0/P1/P2 Backlog
 
 ### P0
@@ -117,6 +125,7 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - `POST /api/gpi-integration/sales-orders/cost-only-from-document/{doc_id}`
 - `POST /api/admin/sh-invoice/{doc_id}/assign-processor`
 - `GET /api/admin/sh-invoice/queue`
+- `GET /api/gpi-integration/factbox-ui/{bc_entity}/{bc_document_no}` (self-contained HTML for BC iframe)
 - `GET /api/feedback-loop/health`
 - `POST /api/reprocess-comparison/run`
 - `GET /api/reprocess-comparison/status`

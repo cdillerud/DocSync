@@ -35,7 +35,7 @@ codeunit 50105 "GPI Document Link Mgt"
     begin
         // TODO: Read from a GPI Hub Setup table record.
         // For now, return the configured URL.
-        exit('https://gpi-hub.company.com/api');
+        exit('https://http://4.204.41.190:8080/');
     end;
 
     /// <summary>

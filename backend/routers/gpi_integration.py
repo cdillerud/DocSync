@@ -26,6 +26,7 @@ from typing import Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from deps import get_db
@@ -2380,6 +2381,408 @@ def bc_entity_to_doc_type(entity: str) -> str:
         "purchaseInvoices": "AP_Invoice",
         "salesOrders": "Sales_Order",
     }.get(entity, "Document")
+
+
+# =========================================================================
+# FACTBOX UI — Self-contained HTML page for BC iframe embedding
+# =========================================================================
+
+@router.get("/factbox-ui/{bc_entity}/{bc_document_no}", response_class=HTMLResponse)
+async def factbox_ui(bc_entity: str, bc_document_no: str, request: Request):
+    """Serve a self-contained HTML page for embedding in a BC control add-in iframe.
+
+    Shows linked documents with upload/delete capability. All CSS/JS inline.
+    Works cross-origin (BC SaaS domain calling the hub domain).
+    """
+    # Use relative API path so JS works from any origin
+    api_path = f"/api/gpi-integration/document-links/{bc_entity}/{bc_document_no}"
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Documents — {bc_document_no}</title>
+<style>
+  *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 13px;
+    color: #1a1a2e;
+    background: #fff;
+    padding: 10px 12px;
+    line-height: 1.4;
+  }}
+
+  /* Header */
+  .hdr {{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #e2e8f0;
+  }}
+  .hdr h1 {{
+    font-size: 13px;
+    font-weight: 600;
+    color: #334155;
+    letter-spacing: -0.01em;
+  }}
+  .hdr .cnt {{
+    font-size: 11px;
+    color: #64748b;
+    background: #f1f5f9;
+    padding: 2px 7px;
+    border-radius: 10px;
+    font-weight: 500;
+  }}
+
+  /* Document list */
+  .doc-list {{ list-style: none; }}
+  .doc-row {{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 4px;
+    border-bottom: 1px solid #f1f5f9;
+    transition: background 0.15s;
+  }}
+  .doc-row:hover {{ background: #f8fafc; }}
+  .doc-row:last-child {{ border-bottom: none; }}
+
+  .doc-info {{ flex: 1; min-width: 0; }}
+  .doc-name {{
+    display: block;
+    font-size: 12px;
+    font-weight: 500;
+    color: #2563eb;
+    text-decoration: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }}
+  .doc-name:hover {{ text-decoration: underline; color: #1d4ed8; }}
+  .doc-meta {{
+    font-size: 10px;
+    color: #94a3b8;
+    margin-top: 1px;
+  }}
+
+  /* Source badges */
+  .badge {{
+    font-size: 9px;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }}
+  .badge-hub {{ background: #dbeafe; color: #1e40af; }}
+  .badge-drop {{ background: #dcfce7; color: #166534; }}
+  .badge-legacy {{ background: #f1f5f9; color: #64748b; }}
+
+  /* Delete button */
+  .del-btn {{
+    width: 20px;
+    height: 20px;
+    border: none;
+    background: transparent;
+    color: #cbd5e1;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    border-radius: 3px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+  }}
+  .del-btn:hover {{ background: #fee2e2; color: #dc2626; }}
+
+  /* Empty state */
+  .empty {{
+    text-align: center;
+    padding: 20px 10px;
+    color: #94a3b8;
+    font-size: 12px;
+  }}
+
+  /* Upload drop zone */
+  .dropzone {{
+    margin-top: 10px;
+    border: 2px dashed #cbd5e1;
+    border-radius: 6px;
+    padding: 14px 10px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: #fafbfc;
+  }}
+  .dropzone:hover, .dropzone.drag-over {{
+    border-color: #2563eb;
+    background: #eff6ff;
+  }}
+  .dropzone-text {{
+    font-size: 11px;
+    color: #64748b;
+    pointer-events: none;
+  }}
+  .dropzone-text strong {{ color: #2563eb; }}
+
+  /* Upload progress */
+  .upload-status {{
+    margin-top: 6px;
+    font-size: 11px;
+    text-align: center;
+    min-height: 16px;
+  }}
+  .upload-status.uploading {{ color: #2563eb; }}
+  .upload-status.success {{ color: #16a34a; }}
+  .upload-status.error {{ color: #dc2626; }}
+
+  /* Spinner */
+  @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+  .spinner {{
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid #bfdbfe;
+    border-top-color: #2563eb;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    vertical-align: middle;
+    margin-right: 4px;
+  }}
+
+  /* Loading state */
+  .loading {{
+    text-align: center;
+    padding: 24px 10px;
+    color: #94a3b8;
+    font-size: 12px;
+  }}
+
+  /* Error banner */
+  .err-banner {{
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    color: #991b1b;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    margin-bottom: 8px;
+    display: none;
+  }}
+</style>
+</head>
+<body>
+
+<div class="err-banner" id="errBanner"></div>
+
+<div class="hdr">
+  <h1>Linked Documents</h1>
+  <span class="cnt" id="docCount">...</span>
+</div>
+
+<div id="docListWrap">
+  <div class="loading"><span class="spinner"></span> Loading...</div>
+</div>
+
+<div class="dropzone" id="dropzone">
+  <div class="dropzone-text">
+    Drag files here or <strong>click to browse</strong>
+  </div>
+</div>
+<input type="file" id="fileInput" style="display:none" multiple>
+
+<div class="upload-status" id="uploadStatus"></div>
+
+<script>
+(function() {{
+  const API = "{api_path}";
+  const listWrap = document.getElementById("docListWrap");
+  const countEl  = document.getElementById("docCount");
+  const dropzone = document.getElementById("dropzone");
+  const fileInput = document.getElementById("fileInput");
+  const statusEl = document.getElementById("uploadStatus");
+  const errBanner = document.getElementById("errBanner");
+
+  function fmtDate(iso) {{
+    if (!iso) return "";
+    try {{
+      const d = new Date(iso);
+      if (isNaN(d)) return "";
+      return String(d.getMonth()+1).padStart(2,"0") + "/"
+           + String(d.getDate()).padStart(2,"0") + "/"
+           + d.getFullYear();
+    }} catch(e) {{ return ""; }}
+  }}
+
+  function badgeClass(src) {{
+    if (!src) return "badge-legacy";
+    const s = src.toLowerCase();
+    if (s === "hub" || s.includes("gpi")) return "badge-hub";
+    if (s === "bc_drop" || s.includes("drop")) return "badge-drop";
+    return "badge-legacy";
+  }}
+
+  function badgeLabel(src) {{
+    if (!src) return "Legacy";
+    const s = src.toLowerCase();
+    if (s === "hub" || s.includes("gpi")) return "GPI Hub";
+    if (s === "bc_drop" || s.includes("drop")) return "BC Drop";
+    return "Legacy";
+  }}
+
+  function showError(msg) {{
+    errBanner.textContent = msg;
+    errBanner.style.display = "block";
+    setTimeout(() => {{ errBanner.style.display = "none"; }}, 6000);
+  }}
+
+  async function loadDocs() {{
+    listWrap.innerHTML = '<div class="loading"><span class="spinner"></span> Loading...</div>';
+    try {{
+      const resp = await fetch(API);
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const data = await resp.json();
+      const docs = data.documents || [];
+      countEl.textContent = docs.length;
+
+      if (docs.length === 0) {{
+        listWrap.innerHTML = '<div class="empty">No documents linked yet</div>';
+        return;
+      }}
+
+      let html = '<ul class="doc-list">';
+      for (const doc of docs) {{
+        const url = doc.sharepoint_web_url || "#";
+        const name = doc.file_name || "Untitled";
+        const date = fmtDate(doc.created_utc);
+        const src = doc.source || "";
+        const docId = doc.doc_id || "";
+
+        html += '<li class="doc-row">'
+          + '<div class="doc-info">'
+          +   '<a class="doc-name" href="' + url + '" target="_blank" rel="noopener" title="' + name + '">' + name + '</a>'
+          +   '<div class="doc-meta">' + date + '</div>'
+          + '</div>'
+          + '<span class="badge ' + badgeClass(src) + '">' + badgeLabel(src) + '</span>'
+          + '<button class="del-btn" data-id="' + docId + '" title="Remove link">&times;</button>'
+          + '</li>';
+      }}
+      html += '</ul>';
+      listWrap.innerHTML = html;
+
+      // Attach delete handlers
+      listWrap.querySelectorAll(".del-btn").forEach(btn => {{
+        btn.addEventListener("click", async function(e) {{
+          e.stopPropagation();
+          const id = this.dataset.id;
+          if (!id) return;
+          if (!confirm("Remove this document link?")) return;
+          this.disabled = true;
+          this.textContent = "...";
+          try {{
+            const resp = await fetch(API + "/" + encodeURIComponent(id), {{ method: "DELETE" }});
+            if (!resp.ok) throw new Error("HTTP " + resp.status);
+            loadDocs();
+          }} catch(err) {{
+            showError("Delete failed: " + err.message);
+            this.disabled = false;
+            this.textContent = "\\u00d7";
+          }}
+        }});
+      }});
+
+    }} catch(err) {{
+      listWrap.innerHTML = '<div class="empty">Failed to load documents</div>';
+      showError("Load error: " + err.message);
+      countEl.textContent = "!";
+    }}
+  }}
+
+  // Upload logic
+  async function uploadFiles(files) {{
+    if (!files || files.length === 0) return;
+
+    for (const file of files) {{
+      if (file.size > 25 * 1024 * 1024) {{
+        showError(file.name + " exceeds 25 MB limit");
+        continue;
+      }}
+
+      statusEl.className = "upload-status uploading";
+      statusEl.innerHTML = '<span class="spinner"></span> Uploading ' + file.name + '...';
+
+      try {{
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("uploaded_by", "BC Drop");
+
+        const resp = await fetch(API + "/upload", {{
+          method: "POST",
+          body: fd,
+        }});
+
+        if (!resp.ok) {{
+          const errData = await resp.json().catch(() => ({{}}));
+          throw new Error(errData.detail || "HTTP " + resp.status);
+        }}
+
+        statusEl.className = "upload-status success";
+        statusEl.textContent = file.name + " uploaded";
+        setTimeout(() => {{ statusEl.textContent = ""; statusEl.className = "upload-status"; }}, 3000);
+        loadDocs();
+
+      }} catch(err) {{
+        statusEl.className = "upload-status error";
+        statusEl.textContent = "Upload failed: " + err.message;
+        setTimeout(() => {{ statusEl.textContent = ""; statusEl.className = "upload-status"; }}, 5000);
+      }}
+    }}
+  }}
+
+  // Drag and drop
+  dropzone.addEventListener("dragover", function(e) {{
+    e.preventDefault();
+    e.stopPropagation();
+    this.classList.add("drag-over");
+  }});
+  dropzone.addEventListener("dragleave", function(e) {{
+    e.preventDefault();
+    e.stopPropagation();
+    this.classList.remove("drag-over");
+  }});
+  dropzone.addEventListener("drop", function(e) {{
+    e.preventDefault();
+    e.stopPropagation();
+    this.classList.remove("drag-over");
+    uploadFiles(e.dataTransfer.files);
+  }});
+  dropzone.addEventListener("click", function() {{
+    fileInput.click();
+  }});
+  fileInput.addEventListener("change", function() {{
+    uploadFiles(this.files);
+    this.value = "";
+  }});
+
+  // Initial load
+  loadDocs();
+}})();
+</script>
+</body>
+</html>"""
+
+    return HTMLResponse(content=html, headers={
+        "X-Frame-Options": "ALLOWALL",
+        "Content-Security-Policy": "frame-ancestors *",
+    })
 
 
 async def _fetch_bc_document_links(bc_document_no: str) -> list:

@@ -161,6 +161,10 @@ export const bulkFileAndClear = (docIds) => api.post('/documents/bulk-file-and-c
 export const bulkApproveAndFile = (category, limit = 500) => api.post(`/documents/bulk-approve-and-file?category=${category || 'needs_approval'}&limit=${limit}`);
 export const getFilingStats = () => api.get('/documents/filing-actions/stats');
 
+// Reference Intelligence
+export const batchAutoResolve = (statusFilter = 'not_run', limit = 500) => api.post(`/admin/batch-auto-resolve?status_filter=${statusFilter}&limit=${limit}`);
+export const triggerAutoResolve = (docId) => api.post(`/documents/${docId}/auto-resolve`);
+
 // Workflows
 export const listWorkflows = (params) => api.get('/workflows', { params });
 export const getWorkflow = (id) => api.get(`/workflows/${id}`);

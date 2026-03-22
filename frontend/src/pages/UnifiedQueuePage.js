@@ -23,7 +23,7 @@ const INTEL_STATUS_CONFIG = {
   retry_scheduled: { label: 'Retry', cls: 'bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/30 dark:text-orange-300' },
   not_run: { label: 'Not Run', cls: 'bg-gray-100 text-gray-500 border-gray-200 dark:bg-gray-800 dark:text-gray-400' },
 };
-import api, { bulkResubmitDocuments, bulkDeleteDocuments, deleteDocument, bulkFileAndClear } from "@/lib/api";
+import api, { bulkResubmitDocuments, bulkDeleteDocuments, deleteDocument, bulkFileAndClear, batchAutoResolve, triggerAutoResolve } from "@/lib/api";
 import BatchFreightClassifyDialog from "@/components/BatchFreightClassifyDialog";
 
 // Document types and their display names (fallback labels for known types)
@@ -329,6 +329,44 @@ export default function UnifiedQueuePage() {
     }
   };
 
+  // Bulk ref intel handler — run reference intelligence on selected docs (or all not_run)
+  const handleBulkRefIntel = async () => {
+    const useSelected = selectedDocs.size > 0;
+    const msg = useSelected
+      ? `Run Reference Intelligence on ${selectedDocs.size} selected document(s)?`
+      : 'Run Reference Intelligence on ALL documents with "Not Run" status?';
+    if (!window.confirm(msg)) return;
+
+    setBulkProcessing(true);
+    try {
+      if (useSelected) {
+        // Trigger per-doc for selected
+        let ok = 0, fail = 0;
+        for (const docId of selectedDocs) {
+          try {
+            await triggerAutoResolve(docId);
+            ok++;
+          } catch {
+            fail++;
+          }
+        }
+        toast.success(`Queued ${ok} documents for ref intel. ${fail} failed.`);
+      } else {
+        // Batch all not_run
+        const res = await batchAutoResolve('not_run', 500);
+        const data = res.data || res;
+        toast.success(`Queued ${data.enqueued || 0} documents for ref intel.`);
+      }
+      setSelectedDocs(new Set());
+      // Delay refresh slightly so the worker has time to start
+      setTimeout(() => { fetchDocuments(); fetchStats(); }, 3000);
+    } catch (err) {
+      toast.error('Ref intel failed: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setBulkProcessing(false);
+    }
+  };
+
   // Single delete handler
   const handleSingleDelete = async (e, docId, fileName) => {
     e.stopPropagation();
@@ -599,6 +637,22 @@ export default function UnifiedQueuePage() {
                 <FolderInput className="w-3.5 h-3.5" />
               )}
               File ({selectedDocs.size})
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5"
+              onClick={handleBulkRefIntel}
+              disabled={bulkProcessing}
+              data-testid="bulk-ref-intel-btn"
+            >
+              {bulkProcessing ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Brain className="w-3.5 h-3.5" />
+              )}
+              {selectedDocs.size > 0 ? `Ref Intel (${selectedDocs.size})` : 'Run Ref Intel'}
             </Button>
           </div>
         </CardContent>

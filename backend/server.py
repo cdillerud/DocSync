@@ -7625,6 +7625,29 @@ async def startup():
     auto_resolve = set_auto_resolve_service(db, ref_intel_service, event_service)
     auto_resolve.start()
     logger.info("Auto-Resolution Service initialized (5 workers)")
+
+    # ── Startup: Re-queue any "not_run" docs that were lost from in-memory queue ──
+    async def _startup_requeue_not_run():
+        """Scan for docs with ref intel = not_run and enqueue them."""
+        await asyncio.sleep(10)  # Let all services finish initializing
+        svc = get_auto_resolve_service()
+        if not svc:
+            return
+        query = {"reference_intelligence_status": {"$in": [None, "not_run"]}}
+        not_run_docs = await db.hub_documents.find(
+            query, {"id": 1, "_id": 0}
+        ).limit(500).to_list(500)
+        if not_run_docs:
+            for doc in not_run_docs:
+                await svc.enqueue(doc["id"])
+            logger.info(
+                "[Startup] Re-queued %d documents with not_run ref intel status",
+                len(not_run_docs),
+            )
+        else:
+            logger.info("[Startup] No not_run documents to re-queue")
+
+    asyncio.create_task(_startup_requeue_not_run())
     
     # Initialize Vendor Intelligence Service
     vendor_intel = set_vendor_intelligence_service(db, event_service)

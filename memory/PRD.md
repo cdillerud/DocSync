@@ -123,4 +123,10 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - "File" button added to Documents Queue, right next to "Show auto-cleared"
 - Select multiple documents via checkboxes → click "File (N)" → routes all selected to their destination SharePoint folders and marks as completed
 - Uses existing `POST /api/documents/bulk-file-and-clear` endpoint
-- Also records filing actions for AI learning and positive classification confirmation
+
+### Run Ref Intel Button + Startup Requeue (Mar 22, 2026 — Session 2)
+- "Run Ref Intel" button added next to File button on Documents Queue
+- When docs selected: triggers ref intel per-doc for selected items
+- When no docs selected: batch-triggers ALL "Not Run" docs (up to 500)
+- **Startup requeue**: Server now auto-scans for "not_run" ref intel docs on startup and re-enqueues them
+- Root cause of "Not Run" docs: in-memory asyncio.Queue lost on server restart — startup requeue prevents this permanently

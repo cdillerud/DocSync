@@ -146,7 +146,49 @@ async def list_documents(
     if category:
         fq["category"] = category
     if search:
-        search_cond = {"file_name": {"$regex": search, "$options": "i"}}
+        search_term = search.strip()
+
+        # Check if it looks like a dollar amount
+        amount_search = None
+        try:
+            cleaned = search_term.replace("$", "").replace(",", "")
+            amount_val = float(cleaned)
+            amount_search = {"amount_float": amount_val}
+        except ValueError:
+            pass
+
+        # Build multi-field regex conditions (always available, no index needed)
+        regex_cond = {"$regex": search_term, "$options": "i"}
+        text_conditions = {"$or": [
+            {"file_name": regex_cond},
+            {"vendor_canonical": regex_cond},
+            {"vendor_raw": regex_cond},
+            {"invoice_number_clean": regex_cond},
+            {"po_number_clean": regex_cond},
+            {"extracted_fields.vendor": regex_cond},
+            {"extracted_fields.invoice_number": regex_cond},
+            {"extracted_fields.po_number": regex_cond},
+            {"extracted_fields.customer": regex_cond},
+            {"bc_document_no": regex_cond},
+        ]}
+        if amount_search:
+            text_conditions["$or"].append(amount_search)
+
+        # Try $text search first (better ranking, faster at scale)
+        # Fall back to regex if text index not ready
+        # Note: $text cannot be inside $or, so skip $text when amount matching is needed
+        if amount_search:
+            search_cond = text_conditions
+        else:
+            try:
+                text_search_cond = {"$text": {"$search": search_term}}
+                test_fq = {k: v for k, v in fq.items()}
+                test_fq.update(text_search_cond)
+                await db.hub_documents.count_documents(test_fq)
+                search_cond = text_search_cond
+            except Exception:
+                search_cond = text_conditions
+
         if "$and" in fq:
             fq["$and"].append(search_cond)
         else:
@@ -259,6 +301,118 @@ async def get_bootstrap_status_endpoint():
     """Check the status of a running bootstrap sweep."""
     from services.classification_feedback_service import get_bootstrap_status
     return get_bootstrap_status()
+
+
+@router.get("/search")
+async def search_documents(
+    q: str = Query(..., min_length=1, description="Search query"),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Dedicated search endpoint with match-field highlights."""
+    db = get_db()
+    search_term = q.strip()
+
+    # Amount detection
+    amount_match = None
+    try:
+        cleaned = search_term.replace("$", "").replace(",", "")
+        amount_match = float(cleaned)
+    except ValueError:
+        pass
+
+    # Searchable field definitions (field_name, weight for display order)
+    SEARCH_FIELDS = [
+        "file_name", "vendor_canonical", "vendor_raw",
+        "invoice_number_clean", "po_number_clean",
+        "extracted_fields.vendor", "extracted_fields.invoice_number",
+        "extracted_fields.po_number", "extracted_fields.customer",
+        "bc_document_no",
+    ]
+
+    projection = {
+        "_id": 0, "id": 1, "file_name": 1, "doc_type": 1, "document_type": 1,
+        "vendor_canonical": 1, "vendor_raw": 1,
+        "invoice_number_clean": 1, "po_number_clean": 1,
+        "amount_float": 1, "workflow_status": 1, "status": 1,
+        "created_utc": 1, "extracted_fields": 1,
+        "sharepoint_web_url": 1, "bc_document_no": 1,
+    }
+
+    # Try $text search first
+    docs = []
+    used_text = False
+    try:
+        text_query = {"$text": {"$search": search_term}, "is_duplicate": {"$ne": True}}
+        cursor = db.hub_documents.find(text_query, {**projection, "score": {"$meta": "textScore"}})
+        cursor = cursor.sort([("score", {"$meta": "textScore"})]).limit(limit)
+        docs = await cursor.to_list(limit)
+        used_text = True
+        # If amount search, also query by amount and merge results
+        if amount_match is not None:
+            amount_docs = await db.hub_documents.find(
+                {"amount_float": amount_match, "is_duplicate": {"$ne": True}},
+                projection,
+            ).limit(limit).to_list(limit)
+            seen_ids = {d.get("id") for d in docs}
+            for ad in amount_docs:
+                if ad.get("id") not in seen_ids:
+                    docs.append(ad)
+    except Exception:
+        pass
+
+    # Fallback to regex if $text failed or returned nothing
+    if not docs:
+        regex_cond = {"$regex": search_term, "$options": "i"}
+        or_clauses = [{f: regex_cond} for f in SEARCH_FIELDS]
+        if amount_match is not None:
+            or_clauses.append({"amount_float": amount_match})
+        regex_query = {"$or": or_clauses, "is_duplicate": {"$ne": True}}
+        docs = await db.hub_documents.find(regex_query, projection).sort("created_utc", -1).limit(limit).to_list(limit)
+
+    # Compute match_fields for each result
+    import re
+    pattern = re.compile(re.escape(search_term), re.IGNORECASE)
+
+    def _get_nested(doc, path):
+        parts = path.split(".")
+        val = doc
+        for p in parts:
+            if isinstance(val, dict):
+                val = val.get(p)
+            else:
+                return None
+        return val
+
+    results = []
+    for doc in docs:
+        match_fields = []
+        for f in SEARCH_FIELDS:
+            val = _get_nested(doc, f)
+            if val and isinstance(val, str) and pattern.search(val):
+                match_fields.append(f)
+        if amount_match is not None and doc.get("amount_float") == amount_match:
+            match_fields.append("amount_float")
+
+        results.append({
+            "doc_id": doc.get("id", ""),
+            "file_name": doc.get("file_name", ""),
+            "document_type": doc.get("doc_type") or doc.get("document_type", ""),
+            "vendor_canonical": doc.get("vendor_canonical", ""),
+            "invoice_number_clean": doc.get("invoice_number_clean", ""),
+            "po_number_clean": doc.get("po_number_clean", ""),
+            "amount_float": doc.get("amount_float"),
+            "workflow_status": doc.get("workflow_status") or doc.get("status", ""),
+            "created_utc": doc.get("created_utc", ""),
+            "match_fields": match_fields,
+            "sharepoint_web_url": doc.get("sharepoint_web_url", ""),
+        })
+
+    return {
+        "query": search_term,
+        "total": len(results),
+        "results": results,
+        "search_method": "text_index" if used_text else "regex_fallback",
+    }
 
 
 @router.get("/{doc_id}")

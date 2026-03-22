@@ -7439,6 +7439,39 @@ async def startup():
         await db.vendor_aliases.create_index("vendor_id")
     except Exception:
         pass
+    # Full-text search index for multi-field document search
+    try:
+        await db.hub_documents.create_index(
+            [
+                ("file_name", "text"),
+                ("vendor_canonical", "text"),
+                ("vendor_raw", "text"),
+                ("invoice_number_clean", "text"),
+                ("po_number_clean", "text"),
+                ("extracted_fields.vendor", "text"),
+                ("extracted_fields.invoice_number", "text"),
+                ("extracted_fields.po_number", "text"),
+                ("extracted_fields.customer", "text"),
+                ("raw_text", "text"),
+            ],
+            name="hub_documents_fulltext",
+            weights={
+                "invoice_number_clean": 10,
+                "po_number_clean": 10,
+                "vendor_canonical": 8,
+                "file_name": 6,
+                "extracted_fields.vendor": 5,
+                "extracted_fields.invoice_number": 5,
+                "extracted_fields.po_number": 5,
+                "extracted_fields.customer": 4,
+                "vendor_raw": 3,
+                "raw_text": 1,
+            },
+            default_language="english",
+        )
+    except Exception as e:
+        logger.warning("Full-text index creation skipped (may already exist with different config): %s", e)
+
     # Vendor match rejections indexes
     try:
         await db.vendor_match_rejections.create_index(

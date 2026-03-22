@@ -113,6 +113,14 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - Priority: local > sharepoint (proxy) > share_link > web_url > none
 - Verified: All 4 scenarios tested and passing
 
+### Multi-Field Document Search (Mar 22, 2026 — Session 4)
+- MongoDB `$text` index on hub_documents with weighted fields (invoice/PO: 10, vendor: 8, filename: 6, raw_text: 1)
+- `GET /api/documents` search param now searches: file_name, vendor_canonical, vendor_raw, invoice_number_clean, po_number_clean, extracted_fields.*, bc_document_no, amount_float
+- Three-tier search: $text index (fast, ranked) → multi-field $regex fallback → amount_float exact match
+- Backward compatible: same URL, same response shape, just better results
+- New `GET /api/documents/search?q=...&limit=20` endpoint with match_fields highlights
+- Verified: vendor, PO, invoice, filename, and amount searches all working
+
 ## P0/P1/P2 Backlog
 
 ### P0
@@ -137,6 +145,7 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - `GET /api/documents/{doc_id}/pages` (page count + text previews)
 - `POST /api/documents/{doc_id}/split` (split PDF at page boundaries)
 - `POST /api/documents/{doc_id}/delete-pages` (remove pages in place)
+- `GET /api/documents/search?q=...&limit=20` (multi-field search with match highlights)
 - `GET /api/feedback-loop/health`
 - `POST /api/reprocess-comparison/run`
 - `GET /api/reprocess-comparison/status`

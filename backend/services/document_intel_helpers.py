@@ -1067,3 +1067,92 @@ For freight/transportation invoices, line items may include:
 - Extract these as line items with appropriate descriptions
 
 Only include fields that you can actually extract from the document. Leave out fields that are not present."""
+
+
+
+# Default warehouse location codes — overridable via hub_config key "wh_location_codes"
+WH_LOCATION_CODES = ["MSC", "00", "65", "MAIN", "WH"]
+
+# GPI address patterns for warehouse ship-to detection
+_GPI_ADDRESS_PATTERNS = [
+    "gamer packaging", "gpi", "minneapolis warehouse",
+    "gamer pack", "gamer pkg",
+]
+
+_DS_KEYWORDS = [
+    "drop ship", "dropship", "drop-ship", "direct ship",
+    "ship direct", "drop shipm", "ds order",
+]
+
+
+def _classify_so_subtype(doc: dict, extracted_fields: dict) -> str:
+    """Classify a Sales_Order as DS_Sales_Order or WH_Sales_Order.
+
+    Rules (priority order):
+    1. Keywords in raw text/description → DS_Sales_Order
+    2. Ship-to location code matches warehouse codes → WH_Sales_Order
+    3. Ship-to address contains GPI address patterns → WH_Sales_Order
+    4. External ship-to address → DS_Sales_Order
+    5. Ambiguous → Sales_Order (unchanged, needs review)
+
+    Never raises — returns "Sales_Order" on any error.
+    """
+    try:
+        # Gather text sources
+        raw_text = (
+            (doc.get("raw_text") or "")
+            + " " + (doc.get("ocr_text") or "")
+            + " " + (extracted_fields.get("description") or "")
+            + " " + (extracted_fields.get("notes") or "")
+            + " " + (extracted_fields.get("special_instructions") or "")
+        ).lower()
+
+        # Rule 1: DS keywords in text
+        for kw in _DS_KEYWORDS:
+            if kw in raw_text:
+                return "DS_Sales_Order"
+
+        # Rule 2: Ship-to location code matches warehouse codes
+        location_code = (
+            extracted_fields.get("ship_to_location_code")
+            or extracted_fields.get("location_code")
+            or extracted_fields.get("ship_to_code")
+            or ""
+        ).strip().upper()
+
+        # Try to load custom codes from hub_config (non-blocking)
+        wh_codes = WH_LOCATION_CODES
+        try:
+            import pymongo
+            client = pymongo.MongoClient("mongodb://localhost:27017")
+            cfg = client["gpi_document_hub"].hub_config.find_one(
+                {"key": "wh_location_codes"}, {"_id": 0}
+            )
+            if cfg and cfg.get("codes"):
+                wh_codes = [c.upper() for c in cfg["codes"]]
+        except Exception:
+            pass
+
+        if location_code and location_code in [c.upper() for c in wh_codes]:
+            return "WH_Sales_Order"
+
+        # Rule 3: Ship-to address contains GPI patterns
+        ship_to = (
+            (extracted_fields.get("ship_to") or "")
+            + " " + (extracted_fields.get("ship_to_address") or "")
+            + " " + (extracted_fields.get("ship_to_name") or "")
+        ).lower()
+
+        for pat in _GPI_ADDRESS_PATTERNS:
+            if pat in ship_to:
+                return "WH_Sales_Order"
+
+        # Rule 4: External ship-to (has an address but not GPI)
+        if ship_to.strip():
+            return "DS_Sales_Order"
+
+        # Rule 5: Ambiguous — no clear signal
+        return "Sales_Order"
+
+    except Exception:
+        return "Sales_Order"

@@ -40,6 +40,8 @@ class DocType(str, Enum):
     """
     AP_INVOICE = "AP_INVOICE"                     # Vendor invoices we receive (ZD00015)
     SALES_INVOICE = "SALES_INVOICE"               # Invoices we send (ZD00007)
+    DS_SALES_ORDER = "DS_SALES_ORDER"             # Drop-Ship Sales Order
+    WH_SALES_ORDER = "WH_SALES_ORDER"             # Warehouse Sales Order
     PURCHASE_ORDER = "PURCHASE_ORDER"             # Purchase orders (ZD00002)
     SALES_CREDIT_MEMO = "SALES_CREDIT_MEMO"       # Credit memos we issue (ZD00009)
     PURCHASE_CREDIT_MEMO = "PURCHASE_CREDIT_MEMO" # Credit memos we receive
@@ -201,6 +203,9 @@ class WorkflowEvent(str, Enum):
     ON_QUALITY_TAGGED = "on_quality_tagged"
     ON_REVIEW_STARTED = "on_review_started"
     
+    # SO subtype classification events
+    SO_SUBTYPE_CLASSIFIED = "so_subtype_classified"
+    
     # Triage events (OTHER)
     ON_TRIAGE_NEEDED = "on_triage_needed"
     ON_TRIAGE_COMPLETED = "on_triage_completed"
@@ -354,6 +359,80 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
         },
     },
     
+    # =========================================================================
+    # DS_SALES_ORDER: Drop-Ship Sales Order (same workflow as SALES_INVOICE)
+    # =========================================================================
+    DocType.DS_SALES_ORDER.value: {
+        None: {WorkflowEvent.ON_CAPTURE.value: WorkflowStatus.CAPTURED.value},
+        WorkflowStatus.CAPTURED.value: {
+            WorkflowEvent.ON_CLASSIFICATION_SUCCESS.value: WorkflowStatus.CLASSIFIED.value,
+            WorkflowEvent.ON_CLASSIFICATION_FAILED.value: WorkflowStatus.FAILED.value,
+        },
+        WorkflowStatus.CLASSIFIED.value: {
+            WorkflowEvent.ON_EXTRACTION_SUCCESS.value: WorkflowStatus.EXTRACTED.value,
+            WorkflowEvent.ON_EXTRACTION_LOW_CONFIDENCE.value: WorkflowStatus.DATA_CORRECTION_PENDING.value,
+            WorkflowEvent.ON_EXTRACTION_FAILED.value: WorkflowStatus.DATA_CORRECTION_PENDING.value,
+        },
+        WorkflowStatus.EXTRACTED.value: {
+            WorkflowEvent.ON_MARK_READY_FOR_APPROVAL.value: WorkflowStatus.READY_FOR_APPROVAL.value,
+            WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
+        },
+        WorkflowStatus.DATA_CORRECTION_PENDING.value: {
+            WorkflowEvent.ON_DATA_CORRECTED.value: WorkflowStatus.EXTRACTED.value,
+            WorkflowEvent.ON_ERROR.value: WorkflowStatus.FAILED.value,
+        },
+        WorkflowStatus.READY_FOR_APPROVAL.value: {
+            WorkflowEvent.ON_APPROVAL_STARTED.value: WorkflowStatus.APPROVAL_IN_PROGRESS.value,
+            WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
+            WorkflowEvent.ON_REJECTED.value: WorkflowStatus.REJECTED.value,
+        },
+        WorkflowStatus.APPROVAL_IN_PROGRESS.value: {
+            WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
+            WorkflowEvent.ON_REJECTED.value: WorkflowStatus.REJECTED.value,
+        },
+        WorkflowStatus.APPROVED.value: {WorkflowEvent.ON_EXPORTED.value: WorkflowStatus.EXPORTED.value},
+        WorkflowStatus.EXPORTED.value: {WorkflowEvent.ON_ARCHIVED.value: WorkflowStatus.ARCHIVED.value},
+        WorkflowStatus.REJECTED.value: {WorkflowEvent.ON_RETRY.value: WorkflowStatus.READY_FOR_APPROVAL.value},
+        WorkflowStatus.FAILED.value: {WorkflowEvent.ON_RETRY.value: WorkflowStatus.CAPTURED.value},
+    },
+
+    # =========================================================================
+    # WH_SALES_ORDER: Warehouse Sales Order (same workflow as SALES_INVOICE)
+    # =========================================================================
+    DocType.WH_SALES_ORDER.value: {
+        None: {WorkflowEvent.ON_CAPTURE.value: WorkflowStatus.CAPTURED.value},
+        WorkflowStatus.CAPTURED.value: {
+            WorkflowEvent.ON_CLASSIFICATION_SUCCESS.value: WorkflowStatus.CLASSIFIED.value,
+            WorkflowEvent.ON_CLASSIFICATION_FAILED.value: WorkflowStatus.FAILED.value,
+        },
+        WorkflowStatus.CLASSIFIED.value: {
+            WorkflowEvent.ON_EXTRACTION_SUCCESS.value: WorkflowStatus.EXTRACTED.value,
+            WorkflowEvent.ON_EXTRACTION_LOW_CONFIDENCE.value: WorkflowStatus.DATA_CORRECTION_PENDING.value,
+            WorkflowEvent.ON_EXTRACTION_FAILED.value: WorkflowStatus.DATA_CORRECTION_PENDING.value,
+        },
+        WorkflowStatus.EXTRACTED.value: {
+            WorkflowEvent.ON_MARK_READY_FOR_APPROVAL.value: WorkflowStatus.READY_FOR_APPROVAL.value,
+            WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
+        },
+        WorkflowStatus.DATA_CORRECTION_PENDING.value: {
+            WorkflowEvent.ON_DATA_CORRECTED.value: WorkflowStatus.EXTRACTED.value,
+            WorkflowEvent.ON_ERROR.value: WorkflowStatus.FAILED.value,
+        },
+        WorkflowStatus.READY_FOR_APPROVAL.value: {
+            WorkflowEvent.ON_APPROVAL_STARTED.value: WorkflowStatus.APPROVAL_IN_PROGRESS.value,
+            WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
+            WorkflowEvent.ON_REJECTED.value: WorkflowStatus.REJECTED.value,
+        },
+        WorkflowStatus.APPROVAL_IN_PROGRESS.value: {
+            WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
+            WorkflowEvent.ON_REJECTED.value: WorkflowStatus.REJECTED.value,
+        },
+        WorkflowStatus.APPROVED.value: {WorkflowEvent.ON_EXPORTED.value: WorkflowStatus.EXPORTED.value},
+        WorkflowStatus.EXPORTED.value: {WorkflowEvent.ON_ARCHIVED.value: WorkflowStatus.ARCHIVED.value},
+        WorkflowStatus.REJECTED.value: {WorkflowEvent.ON_RETRY.value: WorkflowStatus.READY_FOR_APPROVAL.value},
+        WorkflowStatus.FAILED.value: {WorkflowEvent.ON_RETRY.value: WorkflowStatus.CAPTURED.value},
+    },
+
     # =========================================================================
     # PURCHASE_ORDER: Workflow with PO validation step
     # States: captured -> classified -> extracted -> validation_pending ->
@@ -803,6 +882,8 @@ class DocumentClassifier:
             "Sales_Invoice": DocType.SALES_INVOICE,
             "Sales Invoice": DocType.SALES_INVOICE,
             "Sales_Order": DocType.SALES_INVOICE,
+            "DS_Sales_Order": DocType.DS_SALES_ORDER,
+            "WH_Sales_Order": DocType.WH_SALES_ORDER,
             "Purchase_Order": DocType.PURCHASE_ORDER,
             "Purchase Order": DocType.PURCHASE_ORDER,
             "Credit_Memo": DocType.SALES_CREDIT_MEMO,

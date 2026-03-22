@@ -59,7 +59,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/gpi-integration", tags=["GPI Integration"])
 
 # Document types eligible for BC Sales Order creation
-SALES_ORDER_ELIGIBLE_TYPES = {"Sales_Order", "SalesOrder", "Order_Confirmation", "PurchaseOrder"}
+SALES_ORDER_ELIGIBLE_TYPES = {"Sales_Order", "SalesOrder", "Order_Confirmation", "PurchaseOrder", "DS_Sales_Order", "WH_Sales_Order"}
 
 # Document types eligible for BC Purchase Invoice creation
 PURCHASE_INVOICE_ELIGIBLE_TYPES = {"AP_Invoice"}
@@ -1079,6 +1079,14 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
             ds_auto_approved = await _auto_approve_dropship_so(db, doc_id, bc_record_no, so_type)
         except Exception as ds_err:
             logger.warning("Dropship auto-approve failed for SO %s: %s", bc_record_no, ds_err)
+        # Set ds_po_pending flag for the DS PO auto-creation path
+        try:
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {"ds_po_pending": True, "so_subtype": "DS_Sales_Order"}},
+            )
+        except Exception:
+            pass
 
     # ── Warehouse SO Booked Notifications ──
     notification_results = None
@@ -1090,6 +1098,14 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
             )
         except Exception as notif_err:
             logger.warning("Warehouse SO notification failed for SO %s: %s", bc_record_no, notif_err)
+        # Tag subtype
+        try:
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {"so_subtype": "WH_Sales_Order"}},
+            )
+        except Exception:
+            pass
 
     return {
         "success": result.get("success", False),

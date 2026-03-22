@@ -45,6 +45,7 @@ ELIGIBLE_DOC_TYPES = {
     "Shipping_Document", "Shipping Document", "Shipping",
     "BOL", "Bill_of_Lading", "Bill of Lading",
     "Sales_Order", "Sales Order",
+    "DS_Sales_Order", "WH_Sales_Order",
     "Quality_Issue", "Quality Issue",
     "Order_Confirmation", "Order Confirmation", "Order_Confirm",
     "Warehouse_Receipt", "Warehouse Receipt",
@@ -387,6 +388,52 @@ class AutoResolutionService:
                     await self._freight_gl_service.classify_and_save(doc_id)
                 except Exception as fe:
                     logger.warning("[AutoResolve:W%d] Freight GL error: %s", worker_id, str(fe))
+
+            # ---------------------------------------------------------
+            # SALES ORDER SUBTYPE CLASSIFICATION (non-blocking)
+            # ---------------------------------------------------------
+            doc_type = doc.get("suggested_job_type") or doc.get("document_type") or ""
+            if doc_type in ("Sales_Order", "Sales Order"):
+                try:
+                    from services.document_intel_helpers import _classify_so_subtype
+                    ef = doc.get("extracted_fields") or {}
+                    subtype = _classify_so_subtype(doc, ef)
+                    if subtype in ("DS_Sales_Order", "WH_Sales_Order"):
+                        await self.db.hub_documents.update_one(
+                            {"id": doc_id},
+                            {"$set": {
+                                "suggested_job_type": subtype,
+                                "so_subtype": subtype,
+                                "so_subtype_classified_at": __import__("datetime").datetime.now(
+                                    __import__("datetime").timezone.utc
+                                ).isoformat(),
+                            }},
+                        )
+                        logger.info(
+                            "[AutoResolve:W%d] SO subtype classified: %s → %s",
+                            worker_id, doc_id[:8], subtype,
+                        )
+                        # Emit workflow event
+                        try:
+                            from services.workflow_engine import WorkflowEvent
+                            if self._event_service:
+                                await self._event_service.emit(
+                                    event_type=WorkflowEvent.SO_SUBTYPE_CLASSIFIED.value,
+                                    doc_id=doc_id,
+                                    data={"subtype": subtype, "previous_type": doc_type},
+                                )
+                        except Exception:
+                            pass
+                        # WH notification if approved/booked
+                        wf_status = doc.get("workflow_status", "")
+                        if subtype == "WH_Sales_Order" and wf_status in ("approved", "booked", "exported"):
+                            try:
+                                from services.notification_service import on_warehouse_so_booked
+                                await on_warehouse_so_booked(doc_id, dry_run=False)
+                            except Exception as whe:
+                                logger.warning("[AutoResolve:W%d] WH notification error: %s", worker_id, str(whe))
+                except Exception as ste:
+                    logger.warning("[AutoResolve:W%d] SO subtype classification error: %s", worker_id, str(ste))
 
             # ---------------------------------------------------------
             # AP VALIDATION (authoritative validation step)

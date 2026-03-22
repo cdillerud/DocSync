@@ -2733,3 +2733,289 @@ async def migrate_zetadocs_links():
 
     logger.info("[DocLinks] Zetadocs migration: migrated=%d, skipped=%d, errors=%d", migrated, skipped, len(errors))
     return {"migrated": migrated, "skipped": skipped, "errors": errors}
+
+
+# =========================================================================
+# SH_INVOICE: Cost-Only Sales Order Endpoint
+# =========================================================================
+
+@router.post("/sales-orders/cost-only-from-document/{doc_id}")
+async def create_cost_only_so_from_document(doc_id: str):
+    """Create a cost-only Sales Order in BC from an approved SH_Invoice document.
+
+    Cost-only SOs use GL Account type lines (not Item type) to post warehouse
+    storage & handling charges without revenue recognition.
+
+    Preconditions:
+      - Document must be type SH_Invoice
+      - workflow_status must be 'approved'
+      - A customer must be resolvable
+    """
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Validate document type
+    doc_type = doc.get("suggested_job_type") or doc.get("document_type") or ""
+    if doc_type != "SH_Invoice":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Document type is '{doc_type}', expected SH_Invoice",
+        )
+
+    # Validate workflow status
+    wf_status = doc.get("workflow_status", "")
+    if wf_status != "approved":
+        raise HTTPException(
+            status_code=400,
+            detail=f"SH_Invoice must be approved before posting. Current status: {wf_status}",
+        )
+
+    # Idempotency: check if SO already created
+    existing_so = doc.get("bc_sales_order")
+    if existing_so:
+        return {
+            "success": True,
+            "status": "already_created",
+            "bc_so_number": existing_so.get("bc_record_no", ""),
+            "bc_system_id": existing_so.get("bc_system_id", ""),
+            "processor": doc.get("processor", ""),
+            "folder_path": doc.get("sh_folder_path", ""),
+            "gl_account_used": existing_so.get("gl_account_used", ""),
+            "doc_id": doc_id,
+        }
+
+    # Resolve customer
+    customer_info = await _resolve_customer_no(doc)
+    customer_no = customer_info["customer_no"]
+    if not customer_no:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot create cost-only SO: no BC customer resolved. "
+                   "Ensure customer is mapped or provide via extracted_fields.",
+        )
+
+    # Determine GL account for lines
+    gl_account_number = None
+    gl_account_name = "Storage & Handling"
+    try:
+        from services.freight_gl_routing_service import get_freight_gl_service
+        gl_svc = get_freight_gl_service()
+        if gl_svc:
+            gl_result = await gl_svc.classify_document(doc)
+            recommended = gl_result.get("recommended_gl")
+            if recommended:
+                gl_account_number = recommended.get("gl_number")
+                gl_account_name = recommended.get("gl_name", gl_account_name)
+    except Exception as gl_err:
+        logger.warning("[SH-SO] Freight GL classification failed: %s", gl_err)
+
+    # Fallback: hub_config default
+    if not gl_account_number:
+        config = await db.hub_config.find_one({"_key": "sh_default_gl_account"}, {"_id": 0})
+        gl_account_number = (config or {}).get("value", "")
+
+    if not gl_account_number:
+        raise HTTPException(
+            status_code=400,
+            detail="No GL account resolved for SH_Invoice. "
+                   "Configure 'sh_default_gl_account' in hub_config or set up freight GL routing.",
+        )
+
+    # Build cost-only SO lines (Account type, NOT Item type)
+    ef = doc.get("extracted_fields") or {}
+    line_items = ef.get("line_items") or []
+    so_lines = []
+
+    if line_items:
+        for item in line_items:
+            amount = float(item.get("amount") or item.get("total") or item.get("unit_price") or 0)
+            if amount <= 0:
+                continue
+            so_lines.append({
+                "lineType": "Account",
+                "lineObjectNumber": gl_account_number,
+                "description": (item.get("description") or "Storage & Handling charges")[:100],
+                "quantity": 1,
+                "unitPrice": amount,
+            })
+
+    # Fallback: single line with total amount
+    if not so_lines:
+        total_amount = float(ef.get("total_amount") or ef.get("amount") or ef.get("invoice_total") or 0)
+        if total_amount <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="No line items and no total amount found on the document. Cannot create cost-only SO.",
+            )
+        so_lines.append({
+            "lineType": "Account",
+            "lineObjectNumber": gl_account_number,
+            "description": "Storage & Handling charges",
+            "quantity": 1,
+            "unitPrice": total_amount,
+        })
+
+    # Determine processor for folder routing
+    processor = doc.get("processor", "")
+    if not processor:
+        config = await db.hub_config.find_one({"_key": "sh_default_processor"}, {"_id": 0})
+        processor = (config or {}).get("value", "Andy")
+
+    # ── Create SO in BC (or DEMO_MODE) ──
+    now = datetime.now(timezone.utc).isoformat()
+    idempotency_key = f"SH_SO_{doc_id}_{now[:10]}"
+
+    if not HAS_CREDENTIALS:
+        # DEMO_MODE: simulate SO creation
+        demo_so_no = f"SH-DEMO-{doc_id[:8].upper()}"
+        demo_sys_id = f"demo-sh-{uuid.uuid4().hex[:12]}"
+        logger.info("[SH-SO] DEMO MODE: simulated cost-only SO %s for doc %s", demo_so_no, doc_id[:8])
+
+        so_record = {
+            "bc_record_no": demo_so_no,
+            "bc_system_id": demo_sys_id,
+            "created_at": now,
+            "idempotency_key": idempotency_key,
+            "lines_added": len(so_lines),
+            "lines_total": len(so_lines),
+            "gl_account_used": gl_account_number,
+            "cost_only": True,
+            "demo_mode": True,
+        }
+
+        # Determine SharePoint folder path
+        if processor.lower() == "ellie":
+            folder_path = "S&H Invoices Approved Documents/Ellie to Process"
+        else:
+            folder_path = "S&H Invoices Approved Documents/Andy to Process"
+
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {
+                "bc_sales_order": so_record,
+                "workflow_status": "exported",
+                "workflow_status_updated_utc": now,
+                "processor": processor,
+                "sh_folder_path": folder_path,
+                "updated_utc": now,
+            },
+            "$push": {
+                "workflow_history": {
+                    "timestamp": now,
+                    "from_status": "approved",
+                    "to_status": "exported",
+                    "event": "on_exported",
+                    "actor": "sh_cost_only_so",
+                    "reason": f"Cost-only SO {demo_so_no} created (demo)",
+                    "metadata": {"bc_so_no": demo_so_no, "gl_account": gl_account_number, "processor": processor},
+                },
+            }},
+        )
+
+        return {
+            "success": True,
+            "status": "created",
+            "bc_so_number": demo_so_no,
+            "bc_system_id": demo_sys_id,
+            "processor": processor,
+            "folder_path": folder_path,
+            "gl_account_used": gl_account_number,
+            "lines_added": len(so_lines),
+            "cost_only": True,
+            "demo_mode": True,
+            "doc_id": doc_id,
+        }
+
+    # ── Live BC creation ──
+    try:
+        from services.gpi_integration_service import create_sales_order, add_sales_order_lines
+
+        # Step 1: Create SO header
+        so_result = await create_sales_order(
+            customer_no=customer_no,
+            external_doc_no=ef.get("invoice_number") or ef.get("po_number") or "",
+            source_doc_id=doc_id,
+            idempotency_key=idempotency_key,
+        )
+
+        if not so_result.get("success"):
+            raise HTTPException(
+                status_code=502,
+                detail=f"BC SO creation failed: {so_result.get('error_message', 'Unknown error')}",
+            )
+
+        bc_so_no = so_result["bc_record_no"]
+        bc_sys_id = so_result["bc_system_id"]
+
+        # Step 2: Add cost-only Account lines
+        lines_result = await add_sales_order_lines(bc_sys_id, so_lines)
+
+        # Determine SharePoint folder path
+        if processor.lower() == "ellie":
+            folder_path = "S&H Invoices Approved Documents/Ellie to Process"
+        else:
+            folder_path = "S&H Invoices Approved Documents/Andy to Process"
+
+        so_record = {
+            "bc_record_no": bc_so_no,
+            "bc_system_id": bc_sys_id,
+            "created_at": now,
+            "idempotency_key": idempotency_key,
+            "lines_added": lines_result.get("added", 0),
+            "lines_total": lines_result.get("total", len(so_lines)),
+            "gl_account_used": gl_account_number,
+            "cost_only": True,
+        }
+
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {
+                "bc_sales_order": so_record,
+                "workflow_status": "exported",
+                "workflow_status_updated_utc": now,
+                "processor": processor,
+                "sh_folder_path": folder_path,
+                "updated_utc": now,
+            },
+            "$push": {
+                "workflow_history": {
+                    "timestamp": now,
+                    "from_status": "approved",
+                    "to_status": "exported",
+                    "event": "on_exported",
+                    "actor": "sh_cost_only_so",
+                    "reason": f"Cost-only SO {bc_so_no} created",
+                    "metadata": {"bc_so_no": bc_so_no, "gl_account": gl_account_number, "processor": processor},
+                },
+            }},
+        )
+
+        # Move file in SharePoint
+        try:
+            from services.sharepoint_service import get_sharepoint_service
+            sp = get_sharepoint_service()
+            if sp:
+                await sp.move_document(doc, folder_path)
+        except Exception as sp_err:
+            logger.warning("[SH-SO] SharePoint move failed: %s", sp_err)
+
+        return {
+            "success": True,
+            "status": "created",
+            "bc_so_number": bc_so_no,
+            "bc_system_id": bc_sys_id,
+            "processor": processor,
+            "folder_path": folder_path,
+            "gl_account_used": gl_account_number,
+            "lines_added": lines_result.get("added", 0),
+            "cost_only": True,
+            "doc_id": doc_id,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("[SH-SO] Cost-only SO creation failed for %s: %s", doc_id[:8], str(e))
+        raise HTTPException(status_code=502, detail=f"BC API error: {str(e)[:200]}")

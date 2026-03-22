@@ -42,6 +42,7 @@ class DocType(str, Enum):
     SALES_INVOICE = "SALES_INVOICE"               # Invoices we send (ZD00007)
     DS_SALES_ORDER = "DS_SALES_ORDER"             # Drop-Ship Sales Order
     WH_SALES_ORDER = "WH_SALES_ORDER"             # Warehouse Sales Order
+    SH_INVOICE = "SH_INVOICE"                     # Storage & Handling Invoice (cost-only SO)
     PURCHASE_ORDER = "PURCHASE_ORDER"             # Purchase orders (ZD00002)
     SALES_CREDIT_MEMO = "SALES_CREDIT_MEMO"       # Credit memos we issue (ZD00009)
     PURCHASE_CREDIT_MEMO = "PURCHASE_CREDIT_MEMO" # Credit memos we receive
@@ -147,6 +148,7 @@ class WorkflowStatus(str, Enum):
     REVIEWED = "reviewed"                          # Document reviewed
     
     # Approval stage (most types)
+    PENDING_APPROVAL = "pending_approval"
     READY_FOR_APPROVAL = "ready_for_approval"
     APPROVAL_IN_PROGRESS = "approval_in_progress"
     APPROVED = "approved"
@@ -205,6 +207,10 @@ class WorkflowEvent(str, Enum):
     
     # SO subtype classification events
     SO_SUBTYPE_CLASSIFIED = "so_subtype_classified"
+    
+    # SH Invoice events (Storage & Handling)
+    SH_APPROVED = "sh_approved"
+    SH_REJECTED = "sh_rejected"
     
     # Triage events (OTHER)
     ON_TRIAGE_NEEDED = "on_triage_needed"
@@ -431,6 +437,48 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
         WorkflowStatus.EXPORTED.value: {WorkflowEvent.ON_ARCHIVED.value: WorkflowStatus.ARCHIVED.value},
         WorkflowStatus.REJECTED.value: {WorkflowEvent.ON_RETRY.value: WorkflowStatus.READY_FOR_APPROVAL.value},
         WorkflowStatus.FAILED.value: {WorkflowEvent.ON_RETRY.value: WorkflowStatus.CAPTURED.value},
+    },
+
+    # =========================================================================
+    # SH_INVOICE: Storage & Handling Invoice — cost-only SO workflow
+    # States: captured -> classified -> pending_approval ->
+    #         approved -> posted (exported)
+    # NOTE: Never auto-post. Always requires human approval.
+    # On approval, processor field determines which subfolder to route to.
+    # =========================================================================
+    DocType.SH_INVOICE.value: {
+        None: {WorkflowEvent.ON_CAPTURE.value: WorkflowStatus.CAPTURED.value},
+        WorkflowStatus.CAPTURED.value: {
+            WorkflowEvent.ON_CLASSIFICATION_SUCCESS.value: WorkflowStatus.CLASSIFIED.value,
+            WorkflowEvent.ON_CLASSIFICATION_FAILED.value: WorkflowStatus.FAILED.value,
+        },
+        WorkflowStatus.CLASSIFIED.value: {
+            WorkflowEvent.ON_EXTRACTION_SUCCESS.value: WorkflowStatus.PENDING_APPROVAL.value,
+            WorkflowEvent.ON_EXTRACTION_LOW_CONFIDENCE.value: WorkflowStatus.DATA_CORRECTION_PENDING.value,
+            WorkflowEvent.ON_EXTRACTION_FAILED.value: WorkflowStatus.DATA_CORRECTION_PENDING.value,
+        },
+        WorkflowStatus.DATA_CORRECTION_PENDING.value: {
+            WorkflowEvent.ON_DATA_CORRECTED.value: WorkflowStatus.PENDING_APPROVAL.value,
+            WorkflowEvent.ON_ERROR.value: WorkflowStatus.FAILED.value,
+        },
+        WorkflowStatus.PENDING_APPROVAL.value: {
+            WorkflowEvent.SH_APPROVED.value: WorkflowStatus.APPROVED.value,
+            WorkflowEvent.SH_REJECTED.value: WorkflowStatus.REJECTED.value,
+            WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
+            WorkflowEvent.ON_REJECTED.value: WorkflowStatus.REJECTED.value,
+        },
+        WorkflowStatus.APPROVED.value: {
+            WorkflowEvent.ON_EXPORTED.value: WorkflowStatus.EXPORTED.value,
+        },
+        WorkflowStatus.EXPORTED.value: {
+            WorkflowEvent.ON_ARCHIVED.value: WorkflowStatus.ARCHIVED.value,
+        },
+        WorkflowStatus.REJECTED.value: {
+            WorkflowEvent.ON_RETRY.value: WorkflowStatus.PENDING_APPROVAL.value,
+        },
+        WorkflowStatus.FAILED.value: {
+            WorkflowEvent.ON_RETRY.value: WorkflowStatus.CAPTURED.value,
+        },
     },
 
     # =========================================================================
@@ -884,6 +932,7 @@ class DocumentClassifier:
             "Sales_Order": DocType.SALES_INVOICE,
             "DS_Sales_Order": DocType.DS_SALES_ORDER,
             "WH_Sales_Order": DocType.WH_SALES_ORDER,
+            "SH_Invoice": DocType.SH_INVOICE,
             "Purchase_Order": DocType.PURCHASE_ORDER,
             "Purchase Order": DocType.PURCHASE_ORDER,
             "Credit_Memo": DocType.SALES_CREDIT_MEMO,
@@ -1140,6 +1189,11 @@ class WorkflowEngine:
             return [
                 WorkflowStatus.TRIAGE_PENDING.value,
             ]
+        elif doc_type == DocType.SH_INVOICE.value:
+            return [
+                WorkflowStatus.PENDING_APPROVAL.value,
+                WorkflowStatus.DATA_CORRECTION_PENDING.value,
+            ]
         elif doc_type in [DocType.STATEMENT.value, DocType.REMINDER.value, DocType.FINANCE_CHARGE_MEMO.value]:
             return [
                 WorkflowStatus.READY_FOR_REVIEW.value,
@@ -1221,6 +1275,8 @@ class WorkflowEngine:
             # OTHER specific
             WorkflowStatus.TRIAGE_PENDING.value: "triage_pending",
             WorkflowStatus.TRIAGE_COMPLETED.value: "triage_completed",
+            # SH Invoice specific
+            WorkflowStatus.PENDING_APPROVAL.value: "pending_approval",
             # Generic
             WorkflowStatus.DATA_CORRECTION_PENDING.value: "data_correction_pending",
             WorkflowStatus.REVIEW_PENDING.value: "review_pending",

@@ -87,6 +87,16 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - **Router trigger**: `create_sales_order_from_document` spawns background task for DS PO auto-creation immediately after DS SO auto-approval
 - Tests: 9 pytest cases covering happy path, idempotency, rejection, vendor validation, BC SO linkage
 
+### SH_Invoice Document Type (Mar 22, 2026 — Session 3)
+- **New document type**: `SH_Invoice` (Storage & Handling Invoice) for warehouse cost-only charges
+- **Workflow**: received → classified → pending_approval → approved → exported (never auto-post)
+- **Cost-only SO endpoint**: `POST /api/gpi-integration/sales-orders/cost-only-from-document/{doc_id}` creates BC Sales Orders with GL Account type lines (not Item type)
+- GL account resolution: Freight GL service → hub_config `sh_default_gl_account` fallback
+- Processor assignment determines SharePoint subfolder routing (Andy vs Ellie)
+- **Admin endpoints**: `POST /api/admin/sh-invoice/{doc_id}/assign-processor`, `GET /api/admin/sh-invoice/queue`
+- **Workflow engine**: Added `SH_INVOICE` DocType, `PENDING_APPROVAL` status, `SH_APPROVED`/`SH_REJECTED` events
+- Tests: 20 pytest cases covering doc type, workflow, cost-only SO, processor assignment, queue
+
 ## P0/P1/P2 Backlog
 
 ### P0
@@ -104,6 +114,9 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 
 ## Key API Endpoints
 - `POST /api/gpi-integration/ds-purchase-orders/auto-create/{doc_id}`
+- `POST /api/gpi-integration/sales-orders/cost-only-from-document/{doc_id}`
+- `POST /api/admin/sh-invoice/{doc_id}/assign-processor`
+- `GET /api/admin/sh-invoice/queue`
 - `GET /api/feedback-loop/health`
 - `POST /api/reprocess-comparison/run`
 - `GET /api/reprocess-comparison/status`

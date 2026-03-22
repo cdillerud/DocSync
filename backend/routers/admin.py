@@ -288,3 +288,92 @@ async def _recompute_states_task(run_id: str, dry_run: bool):
         "[RecomputeStates:%s] Done: %d processed, %d changed, %d errors",
         run_id, stats["processed"], stats["changed"], stats["errors"]
     )
+
+
+# =========================================================================
+# SH_INVOICE: Processor Assignment & Queue
+# =========================================================================
+
+@router.post("/sh-invoice/{doc_id}/assign-processor")
+async def assign_sh_processor(doc_id: str, payload: dict = Body(...)):
+    """Assign a processor (Andy or Ellie) to an SH_Invoice document.
+
+    Body: {"processor": "Andy" | "Ellie"}
+    Sets the processor field on the document and returns the updated doc.
+    """
+    processor = (payload.get("processor") or "").strip()
+    if processor not in ("Andy", "Ellie"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid processor '{processor}'. Must be 'Andy' or 'Ellie'.",
+        )
+
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    doc_type = doc.get("suggested_job_type") or doc.get("document_type") or ""
+    if doc_type != "SH_Invoice":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Document type is '{doc_type}', expected SH_Invoice",
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "processor": processor,
+            "processor_assigned_utc": now,
+            "updated_utc": now,
+        }},
+    )
+
+    # Return updated document
+    updated = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    return {
+        "success": True,
+        "doc_id": doc_id,
+        "processor": processor,
+        "assigned_at": now,
+        "document": updated,
+    }
+
+
+@router.get("/sh-invoice/queue")
+async def get_sh_invoice_queue(
+    status: str = Query("pending_approval", description="Filter by workflow status"),
+    processor: str = Query(None, description="Filter by assigned processor"),
+    limit: int = Query(100, ge=1, le=500),
+    skip: int = Query(0, ge=0),
+):
+    """Return SH_Invoice documents in the approval queue.
+
+    Defaults to pending_approval status. Supports filtering by processor.
+    """
+    db = get_db()
+
+    query = {
+        "$or": [
+            {"suggested_job_type": "SH_Invoice"},
+            {"document_type": "SH_Invoice"},
+        ],
+    }
+    if status:
+        query["workflow_status"] = status
+    if processor:
+        query["processor"] = processor
+
+    total = await db.hub_documents.count_documents(query)
+    docs = await db.hub_documents.find(
+        query, {"_id": 0}
+    ).sort("created_utc", -1).skip(skip).limit(limit).to_list(length=limit)
+
+    return {
+        "total": total,
+        "returned": len(docs),
+        "status_filter": status,
+        "processor_filter": processor,
+        "documents": docs,
+    }

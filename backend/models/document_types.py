@@ -366,6 +366,28 @@ DEFAULT_JOB_TYPES = {
         "keywords": ["warehouse receipt", "non-negotiable", "goods received", "stored in warehouse"],
         "enabled": True
     },
+    "SH_Invoice": {
+        "job_type": "SH_Invoice",
+        "display_name": "Storage & Handling Invoice",
+        "category": "AP",
+        "automation_level": 0,
+        "min_confidence_to_auto_link": 0.80,
+        "min_confidence_to_auto_create_draft": 0.95,
+        "po_validation_mode": "PO_NOT_REQUIRED",
+        "allow_duplicate_check_override": False,
+        "requires_human_review_if_exception": True,
+        "vendor_match_threshold": 0.80,
+        "vendor_match_strategies": ["alias", "exact_no", "exact_name", "normalized", "fuzzy"],
+        "sharepoint_folder": "S&H Invoices waiting for approval Documents",
+        "bc_entity": "salesOrders",
+        "required_extractions": ["vendor", "amount"],
+        "optional_extractions": ["invoice_number", "line_items", "description"],
+        "keywords": ["storage", "handling", "s&h", "warehouse fee", "storage fee", "handling fee", "storage & handling"],
+        "auto_post_eligible": False,
+        "description": "Warehouse storage and handling charges - cost-only SO",
+        "requires_bc_match": False,
+        "enabled": True
+    },
     "Unknown_Document": {
         "job_type": "Unknown_Document",
         "display_name": "Unknown / Unclassified",

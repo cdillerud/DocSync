@@ -353,6 +353,49 @@ async def stage_classify_llm(
         # ── Build dynamic prompt with ALL learning signals ──
         dynamic_prompt = _CLASSIFY_SYSTEM_PROMPT
 
+        # 0. Vendor Extraction Profile — adaptive hints from historical data
+        profile_used = False
+        try:
+            from services.vendor_extraction_profile_service import get_vep_service
+            vep_svc = get_vep_service()
+            effective_vendor = vendor_id or vendor_name
+            if vep_svc and effective_vendor:
+                profile = await vep_svc.get_profile(effective_vendor)
+                if profile and profile.get("enabled"):
+                    profile_used = True
+                    vep_hints = []
+                    ref_pri = profile.get("reference_priority")
+                    if ref_pri:
+                        vep_hints.append(
+                            f"For vendor '{effective_vendor}', the PO/reference number is typically "
+                            f"found in: {', '.join(ref_pri)}."
+                        )
+                    doc_bias = profile.get("doc_type_bias")
+                    if doc_bias and doc_bias != "unknown":
+                        vep_hints.append(
+                            f"This vendor most commonly sends: {doc_bias}."
+                        )
+                    label_bias = profile.get("label_bias")
+                    if label_bias:
+                        for predicted, hint in label_bias.items():
+                            target = hint.get("target_label", "")
+                            if target:
+                                vep_hints.append(
+                                    f"When you see '{predicted}' on this vendor's docs, "
+                                    f"it usually refers to: {target}."
+                                )
+                    if vep_hints:
+                        dynamic_prompt += (
+                            "\n\n== VENDOR EXTRACTION PROFILE (learned from historical data) ==\n"
+                            + "\n".join(vep_hints)
+                        )
+                        logger.info(
+                            "[CLASSIFY:LLM] Injected VEP hints for %s (%d hints)",
+                            effective_vendor, len(vep_hints),
+                        )
+        except Exception as e:
+            logger.debug("[CLASSIFY:LLM] VEP lookup failed (non-blocking): %s", e)
+
         # 1. Few-shot examples from classification corrections
         try:
             from services.classification_feedback_service import (
@@ -469,6 +512,7 @@ async def stage_classify_llm(
                 "reasoning": result.get("reasoning", ""),
                 "llm_extracted_fields": extracted,
                 "page_count": page_count,
+                "profile_used": profile_used,
             },
             quality_gate_passed=confidence >= 0.30,
             duration_ms=_ms_since(t0),

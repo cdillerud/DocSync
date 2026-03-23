@@ -86,10 +86,32 @@ export default function SalesDashboardPage() {
             Orders awaiting review, correction, or creation in Business Central
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={fetchQueue} disabled={loading} data-testid="sales-refresh-btn">
-          <RefreshCw className={`w-4 h-4 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={fetchQueue} disabled={loading} data-testid="sales-refresh-btn">
+            <RefreshCw className={`w-4 h-4 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-red-500 border-red-200 hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-950"
+            data-testid="sales-clear-queue-btn"
+            onClick={async () => {
+              if (!window.confirm(`Clear all ${total} sales documents from the queue? This cannot be undone.`)) return;
+              try {
+                const resp = await fetch(`${API}/api/sales-dashboard/queue/clear`, { method: 'DELETE' });
+                const data = await resp.json();
+                toast.success(`Cleared ${data.deleted} documents`);
+                fetchQueue();
+              } catch (err) {
+                toast.error('Failed to clear queue');
+              }
+            }}
+          >
+            <XCircle className="w-4 h-4 mr-1.5" />
+            Clear Queue
+          </Button>
+        </div>
       </div>
 
       {/* Summary Cards */}

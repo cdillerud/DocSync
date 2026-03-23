@@ -225,3 +225,17 @@ async def _compute_summary(db) -> dict:
         counts[a["status"]] = counts.get(a["status"], 0) + 1
 
     return counts
+
+
+@router.delete("/queue/clear")
+async def clear_sales_queue():
+    """
+    Remove all sales-eligible documents from hub_documents.
+    This clears the Sales Orders queue completely.
+    """
+    db = get_db()
+    query = {"document_type": {"$in": list(SALES_ELIGIBLE_TYPES)}}
+    result = await db.hub_documents.delete_many(query)
+    deleted = result.deleted_count
+    logger.info("Cleared sales queue: %d documents removed", deleted)
+    return {"deleted": deleted, "message": f"Cleared {deleted} sales documents from queue"}

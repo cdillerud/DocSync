@@ -999,6 +999,37 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
 
     await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
 
+    # For non-AP document types, run the type-specific workflow (warehouse/sales)
+    # This handles auto-completion for shipping docs with PO/BOL/ship_date present
+    doc_type_value = doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type") or ""
+    if doc_type_value and doc_type_value.upper() != "AP_INVOICE":
+        try:
+            from server import _update_standard_workflow_status, compute_ap_normalized_fields
+            norm_fields = compute_ap_normalized_fields(extracted_fields)
+            await _update_standard_workflow_status(doc_id, doc_type_value, confidence, norm_fields)
+            refreshed = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "status": 1, "workflow_status": 1})
+            if refreshed:
+                new_status = refreshed.get("status", new_status)
+                new_workflow_status = refreshed.get("workflow_status", new_workflow_status)
+        except Exception as wf_err:
+            logger.warning("[REPROCESS] Workflow update error for %s: %s", doc_id[:8], str(wf_err))
+
+    # Run auto-clear evaluation (may auto-complete eligible docs)
+    try:
+        from services.auto_clear_service import evaluate_auto_clear, get_auto_clear_update, AutoClearDecision
+        doc_for_eval = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+        if doc_for_eval:
+            ac_decision, ac_reason, ac_details = evaluate_auto_clear(
+                doc_for_eval, validation_results=validation_results
+            )
+            ac_update = get_auto_clear_update(ac_decision, ac_details)
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": ac_update})
+            if ac_decision == AutoClearDecision.CLEARED:
+                new_status = "Completed"
+                logger.info("[REPROCESS] Document %s AUTO-CLEARED: %s", doc_id[:8], ac_reason)
+    except Exception as ac_err:
+        logger.warning("[REPROCESS] Auto-clear error for %s: %s", doc_id[:8], str(ac_err))
+
     workflow = {
         "id": str(uuid.uuid4()),
         "document_id": doc_id,

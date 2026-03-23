@@ -4238,6 +4238,39 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
     
     await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
     
+    # For non-AP document types, run the type-specific workflow (warehouse/sales)
+    # This handles auto-completion for shipping docs with PO/BOL/ship_date present
+    doc_type_value = doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type") or ""
+    if doc_type_value and doc_type_value.upper() != "AP_INVOICE":
+        try:
+            normalized_fields = compute_ap_normalized_fields(extracted_fields)
+            logger.info("[REPROCESS] Running _update_standard_workflow_status for %s", doc_id[:8])
+            await _update_standard_workflow_status(
+                doc_id, doc_type_value, confidence, normalized_fields
+            )
+            # Refresh status after workflow update
+            refreshed = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "status": 1, "workflow_status": 1})
+            if refreshed:
+                new_status = refreshed.get("status", new_status)
+                new_workflow_status = refreshed.get("workflow_status", new_workflow_status)
+        except Exception as wf_err:
+            logger.warning("[REPROCESS] Workflow update error for %s: %s", doc_id[:8], str(wf_err))
+    
+    # Run auto-clear evaluation (may auto-complete eligible docs)
+    try:
+        doc_for_eval = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+        if doc_for_eval:
+            auto_clear_decision, auto_clear_reason, auto_clear_details = evaluate_auto_clear(
+                doc_for_eval, validation_results=validation_results
+            )
+            auto_clear_update = get_auto_clear_update(auto_clear_decision, auto_clear_details)
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": auto_clear_update})
+            if auto_clear_decision == AutoClearDecision.CLEARED:
+                new_status = "Completed"
+                logger.info("[REPROCESS] Document %s AUTO-CLEARED: %s", doc_id[:8], auto_clear_reason)
+    except Exception as ac_err:
+        logger.warning("[REPROCESS] Auto-clear error for %s: %s", doc_id[:8], str(ac_err))
+
     # Log reprocess workflow (Square9 aligned)
     workflow = {
         "id": str(uuid.uuid4()),

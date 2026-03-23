@@ -126,7 +126,8 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - **Secondary bug**: `compute_ap_normalized_fields()` only extracts AP fields (vendor, invoice#, amount) — shipping fields like `bol_number`, `ship_date`, `pro_number` were never passed to the warehouse workflow validator
 - **Fix**: Removed invalid enum references, added `extracted_fields` fallback for shipping-specific fields in `_update_standard_workflow_status()`
 - **Also fixed**: `DocType.SALES_ORDER` (also missing from enum) in the sales workflow path
-- Verified: test shipping doc now correctly transitions to `exported`/`Completed`/`archived=True`
+- **Also fixed**: `reprocess_document` in `services/document_handlers.py` now calls `_update_standard_workflow_status` and `evaluate_auto_clear` for non-AP docs, enabling shipping docs to auto-close on reprocess
+- Verified: test shipping doc now correctly transitions to `exported`/`Completed`/`archived=True` both on initial intake and on reprocess
 
 ## P0/P1/P2 Backlog
 

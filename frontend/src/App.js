@@ -13,6 +13,7 @@ import OperationsQueuePage from "@/pages/OperationsQueuePage";
 // Hub pages (consolidated)
 import DocumentsHubPage from "@/pages/DocumentsHubPage";
 import SalesInventoryHubPage from "@/pages/SalesInventoryHubPage";
+import SalespersonDashboardPage from "@/pages/SalespersonDashboardPage";
 import IntelligenceHubPage from "@/pages/IntelligenceHubPage";
 import IntegrationsHubPage from "@/pages/IntegrationsHubPage";
 import SettingsHubPage from "@/pages/SettingsHubPage";

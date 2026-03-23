@@ -2,9 +2,11 @@ import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import SalesDashboardPage from './SalesDashboardPage';
 import InventoryLedgerPage from './InventoryLedgerPage';
+import SalespersonDashboardPage from './SalespersonDashboardPage';
 
 const TABS = [
   { key: 'sales', label: 'Sales Orders' },
+  { key: 'rep-performance', label: 'Rep Performance' },
   { key: 'inventory', label: 'Inventory Ledger' },
 ];
 
@@ -33,6 +35,7 @@ export default function SalesInventoryHubPage() {
         ))}
       </div>
       {activeTab === 'sales' && <SalesDashboardPage />}
+      {activeTab === 'rep-performance' && <SalespersonDashboardPage />}
       {activeTab === 'inventory' && <InventoryLedgerPage />}
     </div>
   );

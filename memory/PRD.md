@@ -170,6 +170,7 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - Preview env: Graph API token fails (expected — use DEMO_MODE fallback)
 - 19 pre-existing integration tests fail due to missing BASE_URL env var
 - Before/After comparison on preview test docs shows "regression" because test files are plain text stubs with heuristic-assigned 1.0 confidence — real PDFs will show true improvement
+- **FIXED (Session 4)**: Auto-clear doc_type case mismatch — DB stores `AP_INVOICE` but config used `AP_Invoice`, causing all AP invoices to fall through to DEFAULT (threshold 0.0, no vendor check). Now uses case-insensitive config key lookup.
 
 ### Bulk File Button (Mar 22, 2026 — Session 2)
 - "File" button added to Documents Queue, right next to "Show auto-cleared"

@@ -201,7 +201,16 @@ def evaluate_auto_clear(
         return AutoClearDecision.NEEDS_REVIEW, "Auto-clear disabled", {}
     
     doc_type = doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type") or "DEFAULT"
-    type_config = config["thresholds"].get(doc_type, config["thresholds"]["DEFAULT"])
+    # Case-insensitive config lookup — DB stores 'AP_INVOICE', config keys use 'AP_Invoice'
+    type_config = config["thresholds"].get(doc_type)
+    if type_config is None:
+        doc_type_lower = doc_type.lower()
+        for key, val in config["thresholds"].items():
+            if key.lower() == doc_type_lower:
+                type_config = val
+                break
+        if type_config is None:
+            type_config = config["thresholds"]["DEFAULT"]
     
     details = {
         "doc_id": doc.get("id"),
@@ -577,11 +586,16 @@ def get_auto_clear_summary(details: Dict[str, Any]) -> str:
 # =============================================================================
 
 def get_threshold_for_type(doc_type: str) -> float:
-    """Get the confidence threshold for a document type."""
-    type_config = AUTO_CLEAR_CONFIG["thresholds"].get(
-        doc_type, 
-        AUTO_CLEAR_CONFIG["thresholds"]["DEFAULT"]
-    )
+    """Get the confidence threshold for a document type (case-insensitive)."""
+    type_config = AUTO_CLEAR_CONFIG["thresholds"].get(doc_type)
+    if type_config is None:
+        doc_type_lower = doc_type.lower()
+        for key, val in AUTO_CLEAR_CONFIG["thresholds"].items():
+            if key.lower() == doc_type_lower:
+                type_config = val
+                break
+    if type_config is None:
+        type_config = AUTO_CLEAR_CONFIG["thresholds"]["DEFAULT"]
     return type_config.get("confidence_threshold", 0.90)
 
 

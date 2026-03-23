@@ -340,7 +340,12 @@ export default function DocumentDetailPage() {
       setEventTimeline(res.data.event_timeline || []);
       setDerivedState(res.data.derived_state);
     } catch (err) {
-      toast.error('Document not found');
+      const status = err.response?.status;
+      if (status === 404) {
+        toast.error('Document not found');
+      } else {
+        toast.error(`Failed to load document (${status || 'network error'})`);
+      }
       navigate('/documents');
     } finally {
       setLoading(false);

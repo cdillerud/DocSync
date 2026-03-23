@@ -430,64 +430,74 @@ async def get_document(doc_id: str, include_events: bool = Query(True)):
     derived_state = None
 
     if include_events:
-        event_service = get_event_service()
-        derived_state_service = get_derived_state_service()
+        try:
+            event_service = get_event_service()
+            derived_state_service = get_derived_state_service()
 
-        if event_service:
-            event_timeline = await event_service.get_event_timeline(doc_id, include_legacy=True)
+            if event_service:
+                event_timeline = await event_service.get_event_timeline(doc_id, include_legacy=True)
 
-        if derived_state_service:
-            derived_state = await derived_state_service.derive_state(doc_id, doc)
-            derived_state["display"] = format_state_for_display(derived_state)
+            if derived_state_service:
+                derived_state = await derived_state_service.derive_state(doc_id, doc)
+                if derived_state:
+                    derived_state["display"] = format_state_for_display(derived_state)
+        except Exception as e:
+            logger.warning(f"Error computing derived state for {doc_id}: {e}")
 
     # Reconcile stale readiness with actual document state
-    doc_status = (doc.get("status") or "").lower()
-    workflow_status = (doc.get("workflow_status") or "").lower()
-    is_terminal = (
-        doc.get("auto_cleared")
-        or doc_status in ("completed", "posted", "archived")
-        or workflow_status in ("completed", "exported", "processed")
-    )
-    stored_readiness = doc.get("readiness") or {}
-    if is_terminal and stored_readiness.get("status") not in ("ready_auto_link", "ready_auto_draft"):
-        from services.document_readiness_service import evaluate_readiness
-        doc["readiness"] = evaluate_readiness(doc)
+    try:
+        doc_status = (doc.get("status") or "").lower()
+        workflow_status = (doc.get("workflow_status") or "").lower()
+        is_terminal = (
+            doc.get("auto_cleared")
+            or doc_status in ("completed", "posted", "archived")
+            or workflow_status in ("completed", "exported", "processed")
+        )
+        stored_readiness = doc.get("readiness") or {}
+        if is_terminal and stored_readiness.get("status") not in ("ready_auto_link", "ready_auto_draft"):
+            from services.document_readiness_service import evaluate_readiness
+            doc["readiness"] = evaluate_readiness(doc)
+    except Exception as e:
+        logger.warning(f"Error evaluating readiness for {doc_id}: {e}")
 
     # Reconcile stale ap_validation_result warnings with current vendor state
-    ap_val = doc.get("ap_validation_result")
-    if ap_val:
-        vendor_resolved_now = bool(
-            ap_val.get("vendor_resolved")
-            or doc.get("matched_vendor_no")
-            or doc.get("vendor_id")
-            or ((doc.get("validation_results") or {}).get("bc_record_info") or {}).get("number")
-        )
-        if vendor_resolved_now:
-            # Filter stale vendor-dependent warnings
-            original_warnings = ap_val.get("warnings", [])
-            filtered_warnings = [
-                w for w in original_warnings
-                if "vendor not resolved" not in (
-                    (w.get("details", "") if isinstance(w, dict) else str(w)).lower()
-                )
-            ]
-            if len(filtered_warnings) != len(original_warnings):
-                ap_val["warnings"] = filtered_warnings
-            # Filter stale vendor blocking issues
-            original_blocking = ap_val.get("blocking_issues", [])
-            filtered_blocking = [
-                b for b in original_blocking
-                if "vendor" not in b.lower()
-            ]
-            if len(filtered_blocking) != len(original_blocking):
-                ap_val["blocking_issues"] = filtered_blocking
-            # Update vendor_resolved flag
-            if not ap_val.get("vendor_resolved"):
-                ap_val["vendor_resolved"] = True
-                vendor_no = doc.get("matched_vendor_no") or doc.get("vendor_id") or \
-                    ((doc.get("validation_results") or {}).get("bc_record_info") or {}).get("number", "")
-                if vendor_no:
-                    ap_val["matched_vendor_no"] = vendor_no
+    try:
+        ap_val = doc.get("ap_validation_result")
+        if ap_val:
+            vendor_resolved_now = bool(
+                ap_val.get("vendor_resolved")
+                or doc.get("matched_vendor_no")
+                or doc.get("vendor_id")
+                or ((doc.get("validation_results") or {}).get("bc_record_info") or {}).get("number")
+            )
+            if vendor_resolved_now:
+                # Filter stale vendor-dependent warnings
+                original_warnings = ap_val.get("warnings", [])
+                filtered_warnings = [
+                    w for w in original_warnings
+                    if "vendor not resolved" not in (
+                        (w.get("details", "") if isinstance(w, dict) else str(w)).lower()
+                    )
+                ]
+                if len(filtered_warnings) != len(original_warnings):
+                    ap_val["warnings"] = filtered_warnings
+                # Filter stale vendor blocking issues
+                original_blocking = ap_val.get("blocking_issues", [])
+                filtered_blocking = [
+                    b for b in original_blocking
+                    if "vendor" not in (b.get("details", "") if isinstance(b, dict) else str(b)).lower()
+                ]
+                if len(filtered_blocking) != len(original_blocking):
+                    ap_val["blocking_issues"] = filtered_blocking
+                # Update vendor_resolved flag
+                if not ap_val.get("vendor_resolved"):
+                    ap_val["vendor_resolved"] = True
+                    vendor_no = doc.get("matched_vendor_no") or doc.get("vendor_id") or \
+                        ((doc.get("validation_results") or {}).get("bc_record_info") or {}).get("number", "")
+                    if vendor_no:
+                        ap_val["matched_vendor_no"] = vendor_no
+    except Exception as e:
+        logger.warning(f"Error reconciling ap_validation for {doc_id}: {e}")
 
     return {
         "document": doc,

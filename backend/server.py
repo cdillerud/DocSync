@@ -2283,8 +2283,23 @@ async def _update_standard_workflow_status(
                         "reason": f"Warehouse workflow: PO={po_number}, BOL={bol_number}, Date={document_date}",
                     },
                 )
-        except Exception:
-            pass
+            else:
+                # Fallback: write event directly to DB
+                await db.workflow_events.insert_one({
+                    "event_id": str(uuid.uuid4()),
+                    "document_id": doc_id,
+                    "event_type": "automation.decision.completed",
+                    "status": "completed",
+                    "source_service": "warehouse_workflow",
+                    "timestamp": now,
+                    "payload": {
+                        "decision": "Cleared",
+                        "auto_clear": True,
+                        "reason": f"Warehouse workflow: PO={po_number}, BOL={bol_number}, Date={document_date}",
+                    },
+                })
+        except Exception as evt_err:
+            logger.warning("[Warehouse Workflow] Event emission error for %s: %s", doc_id[:8], str(evt_err))
         
         return
     

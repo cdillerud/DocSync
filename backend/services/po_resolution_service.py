@@ -62,11 +62,12 @@ BC_LINK_UNKNOWN = "unknown_error"
 #   T-prefix: T1126
 #   WTR-prefix: WTR1012
 #   Suffix variants: 104718B, 111597_1
+#   Dash-suffixed line numbers: 106975-3, W117397-1, WR-12345-2
 _VALID_BC_PO_PATTERN = re.compile(
     r"^(?:"
-    r"\d{4,7}"                     # pure numeric 4-7 digits
-    r"|[A-Z]{1,3}\d{3,7}[A-Z]?"  # alpha prefix (1-3 letters) + digits + optional alpha suffix
-    r"|\d{5,7}[A-Z_]\w{0,3}"     # digits + suffix letter/underscore
+    r"\d{4,7}(?:[\-/]\d{1,3})?"           # pure numeric + optional line suffix (-3, /2)
+    r"|[A-Z]{1,3}[\-]?\d{3,7}[A-Z]?(?:[\-/]\d{1,3})?"  # alpha prefix + digits + optional line suffix
+    r"|\d{5,7}[A-Z_]\w{0,3}"              # digits + suffix letter/underscore
     r")$"
 )
 
@@ -186,6 +187,33 @@ def extract_po_candidates(
                 if len(raw) >= 3:
                     _add(raw, f"regex:{pattern.pattern[:30]}", 0.70)
 
+    candidates.sort(key=lambda c: c["confidence"], reverse=True)
+
+    # ── Generate base-number candidates for dash/slash-suffixed POs ──
+    # e.g., "106975-3" → also try "106975" (PO 106975, line 3)
+    # e.g., "WR-12345-2" → also try "WR-12345"
+    suffix_derived = []
+    for c in candidates:
+        norm = c["normalized"]
+        if not norm:
+            continue
+        # Match trailing -N or /N suffix (1-3 digits)
+        m = re.match(r"^(.+?)[\-/](\d{1,3})$", norm)
+        if m:
+            base = m.group(1)
+            base_norm = normalize_po(base)
+            if base_norm and base_norm not in seen_normalized and is_valid_po_format(base_norm):
+                seen_normalized.add(base_norm)
+                suffix_derived.append({
+                    "value": base,
+                    "normalized": base_norm,
+                    "source": f"{c['source']}:base_stripped",
+                    "confidence": round(c["confidence"] * 0.85, 3),  # Slightly lower than original
+                    "valid_format": True,
+                    "is_non_po": False,
+                })
+
+    candidates.extend(suffix_derived)
     candidates.sort(key=lambda c: c["confidence"], reverse=True)
     return candidates
 
@@ -702,6 +730,28 @@ async def _search_bc_cache(
             matches.append({
                 **hit, "confidence": 0.55, "match_method": f"bc_cache_suffix({suffix})",
             })
+
+    # Dash/slash suffix stripping — try base number if PO has trailing -N or /N
+    if not matches:
+        m = re.match(r"^(.+?)[\-/](\d{1,3})$", normalized_po)
+        if m:
+            base_po = m.group(1).strip()
+            if base_po:
+                base_query = {
+                    "bc_entity_type": "purchase_order",
+                    "$or": [
+                        {"normalized_document_no": base_po},
+                        {"bc_document_no": base_po},
+                    ],
+                }
+                base_hits = await db.bc_reference_cache.find(base_query, {"_id": 0}).to_list(5)
+                for hit in base_hits:
+                    confidence = 0.88
+                    method = f"bc_cache_base_stripped({normalized_po}->{base_po})"
+                    if vendor_no and hit.get("bc_vendor_no") == vendor_no:
+                        confidence = min(1.0, confidence + 0.05)
+                        method += "+vendor_no"
+                    matches.append({**hit, "confidence": confidence, "match_method": method})
 
     return matches
 

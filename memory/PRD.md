@@ -30,55 +30,29 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
 
 ### Session Work (March 23, 2026)
 - **server.py Extraction Pass 3**: Reduced from 7879 to 6874 lines
-  - Email polling logic → `services/email_polling_service.py` (authoritative)
-  - Classification pipeline → `services/classification_helpers.py` (authoritative)
-  - Rewired 8 consumer modules to import from extracted services
-- **Rep Assignment in SO Creation**: Wired salesperson code from BC customer record into SO creation flow
-  - `_lookup_bc_customer` returns (customer_number, salesperson_code) tuple
-  - `create_sales_order` includes `salesperson` field in BC API payload
-  - Document record stores `assigned_salesperson_code` for audit trail
-- **Salesperson Performance Dashboard**: New "Rep Performance" tab in Sales & Inventory Hub
-  - 3 API endpoints: /overview, /trend, /detail/{code}
-  - KPI cards, bar + line charts, ranked leaderboard, rep drill-down, unassigned docs alert
-- **Auto-Post Readiness Improvements** (targeting 76.8% → higher):
-  - Active vendor resolution: When vendor_canonical not found on hub_doc, runs lookup_vendor_alias (aliases, BC cache, fuzzy matching), direct alias lookup, and BC cache name match
-  - Expanded PO number sources: ai_extraction, normalized_fields, bc_po_number, purchase_order_number, linked BC records
-  - Added vendor_resolution_methods tracking in readiness response for observability
+  - Email polling logic → `services/email_polling_service.py`
+  - Classification pipeline → `services/classification_helpers.py`
+- **Rep Assignment in SO Creation**: salesperson code from BC customer wired into SO payload
+- **Salesperson Performance Dashboard**: New "Rep Performance" tab with KPI cards, charts, leaderboard
+- **Auto-Post Readiness Improvements**:
+  - Active vendor resolution (lookup_vendor_alias, alias direct, BC cache name match)
+  - Expanded PO number sources (ai_extraction, normalized_fields, linked records)
+- **PO Resolution Fix** (for doc 113798.pdf / "106975-3"):
+  - Updated `_VALID_BC_PO_PATTERN` to accept dash-suffixed POs (e.g., 106975-3, W117397-1)
+  - Added base-number candidate generation: `106975-3` → also tries `106975`
+  - Added suffix-stripping fallback in `_search_bc_cache`: tries base number when exact match fails
+  - Confidence now properly 0.900 for dash-suffixed POs (was 0.450 due to valid_format=False)
 
-## Code Architecture
-```
-/app/backend/
-├── server.py                              # Core orchestration (6874 lines)
-├── main.py                                # App startup, router registration
-├── deps.py                                # Shared config, DB connection
-├── routers/
-│   ├── salesperson_dashboard.py           # Rep performance metrics API
-│   ├── bakeoff.py                         # Intake benchmark (updated: active vendor resolution)
-│   ├── documents.py                       # Document CRUD + search
-│   ├── email_polling.py                   # Email poll trigger
-│   ├── mailbox_sources.py                 # Dynamic mailbox management
-│   ├── settings.py                        # Email watcher config
-│   ├── sharepoint.py                      # SharePoint operations
-│   ├── workflows.py                       # Workflow management
-│   └── reference_intelligence.py          # BC reference resolution
-├── services/
-│   ├── email_polling_service.py           # Extracted email polling (authoritative)
-│   ├── classification_helpers.py          # Extracted classification (authoritative)
-│   ├── auto_post_service.py               # AP auto-posting + SO creation (rep assignment)
-│   ├── business_central_service.py        # BC API client (salesperson in SO)
-│   ├── vendor_matching.py                 # Multi-source vendor resolution
-│   ├── config_service.py                  # Token management
-│   ├── bc_api_helpers.py                  # BC companies/sales orders
-│   ├── document_handlers.py               # Document processing
-│   └── derived_state_service.py           # UI state from events
-/app/frontend/src/pages/
-│   ├── SalespersonDashboardPage.js        # Rep performance dashboard
-│   ├── SalesInventoryHubPage.js           # 3 tabs (Sales, Rep Performance, Inventory)
-│   └── ...
-```
+## Key API Endpoints
+- `GET /api/documents/search` — Multi-field text search
+- `POST /api/documents/{doc_id}/reprocess` — Document reprocessing
+- `GET /api/intake-benchmark/runs/{run_id}/auto-post-readiness` — Readiness scoring
+- `GET /api/salesperson-dashboard/overview` — Rep performance metrics
+- `GET /api/salesperson-dashboard/trend` — SO creation trend over time
+- `GET /api/salesperson-dashboard/detail/{code}` — Rep drill-down
 
 ## Known Limitations
-- BC Sandbox and SharePoint Graph API calls fail in preview environment (DEMO_MODE=true)
+- BC Sandbox and SharePoint Graph API calls fail in preview (DEMO_MODE=true)
 - 19 pre-existing integration tests fail (env var mocking, low priority)
 - 205 `no_bc_match` batch failures need investigation
 

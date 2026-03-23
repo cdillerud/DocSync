@@ -32,28 +32,30 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
 - **server.py Extraction Pass 3**: Reduced from 7879 to 6874 lines
   - Email polling logic → `services/email_polling_service.py` (authoritative)
   - Classification pipeline → `services/classification_helpers.py` (authoritative)
-  - Rewired 8 consumer modules to import from extracted services instead of server.py
-- **Rep Assignment in SO Creation**: Wired salesperson code from BC customer record into Sales Order creation flow
+  - Rewired 8 consumer modules to import from extracted services
+- **Rep Assignment in SO Creation**: Wired salesperson code from BC customer record into SO creation flow
   - `_lookup_bc_customer` returns (customer_number, salesperson_code) tuple
-  - `attempt_auto_create_sales_order` passes salesperson to order_data
   - `create_sales_order` includes `salesperson` field in BC API payload
   - Document record stores `assigned_salesperson_code` for audit trail
-- **Salesperson Performance Dashboard** (NEW):
-  - Backend: 3 new API endpoints (`/overview`, `/trend`, `/detail/{code}`)
-  - Frontend: New "Rep Performance" tab in Sales & Inventory Hub
-  - Features: KPI cards (active reps, total docs, auto-created, success rate, pending review), bar chart by rep volume, weekly trend line chart, ranked leaderboard table with drill-down, unassigned docs alert, configurable time window (7-365 days)
+- **Salesperson Performance Dashboard**: New "Rep Performance" tab in Sales & Inventory Hub
+  - 3 API endpoints: /overview, /trend, /detail/{code}
+  - KPI cards, bar + line charts, ranked leaderboard, rep drill-down, unassigned docs alert
+- **Auto-Post Readiness Improvements** (targeting 76.8% → higher):
+  - Active vendor resolution: When vendor_canonical not found on hub_doc, runs lookup_vendor_alias (aliases, BC cache, fuzzy matching), direct alias lookup, and BC cache name match
+  - Expanded PO number sources: ai_extraction, normalized_fields, bc_po_number, purchase_order_number, linked BC records
+  - Added vendor_resolution_methods tracking in readiness response for observability
 
 ## Code Architecture
 ```
 /app/backend/
-├── server.py                              # Core orchestration (6874 lines, down from 7879)
+├── server.py                              # Core orchestration (6874 lines)
 ├── main.py                                # App startup, router registration
 ├── deps.py                                # Shared config, DB connection
 ├── routers/
-│   ├── salesperson_dashboard.py           # [NEW] Rep performance metrics API
+│   ├── salesperson_dashboard.py           # Rep performance metrics API
+│   ├── bakeoff.py                         # Intake benchmark (updated: active vendor resolution)
 │   ├── documents.py                       # Document CRUD + search
-│   ├── bakeoff.py                         # Intake benchmark scoring
-│   ├── email_polling.py                   # Email poll trigger endpoint
+│   ├── email_polling.py                   # Email poll trigger
 │   ├── mailbox_sources.py                 # Dynamic mailbox management
 │   ├── settings.py                        # Email watcher config
 │   ├── sharepoint.py                      # SharePoint operations
@@ -62,33 +64,27 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
 ├── services/
 │   ├── email_polling_service.py           # Extracted email polling (authoritative)
 │   ├── classification_helpers.py          # Extracted classification (authoritative)
-│   ├── auto_post_service.py               # AP auto-posting + SO auto-creation (updated: rep assignment)
-│   ├── business_central_service.py        # BC API client (updated: salesperson in SO payload)
-│   ├── bc_reference_cache_service.py      # BC entity cache with salesperson data
-│   ├── config_service.py                  # Token management (Graph, BC, Email)
+│   ├── auto_post_service.py               # AP auto-posting + SO creation (rep assignment)
+│   ├── business_central_service.py        # BC API client (salesperson in SO)
+│   ├── vendor_matching.py                 # Multi-source vendor resolution
+│   ├── config_service.py                  # Token management
 │   ├── bc_api_helpers.py                  # BC companies/sales orders
 │   ├── document_handlers.py               # Document processing
-│   ├── classification_pipeline.py         # 5-stage AI classification
-│   ├── sharepoint_service.py              # SharePoint operations
 │   └── derived_state_service.py           # UI state from events
-/app/frontend/src/
-├── pages/
-│   ├── SalespersonDashboardPage.js        # [NEW] Rep performance dashboard
-│   ├── SalesInventoryHubPage.js           # Updated: 3 tabs (Sales, Rep Performance, Inventory)
+/app/frontend/src/pages/
+│   ├── SalespersonDashboardPage.js        # Rep performance dashboard
+│   ├── SalesInventoryHubPage.js           # 3 tabs (Sales, Rep Performance, Inventory)
 │   └── ...
 ```
 
 ## Known Limitations
-- BC Sandbox and SharePoint Graph API calls fail in preview environment (DEMO_MODE=true handles gracefully)
-- 19 pre-existing integration tests fail due to missing env var mocking (low priority)
+- BC Sandbox and SharePoint Graph API calls fail in preview environment (DEMO_MODE=true)
+- 19 pre-existing integration tests fail (env var mocking, low priority)
 - 205 `no_bc_match` batch failures need investigation
 
 ## Backlog
-- P1: ~~Wire rep assignment into SO creation flow~~ (DONE)
-- P1: ~~Salesperson Performance Dashboard~~ (DONE)
 - P2: Vendor Inventory Dashboard and Sales module
 - P2: Product/BOM (Bill of Materials) module
 - P2: Production-ready email service and Entra ID SSO
-- P3: Continue server.py extraction (vendor profile, workflow status, intake pipeline — 5 remaining `from server import` calls)
+- P3: Continue server.py extraction (5 remaining `from server import` calls)
 - P3: Investigate 205 `no_bc_match` batch failures
-- P3: Fix 19 pre-existing integration test failures

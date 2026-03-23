@@ -1119,6 +1119,60 @@ async def get_auto_post_readiness(run_id: str):
             if not vendor_canonical:
                 vmd = hub_doc.get("vendor_match_details") or {}
                 vendor_canonical = vmd.get("bc_vendor_no") or vmd.get("vendor_no")
+
+        # ACTIVE RESOLUTION: If vendor name exists but no BC match stored,
+        # run the vendor alias/BC cache lookup to try resolving it now.
+        # This catches docs that were ingested before vendor matching was wired,
+        # or where the original match failed but aliases/BC cache have since been updated.
+        if not vendor_canonical and vendor:
+            try:
+                from services.vendor_matching import lookup_vendor_alias
+                vendor_normalized = vendor.strip().upper()
+                alias_result = await lookup_vendor_alias(vendor_normalized)
+                if alias_result and alias_result.get("vendor_canonical"):
+                    resolved_method = alias_result.get("vendor_match_method", "benchmark_resolve")
+                    # Only accept high-confidence matches (not fuzzy_candidate)
+                    if resolved_method not in ("fuzzy_candidate",):
+                        vendor_canonical = alias_result["vendor_canonical"]
+                        vendor_match_method = f"benchmark:{resolved_method}"
+                        logger.info("Benchmark resolved vendor '%s' -> %s via %s",
+                                    vendor, vendor_canonical, resolved_method)
+            except Exception as e:
+                logger.debug("Benchmark vendor resolution failed for '%s': %s", vendor, str(e))
+
+        # Fallback: check vendor_aliases and hub_bc_vendors directly by name
+        if not vendor_canonical and vendor:
+            try:
+                # Check vendor_aliases for this vendor name
+                alias_doc = await db.vendor_aliases.find_one({
+                    "$or": [
+                        {"vendor_name": {"$regex": f"^{re.escape(vendor)}$", "$options": "i"}},
+                        {"alias_string": {"$regex": f"^{re.escape(vendor)}$", "$options": "i"}},
+                        {"normalized": vendor.strip().upper()},
+                    ]
+                }, {"_id": 0, "canonical_vendor_id": 1, "vendor_no": 1})
+                if alias_doc:
+                    vendor_canonical = alias_doc.get("canonical_vendor_id") or alias_doc.get("vendor_no")
+                    vendor_match_method = "benchmark:alias_direct"
+            except Exception:
+                pass
+
+        # Last resort: case-insensitive name match against cached BC vendors
+        if not vendor_canonical and vendor:
+            try:
+                bc_v = await db.hub_bc_vendors.find_one({
+                    "$or": [
+                        {"displayName": {"$regex": f"^{re.escape(vendor)}$", "$options": "i"}},
+                        {"name_normalized": vendor.strip().upper()},
+                    ]
+                }, {"_id": 0, "number": 1, "displayName": 1})
+                if bc_v:
+                    vendor_canonical = bc_v.get("number")
+                    vendor_match_method = "benchmark:bc_cache_name"
+                    logger.info("Benchmark resolved vendor '%s' -> %s via bc_cache_name", vendor, vendor_canonical)
+            except Exception:
+                pass
+
         criteria["vendor_matched_bc"] = bool(vendor_canonical)
         if not vendor_canonical:
             if vendor:
@@ -1171,7 +1225,17 @@ async def get_auto_post_readiness(run_id: str):
             has_po = bool(
                 hub_doc.get("po_number_extracted") or hub_doc.get("po_number")
                 or (hub_doc.get("extracted_fields") or {}).get("po_number")
+                or (hub_doc.get("ai_extraction") or {}).get("po_number")
+                or (hub_doc.get("normalized_fields") or {}).get("po_number")
+                or hub_doc.get("bc_po_number")
+                or hub_doc.get("purchase_order_number")
             )
+            # Also check if there's a linked BC order already
+            if not has_po:
+                has_po = bool(
+                    hub_doc.get("bc_purchase_order_id") or hub_doc.get("bc_order_number")
+                    or hub_doc.get("linked_bc_record_id")
+                )
         criteria["po_number"] = has_po
         if not has_po:
             blockers.append("no_po")
@@ -1261,6 +1325,8 @@ async def get_auto_post_readiness(run_id: str):
         results.append({
             "file_name": fname,
             "vendor": vendor,
+            "vendor_canonical": vendor_canonical,
+            "vendor_match_method": vendor_match_method,
             "criteria": {**criteria, **info},
             "blockers": blockers,
             "ready": is_ready,
@@ -1268,13 +1334,19 @@ async def get_auto_post_readiness(run_id: str):
         })
 
     # Calculate readiness tiers
-    tier_ready = ready_count
     tier_one_blocker = sum(1 for r in results if len(r["blockers"]) == 1)
     tier_multiple = sum(1 for r in results if len(r["blockers"]) > 1)
     tier_no_hub = sum(1 for r in results if not r["hub_doc_found"])
 
     total_ap = len(ap_invoices)
     pct_ready = round(ready_count / total_ap * 100, 1) if total_ap else 0
+
+    # Count resolution methods for visibility
+    resolution_methods = {}
+    for r in results:
+        method = r.get("vendor_match_method", "none")
+        if method:
+            resolution_methods[method] = resolution_methods.get(method, 0) + 1
 
     return {
         "summary": {
@@ -1288,6 +1360,7 @@ async def get_auto_post_readiness(run_id: str):
             "no_hub_data": tier_no_hub,
         },
         "blockers_distribution": dict(sorted(blockers_summary.items(), key=lambda x: -x[1])),
+        "vendor_resolution_methods": dict(sorted(resolution_methods.items(), key=lambda x: -x[1])),
         "criteria_pass_rates": {
             "vendor_matched_bc": round(sum(1 for r in results if r["criteria"]["vendor_matched_bc"]) / total_ap * 100, 1) if total_ap else 0,
             "invoice_number": round(sum(1 for r in results if r["criteria"]["invoice_number"]) / total_ap * 100, 1) if total_ap else 0,

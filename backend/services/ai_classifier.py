@@ -190,13 +190,16 @@ You MUST respond with ONLY a JSON object in this exact format:
 Where TYPE must be EXACTLY one of these values:
 - AP_INVOICE: Vendor invoices/bills we receive and need to pay
 - SALES_INVOICE: Invoices we send to our customers
-- PURCHASE_ORDER: Purchase orders, PO confirmations, warehouse receipts
+- PURCHASE_ORDER: Purchase orders, PO confirmations
+- SALES_ORDER: Sales orders, customer orders
 - SALES_CREDIT_MEMO: Credit memos/returns we issue to customers
 - PURCHASE_CREDIT_MEMO: Credit memos we receive from vendors
 - STATEMENT: Account statements from vendors or to customers
 - REMINDER: Payment reminders
 - FINANCE_CHARGE_MEMO: Finance charge documents
 - QUALITY_DOC: Quality assurance documentation
+- BILL_OF_LADING: Bills of lading, shipping documents, BOLs, freight bills, carrier documents, inbound/outbound shipping notifications, delivery receipts
+- PACKING_SLIP: Packing lists, packing slips, pick lists
 - OTHER: Cannot confidently classify
 
 The confidence should be between 0.0 and 1.0, where:
@@ -208,7 +211,10 @@ The confidence should be between 0.0 and 1.0, where:
 Classification guidelines:
 - AP_INVOICE: Documents from vendors requesting payment, includes "invoice", "bill", vendor names
 - SALES_INVOICE: Documents we send for payment, addressed to customers
-- PURCHASE_ORDER: PO documents, PO confirmations, warehouse receipts with line items
+- PURCHASE_ORDER: PO documents, PO confirmations with line items
+- SALES_ORDER: Customer orders, sales order confirmations
+- BILL_OF_LADING: BOLs, shipping docs, freight bills, carrier notifications, inbound/outbound documents, container shipping, delivery receipts. Common carriers include Evergreen, Maersk, MSC, CMA-CGM, OOCL, ONE, Yang Ming, etc.
+- PACKING_SLIP: Packing lists, packing slips, pick lists, shipment contents
 - STATEMENT: Summary of account activity, not a single transaction
 - Look at sender/recipient context to distinguish AP vs Sales documents
 - For multi-page PDFs, focus on the FIRST page to determine the primary document type

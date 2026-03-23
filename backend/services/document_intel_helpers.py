@@ -39,7 +39,12 @@ import re as _re
 
 # BOL keyword patterns for fast pre-AI detection
 _BOL_FILENAME_PATTERNS = _re.compile(
-    r'\b(bol|b[/-]?l|bill[_ -]?of[_ -]?lading|straight[_ -]?bill)\b', _re.IGNORECASE
+    r'\b(bol|b[/-]?l|bill[_ -]?of[_ -]?lading|straight[_ -]?bill'
+    r'|freight[_ -]?bill'
+    r'|evergreen|maersk|msc|cma[_ -]?cgm|oocl|yang[_ -]?ming|hapag|one[_ -]?line'
+    r'|cosco|zim|hmm|wan[_ -]?hai)\b'
+    r'|(?:^|\s)([a-z]{4}\d{7})(?:\s|$)',  # Container number pattern: 4 letters + 7 digits
+    _re.IGNORECASE
 )
 
 # Packing list patterns — check BEFORE BOL and Sales_Order to prevent misclassification

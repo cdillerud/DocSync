@@ -99,7 +99,7 @@ async def classify_document_type(
             result["ai_classification"] = ai_result.to_dict()
 
             if ai_result.should_accept(AI_CLASSIFICATION_THRESHOLD):
-                result["doc_type"] = ai_result.proposed_doc_type
+                result["doc_type"] = normalize_doc_type(ai_result.proposed_doc_type)
                 result["classification_method"] = f"ai:{ai_result.model_name}:{ai_result.confidence:.2f}"
                 logger.info("AI classification accepted for doc %s: %s (confidence: %.2f)",
                             document.get("id"), ai_result.proposed_doc_type, ai_result.confidence)
@@ -122,7 +122,24 @@ def get_category_for_doc_type(doc_type: str) -> str:
         return "Sales"
     elif doc_type == DocType.PURCHASE_ORDER.value:
         return "Purchase"
+    elif doc_type in ["SALES_ORDER", "Sales_Order", "DS_SALES_ORDER", "WH_SALES_ORDER", "SH_INVOICE"]:
+        return "Sales"
+    elif doc_type in ["BILL_OF_LADING", "Shipping_Document", "PACKING_SLIP", "Warehouse_Document"]:
+        return "Shipping"
     return "Other"
+
+
+# Map AI classifier types to system-internal document type strings
+_AI_TYPE_TO_SYSTEM_TYPE = {
+    "BILL_OF_LADING": "Shipping_Document",
+    "PACKING_SLIP": "Packing_Slip",
+    "SALES_ORDER": "Sales_Order",
+}
+
+
+def normalize_doc_type(raw_type: str) -> str:
+    """Normalize AI-returned doc type to system-expected values."""
+    return _AI_TYPE_TO_SYSTEM_TYPE.get(raw_type, raw_type)
 
 
 def derive_workflow_status(final_status: str, doc_type: str, decision: str) -> str:

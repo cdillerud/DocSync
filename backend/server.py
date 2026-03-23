@@ -2636,7 +2636,11 @@ async def _internal_intake_document(
     
     # Run AI extraction (for field extraction, not doc_type classification)
     logger.info("Running AI field extraction for document %s", doc_id)
-    classification = await classify_document_with_ai(str(file_path), filename)
+    try:
+        classification = await classify_document_with_ai(str(file_path), filename)
+    except Exception as ai_err:
+        logger.error("AI classification crashed for %s: %s", doc_id, str(ai_err))
+        classification = {"suggested_job_type": "Unknown", "confidence": 0.0, "extracted_fields": {}, "error": str(ai_err)}
     
     suggested_type = classification.get("suggested_job_type", "Unknown")
     confidence = classification.get("confidence", 0.0)
@@ -2645,17 +2649,21 @@ async def _internal_intake_document(
     # Deterministic-first document type classification
     # Step 1: Try deterministic rules (Zetadocs, Square9, mailbox category)
     # Step 2: If still OTHER, try AI classification if enabled
-    classification_result = await classify_document_type(
-        document=doc,
-        extracted_fields=extracted_fields,
-        suggested_type=suggested_type,
-        confidence=confidence,
-        metadata={
-            "mailbox_category": doc.get("mailbox_category"),
-            "zetadocs_set": doc.get("zetadocs_set_code"),
-            "square9_workflow": doc.get("square9_workflow_name")
-        }
-    )
+    try:
+        classification_result = await classify_document_type(
+            document=doc,
+            extracted_fields=extracted_fields,
+            suggested_type=suggested_type,
+            confidence=confidence,
+            metadata={
+                "mailbox_category": doc.get("mailbox_category"),
+                "zetadocs_set": doc.get("zetadocs_set_code"),
+                "square9_workflow": doc.get("square9_workflow_name")
+            }
+        )
+    except Exception as cls_err:
+        logger.error("Document type classification crashed for %s: %s", doc_id, str(cls_err))
+        classification_result = {"doc_type": "Other", "category": "Other", "ai_classification": None, "classification_method": "fallback_error"}
     
     doc_type_value = classification_result["doc_type"]
     category = classification_result["category"]
@@ -2668,10 +2676,18 @@ async def _internal_intake_document(
     )
     
     # Phase 7: Compute normalized fields (flat, stored on document)
-    normalized_fields = compute_ap_normalized_fields(extracted_fields)
+    try:
+        normalized_fields = compute_ap_normalized_fields(extracted_fields)
+    except Exception as norm_err:
+        logger.warning("Normalized fields computation failed for %s: %s", doc_id, str(norm_err))
+        normalized_fields = {}
     
     # Phase 7: Vendor alias lookup
-    vendor_alias_result = await lookup_vendor_alias(normalized_fields.get("vendor_normalized"))
+    try:
+        vendor_alias_result = await lookup_vendor_alias(normalized_fields.get("vendor_normalized"))
+    except Exception as va_err:
+        logger.warning("Vendor alias lookup failed for %s: %s", doc_id, str(va_err))
+        vendor_alias_result = {}
 
     # Phase 8: Spiro context enrichment (Shadow Mode - logs only, doesn't affect decisions)
     spiro_context_dict = None
@@ -2697,23 +2713,31 @@ async def _internal_intake_document(
 
     
     # Phase 7: Duplicate check
-    duplicate_result = await check_duplicate_document(
-        vendor_normalized=normalized_fields.get("vendor_normalized"),
-        vendor_canonical=vendor_alias_result.get("vendor_canonical"),
-        invoice_number_clean=normalized_fields.get("invoice_number_clean"),
-        current_doc_id=doc_id
-    )
+    try:
+        duplicate_result = await check_duplicate_document(
+            vendor_normalized=normalized_fields.get("vendor_normalized"),
+            vendor_canonical=vendor_alias_result.get("vendor_canonical"),
+            invoice_number_clean=normalized_fields.get("invoice_number_clean"),
+            current_doc_id=doc_id
+        )
+    except Exception as dup_err:
+        logger.warning("Duplicate check failed for %s: %s", doc_id, str(dup_err))
+        duplicate_result = {"possible_duplicate": False}
     
     # Phase 7: Compute validation errors/warnings and draft_candidate
-    ap_validation = compute_ap_validation(
-        document_type=suggested_type,
-        vendor_normalized=normalized_fields.get("vendor_normalized"),
-        invoice_number_clean=normalized_fields.get("invoice_number_clean"),
-        amount_float=normalized_fields.get("amount_float"),
-        po_number_clean=normalized_fields.get("po_number_clean"),
-        ai_confidence=confidence,
-        possible_duplicate=duplicate_result.get("possible_duplicate", False)
-    )
+    try:
+        ap_validation = compute_ap_validation(
+            document_type=suggested_type,
+            vendor_normalized=normalized_fields.get("vendor_normalized"),
+            invoice_number_clean=normalized_fields.get("invoice_number_clean"),
+            amount_float=normalized_fields.get("amount_float"),
+            po_number_clean=normalized_fields.get("po_number_clean"),
+            ai_confidence=confidence,
+            possible_duplicate=duplicate_result.get("possible_duplicate", False)
+        )
+    except Exception as val_err:
+        logger.warning("AP validation failed for %s: %s", doc_id, str(val_err))
+        ap_validation = {"draft_candidate": False, "blocking_issues": [], "warnings": []}
     
     # Get job type config
     job_configs = await db.hub_job_types.find_one({"job_type": suggested_type}, {"_id": 0})
@@ -2757,11 +2781,19 @@ async def _internal_intake_document(
         logger.warning("[INTAKE] PO resolution error for %s: %s", doc_id[:8], str(po_err))
 
     # Run BC validation (existing logic — now enriched with PO resolution candidates)
-    from services.bc_validation_service import validate_bc_match
-    validation_results = await validate_bc_match(suggested_type, extracted_fields, job_configs)
+    try:
+        from services.bc_validation_service import validate_bc_match
+        validation_results = await validate_bc_match(suggested_type, extracted_fields, job_configs)
+    except Exception as bc_err:
+        logger.warning("BC validation failed for %s: %s", doc_id, str(bc_err))
+        validation_results = {"all_passed": False}
     
     # Make automation decision
-    decision, reasoning, decision_metadata = make_automation_decision(job_configs, confidence, validation_results)
+    try:
+        decision, reasoning, decision_metadata = make_automation_decision(job_configs, confidence, validation_results)
+    except Exception as dec_err:
+        logger.warning("Automation decision failed for %s: %s", doc_id, str(dec_err))
+        decision, reasoning, decision_metadata = "manual", "Decision engine error", {}
     
     # Get freight direction for routing
     freight_direction = validation_results.get("freight_direction")

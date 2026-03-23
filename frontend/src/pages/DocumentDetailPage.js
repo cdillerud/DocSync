@@ -1219,7 +1219,7 @@ function FileAndClearButton({ docId, onCleared }) {
     if (!window.confirm('File this document to its suggested SharePoint folder and clear it from the queue?')) return;
     setLoading(true);
     try {
-      const res = await api.post(`/documents/${docId}/file-and-clear`);
+      const res = await api.post(`/documents/${encodeURIComponent(docId)}/file-and-clear`);
       toast.success(res.data.message || 'Document filed & cleared');
       if (onCleared) onCleared();
     } catch (e) { toast.error(e.response?.data?.detail || 'File & Clear failed'); }

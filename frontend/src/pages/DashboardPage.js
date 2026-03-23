@@ -1466,7 +1466,7 @@ export default function DashboardPage() {
                   </TableHeader>
                   <TableBody>
                     {stats.recent_workflows.map((wf) => (
-                      <TableRow key={wf.id} className="cursor-pointer" onClick={() => wf.document_id && navigate(`/documents/${wf.document_id}`)}>
+                      <TableRow key={wf.id} className="cursor-pointer" onClick={() => wf.document_id && navigate(`/documents/${encodeURIComponent(wf.document_id)}`)}>
                         <TableCell className="font-mono text-xs">{wf.workflow_name}</TableCell>
                         <TableCell>
                           <Badge variant={wf.status === 'Completed' ? 'secondary' : wf.status === 'Failed' ? 'destructive' : 'default'}>

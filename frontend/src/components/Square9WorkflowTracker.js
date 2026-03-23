@@ -55,7 +55,7 @@ export function Square9WorkflowTracker({ documentId, onRetry }) {
 
   const fetchStatus = async () => {
     try {
-      const res = await fetch(`${API}/api/documents/${documentId}/square9-status`);
+      const res = await fetch(`${API}/api/documents/${encodeURIComponent(documentId)}/square9-status`);
       if (res.ok) {
         const data = await res.json();
         setStatus(data);
@@ -76,7 +76,7 @@ export function Square9WorkflowTracker({ documentId, onRetry }) {
   const handleRetry = async () => {
     setRetrying(true);
     try {
-      const res = await fetch(`${API}/api/documents/${documentId}/retry`, {
+      const res = await fetch(`${API}/api/documents/${encodeURIComponent(documentId)}/retry`, {
         method: 'POST',
       });
       const data = await res.json();
@@ -93,7 +93,7 @@ export function Square9WorkflowTracker({ documentId, onRetry }) {
 
   const handleResetRetries = async () => {
     try {
-      const res = await fetch(`${API}/api/documents/${documentId}/reset-retries`, {
+      const res = await fetch(`${API}/api/documents/${encodeURIComponent(documentId)}/reset-retries`, {
         method: 'POST',
       });
       if (res.ok) {

@@ -35,7 +35,7 @@ export default function MatchingDebugPanel({ document: doc }) {
   const fetchDebug = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API}/api/documents/${doc.id}/matching-debug`);
+      const res = await fetch(`${API}/api/documents/${encodeURIComponent(doc.id)}/matching-debug`);
       if (res.ok) setDebug(await res.json());
     } catch (err) { /* silent */ }
     finally { setLoading(false); }
@@ -44,7 +44,7 @@ export default function MatchingDebugPanel({ document: doc }) {
   const handleRerun = async () => {
     setRerunning(true);
     try {
-      const res = await fetch(`${API}/api/documents/${doc.id}/matching-debug/rerun`, { method: 'POST' });
+      const res = await fetch(`${API}/api/documents/${encodeURIComponent(doc.id)}/matching-debug/rerun`, { method: 'POST' });
       if (res.ok) {
         toast.success('Resolution re-run with diagnostics');
         await fetchDebug();

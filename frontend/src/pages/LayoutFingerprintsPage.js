@@ -158,7 +158,7 @@ function FamilyDetailSheet({ family, open, onClose }) {
               <CardContent className="space-y-1.5">
                 {recentDocs.map(d => (
                   <div key={d.document_id} className="flex justify-between items-center text-xs py-1 border-b border-slate-700/50 last:border-0">
-                    <a href={`/documents/${d.document_id}`} className="text-blue-400 hover:underline font-mono truncate max-w-[180px]">{d.document_id.substring(0, 12)}...</a>
+                    <a href={`/documents/${encodeURIComponent(d.document_id)}`} className="text-blue-400 hover:underline font-mono truncate max-w-[180px]">{d.document_id.substring(0, 12)}...</a>
                     <span className="text-slate-500">{d.layout_similarity_score ? `${(d.layout_similarity_score * 100).toFixed(0)}%` : '-'}</span>
                     <span className="text-slate-600">{d.created_at ? new Date(d.created_at).toLocaleDateString() : ''}</span>
                   </div>

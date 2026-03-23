@@ -43,26 +43,27 @@ export const exportDocumentTypesDashboard = (params) => {
 // Documents
 export const uploadDocument = (formData) => api.post('/documents/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
 export const listDocuments = (params) => api.get('/documents', { params });
-export const getDocument = (id, includeEvents = true) => api.get(`/documents/${id}`, { params: { include_events: includeEvents } });
-export const updateDocument = (id, data) => api.put(`/documents/${id}`, data);
-export const linkDocument = (id) => api.post(`/documents/${id}/link`);
-export const deleteDocument = (id) => api.delete(`/documents/${id}`);
-export const resubmitDocument = (id) => api.post(`/documents/${id}/reprocess?reclassify=true`);
+const encId = (id) => encodeURIComponent(id);
+export const getDocument = (id, includeEvents = true) => api.get(`/documents/${encId(id)}`, { params: { include_events: includeEvents } });
+export const updateDocument = (id, data) => api.put(`/documents/${encId(id)}`, data);
+export const linkDocument = (id) => api.post(`/documents/${encId(id)}/link`);
+export const deleteDocument = (id) => api.delete(`/documents/${encId(id)}`);
+export const resubmitDocument = (id) => api.post(`/documents/${encId(id)}/reprocess?reclassify=true`);
 
 // Event-Driven Workflow APIs
-export const getDocumentEvents = (id, params) => api.get(`/documents/${id}/events`, { params });
-export const getDocumentTimeline = (id, includeLegacy = true) => api.get(`/documents/${id}/timeline`, { params: { include_legacy: includeLegacy } });
-export const getDocumentDerivedState = (id) => api.get(`/documents/${id}/derived-state`);
-export const refreshDocumentState = (id) => api.post(`/documents/${id}/refresh-state`);
+export const getDocumentEvents = (id, params) => api.get(`/documents/${encId(id)}/events`, { params });
+export const getDocumentTimeline = (id, includeLegacy = true) => api.get(`/documents/${encId(id)}/timeline`, { params: { include_legacy: includeLegacy } });
+export const getDocumentDerivedState = (id) => api.get(`/documents/${encId(id)}/derived-state`);
+export const refreshDocumentState = (id) => api.post(`/documents/${encId(id)}/refresh-state`);
 export const getEventTypes = () => api.get('/events/types');
 export const getRecentEvents = (params) => api.get('/events/recent', { params });
 export const getEventStats = (sinceHours = 24) => api.get('/events/stats', { params: { since_hours: sinceHours } });
 
 // BC Reference Resolution + Write Safety APIs
 export const resolveBCReference = (referenceNumber) => api.post('/bc/resolve-reference', null, { params: { reference_number: referenceNumber } });
-export const resolveDocumentReference = (docId) => api.post(`/documents/${docId}/resolve-reference`);
-export const resolveDocumentIntelligence = (docId) => api.post(`/documents/${docId}/resolve-intelligence`);
-export const getDocumentReferenceIntelligence = (docId) => api.get(`/documents/${docId}/reference-intelligence`);
+export const resolveDocumentReference = (docId) => api.post(`/documents/${encId(docId)}/resolve-reference`);
+export const resolveDocumentIntelligence = (docId) => api.post(`/documents/${encId(docId)}/resolve-intelligence`);
+export const getDocumentReferenceIntelligence = (docId) => api.get(`/documents/${encId(docId)}/reference-intelligence`);
 export const getBCWriteGuardStatus = () => api.get('/bc/write-guard/status');
 export const checkBCWritePermission = (documentId, action) => api.post('/bc/write-guard/check', null, { params: { document_id: documentId, action } });
 
@@ -76,9 +77,9 @@ export const searchCache = (reference, entityType = null) => {
 };
 
 // Square9 Workflow Retry
-export const retryDocument = (id, reason = 'Manual retry') => api.post(`/documents/${id}/retry?reason=${encodeURIComponent(reason)}`);
-export const resetDocumentRetries = (id, reason = 'Manual reset') => api.post(`/documents/${id}/reset-retries?reason=${encodeURIComponent(reason)}`);
-export const getSquare9Status = (id) => api.get(`/documents/${id}/square9-status`);
+export const retryDocument = (id, reason = 'Manual retry') => api.post(`/documents/${encId(id)}/retry?reason=${encodeURIComponent(reason)}`);
+export const resetDocumentRetries = (id, reason = 'Manual reset') => api.post(`/documents/${encId(id)}/reset-retries?reason=${encodeURIComponent(reason)}`);
+export const getSquare9Status = (id) => api.get(`/documents/${encId(id)}/square9-status`);
 export const getSquare9StageCounts = () => api.get('/square9/stage-counts');
 
 // Automation Rules APIs
@@ -156,14 +157,14 @@ export const bulkDeleteDocuments = async (docIds) => {
 };
 
 // File & Clear
-export const fileAndClearDocument = (docId) => api.post(`/documents/${docId}/file-and-clear`);
+export const fileAndClearDocument = (docId) => api.post(`/documents/${encId(docId)}/file-and-clear`);
 export const bulkFileAndClear = (docIds) => api.post('/documents/bulk-file-and-clear', docIds);
 export const bulkApproveAndFile = (category, limit = 500) => api.post(`/documents/bulk-approve-and-file?category=${category || 'needs_approval'}&limit=${limit}`);
 export const getFilingStats = () => api.get('/documents/filing-actions/stats');
 
 // Reference Intelligence
 export const batchAutoResolve = (statusFilter = 'not_run', limit = 500) => api.post(`/admin/batch-auto-resolve?status_filter=${statusFilter}&limit=${limit}`);
-export const triggerAutoResolve = (docId) => api.post(`/documents/${docId}/auto-resolve`);
+export const triggerAutoResolve = (docId) => api.post(`/documents/${encId(docId)}/auto-resolve`);
 
 // Workflows
 export const listWorkflows = (params) => api.get('/workflows', { params });
@@ -205,7 +206,7 @@ export const getEmailStats = () => api.get('/dashboard/email-stats');
 
 // Document Intake & Classification
 export const intakeDocument = (formData) => api.post('/documents/intake', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-export const classifyDocument = (id) => api.post(`/documents/${id}/classify`);
+export const classifyDocument = (id) => api.post(`/documents/${encId(id)}/classify`);
 
 // AP Invoice Workflow Queues
 export const getWorkflowStatusCounts = () => api.get('/workflows/ap_invoice/status-counts');
@@ -288,27 +289,27 @@ export const searchPurchaseOrders = (vendorId = null, limit = 50) =>
 
 // Save AP review edits
 export const saveAPReview = (docId, data) => 
-  api.put(`/ap-review/documents/${docId}`, data);
+  api.put(`/ap-review/documents/${encId(docId)}`, data);
 
 // Mark document ready for posting
 export const markReadyForPost = (docId) => 
-  api.post(`/ap-review/documents/${docId}/mark-ready`);
+  api.post(`/ap-review/documents/${encId(docId)}/mark-ready`);
 
 // Post document to BC
 export const postToBC = (docId, data = null) => 
-  api.post(`/ap-review/documents/${docId}/post-to-bc`, data);
+  api.post(`/ap-review/documents/${encId(docId)}/post-to-bc`, data);
 
 // Get BC posting status
 export const getBCPostingStatus = (docId) => 
-  api.get(`/ap-review/documents/${docId}/bc-status`);
+  api.get(`/ap-review/documents/${encId(docId)}/bc-status`);
 
 // Extract invoice data using AI
 export const extractInvoiceData = (docId) => 
-  api.post(`/ap-review/documents/${docId}/extract-invoice-data`);
+  api.post(`/ap-review/documents/${encId(docId)}/extract-invoice-data`);
 
 // Get extraction status
 export const getExtractionStatus = (docId) => 
-  api.get(`/ap-review/documents/${docId}/extraction-status`);
+  api.get(`/ap-review/documents/${encId(docId)}/extraction-status`);
 
 // =============================================================================
 // GPI INTEGRATION APIs (BC Sales Order creation)
@@ -429,10 +430,10 @@ export const getARReleaseQueue = (params) => api.get('/ar-release/queue', { para
 // Automation Intelligence APIs
 export const getAutomationMetrics = () => api.get('/automation/metrics');
 export const batchEvaluateIntelligence = (limit) => api.post(`/automation/batch-evaluate?limit=${limit || 200}`);
-export const getDecisionExplanation = (docId) => api.get(`/documents/${docId}/decision-explanation`);
-export const getAutomationConfidence = (docId) => api.get(`/documents/${docId}/automation-confidence`);
-export const getReviewAssist = (docId) => api.post(`/documents/${docId}/review-assist`);
-export const acceptSuggestion = (docId, data) => api.post(`/documents/${docId}/accept-suggestion`, data);
+export const getDecisionExplanation = (docId) => api.get(`/documents/${encId(docId)}/decision-explanation`);
+export const getAutomationConfidence = (docId) => api.get(`/documents/${encId(docId)}/automation-confidence`);
+export const getReviewAssist = (docId) => api.post(`/documents/${encId(docId)}/review-assist`);
+export const acceptSuggestion = (docId, data) => api.post(`/documents/${encId(docId)}/accept-suggestion`, data);
 
 
 

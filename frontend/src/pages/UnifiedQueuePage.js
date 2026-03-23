@@ -713,7 +713,7 @@ export default function UnifiedQueuePage() {
                       <TableRow 
                         key={doc.id} 
                         className={`cursor-pointer hover:bg-muted/50 ${selectedDocs.has(doc.id) ? 'bg-primary/5' : ''}`}
-                        onClick={() => navigate(`/documents/${doc.id}`)}
+                        onClick={() => navigate(`/documents/${encodeURIComponent(doc.id)}`)}
                         data-testid={`doc-row-${doc.id}`}
                       >
                         <TableCell className="pl-4" onClick={(e) => e.stopPropagation()}>

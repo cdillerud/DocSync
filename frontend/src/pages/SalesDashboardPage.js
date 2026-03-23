@@ -283,7 +283,7 @@ function QueueRow({ item, navigate }) {
   };
 
   const handleAction = () => {
-    navigate(`/documents/${item.id}`);
+    navigate(`/documents/${encodeURIComponent(item.id)}`);
   };
 
   const actionLabel = item.status === 'already_created' ? 'View' : item.status === 'ready' || item.status === 'ready_warnings' ? 'Review' : 'Review';

@@ -346,7 +346,7 @@ export default function DocumentBundleReviewPage() {
                           )}
                         </div>
                       </div>
-                      <Button variant="ghost" size="sm" className="h-6 text-[9px] opacity-0 group-hover:opacity-100" onClick={(e) => { e.stopPropagation(); navigate(`/documents/${doc.document_id}`); }}>
+                      <Button variant="ghost" size="sm" className="h-6 text-[9px] opacity-0 group-hover:opacity-100" onClick={(e) => { e.stopPropagation(); navigate(`/documents/${encodeURIComponent(doc.document_id)}`); }}>
                         <ChevronRight className="w-3 h-3" />
                       </Button>
                       <Button variant="ghost" size="sm" className="h-6 text-[9px] text-red-400 opacity-0 group-hover:opacity-100" onClick={(e) => { e.stopPropagation(); handleRemoveDoc(doc.document_id); }} data-testid={`remove-doc-${doc.document_id}`}>

@@ -63,7 +63,7 @@ export default function ReviewerAssistPanel({ document, onRefresh }) {
     if (!docId) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API}/api/documents/${docId}/review-assist`, { method: 'POST' });
+      const res = await fetch(`${API}/api/documents/${encodeURIComponent(docId)}/review-assist`, { method: 'POST' });
       if (res.ok) {
         const data = await res.json();
         setSuggestions(data.suggested_actions || []);
@@ -81,7 +81,7 @@ export default function ReviewerAssistPanel({ document, onRefresh }) {
   const handleAccept = async (suggestion, idx) => {
     setAccepting(idx);
     try {
-      const res = await fetch(`${API}/api/documents/${docId}/accept-suggestion`, {
+      const res = await fetch(`${API}/api/documents/${encodeURIComponent(docId)}/accept-suggestion`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -108,8 +108,8 @@ export default function DecisionExplainabilityPanel({ document, onRefresh }) {
     setLoading(true);
     try {
       const [expRes, confRes] = await Promise.all([
-        fetch(`${API}/api/documents/${docId}/decision-explanation`),
-        fetch(`${API}/api/documents/${docId}/automation-confidence`),
+        fetch(`${API}/api/documents/${encodeURIComponent(docId)}/decision-explanation`),
+        fetch(`${API}/api/documents/${encodeURIComponent(docId)}/automation-confidence`),
       ]);
       if (expRes.ok) setExplanation(await expRes.json());
       if (confRes.ok) setConfidence(await confRes.json());

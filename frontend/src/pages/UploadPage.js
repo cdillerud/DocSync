@@ -95,7 +95,7 @@ export default function UploadPage() {
       } else {
         toast.success('Document uploaded');
       }
-      navigate(`/documents/${res.data.document.id}`);
+      navigate(`/documents/${encodeURIComponent(res.data.document.id)}`);
     } catch (err) {
       toast.error('Upload failed: ' + (err.response?.data?.detail || err.message));
     } finally {

@@ -348,7 +348,7 @@ function TransactionRow({ txn, isExpanded, onToggle }) {
         <td className="p-3">
           {txn.source_document_id ? (
             <Link
-              to={`/documents/${txn.source_document_id}`}
+              to={`/documents/${encodeURIComponent(txn.source_document_id)}`}
               className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline"
               onClick={e => e.stopPropagation()}
               data-testid="source-doc-link"
@@ -430,7 +430,7 @@ function ExpandedDetail({ txn }) {
             value={
               txn.source_document_id ? (
                 <Link
-                  to={`/documents/${txn.source_document_id}`}
+                  to={`/documents/${encodeURIComponent(txn.source_document_id)}`}
                   className="text-blue-600 dark:text-blue-400 hover:underline font-mono"
                 >
                   {txn.source_document_id}

@@ -239,7 +239,7 @@ export default function DocumentReviewQueuePage() {
                       <tr
                         key={item.document_id}
                         className="border-b border-border/50 hover:bg-accent/50 cursor-pointer transition-colors"
-                        onClick={() => navigate(`/documents/${item.document_id}`)}
+                        onClick={() => navigate(`/documents/${encodeURIComponent(item.document_id)}`)}
                         data-testid={`review-row-${item.document_id}`}
                       >
                         <td className="px-4 py-3">

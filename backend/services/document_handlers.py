@@ -1011,6 +1011,23 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
             if refreshed:
                 new_status = refreshed.get("status", new_status)
                 new_workflow_status = refreshed.get("workflow_status", new_workflow_status)
+                # Emit events so derived state picks up the new status
+                if new_status == "Completed" or new_workflow_status == "exported":
+                    from services.event_service import get_event_service
+                    evt_svc = get_event_service()
+                    if evt_svc:
+                        await evt_svc.emit(
+                            document_id=doc_id,
+                            event_type="automation.decision.completed",
+                            status="completed",
+                            source_service="reprocess_workflow",
+                            payload={
+                                "decision": "Cleared",
+                                "auto_clear": True,
+                                "reason": f"Reprocess: {doc_type_value} warehouse workflow completed",
+                                "workflow_status": new_workflow_status,
+                            },
+                        )
         except Exception as wf_err:
             logger.warning("[REPROCESS] Workflow update error for %s: %s", doc_id[:8], str(wf_err))
 

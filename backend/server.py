@@ -2266,6 +2266,26 @@ async def _update_standard_workflow_status(
         await db.hub_documents.update_one({"id": doc_id}, {"$set": final_update})
         logger.info("[Warehouse Workflow] Doc %s: COMPLETED - PO=%s, BOL=%s, Date=%s, archived to SharePoint", 
                    doc_id, po_number, bol_number, document_date)
+        
+        # Emit events for derived state tracking
+        try:
+            from services.event_service import get_event_service
+            evt_svc = get_event_service()
+            if evt_svc:
+                await evt_svc.emit(
+                    document_id=doc_id,
+                    event_type="automation.decision.completed",
+                    status="completed",
+                    source_service="warehouse_workflow",
+                    payload={
+                        "decision": "Cleared",
+                        "auto_clear": True,
+                        "reason": f"Warehouse workflow: PO={po_number}, BOL={bol_number}, Date={document_date}",
+                    },
+                )
+        except Exception:
+            pass
+        
         return
     
     # =============== SALES WORKFLOW ===============

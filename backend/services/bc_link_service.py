@@ -24,12 +24,12 @@ BC_CLIENT_ID = os.environ.get('BC_CLIENT_ID', '')
 
 
 async def _get_bc_token():
-    from server import get_bc_token
+    from services.config_service import get_bc_token
     return await get_bc_token()
 
 
 async def _get_bc_companies():
-    from server import get_bc_companies
+    from services.bc_api_helpers import get_bc_companies
     return await get_bc_companies()
 
 

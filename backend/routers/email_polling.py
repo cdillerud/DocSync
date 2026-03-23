@@ -27,7 +27,7 @@ async def trigger_email_poll():
     if not EMAIL_POLLING_ENABLED:
         return {"error": "EMAIL_POLLING_ENABLED is false. Set to true to enable polling."}
     
-    from server import poll_mailbox_for_attachments
+    from services.email_polling_service import poll_mailbox_for_attachments
     stats = await poll_mailbox_for_attachments()
     return stats
 

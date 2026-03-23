@@ -33,7 +33,7 @@ async def initialize_sharepoint_folders(background_tasks: BackgroundTasks):
     Initialize all SharePoint folders according to accounting structure.
     Creates folders if they don't exist.
     """
-    from server import ensure_sharepoint_folder_exists
+    from services.sharepoint_service import ensure_sharepoint_folder_exists
 
     folders = get_all_folder_paths()
 

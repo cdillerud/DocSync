@@ -71,7 +71,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://erp-decouple.preview.emergentagent.com"
+    "api_url": "https://erp-extraction.preview.emergentagent.com"
   },
   "seed_data_used": "Used existing Hormel Foods workspace (ID: 366bfcce-4d68-4daf-b9f4-cb05a35de8c8) with 12 unique items, 13 balance rows (8 OK, 3 LOW, 2 SHORT).",
   "retest_needed": false,

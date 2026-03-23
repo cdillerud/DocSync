@@ -534,8 +534,8 @@ async def attempt_auto_create_sales_order(doc_id: str, doc: Dict[str, Any], db, 
         datetime.now(timezone.utc).strftime("%Y-%m-%d")
     )
     
-    # Look up customer in BC
-    customer_number = await _lookup_bc_customer(customer_name, bc_service)
+    # Look up customer in BC (returns customer_number and salesperson_code)
+    customer_number, salesperson_code = await _lookup_bc_customer(customer_name, bc_service)
     
     if not customer_number:
         logger.warning("AUTO-CREATE: Customer '%s' not found in BC for doc %s", customer_name, doc_id)
@@ -566,6 +566,11 @@ async def attempt_auto_create_sales_order(doc_id: str, doc: Dict[str, Any], db, 
         "lines": line_items
     }
     
+    # Wire in salesperson from customer record (rep assignment)
+    if salesperson_code:
+        order_data["salesperson"] = salesperson_code
+        logger.info("AUTO-CREATE: Assigning salesperson '%s' to SO for doc %s", salesperson_code, doc_id)
+    
     try:
         # Update status to creating
         await db.hub_documents.update_one(
@@ -586,9 +591,7 @@ async def attempt_auto_create_sales_order(doc_id: str, doc: Dict[str, Any], db, 
             bc_document_number = result.get("bcDocumentNumber")
             
             # Update document with success
-            await db.hub_documents.update_one(
-                {"id": doc_id},
-                {"$set": {
+            update_fields = {
                     "bc_document_id": bc_document_id,
                     "bc_document_number": bc_document_number,
                     "bc_sales_order_id": bc_document_id,
@@ -601,7 +604,15 @@ async def attempt_auto_create_sales_order(doc_id: str, doc: Dict[str, Any], db, 
                     "auto_create_success": True,
                     "created_in_bc_utc": utcnow(),
                     "updated_utc": utcnow()
-                }}
+            }
+            
+            # Store salesperson assignment for audit trail
+            if salesperson_code:
+                update_fields["assigned_salesperson_code"] = salesperson_code
+            
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": update_fields}
             )
             
             logger.info("AUTO-CREATE SUCCESS: Doc %s -> BC Sales Order %s", doc_id, bc_document_number)
@@ -662,17 +673,20 @@ async def attempt_auto_create_sales_order(doc_id: str, doc: Dict[str, Any], db, 
         )
 
 
-async def _lookup_bc_customer(customer_name: str, bc_service) -> Optional[str]:
+async def _lookup_bc_customer(customer_name: str, bc_service) -> tuple:
     """
-    Look up a customer in BC by name and return the customer number.
+    Look up a customer in BC by name and return (customer_number, salesperson_code).
     
     Tries:
     1. Exact match on displayName
     2. Contains match on displayName
     3. First word match (company name prefix)
+    
+    Returns:
+        (customer_number: str|None, salesperson_code: str|None)
     """
     if not customer_name:
-        return None
+        return None, None
     
     try:
         # Use BC service to search for customer
@@ -689,7 +703,7 @@ async def _lookup_bc_customer(customer_name: str, bc_service) -> Optional[str]:
                 headers={"Authorization": f"Bearer {token}"},
                 params={
                     "$filter": f"displayName eq '{customer_name}'",
-                    "$select": "number,displayName",
+                    "$select": "number,displayName,salespersonCode",
                     "$top": "1"
                 }
             )
@@ -697,8 +711,10 @@ async def _lookup_bc_customer(customer_name: str, bc_service) -> Optional[str]:
             if resp.status_code == 200:
                 customers = resp.json().get("value", [])
                 if customers:
-                    logger.info("Found exact customer match: %s -> %s", customer_name, customers[0]["number"])
-                    return customers[0]["number"]
+                    cust = customers[0]
+                    logger.info("Found exact customer match: %s -> %s (salesperson: %s)", 
+                               customer_name, cust["number"], cust.get("salespersonCode", ""))
+                    return cust["number"], cust.get("salespersonCode") or None
             
             # Try contains match
             # Escape single quotes in customer name
@@ -708,7 +724,7 @@ async def _lookup_bc_customer(customer_name: str, bc_service) -> Optional[str]:
                 headers={"Authorization": f"Bearer {token}"},
                 params={
                     "$filter": f"contains(displayName, '{safe_name}')",
-                    "$select": "number,displayName",
+                    "$select": "number,displayName,salespersonCode",
                     "$top": "5"
                 }
             )
@@ -716,10 +732,10 @@ async def _lookup_bc_customer(customer_name: str, bc_service) -> Optional[str]:
             if resp.status_code == 200:
                 customers = resp.json().get("value", [])
                 if customers:
-                    # Return first match
-                    logger.info("Found customer contains match: %s -> %s (%s)", 
-                               customer_name, customers[0]["number"], customers[0]["displayName"])
-                    return customers[0]["number"]
+                    cust = customers[0]
+                    logger.info("Found customer contains match: %s -> %s (%s, salesperson: %s)", 
+                               customer_name, cust["number"], cust["displayName"], cust.get("salespersonCode", ""))
+                    return cust["number"], cust.get("salespersonCode") or None
             
             # Try first word match (common for "Company Name LLC" -> "Company Name")
             first_word = customer_name.split()[0] if customer_name else ""
@@ -729,7 +745,7 @@ async def _lookup_bc_customer(customer_name: str, bc_service) -> Optional[str]:
                     headers={"Authorization": f"Bearer {token}"},
                     params={
                         "$filter": f"startswith(displayName, '{first_word}')",
-                        "$select": "number,displayName",
+                        "$select": "number,displayName,salespersonCode",
                         "$top": "5"
                     }
                 )
@@ -737,13 +753,14 @@ async def _lookup_bc_customer(customer_name: str, bc_service) -> Optional[str]:
                 if resp.status_code == 200:
                     customers = resp.json().get("value", [])
                     if customers:
-                        logger.info("Found customer prefix match: %s -> %s (%s)", 
-                                   customer_name, customers[0]["number"], customers[0]["displayName"])
-                        return customers[0]["number"]
+                        cust = customers[0]
+                        logger.info("Found customer prefix match: %s -> %s (%s, salesperson: %s)", 
+                                   customer_name, cust["number"], cust["displayName"], cust.get("salespersonCode", ""))
+                        return cust["number"], cust.get("salespersonCode") or None
         
         logger.warning("No BC customer found for: %s", customer_name)
-        return None
+        return None, None
         
     except Exception as e:
         logger.error("Error looking up BC customer '%s': %s", customer_name, str(e))
-        return None
+        return None, None

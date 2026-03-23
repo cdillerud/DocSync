@@ -90,7 +90,7 @@ async def run_upload_and_link_workflow(
             step3_start = datetime.now(timezone.utc).isoformat()
             steps.append({"step": "validate_bc_record", "status": "running", "started": step3_start})
             try:
-                from server import get_bc_sales_orders
+                from services.bc_api_helpers import get_bc_sales_orders
                 orders = await get_bc_sales_orders(order_no=bc_document_no)
                 if orders:
                     steps[-1]["status"] = "completed"

@@ -1224,17 +1224,23 @@ async def get_auto_post_readiness(run_id: str):
                 stable_score = vip2.get("stable_vendor_score", 0) or 0
 
         # THE FEEDBACK LOOP: stable vendor flag = earned trust
+        # Rule: raw confidence alone meeting threshold always passes
+        # Stable score can only BOOST, never reduce effective confidence
         if stable_flag and stable_score >= 0.85:
             effective_confidence = max(raw_confidence, stable_score)
         elif stable_score > 0:
-            effective_confidence = (raw_confidence * 0.4) + (stable_score * 0.6)
+            blended = (raw_confidence * 0.4) + (stable_score * 0.6)
+            effective_confidence = max(raw_confidence, blended)
         else:
             effective_confidence = raw_confidence
 
         threshold = 0.90
         criteria["confidence_ok"] = effective_confidence >= threshold
-        criteria["stable_vendor"] = stable_flag
-        criteria["stable_score"] = round(stable_score, 3)
+        # Informational fields — NOT used for readiness check
+        info = {
+            "stable_vendor": stable_flag,
+            "stable_score": round(stable_score, 3),
+        }
         if effective_confidence < threshold and hub_doc:
             if stable_flag:
                 blockers.append(f"low_confidence (stable vendor but score={stable_score:.2f})")
@@ -1243,7 +1249,7 @@ async def get_auto_post_readiness(run_id: str):
             else:
                 blockers.append("low_confidence (no vendor history)")
 
-        # Overall readiness
+        # Overall readiness — only check actual pass/fail criteria
         is_ready = all(criteria.values())
         if is_ready:
             ready_count += 1
@@ -1255,7 +1261,7 @@ async def get_auto_post_readiness(run_id: str):
         results.append({
             "file_name": fname,
             "vendor": vendor,
-            "criteria": criteria,
+            "criteria": {**criteria, **info},
             "blockers": blockers,
             "ready": is_ready,
             "hub_doc_found": hub_doc is not None,

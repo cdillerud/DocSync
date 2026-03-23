@@ -123,13 +123,8 @@ from services.bc_api_helpers import get_bc_companies as _get_bc_companies
 
 # ---------------------------------------------------------------------------
 # Server.py functions still needed (remaining extraction targets)
-# Used for: classify_document_type, get_bc_token (remaining lazy imports)
+# Used for: _update_vendor_profile_incremental, _update_standard_workflow_status
 # ---------------------------------------------------------------------------
-
-def _server():
-    """Lazy import of server module for functions not yet extracted."""
-    import server
-    return server
 
 # Extracted service imports
 from services.document_orchestration_service import run_upload_and_link_workflow as _run_upload_and_link_workflow
@@ -138,6 +133,8 @@ from services.sharepoint_service import create_sharing_link as _create_sharing_l
 from services.bc_link_service import link_document_to_bc as _link_document_to_bc
 from services.bc_draft_service import check_duplicate_purchase_invoice as _check_duplicate_purchase_invoice
 from services.bc_draft_service import create_purchase_invoice_header as _create_purchase_invoice_header
+from services.classification_helpers import classify_document_type as _classify_document_type
+from services.config_service import get_bc_token as _get_bc_token
 
 
 # ---------------------------------------------------------------------------
@@ -376,7 +373,6 @@ async def intake_document(
     email_received_utc: Optional[str] = Form(None),
 ):
     db = get_db()
-    srv = _server()
     DocType, SourceSystem, CaptureChannel, WorkflowStatus, WorkflowEvent, _DC = _get_workflow_enums()
     TransactionAction = _get_transaction_action()
     DEFAULT_JOB_TYPES = _get_default_job_types()
@@ -445,7 +441,7 @@ async def intake_document(
     extracted_fields = classification.get("extracted_fields", {})
 
     # Deterministic-first classification
-    classification_result = await srv.classify_document_type(
+    classification_result = await _classify_document_type(
         document=doc, extracted_fields=extracted_fields,
         suggested_type=suggested_type, confidence=confidence,
         metadata={
@@ -624,7 +620,7 @@ async def intake_document(
             external_doc_no = norm_fields.get("invoice_number") or extracted_fields.get("invoice_number", "")
 
             if vendor_no and external_doc_no:
-                token = await srv.get_bc_token()
+                token = await _get_bc_token()
                 companies = await _get_bc_companies()
                 company_id = companies[0]["id"] if companies else None
 

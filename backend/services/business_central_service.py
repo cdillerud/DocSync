@@ -964,6 +964,7 @@ class BusinessCentralService:
                 "bcDocumentId": mock_bc_id,
                 "bcDocumentNumber": mock_bc_id,
                 "status": "Draft",
+                "salesperson": order_data.get("salesperson", ""),
                 "message": "Sales order created (mock mode)",
                 "mock": True,
                 "createdAt": datetime.now(timezone.utc).isoformat(),
@@ -983,6 +984,10 @@ class BusinessCentralService:
             "externalDocumentNumber": order_data.get("externalDocumentNumber") or order_data.get("po_number") or order_data.get("customer_po"),
             "currencyCode": order_data.get("currencyCode") or order_data.get("currency") or "USD",
         }
+        
+        # Add salesperson code (rep assignment)
+        if order_data.get("salesperson"):
+            payload["salesperson"] = order_data["salesperson"]
         
         # Add optional fields
         if order_data.get("requestedDeliveryDate") or order_data.get("delivery_date"):

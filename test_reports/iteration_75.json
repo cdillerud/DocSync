@@ -60,7 +60,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://erp-decouple.preview.emergentagent.com"
+    "api_url": "https://erp-extraction.preview.emergentagent.com"
   },
   "seed_data_used": "Used existing Hormel Foods workspace (customer_id: 366bfcce-4d68-4daf-b9f4-cb05a35de8c8). Already converted draft: PO-DRAFT-20260314163256-689B67 (2 lines: TEST-ITEM-WARN, SPAM-LITE). Second converted draft: PO-DRAFT-20260314170144-8ED5A8 (1 line: TEST-ITEM-WARN). Multiple archived drafts available for testing.",
   "retest_needed": false,

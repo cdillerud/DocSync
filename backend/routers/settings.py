@@ -19,7 +19,7 @@ from services.config_service import (
     get_graph_token, get_bc_token,
 )
 # These two still live in server.py (email-watcher config + subscription are tightly coupled)
-from server import get_email_watcher_config, subscribe_to_mailbox_notifications
+from services.email_polling_service import get_email_watcher_config, subscribe_to_mailbox_notifications
 
 logger = logging.getLogger(__name__)
 

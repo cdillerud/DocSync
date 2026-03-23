@@ -45,12 +45,12 @@ async def list_mailbox_sources():
 @router.get("/polling-status")
 async def get_mailbox_polling_status():
     """Get the status of the dynamic mailbox polling worker."""
-    import server
+    import services.email_polling_service as email_polling_svc
     from deps import EMAIL_POLLING_ENABLED, SALES_EMAIL_POLLING_ENABLED
 
     db = get_db()
-    task = server._dynamic_mailbox_polling_task
-    poll_times = server._mailbox_last_poll_times
+    task = email_polling_svc._dynamic_mailbox_polling_task
+    poll_times = email_polling_svc._mailbox_last_poll_times
 
     worker_running = task is not None and not task.done()
 
@@ -198,7 +198,7 @@ async def test_mailbox_connection(mailbox_id: str):
 @router.post("/{mailbox_id}/poll-now")
 async def poll_mailbox_now(mailbox_id: str):
     """Manually trigger polling for a specific mailbox."""
-    from server import poll_mailbox_for_documents
+    from services.email_polling_service import poll_mailbox_for_documents
 
     db = get_db()
     source = await db.mailbox_sources.find_one({"mailbox_id": mailbox_id}, {"_id": 0})

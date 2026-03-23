@@ -1725,178 +1725,24 @@ def make_automation_decision(
     return _impl(job_config, ai_confidence, validation_results)
 
 async def get_email_watcher_config() -> dict:
-    """Load email watcher configuration from database."""
-    config = await db.hub_config.find_one({"_key": "email_watcher"}, {"_id": 0})
-    if not config:
-        return {
-            "mailbox_address": "",
-            "watch_folder": "Inbox",
-            "needs_review_folder": "Needs Review",
-            "processed_folder": "Processed",
-            "enabled": False,
-            "interval_minutes": 5,
-            "webhook_subscription_id": None,
-            "last_poll_utc": None
-        }
-    # Ensure interval_minutes has a default
-    if "interval_minutes" not in config:
-        config["interval_minutes"] = 5
-    return config
+    """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
+    from services.email_polling_service import get_email_watcher_config as _impl
+    return await _impl()
 
 async def subscribe_to_mailbox_notifications(mailbox_address: str, webhook_url: str) -> dict:
-    """
-    Create a Microsoft Graph subscription for email notifications.
-    """
-    if DEMO_MODE or not GRAPH_CLIENT_ID:
-        return {"status": "demo", "message": "Running in demo mode"}
-    
-    try:
-        token = await get_graph_token()
-        
-        # Create subscription for new messages
-        subscription_payload = {
-            "changeType": "created",
-            "notificationUrl": webhook_url,
-            "resource": f"users/{mailbox_address}/mailFolders/Inbox/messages",
-            "expirationDateTime": (datetime.now(timezone.utc).replace(hour=23, minute=59) + timedelta(days=2)).isoformat() + "Z",
-            "clientState": "gpi-document-hub-secret"
-        }
-        
-        async with httpx.AsyncClient(timeout=30.0) as c:
-            resp = await c.post(
-                "https://graph.microsoft.com/v1.0/subscriptions",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json"
-                },
-                json=subscription_payload
-            )
-            
-            if resp.status_code in (200, 201):
-                data = resp.json()
-                return {
-                    "status": "ok",
-                    "subscription_id": data.get("id"),
-                    "expiration": data.get("expirationDateTime")
-                }
-            else:
-                return {
-                    "status": "error",
-                    "message": f"Failed to create subscription (HTTP {resp.status_code}): {resp.text[:500]}"
-                }
-    
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
+    from services.email_polling_service import subscribe_to_mailbox_notifications as _impl
+    return await _impl(mailbox_address, webhook_url)
 
 async def fetch_email_with_attachments(email_id: str, mailbox_address: str) -> dict:
-    """Fetch a specific email and its attachments from Graph API."""
-    if DEMO_MODE or not GRAPH_CLIENT_ID:
-        return {"status": "demo", "email": None, "attachments": []}
-    
-    try:
-        token = await get_graph_token()
-        
-        async with httpx.AsyncClient(timeout=60.0) as c:
-            # Get email details
-            email_resp = await c.get(
-                f"https://graph.microsoft.com/v1.0/users/{mailbox_address}/messages/{email_id}",
-                headers={"Authorization": f"Bearer {token}"}
-            )
-            
-            if email_resp.status_code != 200:
-                return {"status": "error", "message": f"Failed to fetch email: {email_resp.status_code}"}
-            
-            email_data = email_resp.json()
-            
-            # Get attachments
-            attachments_resp = await c.get(
-                f"https://graph.microsoft.com/v1.0/users/{mailbox_address}/messages/{email_id}/attachments",
-                headers={"Authorization": f"Bearer {token}"}
-            )
-            
-            attachments = []
-            if attachments_resp.status_code == 200:
-                for att in attachments_resp.json().get("value", []):
-                    if att.get("@odata.type") == "#microsoft.graph.fileAttachment":
-                        attachments.append({
-                            "id": att.get("id"),
-                            "name": att.get("name"),
-                            "content_type": att.get("contentType"),
-                            "size": att.get("size"),
-                            "content_bytes": att.get("contentBytes")  # Base64 encoded
-                        })
-            
-            return {
-                "status": "ok",
-                "email": {
-                    "id": email_data.get("id"),
-                    "subject": email_data.get("subject"),
-                    "sender": email_data.get("from", {}).get("emailAddress", {}).get("address"),
-                    "received_utc": email_data.get("receivedDateTime"),
-                    "has_attachments": email_data.get("hasAttachments", False)
-                },
-                "attachments": attachments
-            }
-    
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
+    from services.email_polling_service import fetch_email_with_attachments as _impl
+    return await _impl(email_id, mailbox_address)
 
 async def move_email_to_folder(email_id: str, mailbox_address: str, folder_name: str) -> dict:
-    """Move an email to a specific folder."""
-    if DEMO_MODE or not GRAPH_CLIENT_ID:
-        return {"status": "demo"}
-    
-    try:
-        token = await get_graph_token()
-        
-        async with httpx.AsyncClient(timeout=30.0) as c:
-            # First, find the folder ID
-            folders_resp = await c.get(
-                f"https://graph.microsoft.com/v1.0/users/{mailbox_address}/mailFolders",
-                headers={"Authorization": f"Bearer {token}"}
-            )
-            
-            if folders_resp.status_code != 200:
-                return {"status": "error", "message": f"Failed to list folders: {folders_resp.status_code}"}
-            
-            folder_id = None
-            for folder in folders_resp.json().get("value", []):
-                if folder.get("displayName") == folder_name:
-                    folder_id = folder.get("id")
-                    break
-            
-            if not folder_id:
-                # Create the folder if it doesn't exist
-                create_resp = await c.post(
-                    f"https://graph.microsoft.com/v1.0/users/{mailbox_address}/mailFolders",
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json"
-                    },
-                    json={"displayName": folder_name}
-                )
-                if create_resp.status_code in (200, 201):
-                    folder_id = create_resp.json().get("id")
-                else:
-                    return {"status": "error", "message": f"Failed to create folder: {create_resp.status_code}"}
-            
-            # Move the email
-            move_resp = await c.post(
-                f"https://graph.microsoft.com/v1.0/users/{mailbox_address}/messages/{email_id}/move",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json"
-                },
-                json={"destinationId": folder_id}
-            )
-            
-            if move_resp.status_code in (200, 201):
-                return {"status": "ok", "folder": folder_name}
-            else:
-                return {"status": "error", "message": f"Failed to move email: {move_resp.status_code}"}
-    
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
+    from services.email_polling_service import move_email_to_folder as _impl
+    return await _impl(email_id, mailbox_address, folder_name)
 
 # ==================== AUTOMATIC WORKFLOW TRIGGER ====================
 
@@ -2577,145 +2423,22 @@ async def classify_document_type(
     confidence: float,
     metadata: Optional[Dict] = None
 ) -> Dict:
-    """
-    Deterministic-first document type classification pipeline.
-    
-    Step 1: Run deterministic rules (Zetadocs codes, Square9 workflows, mailbox category)
-    Step 2: If doc_type is not OTHER, keep it and skip AI
-    Step 3: If doc_type is OTHER and AI classification is enabled, try AI
-    Step 4: Apply AI result if confidence >= threshold
-    
-    Args:
-        document: The document dict
-        extracted_fields: Fields extracted from the document
-        suggested_type: Legacy suggested_job_type from classification
-        confidence: Legacy AI classification confidence
-        metadata: Additional metadata (zetadocs_set, square9_workflow, mailbox_category)
-    
-    Returns:
-        Dict with doc_type, category, ai_classification (if used)
-    """
-    metadata = metadata or {}
-    result = {
-        "doc_type": DocType.OTHER.value,
-        "category": "Other",
-        "ai_classification": None,
-        "classification_method": "default"
-    }
-    
-    # Step 1a: Check Zetadocs set code
-    zetadocs_set = metadata.get("zetadocs_set") or document.get("zetadocs_set_code")
-    if zetadocs_set:
-        doc_type, capture_channel = DocumentClassifier.classify_from_zetadocs_set(zetadocs_set)
-        if doc_type != DocType.OTHER:
-            result["doc_type"] = doc_type.value
-            result["classification_method"] = f"zetadocs:{zetadocs_set}"
-            logger.info("Deterministic classification: Zetadocs set %s -> %s", zetadocs_set, doc_type.value)
-    
-    # Step 1b: Check Square9 workflow name
-    if result["doc_type"] == DocType.OTHER.value:
-        square9_workflow = metadata.get("square9_workflow") or document.get("square9_workflow_name")
-        if square9_workflow:
-            doc_type = DocumentClassifier.classify_from_square9_workflow(square9_workflow)
-            if doc_type != DocType.OTHER:
-                result["doc_type"] = doc_type.value
-                result["classification_method"] = f"square9:{square9_workflow}"
-                logger.info("Deterministic classification: Square9 workflow %s -> %s", square9_workflow, doc_type.value)
-    
-    # Step 1c: Check mailbox category (from email polling config)
-    if result["doc_type"] == DocType.OTHER.value:
-        mailbox_category = metadata.get("mailbox_category") or document.get("mailbox_category")
-        if mailbox_category:
-            doc_type = DocumentClassifier.classify_from_mailbox_category(mailbox_category)
-            if doc_type != DocType.OTHER:
-                result["doc_type"] = doc_type.value
-                result["classification_method"] = f"mailbox:{mailbox_category}"
-                logger.info("Deterministic classification: Mailbox category %s -> %s", mailbox_category, doc_type.value)
-    
-    # Step 1d: Check legacy suggested_job_type from existing AI extraction
-    if result["doc_type"] == DocType.OTHER.value and suggested_type and suggested_type != "Unknown":
-        doc_type = DocumentClassifier.classify_from_ai_result(suggested_type)
-        if doc_type != DocType.OTHER:
-            result["doc_type"] = doc_type.value
-            result["classification_method"] = f"legacy_ai:{suggested_type}"
-            logger.info("Classification from legacy AI: %s -> %s", suggested_type, doc_type.value)
-    
-    # Step 2: If we have a definitive type, set category and return
-    if result["doc_type"] != DocType.OTHER.value:
-        result["category"] = _get_category_for_doc_type(result["doc_type"])
-        return result
-    
-    # Step 3: doc_type is still OTHER - try AI classification if enabled
-    if AI_CLASSIFICATION_ENABLED and os.environ.get("EMERGENT_LLM_KEY"):
-        logger.info("Deterministic classification returned OTHER, invoking AI classifier for doc %s", document.get("id"))
-        
-        try:
-            ai_result = await classify_doc_type_with_ai(
-                document=document,
-                extracted_text=extracted_fields.get("raw_text"),
-                metadata=metadata
-            )
-            
-            # Always record the AI classification attempt
-            result["ai_classification"] = ai_result.to_dict()
-            
-            # Step 4: Apply if confidence meets threshold
-            if ai_result.should_accept(AI_CLASSIFICATION_THRESHOLD):
-                result["doc_type"] = ai_result.proposed_doc_type
-                result["classification_method"] = f"ai:{ai_result.model_name}:{ai_result.confidence:.2f}"
-                logger.info(
-                    "AI classification accepted for doc %s: %s (confidence: %.2f)",
-                    document.get("id"), ai_result.proposed_doc_type, ai_result.confidence
-                )
-            else:
-                logger.info(
-                    "AI classification NOT accepted for doc %s: %s (confidence: %.2f, threshold: %.2f)",
-                    document.get("id"), ai_result.proposed_doc_type, ai_result.confidence, AI_CLASSIFICATION_THRESHOLD
-                )
-        except Exception as e:
-            logger.error("AI classification failed for doc %s: %s", document.get("id"), str(e))
-            result["ai_classification"] = {
-                "error": str(e),
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
-    
-    # Final category assignment
-    result["category"] = _get_category_for_doc_type(result["doc_type"])
-    
-    return result
+    """COMPATIBILITY WRAPPER — authoritative source: services.classification_helpers"""
+    from services.classification_helpers import classify_document_type as _impl
+    return await _impl(document, extracted_fields, suggested_type, confidence, metadata)
 
 
 def _get_category_for_doc_type(doc_type: str) -> str:
-    """Map doc_type to category for backward compatibility."""
-    if doc_type == DocType.AP_INVOICE.value:
-        return "AP"
-    elif doc_type in [DocType.SALES_INVOICE.value, DocType.SALES_CREDIT_MEMO.value]:
-        return "Sales"
-    elif doc_type == DocType.PURCHASE_ORDER.value:
-        return "Purchase"
-    else:
-        return "Other"
+    """COMPATIBILITY WRAPPER — authoritative source: services.classification_helpers"""
+    from services.classification_helpers import get_category_for_doc_type as _impl
+    return _impl(doc_type)
 
 
 
 def _derive_workflow_status(final_status: str, doc_type: str, decision: str) -> str:
-    """Map the processing result to a meaningful workflow_status so documents
-    never stay stuck at 'captured' after the intake pipeline completes."""
-    status_lower = (final_status or "").lower()
-    if status_lower in ("completed", "posted", "archived"):
-        return "completed"
-    if status_lower == "exception":
-        return "exception"
-    if status_lower in ("readytolink", "linkedtobc"):
-        return "ready_for_approval"
-    if status_lower == "storedInsp" or status_lower == "storedinsp":
-        return "processed"
-    if decision == "auto_link":
-        return "validation_passed"
-    if status_lower == "needsreview":
-        return "needs_review"
-    # Fallback: if the pipeline finished at all, it's at least classified
-    return "classified"
+    """COMPATIBILITY WRAPPER — authoritative source: services.classification_helpers"""
+    from services.classification_helpers import derive_workflow_status as _impl
+    return _impl(final_status, doc_type, decision)
 
 
 async def _update_vendor_profile_incremental(db, doc_id: str, vendor_name: str, update_data: dict, final_status: str):
@@ -5007,570 +4730,61 @@ async def process_incoming_email(email_id: str, mailbox_address: str):
             logger.error("Failed to process attachment from email %s: %s", email_id, str(e))
 
 # ==================== PHASE 7 C1: EMAIL POLLING (OBSERVATION INFRASTRUCTURE) ====================
-# This is NOT a product feature - it is data collection plumbing for shadow mode.
-# Scope: Poll → Ingest → Log → Metrics. No BC writes, no folder moves.
+# Authoritative source: services/email_polling_service.py
+# Compatibility wrappers below — functions delegated to the extracted service.
 
-# Global state for polling worker
 _email_polling_task = None
 _email_polling_lock = asyncio.Lock()
 
-# Skip patterns for attachments (inline images, signatures)
 SKIP_CONTENT_TYPES = {'image/gif', 'image/x-icon', 'image/bmp'}
 SKIP_FILENAME_PATTERNS = [
-    r'^image\d+\.(png|jpg|gif)$',  # Inline images
-    r'^signature',  # Email signatures
-    r'^logo',  # Company logos
-    r'\.vcf$',  # Contact cards
+    r'^image\d+\.(png|jpg|gif)$',
+    r'^signature',
+    r'^logo',
+    r'\.vcf$',
 ]
 
 
-async def record_mail_intake_log(
-    message_id: str,
-    internet_message_id: str,
-    attachment_id: str,
-    attachment_hash: str,
-    filename: str,
-    status: str,
-    sharepoint_doc_id: str = None,
-    error: str = None
-):
-    """Record mail intake for idempotency and observability."""
-    log_entry = {
-        "id": str(uuid.uuid4()),
-        "message_id": message_id,
-        "internet_message_id": internet_message_id,
-        "attachment_id": attachment_id,
-        "attachment_hash": attachment_hash,
-        "filename": filename,
-        "status": status,  # Processed, SkippedDuplicate, SkippedInline, Error
-        "sharepoint_doc_id": sharepoint_doc_id,
-        "error": error,
-        "processed_at": datetime.now(timezone.utc).isoformat()
-    }
-    await db.mail_intake_log.insert_one(log_entry)
-    return log_entry
+async def record_mail_intake_log(message_id, internet_message_id, attachment_id, attachment_hash, filename, status, sharepoint_doc_id=None, error=None):
+    """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
+    from services.email_polling_service import record_mail_intake_log as _impl
+    return await _impl(message_id, internet_message_id, attachment_id, attachment_hash, filename, status, sharepoint_doc_id, error)
 
 
-async def check_duplicate_mail_intake(internet_message_id: str, attachment_hash: str, message_id: str = None, attachment_id: str = None) -> bool:
-    """Check if this attachment was already processed (idempotency).
-    
-    Primary key: internetMessageId + attachment_hash
-    Fallback: message_id + attachment_id (Graph-specific IDs)
-    """
-    query = {"$or": [
-        {"internet_message_id": internet_message_id, "attachment_hash": attachment_hash}
-    ]}
-    if message_id and attachment_id:
-        query["$or"].append({"message_id": message_id, "attachment_id": attachment_id})
-    
-    existing = await db.mail_intake_log.find_one(query)
-    return existing is not None
+async def check_duplicate_mail_intake(internet_message_id, attachment_hash, message_id=None, attachment_id=None):
+    """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
+    from services.email_polling_service import check_duplicate_mail_intake as _impl
+    return await _impl(internet_message_id, attachment_hash, message_id, attachment_id)
 
 
-def should_skip_attachment(filename: str, content_type: str, size_bytes: int) -> tuple:
-    """Determine if attachment should be skipped (inline images, signatures, too large)."""
-    # Check content type
-    if content_type and content_type.lower() in SKIP_CONTENT_TYPES:
-        return (True, f"Skipped content type: {content_type}")
-    
-    # Check filename patterns
-    if filename:
-        for pattern in SKIP_FILENAME_PATTERNS:
-            if re.match(pattern, filename.lower()):
-                return (True, f"Skipped filename pattern: {filename}")
-    
-    # Check size limit
-    max_size = EMAIL_POLLING_MAX_ATTACHMENT_MB * 1024 * 1024
-    if size_bytes > max_size:
-        return (True, f"Skipped size: {size_bytes / 1024 / 1024:.1f}MB > {EMAIL_POLLING_MAX_ATTACHMENT_MB}MB limit")
-    
-    return (False, None)
+def should_skip_attachment(filename, content_type, size_bytes):
+    """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
+    from services.email_polling_service import should_skip_attachment as _impl
+    return _impl(filename, content_type, size_bytes)
 
 
 async def poll_mailbox_for_attachments():
-    """
-    Phase C1 (Revised): Passive Graph "Tap" - READ-ONLY.
-    
-    This is a shadow listener that does NOT modify the mailbox in any way.
-    Zetadocs/Square9 continues to own the inbox state.
-    
-    Process flow:
-    1. Get watermark (last seen receivedDateTime)
-    2. Query messages received after watermark (with overlap buffer)
-    3. For each message with attachments:
-       - Check idempotency log (skip duplicates)
-       - Store in SharePoint first (durability)
-       - Process through intake pipeline
-       - Log result
-    4. Update watermark
-    
-    Permissions: Mail.Read only (application permission)
-    
-    What this does NOT do:
-    - Mark messages as read
-    - Add categories
-    - Move messages
-    - Delete anything
-    """
-    if not EMAIL_POLLING_ENABLED:
-        return {"skipped": True, "reason": "EMAIL_POLLING_ENABLED is false"}
-    
-    if not EMAIL_POLLING_USER:
-        return {"skipped": True, "reason": "EMAIL_POLLING_USER not configured"}
-    
-    if DEMO_MODE:
-        return {"skipped": True, "reason": "Demo mode - no real polling"}
-    
-    run_id = str(uuid.uuid4())[:8]
-    logger.info("[EmailPoll:%s] Starting passive tap for %s", run_id, EMAIL_POLLING_USER)
-    
-    stats = {
-        "run_id": run_id,
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "messages_detected": 0,
-        "attachments_ingested": 0,
-        "attachments_skipped_duplicate": 0,
-        "attachments_skipped_inline": 0,
-        "attachments_failed": 0,
-        "errors": []
-    }
-    
-    try:
-        # Get Email token (uses EMAIL_CLIENT_ID/SECRET if configured)
-        token = await get_email_token()
-        if not token:
-            stats["errors"].append("Failed to get Email token")
-            return stats
-        
-        # Get watermark from settings (last seen receivedDateTime)
-        watermark_doc = await db.hub_settings.find_one({"type": "email_poll_watermark"}, {"_id": 0})
-        
-        if watermark_doc and watermark_doc.get("last_received_datetime"):
-            # Use watermark with 5-minute overlap buffer for safety
-            watermark_time = watermark_doc["last_received_datetime"]
-            try:
-                watermark_dt = datetime.fromisoformat(watermark_time.replace('Z', '+00:00'))
-                buffer_time = (watermark_dt - timedelta(minutes=5)).isoformat()
-            except Exception:
-                buffer_time = watermark_time
-        else:
-            # First run: look back N minutes
-            buffer_time = (datetime.now(timezone.utc) - timedelta(minutes=EMAIL_POLLING_LOOKBACK_MINUTES)).isoformat()
-        
-        # Query messages received after watermark
-        # Note: hasAttachments filter combined with orderby can cause InefficientFilter error
-        # So we filter by date only and check attachments client-side
-        filter_query = f"receivedDateTime ge {buffer_time}"
-        
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            messages_resp = await client.get(
-                f"https://graph.microsoft.com/v1.0/users/{EMAIL_POLLING_USER}/mailFolders/Inbox/messages",
-                headers={"Authorization": f"Bearer {token}"},
-                params={
-                    "$filter": filter_query,
-                    "$select": "id,subject,from,receivedDateTime,internetMessageId,hasAttachments",
-                    "$top": EMAIL_POLLING_MAX_MESSAGES,
-                    "$orderby": "receivedDateTime asc"
-                }
-            )
-            
-            if messages_resp.status_code != 200:
-                error_msg = f"Graph API error {messages_resp.status_code}: {messages_resp.text[:200]}"
-                logger.error("[EmailPoll:%s] %s", run_id, error_msg)
-                stats["errors"].append(error_msg)
-                return stats
-            
-            messages = messages_resp.json().get("value", [])
-            # Filter to only messages with attachments (client-side filter)
-            messages_with_attachments = [m for m in messages if m.get("hasAttachments")]
-            stats["messages_detected"] = len(messages_with_attachments)
-            
-            logger.info("[EmailPoll:%s] Detected %d messages with attachments (out of %d total)", run_id, len(messages_with_attachments), len(messages))
-            
-            # Process each message
-            for msg in messages_with_attachments:
-                msg_id = msg["id"]
-                internet_msg_id = msg.get("internetMessageId", msg_id)
-                subject = msg.get("subject", "No Subject")
-                sender = msg.get("from", {}).get("emailAddress", {}).get("address", "unknown")
-                
-                try:
-                    # Fetch attachments list (without contentBytes - not allowed in list query)
-                    att_resp = await client.get(
-                        f"https://graph.microsoft.com/v1.0/users/{EMAIL_POLLING_USER}/messages/{msg_id}/attachments",
-                        headers={"Authorization": f"Bearer {token}"},
-                        params={"$select": "id,name,contentType,size"}
-                    )
-                    
-                    if att_resp.status_code != 200:
-                        stats["errors"].append(f"Failed to fetch attachments for {msg_id}")
-                        continue
-                    
-                    attachments = att_resp.json().get("value", [])
-                    
-                    for att in attachments:
-                        att_id = att.get("id")
-                        filename = att.get("name", "unknown")
-                        content_type = att.get("contentType", "")
-                        size_bytes = att.get("size", 0)
-                        
-                        # Skip check
-                        should_skip, skip_reason = should_skip_attachment(filename, content_type, size_bytes)
-                        if should_skip:
-                            await record_mail_intake_log(
-                                message_id=msg_id,
-                                internet_message_id=internet_msg_id,
-                                attachment_id=att_id,
-                                attachment_hash="",
-                                filename=filename,
-                                status="SkippedInline",
-                                error=skip_reason
-                            )
-                            stats["attachments_skipped_inline"] += 1
-                            continue
-                        
-                        # Fetch individual attachment content
-                        try:
-                            att_content_resp = await client.get(
-                                f"https://graph.microsoft.com/v1.0/users/{EMAIL_POLLING_USER}/messages/{msg_id}/attachments/{att_id}",
-                                headers={"Authorization": f"Bearer {token}"}
-                            )
-                            if att_content_resp.status_code != 200:
-                                stats["attachments_failed"] += 1
-                                stats["errors"].append(f"Failed to fetch content for {filename}")
-                                continue
-                            content_b64 = att_content_resp.json().get("contentBytes", "")
-                        except Exception as e:
-                            stats["attachments_failed"] += 1
-                            stats["errors"].append(f"Error fetching {filename}: {str(e)}")
-                            continue
-                        
-                        # Decode content and hash
-                        try:
-                            content_bytes = base64.b64decode(content_b64)
-                            att_hash = hashlib.sha256(content_bytes).hexdigest()
-                        except Exception as e:
-                            stats["attachments_failed"] += 1
-                            stats["errors"].append(f"Failed to decode {filename}: {str(e)}")
-                            continue
-                        
-                        # Idempotency check
-                        if await check_duplicate_mail_intake(internet_msg_id, att_hash):
-                            await record_mail_intake_log(
-                                message_id=msg_id,
-                                internet_message_id=internet_msg_id,
-                                attachment_id=att_id,
-                                attachment_hash=att_hash,
-                                filename=filename,
-                                status="SkippedDuplicate"
-                            )
-                            stats["attachments_skipped_duplicate"] += 1
-                            continue
-                        
-                        # Process through intake pipeline
-                        try:
-                            intake_result = await _internal_intake_document(
-                                file_content=content_bytes,
-                                filename=filename,
-                                content_type=content_type,
-                                source="email_poll",
-                                email_id=msg_id,
-                                subject=subject,
-                                sender=sender
-                            )
-                            
-                            doc_id = intake_result.get("document", {}).get("id")
-                            
-                            await record_mail_intake_log(
-                                message_id=msg_id,
-                                internet_message_id=internet_msg_id,
-                                attachment_id=att_id,
-                                attachment_hash=att_hash,
-                                filename=filename,
-                                status="Processed",
-                                sharepoint_doc_id=doc_id
-                            )
-                            stats["attachments_ingested"] += 1
-                            
-                            logger.info("[EmailPoll:%s] Ingested %s → doc %s", run_id, filename, doc_id)
-                            
-                        except Exception as e:
-                            await record_mail_intake_log(
-                                message_id=msg_id,
-                                internet_message_id=internet_msg_id,
-                                attachment_id=att_id,
-                                attachment_hash=att_hash,
-                                filename=filename,
-                                status="Error",
-                                error=str(e)
-                            )
-                            stats["attachments_failed"] += 1
-                            stats["errors"].append(f"Intake failed for {filename}: {str(e)}")
-                    
-                    # NO mailbox mutations - we are read-only
-                    # Idempotency log is the source of truth, not mailbox state
-                
-                except Exception as e:
-                    stats["errors"].append(f"Failed processing message {msg_id}: {str(e)}")
-            
-            # Update watermark to newest receivedDateTime seen
-            if messages:
-                newest_received = max(msg.get("receivedDateTime", "") for msg in messages)
-                if newest_received:
-                    await db.hub_settings.update_one(
-                        {"type": "email_poll_watermark"},
-                        {"$set": {
-                            "last_received_datetime": newest_received,
-                            "updated_utc": datetime.now(timezone.utc).isoformat()
-                        }},
-                        upsert=True
-                    )
-        
-    except Exception as e:
-        stats["errors"].append(f"Poll run failed: {str(e)}")
-        logger.error("[EmailPoll:%s] Run failed: %s", run_id, str(e))
-    
-    stats["ended_at"] = datetime.now(timezone.utc).isoformat()
-    
-    # Store run stats (make a copy since insert_one adds _id)
-    stats_to_store = stats.copy()
-    await db.mail_poll_runs.insert_one(stats_to_store)
-    
-    logger.info(
-        "[EmailPoll:%s] Complete: detected=%d, ingested=%d, skipped_dup=%d, skipped_inline=%d, failed=%d",
-        run_id, stats["messages_detected"], stats["attachments_ingested"],
-        stats["attachments_skipped_duplicate"], stats["attachments_skipped_inline"], stats["attachments_failed"]
-    )
-    
-    return stats
+    """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
+    from services.email_polling_service import poll_mailbox_for_attachments as _impl
+    return await _impl()
 
 
 async def email_polling_worker():
-    """Background worker that polls mailbox at configured interval."""
-    logger.info("Email polling worker started (interval: %d minutes)", EMAIL_POLLING_INTERVAL_MINUTES)
-    
-    while True:
-        try:
-            # Get current interval from config (allows runtime adjustment)
-            config = await get_email_watcher_config()
-            interval = config.get("interval_minutes", EMAIL_POLLING_INTERVAL_MINUTES)
-            
-            # Check if polling is enabled
-            async with _email_polling_lock:
-                if config.get("enabled", True) and EMAIL_POLLING_ENABLED:
-                    await poll_mailbox_for_attachments()
-        except Exception as e:
-            logger.error("Email polling worker error: %s", str(e))
-        
-        # Get interval again in case it changed
-        try:
-            config = await get_email_watcher_config()
-            interval = config.get("interval_minutes", EMAIL_POLLING_INTERVAL_MINUTES)
-        except:
-            interval = EMAIL_POLLING_INTERVAL_MINUTES
-        
-        # Wait for next interval
-        await asyncio.sleep(interval * 60)
-
-
-
+    """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
+    from services.email_polling_service import email_polling_worker as _impl
+    return await _impl()
 
 
 async def run_sales_email_poll():
-    """
-    Poll the Sales intake mailbox for new documents.
-    
-    Similar to AP email polling but routes to Sales document pipeline.
-    All documents classified and stored, none auto-processed.
-    """
-    run_id = str(uuid.uuid4())[:8]
-    
-    if not SALES_EMAIL_POLLING_USER:
-        return {"skipped": True, "reason": "SALES_EMAIL_POLLING_USER not configured"}
-    
-    stats = {
-        "run_id": run_id,
-        "mailbox": SALES_EMAIL_POLLING_USER,
-        "messages_detected": 0,
-        "attachments_ingested": 0,
-        "attachments_skipped_dup": 0,
-        "attachments_skipped_inline": 0,
-        "attachments_failed": 0,
-        "errors": [],
-        "started_at": datetime.now(timezone.utc).isoformat()
-    }
-    
-    try:
-        logger.info("[SalesPoll:%s] Starting poll for %s", run_id, SALES_EMAIL_POLLING_USER)
-        
-        # Get email access token
-        token = await get_email_token()
-        if not token:
-            stats["errors"].append("Failed to get email access token")
-            return stats
-        
-        # Calculate lookback window
-        lookback = EMAIL_POLLING_LOOKBACK_MINUTES
-        buffer_time = (datetime.now(timezone.utc) - timedelta(minutes=lookback)).isoformat()
-        filter_query = f"receivedDateTime ge {buffer_time}"
-        
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            # Query messages
-            messages_resp = await client.get(
-                f"https://graph.microsoft.com/v1.0/users/{SALES_EMAIL_POLLING_USER}/mailFolders/Inbox/messages",
-                headers={"Authorization": f"Bearer {token}"},
-                params={
-                    "$filter": filter_query,
-                    "$select": "id,subject,from,receivedDateTime,internetMessageId,hasAttachments,bodyPreview",
-                    "$top": EMAIL_POLLING_MAX_MESSAGES,
-                    "$orderby": "receivedDateTime asc"
-                }
-            )
-            
-            if messages_resp.status_code != 200:
-                stats["errors"].append(f"Graph API error: {messages_resp.status_code}")
-                return stats
-            
-            messages = messages_resp.json().get("value", [])
-            stats["messages_detected"] = len(messages)
-            
-            for msg in messages:
-                msg_id = msg.get("id")
-                has_attachments = msg.get("hasAttachments", False)
-                
-                if not has_attachments:
-                    continue
-                
-                internet_msg_id = msg.get("internetMessageId", msg_id)
-                subject = msg.get("subject", "No Subject")
-                sender = msg.get("from", {}).get("emailAddress", {}).get("address", "unknown")
-                body_preview = msg.get("bodyPreview", "")
-                
-                try:
-                    # Fetch attachments
-                    att_resp = await client.get(
-                        f"https://graph.microsoft.com/v1.0/users/{SALES_EMAIL_POLLING_USER}/messages/{msg_id}/attachments",
-                        headers={"Authorization": f"Bearer {token}"},
-                        params={"$select": "id,name,contentType,size,isInline"}
-                    )
-                    
-                    if att_resp.status_code != 200:
-                        stats["errors"].append(f"Failed to fetch attachments for {msg_id}")
-                        continue
-                    
-                    attachments = att_resp.json().get("value", [])
-                    
-                    for att in attachments:
-                        att_id = att.get("id")
-                        filename = att.get("name", "unknown")
-                        content_type = att.get("contentType", "")
-                        is_inline = att.get("isInline", False)
-                        size_bytes = att.get("size", 0)
-                        
-                        # Skip inline images and signatures
-                        if is_inline or content_type.startswith("image/"):
-                            stats["attachments_skipped_inline"] += 1
-                            continue
-                        
-                        # Skip very small files (likely signatures)
-                        if size_bytes < 1000:
-                            stats["attachments_skipped_inline"] += 1
-                            continue
-                        
-                        # Fetch attachment content
-                        try:
-                            att_content_resp = await client.get(
-                                f"https://graph.microsoft.com/v1.0/users/{SALES_EMAIL_POLLING_USER}/messages/{msg_id}/attachments/{att_id}",
-                                headers={"Authorization": f"Bearer {token}"}
-                            )
-                            if att_content_resp.status_code != 200:
-                                stats["attachments_failed"] += 1
-                                continue
-                            content_b64 = att_content_resp.json().get("contentBytes", "")
-                        except Exception as e:
-                            stats["attachments_failed"] += 1
-                            stats["errors"].append(f"Error fetching {filename}: {str(e)}")
-                            continue
-                        
-                        content_bytes = base64.b64decode(content_b64)
-                        content_hash = hashlib.sha256(content_bytes).hexdigest()
-                        
-                        # Check idempotency
-                        is_dup = await check_sales_duplicate(internet_msg_id, content_hash)
-                        if is_dup:
-                            stats["attachments_skipped_dup"] += 1
-                            continue
-                        
-                        # Ingest document
-                        try:
-                            result = await ingest_sales_document(
-                                file_content=content_bytes,
-                                filename=filename,
-                                source="email",
-                                email_sender=sender,
-                                email_subject=subject,
-                                email_body=body_preview,
-                                email_message_id=internet_msg_id,
-                                correlation_id=run_id
-                            )
-                            
-                            # Log intake
-                            await record_sales_mail_log(
-                                message_id=msg_id,
-                                internet_message_id=internet_msg_id,
-                                attachment_id=att_id,
-                                attachment_hash=content_hash,
-                                filename=filename,
-                                status="Ingested",
-                                document_id=result.get("document_id")
-                            )
-                            
-                            stats["attachments_ingested"] += 1
-                            logger.info("[SalesPoll:%s] Ingested: %s -> %s", run_id, filename, result.get("document_type"))
-                            
-                        except Exception as e:
-                            stats["attachments_failed"] += 1
-                            stats["errors"].append(f"Ingestion failed for {filename}: {str(e)}")
-                            await record_sales_mail_log(
-                                message_id=msg_id,
-                                internet_message_id=internet_msg_id,
-                                attachment_id=att_id,
-                                attachment_hash=content_hash,
-                                filename=filename,
-                                status="Failed",
-                                error=str(e)
-                            )
-                            
-                except Exception as e:
-                    stats["errors"].append(f"Error processing message {msg_id}: {str(e)}")
-                    
-    except Exception as e:
-        stats["errors"].append(f"Poll run failed: {str(e)}")
-        logger.error("[SalesPoll:%s] Run failed: %s", run_id, str(e))
-    
-    stats["completed_at"] = datetime.now(timezone.utc).isoformat()
-    
-    # Record poll run - make a copy to avoid _id mutation affecting response
-    stats_to_store = {**stats}
-    await db.sales_mail_poll_runs.insert_one(stats_to_store)
-    
-    logger.info("[SalesPoll:%s] Complete: detected=%d, ingested=%d, skipped_dup=%d, skipped_inline=%d, failed=%d",
-                run_id, stats["messages_detected"], stats["attachments_ingested"],
-                stats["attachments_skipped_dup"], stats["attachments_skipped_inline"], stats["attachments_failed"])
-    
-    return stats
+    """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
+    from services.email_polling_service import run_sales_email_poll as _impl
+    return await _impl()
 
 
 async def _sales_email_polling_worker():
-    """Background worker that polls sales mailbox periodically."""
-    while True:
-        try:
-            if SALES_EMAIL_POLLING_ENABLED and SALES_EMAIL_POLLING_USER:
-                await run_sales_email_poll()
-        except Exception as e:
-            logger.error("Sales email polling worker error: %s", str(e))
-        
-        await asyncio.sleep(SALES_EMAIL_POLLING_INTERVAL_MINUTES * 60)
+    """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
+    from services.email_polling_service import _sales_email_polling_worker as _impl
+    return await _impl()
 
 
 class SetVendorRequest(BaseModel):
@@ -6959,176 +6173,13 @@ async def get_ap_workflow_metrics(days: int = Query(30)):
 # ==================== MAILBOX SOURCES CRUD ====================
 
 # Mailbox source routes moved to routers/mailbox_sources.py — REMOVED (Domain 3)
-# poll_mailbox_for_documents stays here (used by background worker)
+# poll_mailbox_for_documents authoritative source: services.email_polling_service
 
 
 async def poll_mailbox_for_documents(mailbox_address: str, default_category: str = "AP", source_id: str = None):
-    """
-    Unified mailbox polling function that ingests documents into the main hub_documents collection.
-    """
-    run_id = uuid.uuid4().hex[:8]
-    
-    stats = {
-        "run_id": run_id,
-        "mailbox": mailbox_address,
-        "source_id": source_id,
-        "default_category": default_category,
-        "messages_detected": 0,
-        "attachments_ingested": 0,
-        "attachments_skipped_dup": 0,
-        "attachments_skipped_inline": 0,
-        "attachments_failed": 0,
-        "errors": [],
-        "started_at": datetime.now(timezone.utc).isoformat()
-    }
-    
-    logger.info("[MailboxPoll:%s] Starting poll for %s (category=%s)", run_id, mailbox_address, default_category)
-    
-    try:
-        token = await get_email_token()
-        if not token:
-            stats["errors"].append("Failed to get email token")
-            return stats
-        
-        # Look back 1 hour for new emails
-        lookback_time = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-        
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            messages_resp = await client.get(
-                f"https://graph.microsoft.com/v1.0/users/{mailbox_address}/mailFolders/Inbox/messages",
-                headers={"Authorization": f"Bearer {token}"},
-                params={
-                    "$filter": f"receivedDateTime ge {lookback_time}",
-                    "$select": "id,subject,from,receivedDateTime,internetMessageId,hasAttachments,bodyPreview",
-                    "$top": 25,
-                    "$orderby": "receivedDateTime asc"
-                }
-            )
-            
-            if messages_resp.status_code != 200:
-                stats["errors"].append(f"Graph API error: {messages_resp.status_code}")
-                return stats
-            
-            messages = messages_resp.json().get("value", [])
-            stats["messages_detected"] = len([m for m in messages if m.get("hasAttachments")])
-            
-            for msg in messages:
-                if not msg.get("hasAttachments"):
-                    continue
-                
-                msg_id = msg.get("id")
-                internet_msg_id = msg.get("internetMessageId", msg_id)
-                subject = msg.get("subject", "No Subject")
-                sender = msg.get("from", {}).get("emailAddress", {}).get("address", "unknown")
-                body_preview = msg.get("bodyPreview", "")
-                
-                # Get attachments
-                att_resp = await client.get(
-                    f"https://graph.microsoft.com/v1.0/users/{mailbox_address}/messages/{msg_id}/attachments",
-                    headers={"Authorization": f"Bearer {token}"},
-                    params={"$select": "id,name,contentType,size,isInline"}
-                )
-                
-                if att_resp.status_code != 200:
-                    continue
-                
-                attachments = att_resp.json().get("value", [])
-                
-                for att in attachments:
-                    att_id = att.get("id")
-                    filename = att.get("name", "unknown")
-                    content_type = att.get("contentType", "")
-                    is_inline = att.get("isInline", False)
-                    size_bytes = att.get("size", 0)
-                    
-                    # Skip inline images and tiny files
-                    if is_inline or content_type.startswith("image/") or size_bytes < 1000:
-                        stats["attachments_skipped_inline"] += 1
-                        continue
-                    
-                    # Check for duplicates
-                    existing = await db.mail_intake_log.find_one({
-                        "internet_message_id": internet_msg_id,
-                        "attachment_name": filename
-                    })
-                    if existing:
-                        stats["attachments_skipped_dup"] += 1
-                        continue
-                    
-                    # Fetch attachment content
-                    try:
-                        att_content_resp = await client.get(
-                            f"https://graph.microsoft.com/v1.0/users/{mailbox_address}/messages/{msg_id}/attachments/{att_id}",
-                            headers={"Authorization": f"Bearer {token}"}
-                        )
-                        
-                        if att_content_resp.status_code != 200:
-                            stats["attachments_failed"] += 1
-                            continue
-                        
-                        content_b64 = att_content_resp.json().get("contentBytes", "")
-                        content_bytes = base64.b64decode(content_b64)
-                        content_hash = hashlib.sha256(content_bytes).hexdigest()
-                        
-                        # Content-hash dedup against hub_documents
-                        hash_dup = await db.hub_documents.find_one(
-                            {"sha256_hash": content_hash, "is_duplicate": {"$ne": True}},
-                            {"_id": 0, "id": 1}
-                        )
-                        if hash_dup:
-                            # Log so future polls also skip via mail_intake_log
-                            await db.mail_intake_log.insert_one({
-                                "internet_message_id": internet_msg_id,
-                                "attachment_name": filename,
-                                "attachment_hash": content_hash,
-                                "document_id": hash_dup["id"],
-                                "mailbox_source": mailbox_address,
-                                "source_id": source_id,
-                                "status": "Skipped_Duplicate",
-                                "created_utc": datetime.now(timezone.utc).isoformat()
-                            })
-                            stats["attachments_skipped_dup"] += 1
-                            continue
-                        
-                        # Ingest through unified pipeline
-                        result = await _internal_intake_document(
-                            file_content=content_bytes,
-                            filename=filename,
-                            source="email",
-                            sender=sender,
-                            subject=subject,
-                            email_id=internet_msg_id,
-                            content_type=content_type
-                        )
-                        
-                        # Log the intake
-                        await db.mail_intake_log.insert_one({
-                            "internet_message_id": internet_msg_id,
-                            "attachment_name": filename,
-                            "attachment_hash": content_hash,
-                            "document_id": result.get("document_id"),
-                            "mailbox_source": mailbox_address,
-                            "source_id": source_id,
-                            "status": "Ingested",
-                            "created_utc": datetime.now(timezone.utc).isoformat()
-                        })
-                        
-                        stats["attachments_ingested"] += 1
-                        
-                    except Exception as e:
-                        stats["attachments_failed"] += 1
-                        stats["errors"].append(f"Failed to process {filename}: {str(e)}")
-    
-    except Exception as e:
-        stats["errors"].append(f"Poll error: {str(e)}")
-        logger.error("[MailboxPoll:%s] Error: %s", run_id, str(e))
-    
-    stats["completed_at"] = datetime.now(timezone.utc).isoformat()
-    
-    logger.info("[MailboxPoll:%s] Complete: ingested=%d, skipped_dup=%d, failed=%d",
-                run_id, stats["attachments_ingested"], stats["attachments_skipped_dup"], stats["attachments_failed"])
-    
-    return stats
+    """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
+    from services.email_polling_service import poll_mailbox_for_documents as _impl
+    return await _impl(mailbox_address, default_category, source_id)
 
 
 # ==================== VENDOR ALIAS ENGINE ====================
@@ -7410,74 +6461,16 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 # ==================== DYNAMIC MAILBOX POLLING WORKER ====================
+# Authoritative source: services/email_polling_service.py
 
 _dynamic_mailbox_polling_task = None
-_mailbox_last_poll_times = {}  # Track last poll time per mailbox
+_mailbox_last_poll_times = {}  # Legacy — real state is in email_polling_svc
+
 
 async def dynamic_mailbox_polling_worker():
-    """
-    Background worker that polls all enabled mailbox sources from the database.
-    Each mailbox is polled at its configured interval.
-    """
-    logger.info("[DynamicMailboxWorker] Starting dynamic mailbox polling worker")
-    
-    # Initial delay to let the app fully start
-    await asyncio.sleep(30)
-    
-    while True:
-        try:
-            # Get all enabled mailbox sources
-            mailbox_sources = await db.mailbox_sources.find(
-                {"enabled": True}, 
-                {"_id": 0}
-            ).to_list(100)
-            
-            now = datetime.now(timezone.utc)
-            
-            for mailbox in mailbox_sources:
-                mailbox_id = mailbox.get("mailbox_id")
-                email_address = mailbox.get("email_address")
-                interval_minutes = mailbox.get("polling_interval_minutes", 5)
-                category = mailbox.get("category", "AP")
-                
-                if not email_address:
-                    continue
-                
-                # Check if it's time to poll this mailbox
-                last_poll = _mailbox_last_poll_times.get(mailbox_id)
-                if last_poll:
-                    elapsed = (now - last_poll).total_seconds() / 60
-                    if elapsed < interval_minutes:
-                        continue  # Not time yet
-                
-                # Time to poll!
-                logger.info("[DynamicMailboxWorker] Polling %s (%s)", mailbox.get("name"), email_address)
-                
-                try:
-                    stats = await poll_mailbox_for_documents(
-                        mailbox_address=email_address,
-                        default_category=category,
-                        source_id=mailbox_id
-                    )
-                    
-                    _mailbox_last_poll_times[mailbox_id] = now
-                    
-                    if stats.get("attachments_ingested", 0) > 0:
-                        logger.info("[DynamicMailboxWorker] %s: ingested %d documents", 
-                                   mailbox.get("name"), stats["attachments_ingested"])
-                    
-                except Exception as e:
-                    logger.error("[DynamicMailboxWorker] Error polling %s: %s", email_address, str(e))
-            
-            # Sleep for 1 minute before checking again
-            await asyncio.sleep(60)
-            
-        except asyncio.CancelledError:
-            logger.info("[DynamicMailboxWorker] Polling worker cancelled")
-            break
-        except Exception as e:
-            logger.error("[DynamicMailboxWorker] Worker error: %s", str(e))
-            await asyncio.sleep(60)  # Wait before retrying
+    """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
+    from services.email_polling_service import dynamic_mailbox_polling_worker as _impl
+    return await _impl()
 
 
 # ---------------------------------------------------------------------------
@@ -7649,19 +6642,21 @@ async def startup():
         logger.warning("BC vendor alias bootstrap failed: %s", e)
     
     # Start dynamic mailbox polling worker (polls mailboxes configured via UI)
+    import services.email_polling_service as email_polling_svc
     global _dynamic_mailbox_polling_task
-    _dynamic_mailbox_polling_task = asyncio.create_task(dynamic_mailbox_polling_worker())
+    _dynamic_mailbox_polling_task = asyncio.create_task(email_polling_svc.dynamic_mailbox_polling_worker())
+    email_polling_svc._dynamic_mailbox_polling_task = _dynamic_mailbox_polling_task
     logger.info("Dynamic mailbox polling worker started")
     
     # Start AP email polling worker if enabled (legacy env var method)
     if EMAIL_POLLING_ENABLED:
-        _email_polling_task = asyncio.create_task(email_polling_worker())
+        _email_polling_task = asyncio.create_task(email_polling_svc.email_polling_worker())
         logger.info("AP email polling worker started (interval: %d min, user: %s)", 
                    EMAIL_POLLING_INTERVAL_MINUTES, EMAIL_POLLING_USER)
     # Start Sales email polling worker if enabled (legacy env var method)
     global _sales_polling_task
     if SALES_EMAIL_POLLING_ENABLED and SALES_EMAIL_POLLING_USER:
-        _sales_polling_task = asyncio.create_task(_sales_email_polling_worker())
+        _sales_polling_task = asyncio.create_task(email_polling_svc._sales_email_polling_worker())
         logger.info("Sales email polling worker started (interval: %d min, user: %s)", 
                    SALES_EMAIL_POLLING_INTERVAL_MINUTES, SALES_EMAIL_POLLING_USER)
     

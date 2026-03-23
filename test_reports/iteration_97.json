@@ -58,7 +58,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://erp-extraction.preview.emergentagent.com"
+    "api_url": "https://erp-automate.preview.emergentagent.com"
   },
   "seed_data_created": {
     "so_drafts": ["SO-DRAFT-TEST-001 (PO-12345, Acme Corp)", "SO-DRAFT-TEST-002 (PO-67890, Beta Industries)"],

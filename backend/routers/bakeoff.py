@@ -1107,8 +1107,18 @@ async def get_auto_post_readiness(run_id: str):
 
         # 1. Vendor matched to BC
         vendor_canonical = None
+        vendor_match_method = ""
         if hub_doc:
             vendor_canonical = hub_doc.get("vendor_canonical") or hub_doc.get("vendor_id") or hub_doc.get("vendor_no")
+            vendor_match_method = hub_doc.get("vendor_match_method") or hub_doc.get("match_method") or ""
+            # Also check bc_vendor_no from validation results
+            if not vendor_canonical:
+                vr = hub_doc.get("validation_results") or {}
+                vendor_canonical = vr.get("bc_vendor_no") or vr.get("vendor_no")
+            # Also check vendor match details
+            if not vendor_canonical:
+                vmd = hub_doc.get("vendor_match_details") or {}
+                vendor_canonical = vmd.get("bc_vendor_no") or vmd.get("vendor_no")
         criteria["vendor_matched_bc"] = bool(vendor_canonical)
         if not vendor_canonical:
             if vendor:
@@ -1179,7 +1189,11 @@ async def get_auto_post_readiness(run_id: str):
         stable_score = 0
         stable_flag = False
         if hub_doc:
-            raw_confidence = (hub_doc.get("ai_extraction") or {}).get("confidence", 0) or hub_doc.get("classification_confidence", 0)
+            raw_confidence = (
+                (hub_doc.get("ai_extraction") or {}).get("confidence", 0) 
+                or hub_doc.get("classification_confidence", 0)
+                or hub_doc.get("ai_confidence", 0)
+            )
             stable_score = hub_doc.get("stable_vendor_score", 0) or 0
             stable_flag = hub_doc.get("stable_vendor_flag", False)
 

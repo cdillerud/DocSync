@@ -89,7 +89,11 @@ async def check_auto_post_eligibility(doc: Dict[str, Any]) -> tuple[bool, str]:
     
     # Check AI extraction confidence — BLENDED with stable vendor score
     ai_extraction = doc.get("ai_extraction", {})
-    raw_confidence = ai_extraction.get("confidence", 0) or doc.get("classification_confidence", 0)
+    raw_confidence = (
+        ai_extraction.get("confidence", 0) 
+        or doc.get("classification_confidence", 0)
+        or doc.get("ai_confidence", 0)
+    )
     
     # Get stable vendor score (the feedback loop)
     stable_score = doc.get("stable_vendor_score", 0) or 0
@@ -144,9 +148,15 @@ async def check_auto_post_eligibility(doc: Dict[str, Any]) -> tuple[bool, str]:
         return False, "Missing total amount"
     
     # Check vendor is matched to BC
-    vendor_id = doc.get("vendor_id") or doc.get("vendor_canonical")
+    vendor_id = doc.get("vendor_id") or doc.get("vendor_canonical") or doc.get("vendor_no")
+    vendor_match_method = doc.get("vendor_match_method") or doc.get("match_method") or ""
     if not vendor_id:
         return False, "Vendor not matched to BC"
+    # Accept stable vendor matches even if only by name/alias
+    if vendor_match_method in ("name_match", "alias_match", "document_history", "spiro_crm", "sharepoint_patterns"):
+        pass  # These are trusted resolution methods
+    elif vendor_match_method == "none" and not doc.get("vendor_no"):
+        return False, "vendor_name_only"
     
     # Check document is in SharePoint
     sharepoint_url = doc.get("sharepoint_share_link_url") or doc.get("sharepoint_web_url")

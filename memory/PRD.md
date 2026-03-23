@@ -129,6 +129,13 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - **Also fixed**: `reprocess_document` in `services/document_handlers.py` now calls `_update_standard_workflow_status` and `evaluate_auto_clear` for non-AP docs, enabling shipping docs to auto-close on reprocess
 - Verified: test shipping doc now correctly transitions to `exported`/`Completed`/`archived=True` both on initial intake and on reprocess
 
+### Auto-Post Readiness Confidence Fix (Mar 23, 2026 — Session 4)
+- **Critical**: `raw_confidence` in `auto_post_service.py` and `bakeoff.py` only checked `ai_extraction.confidence` and `classification_confidence` (both `None` in production data) — missed `ai_confidence` which has the actual value
+- Result: ALL 51 TUMALOC AP invoices showed `raw=0.00` despite having 0.85+ AI confidence
+- **Fix**: Added `ai_confidence` to the fallback chain in both files
+- **Also fixed**: `vendor_name_only` blocker — docs with trusted match methods (alias_match, document_history, spiro_crm) now pass vendor check even without explicit `vendor_no`
+- Production impact: ~51 previously blocked AP invoices should now be auto-post eligible (from 0% to ~74%+)
+
 ## P0/P1/P2 Backlog
 
 ### P0

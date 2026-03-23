@@ -2138,8 +2138,12 @@ async def _update_standard_workflow_status(
     # 4. Counter >= 4? -> Delete Document
     # 5. All pass -> Send to SharePoint
     
-    if doc_type in [DocType.SHIPMENT.value, DocType.RECEIPT.value, "Shipping_Document", "Warehouse_Document"]:
+    if doc_type in ["Shipping_Document", "Warehouse_Document", "SHIPPING_DOCUMENT", "WAREHOUSE_DOCUMENT"]:
         
+        # Shipping docs store key fields in extracted_fields, not normalized_fields
+        # (compute_ap_normalized_fields only processes AP-specific fields)
+        ef = doc.get("extracted_fields") or {}
+
         # Helper function to handle validation failure with retry/delete logic
         async def handle_warehouse_validation_failure(doc, doc_id, field_name, stage, status_label):
             """Handle validation failure - increment retry, delete if max reached"""
@@ -2162,20 +2166,28 @@ async def _update_standard_workflow_status(
                 logger.info("[Warehouse Workflow] Doc %s: %s - %s", doc_id, status_label, message)
                 return False  # Document not deleted, needs review
         
-        # Extract fields
+        # Extract fields — check normalized_fields first, fall back to extracted_fields
         po_number = (normalized_fields.get("po_number_clean") or 
                     normalized_fields.get("po_number_raw") or 
-                    normalized_fields.get("po_number"))
+                    normalized_fields.get("po_number") or
+                    ef.get("po_number"))
         
         # For shipping docs, "Invoice Number" = BOL Number
         bol_number = (normalized_fields.get("bol_number") or 
                      normalized_fields.get("tracking_number") or
-                     normalized_fields.get("pro_number"))
+                     normalized_fields.get("pro_number") or
+                     ef.get("bol_number") or
+                     ef.get("tracking_number") or
+                     ef.get("pro_number"))
         
         # Document Date = Ship Date
         document_date = (normalized_fields.get("ship_date") or 
                         normalized_fields.get("document_date") or
-                        normalized_fields.get("delivery_date"))
+                        normalized_fields.get("delivery_date") or
+                        ef.get("ship_date") or
+                        ef.get("ship_date_raw") or
+                        ef.get("document_date") or
+                        ef.get("delivery_date"))
         
         # ===== STEP 1: PO Number Is Empty? =====
         if not po_number or str(po_number).strip() == "":
@@ -2257,7 +2269,7 @@ async def _update_standard_workflow_status(
         return
     
     # =============== SALES WORKFLOW ===============
-    elif doc_type in [DocType.SALES_ORDER.value, DocType.SALES_INVOICE.value, "SalesOrder", "SalesInvoice"]:
+    elif doc_type in [DocType.SALES_INVOICE.value, "SALES_ORDER", "Sales_Order", "SalesOrder", "SalesInvoice"]:
         # Step 2: Check Customer
         customer = normalized_fields.get("customer") or normalized_fields.get("customer_raw")
         if not customer:

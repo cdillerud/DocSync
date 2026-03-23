@@ -121,6 +121,13 @@ Enterprise document intelligence platform for Gamer Packaging, Inc. (GPI) that a
 - New `GET /api/documents/search?q=...&limit=20` endpoint with match_fields highlights
 - Verified: vendor, PO, invoice, filename, and amount searches all working
 
+### Shipping Document Auto-Close Fix (Mar 23, 2026 — Session 4)
+- **Critical bug**: `DocType.SHIPMENT` and `DocType.RECEIPT` don't exist in the enum → `AttributeError` crashed the warehouse workflow on every shipping document, leaving them stuck in "processing/manual" with only the initial "Document Received" event
+- **Secondary bug**: `compute_ap_normalized_fields()` only extracts AP fields (vendor, invoice#, amount) — shipping fields like `bol_number`, `ship_date`, `pro_number` were never passed to the warehouse workflow validator
+- **Fix**: Removed invalid enum references, added `extracted_fields` fallback for shipping-specific fields in `_update_standard_workflow_status()`
+- **Also fixed**: `DocType.SALES_ORDER` (also missing from enum) in the sales workflow path
+- Verified: test shipping doc now correctly transitions to `exported`/`Completed`/`archived=True`
+
 ## P0/P1/P2 Backlog
 
 ### P0

@@ -948,6 +948,35 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
 
     extracted_fields = doc.get("extracted_fields", {})
 
+    # ── Re-run PO resolution (regenerates candidates with latest patterns) ──
+    try:
+        from services.po_resolution_service import resolve_po_from_document, attempt_bc_link
+        po_result = await resolve_po_from_document(doc)
+        if po_result:
+            # Also attempt BC link with the new candidates
+            bc_link_result = await attempt_bc_link(doc_id, po_result)
+            po_result["bc_link"] = bc_link_result
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    "po_resolution": po_result,
+                    "po_candidates": po_result.get("candidates_raw", []),
+                }}
+            )
+            # Feed resolved PO into validation
+            if po_result.get("po_number"):
+                extracted_fields["_po_resolution_number"] = po_result["po_number"]
+            valid_candidates = po_result.get("candidates_valid", [])
+            if isinstance(valid_candidates, list) and valid_candidates:
+                if isinstance(valid_candidates[0], dict):
+                    valid_candidates = [c["normalized"] for c in valid_candidates if c.get("valid_format") and not c.get("is_non_po")]
+            if valid_candidates:
+                extracted_fields["_po_all_candidates"] = valid_candidates
+            logger.info("[REPROCESS] PO re-resolution for %s: status=%s po=%s candidates=%d",
+                        doc_id[:8], po_result.get("status"), po_result.get("po_number"), len(valid_candidates))
+    except Exception as po_err:
+        logger.warning("[REPROCESS] PO resolution error for %s: %s", doc_id[:8], str(po_err))
+
     old_match_method = doc.get("match_method", "none")
     from services.bc_validation_service import validate_bc_match
     validation_results = await validate_bc_match(job_type, extracted_fields, job_configs)

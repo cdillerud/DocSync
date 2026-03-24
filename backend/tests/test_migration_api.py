@@ -10,7 +10,7 @@ sys.path.insert(0, '/app/backend')
 
 
 # Test configuration
-API_BASE_URL = "https://doc-intake-bench.preview.emergentagent.com"
+API_BASE_URL = "https://routing-accuracy.preview.emergentagent.com"
 
 
 @pytest.fixture

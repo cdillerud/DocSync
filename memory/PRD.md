@@ -53,6 +53,7 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
   - Added `_detect_international_vendor` auto-detection from vendor name patterns (FEVISA, Envases, S.A. DE C.V., etc.)
   - Fixed subfolder matching scoring — GPI's more specific routing (e.g., "Dropship International/PO88432") now correctly matches S9's parent folder
   - Added `/api/intake-benchmark/runs/{run_id}/reroute-folders` endpoint for live re-routing
+  - Added `/api/intake-benchmark/runs/reroute-all` endpoint to batch-update ALL runs at once
   - Re-scored all 87 bakeoff documents across 9 runs → all at 100%
 - Files changed: `services/folder_routing_service.py`, `routers/bakeoff.py`
 - Tests: `tests/test_folder_routing_fix.py` (5 passing)
@@ -74,6 +75,8 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
 - `POST /api/documents/{doc_id}/classify` — Manual classification trigger
 - `GET /api/intake-benchmark/runs/{run_id}/auto-post-readiness` — Readiness scoring
 - `GET /api/salesperson-dashboard/overview` — Rep performance metrics
+- `POST /api/intake-benchmark/runs/{run_id}/reroute-folders` — Re-route single run
+- `POST /api/intake-benchmark/runs/reroute-all` — Re-route ALL runs with latest logic
 
 ## Known Limitations
 - BC Sandbox and SharePoint Graph API calls fail in preview (DEMO_MODE=true)

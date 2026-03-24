@@ -109,6 +109,53 @@ def register_server_routes(app=None):
     )
 
 
+
+
+@router.get("/{doc_id}/diagnose")
+async def diagnose_document(doc_id: str):
+    """Diagnostic endpoint — check why a document is stuck and what can be done."""
+    import os
+    from pathlib import Path
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        return {"error": "Document not found"}
+    
+    upload_dir = Path(os.environ.get("ROOT_DIR", "/app/backend")) / "uploads"
+    file_path = upload_dir / doc_id
+    file_exists = file_path.exists()
+    file_size = file_path.stat().st_size if file_exists else 0
+    
+    # Check LLM key
+    llm_key = os.environ.get("EMERGENT_LLM_KEY", "")
+    has_llm_key = bool(llm_key and len(llm_key) > 10)
+    
+    ef = doc.get("extracted_fields")
+    ef_type = type(ef).__name__ if ef is not None else "None"
+    ef_keys = list(ef.keys()) if isinstance(ef, dict) and ef else []
+    
+    return {
+        "doc_id": doc_id,
+        "status": doc.get("status"),
+        "document_type": doc.get("document_type"),
+        "ai_confidence": doc.get("ai_confidence"),
+        "extracted_fields_type": ef_type,
+        "extracted_fields_keys": ef_keys,
+        "file_on_disk": file_exists,
+        "file_size_bytes": file_size,
+        "has_llm_key": has_llm_key,
+        "classification_method": doc.get("classification_method"),
+        "vendor_raw": doc.get("vendor_raw"),
+        "vendor_normalized": doc.get("vendor_normalized"),
+        "last_error": doc.get("last_error"),
+        "code_version": "2026-03-24-v3-try-except-wrapped",
+        "advice": (
+            "Click 'AI Extract Invoice Data' button in the AP Invoice Review panel to re-run extraction. "
+            "Or click 'Run Intelligence Pipeline' under Document Intelligence."
+        ) if not ef_keys else "Document has extracted fields.",
+    }
+
+
 # =============================================================================
 # SIMPLE ROUTES — Direct implementations using deps.get_db()
 # =============================================================================

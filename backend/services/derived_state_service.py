@@ -571,7 +571,7 @@ class DerivedStateService:
         elif document.get("auto_posted"):
             automation_state = AutomationState.AUTONOMOUS.value
             workflow_state = WorkflowState.COMPLETED.value
-        elif document.get("ai_confidence", 0) > 0.9 and validation_state == ValidationState.PASS.value:
+        elif document.get("ai_confidence") or 0 > 0.9 and validation_state == ValidationState.PASS.value:
             automation_state = AutomationState.ASSISTED.value
         
         # Generate state reason

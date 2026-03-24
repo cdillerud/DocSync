@@ -830,7 +830,7 @@ async def run_pipeline(doc_id: str, doc: Dict[str, Any]) -> PipelineResult:
     """
     result = PipelineResult(document_id=doc_id)
     existing_type = doc.get("suggested_job_type") or doc.get("doc_type") or "Unknown"
-    existing_confidence = doc.get("ai_confidence", 0.0)
+    existing_confidence = doc.get("ai_confidence") or 0.0
 
     # ----- Stage 1: PARSE -----
     parse = stage_parse(doc_id, doc)

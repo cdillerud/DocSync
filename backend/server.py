@@ -1797,7 +1797,7 @@ async def on_document_ingested(doc_id: str, source: str = "unknown"):
         validation_results = await validate_bc_match(job_type, extracted_fields, job_configs)
         
         # Make automation decision
-        confidence = doc.get("ai_confidence", 0.0)
+        confidence = doc.get("ai_confidence") or 0.0
         decision, reasoning, decision_metadata = make_automation_decision(job_configs, confidence, validation_results)
         
         # Determine new status based on decision
@@ -3970,6 +3970,30 @@ async def _reprocess_document_inner(doc_id: str, doc: dict, reclassify: bool):
     if file_path.exists():
         file_content = file_path.read_bytes()
     
+    # If file not on disk but reclassify requested, try to recover from email
+    if reclassify and not file_path.exists():
+        email_id = doc.get("email_id")
+        if email_id:
+            try:
+                from services.email_polling_service import fetch_email_with_attachments
+                # Try to get the sender's mailbox (AP mailbox)
+                mailbox = doc.get("sender") or os.environ.get("MS_GRAPH_AP_MAILBOX", "")
+                if mailbox:
+                    logger.info("[REPROCESS] File not on disk, attempting email re-fetch for %s (email_id=%s)", doc_id[:8], email_id[:16])
+                    email_data = await fetch_email_with_attachments(email_id, mailbox)
+                    if email_data and email_data.get("attachments"):
+                        target_name = doc.get("file_name", "")
+                        for att in email_data["attachments"]:
+                            if att.get("name") == target_name or not target_name:
+                                recovered_bytes = att.get("content_bytes")
+                                if recovered_bytes:
+                                    file_path.write_bytes(recovered_bytes)
+                                    file_content = recovered_bytes
+                                    logger.info("[REPROCESS] Recovered file from email: %s (%d bytes)", target_name, len(recovered_bytes))
+                                    break
+            except Exception as email_err:
+                logger.warning("[REPROCESS] Email re-fetch failed for %s: %s", doc_id[:8], str(email_err))
+    
     # Re-run AI classification if requested
     if reclassify and file_path.exists():
         try:
@@ -4038,7 +4062,7 @@ async def _reprocess_document_inner(doc_id: str, doc: dict, reclassify: bool):
     new_match_method = validation_results.get("match_method", "none")
     
     # Make new automation decision
-    confidence = doc.get("ai_confidence", 0.0)
+    confidence = doc.get("ai_confidence") or 0.0
     # FIX: If doc has a valid type but low ai_confidence (e.g., from failed AI extraction),
     # use classification confidence so reprocess doesn't fail the workflow check.
     doc_type_for_conf = doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type") or ""
@@ -4256,7 +4280,7 @@ async def batch_revalidate_documents(
             new_validation_passed = validation_results.get("all_passed", False)
             
             # Make new automation decision
-            confidence = doc.get("ai_confidence", 0.0)
+            confidence = doc.get("ai_confidence") or 0.0
             decision, reasoning, decision_metadata = make_automation_decision(job_configs, confidence, validation_results)
             
             # Update document with new validation results

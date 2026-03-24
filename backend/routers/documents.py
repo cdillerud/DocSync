@@ -144,15 +144,19 @@ async def diagnose_document(doc_id: str):
         "file_on_disk": file_exists,
         "file_size_bytes": file_size,
         "has_llm_key": has_llm_key,
+        "email_id": doc.get("email_id"),
+        "sender": doc.get("sender"),
         "classification_method": doc.get("classification_method"),
         "vendor_raw": doc.get("vendor_raw"),
         "vendor_normalized": doc.get("vendor_normalized"),
         "last_error": doc.get("last_error"),
-        "code_version": "2026-03-24-v3-try-except-wrapped",
+        "code_version": "2026-03-24-v4-null-confidence-fix",
         "advice": (
-            "Click 'AI Extract Invoice Data' button in the AP Invoice Review panel to re-run extraction. "
-            "Or click 'Run Intelligence Pipeline' under Document Intelligence."
-        ) if not ef_keys else "Document has extracted fields.",
+            "File not on disk. Re-process will try to recover from email. "
+            "Click Re-process to attempt email recovery + AI extraction."
+        ) if not file_exists else (
+            "File exists. Re-process should re-run AI extraction."
+        ),
     }
 
 

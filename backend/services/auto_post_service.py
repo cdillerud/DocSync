@@ -92,7 +92,7 @@ async def check_auto_post_eligibility(doc: Dict[str, Any]) -> tuple[bool, str]:
     raw_confidence = (
         ai_extraction.get("confidence", 0) 
         or doc.get("classification_confidence", 0)
-        or doc.get("ai_confidence", 0)
+        or doc.get("ai_confidence") or 0
     )
     
     # Get stable vendor score (the feedback loop)
@@ -454,7 +454,7 @@ def check_sales_order_eligibility(doc: Dict[str, Any]) -> tuple[bool, str]:
         return False, f"Not a sales document (doc_type={doc_type})"
     
     # Check confidence
-    confidence = doc.get("ai_confidence", 0) or doc.get("classification_confidence", 0)
+    confidence = doc.get("ai_confidence") or 0 or doc.get("classification_confidence", 0)
     if confidence < AUTO_POST_CONFIDENCE_THRESHOLD:
         return False, f"Confidence too low ({confidence:.2f} < {AUTO_POST_CONFIDENCE_THRESHOLD})"
     

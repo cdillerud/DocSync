@@ -1256,7 +1256,7 @@ async def get_auto_post_readiness(run_id: str):
             raw_confidence = (
                 (hub_doc.get("ai_extraction") or {}).get("confidence", 0) 
                 or hub_doc.get("classification_confidence", 0)
-                or hub_doc.get("ai_confidence", 0)
+                or hub_doc.get("ai_confidence") or 0
             )
             stable_score = hub_doc.get("stable_vendor_score", 0) or 0
             stable_flag = hub_doc.get("stable_vendor_flag", False)

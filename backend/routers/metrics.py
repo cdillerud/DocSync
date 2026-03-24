@@ -194,7 +194,7 @@ async def get_vendor_friction_metrics(days: int = Query(30)):
             }
         
         vendor_stats[vendor]["total"] += 1
-        vendor_stats[vendor]["total_confidence"] += doc.get("ai_confidence", 0)
+        vendor_stats[vendor]["total_confidence"] += doc.get("ai_confidence") or 0
         
         # Track alias-based matches
         if doc.get("match_method") == "alias":
@@ -1459,7 +1459,7 @@ async def get_stable_vendors(
             vd["draft_candidates"] += 1
         
         # High confidence tracking
-        confidence = doc.get("ai_confidence", 0)
+        confidence = doc.get("ai_confidence") or 0
         if confidence and confidence >= 0.92:
             vd["high_confidence_count"] += 1
     

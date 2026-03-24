@@ -999,7 +999,7 @@ async def _reprocess_document_inner_dh(doc_id: str, doc: dict, reclassify: bool,
     validation_results = await validate_bc_match(job_type, extracted_fields, job_configs)
     new_match_method = validation_results.get("match_method", "none")
 
-    confidence = doc.get("ai_confidence", 0.0)
+    confidence = doc.get("ai_confidence") or 0.0
     # FIX: Bump confidence for valid doc types with failed AI extraction
     doc_type_for_conf = doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type") or ""
     if doc_type_for_conf not in ("Other", "Unknown", "Unknown_Document", "") and confidence < 0.5:
@@ -1214,7 +1214,7 @@ async def batch_revalidate_documents(
             new_match_method = validation_results.get("match_method", "none")
             new_validation_passed = validation_results.get("all_passed", False)
 
-            confidence = doc.get("ai_confidence", 0.0)
+            confidence = doc.get("ai_confidence") or 0.0
             decision, reasoning, decision_metadata = _make_automation_decision(job_configs, confidence, validation_results)
 
             update_data = {

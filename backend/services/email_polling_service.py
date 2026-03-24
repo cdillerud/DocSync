@@ -422,6 +422,7 @@ async def poll_mailbox_for_attachments():
                                 file_content=content_bytes, filename=filename,
                                 content_type=content_type, source="email_poll",
                                 email_id=msg_id, subject=subject, sender=sender,
+                                mailbox_category="AP",
                             )
                             doc_id = intake_result.get("document", {}).get("id")
                             await record_mail_intake_log(
@@ -764,6 +765,7 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
                             file_content=content_bytes, filename=filename,
                             source="email", sender=sender, subject=subject,
                             email_id=internet_msg_id, content_type=content_type,
+                            mailbox_category=default_category,
                         )
 
                         await db.mail_intake_log.insert_one({

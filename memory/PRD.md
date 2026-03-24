@@ -35,7 +35,16 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
 - **Auto-Post Readiness Improvements**: Active vendor resolution
 - **PO Resolution Fix**: Dash-suffixed PO support (e.g., 106975-3)
 
-### Current Session Fixes (March 23, 2026 - Fork)
+### Current Session Fixes (March 24, 2026 - Fork)
+- **Auto-Close Confidence Fix (P0)**: Fixed pipeline where documents like `0303691.pdf` failed to auto-close despite being "slam dunk" easy docs. Root cause: when AI extraction (Gemini LLM) fails/times out, `confidence=0.0` propagated to ALL downstream systems — workflow handler (`_update_standard_workflow_status`) treated it as classification failure and bailed, auto-resolution skipped it, auto-clear rejected it. Three-part fix:
+  1. **Confidence bump after classification**: After `classify_document_type` successfully classifies a doc (doc_type != Other/Unknown), confidence is bumped to 0.85 so downstream systems don't treat it as failed.
+  2. **`_update_standard_workflow_status` guard**: No longer treats `confidence=0` as classification failure if the document has a valid `doc_type` assigned by deterministic rules.
+  3. **`mailbox_category` passthrough**: Email polling services now pass `mailbox_category` (AP/Sales) to `_internal_intake_document`, enabling deterministic classification by mailbox when AI fails.
+  4. **Reprocess path fix**: `reprocess_document` also bumps confidence for valid doc types with low `ai_confidence`.
+- Files changed: `server.py`, `services/email_polling_service.py`
+- Tests: `tests/test_auto_close_confidence_fix.py` (4 passing)
+
+### Previous Session Fixes (March 23, 2026 - Fork)
 - **500 Error Fix on Document Detail**: Wrapped `derive_state`, `evaluate_readiness`, and AP validation reconciliation in try/except. Fixed `b.lower()` crash when `blocking_issues` contained dicts. Documents with any type (including Unknown) now load without 500.
 - **URL Encoding for Document Navigation**: Added `encodeURIComponent()` to all document navigation calls across 8 pages and all `api.js` functions. Prevents `#` or special characters in IDs from breaking routes.
 - **Frontend Error Differentiation**: Toast now shows actual HTTP status (500 vs 404) instead of generic "Document not found" for all errors.
@@ -57,6 +66,7 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
 - BC Sandbox and SharePoint Graph API calls fail in preview (DEMO_MODE=true)
 - 19 pre-existing integration tests fail (env var mocking, low priority)
 - 205 `no_bc_match` batch failures need investigation
+- Documents stuck at 0.00 confidence from before the fix can be reprocessed via `POST /api/documents/{doc_id}/reprocess?reclassify=true` to re-run classification
 
 ## Backlog
 - P2: Vendor Inventory Dashboard and Sales module

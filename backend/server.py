@@ -1952,7 +1952,10 @@ async def _update_standard_workflow_status(
         await db.hub_documents.update_one({"id": doc_id}, {"$set": retry_state})
     
     # Step 1: Classification done - move from captured to classified
-    if confidence > 0:
+    # FIX: Also check doc_type — if document was classified by deterministic rules,
+    # treat it as successful even if AI extraction confidence was 0.
+    has_valid_type = doc_type and doc_type not in ("Other", "Unknown", "Unknown_Document", "")
+    if confidence > 0 or has_valid_type:
         WorkflowEngine.advance_workflow(
             doc,
             WorkflowEvent.ON_CLASSIFICATION_SUCCESS.value,
@@ -2539,7 +2542,8 @@ async def _internal_intake_document(
     source: str = "email_poll",
     sender: Optional[str] = None,
     subject: Optional[str] = None,
-    email_id: Optional[str] = None
+    email_id: Optional[str] = None,
+    mailbox_category: Optional[str] = None
 ) -> dict:
     """
     Internal function to process document intake from email polling.
@@ -2585,6 +2589,7 @@ async def _internal_intake_document(
         "email_subject": subject,
         "email_id": email_id,
         "email_received_utc": now,
+        "mailbox_category": mailbox_category,
         "sharepoint_drive_id": None,
         "sharepoint_item_id": None,
         "sharepoint_web_url": None,
@@ -2669,6 +2674,16 @@ async def _internal_intake_document(
     category = classification_result["category"]
     ai_classification_audit = classification_result.get("ai_classification")
     classification_method = classification_result.get("classification_method", "unknown")
+    
+    # FIX: If deterministic classification succeeded but AI extraction returned 0.0 confidence,
+    # bump confidence so downstream workflow/auto-resolution don't treat this as a failure.
+    if doc_type_value not in ("Other", "Unknown", "Unknown_Document") and confidence < 0.5:
+        classification_confidence = 0.85  # Deterministic classification gets minimum 85%
+        logger.info(
+            "Bumping confidence for %s from %.2f to %.2f (classified as %s via %s)",
+            doc_id, confidence, classification_confidence, doc_type_value, classification_method
+        )
+        confidence = classification_confidence
     
     logger.info(
         "Document %s classified as %s (category: %s, method: %s)",
@@ -3354,6 +3369,16 @@ async def intake_document(
     ai_classification_audit = classification_result.get("ai_classification")
     classification_method = classification_result.get("classification_method", "unknown")
     
+    # FIX: If deterministic classification succeeded but AI extraction returned 0.0 confidence,
+    # bump confidence so downstream workflow/auto-resolution don't treat this as a failure.
+    if doc_type_value not in ("Other", "Unknown", "Unknown_Document") and confidence < 0.5:
+        classification_confidence = 0.85
+        logger.info(
+            "Bumping confidence for %s from %.2f to %.2f (classified as %s via %s)",
+            doc_id, confidence, classification_confidence, doc_type_value, classification_method
+        )
+        confidence = classification_confidence
+    
     logger.info(
         "Document %s classified as %s (category: %s, method: %s)",
         doc_id, doc_type_value, category, classification_method
@@ -3973,6 +3998,11 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
     
     # Make new automation decision
     confidence = doc.get("ai_confidence", 0.0)
+    # FIX: If doc has a valid type but low ai_confidence (e.g., from failed AI extraction),
+    # use classification confidence so reprocess doesn't fail the workflow check.
+    doc_type_for_conf = doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type") or ""
+    if doc_type_for_conf not in ("Other", "Unknown", "Unknown_Document", "") and confidence < 0.5:
+        confidence = 0.85
     decision, reasoning, decision_metadata = make_automation_decision(job_configs, confidence, validation_results)
     
     # Determine if status should change

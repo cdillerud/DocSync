@@ -18,7 +18,7 @@ import io
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 
 if not BASE_URL:
-    BASE_URL = "https://erp-automate.preview.emergentagent.com"
+    BASE_URL = "https://doc-intake-bench.preview.emergentagent.com"
 
 
 # Test CSV data

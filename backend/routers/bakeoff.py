@@ -1039,7 +1039,7 @@ async def reroute_all_runs():
     }
 
 
-@router.get("/runs/folder-mismatches")
+@router.get("/folder-mismatches")
 async def get_folder_mismatches():
     """Find all documents where GPI folder doesn't match S9 truth."""
     db = get_db()

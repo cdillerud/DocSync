@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getDocument, linkDocument, updateDocument, resubmitDocument, refreshDocumentState } from '../lib/api';
 import api from '../lib/api';
@@ -14,7 +14,7 @@ import {
   CheckCircle2, AlertCircle, Clock, Loader2, Copy, RotateCcw, 
   ShieldCheck, ShieldAlert, Building2, FileSearch, Receipt,
   Zap, User, Cpu, Eye, Inbox, Check, XCircle, AlertTriangle,
-  Gauge, CircleDot, FolderOpen, Send, Archive
+  Gauge, CircleDot, FolderOpen, Send, Archive, Upload
 } from 'lucide-react';
 import { Square9WorkflowTracker } from '../components/Square9WorkflowTracker';
 import APReviewPanel from '../components/APReviewPanel';
@@ -330,6 +330,8 @@ export default function DocumentDetailPage() {
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState({});
   const [resubmitting, setResubmitting] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = React.useRef(null);
   const [showLegacyWorkflows, setShowLegacyWorkflows] = useState(false);
 
   const fetchDoc = async () => {
@@ -404,6 +406,33 @@ export default function DocumentDetailPage() {
     }
   };
 
+  const handleUploadFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/documents/${encodeURIComponent(id)}/upload-file`, {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.error) {
+        toast.error('Upload issue: ' + data.error);
+      } else {
+        toast.success('File uploaded & re-processed');
+        if (data.document) setDoc(data.document);
+      }
+      fetchDoc();
+    } catch (err) {
+      toast.error('Upload failed: ' + err.message);
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64" data-testid="doc-detail-loading">
@@ -456,6 +485,12 @@ export default function DocumentDetailPage() {
           <Button size="sm" variant="outline" onClick={handleResubmit} disabled={resubmitting} data-testid="resubmit-btn">
             {resubmitting ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> : <RotateCcw className="w-3 h-3 mr-1.5" />}
             {resubmitting ? 'Re-processing...' : 'Re-process'}
+          </Button>
+          {/* Upload & Re-extract — for documents missing their file on disk */}
+          <input type="file" ref={fileInputRef} className="hidden" accept=".pdf,.png,.jpg,.jpeg,.tiff" onChange={handleUploadFile} />
+          <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={uploading} data-testid="upload-reextract-btn">
+            {uploading ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> : <Upload className="w-3 h-3 mr-1.5" />}
+            {uploading ? 'Uploading...' : 'Upload & Re-extract'}
           </Button>
           {(doc.status === 'Classified' || doc.status === 'Exception') && doc.bc_document_no && (
             <Button size="sm" onClick={handleLink} disabled={linking} data-testid="link-to-bc-btn">

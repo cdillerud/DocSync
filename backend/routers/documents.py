@@ -744,6 +744,37 @@ async def delete_document(doc_id: str):
     return {"message": "Document deleted", "id": doc_id}
 
 
+
+@router.post("/{doc_id}/upload-file")
+async def upload_replacement_file(doc_id: str, file: UploadFile = File(...)):
+    """Upload a replacement file for an existing document, then re-run AI extraction."""
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    try:
+        content = await file.read()
+        file_path = UPLOAD_DIR / doc_id
+        file_path.write_bytes(content)
+        
+        # Update document metadata
+        await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+            "file_size": len(content),
+            "content_type": file.content_type or "application/pdf",
+        }})
+        
+        logger.info("[UPLOAD-FILE] Saved replacement file for %s: %s (%d bytes)", doc_id[:8], file.filename, len(content))
+        
+        # Auto-trigger reprocess with reclassify
+        from server import reprocess_document
+        result = await reprocess_document(doc_id, reclassify=True)
+        return result
+    except Exception as e:
+        logger.error("[UPLOAD-FILE] Failed for %s: %s", doc_id[:8], str(e), exc_info=True)
+        return {"error": str(e), "uploaded": False}
+
+
 @router.get("/{doc_id}/file")
 async def get_document_file(doc_id: str):
     """Serve a document file — local disk first, SharePoint fallback."""

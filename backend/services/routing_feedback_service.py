@@ -58,7 +58,7 @@ async def record_correction(
     Record a routing correction. If a matching rule already exists,
     increment its confidence. Otherwise create a new rule.
     """
-    if not _db:
+    if _db is None:
         return {"status": "no_db"}
 
     key = _make_routing_key(vendor, doc_type, has_po, is_international)
@@ -115,7 +115,7 @@ async def lookup_feedback(
     Check if we have a learned routing rule for this document profile.
     Returns the correct_folder if found, None otherwise.
     """
-    if not _db:
+    if _db is None:
         return None
 
     key = _make_routing_key(vendor, doc_type, has_po, is_international)
@@ -134,7 +134,7 @@ async def lookup_feedback(
 
 async def get_all_rules() -> list:
     """Return all learned routing rules."""
-    if not _db:
+    if _db is None:
         return []
     rules = await _db[COLLECTION].find({}, {"_id": 0}).sort("confidence", -1).to_list(500)
     return rules
@@ -142,7 +142,7 @@ async def get_all_rules() -> list:
 
 async def delete_rule(routing_key: str) -> bool:
     """Delete a specific learned rule."""
-    if not _db:
+    if _db is None:
         return False
     result = await _db[COLLECTION].delete_one({"routing_key": routing_key})
     return result.deleted_count > 0
@@ -150,7 +150,7 @@ async def delete_rule(routing_key: str) -> bool:
 
 async def clear_all_rules() -> int:
     """Clear all learned rules (for testing/reset)."""
-    if not _db:
+    if _db is None:
         return 0
     result = await _db[COLLECTION].delete_many({})
     return result.deleted_count

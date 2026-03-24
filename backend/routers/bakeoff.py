@@ -1190,14 +1190,14 @@ async def fix_truth_and_output():
     
     for d in docs:
         doc_id = d["_id"]
-        old_output = d.get("gpi_folder_output", "")
-        truth = d.get("folder_truth", "")
-        s9 = d.get("s9_folder_output", "")
-        doc_type = d.get("gpi_doc_type", "")
-        vendor = d.get("gpi_vendor", "")
-        po = d.get("gpi_po", "").strip()
-        file_name = d.get("file_name", "")
-        run_id = d.get("run_id", "")
+        old_output = d.get("gpi_folder_output") or ""
+        truth = d.get("folder_truth") or ""
+        s9 = d.get("s9_folder_output") or ""
+        doc_type = d.get("gpi_doc_type") or ""
+        vendor = d.get("gpi_vendor") or ""
+        po = (d.get("gpi_po") or "").strip()
+        file_name = d.get("file_name") or ""
+        run_id = d.get("run_id") or ""
         
         truth_lower = truth.lower()
         new_truth = truth

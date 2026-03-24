@@ -50,6 +50,136 @@ def _server_config():
 # Vendor alias / DB matching
 # ---------------------------------------------------------------------------
 
+async def lookup_vendor_by_sender(sender_email: str) -> dict:
+    """
+    Look up vendor by sender email address.
+    Uses the sender_vendor_map collection populated by the learning loop.
+    Returns dict with vendor_canonical, vendor_match_method, etc.
+    """
+    db = get_db()
+    if not sender_email:
+        return {"vendor_canonical": None, "vendor_match_method": "none"}
+
+    email_lower = sender_email.strip().lower()
+    # Check exact email match
+    mapping = await db.sender_vendor_map.find_one(
+        {"sender_email": email_lower},
+        {"_id": 0}
+    )
+    if mapping and mapping.get("vendor_canonical"):
+        # Track usage
+        try:
+            await db.sender_vendor_map.update_one(
+                {"sender_email": email_lower},
+                {"$inc": {"hit_count": 1},
+                 "$set": {"last_used_at": datetime.now(timezone.utc).isoformat()}}
+            )
+        except Exception:
+            pass
+        return {
+            "vendor_canonical": mapping["vendor_canonical"],
+            "vendor_match_method": "sender_email",
+            "vendor_name": mapping.get("vendor_name", ""),
+            "vendor_no": mapping.get("vendor_no", ""),
+        }
+
+    # Check domain match (e.g., @tumalocreek.us → TUMALOC)
+    domain = email_lower.split("@")[-1] if "@" in email_lower else ""
+    if domain:
+        domain_mapping = await db.sender_vendor_map.find_one(
+            {"sender_domain": domain, "domain_confidence": {"$gte": 2}},
+            {"_id": 0}
+        )
+        if domain_mapping and domain_mapping.get("vendor_canonical"):
+            return {
+                "vendor_canonical": domain_mapping["vendor_canonical"],
+                "vendor_match_method": "sender_domain",
+                "vendor_name": domain_mapping.get("vendor_name", ""),
+                "vendor_no": domain_mapping.get("vendor_no", ""),
+            }
+
+    return {"vendor_canonical": None, "vendor_match_method": "none"}
+
+
+async def learn_sender_vendor(sender_email: str, vendor_canonical: str, 
+                               vendor_name: str = "", vendor_no: str = ""):
+    """
+    Record a sender email → vendor mapping.
+    If the same sender is seen multiple times with the same vendor, confidence grows.
+    Also tracks domain-level mappings.
+    """
+    db = get_db()
+    if not sender_email or not vendor_canonical:
+        return
+
+    email_lower = sender_email.strip().lower()
+    domain = email_lower.split("@")[-1] if "@" in email_lower else ""
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Upsert exact sender mapping
+    existing = await db.sender_vendor_map.find_one(
+        {"sender_email": email_lower}, {"_id": 0}
+    )
+    if existing:
+        if existing.get("vendor_canonical") == vendor_canonical:
+            # Same vendor — strengthen confidence
+            await db.sender_vendor_map.update_one(
+                {"sender_email": email_lower},
+                {"$inc": {"confirmation_count": 1, "hit_count": 1},
+                 "$set": {"updated_at": now}}
+            )
+        else:
+            # Different vendor — only override if new one is more confident
+            if existing.get("confirmation_count", 0) <= 1:
+                await db.sender_vendor_map.update_one(
+                    {"sender_email": email_lower},
+                    {"$set": {
+                        "vendor_canonical": vendor_canonical,
+                        "vendor_name": vendor_name,
+                        "vendor_no": vendor_no,
+                        "confirmation_count": 1,
+                        "updated_at": now,
+                    }}
+                )
+    else:
+        await db.sender_vendor_map.insert_one({
+            "sender_email": email_lower,
+            "sender_domain": domain,
+            "vendor_canonical": vendor_canonical,
+            "vendor_name": vendor_name,
+            "vendor_no": vendor_no,
+            "confirmation_count": 1,
+            "hit_count": 0,
+            "created_at": now,
+            "updated_at": now,
+        })
+
+    # Also track domain-level mapping
+    if domain:
+        domain_existing = await db.sender_vendor_map.find_one(
+            {"sender_domain": domain, "sender_email": {"$exists": False}},
+            {"_id": 0}
+        )
+        if domain_existing:
+            if domain_existing.get("vendor_canonical") == vendor_canonical:
+                await db.sender_vendor_map.update_one(
+                    {"sender_domain": domain, "sender_email": {"$exists": False}},
+                    {"$inc": {"domain_confidence": 1}, "$set": {"updated_at": now}}
+                )
+        else:
+            await db.sender_vendor_map.insert_one({
+                "sender_domain": domain,
+                "vendor_canonical": vendor_canonical,
+                "vendor_name": vendor_name,
+                "vendor_no": vendor_no,
+                "domain_confidence": 1,
+                "created_at": now,
+                "updated_at": now,
+            })
+
+    logger.info(f"[VendorLearn] {email_lower} → {vendor_canonical} ({vendor_name})")
+
+
 async def lookup_vendor_alias(vendor_normalized: str) -> dict:
     """
     Multi-source vendor lookup.
@@ -68,12 +198,14 @@ async def lookup_vendor_alias(vendor_normalized: str) -> dict:
     if not vendor_normalized:
         return {"vendor_canonical": None, "vendor_match_method": "none"}
 
-    # 1. Check vendor_aliases collection
+    # 1. Check vendor_aliases collection (includes manually created + learning loop aliases)
     alias_doc = await db.vendor_aliases.find_one({
         "$or": [
             {"normalized": vendor_normalized},
             {"normalized_alias": vendor_normalized},
             {"alias_string": {"$regex": f"^{re.escape(vendor_normalized)}$", "$options": "i"}},
+            # Learning loop stores aliases with uppercase 'alias' field
+            {"alias": vendor_normalized.strip().upper()},
         ]
     }, {"_id": 0})
 
@@ -89,6 +221,7 @@ async def lookup_vendor_alias(vendor_normalized: str) -> dict:
                 {"$or": [
                     {"normalized": vendor_normalized},
                     {"normalized_alias": vendor_normalized},
+                    {"alias": vendor_normalized.strip().upper()},
                 ]},
                 {
                     "$inc": {"usage_count": 1},

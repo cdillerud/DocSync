@@ -2713,9 +2713,19 @@ async def _internal_intake_document(
         logger.warning("Normalized fields computation failed for %s: %s", doc_id, str(norm_err))
         normalized_fields = {}
     
-    # Phase 7: Vendor alias lookup
+    # Phase 7: Vendor alias lookup — sender email first, then text lookup
     try:
-        vendor_alias_result = await lookup_vendor_alias(normalized_fields.get("vendor_normalized"))
+        vendor_alias_result = {"vendor_canonical": None, "vendor_match_method": "none"}
+        # Check sender email → vendor mapping first
+        existing_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "email_sender": 1})
+        sender_email = (existing_doc or {}).get("email_sender", "")
+        if sender_email:
+            from services.vendor_matching import lookup_vendor_by_sender
+            sender_result = await lookup_vendor_by_sender(sender_email)
+            if sender_result.get("vendor_canonical"):
+                vendor_alias_result = sender_result
+        if not vendor_alias_result.get("vendor_canonical"):
+            vendor_alias_result = await lookup_vendor_alias(normalized_fields.get("vendor_normalized"))
     except Exception as va_err:
         logger.warning("Vendor alias lookup failed for %s: %s", doc_id, str(va_err))
         vendor_alias_result = {}
@@ -4836,8 +4846,20 @@ async def process_incoming_email(email_id: str, mailbox_address: str):
             # Phase 8: Compute normalized fields including invoice_date and line_items
             normalized_fields = compute_ap_normalized_fields(extracted_fields)
             
-            # Phase 7: Vendor alias lookup
-            vendor_alias_result = await lookup_vendor_alias(normalized_fields.get("vendor_normalized"))
+            # Phase 7: Vendor resolution — check sender email FIRST, then alias lookup
+            sender_email = intake.sender or ""
+            vendor_alias_result = {"vendor_canonical": None, "vendor_match_method": "none"}
+            
+            # Step 7a: Check sender email → vendor mapping (learned from previous docs)
+            if sender_email:
+                from services.vendor_matching import lookup_vendor_by_sender
+                sender_result = await lookup_vendor_by_sender(sender_email)
+                if sender_result.get("vendor_canonical"):
+                    vendor_alias_result = sender_result
+            
+            # Step 7b: Fall back to vendor text alias lookup
+            if not vendor_alias_result.get("vendor_canonical"):
+                vendor_alias_result = await lookup_vendor_alias(normalized_fields.get("vendor_normalized"))
             
             # Get job config and validate
             job_configs = await db.hub_job_types.find_one({"job_type": suggested_type}, {"_id": 0})
@@ -4887,6 +4909,20 @@ async def process_incoming_email(email_id: str, mailbox_address: str):
                 await move_email_to_folder(email_id, mailbox_address, config.get("processed_folder", "Processed"))
             
             logger.info("Processed email attachment: doc_id=%s, type=%s, decision=%s", doc_id, suggested_type, decision)
+            
+            # Step 7c: LEARN — if vendor was resolved and we have sender, record the mapping
+            resolved_vendor = vendor_alias_result.get("vendor_canonical")
+            if resolved_vendor and sender_email:
+                try:
+                    from services.vendor_matching import learn_sender_vendor
+                    await learn_sender_vendor(
+                        sender_email=sender_email,
+                        vendor_canonical=resolved_vendor,
+                        vendor_name=vendor_alias_result.get("vendor_name", ""),
+                        vendor_no=vendor_alias_result.get("vendor_no", ""),
+                    )
+                except Exception as e:
+                    logger.warning("Failed to learn sender→vendor mapping: %s", e)
             
         except Exception as e:
             logger.error("Failed to process attachment from email %s: %s", email_id, str(e))
@@ -6739,7 +6775,9 @@ async def startup():
     init_feedback_db(db)
     await db.routing_feedback.create_index("routing_key", unique=True)
     await db.routing_feedback.create_index("confidence")
-    logger.info("Routing feedback learning layer initialized")
+    await db.sender_vendor_map.create_index("sender_email")
+    await db.sender_vendor_map.create_index("sender_domain")
+    logger.info("Routing feedback + vendor sender learning initialized")
     # Create Spiro indexes
     await db.spiro_contacts.create_index("spiro_id", unique=True)
     await db.spiro_contacts.create_index("email")

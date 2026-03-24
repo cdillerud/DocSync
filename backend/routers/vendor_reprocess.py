@@ -47,7 +47,7 @@ async def _get_vendor_raw(doc: dict) -> str:
 
 async def _reprocess_single(doc: dict, dry_run: bool = False) -> dict:
     """Re-run vendor matching on a single document. Returns change summary."""
-    from services.vendor_matching import lookup_vendor_alias
+    from services.vendor_matching import lookup_vendor_alias, lookup_vendor_by_sender, learn_sender_vendor
     from services.vendor_name_helpers import normalize_vendor_name
     from services.vendor_resolution_service import build_resolution_object
 
@@ -57,27 +57,36 @@ async def _reprocess_single(doc: dict, dry_run: bool = False) -> dict:
     old_resolution = doc.get("vendor_resolution") or {}
     old_status = old_resolution.get("status", "none")
 
-    vendor_raw = await _get_vendor_raw(doc)
-    if not vendor_raw:
-        return {
-            "doc_id": doc_id,
-            "action": "skipped",
-            "reason": "no_vendor_raw_string",
-            "old_method": old_method,
-        }
+    # Check sender email first (learned mapping)
+    sender_email = doc.get("email_sender") or ""
+    match_result = {"vendor_canonical": None, "vendor_match_method": "none"}
+    if sender_email:
+        match_result = await lookup_vendor_by_sender(sender_email)
 
-    vendor_normalized = normalize_vendor_name(vendor_raw)
-    if not vendor_normalized:
-        return {
-            "doc_id": doc_id,
-            "action": "skipped",
-            "reason": "normalized_to_empty",
-            "vendor_raw": vendor_raw,
-            "old_method": old_method,
-        }
+    # Fall back to text-based vendor matching
+    if not match_result.get("vendor_canonical"):
+        vendor_raw = await _get_vendor_raw(doc)
+        if not vendor_raw:
+            return {
+                "doc_id": doc_id,
+                "action": "skipped",
+                "reason": "no_vendor_raw_string",
+                "old_method": old_method,
+            }
 
-    # Run the updated matching logic
-    match_result = await lookup_vendor_alias(vendor_normalized)
+        vendor_normalized = normalize_vendor_name(vendor_raw)
+        if not vendor_normalized:
+            return {
+                "doc_id": doc_id,
+                "action": "skipped",
+                "reason": "normalized_to_empty",
+                "vendor_raw": vendor_raw,
+                "old_method": old_method,
+            }
+        match_result = await lookup_vendor_alias(vendor_normalized)
+    else:
+        vendor_raw = await _get_vendor_raw(doc)
+        vendor_normalized = ""
 
     new_method = match_result.get("vendor_match_method", "none")
     new_canonical = match_result.get("vendor_canonical")
@@ -131,6 +140,18 @@ async def _reprocess_single(doc: dict, dry_run: bool = False) -> dict:
 
         await db.hub_documents.update_one({"id": doc_id}, {"$set": update})
         result["action"] = "updated"
+        
+        # LEARN: Record sender→vendor mapping
+        if new_canonical and sender_email:
+            try:
+                await learn_sender_vendor(
+                    sender_email=sender_email,
+                    vendor_canonical=new_canonical,
+                    vendor_name=match_result.get("vendor_name", ""),
+                    vendor_no=match_result.get("vendor_no", ""),
+                )
+            except Exception:
+                pass
 
     return result
 
@@ -270,3 +291,65 @@ async def dry_run_reprocess(limit: int = Query(500, ge=1, le=5000)):
 async def reprocess_status():
     """Check the status/result of the last re-processing run."""
     return _last_run
+
+
+
+@router.post("/learn-from-history")
+async def learn_sender_mappings_from_history():
+    """
+    Scan all documents with resolved vendors AND sender emails.
+    Record every sender→vendor mapping into the learning table.
+    This bootstraps the feedback loop from existing data.
+    """
+    from services.vendor_matching import learn_sender_vendor
+    db = get_db()
+
+    docs = await db.hub_documents.find(
+        {
+            "vendor_canonical": {"$exists": True, "$ne": None, "$ne": ""},
+            "email_sender": {"$exists": True, "$ne": None, "$ne": ""},
+        },
+        {"_id": 0, "email_sender": 1, "vendor_canonical": 1,
+         "vendor_name": 1, "vendor_no": 1, "id": 1}
+    ).to_list(5000)
+
+    learned = 0
+    senders_seen = set()
+    for d in docs:
+        sender = (d.get("email_sender") or "").strip()
+        vendor = (d.get("vendor_canonical") or "").strip()
+        if sender and vendor:
+            await learn_sender_vendor(
+                sender_email=sender,
+                vendor_canonical=vendor,
+                vendor_name=d.get("vendor_name", ""),
+                vendor_no=d.get("vendor_no", ""),
+            )
+            learned += 1
+            senders_seen.add(sender)
+
+    # Return what was learned
+    mappings = await db.sender_vendor_map.find(
+        {"sender_email": {"$exists": True}},
+        {"_id": 0}
+    ).sort("confirmation_count", -1).to_list(100)
+
+    return {
+        "docs_scanned": len(docs),
+        "mappings_recorded": learned,
+        "unique_senders": len(senders_seen),
+        "sender_mappings": mappings,
+    }
+
+
+@router.get("/sender-mappings")
+async def get_sender_mappings():
+    """View all learned sender email → vendor mappings."""
+    db = get_db()
+    mappings = await db.sender_vendor_map.find(
+        {}, {"_id": 0}
+    ).sort("confirmation_count", -1).to_list(200)
+    return {
+        "total": len(mappings),
+        "mappings": mappings,
+    }

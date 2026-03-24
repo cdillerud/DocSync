@@ -2584,6 +2584,10 @@ async def _internal_intake_document(
     file_path = UPLOAD_DIR / doc_id
     file_path.write_bytes(file_content)
     
+    # Also store file content in MongoDB as backup (survives container restarts)
+    import base64 as b64mod
+    file_content_b64 = b64mod.b64encode(file_content).decode("ascii")
+    
     # Apply pilot capture channel if pilot mode is enabled
     base_capture_channel = CaptureChannel.EMAIL.value if "email" in source.lower() else CaptureChannel.UPLOAD.value
     capture_channel = get_pilot_capture_channel(base_capture_channel) if PILOT_MODE_ENABLED else base_capture_channel
@@ -2595,6 +2599,7 @@ async def _internal_intake_document(
         "file_name": filename,
         "sha256_hash": computed_hash,
         "file_size": len(file_content),
+        "file_content_b64": file_content_b64,
         "content_type": content_type,
         "email_sender": sender,
         "email_subject": subject,
@@ -3300,6 +3305,10 @@ async def intake_document(
     file_path = UPLOAD_DIR / doc_id
     file_path.write_bytes(file_content)
     
+    # Also store file content in MongoDB as backup
+    import base64 as b64mod
+    file_content_b64 = b64mod.b64encode(file_content).decode("ascii")
+    
     # Create document record with workflow tracking
     doc = {
         "id": doc_id,
@@ -3307,6 +3316,7 @@ async def intake_document(
         "file_name": final_filename,
         "sha256_hash": computed_hash,
         "file_size": len(file_content),
+        "file_content_b64": file_content_b64,
         "content_type": file.content_type,
         "email_sender": sender,
         "email_subject": subject,
@@ -3931,7 +3941,11 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
         raise HTTPException(status_code=404, detail="Document not found")
     
     try:
-        return await _reprocess_document_inner(doc_id, doc, reclassify)
+        result = await _reprocess_document_inner(doc_id, doc, reclassify)
+        # Strip large binary field from response
+        if isinstance(result, dict) and "document" in result:
+            result["document"].pop("file_content_b64", None)
+        return result
     except Exception as e:
         logger.error("[REPROCESS] FATAL error reprocessing %s: %s", doc_id[:8], str(e), exc_info=True)
         # Never return 500 — return error details for debugging
@@ -3970,35 +3984,48 @@ async def _reprocess_document_inner(doc_id: str, doc: dict, reclassify: bool):
     if file_path.exists():
         file_content = file_path.read_bytes()
     
-    # If file not on disk but reclassify requested, try to recover from email
+    # If file not on disk but reclassify requested, try to recover
     if reclassify and not file_path.exists():
-        email_id = doc.get("email_id")
-        if email_id:
+        # Try 1: Recover from MongoDB (file_content_b64 backup)
+        file_b64 = doc.get("file_content_b64")
+        if file_b64:
             try:
-                from services.email_polling_service import fetch_email_with_attachments
-                # Use the AP polling mailbox address (not sender — sender is who sent the email)
-                mailbox = os.environ.get("EMAIL_POLLING_USER", "")
-                if not mailbox:
-                    mailbox = os.environ.get("SALES_EMAIL_POLLING_USER", "")
-                if mailbox:
-                    logger.info("[REPROCESS] File not on disk, attempting email re-fetch for %s (email_id=%s, mailbox=%s)", doc_id[:8], email_id[:20], mailbox)
-                    email_data = await fetch_email_with_attachments(email_id, mailbox)
-                    if email_data and email_data.get("attachments"):
-                        target_name = doc.get("file_name", "")
-                        for att in email_data["attachments"]:
-                            if att.get("name") == target_name or not target_name:
-                                recovered_bytes = att.get("content_bytes")
-                                if recovered_bytes:
-                                    file_path.write_bytes(recovered_bytes)
-                                    file_content = recovered_bytes
-                                    logger.info("[REPROCESS] Recovered file from email: %s (%d bytes)", target_name, len(recovered_bytes))
-                                    break
-                    if not file_content:
-                        logger.warning("[REPROCESS] Email found but no matching attachment for %s", doc_id[:8])
-                else:
-                    logger.warning("[REPROCESS] No EMAIL_POLLING_USER configured, cannot recover file for %s", doc_id[:8])
-            except Exception as email_err:
-                logger.warning("[REPROCESS] Email re-fetch failed for %s: %s", doc_id[:8], str(email_err))
+                import base64 as b64mod
+                recovered_bytes = b64mod.b64decode(file_b64)
+                file_path.write_bytes(recovered_bytes)
+                file_content = recovered_bytes
+                logger.info("[REPROCESS] Recovered file from MongoDB for %s (%d bytes)", doc_id[:8], len(recovered_bytes))
+            except Exception as db_err:
+                logger.warning("[REPROCESS] MongoDB file recovery failed for %s: %s", doc_id[:8], str(db_err))
+        
+        # Try 2: Recover from email (if DB didn't have it)
+        if not file_content:
+            email_id = doc.get("email_id")
+            if email_id:
+                try:
+                    from services.email_polling_service import fetch_email_with_attachments
+                    mailbox = os.environ.get("EMAIL_POLLING_USER", "")
+                    if not mailbox:
+                        mailbox = os.environ.get("SALES_EMAIL_POLLING_USER", "")
+                    if mailbox:
+                        logger.info("[REPROCESS] File not on disk, attempting email re-fetch for %s (email_id=%s, mailbox=%s)", doc_id[:8], email_id[:20], mailbox)
+                        email_data = await fetch_email_with_attachments(email_id, mailbox)
+                        if email_data and email_data.get("attachments"):
+                            target_name = doc.get("file_name", "")
+                            for att in email_data["attachments"]:
+                                if att.get("name") == target_name or not target_name:
+                                    recovered_bytes = att.get("content_bytes")
+                                    if recovered_bytes:
+                                        file_path.write_bytes(recovered_bytes)
+                                        file_content = recovered_bytes
+                                        logger.info("[REPROCESS] Recovered file from email: %s (%d bytes)", target_name, len(recovered_bytes))
+                                        break
+                        if not file_content:
+                            logger.warning("[REPROCESS] Email found but no matching attachment for %s", doc_id[:8])
+                    else:
+                        logger.warning("[REPROCESS] No EMAIL_POLLING_USER configured, cannot recover file for %s", doc_id[:8])
+                except Exception as email_err:
+                    logger.warning("[REPROCESS] Email re-fetch failed for %s: %s", doc_id[:8], str(email_err))
     
     # Re-run AI classification if requested
     if reclassify and file_path.exists():

@@ -41,6 +41,10 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
   2. **`_update_standard_workflow_status` guard**: No longer treats `confidence=0` as classification failure if the document has a valid `doc_type` assigned by deterministic rules.
   3. **`mailbox_category` passthrough**: Email polling services now pass `mailbox_category` (AP/Sales) to `_internal_intake_document`, enabling deterministic classification by mailbox when AI fails.
 - **Reprocess 500 Error Fix**: Fixed `NoneType.items()` crash when reprocessing documents with `null` extracted_fields in DB. Applied `or {}` None-safety guard across all `doc.get("extracted_fields")` patterns in `server.py` (8 occurrences) and `document_handlers.py` (3 occurrences). Also added guard in `normalize_extracted_fields()`.
+- **Null `ai_confidence` Fix**: `ai_confidence` stored as `null` in MongoDB caused `TypeError: '<' not supported between NoneType and float`. Fixed all `doc.get("ai_confidence", 0.0)` → `doc.get("ai_confidence") or 0.0` across 11 files.
+- **File Persistence Fix**: Email-ingested files were lost on Docker container rebuild (uploads directory wiped). Added `file_content_b64` field to document records in MongoDB as a permanent backup. File serving endpoint and reprocess both recover from MongoDB if disk file is missing.
+- **Upload & Re-extract Button**: Added frontend button to manually upload a replacement PDF for any document, triggering automatic re-extraction. Useful for documents where the original file was lost.
+- **Email Recovery in Reprocess**: Added fallback chain: MongoDB backup → email re-fetch → manual upload. Reprocess endpoint tries all sources before giving up.
   4. **Reprocess path fix**: `reprocess_document` also bumps confidence for valid doc types with low `ai_confidence`.
 - Files changed: `server.py`, `services/email_polling_service.py`, `services/document_handlers.py`, `services/document_intel_helpers.py`
 - Tests: `tests/test_auto_close_confidence_fix.py` (4 passing)

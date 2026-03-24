@@ -260,7 +260,7 @@ async def list_documents(
             fq["$and"] = [not_cleared, not_terminal, not_done_wf]
 
     total = await db.hub_documents.count_documents(fq)
-    docs = await db.hub_documents.find(fq, {"_id": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
+    docs = await db.hub_documents.find(fq, {"_id": 0, "file_content_b64": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
 
     # Compute global counts (excluding duplicates)
     not_dup = {"is_duplicate": {"$ne": True}}
@@ -472,7 +472,7 @@ async def get_document(doc_id: str, include_events: bool = Query(True)):
     from services.derived_state_service import get_derived_state_service, format_state_for_display
 
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     workflows = await db.hub_workflow_runs.find({"document_id": doc_id}, {"_id": 0}).sort("started_utc", -1).to_list(100)
@@ -797,6 +797,23 @@ async def get_document_file(doc_id: str):
             filename=filename,
             headers={"Content-Disposition": f'inline; filename="{filename}"'}
         )
+
+    # 1b. Recover from MongoDB backup (file_content_b64)
+    file_b64 = doc.get("file_content_b64")
+    if file_b64:
+        try:
+            import base64 as b64mod
+            recovered = b64mod.b64decode(file_b64)
+            # Restore to disk for future use
+            file_path.write_bytes(recovered)
+            return FileResponse(
+                path=file_path,
+                media_type=content_type,
+                filename=filename,
+                headers={"Content-Disposition": f'inline; filename="{filename}"'}
+            )
+        except Exception:
+            pass  # Fall through to SharePoint
 
     # 2. SharePoint fallback
     drive_id = doc.get("sharepoint_drive_id", "")

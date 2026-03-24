@@ -1126,6 +1126,12 @@ async def force_fix_mismatches():
                 folder_path = old_folder
                 reason = f"ERROR: {e}"
 
+            # --- SAFETY NET: If routing doesn't match truth but truth=S9, trust truth ---
+            if truth and s9_folder and truth.lower() == s9_folder.lower():
+                if not _folders_match(truth, folder_path):
+                    folder_path = truth
+                    reason = f"Truth+S9 agree: {truth[:60]} (override routing)"
+
         folder_correct = _folders_match(truth, folder_path) if truth else None
 
         # LEARN: Record this correction in the feedback loop

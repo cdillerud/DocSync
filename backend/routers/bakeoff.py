@@ -948,27 +948,23 @@ async def reroute_folders(run_id: str):
         
         try:
             is_intl = d.get("is_international", False)
-            # Also preserve international status from existing routing
-            old_folder_lower = old_folder.lower()
-            if "international" in old_folder_lower and "not international" not in old_folder_lower:
-                is_intl = True
             folder_path, reason, _ = determine_folder_path(sim_doc, is_international=is_intl)
         except Exception:
             folder_path = old_folder
         
+        # Always recalculate and update
+        truth = d.get("folder_truth", "")
+        folder_correct = _folders_match(truth, folder_path) if truth else None
+        
+        await db[DOCS_COLL].update_one(
+            {"run_id": run_id, "document_id": d["document_id"]},
+            {"$set": {
+                "gpi_folder_output": folder_path,
+                "gpi_folder_correct": folder_correct,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }}
+        )
         if folder_path != old_folder:
-            # Re-score folder correctness
-            truth = d.get("folder_truth", "")
-            folder_correct = _folders_match(truth, folder_path) if truth else None
-            
-            await db[DOCS_COLL].update_one(
-                {"run_id": run_id, "document_id": d["document_id"]},
-                {"$set": {
-                    "gpi_folder_output": folder_path,
-                    "gpi_folder_correct": folder_correct,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                }}
-            )
             updated += 1
             changes.append({
                 "file_name": d.get("file_name"),
@@ -1009,24 +1005,22 @@ async def reroute_all_runs():
             }
             try:
                 is_intl = d.get("is_international", False)
-                old_folder_lower = old_folder.lower()
-                if "international" in old_folder_lower and "not international" not in old_folder_lower:
-                    is_intl = True
                 folder_path, reason, _ = determine_folder_path(sim_doc, is_international=is_intl)
             except Exception:
                 folder_path = old_folder
 
+            # Always recalculate and update
+            truth = d.get("folder_truth", "")
+            folder_correct = _folders_match(truth, folder_path) if truth else None
+            await db[DOCS_COLL].update_one(
+                {"run_id": rid, "document_id": d["document_id"]},
+                {"$set": {
+                    "gpi_folder_output": folder_path,
+                    "gpi_folder_correct": folder_correct,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }}
+            )
             if folder_path != old_folder:
-                truth = d.get("folder_truth", "")
-                folder_correct = _folders_match(truth, folder_path) if truth else None
-                await db[DOCS_COLL].update_one(
-                    {"run_id": rid, "document_id": d["document_id"]},
-                    {"$set": {
-                        "gpi_folder_output": folder_path,
-                        "gpi_folder_correct": folder_correct,
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
-                    }}
-                )
                 updated += 1
 
         results.append({"run_id": rid, "total_docs": len(docs), "updated": updated})

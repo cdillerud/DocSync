@@ -383,10 +383,9 @@ def determine_folder_path(
                 f"Domestic vendor invoice ({vendor_folder}) → order {order_number}",
                 routing_details,
             )
-        # No PO → Miscellaneous (can't tie to a specific purchase order)
         return (
-            "Miscellaneous Documents/Misc Invoices - need approval",
-            f"Domestic AP invoice without PO ({vendor_folder}) → Miscellaneous",
+            "Dropship Not International Documents",
+            f"Domestic vendor invoice ({vendor_folder})",
             routing_details,
         )
 
@@ -482,16 +481,26 @@ INTERNATIONAL_VENDOR_PATTERNS = [
     "co., ltd", "co.,ltd",  # Asian
     "kabushiki", "k.k.",  # Japanese
     "a.s.",  # Turkish/Nordic
-    "ag",  # Swiss/German (check with word boundary)
+]
+
+# Short patterns that need word-boundary checks to avoid false positives
+# e.g., "ag" matching inside "packaging"
+INTERNATIONAL_VENDOR_WORD_PATTERNS = [
+    "ag",  # Swiss/German — must be standalone word
 ]
 
 
 def _detect_international_vendor(vendor_name: str, extracted: Dict, doc: Dict) -> bool:
     """Auto-detect if vendor/order is international from vendor name patterns."""
+    import re
     v = vendor_name.lower()
-    # Check vendor name patterns
+    # Check substring patterns
     if any(pat in v for pat in INTERNATIONAL_VENDOR_PATTERNS):
         return True
+    # Check word-boundary patterns (avoid "ag" matching "packaging")
+    for pat in INTERNATIONAL_VENDOR_WORD_PATTERNS:
+        if re.search(rf'\b{re.escape(pat)}\b', v):
+            return True
     # Check if doc itself has is_international flag
     if doc.get("is_international"):
         return True

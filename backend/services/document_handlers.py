@@ -915,12 +915,29 @@ async def resolve_and_link_document(doc_id: str, resolve: ResolveRequest):
 async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
     """Safe reprocess — re-runs validation + vendor match only."""
     db = get_db()
-    TransactionAction = _get_transaction_action()
-    DEFAULT_JOB_TYPES = _get_default_job_types()
 
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+
+    try:
+        return await _reprocess_document_inner_dh(doc_id, doc, reclassify, db)
+    except Exception as e:
+        logger.error("[REPROCESS-DH] FATAL error reprocessing %s: %s", doc_id[:8], str(e), exc_info=True)
+        return {
+            "reprocessed": False,
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "old_status": doc.get("status"),
+            "new_status": doc.get("status"),
+            "document": doc,
+            "reasoning": f"Reprocess failed: {str(e)}"
+        }
+
+
+async def _reprocess_document_inner_dh(doc_id: str, doc: dict, reclassify: bool, db):
+    TransactionAction = _get_transaction_action()
+    DEFAULT_JOB_TYPES = _get_default_job_types()
 
     if doc.get("status") == "LinkedToBC":
         return {"reprocessed": False, "reason": "Document already linked to BC - no reprocessing needed", "document": doc}
@@ -936,7 +953,7 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
             "document_type": classification.get("suggested_job_type", "Unknown"),
             "suggested_job_type": classification.get("suggested_job_type", "Unknown"),
             "ai_confidence": classification.get("confidence", 0.0),
-            "extracted_fields": classification.get("extracted_fields", {}),
+            "extracted_fields": classification.get("extracted_fields") or {},
             "updated_utc": datetime.now(timezone.utc).isoformat(),
         }})
         doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})

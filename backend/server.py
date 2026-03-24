@@ -1058,30 +1058,41 @@ async def resubmit_document(doc_id: str):
     file_path = UPLOAD_DIR / doc_id
     if not file_path.exists():
         raise HTTPException(status_code=400, detail="Original file not found on server. Please upload again via the Upload page.")
-    file_content = file_path.read_bytes()
-    now = datetime.now(timezone.utc).isoformat()
 
-    # Reset document status
-    await db.hub_documents.update_one({"id": doc_id}, {"$set": {
-        "status": "Received",
-        "sharepoint_drive_id": None,
-        "sharepoint_item_id": None,
-        "sharepoint_web_url": None,
-        "sharepoint_share_link_url": None,
-        "last_error": None,
-        "updated_utc": now,
-    }})
+    try:
+        file_content = file_path.read_bytes()
+        now = datetime.now(timezone.utc).isoformat()
 
-    # Re-run the full workflow with existing metadata
-    workflow_id, final_status = await run_upload_and_link_workflow(
-        doc_id, file_content, doc["file_name"],
-        doc.get("document_type", "Other"),
-        doc.get("bc_record_id"),
-        doc.get("bc_document_no")
-    )
+        # Reset document status
+        await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+            "status": "Received",
+            "sharepoint_drive_id": None,
+            "sharepoint_item_id": None,
+            "sharepoint_web_url": None,
+            "sharepoint_share_link_url": None,
+            "last_error": None,
+            "updated_utc": now,
+        }})
 
-    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-    return {"document": updated_doc, "workflow_id": workflow_id}
+        # Re-run the full workflow with existing metadata
+        workflow_id, final_status = await run_upload_and_link_workflow(
+            doc_id, file_content, doc["file_name"],
+            doc.get("document_type", "Other"),
+            doc.get("bc_record_id"),
+            doc.get("bc_document_no")
+        )
+
+        updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+        return {"document": updated_doc, "workflow_id": workflow_id}
+    except Exception as e:
+        logger.error("[RESUBMIT] FATAL error resubmitting %s: %s", doc_id[:8], str(e), exc_info=True)
+        return {
+            "reprocessed": False,
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "document": doc,
+            "reasoning": f"Resubmit failed: {str(e)}"
+        }
 
 # Moved to routers/documents.py — link_document
 async def link_document(doc_id: str):
@@ -3918,6 +3929,24 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+    
+    try:
+        return await _reprocess_document_inner(doc_id, doc, reclassify)
+    except Exception as e:
+        logger.error("[REPROCESS] FATAL error reprocessing %s: %s", doc_id[:8], str(e), exc_info=True)
+        # Never return 500 — return error details for debugging
+        return {
+            "reprocessed": False,
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "old_status": doc.get("status"),
+            "new_status": doc.get("status"),
+            "document": doc,
+            "reasoning": f"Reprocess failed: {str(e)}"
+        }
+
+
+async def _reprocess_document_inner(doc_id: str, doc: dict, reclassify: bool):
     
     # Cannot reprocess already-linked documents
     if doc.get("status") == "LinkedToBC":

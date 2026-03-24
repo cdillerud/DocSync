@@ -388,11 +388,17 @@ export default function DocumentDetailPage() {
     setResubmitting(true);
     try {
       const res = await resubmitDocument(id);
-      toast.success('Document re-submitted successfully');
-      setDoc(res.data.document);
+      // Check if the reprocess returned an error (200 but with error field)
+      if (res.data?.error) {
+        toast.error('Re-process issue: ' + res.data.error);
+      } else {
+        toast.success('Document re-submitted successfully');
+      }
+      if (res.data?.document) setDoc(res.data.document);
       fetchDoc();
     } catch (err) {
-      toast.error('Re-submit failed: ' + (err.response?.data?.detail || err.message));
+      const detail = err.response?.data?.detail || err.response?.data?.error || err.message;
+      toast.error('Re-submit failed: ' + detail);
     } finally {
       setResubmitting(false);
     }

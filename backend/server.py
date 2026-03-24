@@ -3976,10 +3976,12 @@ async def _reprocess_document_inner(doc_id: str, doc: dict, reclassify: bool):
         if email_id:
             try:
                 from services.email_polling_service import fetch_email_with_attachments
-                # Try to get the sender's mailbox (AP mailbox)
-                mailbox = doc.get("sender") or os.environ.get("MS_GRAPH_AP_MAILBOX", "")
+                # Use the AP polling mailbox address (not sender — sender is who sent the email)
+                mailbox = os.environ.get("EMAIL_POLLING_USER", "")
+                if not mailbox:
+                    mailbox = os.environ.get("SALES_EMAIL_POLLING_USER", "")
                 if mailbox:
-                    logger.info("[REPROCESS] File not on disk, attempting email re-fetch for %s (email_id=%s)", doc_id[:8], email_id[:16])
+                    logger.info("[REPROCESS] File not on disk, attempting email re-fetch for %s (email_id=%s, mailbox=%s)", doc_id[:8], email_id[:20], mailbox)
                     email_data = await fetch_email_with_attachments(email_id, mailbox)
                     if email_data and email_data.get("attachments"):
                         target_name = doc.get("file_name", "")
@@ -3991,6 +3993,10 @@ async def _reprocess_document_inner(doc_id: str, doc: dict, reclassify: bool):
                                     file_content = recovered_bytes
                                     logger.info("[REPROCESS] Recovered file from email: %s (%d bytes)", target_name, len(recovered_bytes))
                                     break
+                    if not file_content:
+                        logger.warning("[REPROCESS] Email found but no matching attachment for %s", doc_id[:8])
+                else:
+                    logger.warning("[REPROCESS] No EMAIL_POLLING_USER configured, cannot recover file for %s", doc_id[:8])
             except Exception as email_err:
                 logger.warning("[REPROCESS] Email re-fetch failed for %s: %s", doc_id[:8], str(email_err))
     

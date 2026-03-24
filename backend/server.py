@@ -586,9 +586,9 @@ async def resolve_document_reference(doc_id: str):
     # Get reference number from document
     reference_number = (
         doc.get("po_number_clean") or
-        doc.get("extracted_fields", {}).get("po_number") or
+        (doc.get("extracted_fields") or {}).get("po_number") or
         doc.get("bol_number") or
-        doc.get("extracted_fields", {}).get("bol_number")
+        (doc.get("extracted_fields") or {}).get("bol_number")
     )
     
     if not reference_number:
@@ -648,7 +648,7 @@ async def resolve_document_intelligence(doc_id: str):
         raise HTTPException(status_code=503, detail="Reference Intelligence Service not initialized")
     
     # Build extracted fields from document
-    extracted_fields = doc.get("extracted_fields", {})
+    extracted_fields = doc.get("extracted_fields") or {}
     if not extracted_fields:
         extracted_fields = {}
     # Merge top-level extracted fields into extracted_fields dict
@@ -1774,7 +1774,7 @@ async def on_document_ingested(doc_id: str, source: str = "unknown"):
         
         old_status = doc.get("status", "Unknown")
         job_type = doc.get("suggested_job_type", "AP_Invoice")
-        extracted_fields = doc.get("extracted_fields", {})
+        extracted_fields = doc.get("extracted_fields") or {}
         
         # Get job config
         job_configs = await db.hub_job_types.find_one({"job_type": job_type}, {"_id": 0})
@@ -3967,7 +3967,7 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
         job_configs = DEFAULT_JOB_TYPES.get(job_type, DEFAULT_JOB_TYPES["AP_Invoice"])
     
     # Get extracted fields
-    extracted_fields = doc.get("extracted_fields", {})
+    extracted_fields = doc.get("extracted_fields") or {}
     
     # Run PO resolution from ALL sources before validation
     try:
@@ -4199,7 +4199,7 @@ async def batch_revalidate_documents(
                 job_configs = DEFAULT_JOB_TYPES.get(job_type, DEFAULT_JOB_TYPES.get("AP_Invoice", {}))
             
             # Get extracted fields
-            extracted_fields = doc.get("extracted_fields", {})
+            extracted_fields = doc.get("extracted_fields") or {}
             vendor_name = extracted_fields.get("vendor", doc.get("vendor_canonical", ""))
             
             # Record old state
@@ -4388,7 +4388,7 @@ async def preview_post_to_bc(doc_id: str, request: DryRunPreviewRequest = None):
                 return preview_result
             
             # Extract data from document
-            extracted_fields = doc.get("extracted_fields", {})
+            extracted_fields = doc.get("extracted_fields") or {}
             normalized_fields = doc.get("normalized_fields", {})
             ai_extraction = doc.get("ai_extraction", {})
             
@@ -5342,7 +5342,7 @@ async def update_document_fields(doc_id: str, request: UpdateFieldsRequest):
     
     # Update fields
     update_data = {"updated_utc": datetime.now(timezone.utc).isoformat()}
-    extracted_fields = doc.get("extracted_fields", {})
+    extracted_fields = doc.get("extracted_fields") or {}
     
     if request.invoice_number is not None:
         extracted_fields["invoice_number"] = request.invoice_number

@@ -946,7 +946,7 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
     if not job_configs:
         job_configs = DEFAULT_JOB_TYPES.get(job_type, DEFAULT_JOB_TYPES["AP_Invoice"])
 
-    extracted_fields = doc.get("extracted_fields", {})
+    extracted_fields = doc.get("extracted_fields") or {}
 
     # ── Re-run PO resolution (regenerates candidates with latest patterns) ──
     try:
@@ -983,6 +983,10 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
     new_match_method = validation_results.get("match_method", "none")
 
     confidence = doc.get("ai_confidence", 0.0)
+    # FIX: Bump confidence for valid doc types with failed AI extraction
+    doc_type_for_conf = doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type") or ""
+    if doc_type_for_conf not in ("Other", "Unknown", "Unknown_Document", "") and confidence < 0.5:
+        confidence = 0.85
     decision, reasoning, decision_metadata = _make_automation_decision(job_configs, confidence, validation_results)
 
     old_status = doc.get("status")
@@ -1183,7 +1187,7 @@ async def batch_revalidate_documents(
             if not job_configs:
                 job_configs = DEFAULT_JOB_TYPES.get(job_type, DEFAULT_JOB_TYPES.get("AP_Invoice", {}))
 
-            extracted_fields = doc.get("extracted_fields", {})
+            extracted_fields = doc.get("extracted_fields") or {}
             vendor_name = extracted_fields.get("vendor", doc.get("vendor_canonical", ""))
 
             old_match_method = doc.get("match_method", doc.get("validation_results", {}).get("match_method", "none"))
@@ -1326,9 +1330,9 @@ async def preview_post_to_bc(doc_id: str, request: DryRunPreviewRequest = None):
                 return preview_result
 
             # Extract data
-            extracted_fields = doc.get("extracted_fields", {})
-            normalized_fields = doc.get("normalized_fields", {})
-            ai_extraction = doc.get("ai_extraction", {})
+            extracted_fields = doc.get("extracted_fields") or {}
+            normalized_fields = doc.get("normalized_fields") or {}
+            ai_extraction = doc.get("ai_extraction") or {}
 
             vendor_name = (doc.get("vendor_canonical") or normalized_fields.get("vendor")
                            or extracted_fields.get("vendor") or ai_extraction.get("vendor"))

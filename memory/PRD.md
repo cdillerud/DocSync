@@ -40,8 +40,9 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
   1. **Confidence bump after classification**: After `classify_document_type` successfully classifies a doc (doc_type != Other/Unknown), confidence is bumped to 0.85 so downstream systems don't treat it as failed.
   2. **`_update_standard_workflow_status` guard**: No longer treats `confidence=0` as classification failure if the document has a valid `doc_type` assigned by deterministic rules.
   3. **`mailbox_category` passthrough**: Email polling services now pass `mailbox_category` (AP/Sales) to `_internal_intake_document`, enabling deterministic classification by mailbox when AI fails.
+- **Reprocess 500 Error Fix**: Fixed `NoneType.items()` crash when reprocessing documents with `null` extracted_fields in DB. Applied `or {}` None-safety guard across all `doc.get("extracted_fields")` patterns in `server.py` (8 occurrences) and `document_handlers.py` (3 occurrences). Also added guard in `normalize_extracted_fields()`.
   4. **Reprocess path fix**: `reprocess_document` also bumps confidence for valid doc types with low `ai_confidence`.
-- Files changed: `server.py`, `services/email_polling_service.py`
+- Files changed: `server.py`, `services/email_polling_service.py`, `services/document_handlers.py`, `services/document_intel_helpers.py`
 - Tests: `tests/test_auto_close_confidence_fix.py` (4 passing)
 
 ### Previous Session Fixes (March 23, 2026 - Fork)

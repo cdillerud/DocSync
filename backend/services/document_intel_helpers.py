@@ -663,6 +663,8 @@ def normalize_extracted_fields(fields: dict) -> dict:
 
     Extracted from server.py — identical behavior.
     """
+    if not fields:
+        return {}
     normalized = {}
 
     for key, value in fields.items():

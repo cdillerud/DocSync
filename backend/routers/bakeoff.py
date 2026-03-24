@@ -921,6 +921,66 @@ def _calc_breakdowns(docs):
     }
 
 
+@router.post("/runs/{run_id}/reroute-folders")
+async def reroute_folders(run_id: str):
+    """Re-run folder routing for all documents in a run using latest routing logic."""
+    from services.folder_routing_service import determine_folder_path
+    db = get_db()
+    docs = await db[DOCS_COLL].find({"run_id": run_id}, {"_id": 0}).to_list(2000)
+    if not docs:
+        raise HTTPException(404, "No documents in this run")
+    
+    updated = 0
+    changes = []
+    for d in docs:
+        old_folder = d.get("gpi_folder_output", "")
+        # Build a sim_doc for routing
+        sim_doc = {
+            "file_name": d.get("file_name", ""),
+            "document_type": d.get("gpi_doc_type", ""),
+            "vendor_canonical": d.get("gpi_vendor", ""),
+            "extracted_fields": {
+                "order_number": d.get("gpi_po", ""),
+                "po_number": d.get("gpi_po", ""),
+            },
+            "is_international": d.get("is_international", False),
+        }
+        
+        try:
+            is_intl = d.get("is_international", False)
+            # Also preserve international status from existing routing
+            old_folder_lower = old_folder.lower()
+            if "international" in old_folder_lower and "not international" not in old_folder_lower:
+                is_intl = True
+            folder_path, reason, _ = determine_folder_path(sim_doc, is_international=is_intl)
+        except Exception:
+            folder_path = old_folder
+        
+        if folder_path != old_folder:
+            # Re-score folder correctness
+            truth = d.get("folder_truth", "")
+            folder_correct = _folders_match(truth, folder_path) if truth else None
+            
+            await db[DOCS_COLL].update_one(
+                {"run_id": run_id, "document_id": d["document_id"]},
+                {"$set": {
+                    "gpi_folder_output": folder_path,
+                    "gpi_folder_correct": folder_correct,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }}
+            )
+            updated += 1
+            changes.append({
+                "file_name": d.get("file_name"),
+                "old_folder": old_folder,
+                "new_folder": folder_path,
+                "folder_correct": folder_correct,
+            })
+    
+    return {"run_id": run_id, "total_docs": len(docs), "updated": updated, "changes": changes}
+
+
+
 @router.get("/runs/{run_id}/metrics")
 async def get_run_metrics(run_id: str):
     db = get_db()

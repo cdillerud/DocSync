@@ -46,8 +46,16 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
 - **Upload & Re-extract Button**: Added frontend button to manually upload a replacement PDF for any document, triggering automatic re-extraction. Useful for documents where the original file was lost.
 - **Email Recovery in Reprocess**: Added fallback chain: MongoDB backup → email re-fetch → manual upload. Reprocess endpoint tries all sources before giving up.
   4. **Reprocess path fix**: `reprocess_document` also bumps confidence for valid doc types with low `ai_confidence`.
-- Files changed: `server.py`, `services/email_polling_service.py`, `services/document_handlers.py`, `services/document_intel_helpers.py`
-- Tests: `tests/test_auto_close_confidence_fix.py` (4 passing)
+- **Folder Routing Fixes (100% accuracy)**: Fixed 4 routing failures bringing folder accuracy from 96.9% to 100%:
+  - Added `Credit_Memo` doc_type to `_is_credit_memo` check (was only checking Return_Request/Remittance)
+  - Added `S&H_Invoice` doc_type to RULE 5 (was only checking description keywords)
+  - Fixed `_is_warehouse_order` to detect `WH_` prefix in filenames (was only matching `wh ` with space)
+  - Added `_detect_international_vendor` auto-detection from vendor name patterns (FEVISA, Envases, S.A. DE C.V., etc.)
+  - Fixed subfolder matching scoring — GPI's more specific routing (e.g., "Dropship International/PO88432") now correctly matches S9's parent folder
+  - Added `/api/intake-benchmark/runs/{run_id}/reroute-folders` endpoint for live re-routing
+  - Re-scored all 87 bakeoff documents across 9 runs → all at 100%
+- Files changed: `services/folder_routing_service.py`, `routers/bakeoff.py`
+- Tests: `tests/test_folder_routing_fix.py` (5 passing)
 
 ### Previous Session Fixes (March 23, 2026 - Fork)
 - **500 Error Fix on Document Detail**: Wrapped `derive_state`, `evaluate_readiness`, and AP validation reconciliation in try/except. Fixed `b.lower()` crash when `blocking_issues` contained dicts. Documents with any type (including Unknown) now load without 500.

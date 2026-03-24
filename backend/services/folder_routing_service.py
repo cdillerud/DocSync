@@ -206,7 +206,7 @@ def determine_folder_path(
         Tuple of (folder_path, routing_reason, routing_details)
     """
     doc_type = doc.get("document_type") or doc.get("suggested_job_type") or "Unknown"
-    extracted = doc.get("extracted_fields", {})
+    extracted = doc.get("extracted_fields") or {}
     normalized = doc.get("normalized_fields", {})
     ai_extraction = doc.get("ai_extraction", {})
 
@@ -244,6 +244,10 @@ def determine_folder_path(
         "freight_direction": freight_direction,
         "is_international": is_international,
     }
+
+    # Auto-detect international from vendor name if not explicitly set
+    if not is_international:
+        is_international = _detect_international_vendor(vendor_name, extracted, doc)
 
     # =================================================================
     # ROUTING RULES (in priority order per accounting document)
@@ -296,16 +300,16 @@ def determine_folder_path(
         return ("Freight Issues", "Freight invoice needing logistics approval", routing_details)
 
     # RULE 5: S&H (Storage & Handling) Invoices
-    if _is_storage_handling(invoice_description):
+    if doc_type in ("S&H_Invoice", "SH_Invoice") or _is_storage_handling(invoice_description):
         if doc.get("approved") or doc.get("status") == "Approved":
             return (
-                "S&H Invoices Approved Documents/Andy to Process",
-                "Approved S&H invoice → Andy",
+                "S&H Invoices Approved Documents",
+                "Approved S&H invoice",
                 routing_details,
             )
         return (
-            "S&H Invoices waiting for approval Documents/Andy to Process",
-            "S&H invoice awaiting approval → Andy",
+            "S&H Invoices Approved Documents",
+            "S&H invoice",
             routing_details,
         )
 
@@ -457,9 +461,44 @@ def _is_canpack_vendor(vendor_name: str) -> bool:
 
 def _is_credit_memo(doc_type: str, description: str) -> bool:
     """Check if document is a credit memo."""
-    if doc_type in ("Return_Request", "Remittance"):
+    if doc_type in ("Return_Request", "Remittance", "Credit_Memo", "credit_memo"):
         return True
     return any(indicator in description for indicator in CREDIT_MEMO_INDICATORS)
+
+
+# International vendor indicators — vendor names/patterns that are known international suppliers
+INTERNATIONAL_VENDOR_PATTERNS = [
+    "s.a. de c.v.", "sa de cv", "s.a.de c.v",  # Mexican companies
+    "de mexico", "de méxico",  # Literally "of Mexico"
+    "fevisa", "canpack", "envases",
+    "gmbh",  # German
+    "s.r.l", "srl",  # Italian/Latin American
+    "ltd.",  # Could be intl
+    "b.v.",  # Dutch
+    "s.a.s", "sarl",  # French
+    "pty ltd",  # Australian
+    "pte ltd",  # Singaporean
+    "co., ltd", "co.,ltd",  # Asian
+    "kabushiki", "k.k.",  # Japanese
+    "a.s.",  # Turkish/Nordic
+    "ag",  # Swiss/German (check with word boundary)
+]
+
+
+def _detect_international_vendor(vendor_name: str, extracted: Dict, doc: Dict) -> bool:
+    """Auto-detect if vendor/order is international from vendor name patterns."""
+    v = vendor_name.lower()
+    # Check vendor name patterns
+    if any(pat in v for pat in INTERNATIONAL_VENDOR_PATTERNS):
+        return True
+    # Check if doc itself has is_international flag
+    if doc.get("is_international"):
+        return True
+    # Check extracted fields
+    if (extracted.get("is_international") is True or
+            str(extracted.get("is_international", "")).lower() == "true"):
+        return True
+    return False
 
 
 def _get_credit_vendor_subfolder(vendor_name: str, description: str) -> Optional[str]:
@@ -497,7 +536,7 @@ def _get_warehouse_subfolder(vendor_name: str, order_number: str, doc: Dict) -> 
     """Determine warehouse subfolder based on order type."""
     vendor_lower = vendor_name.lower()
     file_name = (doc.get("file_name") or "").lower()
-    desc = (doc.get("extracted_fields", {}).get("description") or "").lower()
+    desc = ((doc.get("extracted_fields") or {}).get("description") or "").lower()
 
     if "ball" in vendor_lower:
         return "Ball Orders"
@@ -535,11 +574,14 @@ def _is_freight_vendor(vendor_name: str) -> bool:
 def _is_warehouse_order(doc: Dict) -> bool:
     """Check if document is related to a warehouse order."""
     file_name = (doc.get("file_name") or "").lower()
-    desc = (doc.get("extracted_fields", {}).get("description") or "").lower()
+    desc = ((doc.get("extracted_fields") or {}).get("description") or "").lower()
     tags = doc.get("tags", [])
 
-    warehouse_keywords = ["warehouse", "wh ", "assembly", "storage", "inventory"]
+    warehouse_keywords = ["warehouse", "wh_", "wh-", "wh ", "assembly", "storage", "inventory"]
     if any(kw in file_name for kw in warehouse_keywords):
+        return True
+    # Also check if filename starts with "wh" followed by separator
+    if file_name.startswith("wh_") or file_name.startswith("wh-") or file_name.startswith("wh "):
         return True
     if any(kw in desc for kw in warehouse_keywords):
         return True

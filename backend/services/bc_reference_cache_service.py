@@ -776,6 +776,59 @@ class BCReferenceCacheService:
         }
 
 
+    async def lookup_po_location_codes(self, po_numbers: List[str]) -> Dict[str, str]:
+        """
+        Batch-lookup locationCode for a list of PO numbers.
+        1. Search the BC cache for each PO to get the bc_record_id
+        2. Query BC API purchaseOrderLines for the locationCode
+        Returns: {po_number: locationCode}
+        """
+        if not po_numbers:
+            return {}
+
+        token = await self._get_token()
+        if not token:
+            logger.warning("[BC Cache] No token for PO location lookup")
+            return {}
+
+        company_id = await self._get_company_id(token)
+        if not company_id:
+            return {}
+
+        results = {}
+        # Batch: look up PO record IDs from cache first
+        po_to_bc_id = {}
+        for po in po_numbers:
+            if not po or po in results:
+                continue
+            cached = await self.search_multi(po, entity_types=["purchase_order"])
+            if cached:
+                bc_id = cached[0].get("bc_record_id")
+                if bc_id:
+                    po_to_bc_id[po] = bc_id
+
+        # Query BC API for purchaseOrderLines to get locationCode
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for po, bc_id in po_to_bc_id.items():
+                try:
+                    url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_PROD_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseOrders({bc_id})/purchaseOrderLines"
+                    resp = await client.get(
+                        url,
+                        headers={"Authorization": f"Bearer {token}"},
+                        params={"$select": "locationCode", "$top": "1"}
+                    )
+                    if resp.status_code == 200:
+                        lines = resp.json().get("value", [])
+                        if lines:
+                            loc = lines[0].get("locationCode", "")
+                            results[po] = loc
+                            logger.info("[BC Cache] PO %s → locationCode=%s", po, loc)
+                except Exception as e:
+                    logger.warning("[BC Cache] PO lines lookup error for %s: %s", po, str(e))
+
+        return results
+
+
 # =============================================================================
 # GLOBAL INSTANCE
 # =============================================================================

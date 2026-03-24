@@ -197,7 +197,8 @@ DUNNAGE_INDICATORS = [
 def determine_folder_path(
     doc: Dict[str, Any],
     freight_direction: Optional[str] = None,
-    is_international: bool = False
+    is_international: bool = False,
+    location_code: Optional[str] = None
 ) -> Tuple[str, str, Dict[str, Any]]:
     """
     Determine the SharePoint folder path for a document based on accounting rules.
@@ -243,7 +244,16 @@ def determine_folder_path(
         "order_number": order_number,
         "freight_direction": freight_direction,
         "is_international": is_international,
+        "location_code": location_code,
     }
+
+    # RULE -1: LocationCode = MSC → Miscellaneous (matches S9 workflow)
+    if location_code and location_code.upper() == "MSC":
+        return (
+            "Miscellaneous Documents/Misc Invoices - need approval",
+            f"LocationCode=MSC → Miscellaneous (vendor={vendor_name})",
+            routing_details,
+        )
 
     # Auto-detect international from vendor name if not explicitly set
     if not is_international:

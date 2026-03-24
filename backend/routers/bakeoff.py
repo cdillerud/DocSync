@@ -1103,6 +1103,97 @@ async def force_fix_mismatches():
 
 
 
+@router.post("/runs/enrich-and-reroute")
+async def enrich_location_codes_and_reroute():
+    """
+    1. Collect all unique PO numbers from bakeoff docs
+    2. Batch-lookup locationCode from BC purchaseOrderLines
+    3. Store bc_location_code on each bakeoff doc
+    4. Re-run folder routing with locationCode awareness
+    """
+    from services.folder_routing_service import determine_folder_path
+    from services.bc_reference_cache_service import get_cache_service
+    db = get_db()
+
+    # Step 1: Get all docs with PO numbers
+    all_docs = await db[DOCS_COLL].find({}, {"_id": 1, "run_id": 1, "document_id": 1,
+        "file_name": 1, "gpi_doc_type": 1, "gpi_vendor": 1, "gpi_po": 1,
+        "gpi_folder_output": 1, "folder_truth": 1, "is_international": 1,
+        "bc_location_code": 1}).to_list(5000)
+
+    # Step 2: Collect unique PO numbers
+    po_set = set()
+    for d in all_docs:
+        po = d.get("gpi_po", "").strip()
+        if po:
+            po_set.add(po)
+
+    # Step 3: Batch-lookup locationCodes from BC
+    po_location_map = {}
+    cache_service = get_cache_service()
+    if cache_service and po_set:
+        try:
+            po_location_map = await cache_service.lookup_po_location_codes(list(po_set))
+        except Exception as e:
+            logger.warning("BC location lookup failed: %s", str(e))
+
+    # Step 4: Update docs with location codes and re-route
+    results = []
+    updated_count = 0
+    for d in all_docs:
+        doc_id = d["_id"]
+        po = d.get("gpi_po", "").strip()
+        old_folder = d.get("gpi_folder_output", "")
+        loc_code = po_location_map.get(po) or d.get("bc_location_code") or None
+
+        sim_doc = {
+            "file_name": d.get("file_name", ""),
+            "document_type": d.get("gpi_doc_type", ""),
+            "vendor_canonical": d.get("gpi_vendor", ""),
+            "extracted_fields": {
+                "order_number": po,
+                "po_number": po,
+            },
+            "is_international": d.get("is_international", False),
+        }
+
+        try:
+            is_intl = d.get("is_international", False)
+            folder_path, reason, _ = determine_folder_path(
+                sim_doc, is_international=is_intl, location_code=loc_code
+            )
+        except Exception:
+            folder_path = old_folder
+
+        truth = d.get("folder_truth", "")
+        folder_correct = _folders_match(truth, folder_path) if truth else None
+
+        update_set = {
+            "gpi_folder_output": folder_path,
+            "gpi_folder_correct": folder_correct,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if loc_code:
+            update_set["bc_location_code"] = loc_code
+
+        await db[DOCS_COLL].update_one({"_id": doc_id}, {"$set": update_set})
+        if folder_path != old_folder:
+            updated_count += 1
+
+    # Summary: count remaining mismatches
+    remaining = await db[DOCS_COLL].count_documents({"gpi_folder_correct": False})
+
+    return {
+        "total_docs": len(all_docs),
+        "unique_pos": len(po_set),
+        "location_codes_found": len(po_location_map),
+        "po_locations": po_location_map,
+        "folders_changed": updated_count,
+        "remaining_mismatches": remaining,
+    }
+
+
+
 
 @router.get("/runs/{run_id}/metrics")
 async def get_run_metrics(run_id: str):

@@ -368,6 +368,24 @@ def determine_folder_path(
         if _is_freight_vendor(vendor_name):
             return ("Freight Issues", "Freight invoice from carrier", routing_details)
 
+        # S9 Workflow: If PO is NOT a valid internal BC purchase order → Miscellaneous
+        # This mirrors Square 9's logic: unresolved POs get routed to Misc for approval
+        bc_po_resolved = doc.get("bc_po_resolved")
+        if order_number and bc_po_resolved is False:
+            return (
+                "Miscellaneous Documents/Misc Invoices - need approval",
+                f"PO {order_number} not found as internal BC purchase order (S9 workflow)",
+                routing_details,
+            )
+
+        # No PO number at all on a domestic non-freight AP Invoice → Miscellaneous
+        if not order_number and not (is_international or doc.get("is_international")):
+            return (
+                "Miscellaneous Documents/Misc Invoices - need approval",
+                "Domestic AP Invoice with no PO → Miscellaneous (S9 workflow)",
+                routing_details,
+            )
+
         # International
         if is_international or doc.get("is_international"):
             if _is_warehouse_order(doc):
@@ -385,7 +403,7 @@ def determine_folder_path(
                 routing_details,
             )
 
-        # Regular domestic invoice → Dropship Not International by order
+        # Regular domestic invoice with valid PO → Dropship Not International by order
         vendor_folder = _get_vendor_subfolder(vendor_name)
         if order_number:
             return (
@@ -394,8 +412,8 @@ def determine_folder_path(
                 routing_details,
             )
         return (
-            "Dropship Not International Documents",
-            f"Domestic vendor invoice ({vendor_folder})",
+            "Miscellaneous Documents/Misc Invoices - need approval",
+            f"Domestic AP Invoice fallback → Miscellaneous",
             routing_details,
         )
 

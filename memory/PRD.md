@@ -59,6 +59,13 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
 - Files changed: `services/folder_routing_service.py`, `routers/bakeoff.py`
 - Tests: `tests/test_folder_routing_fix.py` (5 passing)
 
+### S9 Workflow PO Validation Fix (March 24, 2026 - Fork 2)
+- **S9 PO Resolution Routing**: Wired `bc_po_resolved` flag into `determine_folder_path()` Rule 7 (AP Invoices). AP Invoices whose PO number does NOT exist as an internal BC purchase order (`bc_entity_type: "purchase_order"`) are now routed to "Miscellaneous Documents/Misc Invoices - need approval" — matching the Square 9 workflow.
+- **Enrich-and-Reroute Fix**: Fixed `enrich-and-reroute` endpoint to check PO existence ONLY against `purchase_order` entity type (was incorrectly checking all entity types including sales orders/invoices).
+- **No-PO Domestic AP Fix**: Domestic AP Invoices with no PO number now consistently route to "Miscellaneous Documents/Misc Invoices - need approval".
+- Files changed: `services/folder_routing_service.py`, `routers/bakeoff.py`
+- Tests: `tests/test_s9_routing_fix.py` (14 passing), `tests/test_folder_routing_fix.py` (5 passing) — 19 total routing tests pass
+
 ### Previous Session Fixes (March 23, 2026 - Fork)
 - **500 Error Fix on Document Detail**: Wrapped `derive_state`, `evaluate_readiness`, and AP validation reconciliation in try/except. Fixed `b.lower()` crash when `blocking_issues` contained dicts. Documents with any type (including Unknown) now load without 500.
 - **URL Encoding for Document Navigation**: Added `encodeURIComponent()` to all document navigation calls across 8 pages and all `api.js` functions. Prevents `#` or special characters in IDs from breaking routes.

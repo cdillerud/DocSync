@@ -1200,10 +1200,10 @@ async def enrich_location_codes_and_reroute():
     if cache_service and po_set:
         for po in po_set:
             try:
-                # S9 workflow: check if PO exists as an internal BC document number
-                # (bc_document_no), NOT just as an external reference
+                # S9 workflow: check if PO exists as an internal BC purchase order
+                # ONLY check purchase_order entity type — not sales orders or invoices
                 match = await cache_service.collection.find_one(
-                    {"bc_document_no": po},
+                    {"bc_document_no": po, "bc_entity_type": "purchase_order"},
                     {"_id": 0, "bc_document_no": 1}
                 )
                 po_resolved_map[po] = match is not None

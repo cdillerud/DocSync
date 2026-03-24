@@ -1118,16 +1118,27 @@ async def debug_po_lookup(po_number: str):
     po_count = await cache.collection.count_documents({"bc_entity_type": "purchase_order"})
     result["steps"].append({"step": "cache_po_count", "count": po_count})
 
-    # Step 2: Try search_multi
+    # Step 2: Try search_multi (ALL entity types)
     try:
-        matches = await cache.search_multi(po_number, entity_types=["purchase_order"])
+        matches = await cache.search_multi(po_number)
         result["steps"].append({
-            "step": "search_multi",
+            "step": "search_multi_all_types",
             "matches": len(matches),
             "first_match": {k: v for k, v in matches[0].items() if k != "_id"} if matches else None
         })
     except Exception as e:
-        result["steps"].append({"step": "search_multi", "error": str(e)})
+        result["steps"].append({"step": "search_multi_all_types", "error": str(e)})
+
+    # Step 2b: Try search_by_document_number
+    try:
+        matches2 = await cache.search_by_document_number(po_number)
+        result["steps"].append({
+            "step": "search_by_document_number",
+            "matches": len(matches2),
+            "first_match": {k: v for k, v in matches2[0].items() if k != "_id"} if matches2 else None
+        })
+    except Exception as e:
+        result["steps"].append({"step": "search_by_document_number", "error": str(e)})
 
     # Step 3: Try direct query
     try:
@@ -1179,7 +1190,11 @@ async def enrich_location_codes_and_reroute():
     if cache_service and po_set:
         for po in po_set:
             try:
-                matches = await cache_service.search_multi(po, entity_types=["purchase_order"])
+                # Search ALL entity types (open POs, posted invoices, sales orders, shipments)
+                matches = await cache_service.search_multi(po)
+                if not matches:
+                    # Also try document number search (handles normalization)
+                    matches = await cache_service.search_by_document_number(po)
                 po_resolved_map[po] = len(matches) > 0
             except Exception:
                 pass  # leave as unknown (won't affect routing)

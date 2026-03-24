@@ -1048,6 +1048,61 @@ async def get_folder_mismatches():
 
 
 
+@router.post("/runs/force-fix-mismatches")
+async def force_fix_mismatches():
+    """Force-fix all docs where gpi_folder_correct is False by recalculating with _id filter."""
+    from bson import ObjectId
+    from services.folder_routing_service import determine_folder_path
+    db = get_db()
+    # Fetch WITH _id so we can use it as the update filter
+    docs = await db[DOCS_COLL].find({"gpi_folder_correct": False}).to_list(500)
+    results = []
+    for d in docs:
+        doc_id = d["_id"]
+        old_folder = d.get("gpi_folder_output", "")
+        sim_doc = {
+            "file_name": d.get("file_name", ""),
+            "document_type": d.get("gpi_doc_type", ""),
+            "vendor_canonical": d.get("gpi_vendor", ""),
+            "extracted_fields": {
+                "order_number": d.get("gpi_po", ""),
+                "po_number": d.get("gpi_po", ""),
+            },
+            "is_international": d.get("is_international", False),
+        }
+        try:
+            is_intl = d.get("is_international", False)
+            folder_path, reason, _ = determine_folder_path(sim_doc, is_international=is_intl)
+        except Exception as e:
+            folder_path = old_folder
+            reason = f"ERROR: {e}"
+
+        truth = d.get("folder_truth", "")
+        folder_correct = _folders_match(truth, folder_path) if truth else None
+
+        res = await db[DOCS_COLL].update_one(
+            {"_id": doc_id},
+            {"$set": {
+                "gpi_folder_output": folder_path,
+                "gpi_folder_correct": folder_correct,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }}
+        )
+        results.append({
+            "file_name": d.get("file_name", "")[:50],
+            "run_id": d.get("run_id", ""),
+            "old_folder": old_folder,
+            "new_folder": folder_path,
+            "reason": reason,
+            "folder_correct": folder_correct,
+            "matched": res.matched_count,
+            "modified": res.modified_count,
+        })
+
+    return {"total_fixed": len(results), "results": results}
+
+
+
 
 @router.get("/runs/{run_id}/metrics")
 async def get_run_metrics(run_id: str):

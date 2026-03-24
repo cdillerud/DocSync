@@ -979,7 +979,10 @@ async def reroute_folders(run_id: str):
 
 @router.post("/runs/reroute-all")
 async def reroute_all_runs():
-    """Re-run folder routing for ALL runs using the latest routing logic."""
+    """Re-run folder routing for ALL runs using the latest routing logic.
+    Only recalculates docs that are currently wrong or unscored.
+    Docs already marked correct are left untouched.
+    """
     from services.folder_routing_service import determine_folder_path
     db = get_db()
     runs = await db[RUNS_COLL].find({}, {"_id": 0, "run_id": 1}).to_list(500)
@@ -992,6 +995,10 @@ async def reroute_all_runs():
         docs = await db[DOCS_COLL].find({"run_id": rid}, {"_id": 0}).to_list(2000)
         updated = 0
         for d in docs:
+            # Skip docs that are already correctly routed
+            if d.get("gpi_folder_correct") is True:
+                continue
+
             old_folder = d.get("gpi_folder_output", "")
             sim_doc = {
                 "file_name": d.get("file_name", ""),
@@ -1051,10 +1058,8 @@ async def get_folder_mismatches():
 @router.post("/runs/force-fix-mismatches")
 async def force_fix_mismatches():
     """Force-fix all docs where gpi_folder_correct is False by recalculating with _id filter."""
-    from bson import ObjectId
     from services.folder_routing_service import determine_folder_path
     db = get_db()
-    # Fetch WITH _id so we can use it as the update filter
     docs = await db[DOCS_COLL].find({"gpi_folder_correct": False}).to_list(500)
     results = []
     for d in docs:
@@ -1072,12 +1077,17 @@ async def force_fix_mismatches():
         }
         try:
             is_intl = d.get("is_international", False)
+            # Use folder truth to infer international if truth contains "International"
+            # but NOT "Not International"
+            truth = d.get("folder_truth", "")
+            truth_lower = truth.lower()
+            if "international" in truth_lower and "not international" not in truth_lower:
+                is_intl = True
             folder_path, reason, _ = determine_folder_path(sim_doc, is_international=is_intl)
         except Exception as e:
             folder_path = old_folder
             reason = f"ERROR: {e}"
 
-        truth = d.get("folder_truth", "")
         folder_correct = _folders_match(truth, folder_path) if truth else None
 
         res = await db[DOCS_COLL].update_one(

@@ -255,16 +255,6 @@ def determine_folder_path(
             routing_details,
         )
 
-    # RULE -0.5: PO checked against BC but not found → Miscellaneous
-    # S9 workflow: if PO doesn't resolve in BC, route to Misc for manual review
-    po_resolved = doc.get("bc_po_resolved")
-    if po_resolved is False and order_number:
-        return (
-            "Miscellaneous Documents/Misc Invoices - need approval",
-            f"PO '{order_number}' not found in BC → Miscellaneous",
-            routing_details,
-        )
-
     # Auto-detect international from vendor name if not explicitly set
     if not is_international:
         is_international = _detect_international_vendor(vendor_name, extracted, doc)

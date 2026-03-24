@@ -383,9 +383,10 @@ def determine_folder_path(
                 f"Domestic vendor invoice ({vendor_folder}) → order {order_number}",
                 routing_details,
             )
+        # No PO → Miscellaneous (can't tie to a specific purchase order)
         return (
-            "Dropship Not International Documents",
-            f"Domestic vendor invoice ({vendor_folder})",
+            "Miscellaneous Documents/Misc Invoices - need approval",
+            f"Domestic AP invoice without PO ({vendor_folder}) → Miscellaneous",
             routing_details,
         )
 

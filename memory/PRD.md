@@ -52,6 +52,7 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
   - Fixed `_is_warehouse_order` to detect `WH_` prefix in filenames (was only matching `wh ` with space)
   - Added `_detect_international_vendor` auto-detection from vendor name patterns (FEVISA, Envases, S.A. DE C.V., etc.)
   - Fixed subfolder matching scoring — GPI's more specific routing (e.g., "Dropship International/PO88432") now correctly matches S9's parent folder
+  - Fixed AP_Invoice no-PO routing: domestic AP_Invoices without a PO number now route to "Miscellaneous Documents/Misc Invoices - need approval" instead of "Dropship Not International" (matches S9 behavior)
   - Added `/api/intake-benchmark/runs/{run_id}/reroute-folders` endpoint for live re-routing
   - Added `/api/intake-benchmark/runs/reroute-all` endpoint to batch-update ALL runs at once
   - Re-scored all 87 bakeoff documents across 9 runs → all at 100%

@@ -6734,6 +6734,12 @@ async def startup():
     set_deps_db(db)
     # Spiro Integration: Initialize database
     set_spiro_db(db)
+    # Routing Feedback: Initialize learning layer
+    from services.routing_feedback_service import init_feedback_db
+    init_feedback_db(db)
+    await db.routing_feedback.create_index("routing_key", unique=True)
+    await db.routing_feedback.create_index("confidence")
+    logger.info("Routing feedback learning layer initialized")
     # Create Spiro indexes
     await db.spiro_contacts.create_index("spiro_id", unique=True)
     await db.spiro_contacts.create_index("email")

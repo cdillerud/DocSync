@@ -17,7 +17,6 @@ from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
-
 # =============================================================================
 # VENDOR ROUTING RULES
 # =============================================================================
@@ -676,3 +675,64 @@ def get_folder_structure_summary() -> Dict[str, Any]:
         "vendor_mapping": VENDOR_FOLDER_MAPPING,
         "total_folders": len(get_all_folder_paths()),
     }
+
+
+async def route_with_feedback(
+    doc: Dict[str, Any],
+    is_international: bool = False,
+    location_code: Optional[str] = None,
+    freight_direction: Optional[str] = None,
+) -> Tuple[str, str, Dict[str, Any]]:
+    """
+    Async wrapper that checks the feedback/learning layer BEFORE
+    falling through to the rule-based determine_folder_path().
+    
+    Use this in async contexts (API endpoints, document processing)
+    to get the benefit of learned routing corrections.
+    """
+    from services.routing_feedback_service import lookup_feedback
+
+    doc_type = doc.get("document_type") or doc.get("suggested_job_type") or "Unknown"
+    vendor_name = (
+        doc.get("vendor_canonical") or
+        (doc.get("normalized_fields") or {}).get("vendor") or
+        (doc.get("extracted_fields") or {}).get("vendor") or
+        ""
+    )
+    extracted = doc.get("extracted_fields") or {}
+    po = (
+        doc.get("po_number_extracted") or
+        extracted.get("po_number") or
+        extracted.get("order_number") or
+        ""
+    ).strip()
+
+    # Check learned feedback
+    feedback_folder = await lookup_feedback(
+        vendor=vendor_name,
+        doc_type=doc_type,
+        has_po=bool(po),
+        is_international=is_international,
+    )
+
+    if feedback_folder:
+        routing_details = {
+            "doc_type": doc_type,
+            "vendor": vendor_name.lower(),
+            "order_number": po,
+            "is_international": is_international,
+            "source": "feedback_loop",
+        }
+        return (
+            feedback_folder,
+            f"Learned from feedback (vendor={vendor_name}, type={doc_type})",
+            routing_details,
+        )
+
+    # Fall through to rule-based routing
+    return determine_folder_path(
+        doc,
+        is_international=is_international,
+        location_code=location_code,
+        freight_direction=freight_direction,
+    )

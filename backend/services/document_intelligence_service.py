@@ -266,13 +266,13 @@ async def process_document(doc_id: str) -> Dict[str, Any]:
 
     # 8b) Compute and store SharePoint folder suggestion
     try:
-        from services.folder_routing_service import determine_folder_path
+        from services.folder_routing_service import route_with_feedback
         updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
         if updated_doc:
             ef = ai_extracted_fields or {}
             if ef.get("is_international"):
                 updated_doc["is_international"] = True
-            folder_path, folder_reason, _ = determine_folder_path(
+            folder_path, folder_reason, _ = await route_with_feedback(
                 doc=updated_doc,
                 freight_direction=ef.get("freight_direction"),
                 is_international=bool(ef.get("is_international")),

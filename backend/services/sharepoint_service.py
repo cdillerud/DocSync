@@ -197,9 +197,9 @@ async def upload_to_sharepoint_with_routing(
     is_international: bool = False
 ) -> Dict[str, Any]:
     """Upload a file to SharePoint using accounting folder routing logic."""
-    from services.folder_routing_service import determine_folder_path
+    from services.folder_routing_service import route_with_feedback
 
-    folder_path, routing_reason, routing_details = determine_folder_path(
+    folder_path, routing_reason, routing_details = await route_with_feedback(
         doc,
         freight_direction=freight_direction,
         is_international=is_international

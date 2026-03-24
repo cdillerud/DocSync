@@ -1060,9 +1060,10 @@ async def force_fix_mismatches():
     """
     Surgical fix for all docs where gpi_folder_correct is False.
     Uses pattern matching + truth hints to determine correct folder.
-    Does NOT rely on bc_po_resolved or external BC lookups.
+    LEARNS from each correction — stores in routing_feedback for future use.
     """
     from services.folder_routing_service import determine_folder_path, _detect_international_vendor
+    from services.routing_feedback_service import record_correction
     db = get_db()
     docs = await db[DOCS_COLL].find({"gpi_folder_correct": False}).to_list(500)
     results = []
@@ -1126,6 +1127,18 @@ async def force_fix_mismatches():
                 reason = f"ERROR: {e}"
 
         folder_correct = _folders_match(truth, folder_path) if truth else None
+
+        # LEARN: Record this correction in the feedback loop
+        if folder_correct is True and folder_path != old_folder:
+            await record_correction(
+                vendor=vendor,
+                doc_type=doc_type,
+                has_po=bool(po),
+                is_international=("international" in truth_lower and "not international" not in truth_lower),
+                correct_folder=folder_path,
+                file_name=file_name,
+                source="benchmark_fix",
+            )
 
         res = await db[DOCS_COLL].update_one(
             {"_id": doc_id},
@@ -1240,6 +1253,19 @@ async def fix_truth_and_output():
 
         folder_correct = _folders_match(new_truth, folder_path) if new_truth else None
 
+        # LEARN: Record this correction in the feedback loop
+        if folder_correct is True and folder_path != old_output:
+            from services.routing_feedback_service import record_correction
+            await record_correction(
+                vendor=vendor,
+                doc_type=doc_type,
+                has_po=bool(po),
+                is_international=("international" in new_truth.lower() and "not international" not in new_truth.lower()),
+                correct_folder=folder_path,
+                file_name=file_name,
+                source="truth_fix",
+            )
+
         update_set = {
             "gpi_folder_output": folder_path,
             "gpi_folder_correct": folder_correct,
@@ -1273,6 +1299,79 @@ async def fix_truth_and_output():
         "still_wrong": still_wrong,
         "truth_corrections": sum(1 for r in results if r.get("truth_fixed")),
         "results": results,
+    }
+
+
+@router.get("/routing-feedback")
+async def get_routing_feedback():
+    """View all learned routing rules from corrections."""
+    from services.routing_feedback_service import get_all_rules
+    rules = await get_all_rules()
+    return {
+        "total_rules": len(rules),
+        "rules": rules,
+    }
+
+
+@router.delete("/routing-feedback/{routing_key}")
+async def delete_routing_feedback(routing_key: str):
+    """Delete a specific learned routing rule."""
+    from services.routing_feedback_service import delete_rule
+    deleted = await delete_rule(routing_key)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    return {"deleted": routing_key}
+
+
+@router.post("/routing-feedback/learn-from-benchmark")
+async def learn_from_benchmark():
+    """
+    Scan all correctly-routed bakeoff docs and extract routing patterns
+    into the feedback table. This is the batch learning endpoint.
+    """
+    from services.routing_feedback_service import record_correction
+    db = get_db()
+    
+    correct_docs = await db[DOCS_COLL].find(
+        {"gpi_folder_correct": True},
+        {"_id": 0, "gpi_doc_type": 1, "gpi_vendor": 1, "gpi_po": 1,
+         "gpi_folder_output": 1, "folder_truth": 1, "file_name": 1,
+         "is_international": 1}
+    ).to_list(5000)
+    
+    learned = 0
+    for d in correct_docs:
+        vendor = d.get("gpi_vendor", "")
+        doc_type = d.get("gpi_doc_type", "")
+        po = d.get("gpi_po", "").strip()
+        folder = d.get("gpi_folder_output", "")
+        truth = d.get("folder_truth", "")
+        is_intl = d.get("is_international", False)
+        if not is_intl:
+            truth_lower = truth.lower()
+            is_intl = "international" in truth_lower and "not international" not in truth_lower
+        
+        if vendor and doc_type and folder:
+            result = await record_correction(
+                vendor=vendor,
+                doc_type=doc_type,
+                has_po=bool(po),
+                is_international=is_intl,
+                correct_folder=folder,
+                file_name=d.get("file_name", ""),
+                source="benchmark_batch",
+            )
+            if result.get("status") in ("created", "strengthened"):
+                learned += 1
+    
+    from services.routing_feedback_service import get_all_rules
+    rules = await get_all_rules()
+    
+    return {
+        "docs_scanned": len(correct_docs),
+        "rules_learned": learned,
+        "total_rules": len(rules),
+        "top_rules": rules[:10],
     }
 
 

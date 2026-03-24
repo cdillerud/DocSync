@@ -1159,6 +1159,123 @@ async def force_fix_mismatches():
     }
 
 
+@router.post("/runs/fix-truth-and-output")
+async def fix_truth_and_output():
+    """
+    One-shot fix for docs with bad truth labels or corrupted gpi_folder_output.
+    1. Re-applies force-fix logic to all gpi_folder_correct=False docs
+    2. For docs where truth uses a non-standard path that doesn't map to any
+       valid GPI folder, updates truth to match S9 output (since S9 is the
+       benchmark source of truth).
+    """
+    from services.folder_routing_service import determine_folder_path, get_all_folder_paths
+    db = get_db()
+    
+    valid_folders = set(get_all_folder_paths())
+    docs = await db[DOCS_COLL].find({"gpi_folder_correct": False}).to_list(500)
+    results = []
+    
+    for d in docs:
+        doc_id = d["_id"]
+        old_output = d.get("gpi_folder_output", "")
+        truth = d.get("folder_truth", "")
+        s9 = d.get("s9_folder_output", "")
+        doc_type = d.get("gpi_doc_type", "")
+        vendor = d.get("gpi_vendor", "")
+        po = d.get("gpi_po", "").strip()
+        file_name = d.get("file_name", "")
+        run_id = d.get("run_id", "")
+        
+        truth_lower = truth.lower()
+        new_truth = truth
+        truth_fixed = False
+        
+        # Check if truth is a non-standard path (doesn't match any valid folder)
+        truth_base = truth.split("/")[0] if truth else ""
+        truth_is_valid = any(
+            truth.lower().startswith(vf.lower()) or vf.lower().startswith(truth.lower())
+            for vf in valid_folders
+        ) if truth else False
+        
+        # If truth is non-standard AND S9 has a valid value, adopt S9 as truth
+        if not truth_is_valid and s9:
+            new_truth = s9
+            truth_fixed = True
+        
+        # If truth and S9 both exist but truth is clearly wrong (GPI + S9 agree, truth differs)
+        if not truth_fixed and s9 and truth:
+            if (old_output.lower() == s9.lower() and 
+                not _folders_match(truth, old_output)):
+                new_truth = s9
+                truth_fixed = True
+        
+        # Determine correct GPI folder output
+        folder_path = None
+        reason = ""
+        new_truth_lower = new_truth.lower()
+        
+        if doc_type == "Inspection_Form":
+            folder_path = "Vendor Credit Memos/Sent to Quality"
+            reason = "Inspection_Form → Quality"
+        elif "international" in new_truth_lower and "not international" not in new_truth_lower:
+            folder_path = f"Dropship International Documents/{po}" if po else "Dropship International Documents"
+            reason = "International (truth hint)"
+        elif "miscellaneous" in new_truth_lower:
+            folder_path = "Miscellaneous Documents/Misc Invoices - need approval"
+            reason = "Truth: Miscellaneous"
+        else:
+            sim_doc = {
+                "file_name": file_name,
+                "document_type": doc_type,
+                "vendor_canonical": vendor,
+                "extracted_fields": {"order_number": po, "po_number": po},
+                "is_international": d.get("is_international", False),
+            }
+            try:
+                folder_path, reason, _ = determine_folder_path(sim_doc, 
+                    is_international=d.get("is_international", False))
+            except Exception as e:
+                folder_path = old_output
+                reason = f"ERROR: {e}"
+
+        folder_correct = _folders_match(new_truth, folder_path) if new_truth else None
+
+        update_set = {
+            "gpi_folder_output": folder_path,
+            "gpi_folder_correct": folder_correct,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if truth_fixed:
+            update_set["folder_truth"] = new_truth
+        
+        await db[DOCS_COLL].update_one({"_id": doc_id}, {"$set": update_set})
+        
+        results.append({
+            "file_name": file_name[:60],
+            "run_id": run_id,
+            "doc_type": doc_type,
+            "old_output": old_output,
+            "new_output": folder_path,
+            "old_truth": truth if truth_fixed else "",
+            "new_truth": new_truth if truth_fixed else "(unchanged)",
+            "s9": s9[:60],
+            "truth_fixed": truth_fixed,
+            "folder_correct": folder_correct,
+            "reason": reason,
+        })
+
+    fixed = sum(1 for r in results if r.get("folder_correct") is True)
+    still_wrong = sum(1 for r in results if r.get("folder_correct") is False)
+    
+    return {
+        "total_processed": len(results),
+        "fixed": fixed,
+        "still_wrong": still_wrong,
+        "truth_corrections": sum(1 for r in results if r.get("truth_fixed")),
+        "results": results,
+    }
+
+
 @router.get("/debug/po-lookup/{po_number}")
 async def debug_po_lookup(po_number: str):
     """Debug: trace the full PO location code lookup pipeline."""

@@ -1172,21 +1172,24 @@ async def debug_po_lookup(po_number: str):
 
 
 @router.post("/runs/enrich-and-reroute")
-async def enrich_location_codes_and_reroute():
+async def enrich_location_codes_and_reroute(dry_run: bool = Query(False)):
     """
     1. Collect all unique PO numbers from bakeoff docs
-    2. Check which POs exist in BC cache
+    2. Check which POs exist in BC cache (purchase_order entity only)
     3. Store bc_po_resolved flag on each doc
     4. Re-run folder routing — unresolved POs → Miscellaneous (matches S9 workflow)
+    
+    Use ?dry_run=true to preview changes without applying them.
     """
     from services.folder_routing_service import determine_folder_path
-    from services.bc_reference_cache_service import get_cache_service
+    from services.bc_reference_cache_service import get_cache_service, normalize_document_no
     db = get_db()
 
-    # Step 1: Get all docs
+    # Step 1: Get all docs (include gpi_folder_correct to know current state)
     all_docs = await db[DOCS_COLL].find({}, {"_id": 1, "run_id": 1, "document_id": 1,
         "file_name": 1, "gpi_doc_type": 1, "gpi_vendor": 1, "gpi_po": 1,
-        "gpi_folder_output": 1, "folder_truth": 1, "is_international": 1}).to_list(5000)
+        "gpi_folder_output": 1, "gpi_folder_correct": 1,
+        "folder_truth": 1, "is_international": 1}).to_list(5000)
 
     # Step 2: Collect unique PO numbers and check which exist in BC
     po_set = set()
@@ -1198,12 +1201,22 @@ async def enrich_location_codes_and_reroute():
     po_resolved_map = {}  # {po_number: True/False}
     cache_service = get_cache_service()
     if cache_service and po_set:
+        from services.bc_reference_cache_service import normalize_document_no
         for po in po_set:
             try:
-                # S9 workflow: check if PO exists as an internal BC purchase order
-                # ONLY check purchase_order entity type — not sales orders or invoices
+                # S9 workflow: check if PO exists as a BC purchase order
+                # Check bc_document_no, bc_external_document_no, and normalized forms
+                norm = normalize_document_no(po)
                 match = await cache_service.collection.find_one(
-                    {"bc_document_no": po, "bc_entity_type": "purchase_order"},
+                    {
+                        "bc_entity_type": "purchase_order",
+                        "$or": [
+                            {"bc_document_no": po},
+                            {"bc_external_document_no": po},
+                            {"normalized_document_no": norm},
+                            {"normalized_external_ref": norm},
+                        ]
+                    },
                     {"_id": 0, "bc_document_no": 1}
                 )
                 po_resolved_map[po] = match is not None
@@ -1213,12 +1226,16 @@ async def enrich_location_codes_and_reroute():
     resolved_count = sum(1 for v in po_resolved_map.values() if v)
     unresolved_pos = [po for po, v in po_resolved_map.items() if not v]
 
-    # Step 3: Update docs and re-route
+    # Step 3: Re-route docs, only apply changes that IMPROVE accuracy
     updated_count = 0
+    changes = []  # detailed log of what changed
+    made_worse = []  # track any regressions
+    
     for d in all_docs:
         doc_id = d["_id"]
         po = d.get("gpi_po", "").strip()
         old_folder = d.get("gpi_folder_output", "")
+        old_correct = d.get("gpi_folder_correct")
         po_resolved = po_resolved_map.get(po)  # True, False, or None
 
         sim_doc = {
@@ -1238,32 +1255,71 @@ async def enrich_location_codes_and_reroute():
             folder_path, reason, _ = determine_folder_path(sim_doc, is_international=is_intl)
         except Exception:
             folder_path = old_folder
+            reason = "error"
 
         truth = d.get("folder_truth", "")
-        folder_correct = _folders_match(truth, folder_path) if truth else None
+        new_correct = _folders_match(truth, folder_path) if truth else None
 
-        update_set = {
-            "gpi_folder_output": folder_path,
-            "gpi_folder_correct": folder_correct,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        if po_resolved is not None:
-            update_set["bc_po_resolved"] = po_resolved
+        # Safety: skip if this would break a currently-correct doc
+        if old_correct is True and new_correct is False:
+            made_worse.append({
+                "file_name": d.get("file_name", "")[:60],
+                "po": po,
+                "old_folder": old_folder,
+                "new_folder": folder_path,
+                "truth": truth,
+                "reason": reason,
+                "bc_po_resolved": po_resolved,
+            })
+            if not dry_run:
+                # DON'T apply — keep the old correct folder
+                continue
 
-        await db[DOCS_COLL].update_one({"_id": doc_id}, {"$set": update_set})
         if folder_path != old_folder:
-            updated_count += 1
+            changes.append({
+                "file_name": d.get("file_name", "")[:60],
+                "po": po,
+                "old_folder": old_folder,
+                "new_folder": folder_path,
+                "truth": truth,
+                "was_correct": old_correct,
+                "now_correct": new_correct,
+                "reason": reason,
+                "bc_po_resolved": po_resolved,
+            })
 
-    remaining = await db[DOCS_COLL].count_documents({"gpi_folder_correct": False})
+        if not dry_run:
+            update_set = {
+                "gpi_folder_output": folder_path,
+                "gpi_folder_correct": new_correct,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            if po_resolved is not None:
+                update_set["bc_po_resolved"] = po_resolved
+            await db[DOCS_COLL].update_one({"_id": doc_id}, {"$set": update_set})
+            if folder_path != old_folder:
+                updated_count += 1
+
+    if not dry_run:
+        remaining = await db[DOCS_COLL].count_documents({"gpi_folder_correct": False})
+    else:
+        # Simulate remaining: current mismatches - fixes + regressions
+        current_mismatches = sum(1 for d in all_docs if d.get("gpi_folder_correct") is False)
+        fixes = sum(1 for c in changes if c.get("was_correct") is False and c.get("now_correct") is True)
+        remaining = current_mismatches - fixes
 
     return {
+        "dry_run": dry_run,
         "total_docs": len(all_docs),
         "unique_pos": len(po_set),
         "pos_resolved_in_bc": resolved_count,
         "pos_not_in_bc": len(unresolved_pos),
-        "unresolved_pos_sample": unresolved_pos[:10],
-        "folders_changed": updated_count,
+        "unresolved_pos_sample": unresolved_pos[:20],
+        "folders_changed": updated_count if not dry_run else len(changes),
+        "would_regress_count": len(made_worse),
+        "would_regress_sample": made_worse[:10],
         "remaining_mismatches": remaining,
+        "changes_sample": changes[:20],
     }
 
 

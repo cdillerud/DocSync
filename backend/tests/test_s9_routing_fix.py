@@ -1,9 +1,12 @@
 """
 Tests for S9-mirroring routing fix:
 - AP Invoices with unresolved POs (bc_po_resolved=False) → Miscellaneous
-- AP Invoices with no PO → Miscellaneous
+- AP Invoices with no PO → Dropship Not International (NOT Misc)
 - AP Invoices with resolved POs → Dropship Not International
-- International/warehouse routing unaffected
+- Shipping docs with unresolved POs → Miscellaneous
+- Freight vendors with unresolved POs → Miscellaneous (S9 PO check beats freight)
+- International detection improvements
+- Inspection_Form → Quality
 """
 import pytest
 from services.folder_routing_service import determine_folder_path
@@ -44,36 +47,85 @@ class TestS9UnresolvedPORouting:
         path, reason, _ = determine_folder_path(doc)
         assert "Dropship Not International Documents" in path
 
-    def test_ap_invoice_no_po_domestic_goes_to_miscellaneous(self):
+    def test_ap_invoice_no_po_domestic_goes_to_dropship(self):
+        """No PO on domestic AP → Dropship Not International (NOT Misc)."""
         doc = make_doc(po="", bc_po_resolved=None)
         path, reason, _ = determine_folder_path(doc)
-        assert "Miscellaneous" in path
-        assert "need approval" in path
+        assert "Dropship Not International Documents" in path
 
     def test_ap_invoice_no_po_international_still_routes_international(self):
-        """International AP invoices without PO should NOT go to Misc."""
+        """International AP invoices without PO should route international."""
         doc = make_doc(po="", is_international=True)
         path, reason, _ = determine_folder_path(doc)
         assert "International" in path
         assert "Miscellaneous" not in path
 
-    def test_ap_invoice_unresolved_po_freight_vendor_goes_to_freight(self):
-        """Freight vendors override S9 PO check."""
-        doc = make_doc(vendor="fedex", po="PO99999", bc_po_resolved=False)
+    def test_freight_vendor_unresolved_po_goes_to_miscellaneous(self):
+        """S9: PO check comes BEFORE freight vendor check."""
+        doc = make_doc(vendor="TUMALOC", po="GP111025-CREAMSODA", bc_po_resolved=False)
+        path, reason, _ = determine_folder_path(doc)
+        assert "Miscellaneous" in path
+
+    def test_freight_vendor_resolved_po_goes_to_freight(self):
+        """Freight vendor with valid PO → Freight Issues."""
+        doc = make_doc(vendor="TUMALOC", po="PO12345", bc_po_resolved=True)
         path, reason, _ = determine_folder_path(doc)
         assert "Freight" in path
 
-    def test_ap_invoice_unresolved_po_international_goes_to_miscellaneous(self):
-        """Even international docs with unresolved PO go to Misc per S9."""
-        doc = make_doc(po="PO99999", bc_po_resolved=False, is_international=True)
+    def test_freight_vendor_no_bc_check_goes_to_freight(self):
+        """Freight vendor without BC check → default Freight Issues."""
+        doc = make_doc(vendor="fedex", po="PO12345", bc_po_resolved=None)
         path, reason, _ = determine_folder_path(doc)
-        assert "Miscellaneous" in path
+        assert "Freight" in path
 
     def test_ap_invoice_resolved_po_warehouse_goes_to_warehouse(self):
         """Warehouse orders with resolved PO route normally."""
         doc = make_doc(po="PO12345", bc_po_resolved=True, file_name="wh_order.pdf")
         path, reason, _ = determine_folder_path(doc)
         assert "Warehouse" in path
+
+
+class TestShippingDocS9Routing:
+    """S9 workflow also applies to shipping documents."""
+
+    def test_shipping_doc_unresolved_po_goes_to_miscellaneous(self):
+        doc = make_doc(doc_type="Shipping_Document", po="158491", bc_po_resolved=False)
+        path, _, _ = determine_folder_path(doc)
+        assert "Miscellaneous" in path
+
+    def test_shipping_doc_resolved_po_routes_normally(self):
+        doc = make_doc(doc_type="Shipping_Document", po="PO12345", bc_po_resolved=True)
+        path, _, _ = determine_folder_path(doc)
+        assert "Dropship" in path or "Warehouse" in path
+
+    def test_shipping_doc_no_bc_check_routes_normally(self):
+        doc = make_doc(doc_type="Shipping_Document", po="PO12345", bc_po_resolved=None)
+        path, _, _ = determine_folder_path(doc)
+        assert "Dropship" in path or "Warehouse" in path
+
+
+class TestInternationalDetection:
+    """Improved international vendor detection."""
+
+    def test_intl_abbreviation_detected(self):
+        doc = make_doc(vendor="MKC CUSTOMS BROKERS INT'L INC.", po="PO123", bc_po_resolved=True)
+        path, _, _ = determine_folder_path(doc, is_international=False)
+        assert "International" in path
+
+    def test_customs_broker_detected(self):
+        doc = make_doc(vendor="Pacific Customs Broker LLC", po="PO123", bc_po_resolved=True)
+        path, _, _ = determine_folder_path(doc, is_international=False)
+        assert "International" in path
+
+
+class TestInspectionFormRouting:
+    """Inspection forms → Vendor Credit Memos / Sent to Quality."""
+
+    def test_inspection_form_goes_to_quality(self):
+        doc = make_doc(doc_type="Inspection_Form", vendor="CITICARGO", po="")
+        path, _, _ = determine_folder_path(doc)
+        assert "Vendor Credit Memos" in path
+        assert "Sent to Quality" in path
 
 
 class TestExistingRoutingUnchanged:

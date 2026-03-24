@@ -323,8 +323,25 @@ def determine_folder_path(
             routing_details,
         )
 
+    # RULE 5.5: Inspection Forms → Vendor Credit Memos / Sent to Quality
+    if doc_type == "Inspection_Form":
+        return (
+            "Vendor Credit Memos/Sent to Quality",
+            "Inspection form → Sent to Quality",
+            routing_details,
+        )
+
     # RULE 6: Shipping/Freight documents based on direction & international
     if doc_type in ("Shipping_Document", "Freight_Document", "SHIPMENT", "RECEIPT"):
+        # S9 Workflow: If PO not in BC → Miscellaneous (applies to shipping docs too)
+        bc_po_resolved = doc.get("bc_po_resolved")
+        if order_number and bc_po_resolved is False:
+            return (
+                "Miscellaneous Documents/Misc Invoices - need approval",
+                f"PO {order_number} not found as BC purchase order — shipping doc → Misc (S9)",
+                routing_details,
+            )
+
         if _is_freight_vendor(vendor_name) and doc_type == "Freight_Document":
             return ("Freight Issues", "Freight invoice from carrier", routing_details)
 
@@ -364,12 +381,8 @@ def determine_folder_path(
 
     # RULE 7: AP Invoices
     if doc_type in ("AP_Invoice", "AP Invoice"):
-        # Freight vendors
-        if _is_freight_vendor(vendor_name):
-            return ("Freight Issues", "Freight invoice from carrier", routing_details)
-
         # S9 Workflow: If PO is NOT a valid internal BC purchase order → Miscellaneous
-        # This mirrors Square 9's logic: unresolved POs get routed to Misc for approval
+        # This check comes FIRST, before vendor-specific routing (mirrors S9)
         bc_po_resolved = doc.get("bc_po_resolved")
         if order_number and bc_po_resolved is False:
             return (
@@ -378,13 +391,9 @@ def determine_folder_path(
                 routing_details,
             )
 
-        # No PO number at all on a domestic non-freight AP Invoice → Miscellaneous
-        if not order_number and not (is_international or doc.get("is_international")):
-            return (
-                "Miscellaneous Documents/Misc Invoices - need approval",
-                "Domestic AP Invoice with no PO → Miscellaneous (S9 workflow)",
-                routing_details,
-            )
+        # Freight vendors (only reached if PO is valid or bc_po_resolved not set)
+        if _is_freight_vendor(vendor_name):
+            return ("Freight Issues", "Freight invoice from carrier", routing_details)
 
         # International
         if is_international or doc.get("is_international"):
@@ -403,7 +412,7 @@ def determine_folder_path(
                 routing_details,
             )
 
-        # Regular domestic invoice with valid PO → Dropship Not International by order
+        # Regular domestic invoice → Dropship Not International by order
         vendor_folder = _get_vendor_subfolder(vendor_name)
         if order_number:
             return (
@@ -412,8 +421,8 @@ def determine_folder_path(
                 routing_details,
             )
         return (
-            "Miscellaneous Documents/Misc Invoices - need approval",
-            f"Domestic AP Invoice fallback → Miscellaneous",
+            "Dropship Not International Documents",
+            f"Domestic vendor invoice ({vendor_folder})",
             routing_details,
         )
 
@@ -509,6 +518,9 @@ INTERNATIONAL_VENDOR_PATTERNS = [
     "co., ltd", "co.,ltd",  # Asian
     "kabushiki", "k.k.",  # Japanese
     "a.s.",  # Turkish/Nordic
+    "int'l",  # International abbreviation (e.g., MKC CUSTOMS BROKERS INT'L INC.)
+    "intl",  # Alternative intl abbreviation
+    "customs broker",  # Customs brokers handle international shipments
 ]
 
 # Short patterns that need word-boundary checks to avoid false positives

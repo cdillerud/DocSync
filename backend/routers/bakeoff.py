@@ -1102,6 +1102,53 @@ async def force_fix_mismatches():
     return {"total_fixed": len(results), "results": results}
 
 
+@router.get("/debug/po-lookup/{po_number}")
+async def debug_po_lookup(po_number: str):
+    """Debug: trace the full PO location code lookup pipeline."""
+    from services.bc_reference_cache_service import get_cache_service
+    db = get_db()
+    cache = get_cache_service()
+    result = {"po": po_number, "steps": []}
+
+    if not cache:
+        result["steps"].append({"step": "cache_service", "status": "NOT AVAILABLE"})
+        return result
+
+    # Step 1: Check cache contents
+    po_count = await cache.collection.count_documents({"bc_entity_type": "purchase_order"})
+    result["steps"].append({"step": "cache_po_count", "count": po_count})
+
+    # Step 2: Try search_multi
+    try:
+        matches = await cache.search_multi(po_number, entity_types=["purchase_order"])
+        result["steps"].append({
+            "step": "search_multi",
+            "matches": len(matches),
+            "first_match": {k: v for k, v in matches[0].items() if k != "_id"} if matches else None
+        })
+    except Exception as e:
+        result["steps"].append({"step": "search_multi", "error": str(e)})
+
+    # Step 3: Try direct query
+    try:
+        direct = await cache.collection.find_one(
+            {"bc_entity_type": "purchase_order", "bc_document_no": po_number},
+            {"_id": 0, "bc_record_id": 1, "bc_document_no": 1, "bc_vendor_name": 1}
+        )
+        result["steps"].append({"step": "direct_query", "found": direct is not None, "data": direct})
+    except Exception as e:
+        result["steps"].append({"step": "direct_query", "error": str(e)})
+
+    # Step 4: Try location lookup
+    try:
+        loc_map = await cache.lookup_po_location_codes([po_number])
+        result["steps"].append({"step": "location_lookup", "result": loc_map})
+    except Exception as e:
+        result["steps"].append({"step": "location_lookup", "error": str(e)})
+
+    return result
+
+
 
 @router.post("/runs/enrich-and-reroute")
 async def enrich_location_codes_and_reroute():

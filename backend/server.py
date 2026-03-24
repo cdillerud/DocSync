@@ -3943,22 +3943,26 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
     
     # Re-run AI classification if requested
     if reclassify and file_path.exists():
-        logger.info("Re-running AI classification for document %s", doc_id)
-        classification = await classify_document_with_ai(str(file_path), doc["file_name"])
-        
-        # Update document with new classification
-        await db.hub_documents.update_one(
-            {"id": doc_id},
-            {"$set": {
-                "document_type": classification.get("suggested_job_type", "Unknown"),
-                "suggested_job_type": classification.get("suggested_job_type", "Unknown"),
-                "ai_confidence": classification.get("confidence", 0.0),
-                "extracted_fields": classification.get("extracted_fields", {}),
-                "updated_utc": datetime.now(timezone.utc).isoformat()
-            }}
-        )
-        # Reload the document
-        doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+        try:
+            logger.info("Re-running AI classification for document %s", doc_id)
+            classification = await classify_document_with_ai(str(file_path), doc["file_name"])
+            
+            # Update document with new classification
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    "document_type": classification.get("suggested_job_type", "Unknown"),
+                    "suggested_job_type": classification.get("suggested_job_type", "Unknown"),
+                    "ai_confidence": classification.get("confidence", 0.0),
+                    "extracted_fields": classification.get("extracted_fields") or {},
+                    "updated_utc": datetime.now(timezone.utc).isoformat()
+                }}
+            )
+            # Reload the document
+            doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+        except Exception as classify_err:
+            logger.error("[REPROCESS] AI classification crashed for %s: %s", doc_id[:8], str(classify_err))
+            # Continue with existing data — don't crash the endpoint
     
     # Get job config
     job_type = doc.get("suggested_job_type", "AP_Invoice")
@@ -3992,8 +3996,16 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
 
     # Re-run BC validation (this will use any new aliases)
     old_match_method = doc.get("match_method", "none")
-    from services.bc_validation_service import validate_bc_match
-    validation_results = await validate_bc_match(job_type, extracted_fields, job_configs)
+    try:
+        from services.bc_validation_service import validate_bc_match
+        validation_results = await validate_bc_match(job_type, extracted_fields, job_configs)
+    except Exception as val_err:
+        logger.error("[REPROCESS] BC validation crashed for %s: %s", doc_id[:8], str(val_err))
+        validation_results = {
+            "all_passed": False, "checks": [{"check_name": "validation_error", "passed": False, "details": str(val_err), "required": True}],
+            "warnings": [], "match_method": "none", "match_score": 0.0,
+            "normalized_fields": {}, "validation_status": "fail",
+        }
     new_match_method = validation_results.get("match_method", "none")
     
     # Make new automation decision
@@ -4004,6 +4016,8 @@ async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
     if doc_type_for_conf not in ("Other", "Unknown", "Unknown_Document", "") and confidence < 0.5:
         confidence = 0.85
     decision, reasoning, decision_metadata = make_automation_decision(job_configs, confidence, validation_results)
+    if not decision_metadata:
+        decision_metadata = {}
     
     # Determine if status should change
     old_status = doc.get("status")

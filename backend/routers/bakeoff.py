@@ -1039,6 +1039,21 @@ async def reroute_all_runs():
     }
 
 
+@router.get("/runs/folder-mismatches")
+async def get_folder_mismatches():
+    """Find all documents where GPI folder doesn't match S9 truth."""
+    db = get_db()
+    docs = await db[DOCS_COLL].find(
+        {"gpi_folder_correct": False},
+        {"_id": 0, "file_name": 1, "run_id": 1, "document_id": 1,
+         "gpi_doc_type": 1, "gpi_vendor": 1, "gpi_po": 1,
+         "gpi_folder_output": 1, "folder_truth": 1,
+         "s9_folder_output": 1, "is_international": 1}
+    ).to_list(500)
+    return {"total_mismatches": len(docs), "documents": docs}
+
+
+
 
 @router.get("/runs/{run_id}/metrics")
 async def get_run_metrics(run_id: str):

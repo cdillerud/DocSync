@@ -440,7 +440,7 @@ function QueueRow({ item, navigate, onApprove, onFlag, actionLoading }) {
             variant="ghost"
             size="sm"
             className="h-7 text-xs"
-            onClick={() => navigate(`/documents/${encodeURIComponent(item.id)}`)}
+            onClick={() => navigate(`/review/${encodeURIComponent(item.id)}`)}
             data-testid={`my-queue-view-${item.id}`}
           >
             <ChevronRight className="w-3 h-3" />

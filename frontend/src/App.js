@@ -18,6 +18,7 @@ import IntelligenceHubPage from "@/pages/IntelligenceHubPage";
 import IntegrationsHubPage from "@/pages/IntegrationsHubPage";
 import SettingsHubPage from "@/pages/SettingsHubPage";
 import BakeOffPage from "@/pages/BakeOffPage";
+import SalesOrderReviewPage from "@/pages/SalesOrderReviewPage";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -33,6 +34,7 @@ function AppRoutes() {
         <Route index element={<DashboardPage />} />
         <Route path="documents" element={<DocumentsHubPage />} />
         <Route path="documents/:id" element={<DocumentDetailPage />} />
+        <Route path="review/:id" element={<SalesOrderReviewPage />} />
         <Route path="sales-inventory" element={<SalesInventoryHubPage />} />
         <Route path="intelligence" element={<IntelligenceHubPage />} />
         <Route path="operations-queue" element={<OperationsQueuePage />} />

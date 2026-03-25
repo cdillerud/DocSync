@@ -576,6 +576,73 @@ async def assign_document(doc_id: str, body: AssignRequest):
     return {"status": "assigned", "doc_id": doc_id, "rep_email": body.rep_email, "rep_name": body.rep_name}
 
 
+class ReviewActionRequest(BaseModel):
+    action: str  # "approve" or "flag"
+    reason: str = ""
+
+
+@router.post("/review/{doc_id}")
+async def review_document(doc_id: str, body: ReviewActionRequest):
+    """Unified review action endpoint for the SalesOrderReviewPage.
+    Supports both approve and flag actions in a single endpoint.
+    """
+    db = get_db()
+
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1, "sales_review_status": 1})
+    if not doc:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    if body.action == "approve":
+        action_entry = {
+            "action": "approved",
+            "at": now,
+            "by": "rep",
+        }
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {
+                "$set": {
+                    "sales_review_status": "approved",
+                    "approved_at": now,
+                    "updated_utc": now,
+                },
+                "$push": {"sales_review_history": action_entry},
+            },
+        )
+        logger.info("[SalesReview] Document %s APPROVED via review endpoint", doc_id)
+        return {"status": "approved", "doc_id": doc_id, "approved_at": now}
+
+    elif body.action == "flag":
+        action_entry = {
+            "action": "flagged",
+            "at": now,
+            "by": "rep",
+            "notes": body.reason,
+        }
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {
+                "$set": {
+                    "sales_review_status": "flagged",
+                    "sales_flag_reason": body.reason,
+                    "flag_notes": body.reason,
+                    "flagged_at": now,
+                    "updated_utc": now,
+                },
+                "$push": {"sales_review_history": action_entry},
+            },
+        )
+        logger.info("[SalesReview] Document %s FLAGGED via review endpoint: %s", doc_id, body.reason[:100])
+        return {"status": "flagged", "doc_id": doc_id, "reason": body.reason, "flagged_at": now}
+
+    else:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=f"Invalid action: {body.action}. Must be 'approve' or 'flag'.")
+
+
 @router.post("/seed-review-data")
 async def seed_review_data():
     """Seed rich, production-realistic demo data for the Inside Sales Rep Review feature.

@@ -208,7 +208,7 @@ export default function TriageQueuePage() {
                             variant="ghost"
                             size="sm"
                             className="h-7 text-xs"
-                            onClick={() => navigate(`/documents/${encodeURIComponent(item.id)}`)}
+                            onClick={() => navigate(`/review/${encodeURIComponent(item.id)}`)}
                           >
                             <ChevronRight className="w-3 h-3" />
                           </Button>

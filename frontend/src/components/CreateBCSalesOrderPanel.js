@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { salesOrderPreflight, createSalesOrderFromDocument, createIncomingFromShortage, reconcileSalesOrder } from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -23,7 +23,7 @@ function isEligible(doc) {
   return ELIGIBLE_TYPES.has(doc?.document_type);
 }
 
-export default function CreateBCSalesOrderPanel({ document, onUpdate }) {
+export default function CreateBCSalesOrderPanel({ document, onUpdate, autoRun = false, forceShow = false }) {
   const [state, setState] = useState('idle');
   const [preflight, setPreflight] = useState(null);
   const [error, setError] = useState(null);
@@ -33,6 +33,7 @@ export default function CreateBCSalesOrderPanel({ document, onUpdate }) {
   const [editedLines, setEditedLines] = useState(null);
   // Snapshot of the original resolved lines from preflight (for reset)
   const [originalLines, setOriginalLines] = useState(null);
+  const autoRanRef = useRef(false);
 
   const existingSO = document?.bc_sales_order;
   const eligible = isEligible(document);
@@ -59,6 +60,15 @@ export default function CreateBCSalesOrderPanel({ document, onUpdate }) {
       setState('error');
     }
   }, [document.id]);
+
+  // Auto-run preflight when rendered on the review page
+  useEffect(() => {
+    if (autoRun && (eligible || forceShow) && state === 'idle' && !autoRanRef.current) {
+      autoRanRef.current = true;
+      runPreflight();
+    }
+  }, [autoRun, eligible, forceShow, state, runPreflight]);
+
 
   const handleCreate = useCallback(async () => {
     setState('creating');
@@ -150,7 +160,7 @@ export default function CreateBCSalesOrderPanel({ document, onUpdate }) {
     }
   }, [existingSO, document.id, onUpdate]);
 
-  if (!eligible && !existingSO) return null;
+  if (!forceShow && !eligible && !existingSO) return null;
 
   if (existingSO && state === 'idle') {
     return (

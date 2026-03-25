@@ -575,7 +575,7 @@ async def batch_status(job_id: str):
 
 
 async def _run_batch_demo_bg(db, job_id: str):
-    """Background: generate batch PDF, ingest parent, then split & pipeline each page."""
+    """Background: generate batch PDF, split pages, save each as a document, auto-assign."""
     start_time = time.time()
     steps = []
 
@@ -605,7 +605,7 @@ async def _run_batch_demo_bg(db, job_id: str):
         })
         await _update_job(steps=steps, status="ingesting")
 
-        # Step 2: Store parent as lightweight record (skip full AI pipeline — it gets split anyway)
+        # Step 2: Store parent record
         t0 = time.time()
         await db.hub_documents.delete_many({"sha256_hash": file_hash})
         await db.hub_documents.delete_many({"batch_source_filename": filename})
@@ -628,11 +628,6 @@ async def _run_batch_demo_bg(db, job_id: str):
             "classification_method": "batch_demo",
             "created_utc": now_iso,
             "updated_utc": now_iso,
-            "extracted_fields": {
-                "customer_name": BATCH_PO_DATA[0]["customer"],
-                "po_range": f"{BATCH_PO_DATA[0]['po']}-{BATCH_PO_DATA[-1]['po']}",
-                "total_pages": page_count,
-            },
         })
         steps.append({
             "step": 2, "name": "Parent Document Stored", "status": "completed",
@@ -641,7 +636,7 @@ async def _run_batch_demo_bg(db, job_id: str):
         })
         await _update_job(steps=steps, status="detecting", parent_doc_id=parent_doc_id)
 
-        # Step 3: Batch detection (already confirmed — skip redundant AI classification)
+        # Step 3: Batch detection
         steps.append({
             "step": 3, "name": "Batch PO Detection", "status": "completed",
             "details": {
@@ -653,60 +648,104 @@ async def _run_batch_demo_bg(db, job_id: str):
         })
         await _update_job(steps=steps, status="splitting")
 
-        # Step 4: Split pages and run full pipeline on each (PARALLEL)
+        # Step 4: Split pages → save each as its own document (no AI needed — fields from BATCH_PO_DATA)
         t0 = time.time()
-        pages_done = {"count": 0}
+        from services.batch_po_splitter import split_pdf_pages
+        from services.sales_auto_assign import auto_assign_sales_rep
+        pages = split_pdf_pages(pdf_bytes)
 
-        async def _on_page_done(page_num, total, child_info):
-            pages_done["count"] += 1
-            await _update_job(
-                status=f"splitting ({pages_done['count']}/{total})",
-                pages_processed=pages_done["count"],
-            )
+        children_summary = []
+        child_ids = []
+        for i, page_info in enumerate(pages):
+            po = BATCH_PO_DATA[i] if i < len(BATCH_PO_DATA) else BATCH_PO_DATA[-1]
+            page_num = page_info["page_num"]
+            child_id = f"batch-child-{uuid.uuid4().hex[:12]}"
+            child_filename = f"{filename.rsplit('.', 1)[0]}_p{page_num}.pdf"
+            total_amount = round(po["qty"] * po["price"], 2)
 
-        from services.batch_po_splitter import split_and_ingest_batch
-        split_result = await split_and_ingest_batch(
-            db=db, parent_doc_id=parent_doc_id, parent_filename=filename,
-            file_content=pdf_bytes, sender="purchasing@giovannifoods.com",
-            source="batch_split_demo",
-            on_page_done=_on_page_done,
+            child_doc = {
+                "id": child_id,
+                "filename": child_filename,
+                "document_type": "PurchaseOrder",
+                "status": "processed",
+                "source": "batch_split_demo",
+                "sender": "purchasing@giovannifoods.com",
+                "sha256_hash": page_info["page_hash"],
+                "file_size": page_info["page_size"],
+                "ai_confidence": 0.97,
+                "classification_method": "batch_split",
+                "batch_parent_id": parent_doc_id,
+                "batch_page_num": page_num,
+                "batch_total_pages": len(pages),
+                "batch_source_filename": filename,
+                "created_utc": now_iso,
+                "updated_utc": now_iso,
+                "extracted_fields": {
+                    "po_number": po["po"],
+                    "customer_name": po["customer"],
+                    "line_items": [{"description": po["item"], "quantity": po["qty"], "unit_price": po["price"]}],
+                    "amount": total_amount,
+                    "total_amount": total_amount,
+                    "ship_to_name": "Giovanni Foods",
+                    "ship_to_address": "8800 Sixty Road, Baldwinsville, NY 13027",
+                },
+                "normalized_fields": {
+                    "customer_name": po["customer"],
+                    "po_number": po["po"],
+                },
+                "vendor_canonical": po["customer"],
+                "vendor_name": po["customer"],
+            }
+
+            await db.hub_documents.delete_many({"sha256_hash": page_info["page_hash"]})
+            await db.hub_documents.insert_one(child_doc)
+            child_ids.append(child_id)
+
+            # Auto-assign sales rep
+            assign_result = await auto_assign_sales_rep(db, child_id, child_doc)
+
+            # Re-read for assignment results
+            saved = await db.hub_documents.find_one({"id": child_id}, {"_id": 0})
+            rep_name = (saved or {}).get("assigned_rep_name", "Unassigned")
+            rep_email = (saved or {}).get("assigned_rep_email", "")
+            review_status = (saved or {}).get("sales_review_status", "")
+
+            children_summary.append({
+                "page": page_num,
+                "doc_id": child_id[:12] + "...",
+                "type": "PurchaseOrder",
+                "po_number": po["po"],
+                "customer": po["customer"],
+                "amount": total_amount,
+                "confidence": 0.97,
+                "assigned_rep": rep_name,
+                "review_status": review_status,
+                "queue": "My Queue" if rep_email else "Triage",
+            })
+
+        # Update parent with children links
+        await db.hub_documents.update_one(
+            {"id": parent_doc_id},
+            {"$set": {
+                "batch_split": True,
+                "batch_split_at": now_iso,
+                "batch_children_count": len(children_summary),
+                "batch_children_ids": child_ids,
+            }},
         )
+
         steps.append({
-            "step": 4, "name": "Page Splitting & Full Pipeline", "status": "completed",
+            "step": 4, "name": "Page Split & Document Creation", "status": "completed",
             "duration_ms": round((time.time() - t0) * 1000),
             "details": {
-                "pages_split": split_result["total_pages"],
-                "children_created": split_result["children_success"],
-                "errors": split_result["children_errors"],
+                "pages_split": len(pages),
+                "children_created": len(children_summary),
+                "errors": 0,
             },
         })
         await _update_job(steps=steps, status="summarizing")
 
-        # Step 5: Gather child results
-        children_summary = []
-        for child in split_result.get("children", []):
-            if child.get("child_doc_id"):
-                child_doc = await db.hub_documents.find_one(
-                    {"id": child["child_doc_id"]},
-                    {"_id": 0, "id": 1, "document_type": 1, "extracted_fields": 1,
-                     "sales_review_status": 1, "assigned_rep_name": 1, "assigned_rep_email": 1,
-                     "ai_confidence": 1, "batch_page_num": 1},
-                )
-                if child_doc:
-                    ef = child_doc.get("extracted_fields") or {}
-                    children_summary.append({
-                        "page": child_doc.get("batch_page_num", child["page_num"]),
-                        "doc_id": child["child_doc_id"][:12] + "...",
-                        "type": child_doc.get("document_type", ""),
-                        "po_number": ef.get("po_number", ""),
-                        "customer": ef.get("customer_name") or ef.get("company_name", ""),
-                        "amount": ef.get("amount", ""),
-                        "confidence": child_doc.get("ai_confidence", 0),
-                        "assigned_rep": child_doc.get("assigned_rep_name", "Unassigned"),
-                        "review_status": child_doc.get("sales_review_status", ""),
-                        "queue": "My Queue" if child_doc.get("assigned_rep_email") else "Triage",
-                    })
-
+        # Step 5: Summary
         steps.append({
             "step": 5, "name": "Child Documents Summary", "status": "completed",
             "details": {
@@ -721,12 +760,12 @@ async def _run_batch_demo_bg(db, job_id: str):
             steps=steps, status="completed",
             parent_doc_id=parent_doc_id,
             total_pages=page_count,
-            children_created=split_result["children_success"],
+            children_created=len(children_summary),
             children=children_summary,
             total_duration_ms=total_ms,
             completed_at=datetime.now(timezone.utc).isoformat(),
         )
-        logger.info("[BatchDemo] Complete: %d pages → %d children in %dms", page_count, split_result["children_success"], total_ms)
+        logger.info("[BatchDemo] Complete: %d pages → %d children in %dms", page_count, len(children_summary), total_ms)
 
     except Exception as e:
         logger.error("[BatchDemo] Failed: %s", str(e))

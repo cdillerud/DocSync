@@ -77,6 +77,7 @@ const DONE_WORKFLOW_STATUSES = ["completed", "exported", "validation_passed", "p
 function isTerminal(doc) {
   const s = (doc.status || "").toLowerCase();
   const ws = (doc.workflow_status || "").toLowerCase();
+  if (s === "batch_parent") return false; // containers, not processed work
   return TERMINAL_STATUSES.some(t => t.toLowerCase() === s) ||
          DONE_WORKFLOW_STATUSES.some(t => t.toLowerCase() === ws) ||
          doc.auto_cleared === true;
@@ -248,7 +249,8 @@ export default function UnifiedQueuePage() {
   const getVendorOrCustomer = (doc) => {
     return doc.vendor_canonical || doc.customer_name ||
       doc.extracted_fields?.vendor_name || doc.extracted_fields?.customer_name ||
-      doc.normalized_fields?.vendor_name || '';
+      doc.extracted_fields?.customer || doc.extracted_fields?.vendor ||
+      doc.normalized_fields?.vendor_name || doc.normalized_fields?.customer_name || '';
   };
 
   const getDocStatus = (doc) => {

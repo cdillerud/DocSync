@@ -267,7 +267,7 @@ async def list_documents(
         else:
             fq.update(search_cond)
 
-    TERMINAL_STATUSES = ["Completed", "Posted", "Archived", "completed", "posted", "archived", "FileMissing"]
+    TERMINAL_STATUSES = ["Completed", "Posted", "Archived", "completed", "posted", "archived", "FileMissing", "batch_parent"]
     DONE_WORKFLOW_STATUSES = ["completed", "validation_passed", "processed", "ready_for_approval", "exported", "file_missing"]
     if queue_view and not include_cleared and not status:
         not_cleared = {"$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}]}
@@ -302,9 +302,11 @@ async def list_documents(
             ]},
         ]
     })
+    # Exclude batch_parent from completed count (they are containers, not processed work)
     completed_count = await db.hub_documents.count_documents({
         "$and": [
             not_dup,
+            {"status": {"$ne": "batch_parent"}},  # Exclude batch_parent containers
             {"$or": [
                 {"status": {"$in": TERMINAL_STATUSES}},
                 {"auto_cleared": True},

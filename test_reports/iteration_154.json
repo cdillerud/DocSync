@@ -1,0 +1,78 @@
+{
+  "summary": "Completed testing of batch PO split refactoring. All features working correctly: batch split uses real AI pipeline (not demo shortcut), batch_parent docs excluded from both active inbox AND Processed tab, Vendor/Customer column correctly reads extracted_fields.customer showing 'Giovanni Food Company'. Fixed minor bug where Processed tab badge showed incorrect count (22 instead of 5) by excluding batch_parent from completed_count calculation.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_batch_split_iteration154.py",
+    "/app/test_reports/pytest/batch_split_iteration154_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/routers/documents.py"
+  ],
+  "success_rate": {
+    "backend": "100% (9/9 tests passed)",
+    "frontend": "100% (All features verified working)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "No new seed data created. Used existing batch split job '3162246957db' from previous run.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Batch PO split refactoring fully tested. The demo shortcut was replaced with split_and_ingest_batch() which runs each split page through the full AI pipeline (classify, extract, validate, route, auto-assign). Job '3162246957db' completed successfully with 5 child documents, all assigned to Lisa Chen with auto_approved status. batch_parent docs (17 total) are correctly excluded from both active inbox and Processed tab. Vendor/Customer column reads from extracted_fields.customer. Fixed bug in completed_count calculation to exclude batch_parent docs.",
+  "features_tested": {
+    "backend": [
+      "GET /api/sales-dashboard/demo/batch-status/3162246957db - Returns completed job with 5 children - PASS",
+      "GET /api/sales-dashboard/demo/batch-status/invalid_id - Returns 404 - PASS",
+      "GET /api/dashboard/inbox-stats - Returns valid stats (Today:5, Auto-rate:100%, AI confidence:99.7%) - PASS",
+      "GET /api/dashboard/insights-trends - Returns daily trend data - PASS",
+      "GET /api/documents?queue_view=true - Excludes batch_parent docs from active inbox - PASS",
+      "GET /api/documents?queue_view=false - Shows terminal docs, excludes batch_parent from display - PASS",
+      "Vendor/Customer field extraction - extracted_fields.customer contains 'Giovanni Food Company' - PASS"
+    ],
+    "frontend": [
+      "Login flow with admin/admin credentials - PASS",
+      "Inbox All tab shows 0 active documents - PASS",
+      "Processed tab shows 5 terminal documents (excluding batch_parent) - PASS",
+      "Processed tab badge shows correct count (5, not 22) - PASS (after fix)",
+      "Vendor/Customer column shows 'Giovanni Food Company., I...' - PASS",
+      "Type column shows 'Sales Order' - PASS",
+      "Status column shows 'Exported' - PASS",
+      "Stats strip shows correct metrics - PASS",
+      "Sales page loads with all 6 tabs - PASS",
+      "Insights page loads with charts and summary cards - PASS"
+    ]
+  },
+  "mocked_apis": {
+    "BC Sandbox": "DEMO_MODE=true - BC Sales Order creation is mocked",
+    "SharePoint Graph API": "DEMO_MODE=true - SharePoint integration is mocked"
+  },
+  "batch_split_job_details": {
+    "job_id": "3162246957db",
+    "status": "completed",
+    "total_pages": 5,
+    "children_created": 5,
+    "pipeline": "Full AI classification → extraction → validation → routing → auto-assign",
+    "duration_ms": 70932,
+    "children": [
+      {"page": 1, "po_number": "61312", "type": "Sales_Order", "assigned_rep": "Lisa Chen", "queue": "My Queue"},
+      {"page": 2, "po_number": "61313", "type": "Sales_Order", "assigned_rep": "Lisa Chen", "queue": "My Queue"},
+      {"page": 3, "po_number": "61314", "type": "Sales_Order", "assigned_rep": "Lisa Chen", "queue": "My Queue"},
+      {"page": 4, "po_number": "61315", "type": "Sales_Order", "assigned_rep": "Lisa Chen", "queue": "My Queue"},
+      {"page": 5, "po_number": "61316", "type": "Sales_Order", "assigned_rep": "Lisa Chen", "queue": "My Queue"}
+    ]
+  },
+  "bug_fixed": {
+    "description": "Processed tab badge showed 22 instead of 5 because completed_count included batch_parent docs",
+    "root_cause": "Backend completed_count query did not exclude batch_parent status",
+    "fix_applied": "Added {'status': {'$ne': 'batch_parent'}} to completed_count query in /app/backend/routers/documents.py",
+    "verification": "Processed tab now shows correct count of 5"
+  }
+}

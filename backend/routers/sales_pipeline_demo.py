@@ -687,7 +687,7 @@ async def batch_status(job_id: str):
 
 
 async def _run_batch_demo_bg(db, job_id: str):
-    """Background: generate batch PDF, split pages, save each as a document, auto-assign."""
+    """Background: generate batch PDF, seed patterns, split pages through REAL intake pipeline."""
     start_time = time.time()
     steps = []
 
@@ -724,9 +724,21 @@ async def _run_batch_demo_bg(db, job_id: str):
 
         parent_doc_id = f"batch-parent-{uuid.uuid4().hex[:12]}"
         now_iso = datetime.now(timezone.utc).isoformat()
+
+        import base64 as b64mod
+        from pathlib import Path
+        UPLOAD_DIR = Path("/app/backend/uploads")
+        UPLOAD_DIR.mkdir(exist_ok=True)
+
+        # Save parent PDF to disk + DB
+        parent_file_path = UPLOAD_DIR / parent_doc_id
+        parent_file_path.write_bytes(pdf_bytes)
+        parent_b64 = b64mod.b64encode(pdf_bytes).decode("ascii")
+
         await db.hub_documents.insert_one({
             "id": parent_doc_id,
             "filename": filename,
+            "file_name": filename,
             "document_type": "PurchaseOrder",
             "status": "batch_parent",
             "source": "batch_demo",
@@ -734,6 +746,8 @@ async def _run_batch_demo_bg(db, job_id: str):
             "subject": f"Batch POs {BATCH_PO_DATA[0]['po']}-{BATCH_PO_DATA[-1]['po']} from Giovanni Food Co.",
             "sha256_hash": file_hash,
             "file_size": len(pdf_bytes),
+            "content_type": "application/pdf",
+            "file_content_b64": parent_b64,
             "batch_detected": True,
             "batch_page_count": page_count,
             "ai_confidence": 1.0,
@@ -748,212 +762,8 @@ async def _run_batch_demo_bg(db, job_id: str):
         })
         await _update_job(steps=steps, status="detecting", parent_doc_id=parent_doc_id)
 
-        # Step 3: Batch detection
-        steps.append({
-            "step": 3, "name": "Batch PO Detection", "status": "completed",
-            "details": {
-                "batch_detected": True,
-                "batch_page_count": page_count,
-                "document_type": "PurchaseOrder",
-                "classification_confidence": 1.0,
-            },
-        })
-        await _update_job(steps=steps, status="splitting")
-
-        # Step 4: Split pages → save each as a real document with file on disk
+        # Step 3: Seed learned patterns BEFORE split (so preflight can use them)
         t0 = time.time()
-        import base64 as b64mod
-        from pathlib import Path
-        from services.batch_po_splitter import split_pdf_pages
-        from services.sales_auto_assign import auto_assign_sales_rep
-
-        UPLOAD_DIR = Path("/app/backend/uploads")
-        UPLOAD_DIR.mkdir(exist_ok=True)
-        pages = split_pdf_pages(pdf_bytes)
-
-        # Also save parent PDF to disk
-        parent_file_path = UPLOAD_DIR / parent_doc_id
-        parent_file_path.write_bytes(pdf_bytes)
-        parent_b64 = b64mod.b64encode(pdf_bytes).decode("ascii")
-        await db.hub_documents.update_one(
-            {"id": parent_doc_id},
-            {"$set": {
-                "content_type": "application/pdf",
-                "file_name": filename,
-                "file_content_b64": parent_b64,
-            }},
-        )
-
-        children_summary = []
-        child_ids = []
-        for i, page_info in enumerate(pages):
-            po = BATCH_PO_DATA[i] if i < len(BATCH_PO_DATA) else BATCH_PO_DATA[-1]
-            page_num = page_info["page_num"]
-            child_id = f"batch-child-{uuid.uuid4().hex[:12]}"
-            child_filename = f"{filename.rsplit('.', 1)[0]}_p{page_num}.pdf"
-            subtotal = po.get("subtotal", round(po.get("primary_qty", 0) * po.get("primary_price", 0), 2))
-
-            # Save PDF to disk
-            child_file_path = UPLOAD_DIR / child_id
-            child_file_path.write_bytes(page_info["pdf_bytes"])
-            child_b64 = b64mod.b64encode(page_info["pdf_bytes"]).decode("ascii")
-
-            # Build rich extracted_fields from real BC data
-            line_items = []
-            for item in po.get("items", []):
-                # Convert to BC UOM: if UOM is "M" (per 1000), qty is qty/1000
-                raw_qty = item["qty"]
-                uom = item.get("uom", "EA")
-                bc_qty = raw_qty / 1000 if uom == "M" else raw_qty
-                li = {"item_no": item.get("no", ""), "description": item["desc"],
-                      "quantity": bc_qty, "uom": uom,
-                      "unit_price": item["price"]}
-                if item.get("vendor"):
-                    li["vendor"] = item["vendor"]
-                if item.get("comments"):
-                    li["comments"] = item["comments"]
-                line_items.append(li)
-
-            child_doc = {
-                "id": child_id,
-                "file_name": child_filename,
-                "filename": child_filename,
-                "document_type": "PurchaseOrder",
-                "status": "processed",
-                "source": "batch_split_demo",
-                "content_type": "application/pdf",
-                "file_content_b64": child_b64,
-                "email_sender": "purchasing@giovannifoods.com",
-                "sender": "purchasing@giovannifoods.com",
-                "email_subject": f"PO {po['po']} — {po['customer']}",
-                "sha256_hash": page_info["page_hash"],
-                "file_size": page_info["page_size"],
-                "ai_confidence": 0.97,
-                "classification_method": "batch_split",
-                "batch_parent_id": parent_doc_id,
-                "batch_page_num": page_num,
-                "batch_total_pages": len(pages),
-                "batch_source_filename": filename,
-                "created_utc": now_iso,
-                "updated_utc": now_iso,
-                "extracted_fields": {
-                    "po_number": po["po"],
-                    "bc_sales_order": po.get("bc_so", ""),
-                    "customer_name": po["customer"],
-                    "customer_no": po.get("customer_no", ""),
-                    "contact": po.get("contact", ""),
-                    "salesperson_code": po.get("salesperson_code", ""),
-                    "backup_isr": po.get("backup_isr", ""),
-                    "industry_code": po.get("industry_code", ""),
-                    "order_date": po.get("order_date", ""),
-                    "requested_delivery": po.get("requested_delivery", ""),
-                    "shipment_date": po.get("shipment_date", ""),
-                    "due_date": po.get("due_date", ""),
-                    "fob": po.get("fob", ""),
-                    "from_state": po.get("from_state", ""),
-                    "to_state": po.get("to_state", ""),
-                    "location_code": po.get("location_code", ""),
-                    "line_items": line_items,
-                    "amount": subtotal,
-                    "total_amount": subtotal,
-                    "ship_to_name": po["customer"],
-                    "ship_to_address": po.get("ship_to", "").replace("\n", ", "),
-                    "ship_to_phone": po.get("ship_to_phone", ""),
-                },
-                "normalized_fields": {
-                    "customer_name": po["customer"],
-                    "bc_customer_no": po.get("customer_no", ""),
-                    "po_number": po["po"],
-                    "bc_sales_order_no": po.get("bc_so", ""),
-                },
-                "vendor_canonical": po["customer"],
-                "vendor_name": po["customer"],
-                "sharepoint_drive_id": None,
-                "sharepoint_item_id": None,
-                "category": "Sales",
-                "workflow_status": "processed",
-                "automation_decision": "assisted",
-            }
-
-            await db.hub_documents.delete_many({"sha256_hash": page_info["page_hash"]})
-            await db.hub_documents.insert_one(child_doc)
-            child_ids.append(child_id)
-
-            # Add workflow events so document detail page shows history
-            correlation_id = str(uuid.uuid4())
-            primary_item_desc = po.get("items", [{}])[0].get("desc", po.get("primary_item", ""))
-            events = [
-                {"event_type": "intake.received", "stage": "intake", "detail": f"Split from batch {filename} (page {page_num}/{len(pages)})"},
-                {"event_type": "classification.completed", "stage": "classification", "detail": f"PurchaseOrder (batch_split, 97% confidence)"},
-                {"event_type": "extraction.completed", "stage": "extraction", "detail": f"PO {po['po']} → BC SO {po.get('bc_so','')}, {po['customer']}, ${subtotal:,.2f}",
-                 "extra_payload": {"completeness_score": 1.0, "fields_extracted": len([k for k in ["po_number", "customer_name", "amount", "line_items", "ship_to_address", "contact"] if True])}},
-                {"event_type": "vendor.resolved", "stage": "vendor_match", "detail": f"Customer: {po['customer']} ({po.get('customer_no','')})"},
-                {"event_type": "bc.validation.completed", "stage": "bc_validation", "detail": f"Matched BC SO {po.get('bc_so','')}, ISR: {po.get('salesperson_code','')}, Status: {po.get('status','')}"},
-            ]
-            for evt in events:
-                payload = {"detail": evt["detail"]}
-                if "extra_payload" in evt:
-                    payload.update(evt["extra_payload"])
-                await db.workflow_events.insert_one({
-                    "event_id": str(uuid.uuid4()),
-                    "document_id": child_id,
-                    "correlation_id": correlation_id,
-                    "event_type": evt["event_type"],
-                    "status": "completed",
-                    "source_service": "batch_split_demo",
-                    "timestamp": now_iso,
-                    "payload": payload,
-                    "payload_summary": evt["detail"],
-                })
-
-            # Auto-assign sales rep
-            assign_result = await auto_assign_sales_rep(db, child_id, child_doc)
-
-            # Re-read for assignment results
-            saved = await db.hub_documents.find_one({"id": child_id}, {"_id": 0})
-            rep_name = (saved or {}).get("assigned_rep_name", "Unassigned")
-            rep_email = (saved or {}).get("assigned_rep_email", "")
-            review_status = (saved or {}).get("sales_review_status", "")
-
-            children_summary.append({
-                "page": page_num,
-                "doc_id": child_id[:12] + "...",
-                "type": "PurchaseOrder",
-                "po_number": po["po"],
-                "bc_so": po.get("bc_so", ""),
-                "customer": po["customer"],
-                "amount": subtotal,
-                "confidence": 0.97,
-                "assigned_rep": rep_name,
-                "review_status": review_status,
-                "queue": "My Queue" if rep_email else "Triage",
-            })
-
-        # Update parent with children links
-        await db.hub_documents.update_one(
-            {"id": parent_doc_id},
-            {"$set": {
-                "batch_split": True,
-                "batch_split_at": now_iso,
-                "batch_children_count": len(children_summary),
-                "batch_children_ids": child_ids,
-            }},
-        )
-
-        steps.append({
-            "step": 4, "name": "Page Split & Document Creation", "status": "completed",
-            "duration_ms": round((time.time() - t0) * 1000),
-            "details": {
-                "pages_split": len(pages),
-                "children_created": len(children_summary),
-                "errors": 0,
-            },
-        })
-        await _update_job(steps=steps, status="summarizing")
-
-        # Seed learned dunnage patterns for the demo
-        # (In production, these would be learned from historical BC orders)
-        # NOTE: qty_ratio values are calibrated for M UOM (qty/1000) since BC quantities use M
         _GLASS_JAR_DUNNAGE = [
             {"line_type": "Comment", "item_no": "", "description": "2,821/plt, 22 plt/TL, 62,062/TL",
              "qty_ratio": None, "fixed_qty": None, "unit_price": 0, "occurrences": 15, "frequency": 1.0},
@@ -966,23 +776,14 @@ async def _run_batch_demo_bg(db, job_id: str):
             {"line_type": "Item", "item_no": "OITOPFRAME", "description": "OI Top Frame - RETURN REQUIRED",
              "qty_ratio": 0.3546, "fixed_qty": None, "unit_price": 0, "occurrences": 15, "frequency": 1.0},
         ]
-        # Historical qty stats per item (in M UOM) for bounds checking
-        # These simulate 10+ historical orders with natural variation
         _QTY_HISTORY = {
-            "C-9874-10001833": {  # 24oz Pasta Jar — typically ~60-65 M
-                "values": [58.5, 62.0, 65.2, 55.8, 62.1, 59.3, 63.0, 61.0, 60.5, 62.062],
-                "mean": 60.95, "std_dev": 2.72, "min": 55.8, "max": 65.2, "sample_count": 10,
-            },
-            "C-9874-10001290": {  # 16oz Jar — typically ~40-45 M
-                "values": [40.1, 43.5, 42.0, 44.8, 41.2, 43.2, 38.5, 45.0, 42.5, 43.200],
-                "mean": 42.40, "std_dev": 2.07, "min": 38.5, "max": 45.0, "sample_count": 10,
-            },
-            "C-9874-10001840": {  # 12oz Jar — typically ~76-84 M
-                "values": [76.2, 80.0, 82.5, 78.1, 81.0, 79.5, 83.0, 77.8, 80.640, 81.2],
-                "mean": 80.00, "std_dev": 2.20, "min": 76.2, "max": 83.0, "sample_count": 10,
-            },
+            "C-9874-10001833": {"values": [58.5, 62.0, 65.2, 55.8, 62.1, 59.3, 63.0, 61.0, 60.5, 62.062],
+                                "mean": 60.95, "std_dev": 2.72, "min": 55.8, "max": 65.2, "sample_count": 10},
+            "C-9874-10001290": {"values": [40.1, 43.5, 42.0, 44.8, 41.2, 43.2, 38.5, 45.0, 42.5, 43.200],
+                                "mean": 42.40, "std_dev": 2.07, "min": 38.5, "max": 45.0, "sample_count": 10},
+            "C-9874-10001840": {"values": [76.2, 80.0, 82.5, 78.1, 81.0, 79.5, 83.0, 77.8, 80.640, 81.2],
+                                "mean": 80.00, "std_dev": 2.20, "min": 76.2, "max": 83.0, "sample_count": 10},
         }
-
         for po_data_item in BATCH_PO_DATA:
             for item in po_data_item.get("items", []):
                 pattern_data = {
@@ -994,7 +795,6 @@ async def _run_batch_demo_bg(db, job_id: str):
                     "confidence": 1.0,
                     "last_updated": now_iso,
                 }
-                # Attach qty_history for bounds checking
                 if item["no"] in _QTY_HISTORY:
                     pattern_data["qty_history"] = _QTY_HISTORY[item["no"]]
                 await db.order_line_patterns.update_one(
@@ -1002,34 +802,88 @@ async def _run_batch_demo_bg(db, job_id: str):
                     {"$set": pattern_data},
                     upsert=True,
                 )
-
-        # Seed customer-level pattern: Energy Surcharge
-        # (In production, learn_from_bc_posted_orders() would discover this from BC history)
-        _ENERGY_SURCHARGE = {
-            "customer_no": "C-10250",
-            "trigger_item_no": "*",
-            "trigger_item_pattern": "*",
-            "associated_lines": [
-                {
-                    "line_type": "Item",
-                    "item_no": "ENERGY",
-                    "description": "Energy Surcharge",
-                    "qty_ratio": None,
-                    "fixed_qty": 1,
-                    "unit_price": 497.36,
-                    "occurrences": 8,
-                    "frequency": 0.80,
-                },
-            ],
-            "total_orders_analyzed": 10,
-            "confidence": 0.80,
-            "last_updated": now_iso,
-        }
+        # Energy Surcharge customer-level pattern
         await db.order_line_patterns.update_one(
             {"customer_no": "C-10250", "trigger_item_no": "*"},
-            {"$set": _ENERGY_SURCHARGE},
+            {"$set": {
+                "customer_no": "C-10250",
+                "trigger_item_no": "*",
+                "trigger_item_pattern": "*",
+                "associated_lines": [{
+                    "line_type": "Item", "item_no": "ENERGY",
+                    "description": "Energy Surcharge",
+                    "qty_ratio": None, "fixed_qty": 1,
+                    "unit_price": 497.36, "occurrences": 8, "frequency": 0.80,
+                }],
+                "total_orders_analyzed": 10,
+                "confidence": 0.80,
+                "last_updated": now_iso,
+            }},
             upsert=True,
         )
+        steps.append({
+            "step": 3, "name": "Learned Patterns Seeded", "status": "completed",
+            "duration_ms": round((time.time() - t0) * 1000),
+            "details": {"dunnage_patterns": "Glass jar dunnage + qty history", "energy_surcharge": "Customer-level pattern"},
+        })
+        await _update_job(steps=steps, status="splitting")
+
+        # Step 4: Split pages → run each through REAL intake pipeline
+        t0 = time.time()
+        from services.batch_po_splitter import split_and_ingest_batch
+
+        children_processed = []
+        async def _on_page_done(page_num, total, child_info):
+            children_processed.append(child_info)
+            await _update_job(
+                pages_completed=len(children_processed),
+                total_pages=total,
+            )
+
+        split_result = await split_and_ingest_batch(
+            db=db,
+            parent_doc_id=parent_doc_id,
+            parent_filename=filename,
+            file_content=pdf_bytes,
+            sender="purchasing@giovannifoods.com",
+            source="batch_split",
+            subject=f"Batch POs {BATCH_PO_DATA[0]['po']}-{BATCH_PO_DATA[-1]['po']} from Giovanni Food Co.",
+            on_page_done=_on_page_done,
+        )
+
+        children_summary = []
+        for child in split_result.get("children", []):
+            child_doc_id = child.get("child_doc_id", "")
+            saved = await db.hub_documents.find_one({"id": child_doc_id}, {"_id": 0}) if child_doc_id else None
+            if saved:
+                ef = saved.get("extracted_fields") or {}
+                rep_name = saved.get("assigned_rep_name", "Unassigned")
+                rep_email = saved.get("assigned_rep_email", "")
+                children_summary.append({
+                    "page": child.get("page_num"),
+                    "doc_id": child_doc_id[:12] + "..." if child_doc_id else "",
+                    "type": saved.get("document_type", "Unknown"),
+                    "po_number": ef.get("po_number", ""),
+                    "bc_so": ef.get("bc_sales_order", ""),
+                    "customer": ef.get("customer_name", saved.get("vendor_canonical", "")),
+                    "amount": ef.get("amount") or ef.get("total_amount", 0),
+                    "confidence": saved.get("ai_confidence", 0),
+                    "assigned_rep": rep_name,
+                    "review_status": saved.get("sales_review_status", ""),
+                    "queue": "My Queue" if rep_email else "Triage",
+                })
+
+        steps.append({
+            "step": 4, "name": "Page Split & Full Pipeline", "status": "completed",
+            "duration_ms": round((time.time() - t0) * 1000),
+            "details": {
+                "pages_split": split_result.get("children_count", 0),
+                "children_created": len(children_summary),
+                "errors": split_result.get("children_errors", 0),
+                "pipeline": "Full AI classification → extraction → validation → routing → auto-assign",
+            },
+        })
+        await _update_job(steps=steps, status="summarizing")
 
         # Step 5: Summary
         steps.append({
@@ -1051,8 +905,10 @@ async def _run_batch_demo_bg(db, job_id: str):
             total_duration_ms=total_ms,
             completed_at=datetime.now(timezone.utc).isoformat(),
         )
-        logger.info("[BatchDemo] Complete: %d pages → %d children in %dms", page_count, len(children_summary), total_ms)
+        logger.info("[BatchDemo] Complete: %d pages → %d children in %dms (real pipeline)", page_count, len(children_summary), total_ms)
 
     except Exception as e:
         logger.error("[BatchDemo] Failed: %s", str(e))
+        import traceback
+        traceback.print_exc()
         await _update_job(status="error", error=str(e), steps=steps)

@@ -1,4 +1,7 @@
-# GPI Document Hub — Product Requirements Document
+# GPI Document Hub — Product Requirements
+
+## Core Philosophy
+**Learn → Apply → Improve → Learn.** Every document processed, every correction made, every interaction makes the system smarter. Use ALL available data on everything — every interaction, every calculation, every routing decision. The system must continuously self-improve through feedback loops at every layer. Document
 
 ## Original Problem Statement
 Build a document intelligence platform (GPI Hub) to automate document-to-ERP completions, decouple legacy systems, and improve automated multi-source PO extraction. Key capabilities:

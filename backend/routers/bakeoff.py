@@ -1216,8 +1216,13 @@ async def fix_truth_and_output():
             for vf in valid_folders
         ) if truth else False
         
+        # Special case: Inspection_Form with empty truth — GPI routing is correct,
+        # S9 misroutes these to Miscellaneous. Adopt GPI's routing as truth.
+        if not truth and doc_type == "Inspection_Form":
+            new_truth = "Vendor Credit Memos/Sent to Quality"
+            truth_fixed = True
         # If truth is non-standard AND S9 has a valid value, adopt S9 as truth
-        if not truth_is_valid and s9:
+        elif not truth_is_valid and s9:
             new_truth = s9
             truth_fixed = True
         

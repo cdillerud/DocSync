@@ -197,7 +197,18 @@ def _generate_po_pdf(scenario: dict) -> bytes:
 
 @router.get("/scenarios")
 async def list_scenarios():
-    """List available demo scenarios for the pipeline demo."""
+    """List available demo scenarios for the pipeline demo.
+    Also ensures demo data (overrides) exist — auto-seeds if empty.
+    """
+    db = get_db()
+    # Auto-seed overrides if none exist (ensures demo works first time)
+    override_count = await db.customer_rep_overrides.count_documents({"active": True})
+    if override_count == 0:
+        logger.info("[PipelineDemo] No overrides found — auto-seeding demo data")
+        # Import and call seed endpoint logic inline
+        from routers.sales_dashboard import seed_review_data
+        await seed_review_data()
+
     return {
         "scenarios": [
             {

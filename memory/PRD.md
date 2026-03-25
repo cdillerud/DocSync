@@ -219,6 +219,9 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
   - Backend: `GET /api/dashboard/insights-trends` endpoint (daily aggregation pipeline)
   - Testing: 100% backend (13/13), 100% frontend — iteration_152
 
+- **Processed Tab (P0 - COMPLETE)**: Added a "Processed" tab to the inbox that shows only terminal/done documents (exported, completed, posted, archived, auto-filed). The All/Accounting/Sales tabs now only show active docs needing attention. Uses backend `queue_view=true` for active tabs and client-side `isTerminal()` filter for the Processed tab.
+  - Testing: 100% frontend — iteration_153
+
 ## Backlog
 - P1: Teams Adaptive Card integration (DM rep via Graph API with Approve/Flag/View buttons)
 - P1: Webhook handler for Teams "Approve" action → BC SO creation

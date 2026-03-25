@@ -1347,11 +1347,11 @@ async def learn_from_benchmark():
     
     learned = 0
     for d in correct_docs:
-        vendor = d.get("gpi_vendor", "")
-        doc_type = d.get("gpi_doc_type", "")
-        po = d.get("gpi_po", "").strip()
-        folder = d.get("gpi_folder_output", "")
-        truth = d.get("folder_truth", "")
+        vendor = d.get("gpi_vendor") or ""
+        doc_type = d.get("gpi_doc_type") or ""
+        po = (d.get("gpi_po") or "").strip()
+        folder = d.get("gpi_folder_output") or ""
+        truth = d.get("folder_truth") or ""
         is_intl = d.get("is_international", False)
         if not is_intl:
             truth_lower = truth.lower()

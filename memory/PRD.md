@@ -92,6 +92,18 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
 - 205 `no_bc_match` batch failures need investigation
 - Documents stuck at 0.00 confidence from before the fix can be reprocessed via `POST /api/documents/{doc_id}/reprocess?reclassify=true` to re-run classification
 
+### Session Fixes (March 25, 2026 - Fork)
+- **Critical Bug Fix: `_get_excluded_sender_domains` was undefined** — The function was called in `vendor_matching.py` line 120 but never defined, causing `NameError` on any `learn_sender_vendor()` call. Defined the function with `gamerpackaging.com` in the exclusion set.
+- **Added `POST /api/vendor-reprocess/sender-mappings/clear` endpoint** — Allows wiping polluted sender→vendor mappings before re-running the learning job.
+- **Fixed `NoneType` crash in `learn-from-benchmark`** — `gpi_po` stored as `None` in DB caused `.strip()` to crash. Applied `or ""` None-safety guards.
+- **Verified all feedback loop endpoints functional:**
+  - `POST /api/intake-benchmark/runs/fix-truth-and-output` ✅
+  - `POST /api/intake-benchmark/routing-feedback/learn-from-benchmark` ✅ (57 docs → 13 rules)
+  - `POST /api/vendor-reprocess/learn-from-history` ✅ (52 docs → 5 unique senders, gamerpackaging.com excluded)
+  - `POST /api/vendor-reprocess/sender-mappings/clear` ✅
+  - `GET /api/vendor-reprocess/sender-mappings` ✅
+- All 26 routing tests pass.
+
 ## Backlog
 - P2: Vendor Inventory Dashboard and Sales module
 - P2: Product/BOM (Bill of Materials) module

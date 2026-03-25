@@ -101,6 +101,14 @@ async def lookup_vendor_by_sender(sender_email: str) -> dict:
     return {"vendor_canonical": None, "vendor_match_method": "none"}
 
 
+EXCLUDED_SENDER_DOMAINS = {"gamerpackaging.com"}
+
+
+async def _get_excluded_sender_domains() -> set:
+    """Return the set of internal domains whose senders should never be learned."""
+    return EXCLUDED_SENDER_DOMAINS
+
+
 async def learn_sender_vendor(sender_email: str, vendor_canonical: str, 
                                vendor_name: str = "", vendor_no: str = ""):
     """

@@ -353,3 +353,17 @@ async def get_sender_mappings():
         "total": len(mappings),
         "mappings": mappings,
     }
+
+
+@router.post("/sender-mappings/clear")
+async def clear_sender_mappings():
+    """
+    Delete ALL learned sender→vendor mappings.
+    Use this to wipe polluted data before re-running learn-from-history.
+    """
+    db = get_db()
+    result = await db.sender_vendor_map.delete_many({})
+    return {
+        "status": "cleared",
+        "deleted_count": result.deleted_count,
+    }

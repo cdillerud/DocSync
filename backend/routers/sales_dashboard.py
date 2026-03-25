@@ -1,20 +1,39 @@
 """
-Sales Dashboard Router — Orders Awaiting Review
+Sales Dashboard Router — Orders Awaiting Review + Inside Sales Rep Review
 
 Provides a lightweight, role-oriented API for the Sales dashboard:
-  GET /sales-dashboard/queue   — filtered list of sales-eligible docs with readiness status
-  GET /sales-dashboard/summary — summary counts only (fast)
+  GET  /sales-dashboard/queue        — all sales-eligible docs with readiness status
+  GET  /sales-dashboard/summary      — summary counts only (fast)
+  GET  /sales-dashboard/reps         — list available sales reps for dropdown
+  GET  /sales-dashboard/my-queue     — docs assigned to a specific rep
+  GET  /sales-dashboard/triage-queue — docs with no rep assigned
+  POST /sales-dashboard/queue/{id}/approve — rep approves doc
+  POST /sales-dashboard/queue/{id}/flag    — rep flags doc with notes
+  POST /sales-dashboard/queue/{id}/assign  — manually assign rep to doc
+  POST /sales-dashboard/seed-review-data   — seed test data for dev
 """
 
 import logging
-from datetime import datetime, timezone
-from fastapi import APIRouter, Query
+import uuid
+from datetime import datetime, timezone, timedelta
+from typing import Optional
+from fastapi import APIRouter, Query, Body
+from pydantic import BaseModel
 from deps import get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sales-dashboard", tags=["Sales Dashboard"])
 
 SALES_ELIGIBLE_TYPES = {"Sales_Order", "SalesOrder", "Order_Confirmation", "PurchaseOrder"}
+
+# Sales review statuses used by the Inside Sales Rep Review flow
+REVIEW_STATUSES = {
+    "pending_rep_review",   # Assigned to rep, waiting for review
+    "approved",             # Rep approved → ready for BC SO creation
+    "flagged",              # Rep flagged → needs attention
+    "auto_approved",        # High confidence, auto-sent to BC
+    "triage",               # No rep found, needs manual assignment
+}
 
 
 def _assess_readiness(doc: dict) -> dict:
@@ -239,3 +258,431 @@ async def clear_sales_queue():
     deleted = result.deleted_count
     logger.info("Cleared sales queue: %d documents removed", deleted)
     return {"deleted": deleted, "message": f"Cleared {deleted} sales documents from queue"}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# INSIDE SALES REP REVIEW — New endpoints
+# ═══════════════════════════════════════════════════════════════════
+
+class FlagRequest(BaseModel):
+    notes: str = ""
+
+class AssignRequest(BaseModel):
+    rep_email: str
+    rep_name: str = ""
+
+
+@router.get("/reps")
+async def list_reps():
+    """List available sales reps from BC cache + overrides.
+    Used to populate the 'Select Rep' dropdown.
+    """
+    db = get_db()
+    reps = []
+    seen_emails = set()
+
+    # 1. From BC salesperson cache
+    sp_records = await db.bc_reference_cache.find(
+        {"bc_entity_type": "salesperson"},
+        {"_id": 0, "code": 1, "name": 1, "email": 1},
+    ).to_list(200)
+    for sp in sp_records:
+        email = sp.get("email", "")
+        if email and email not in seen_emails:
+            reps.append({
+                "rep_email": email,
+                "rep_name": sp.get("name", ""),
+                "salesperson_code": sp.get("code", ""),
+                "source": "bc_cache",
+            })
+            seen_emails.add(email)
+
+    # 2. From customer_rep_overrides
+    overrides = await db.customer_rep_overrides.find(
+        {"active": True}, {"_id": 0}
+    ).to_list(500)
+    for ov in overrides:
+        email = ov.get("rep_email", "")
+        if email and email not in seen_emails:
+            reps.append({
+                "rep_email": email,
+                "rep_name": ov.get("rep_name", ""),
+                "salesperson_code": ov.get("salesperson_code", ""),
+                "source": "override",
+            })
+            seen_emails.add(email)
+
+    # 3. From documents that already have an assigned rep
+    pipeline = [
+        {"$match": {"assigned_rep_email": {"$exists": True, "$ne": ""}}},
+        {"$group": {
+            "_id": "$assigned_rep_email",
+            "rep_name": {"$first": "$assigned_rep_name"},
+        }},
+    ]
+    from_docs = await db.hub_documents.aggregate(pipeline).to_list(100)
+    for d in from_docs:
+        email = d["_id"]
+        if email and email not in seen_emails:
+            reps.append({
+                "rep_email": email,
+                "rep_name": d.get("rep_name") or "",
+                "salesperson_code": "",
+                "source": "document",
+            })
+            seen_emails.add(email)
+
+    reps.sort(key=lambda r: r["rep_name"] or r["rep_email"])
+    return {"reps": reps, "count": len(reps)}
+
+
+@router.get("/my-queue")
+async def my_queue(
+    rep_email: str = Query(..., description="Rep email to filter by"),
+    status: str = Query("", description="Filter: pending_rep_review|approved|flagged"),
+    search: str = Query("", description="Search filename/PO/customer"),
+    sort: str = Query("created_desc"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+):
+    """Return documents assigned to a specific sales rep."""
+    db = get_db()
+
+    query = {
+        "document_type": {"$in": list(SALES_ELIGIBLE_TYPES)},
+        "assigned_rep_email": rep_email,
+    }
+
+    if status:
+        query["sales_review_status"] = status
+
+    if search:
+        query["$or"] = [
+            {"file_name": {"$regex": search, "$options": "i"}},
+            {"extracted_fields.po_number": {"$regex": search, "$options": "i"}},
+            {"normalized_fields.customer_name": {"$regex": search, "$options": "i"}},
+            {"extracted_fields.customer_name": {"$regex": search, "$options": "i"}},
+            {"vendor_name": {"$regex": search, "$options": "i"}},
+        ]
+
+    sort_map = {
+        "created_desc": [("created_utc", -1)],
+        "created_asc": [("created_utc", 1)],
+        "amount_desc": [("normalized_fields.amount", -1)],
+        "amount_asc": [("normalized_fields.amount", 1)],
+    }
+    sort_spec = sort_map.get(sort, [("created_utc", -1)])
+
+    total = await db.hub_documents.count_documents(query)
+    cursor = db.hub_documents.find(query, {"_id": 0}).sort(sort_spec).skip(skip).limit(limit)
+    docs = await cursor.to_list(limit)
+
+    items = []
+    for doc in docs:
+        assessment = _assess_readiness(doc)
+        items.append({
+            "id": doc.get("id", ""),
+            "file_name": doc.get("file_name", ""),
+            "document_type": doc.get("document_type", ""),
+            "created_utc": doc.get("created_utc", ""),
+            "capture_channel": doc.get("capture_channel", ""),
+            "assigned_rep_email": doc.get("assigned_rep_email", ""),
+            "assigned_rep_name": doc.get("assigned_rep_name", ""),
+            "sales_review_status": doc.get("sales_review_status", "pending_rep_review"),
+            "flag_notes": doc.get("flag_notes", ""),
+            **assessment,
+        })
+
+    # Summary counts for this rep
+    rep_summary = {"pending_rep_review": 0, "approved": 0, "flagged": 0, "total": total}
+    count_pipeline = [
+        {"$match": {"document_type": {"$in": list(SALES_ELIGIBLE_TYPES)}, "assigned_rep_email": rep_email}},
+        {"$group": {"_id": "$sales_review_status", "count": {"$sum": 1}}},
+    ]
+    for r in await db.hub_documents.aggregate(count_pipeline).to_list(10):
+        key = r["_id"] or "pending_rep_review"
+        if key in rep_summary:
+            rep_summary[key] = r["count"]
+
+    return {
+        "items": items,
+        "total": total,
+        "filtered_count": len(items),
+        "skip": skip,
+        "limit": limit,
+        "rep_email": rep_email,
+        "summary": rep_summary,
+    }
+
+
+@router.get("/triage-queue")
+async def triage_queue(
+    search: str = Query("", description="Search filename/PO/customer"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+):
+    """Return sales-eligible documents with no rep assigned (triage queue)."""
+    db = get_db()
+
+    query = {
+        "document_type": {"$in": list(SALES_ELIGIBLE_TYPES)},
+        "$or": [
+            {"assigned_rep_email": {"$exists": False}},
+            {"assigned_rep_email": ""},
+            {"assigned_rep_email": None},
+        ],
+    }
+
+    # Also include those explicitly in triage status
+    query_triage = {
+        "document_type": {"$in": list(SALES_ELIGIBLE_TYPES)},
+        "sales_review_status": "triage",
+    }
+
+    combined_query = {"$or": [query, query_triage]}
+
+    if search:
+        combined_query = {
+            "$and": [
+                combined_query,
+                {"$or": [
+                    {"file_name": {"$regex": search, "$options": "i"}},
+                    {"extracted_fields.po_number": {"$regex": search, "$options": "i"}},
+                    {"vendor_name": {"$regex": search, "$options": "i"}},
+                ]},
+            ]
+        }
+
+    total = await db.hub_documents.count_documents(combined_query)
+    cursor = db.hub_documents.find(combined_query, {"_id": 0}).sort([("created_utc", -1)]).skip(skip).limit(limit)
+    docs = await cursor.to_list(limit)
+
+    items = []
+    for doc in docs:
+        assessment = _assess_readiness(doc)
+        items.append({
+            "id": doc.get("id", ""),
+            "file_name": doc.get("file_name", ""),
+            "document_type": doc.get("document_type", ""),
+            "created_utc": doc.get("created_utc", ""),
+            "capture_channel": doc.get("capture_channel", ""),
+            "sales_review_status": doc.get("sales_review_status", "triage"),
+            **assessment,
+        })
+
+    return {"items": items, "total": total, "filtered_count": len(items), "skip": skip, "limit": limit}
+
+
+@router.post("/queue/{doc_id}/approve")
+async def approve_document(doc_id: str):
+    """Rep approves a document → mark as approved, ready for BC SO creation."""
+    db = get_db()
+
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1, "sales_review_status": 1})
+    if not doc:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+    action_entry = {
+        "action": "approved",
+        "at": now,
+        "by": "rep",
+    }
+
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {
+            "$set": {
+                "sales_review_status": "approved",
+                "approved_at": now,
+                "updated_utc": now,
+            },
+            "$push": {"sales_review_history": action_entry},
+        },
+    )
+
+    logger.info("[SalesReview] Document %s APPROVED", doc_id)
+    return {"status": "approved", "doc_id": doc_id, "approved_at": now}
+
+
+@router.post("/queue/{doc_id}/flag")
+async def flag_document(doc_id: str, body: FlagRequest):
+    """Rep flags a document for attention → stays in queue with notes."""
+    db = get_db()
+
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1})
+    if not doc:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+    action_entry = {
+        "action": "flagged",
+        "at": now,
+        "by": "rep",
+        "notes": body.notes,
+    }
+
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {
+            "$set": {
+                "sales_review_status": "flagged",
+                "flag_notes": body.notes,
+                "flagged_at": now,
+                "updated_utc": now,
+            },
+            "$push": {"sales_review_history": action_entry},
+        },
+    )
+
+    logger.info("[SalesReview] Document %s FLAGGED: %s", doc_id, body.notes[:100])
+    return {"status": "flagged", "doc_id": doc_id, "notes": body.notes, "flagged_at": now}
+
+
+@router.post("/queue/{doc_id}/assign")
+async def assign_document(doc_id: str, body: AssignRequest):
+    """Manually assign a rep to a document (triage action)."""
+    db = get_db()
+
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1})
+    if not doc:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+    action_entry = {
+        "action": "assigned",
+        "at": now,
+        "rep_email": body.rep_email,
+        "rep_name": body.rep_name,
+    }
+
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {
+            "$set": {
+                "assigned_rep_email": body.rep_email,
+                "assigned_rep_name": body.rep_name,
+                "sales_review_status": "pending_rep_review",
+                "updated_utc": now,
+            },
+            "$push": {"sales_review_history": action_entry},
+        },
+    )
+
+    logger.info("[SalesReview] Document %s ASSIGNED to %s <%s>", doc_id, body.rep_name, body.rep_email)
+    return {"status": "assigned", "doc_id": doc_id, "rep_email": body.rep_email, "rep_name": body.rep_name}
+
+
+@router.post("/seed-review-data")
+async def seed_review_data():
+    """Seed test data for the Inside Sales Rep Review feature.
+    Creates sample sales documents with rep assignments for development/testing.
+    """
+    db = get_db()
+
+    now = datetime.now(timezone.utc)
+    reps = [
+        {"email": "jsmith@gamerpackaging.com", "name": "John Smith", "code": "JS"},
+        {"email": "mgarcia@gamerpackaging.com", "name": "Maria Garcia", "code": "MG"},
+        {"email": "bwilson@gamerpackaging.com", "name": "Bob Wilson", "code": "BW"},
+    ]
+
+    customers = [
+        {"no": "C-1001", "name": "Bragg Live Food Products, LLC"},
+        {"no": "C-1002", "name": "Palmer's (ET Browne)"},
+        {"no": "C-1003", "name": "Karlin Foods International"},
+        {"no": "C-1004", "name": "House of Wines"},
+        {"no": "C-1005", "name": "Wing Nien Foods"},
+    ]
+
+    sample_docs = []
+    statuses = ["pending_rep_review", "pending_rep_review", "pending_rep_review", "flagged", "approved"]
+    doc_types = list(SALES_ELIGIBLE_TYPES)
+
+    for i in range(15):
+        rep = reps[i % len(reps)]
+        cust = customers[i % len(customers)]
+        status = statuses[i % len(statuses)]
+        doc_type = doc_types[i % len(doc_types)]
+        created = (now - timedelta(hours=i * 6)).isoformat()
+        amount = round(1000 + (i * 2345.67), 2)
+
+        doc = {
+            "id": str(uuid.uuid4()),
+            "file_name": f"PO-{10000 + i}-{cust['name'].split()[0]}.pdf",
+            "document_type": doc_type,
+            "created_utc": created,
+            "updated_utc": created,
+            "capture_channel": "email" if i % 2 == 0 else "SHADOW_PILOT_UPLOAD",
+            "status": "ready" if status == "approved" else "pending",
+            "assigned_rep_email": rep["email"],
+            "assigned_rep_name": rep["name"],
+            "assigned_salesperson_code": rep["code"],
+            "sales_review_status": status,
+            "flag_notes": "Customer requested different ship date" if status == "flagged" else "",
+            "sales_review_history": [],
+            "extracted_fields": {
+                "po_number": f"PO-{10000 + i}",
+                "customer_name": cust["name"],
+                "order_date": (now - timedelta(days=i)).strftime("%m/%d/%y"),
+                "amount": str(amount),
+                "line_items": [{"item": f"PKG-{j}", "qty": 1000 * (j + 1)} for j in range(i % 4 + 1)],
+            },
+            "normalized_fields": {
+                "bc_customer_no": cust["no"],
+                "customer_name": cust["name"],
+                "po_number": f"PO-{10000 + i}",
+                "amount": amount,
+            },
+            "vendor_name": cust["name"],
+            "ai_confidence": round(0.7 + (i % 4) * 0.08, 2),
+        }
+        sample_docs.append(doc)
+
+    # Add 3 unassigned docs for the triage queue
+    for i in range(3):
+        cust = customers[i]
+        created = (now - timedelta(hours=i * 3 + 1)).isoformat()
+        doc = {
+            "id": str(uuid.uuid4()),
+            "file_name": f"UNKNOWN-ORDER-{i + 1}.pdf",
+            "document_type": "Sales_Order",
+            "created_utc": created,
+            "updated_utc": created,
+            "capture_channel": "email",
+            "status": "pending",
+            "assigned_rep_email": "",
+            "assigned_rep_name": "",
+            "sales_review_status": "triage",
+            "flag_notes": "",
+            "sales_review_history": [],
+            "extracted_fields": {
+                "po_number": f"UNK-{9000 + i}",
+                "customer_name": cust["name"],
+                "amount": str(round(500 + i * 750, 2)),
+                "line_items": [{"item": "PKG-X", "qty": 500}],
+            },
+            "normalized_fields": {
+                "customer_name": cust["name"],
+                "amount": round(500 + i * 750, 2),
+            },
+            "vendor_name": cust["name"],
+            "ai_confidence": 0.55,
+        }
+        sample_docs.append(doc)
+
+    # Clear existing seeded data and insert fresh
+    await db.hub_documents.delete_many({"document_type": {"$in": list(SALES_ELIGIBLE_TYPES)}})
+    if sample_docs:
+        await db.hub_documents.insert_many(sample_docs)
+
+    logger.info("[SalesReview] Seeded %d review documents", len(sample_docs))
+    return {
+        "status": "success",
+        "seeded_count": len(sample_docs),
+        "reps": [r["email"] for r in reps],
+        "statuses": {"pending_rep_review": 9, "flagged": 3, "approved": 3, "triage": 3},
+    }

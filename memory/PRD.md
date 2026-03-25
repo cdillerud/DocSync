@@ -187,7 +187,29 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
 - **Validation status fix (March 25, 2026)**: Fixed auto-filed docs showing "Completed" + "fail" validation. Now: docs auto-filed with failed required validation get status "AutoFiled" (not "Completed"), distinguishing them from truly completed docs. Added "Auto-Filed" badge to the queue UI.
 - **Vendor match improvement (March 25, 2026)**: BC validation now trusts reference intelligence vendor resolution. If `vendor_canonical` was set by ref intel, it's tried first in vendor matching AND the vendor_match check is downgraded from "required" to "warning" since the vendor identity was already confirmed.
 
+### UX Simplification + Inbox Stats (March 25, 2026 - Fork)
+- **Radical UX Simplification (P0 - COMPLETE)**: Stripped the cluttered 8-item sidebar down to 3 items (Inbox, Pipeline Demo, Settings). Removed developer metrics dashboard, intelligence hub, operations queue, and integrations from primary nav. Main "Documents" view converted to a clean tabbed inbox with All/Accounting/Sales tabs that filter by document type.
+  - Sidebar: 3 items (Inbox, Pipeline Demo, Settings) — down from 8+
+  - Tabs: All | Accounting | Sales with type-based filtering and count badges
+  - Table: 6 columns (Checkbox, Document, Vendor/Customer, Type, Status, Date) — down from 10+
+  - Search: Simple search bar, no excessive checkbox filters or double date pickers
+  - Bulk actions: Retry, File, Ref Intel, Delete — appear on selection
+  - Upload: Dialog-based upload button (top right)
+  - Files: `Layout.js`, `UnifiedQueuePage.js`, `DocumentsHubPage.js`, `App.js`
+  - NO backend logic was changed during this rewrite (per user directive)
+
+- **Inbox Stats Strip (P0 - COMPLETE)**: Added a compact read-only stats strip above the tabs showing 5 key metrics:
+  - Ingested Today (with 7-day avg)
+  - Auto-validated % (automation_decision=auto OR auto_cleared=True OR sales_review_status=auto_approved)
+  - Pending Review count
+  - Qty Alerts count (bounds violations, shown in red when > 0)
+  - AI Confidence % (sampled from last 200 docs)
+  - Backend: `GET /api/dashboard/inbox-stats` endpoint (read-only aggregation)
+  - Frontend: Auto-refreshes every 60s
+  - Testing: 100% backend (13/13), 100% frontend — iteration_151
+
 ## Backlog
+- P1: Rep Overrides management UI (Admin screen to map customers to reps without DB scripts)
 - P1: Teams Adaptive Card integration (DM rep via Graph API with Approve/Flag/View buttons)
 - P1: Webhook handler for Teams "Approve" action → BC SO creation
 - P2: Vendor Inventory Dashboard

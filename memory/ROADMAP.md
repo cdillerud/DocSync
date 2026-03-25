@@ -4,6 +4,7 @@
 
 ### P0 — Completed
 - ~~Learned Dunnage Patterns~~ (2026-03-25) — Full-stack feature: backend pattern learning + frontend Suggested Additions UI
+- ~~Energy Surcharge / Customer-Level Patterns~~ (2026-03-25) — Customer-level patterns (trigger_item="*") for items like ENERGY that appear across all orders
 - ~~Refactor server.py monolith~~ (2026-03-11)
 - ~~Document Handler Extraction~~ (2026-03-15, iter_109)
 - ~~Workflow Handler Extraction~~ (2026-03-15, iter_110) — 25 of 32 handlers extracted

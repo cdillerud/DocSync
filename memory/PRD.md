@@ -51,6 +51,14 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
   - `forwardRef` added to `CreateBCSalesOrderPanel` for parent access to `editedLines` (used by `SalesOrderReviewPage` approve flow)
   - Testing: 100% pass rate on backend and frontend (iteration_147, iteration_148)
 
+- **Energy Surcharge / Customer-Level Patterns (P0 - COMPLETE)**: Extended the learned pattern system to support customer-level patterns (`trigger_item: "*"`) that apply to ALL orders for a customer.
+  - Backend: New `learn_from_bc_posted_orders()` function in `order_line_patterns.py` queries BC posted sales invoices for the last N orders, identifies recurring line items (≥75% threshold), and saves customer-level patterns
+  - Backend: `get_suggested_lines()` updated to handle both product-level (dunnage) and customer-level (surcharges) patterns
+  - Backend: Preflight endpoint auto-triggers BC history learning if no customer-level patterns exist
+  - Demo seed: ENERGY surcharge pattern seeded for Giovanni (Qty: 1 EA, Price: $497.36, 80% frequency across 10 orders)
+  - Frontend: ENERGY surcharge appears in Suggested Additions panel with "seen in 80% of orders" and editable price in line table
+  - Testing: 100% pass rate (iteration_149)
+
 ### Current Session Fixes (March 24, 2026 - Fork)
 - **Auto-Close Confidence Fix (P0)**: Fixed pipeline where documents like `0303691.pdf` failed to auto-close despite being "slam dunk" easy docs. Root cause: when AI extraction (Gemini LLM) fails/times out, `confidence=0.0` propagated to ALL downstream systems — workflow handler (`_update_standard_workflow_status`) treated it as classification failure and bailed, auto-resolution skipped it, auto-clear rejected it. Three-part fix:
   1. **Confidence bump after classification**: After `classify_document_type` successfully classifies a doc (doc_type != Other/Unknown), confidence is bumped to 0.85 so downstream systems don't treat it as failed.

@@ -15,6 +15,13 @@
 - `CreateBCSalesOrderPanel` wrapped with `forwardRef` for parent access to edited lines
 - Pattern-sourced lines separated from PO lines at preflight load time (shown in Suggested Additions panel, not mixed into line table)
 
+### Added — Energy Surcharge / Customer-Level Patterns
+- **Customer-level patterns** (trigger_item="*") for items that appear across ALL orders for a customer (not tied to specific products)
+- `learn_from_bc_posted_orders()` function: queries BC for posted sales invoices, identifies recurring line items above threshold (default 75% of last 10 orders)
+- ENERGY surcharge auto-suggested for Giovanni: Qty 1 EA, Price $497.36 (editable), "seen in 80% of orders"
+- Preflight endpoint auto-triggers BC history learning on first encounter
+- Demo batch seed includes ENERGY pattern alongside existing dunnage patterns
+
 
 ## [2026-03-16] SharePoint Folder Routing Feature
 

@@ -369,6 +369,183 @@ async def clear_sender_mappings():
     }
 
 
+@router.post("/auto-map-domains")
+async def auto_map_unresolved_domains(
+    dry_run: bool = Query(True),
+):
+    """
+    Automatically map unresolved sender domains to vendors by cross-referencing:
+    1. Existing resolved hub_documents (vendor_canonical from alias_match, etc.)
+    2. Bakeoff benchmark data (gpi_vendor)
+    3. Domain name similarity to known vendor names
+    """
+    from services.vendor_matching import learn_sender_vendor
+    from services.vendor_resolution_service import build_resolution_object
+    db = get_db()
+
+    EXCLUDED_DOMAINS = {"gamerpackaging.com"}
+
+    # Step 1: Get all unresolved domains
+    pipeline = [
+        {"$match": {"vendor_match_method": {"$in": ["none", None]},
+                     "email_sender": {"$exists": True, "$ne": None, "$ne": ""}}},
+        {"$addFields": {"_domain": {"$arrayElemAt": [{"$split": ["$email_sender", "@"]}, 1]}}},
+        {"$group": {"_id": "$_domain", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    unresolved = await db.hub_documents.aggregate(pipeline).to_list(200)
+
+    # Step 2: Build known vendor name list from resolved docs
+    vendor_pipeline = [
+        {"$match": {"vendor_canonical": {"$exists": True, "$ne": None, "$ne": ""}}},
+        {"$group": {"_id": "$vendor_canonical",
+                     "vendor_name": {"$first": "$vendor_name"},
+                     "vendor_no": {"$first": "$vendor_no"},
+                     "count": {"$sum": 1}}},
+    ]
+    known_vendors = await db.hub_documents.aggregate(vendor_pipeline).to_list(500)
+
+    # Also pull from bakeoff
+    bakeoff_vendors = await db.bakeoff_documents.aggregate([
+        {"$match": {"gpi_vendor": {"$exists": True, "$ne": None, "$ne": ""}}},
+        {"$group": {"_id": "$gpi_vendor", "count": {"$sum": 1}}},
+    ]).to_list(500)
+
+    # Merge into a lookup: normalized name → {canonical, vendor_name, vendor_no}
+    vendor_lookup = {}
+    for v in known_vendors:
+        canonical = v["_id"]
+        if not canonical:
+            continue
+        name = v.get("vendor_name") or canonical
+        vendor_lookup[canonical.lower()] = {
+            "vendor_canonical": canonical, "vendor_name": name,
+            "vendor_no": v.get("vendor_no") or canonical,
+        }
+        vendor_lookup[name.lower()] = vendor_lookup[canonical.lower()]
+
+    for v in bakeoff_vendors:
+        name = v["_id"]
+        nl = name.lower()
+        if nl not in vendor_lookup:
+            vendor_lookup[nl] = {
+                "vendor_canonical": name, "vendor_name": name, "vendor_no": "",
+            }
+
+    # Step 3: Match domains to vendors
+    import re
+    mappings = []
+    for entry in unresolved:
+        domain = entry["_id"]
+        doc_count = entry["count"]
+        if not domain or domain in EXCLUDED_DOMAINS:
+            continue
+
+        # Extract company-like tokens from domain (e.g., "citi-cargo.com" → "citi cargo")
+        domain_base = domain.rsplit(".", 1)[0]  # remove TLD
+        domain_tokens = re.split(r'[-_.]', domain_base)
+        domain_search = " ".join(domain_tokens).lower()
+
+        best_match = None
+        best_score = 0
+
+        for key, vendor in vendor_lookup.items():
+            # Check if domain tokens appear in vendor name
+            key_lower = key.lower()
+            score = 0
+            for token in domain_tokens:
+                if len(token) >= 3 and token.lower() in key_lower:
+                    score += len(token)
+
+            # Also check reverse: vendor name tokens in domain
+            for vtoken in re.split(r'[\s\-_&,.]', key_lower):
+                if len(vtoken) >= 3 and vtoken in domain_search:
+                    score += len(vtoken)
+
+            if score > best_score:
+                best_score = score
+                best_match = vendor
+
+        if best_match and best_score >= 5:
+            mappings.append({
+                "domain": domain,
+                "docs": doc_count,
+                "vendor_canonical": best_match["vendor_canonical"],
+                "vendor_name": best_match["vendor_name"],
+                "vendor_no": best_match["vendor_no"],
+                "confidence_score": best_score,
+            })
+
+    # Step 4: Apply if not dry_run
+    total_resolved = 0
+    if not dry_run:
+        now = datetime.now(timezone.utc).isoformat()
+        for m in mappings:
+            # Create domain mapping
+            await db.sender_vendor_map.update_one(
+                {"sender_domain": m["domain"], "sender_email": {"$exists": False}},
+                {"$set": {
+                    "sender_domain": m["domain"],
+                    "vendor_canonical": m["vendor_canonical"],
+                    "vendor_name": m["vendor_name"],
+                    "vendor_no": m["vendor_no"],
+                    "domain_confidence": max(m["docs"], 5),
+                    "source": "auto_map",
+                    "updated_at": now,
+                }, "$setOnInsert": {"created_at": now}},
+                upsert=True,
+            )
+            # Resolve docs
+            match_result = {
+                "vendor_canonical": m["vendor_canonical"],
+                "vendor_match_method": "sender_domain",
+                "vendor_name": m["vendor_name"],
+                "vendor_no": m["vendor_no"],
+            }
+            docs = await db.hub_documents.find(
+                {"vendor_match_method": {"$in": ["none", None]},
+                 "email_sender": {"$regex": f"@{m['domain']}$", "$options": "i"}},
+                {"_id": 0, "id": 1, "email_sender": 1, "vendor_name_raw": 1, "extracted_fields": 1}
+            ).to_list(5000)
+            for doc in docs:
+                vendor_raw = (doc.get("vendor_name_raw") or
+                              (doc.get("extracted_fields") or {}).get("vendor") or "")
+                resolution = build_resolution_object(vendor_raw, match_result)
+                await db.hub_documents.update_one(
+                    {"id": doc["id"]},
+                    {"$set": {
+                        "vendor_canonical": m["vendor_canonical"],
+                        "vendor_match_method": "sender_domain",
+                        "vendor_name": m["vendor_name"],
+                        "vendor_no": m["vendor_no"],
+                        "vendor_resolution": resolution,
+                        "vendor_reprocessed_at": now,
+                    }}
+                )
+                total_resolved += 1
+                sender = (doc.get("email_sender") or "").strip()
+                if sender:
+                    try:
+                        await learn_sender_vendor(sender, m["vendor_canonical"],
+                                                   m["vendor_name"], m["vendor_no"])
+                    except Exception:
+                        pass
+
+    return {
+        "dry_run": dry_run,
+        "mappings_found": len(mappings),
+        "total_would_resolve": sum(m["docs"] for m in mappings),
+        "total_resolved": total_resolved,
+        "mappings": mappings,
+        "unmapped_domains": [
+            {"domain": e["_id"], "docs": e["count"]}
+            for e in unresolved
+            if e["_id"] and e["_id"] not in EXCLUDED_DOMAINS
+            and not any(m["domain"] == e["_id"] for m in mappings)
+        ][:20],
+    }
+
+
 @router.post("/teach-domain")
 async def teach_domain_vendor(
     domain: str = Query(..., description="Email domain (e.g. valleydist.com)"),

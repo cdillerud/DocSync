@@ -723,3 +723,74 @@ async def run_auto_assign():
             results["errors"] += 1
 
     return {"status": "completed", "processed": len(docs), **results}
+
+
+class RepOverrideRequest(BaseModel):
+    customer_no: str = ""
+    customer_name: str = ""
+    rep_email: str
+    rep_name: str = ""
+    salesperson_code: str = ""
+
+
+@router.get("/rep-overrides")
+async def list_rep_overrides():
+    """List all customer→rep manual overrides."""
+    db = get_db()
+    overrides = await db.customer_rep_overrides.find(
+        {"active": True}, {"_id": 0}
+    ).sort([("customer_name", 1)]).to_list(500)
+    return {"overrides": overrides, "count": len(overrides)}
+
+
+@router.post("/rep-overrides")
+async def create_rep_override(body: RepOverrideRequest):
+    """Create or update a customer→rep override. Used by admins to manually
+    map customers to sales reps for auto-assignment."""
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+
+    if not body.customer_no and not body.customer_name:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Either customer_no or customer_name is required")
+
+    # Upsert by customer_no or customer_name
+    filter_q = {}
+    if body.customer_no:
+        filter_q["customer_no"] = body.customer_no
+    else:
+        filter_q["customer_name"] = body.customer_name
+
+    override_doc = {
+        "customer_no": body.customer_no,
+        "customer_name": body.customer_name,
+        "rep_email": body.rep_email,
+        "rep_name": body.rep_name,
+        "salesperson_code": body.salesperson_code,
+        "active": True,
+        "updated_utc": now,
+    }
+
+    result = await db.customer_rep_overrides.update_one(
+        filter_q,
+        {"$set": override_doc, "$setOnInsert": {"id": str(uuid.uuid4()), "created_utc": now}},
+        upsert=True,
+    )
+
+    action = "updated" if result.matched_count > 0 else "created"
+    logger.info("[RepOverride] %s: %s → %s <%s>", action, body.customer_name or body.customer_no, body.rep_name, body.rep_email)
+    return {"status": action, "customer": body.customer_name or body.customer_no, "rep_email": body.rep_email}
+
+
+@router.delete("/rep-overrides/{customer_no}")
+async def delete_rep_override(customer_no: str):
+    """Deactivate a customer→rep override."""
+    db = get_db()
+    result = await db.customer_rep_overrides.update_one(
+        {"customer_no": customer_no},
+        {"$set": {"active": False, "updated_utc": datetime.now(timezone.utc).isoformat()}},
+    )
+    if result.matched_count == 0:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Override not found")
+    return {"status": "deactivated", "customer_no": customer_no}

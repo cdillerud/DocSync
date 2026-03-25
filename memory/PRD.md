@@ -123,6 +123,15 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
 - **Testing**: 21/21 backend tests passed, frontend UI fully verified
 - Files: `routers/sales_dashboard.py`, `pages/MyQueuePage.js`, `pages/TriageQueuePage.js`, `pages/SalesInventoryHubPage.js`
 
+### Auto-Assignment Pipeline (March 25, 2026)
+- **Auto-assign service** (`services/sales_auto_assign.py`): After classification, checks if doc is sales-eligible → looks up customer→rep mapping → assigns rep or routes to triage
+- **Hooked into both intake paths**: `_internal_intake_document` (email) and `intake_document` (upload) in `server.py`
+- **Reprocess endpoint**: `POST /api/sales-dashboard/run-auto-assign` re-runs assignment on all unassigned/triage docs
+- **Rep Overrides CRUD**: `GET/POST /api/sales-dashboard/rep-overrides`, `DELETE /api/sales-dashboard/rep-overrides/{customer_no}`
+- **Auto-approve threshold**: Documents with ≥95% AI confidence + known rep get `auto_approved` status
+- **Verified end-to-end**: Created override → ran auto-assign → Bragg doc moved from triage to John Smith's queue
+- **Testing**: 14/14 backend tests passed
+
 ## Backlog
 - P1: Teams Adaptive Card integration (DM rep via Graph API with Approve/Flag/View buttons)
 - P1: Webhook handler for Teams "Approve" action → BC SO creation

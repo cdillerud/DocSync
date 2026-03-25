@@ -369,6 +369,122 @@ async def clear_sender_mappings():
     }
 
 
+@router.post("/teach-domain")
+async def teach_domain_vendor(
+    domain: str = Query(..., description="Email domain (e.g. valleydist.com)"),
+    vendor_canonical: str = Query(..., description="BC vendor code (e.g. VALLEY)"),
+    vendor_name: str = Query("", description="Vendor display name"),
+    vendor_no: str = Query("", description="BC vendor number"),
+    dry_run: bool = Query(False),
+):
+    """
+    Teach the system that a sender domain maps to a specific vendor.
+    1. Creates a sender domain mapping in the learning table
+    2. Resolves ALL unresolved docs from that domain
+    """
+    from services.vendor_matching import learn_sender_vendor
+    from services.vendor_resolution_service import build_resolution_object
+    db = get_db()
+
+    domain = domain.strip().lower()
+    if not vendor_no:
+        vendor_no = vendor_canonical
+
+    # Find all unresolved docs from this domain
+    docs = await db.hub_documents.find(
+        {
+            "vendor_match_method": {"$in": ["none", None]},
+            "email_sender": {"$regex": f"@{domain}$", "$options": "i"},
+        },
+        {"_id": 0, "id": 1, "email_sender": 1, "vendor_name_raw": 1, "extracted_fields": 1}
+    ).to_list(5000)
+
+    if dry_run:
+        return {
+            "domain": domain,
+            "vendor_canonical": vendor_canonical,
+            "docs_found": len(docs),
+            "action": "dry_run — no changes made",
+        }
+
+    # Create/update the domain mapping
+    now = datetime.now(timezone.utc).isoformat()
+    await db.sender_vendor_map.update_one(
+        {"sender_domain": domain, "sender_email": {"$exists": False}},
+        {"$set": {
+            "sender_domain": domain,
+            "vendor_canonical": vendor_canonical,
+            "vendor_name": vendor_name,
+            "vendor_no": vendor_no,
+            "domain_confidence": max(len(docs), 5),
+            "source": "manual_teach",
+            "updated_at": now,
+        }, "$setOnInsert": {"created_at": now}},
+        upsert=True,
+    )
+
+    # Resolve all matching docs
+    resolved = 0
+    match_result = {
+        "vendor_canonical": vendor_canonical,
+        "vendor_match_method": "sender_domain",
+        "vendor_name": vendor_name,
+        "vendor_no": vendor_no,
+    }
+    for doc in docs:
+        vendor_raw = (doc.get("vendor_name_raw") or
+                      (doc.get("extracted_fields") or {}).get("vendor") or "")
+        resolution = build_resolution_object(vendor_raw, match_result)
+        await db.hub_documents.update_one(
+            {"id": doc["id"]},
+            {"$set": {
+                "vendor_canonical": vendor_canonical,
+                "vendor_match_method": "sender_domain",
+                "vendor_name": vendor_name,
+                "vendor_no": vendor_no,
+                "vendor_resolution": resolution,
+                "vendor_reprocessed_at": now,
+            }}
+        )
+        resolved += 1
+
+        # Also learn each individual email
+        sender = (doc.get("email_sender") or "").strip()
+        if sender:
+            try:
+                await learn_sender_vendor(sender, vendor_canonical, vendor_name, vendor_no)
+            except Exception:
+                pass
+
+    return {
+        "domain": domain,
+        "vendor_canonical": vendor_canonical,
+        "docs_found": len(docs),
+        "resolved": resolved,
+    }
+
+
+@router.get("/unresolved-domains")
+async def list_unresolved_domains():
+    """List all sender domains with unresolved vendor docs, sorted by count."""
+    db = get_db()
+    pipeline = [
+        {"$match": {"vendor_match_method": {"$in": ["none", None]},
+                     "email_sender": {"$exists": True, "$ne": None, "$ne": ""}}},
+        {"$addFields": {"_domain": {"$arrayElemAt": [{"$split": ["$email_sender", "@"]}, 1]}}},
+        {"$group": {"_id": "$_domain", "count": {"$sum": 1},
+                     "sample_sender": {"$first": "$email_sender"}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 50},
+    ]
+    results = await db.hub_documents.aggregate(pipeline).to_list(50)
+    return {
+        "total_unresolved_domains": len(results),
+        "domains": [{"domain": r["_id"], "count": r["count"],
+                      "sample": r.get("sample_sender", "")} for r in results],
+    }
+
+
 @router.post("/resolve-by-sender")
 async def resolve_unresolved_by_sender(
     limit: int = Query(2000, ge=1, le=5000),

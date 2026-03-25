@@ -64,7 +64,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://gpi-hardening.preview.emergentagent.com"
+    "api_url": "https://gpi-hardening-1.preview.emergentagent.com"
   },
   "seed_data_used": {
     "queue_items": "120 total items, 119 unassigned, 1 in_progress",

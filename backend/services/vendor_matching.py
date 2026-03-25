@@ -116,6 +116,12 @@ async def learn_sender_vendor(sender_email: str, vendor_canonical: str,
     domain = email_lower.split("@")[-1] if "@" in email_lower else ""
     now = datetime.now(timezone.utc).isoformat()
 
+    # GUARD: Skip internal/company domains where employees forward external vendor invoices
+    excluded_domains = await _get_excluded_sender_domains()
+    if domain in excluded_domains:
+        logger.info(f"[VendorLearn] Skipping {email_lower} — domain {domain} is excluded (internal)")
+        return
+
     # Upsert exact sender mapping
     existing = await db.sender_vendor_map.find_one(
         {"sender_email": email_lower}, {"_id": 0}

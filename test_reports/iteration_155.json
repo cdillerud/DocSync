@@ -1,0 +1,75 @@
+{
+  "summary": "Completed testing of demo scaffolding removal. All features working correctly: Pipeline Demo tab removed from Sales module, Batches tab added to Inbox showing 17 batch_parent documents with reprocess buttons, Sales defaults to My Queue, Processed tab shows 5 completed docs (excluding batch_parent), Stats strip and Insights page working.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration155_demo_removal.py",
+    "/app/test_reports/pytest/iteration155_demo_removal_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (11/11 tests passed)",
+    "frontend": "100% (All features verified working)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "No new seed data created. Used existing 17 batch_parent documents and 5 completed Sales Order documents.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Demo scaffolding removal fully tested. Pipeline Demo tab removed from Sales module. Batches tab added to Inbox showing batch_parent documents with reprocess button (RotateCcw icon). Sales page defaults to My Queue tab. Processed tab correctly shows 5 completed docs (excluding batch_parent). Stats strip shows: Today 5, Auto-validated 100%, Pending review 0, AI confidence 99.7%. Insights page loads with charts and summary cards.",
+  "features_tested": {
+    "backend": [
+      "GET /api/health - Returns healthy status - PASS",
+      "GET /api/documents?status=batch_parent - Returns 17 batch_parent documents - PASS",
+      "Batch parent documents have batch_children_count field - PASS",
+      "POST /api/documents/{invalid_id}/reprocess-batch - Returns 404 - PASS",
+      "POST /api/documents/{non_batch_parent}/reprocess-batch - Returns 400 - PASS",
+      "Completed count excludes batch_parent (5, not 22) - PASS",
+      "Queue view excludes batch_parent documents - PASS",
+      "GET /api/dashboard/inbox-stats - Returns valid stats - PASS",
+      "GET /api/dashboard/insights-trends - Returns trend data - PASS",
+      "GET /api/sales-dashboard/triage-queue - Returns data - PASS",
+      "GET /api/sales-dashboard/my-queue - Responds correctly - PASS"
+    ],
+    "frontend": [
+      "Login flow with admin/admin credentials - PASS",
+      "Inbox All tab shows 0 active documents - PASS",
+      "Inbox Batches tab shows 17 batch_parent documents - PASS",
+      "Batches tab has reprocess button (RotateCcw icon) on each row - 17 buttons found - PASS",
+      "Processed tab shows 5 completed documents (excluding batch_parent) - PASS",
+      "Processed tab shows 'Exported' status, 'Sales Order' type - PASS",
+      "Stats strip shows: Today 5, Auto-validated 100%, Pending review 0, AI confidence 99.7% - PASS",
+      "Sales page defaults to My Queue tab - PASS",
+      "Sales page tabs: My Queue, Triage, Sales Orders, Rep Performance, Inventory Ledger - PASS",
+      "Pipeline Demo tab removed from Sales page - PASS",
+      "Insights page loads with charts and summary cards - PASS"
+    ]
+  },
+  "mocked_apis": {
+    "BC Sandbox": "DEMO_MODE=true - BC Sales Order creation is mocked",
+    "SharePoint Graph API": "DEMO_MODE=true - SharePoint integration is mocked"
+  },
+  "inbox_tabs_verified": {
+    "All": "Shows 0 active documents (correct - no pending work)",
+    "Accounting": "Tab present",
+    "Sales": "Tab present",
+    "Processed": "Shows 5 completed documents (batch_parent excluded)",
+    "Batches": "Shows 17 batch_parent documents with reprocess buttons"
+  },
+  "sales_tabs_verified": {
+    "My Queue": "Default active tab - PASS",
+    "Triage": "Tab present - PASS",
+    "Sales Orders": "Tab present - PASS",
+    "Rep Performance": "Tab present - PASS",
+    "Inventory Ledger": "Tab present - PASS",
+    "Pipeline Demo": "REMOVED - PASS"
+  }
+}

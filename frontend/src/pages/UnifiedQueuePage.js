@@ -10,6 +10,7 @@ import {
   Search, RefreshCw, FileText, ChevronRight, Trash2, Play,
   Receipt, ShoppingCart, Inbox, FolderInput, Brain,
   TrendingUp, ShieldCheck, AlertTriangle, Clock, CheckCircle2,
+  RotateCcw, Layers,
 } from "lucide-react";
 import api, { bulkResubmitDocuments, bulkDeleteDocuments, deleteDocument, bulkFileAndClear, batchAutoResolve, triggerAutoResolve } from "@/lib/api";
 
@@ -91,8 +92,9 @@ export default function UnifiedQueuePage() {
   const [activeTab, setActiveTab] = useState("all");
   const [selectedDocs, setSelectedDocs] = useState(new Set());
   const [bulkProcessing, setBulkProcessing] = useState(false);
-  const [counts, setCounts] = useState({ all: 0, accounting: 0, sales: 0, processed: 0 });
+  const [counts, setCounts] = useState({ all: 0, accounting: 0, sales: 0, processed: 0, batches: 0 });
   const [stats, setStats] = useState(null);
+  const [reprocessing, setReprocessing] = useState(null);
 
   // ── Fetch Inbox Stats ──
   useEffect(() => {
@@ -113,12 +115,13 @@ export default function UnifiedQueuePage() {
     setLoading(true);
     try {
       const isProcessedTab = activeTab === "processed";
+      const isBatchesTab = activeTab === "batches";
       const params = new URLSearchParams();
       if (searchQuery) params.append("search", searchQuery);
       params.append("limit", "500");
 
-      if (isProcessedTab) {
-        // Show all docs, then filter to terminal client-side
+      if (isProcessedTab || isBatchesTab) {
+        // Show all docs, then filter client-side
         params.append("queue_view", "false");
         params.append("include_cleared", "true");
       } else {
@@ -138,8 +141,9 @@ export default function UnifiedQueuePage() {
       let docs = response.data.documents || [];
 
       if (isProcessedTab) {
-        // Only show terminal/done docs
         docs = docs.filter(isTerminal);
+      } else if (isBatchesTab) {
+        docs = docs.filter(d => d.status === "batch_parent");
       }
 
       setDocuments(docs);
@@ -147,13 +151,17 @@ export default function UnifiedQueuePage() {
 
       // Fetch counts for all tabs (only when on "all" tab to avoid excessive calls)
       if (activeTab === "all") {
-        // Active docs are what we just got
         const activeDocs = docs;
         const apCount = activeDocs.filter(d => AP_TYPES.includes(d.document_type || d.doc_type)).length;
         const salesCount = activeDocs.filter(d => SALES_TYPES.includes(d.document_type || d.doc_type)).length;
-        // Get processed count from response metadata
         const processedCount = response.data.counts?.completed || 0;
-        setCounts({ all: activeDocs.length, accounting: apCount, sales: salesCount, processed: processedCount });
+        // Fetch batch count separately
+        try {
+          const batchRes = await api.get('/documents?limit=0&queue_view=false&include_cleared=true&status=batch_parent');
+          setCounts({ all: activeDocs.length, accounting: apCount, sales: salesCount, processed: processedCount, batches: batchRes.data.total || 0 });
+        } catch {
+          setCounts({ all: activeDocs.length, accounting: apCount, sales: salesCount, processed: processedCount, batches: 0 });
+        }
       }
     } catch (err) {
       console.error("Failed to fetch documents:", err);
@@ -258,6 +266,33 @@ export default function UnifiedQueuePage() {
     return doc.workflow_status || doc.status || 'received';
   };
 
+  const handleReprocessBatch = async (e, docId) => {
+    e.stopPropagation();
+    if (reprocessing) return;
+    setReprocessing(docId);
+    try {
+      const res = await api.post(`/documents/${docId}/reprocess-batch`);
+      toast.success(`Re-processing started: ${res.data.page_count} pages through full pipeline`);
+      // Poll for completion
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusRes = await api.get(`/documents/${docId}/split-status`);
+          if (statusRes.data.split_complete) {
+            clearInterval(pollInterval);
+            setReprocessing(null);
+            toast.success('Batch re-processing complete');
+            fetchDocuments();
+          }
+        } catch { /* continue polling */ }
+      }, 5000);
+      // Stop polling after 5 minutes
+      setTimeout(() => { clearInterval(pollInterval); setReprocessing(null); }, 300000);
+    } catch (err) {
+      toast.error(`Re-process failed: ${err.response?.data?.detail || err.message}`);
+      setReprocessing(null);
+    }
+  };
+
   const hasSelections = selectedDocs.size > 0;
 
   // ── Render ──
@@ -353,6 +388,7 @@ export default function UnifiedQueuePage() {
           { key: "accounting", label: "Accounting", icon: Receipt, count: counts.accounting },
           { key: "sales", label: "Sales", icon: ShoppingCart, count: counts.sales },
           { key: "processed", label: "Processed", icon: CheckCircle2, count: counts.processed },
+          { key: "batches", label: "Batches", icon: Layers, count: counts.batches },
         ].map(({ key, label, icon: Icon, count }) => (
           <button
             key={key}
@@ -440,6 +476,9 @@ export default function UnifiedQueuePage() {
                             {doc.bounds_alert && (
                               <Badge className="bg-red-500/15 text-red-400 text-[9px] px-1 py-0 shrink-0" data-testid={`bounds-flag-${doc.id}`}>QTY ALERT</Badge>
                             )}
+                            {doc.status === "batch_parent" && doc.batch_children_count > 0 && (
+                              <Badge className="bg-sky-500/15 text-sky-400 text-[9px] px-1 py-0 shrink-0">{doc.batch_children_count} pages</Badge>
+                            )}
                           </div>
                           {doc.extracted_fields?.invoice_number && (
                             <div className="text-[11px] text-muted-foreground font-mono">
@@ -469,6 +508,18 @@ export default function UnifiedQueuePage() {
                     </TableCell>
                     <TableCell onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center gap-0.5">
+                        {doc.status === "batch_parent" && (
+                          <Button
+                            variant="ghost" size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-sky-400"
+                            onClick={(e) => handleReprocessBatch(e, doc.id)}
+                            disabled={reprocessing === doc.id}
+                            title="Re-process through full pipeline"
+                            data-testid={`reprocess-batch-${doc.id}`}
+                          >
+                            <RotateCcw className={`h-3.5 w-3.5 ${reprocessing === doc.id ? 'animate-spin' : ''}`} />
+                          </Button>
+                        )}
                         <Button
                           variant="ghost" size="icon"
                           className="h-7 w-7 text-muted-foreground hover:text-destructive"

@@ -5,13 +5,11 @@ import InventoryLedgerPage from './InventoryLedgerPage';
 import SalespersonDashboardPage from './SalespersonDashboardPage';
 import MyQueuePage from './MyQueuePage';
 import TriageQueuePage from './TriageQueuePage';
-import PipelineDemoPage from './PipelineDemoPage';
 import { Badge } from '../components/ui/badge';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
 const TABS = [
-  { key: 'pipeline-demo', label: 'Pipeline Demo' },
   { key: 'my-queue', label: 'My Queue' },
   { key: 'triage', label: 'Triage' },
   { key: 'sales', label: 'Sales Orders' },
@@ -21,7 +19,7 @@ const TABS = [
 
 export default function SalesInventoryHubPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get('tab') || 'pipeline-demo';
+  const activeTab = searchParams.get('tab') || 'my-queue';
   const [triageCount, setTriageCount] = useState(0);
 
   const setTab = (tab) => setSearchParams({ tab }, { replace: true });
@@ -60,7 +58,6 @@ export default function SalesInventoryHubPage() {
           </button>
         ))}
       </div>
-      {activeTab === 'pipeline-demo' && <PipelineDemoPage />}
       {activeTab === 'my-queue' && <MyQueuePage />}
       {activeTab === 'triage' && <TriageQueuePage />}
       {activeTab === 'sales' && <SalesDashboardPage />}

@@ -1293,6 +1293,66 @@ async def _run_batch_split(db, parent_doc_id, parent_filename, file_content, sen
         )
 
 
+@router.post("/{doc_id}/reprocess-batch")
+async def reprocess_batch(doc_id: str, background_tasks: BackgroundTasks):
+    """Re-process an existing batch parent: delete old children, re-split, re-run full pipeline."""
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    if doc.get("status") != "batch_parent":
+        raise HTTPException(status_code=400, detail="Document is not a batch parent")
+
+    # Need the PDF content
+    file_content = None
+    file_path = _resolve_file_path(doc_id, doc.get("file_name", ""))
+    if file_path:
+        file_content = file_path.read_bytes()
+    elif doc.get("file_content_b64"):
+        import base64
+        file_content = base64.b64decode(doc["file_content_b64"])
+
+    if not file_content:
+        raise HTTPException(status_code=400, detail="No PDF content found for this batch parent")
+
+    # Delete old children
+    old_children_ids = doc.get("batch_children_ids", [])
+    if old_children_ids:
+        await db.hub_documents.delete_many({"id": {"$in": old_children_ids}})
+        await db.workflow_events.delete_many({"document_id": {"$in": old_children_ids}})
+        logger.info("[ReprocessBatch] Deleted %d old children for %s", len(old_children_ids), doc_id[:8])
+
+    # Reset parent metadata
+    from pypdf import PdfReader
+    reader = PdfReader(io.BytesIO(file_content))
+    page_count = len(reader.pages)
+
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "batch_split": False,
+            "batch_children_ids": [],
+            "batch_children_count": 0,
+            "batch_split_at": None,
+            "batch_split_error": None,
+            "updated_utc": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+
+    # Re-run split in background
+    sender = doc.get("sender", doc.get("email_sender", ""))
+    background_tasks.add_task(_run_batch_split, db, doc_id, doc.get("file_name", ""), file_content, sender, page_count)
+
+    return {
+        "success": True,
+        "message": f"Re-processing started: {page_count} pages through full pipeline",
+        "page_count": page_count,
+        "parent_doc_id": doc_id,
+        "old_children_deleted": len(old_children_ids),
+    }
+
+
 
 @router.get("/{doc_id}/split-status")
 async def get_split_status(doc_id: str):

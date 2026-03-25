@@ -226,6 +226,56 @@ async def run_reprocess(
         "summary": {k: v for k, v in results.items() if k != "details"},
     }
 
+
+@router.post("/run-all-unresolved")
+async def run_reprocess_all_unresolved(
+    limit: int = Query(2000, ge=1, le=5000),
+    dry_run: bool = Query(False),
+):
+    """
+    Re-process ALL unresolved docs through the full vendor matching pipeline.
+    No doc_type restriction — uses sender email + extracted_fields + alias/BC matching.
+    """
+    global _last_run
+    db = get_db()
+
+    docs = await db.hub_documents.find(
+        {"vendor_match_method": {"$in": ["none", None]}},
+        {"_id": 0}
+    ).limit(limit).to_list(limit)
+
+    results = {
+        "total_docs": len(docs),
+        "updated": 0,
+        "no_change": 0,
+        "skipped": 0,
+        "errors": 0,
+        "method_transitions": {},
+        "details": [],
+    }
+
+    for doc in docs:
+        try:
+            r = await _reprocess_single(doc, dry_run=dry_run)
+            if r.get("action") == "updated" or r.get("action") == "would_update":
+                results["updated"] += 1
+                old_m = r.get("old", {}).get("method", "none")
+                new_m = r.get("new", {}).get("method", "none")
+                transition = f"{old_m} -> {new_m}"
+                results["method_transitions"][transition] = results["method_transitions"].get(transition, 0) + 1
+            elif r.get("action") == "no_change":
+                results["no_change"] += 1
+            else:
+                results["skipped"] += 1
+            if len(results["details"]) < 50:
+                results["details"].append(r)
+        except Exception as e:
+            results["errors"] += 1
+            if len(results["details"]) < 50:
+                results["details"].append({"doc_id": doc.get("id", "?"), "error": str(e)})
+
+    return results
+
     logger.info(
         "Vendor re-processing complete: %d docs, %d updated, %d no_change, %d skipped, %d errors",
         results["total_docs"], results["updated"], results["no_change"],

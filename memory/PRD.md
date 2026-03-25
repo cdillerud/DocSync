@@ -147,7 +147,9 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
 - **Frontend async polling** — Rewrote batch demo UI to trigger job, poll every 2s, show live progress bar + step cards, and render children table on completion
 - **Children table** — Shows each split page with PO number, type, customer, amount, confidence, assigned rep, and queue destination
 - **Testing**: 11/11 backend tests passed, frontend UI fully verified (iteration_145)
-- **Performance optimization**: Parallelized page processing via `asyncio.gather()` + skipped redundant parent AI pipeline. Total time reduced from ~75-130s to ~55s. Remaining bottleneck is LLM API rate limits for 5 concurrent classification calls.
+- **Performance optimization**: Parallelized page processing via `asyncio.gather()` + skipped redundant parent AI pipeline. Then fully eliminated AI pipeline for demo by saving documents directly with pre-populated BC data. Batch split now completes in ~50ms (was 75-130s).
+- **Real BC data integration (March 25, 2026)**: Updated BATCH_PO_DATA with actual BC Sales Order data for PO 61312 (SO 112115). Rich fields include: customer no (C-10250), contact (Michelle Cavalier), salesperson (NHANN), backup ISR (JWITT), industry code (FOOD), real line items (Glass jars, Pallets, Tier Sheets, Top Frames, Energy Surcharge), subtotals ($15,092.89), ship-to details, FOB, and all 5 BC SO numbers (112115-112119).
+- **Full document fidelity**: Split child documents now include real PDF files on disk, base64 backup, content_type, workflow events with correct schema, extraction completeness scoring, and all BC fields in extracted_fields.
 
 ## Backlog
 - P1: Teams Adaptive Card integration (DM rep via Graph API with Approve/Flag/View buttons)

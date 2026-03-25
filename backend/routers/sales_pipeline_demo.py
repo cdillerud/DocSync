@@ -448,16 +448,119 @@ async def run_pipeline_demo(scenario_id: str = Query("bragg-rush")):
 # ═══════════════════════════════════════════════════════════════════
 
 BATCH_PO_DATA = [
-    {"po": "PO-61312", "customer": "Giovanni Food Co., Inc.", "item": "Glass, 24oz, Bulk, 2821/Plt", "qty": 62062, "price": 0.23474},
-    {"po": "PO-61313", "customer": "Giovanni Food Co., Inc.", "item": "Glass, 16oz, Bulk, 3600/Plt", "qty": 43200, "price": 0.18920},
-    {"po": "PO-61314", "customer": "Giovanni Food Co., Inc.", "item": "Glass, 12oz, Flint, 4032/Plt", "qty": 80640, "price": 0.14225},
-    {"po": "PO-61315", "customer": "Giovanni Food Co., Inc.", "item": "Metal Cap 63mm Gold Lug", "qty": 185000, "price": 0.04850},
-    {"po": "PO-61316", "customer": "Giovanni Food Co., Inc.", "item": "Label, Marinara 24oz, 4-Color", "qty": 65000, "price": 0.06300},
+    {
+        "po": "61312", "bc_so": "112115",
+        "customer": "Giovanni Food Company., Inc.", "customer_no": "C-10250",
+        "contact": "Michelle Cavalier",
+        "salesperson_code": "NHANN", "backup_isr": "JWITT",
+        "industry_code": "FOOD", "location_code": "00",
+        "fob": "Auburn", "from_state": "TX", "to_state": "NY",
+        "order_date": "3/18/2026", "requested_delivery": "4/2/2026",
+        "shipment_date": "4/1/2026", "due_date": "5/17/2026",
+        "ship_to": "Giovanni Food Company., Inc.\n8800 Sixty Road\nBaldwinsville, NY 13027",
+        "ship_to_phone": "315-457-2373",
+        "status": "Released",
+        "items": [
+            {"no": "C-9874-10001833", "desc": "24oz, 63-2030, Lug, Flint, Glass, Pasta, Jar, FH", "qty": 62062, "uom": "M", "unit_cost": 222.61, "price": 234.74, "vendor": "OWENS",
+             "comments": ["2,821/plt, 22 plt/TL, 62,062/TL", '56x44x89", 2,199 lbs/plt, 14 ts/plt']},
+            {"no": "OIPALLET", "desc": "OI Pallet - RETURN REQUIRED", "qty": 22, "uom": "EA", "unit_cost": 0, "price": 0, "vendor": "OWENS"},
+            {"no": "OITIERSHEET", "desc": "OI Tier Sheet - RETURN REQUIRED", "qty": 308, "uom": "EA", "unit_cost": 0, "price": 0, "vendor": "OWENS"},
+            {"no": "OITOPFRAME", "desc": "OI Top Frame - RETURN REQUIRED", "qty": 22, "uom": "EA", "unit_cost": 0, "price": 0, "vendor": "OWENS"},
+            {"no": "ENERGY", "desc": "Energy Surcharge", "qty": 1, "uom": "EA", "unit_cost": 497.36, "price": 524.46, "vendor": ""},
+        ],
+        "subtotal": 15092.89,
+        # Primary line for quick display (the glass order)
+        "primary_item": "Glass, 24oz, 63-2030, Lug, Flint, Pasta Jar", "primary_qty": 62062, "primary_price": 0.23474,
+    },
+    {
+        "po": "61313", "bc_so": "112116",
+        "customer": "Giovanni Food Company., Inc.", "customer_no": "C-10250",
+        "contact": "Michelle Cavalier",
+        "salesperson_code": "NHANN", "backup_isr": "JWITT",
+        "industry_code": "FOOD", "location_code": "00",
+        "fob": "Auburn", "from_state": "TX", "to_state": "NY",
+        "order_date": "3/18/2026", "requested_delivery": "4/2/2026",
+        "shipment_date": "4/1/2026", "due_date": "5/17/2026",
+        "ship_to": "Giovanni Food Company., Inc.\n8800 Sixty Road\nBaldwinsville, NY 13027",
+        "ship_to_phone": "315-457-2373",
+        "status": "Released",
+        "items": [
+            {"no": "C-9874-10001290", "desc": "16oz, 63-2030, Lug, Flint, Glass, Pasta, Jar, FH", "qty": 43200, "uom": "M", "unit_cost": 178.92, "price": 189.20, "vendor": "OWENS",
+             "comments": ["3,600/plt, 12 plt/TL, 43,200/TL"]},
+            {"no": "OIPALLET", "desc": "OI Pallet - RETURN REQUIRED", "qty": 12, "uom": "EA", "unit_cost": 0, "price": 0, "vendor": "OWENS"},
+            {"no": "OITIERSHEET", "desc": "OI Tier Sheet - RETURN REQUIRED", "qty": 168, "uom": "EA", "unit_cost": 0, "price": 0, "vendor": "OWENS"},
+            {"no": "OITOPFRAME", "desc": "OI Top Frame - RETURN REQUIRED", "qty": 12, "uom": "EA", "unit_cost": 0, "price": 0, "vendor": "OWENS"},
+            {"no": "ENERGY", "desc": "Energy Surcharge", "qty": 1, "uom": "EA", "unit_cost": 407.16, "price": 429.12, "vendor": ""},
+        ],
+        "subtotal": 8604.72,
+        "primary_item": "Glass, 16oz, 63-2030, Lug, Flint, Pasta Jar", "primary_qty": 43200, "primary_price": 0.18920,
+    },
+    {
+        "po": "61314", "bc_so": "112117",
+        "customer": "Giovanni Food Company., Inc.", "customer_no": "C-10250",
+        "contact": "Michelle Cavalier",
+        "salesperson_code": "NHANN", "backup_isr": "JWITT",
+        "industry_code": "FOOD", "location_code": "00",
+        "fob": "Auburn", "from_state": "TX", "to_state": "NY",
+        "order_date": "3/18/2026", "requested_delivery": "4/2/2026",
+        "shipment_date": "4/1/2026", "due_date": "5/17/2026",
+        "ship_to": "Giovanni Food Company., Inc.\n8800 Sixty Road\nBaldwinsville, NY 13027",
+        "ship_to_phone": "315-457-2373",
+        "status": "Released",
+        "items": [
+            {"no": "C-9874-10001840", "desc": "12oz, 63-2030, Lug, Flint, Glass, Pasta, Jar, FH", "qty": 80640, "uom": "M", "unit_cost": 134.40, "price": 142.25, "vendor": "OWENS",
+             "comments": ["4,032/plt, 20 plt/TL, 80,640/TL"]},
+            {"no": "OIPALLET", "desc": "OI Pallet - RETURN REQUIRED", "qty": 20, "uom": "EA", "unit_cost": 0, "price": 0, "vendor": "OWENS"},
+            {"no": "OITIERSHEET", "desc": "OI Tier Sheet - RETURN REQUIRED", "qty": 280, "uom": "EA", "unit_cost": 0, "price": 0, "vendor": "OWENS"},
+            {"no": "OITOPFRAME", "desc": "OI Top Frame - RETURN REQUIRED", "qty": 20, "uom": "EA", "unit_cost": 0, "price": 0, "vendor": "OWENS"},
+            {"no": "ENERGY", "desc": "Energy Surcharge", "qty": 1, "uom": "EA", "unit_cost": 453.60, "price": 478.00, "vendor": ""},
+        ],
+        "subtotal": 11949.04,
+        "primary_item": "Glass, 12oz, 63-2030, Lug, Flint, Pasta Jar", "primary_qty": 80640, "primary_price": 0.14225,
+    },
+    {
+        "po": "61315", "bc_so": "112118",
+        "customer": "Giovanni Food Company., Inc.", "customer_no": "C-10250",
+        "contact": "Michelle Cavalier",
+        "salesperson_code": "NHANN", "backup_isr": "JWITT",
+        "industry_code": "FOOD", "location_code": "00",
+        "fob": "Auburn", "from_state": "OH", "to_state": "NY",
+        "order_date": "3/18/2026", "requested_delivery": "4/2/2026",
+        "shipment_date": "4/1/2026", "due_date": "5/17/2026",
+        "ship_to": "Giovanni Food Company., Inc.\n8800 Sixty Road\nBaldwinsville, NY 13027",
+        "ship_to_phone": "315-457-2373",
+        "status": "Released",
+        "items": [
+            {"no": "C-63-2030-GOLD", "desc": "Metal Cap 63mm Gold Lug", "qty": 185000, "uom": "M", "unit_cost": 45.82, "price": 48.50, "vendor": "SILGAN",
+             "comments": ["Caps for 24oz/16oz/12oz jars"]},
+        ],
+        "subtotal": 8972.50,
+        "primary_item": "Metal Cap 63mm Gold Lug", "primary_qty": 185000, "primary_price": 0.04850,
+    },
+    {
+        "po": "61316", "bc_so": "112119",
+        "customer": "Giovanni Food Company., Inc.", "customer_no": "C-10250",
+        "contact": "Michelle Cavalier",
+        "salesperson_code": "NHANN", "backup_isr": "JWITT",
+        "industry_code": "FOOD", "location_code": "00",
+        "fob": "GPI-York", "from_state": "PA", "to_state": "NY",
+        "order_date": "3/18/2026", "requested_delivery": "4/2/2026",
+        "shipment_date": "4/1/2026", "due_date": "5/17/2026",
+        "ship_to": "Giovanni Food Company., Inc.\n8800 Sixty Road\nBaldwinsville, NY 13027",
+        "ship_to_phone": "315-457-2373",
+        "status": "Released",
+        "items": [
+            {"no": "L-GIOV-MAR24", "desc": "Label, Marinara 24oz, 4-Color", "qty": 65000, "uom": "M", "unit_cost": 59.85, "price": 63.00, "vendor": "YORK-PRINT",
+             "comments": ["4-color process, shrink sleeve"]},
+        ],
+        "subtotal": 4095.00,
+        "primary_item": "Label, Marinara 24oz, 4-Color", "primary_qty": 65000, "primary_price": 0.06300,
+    },
 ]
 
 
 def _generate_batch_po_pdf(po_data: list) -> bytes:
-    """Generate a multi-page PDF with one PO per page."""
+    """Generate a multi-page PDF with one PO per page — realistic BC-style layout."""
     from reportlab.lib.pagesizes import letter
     from reportlab.lib import colors
     from reportlab.lib.units import inch
@@ -469,61 +572,93 @@ def _generate_batch_po_pdf(po_data: list) -> bytes:
     styles = getSampleStyleSheet()
     elements = []
 
-    title_style = ParagraphStyle('POTitle', parent=styles['Title'], fontSize=18, spaceAfter=6)
-    header_style = ParagraphStyle('Header', parent=styles['Normal'], fontSize=10, spaceAfter=2)
-    bold_style = ParagraphStyle('Bold', parent=styles['Normal'], fontSize=10, fontName='Helvetica-Bold')
-    small_style = ParagraphStyle('Small', parent=styles['Normal'], fontSize=8, textColor=colors.grey)
-
-    now = datetime.now(timezone.utc)
+    title_style = ParagraphStyle('POTitle', parent=styles['Title'], fontSize=16, spaceAfter=4)
+    header_style = ParagraphStyle('Header', parent=styles['Normal'], fontSize=9, spaceAfter=2)
+    bold_style = ParagraphStyle('Bold', parent=styles['Normal'], fontSize=9, fontName='Helvetica-Bold')
+    small_style = ParagraphStyle('Small', parent=styles['Normal'], fontSize=7, textColor=colors.grey)
+    comment_style = ParagraphStyle('Comment', parent=styles['Normal'], fontSize=8, textColor=colors.HexColor('#555555'), leftIndent=20)
 
     for i, po in enumerate(po_data):
         if i > 0:
             elements.append(PageBreak())
 
-        total = round(po["qty"] * po["price"], 2)
-
         elements.append(Paragraph("PURCHASE ORDER", title_style))
         elements.append(Spacer(1, 4))
 
+        # Header info — matches BC layout
         info_data = [
-            ["PO Number:", po["po"], "Date:", now.strftime("%m/%d/%Y")],
-            ["Customer:", po["customer"], "Due Date:", (now + timedelta(days=30)).strftime("%m/%d/%Y")],
-            ["Ship To:", "Giovanni Foods, 8800 Sixty Road, Baldwinsville, NY 13027", "", ""],
+            ["PO Number:", po["po"], "BC Sales Order:", po.get("bc_so", "")],
+            ["Customer:", po["customer"], "Order Date:", po.get("order_date", "")],
+            ["Customer No:", po.get("customer_no", ""), "Req. Delivery:", po.get("requested_delivery", "")],
+            ["Contact:", po.get("contact", ""), "Shipment Date:", po.get("shipment_date", "")],
+            ["Salesperson:", po.get("salesperson_code", ""), "Due Date:", po.get("due_date", "")],
+            ["FOB:", po.get("fob", ""), "Status:", po.get("status", "")],
         ]
-        info_table = Table(info_data, colWidths=[80, 220, 80, 160])
+        info_table = Table(info_data, colWidths=[80, 200, 90, 170])
         info_table.setStyle(TableStyle([
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
             ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
             ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ]))
         elements.append(info_table)
-        elements.append(Spacer(1, 16))
+        elements.append(Spacer(1, 8))
 
-        # Line item table
-        headers = ["Line", "Description", "Qty", "Unit Price", "Amount"]
+        # Ship to
+        elements.append(Paragraph("Ship To:", bold_style))
+        for line in po.get("ship_to", "").split("\n"):
+            elements.append(Paragraph(line, header_style))
+        if po.get("ship_to_phone"):
+            elements.append(Paragraph(f"Phone: {po['ship_to_phone']}", header_style))
+        elements.append(Spacer(1, 10))
+
+        # Line items
+        headers = ["Line", "Item No.", "Description", "Qty", "UOM", "Unit Price", "Amount"]
         table_data = [headers]
-        table_data.append(["1", po["item"], f"{po['qty']:,}", f"${po['price']:.5f}", f"${total:,.2f}"])
-        table_data.append(["", "", "", "TOTAL:", f"${total:,.2f}"])
+        for li, item in enumerate(po.get("items", []), 1):
+            line_amount = round(item["qty"] * item["price"] / (1000 if item.get("uom") == "M" else 1), 2) if item["price"] else 0
+            qty_display = f"{item['qty']:,}" if item.get("uom") != "M" else f"{item['qty']/1000:,.3f}"
+            table_data.append([
+                str(li), item.get("no", ""), item["desc"],
+                qty_display, item.get("uom", "EA"),
+                f"${item['price']:,.2f}" if item["price"] else "",
+                f"${line_amount:,.2f}" if line_amount else "",
+            ])
 
-        line_table = Table(table_data, colWidths=[35, 240, 70, 70, 80])
+        subtotal = po.get("subtotal", sum(
+            round(it["qty"] * it["price"] / (1000 if it.get("uom") == "M" else 1), 2)
+            for it in po.get("items", []) if it["price"]
+        ))
+        table_data.append(["", "", "", "", "", "TOTAL:", f"${subtotal:,.2f}"])
+
+        line_table = Table(table_data, colWidths=[30, 90, 165, 55, 30, 60, 65])
         line_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a365d')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('ALIGN', (2, 0), (-1, -1), 'RIGHT'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('ALIGN', (0, 0), (0, -1), 'CENTER'),
+            ('ALIGN', (3, 0), (-1, -1), 'RIGHT'),
             ('GRID', (0, 0), (-1, -2), 0.5, colors.grey),
             ('LINEBELOW', (0, -1), (-1, -1), 1.5, colors.HexColor('#1a365d')),
-            ('FONTNAME', (3, -1), (-1, -1), 'Helvetica-Bold'),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('FONTNAME', (5, -1), (-1, -1), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, colors.HexColor('#f7fafc')]),
         ]))
         elements.append(line_table)
-        elements.append(Spacer(1, 16))
+        elements.append(Spacer(1, 8))
 
+        # Comments from line items
+        for item in po.get("items", []):
+            for comment in item.get("comments", []):
+                elements.append(Paragraph(f"• {comment}", comment_style))
+
+        elements.append(Spacer(1, 12))
         elements.append(Paragraph(
-            f"Page {i + 1} of {len(po_data)}  |  Batch POs {po_data[0]['po']} – {po_data[-1]['po']}",
+            f"Page {i + 1} of {len(po_data)}  |  Batch POs {po_data[0]['po']} – {po_data[-1]['po']}  |  "
+            f"ISR: {po.get('salesperson_code','')}  |  Industry: {po.get('industry_code','')}",
             small_style,
         ))
 
@@ -600,7 +735,7 @@ async def _run_batch_demo_bg(db, job_id: str):
                 "filename": filename, "pages": page_count,
                 "po_range": f"{BATCH_PO_DATA[0]['po']} – {BATCH_PO_DATA[-1]['po']}",
                 "customer": BATCH_PO_DATA[0]["customer"],
-                "total_value": round(sum(p["qty"] * p["price"] for p in BATCH_PO_DATA), 2),
+                "total_value": round(sum(p.get("subtotal", 0) for p in BATCH_PO_DATA), 2),
             },
         })
         await _update_job(steps=steps, status="ingesting")
@@ -679,12 +814,24 @@ async def _run_batch_demo_bg(db, job_id: str):
             page_num = page_info["page_num"]
             child_id = f"batch-child-{uuid.uuid4().hex[:12]}"
             child_filename = f"{filename.rsplit('.', 1)[0]}_p{page_num}.pdf"
-            total_amount = round(po["qty"] * po["price"], 2)
+            subtotal = po.get("subtotal", round(po.get("primary_qty", 0) * po.get("primary_price", 0), 2))
 
             # Save PDF to disk
             child_file_path = UPLOAD_DIR / child_id
             child_file_path.write_bytes(page_info["pdf_bytes"])
             child_b64 = b64mod.b64encode(page_info["pdf_bytes"]).decode("ascii")
+
+            # Build rich extracted_fields from real BC data
+            line_items = []
+            for item in po.get("items", []):
+                li = {"item_no": item.get("no", ""), "description": item["desc"],
+                      "quantity": item["qty"], "uom": item.get("uom", "EA"),
+                      "unit_price": item["price"]}
+                if item.get("vendor"):
+                    li["vendor"] = item["vendor"]
+                if item.get("comments"):
+                    li["comments"] = item["comments"]
+                line_items.append(li)
 
             child_doc = {
                 "id": child_id,
@@ -697,7 +844,7 @@ async def _run_batch_demo_bg(db, job_id: str):
                 "file_content_b64": child_b64,
                 "email_sender": "purchasing@giovannifoods.com",
                 "sender": "purchasing@giovannifoods.com",
-                "email_subject": f"Batch PO {po['po']} from {po['customer']}",
+                "email_subject": f"PO {po['po']} — {po['customer']}",
                 "sha256_hash": page_info["page_hash"],
                 "file_size": page_info["page_size"],
                 "ai_confidence": 0.97,
@@ -710,16 +857,33 @@ async def _run_batch_demo_bg(db, job_id: str):
                 "updated_utc": now_iso,
                 "extracted_fields": {
                     "po_number": po["po"],
+                    "bc_sales_order": po.get("bc_so", ""),
                     "customer_name": po["customer"],
-                    "line_items": [{"description": po["item"], "quantity": po["qty"], "unit_price": po["price"]}],
-                    "amount": total_amount,
-                    "total_amount": total_amount,
-                    "ship_to_name": "Giovanni Foods",
-                    "ship_to_address": "8800 Sixty Road, Baldwinsville, NY 13027",
+                    "customer_no": po.get("customer_no", ""),
+                    "contact": po.get("contact", ""),
+                    "salesperson_code": po.get("salesperson_code", ""),
+                    "backup_isr": po.get("backup_isr", ""),
+                    "industry_code": po.get("industry_code", ""),
+                    "order_date": po.get("order_date", ""),
+                    "requested_delivery": po.get("requested_delivery", ""),
+                    "shipment_date": po.get("shipment_date", ""),
+                    "due_date": po.get("due_date", ""),
+                    "fob": po.get("fob", ""),
+                    "from_state": po.get("from_state", ""),
+                    "to_state": po.get("to_state", ""),
+                    "location_code": po.get("location_code", ""),
+                    "line_items": line_items,
+                    "amount": subtotal,
+                    "total_amount": subtotal,
+                    "ship_to_name": po["customer"],
+                    "ship_to_address": po.get("ship_to", "").replace("\n", ", "),
+                    "ship_to_phone": po.get("ship_to_phone", ""),
                 },
                 "normalized_fields": {
                     "customer_name": po["customer"],
+                    "bc_customer_no": po.get("customer_no", ""),
                     "po_number": po["po"],
+                    "bc_sales_order_no": po.get("bc_so", ""),
                 },
                 "vendor_canonical": po["customer"],
                 "vendor_name": po["customer"],
@@ -736,13 +900,19 @@ async def _run_batch_demo_bg(db, job_id: str):
 
             # Add workflow events so document detail page shows history
             correlation_id = str(uuid.uuid4())
+            primary_item_desc = po.get("items", [{}])[0].get("desc", po.get("primary_item", ""))
             events = [
                 {"event_type": "intake.received", "stage": "intake", "detail": f"Split from batch {filename} (page {page_num}/{len(pages)})"},
                 {"event_type": "classification.completed", "stage": "classification", "detail": f"PurchaseOrder (batch_split, 97% confidence)"},
-                {"event_type": "extraction.completed", "stage": "extraction", "detail": f"PO {po['po']}, {po['customer']}, ${total_amount:,.2f}"},
-                {"event_type": "vendor.resolved", "stage": "vendor_match", "detail": f"Vendor: {po['customer']}"},
+                {"event_type": "extraction.completed", "stage": "extraction", "detail": f"PO {po['po']} → BC SO {po.get('bc_so','')}, {po['customer']}, ${subtotal:,.2f}",
+                 "extra_payload": {"completeness_score": 1.0, "fields_extracted": len([k for k in ["po_number", "customer_name", "amount", "line_items", "ship_to_address", "contact"] if True])}},
+                {"event_type": "vendor.resolved", "stage": "vendor_match", "detail": f"Customer: {po['customer']} ({po.get('customer_no','')})"},
+                {"event_type": "bc.validation.completed", "stage": "bc_validation", "detail": f"Matched BC SO {po.get('bc_so','')}, ISR: {po.get('salesperson_code','')}, Status: {po.get('status','')}"},
             ]
             for evt in events:
+                payload = {"detail": evt["detail"]}
+                if "extra_payload" in evt:
+                    payload.update(evt["extra_payload"])
                 await db.workflow_events.insert_one({
                     "event_id": str(uuid.uuid4()),
                     "document_id": child_id,
@@ -751,7 +921,7 @@ async def _run_batch_demo_bg(db, job_id: str):
                     "status": "completed",
                     "source_service": "batch_split_demo",
                     "timestamp": now_iso,
-                    "payload": {"detail": evt["detail"]},
+                    "payload": payload,
                     "payload_summary": evt["detail"],
                 })
 
@@ -769,8 +939,9 @@ async def _run_batch_demo_bg(db, job_id: str):
                 "doc_id": child_id[:12] + "...",
                 "type": "PurchaseOrder",
                 "po_number": po["po"],
+                "bc_so": po.get("bc_so", ""),
                 "customer": po["customer"],
-                "amount": total_amount,
+                "amount": subtotal,
                 "confidence": 0.97,
                 "assigned_rep": rep_name,
                 "review_status": review_status,

@@ -335,7 +335,7 @@ export default function PipelineDemoPage() {
         </div>
 
         <div className="mb-4 flex flex-wrap gap-4 text-xs text-muted-foreground">
-          <span><strong>Customer:</strong> Giovanni Food Co., Inc.</span>
+          <span><strong>Customer:</strong> Giovanni Food Company., Inc.</span>
           <span><strong>POs:</strong> 61312 – 61316 (5 pages)</span>
           <span><strong>Items:</strong> Glass jars, caps, labels</span>
           <span><strong>Total Value:</strong> $35,564</span>
@@ -406,7 +406,7 @@ export default function PipelineDemoPage() {
                         <tr className="border-b border-border bg-muted/40 text-xs text-muted-foreground uppercase tracking-wider">
                           <th className="text-left py-2.5 px-4 font-medium">Page</th>
                           <th className="text-left py-2.5 px-3 font-medium">PO Number</th>
-                          <th className="text-left py-2.5 px-3 font-medium">Type</th>
+                          <th className="text-left py-2.5 px-3 font-medium">BC SO #</th>
                           <th className="text-left py-2.5 px-3 font-medium">Customer</th>
                           <th className="text-right py-2.5 px-3 font-medium">Amount</th>
                           <th className="text-center py-2.5 px-3 font-medium">Confidence</th>
@@ -419,7 +419,7 @@ export default function PipelineDemoPage() {
                           <tr key={ci} className="border-b border-border/50 hover:bg-muted/30">
                             <td className="py-2.5 px-4 text-xs font-mono">{child.page}</td>
                             <td className="py-2.5 px-3 text-xs font-mono font-medium">{child.po_number || '-'}</td>
-                            <td className="py-2.5 px-3 text-xs">{child.type || '-'}</td>
+                            <td className="py-2.5 px-3 text-xs font-mono">{child.bc_so || '-'}</td>
                             <td className="py-2.5 px-3 text-xs">{child.customer || '-'}</td>
                             <td className="py-2.5 px-3 text-xs text-right font-mono">
                               {child.amount ? `$${Number(child.amount).toLocaleString()}` : '-'}

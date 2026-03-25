@@ -389,7 +389,7 @@ async def _resolve_customer_no(doc: dict) -> dict:
     nf = doc.get("normalized_fields") or {}
     vr = doc.get("validation_results") or {}
 
-    customer_name = ef.get("customer") or nf.get("customer") or ""
+    customer_name = ef.get("customer") or ef.get("customer_name") or nf.get("customer") or nf.get("customer_name") or ""
     customer_no = ""
     match_method = "none"
     confidence = 0.0
@@ -401,6 +401,15 @@ async def _resolve_customer_no(doc: dict) -> dict:
         customer_name = customer_name or bc_record_info.get("displayName", "")
         match_method = vr.get("match_method", "validation")
         confidence = float(vr.get("match_score", 0.9))
+
+    # 1.5 Check extracted_fields or normalized_fields for customer number
+    if not customer_no:
+        cno = ef.get("customer_no") or nf.get("bc_customer_no") or nf.get("customer_no") or ""
+        if cno:
+            customer_no = cno
+            customer_name = customer_name or ef.get("customer_name") or nf.get("customer_name") or ""
+            match_method = "extracted_field"
+            confidence = 0.95
 
     # 2. Try customer_candidates on the doc
     if not customer_no:
@@ -513,6 +522,24 @@ async def _resolve_sales_lines(doc: dict, customer_no: str = "") -> list:
                         "catalog_validated": False,
                     },
                 })
+
+            # Add comment lines from the line item (e.g. "2,821/plt, 22 plt/TL")
+            comments = li.get("comments") or []
+            for comment_text in comments:
+                if comment_text and isinstance(comment_text, str):
+                    resolved.append({
+                        "lineType": "Comment",
+                        "lineObjectNumber": "",
+                        "description": comment_text[:100],
+                        "quantity": 0,
+                        "unitPrice": 0,
+                        "source": "extracted_comment",
+                        "mapping": {
+                            "matched": False, "target_type": "comment", "target_no": "",
+                            "confidence": 0, "method": "none", "mapping_id": None,
+                            "catalog_validated": False,
+                        },
+                    })
     else:
         # Fallback: create a single line from the document total
         amount = nf.get("amount") or ef.get("amount")

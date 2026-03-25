@@ -824,8 +824,12 @@ async def _run_batch_demo_bg(db, job_id: str):
             # Build rich extracted_fields from real BC data
             line_items = []
             for item in po.get("items", []):
+                # Convert to BC UOM: if UOM is "M" (per 1000), qty is qty/1000
+                raw_qty = item["qty"]
+                uom = item.get("uom", "EA")
+                bc_qty = raw_qty / 1000 if uom == "M" else raw_qty
                 li = {"item_no": item.get("no", ""), "description": item["desc"],
-                      "quantity": item["qty"], "uom": item.get("uom", "EA"),
+                      "quantity": bc_qty, "uom": uom,
                       "unit_price": item["price"]}
                 if item.get("vendor"):
                     li["vendor"] = item["vendor"]

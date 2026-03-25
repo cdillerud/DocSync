@@ -815,8 +815,8 @@ export default function DocumentDetailPage() {
             onUpdate={() => fetchDoc()}
           />
 
-          {/* BC Sales Order Panel - only for sales-related document types */}
-          {(doc.document_type === 'Sales_Order' || doc.document_type === 'AR_Invoice' || doc.bc_sales_order) && (
+          {/* BC Sales Order Panel - for sales-related and PO document types */}
+          {(doc.document_type === 'Sales_Order' || doc.document_type === 'SalesOrder' || doc.document_type === 'PurchaseOrder' || doc.document_type === 'Order_Confirmation' || doc.document_type === 'AR_Invoice' || doc.bc_sales_order) && (
             <CreateBCSalesOrderPanel 
               document={doc} 
               onUpdate={() => fetchDoc()} 

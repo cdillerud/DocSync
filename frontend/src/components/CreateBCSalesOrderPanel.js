@@ -330,6 +330,9 @@ function PreflightReview({
       {/* ─── C. Validation Checklist ─── */}
       <ValidationChecklist checklist={checklist} />
 
+      {/* ─── C1. Bounds Violation Alert ─── */}
+      <BoundsAlert boundsCheck={data.bounds_check} />
+
       {/* ─── C2. Inventory Summary ─── */}
       <InventorySummary invSummary={data.inventory_summary} invWorkspace={data.inventory_workspace} />
 
@@ -508,6 +511,67 @@ const INV_STATUS_BADGE = {
   SHORT: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300 border-red-200',
   'NO_MATCH': 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 border-gray-200',
 };
+
+// ════════════════════════════════════════════════════════════════
+// C1. BOUNDS VIOLATION ALERT
+// ════════════════════════════════════════════════════════════════
+
+function BoundsAlert({ boundsCheck }) {
+  if (!boundsCheck || boundsCheck.in_bounds) return null;
+
+  const violations = boundsCheck.violations || [];
+  if (!violations.length) return null;
+
+  return (
+    <div className="rounded-md border-2 border-red-400 dark:border-red-600 bg-red-50 dark:bg-red-950/30 overflow-hidden" data-testid="bounds-alert-panel">
+      <div className="flex items-center gap-2 px-3 py-2.5 bg-red-100 dark:bg-red-900/40">
+        <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0" />
+        <div className="flex-1">
+          <p className="text-xs font-bold text-red-800 dark:text-red-200">
+            Quantity Out of Bounds — Review Required
+          </p>
+          <p className="text-[10px] text-red-600 dark:text-red-400 mt-0.5">
+            {violations.length} item{violations.length !== 1 ? 's' : ''} outside historical norms. Approval is blocked until reviewed.
+          </p>
+        </div>
+        <Badge className="bg-red-600 text-white text-[9px] px-1.5 py-0.5 shrink-0">BLOCKED</Badge>
+      </div>
+      <div className="divide-y divide-red-200 dark:divide-red-800/40">
+        {violations.map((v, idx) => (
+          <div key={idx} className="px-3 py-2 space-y-1" data-testid={`bounds-violation-${idx}`}>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-red-900 dark:text-red-100">
+                {v.item_no}
+                <span className="font-normal text-red-700 dark:text-red-300 ml-1.5">{v.description}</span>
+              </span>
+              <Badge className={`text-[9px] px-1.5 py-0 ${
+                v.severity === 'critical'
+                  ? 'bg-red-600 text-white'
+                  : 'bg-amber-500 text-white'
+              }`}>
+                {v.severity === 'critical' ? 'CRITICAL' : 'WARNING'}
+              </Badge>
+            </div>
+            <div className="flex items-center gap-4 text-[10px]">
+              <span className="text-red-800 dark:text-red-200">
+                PO Qty: <strong className="font-mono">{v.po_quantity.toLocaleString()}</strong>
+              </span>
+              <span className="text-red-600 dark:text-red-400">
+                Expected: <span className="font-mono">{v.expected_min.toLocaleString()}–{v.expected_max.toLocaleString()}</span>
+              </span>
+              <span className="text-red-500 dark:text-red-500">
+                Historical avg: <span className="font-mono">{v.mean.toLocaleString()}</span> (±{v.std_dev.toLocaleString()})
+              </span>
+              <span className="font-mono text-red-700 dark:text-red-300">
+                {v.deviation_factor}σ deviation
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function InventorySummary({ invSummary, invWorkspace }) {
   if (!invSummary && !invWorkspace) return null;

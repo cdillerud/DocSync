@@ -966,19 +966,40 @@ async def _run_batch_demo_bg(db, job_id: str):
             {"line_type": "Item", "item_no": "OITOPFRAME", "description": "OI Top Frame - RETURN REQUIRED",
              "qty_ratio": 0.3546, "fixed_qty": None, "unit_price": 0, "occurrences": 15, "frequency": 1.0},
         ]
+        # Historical qty stats per item (in M UOM) for bounds checking
+        # These simulate 10+ historical orders with natural variation
+        _QTY_HISTORY = {
+            "C-9874-10001833": {  # 24oz Pasta Jar — typically ~60-65 M
+                "values": [58.5, 62.0, 65.2, 55.8, 62.1, 59.3, 63.0, 61.0, 60.5, 62.062],
+                "mean": 60.95, "std_dev": 2.72, "min": 55.8, "max": 65.2, "sample_count": 10,
+            },
+            "C-9874-10001290": {  # 16oz Jar — typically ~40-45 M
+                "values": [40.1, 43.5, 42.0, 44.8, 41.2, 43.2, 38.5, 45.0, 42.5, 43.200],
+                "mean": 42.40, "std_dev": 2.07, "min": 38.5, "max": 45.0, "sample_count": 10,
+            },
+            "C-9874-10001840": {  # 12oz Jar — typically ~76-84 M
+                "values": [76.2, 80.0, 82.5, 78.1, 81.0, 79.5, 83.0, 77.8, 80.640, 81.2],
+                "mean": 80.00, "std_dev": 2.20, "min": 76.2, "max": 83.0, "sample_count": 10,
+            },
+        }
+
         for po_data_item in BATCH_PO_DATA:
             for item in po_data_item.get("items", []):
+                pattern_data = {
+                    "customer_no": "C-10250",
+                    "trigger_item_no": item["no"],
+                    "trigger_item_pattern": f"{item['no'].split('-')[0]}-{item['no'].split('-')[1]}-*" if '-' in item["no"] else f"{item['no'][:4]}*",
+                    "associated_lines": _GLASS_JAR_DUNNAGE if item["no"].startswith("C-9874") else [],
+                    "total_orders_analyzed": 15,
+                    "confidence": 1.0,
+                    "last_updated": now_iso,
+                }
+                # Attach qty_history for bounds checking
+                if item["no"] in _QTY_HISTORY:
+                    pattern_data["qty_history"] = _QTY_HISTORY[item["no"]]
                 await db.order_line_patterns.update_one(
                     {"customer_no": "C-10250", "trigger_item_no": item["no"]},
-                    {"$set": {
-                        "customer_no": "C-10250",
-                        "trigger_item_no": item["no"],
-                        "trigger_item_pattern": f"{item['no'].split('-')[0]}-{item['no'].split('-')[1]}-*" if '-' in item["no"] else f"{item['no'][:4]}*",
-                        "associated_lines": _GLASS_JAR_DUNNAGE if item["no"].startswith("C-9874") else [],
-                        "total_orders_analyzed": 15,
-                        "confidence": 1.0,
-                        "last_updated": now_iso,
-                    }},
+                    {"$set": pattern_data},
                     upsert=True,
                 )
 

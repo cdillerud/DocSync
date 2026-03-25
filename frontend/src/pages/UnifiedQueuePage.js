@@ -93,6 +93,7 @@ const STATUS_LABELS = {
   auto_filed: "Auto-Filed",
   FileMissing: "File Missing",
   file_missing: "File Missing",
+  bounds_review: "Bounds Review",
   Posted: "Posted",
   posted: "Posted",
   Archived: "Archived",
@@ -108,6 +109,8 @@ const getStatusBadge = (status) => {
   const lower = (status || "").toLowerCase();
   const colorClass = lower.includes("complete") || lower.includes("posted") || lower.includes("approved") || lower.includes("exported") || lower === "validated" || lower === "validationpassed"
     ? "bg-green-500/20 text-green-400"
+    : lower.includes("bounds_review") || lower.includes("bounds review")
+    ? "bg-red-500/20 text-red-400"
     : lower.includes("exception") || lower.includes("rejected") || lower.includes("fail")
     ? "bg-red-500/20 text-red-400"
     : lower.includes("review") || lower.includes("pending") || lower.includes("vendor") || lower.includes("autofiled") || lower.includes("auto-filed") || lower.includes("auto_filed")
@@ -738,6 +741,11 @@ export default function UnifiedQueuePage() {
                                     AUTO
                                   </Badge>
                                 )}
+                                {doc.bounds_alert && (
+                                  <Badge className="ml-1 bg-red-500/20 text-red-400 text-[10px] px-1 py-0" data-testid={`bounds-flag-${doc.id}`}>
+                                    QTY ALERT
+                                  </Badge>
+                                )}
                               </div>
                               {doc.extracted_fields?.invoice_number && (
                                 <div className="text-xs text-muted-foreground">
@@ -748,7 +756,7 @@ export default function UnifiedQueuePage() {
                           </div>
                         </TableCell>
                         <TableCell>{getTypeBadge(doc.document_type || doc.doc_type)}</TableCell>
-                        <TableCell>{getStatusBadge(doc.status || doc.workflow_status)}</TableCell>
+                        <TableCell>{getStatusBadge(doc.bounds_alert ? 'bounds_review' : (doc.status || doc.workflow_status))}</TableCell>
                         <TableCell data-testid={`ref-intel-${doc.id}`}>
                           {(() => {
                             const st = doc.reference_intelligence_status || 'not_run';

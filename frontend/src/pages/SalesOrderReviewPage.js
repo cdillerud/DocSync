@@ -129,6 +129,7 @@ export default function SalesOrderReviewPage() {
   const reviewStatus = doc.sales_review_status || 'pending_rep_review';
   const isApproved = reviewStatus === 'approved';
   const isFlagged = reviewStatus === 'flagged';
+  const hasBoundsAlert = !!doc.bounds_alert;
 
   return (
     <div className="max-w-3xl mx-auto py-6 px-4 space-y-4" data-testid="sales-order-review-page">
@@ -152,6 +153,11 @@ export default function SalesOrderReviewPage() {
               {isFlagged && (
                 <Badge className="bg-red-600 text-white text-xs">
                   <Flag className="w-3 h-3 mr-1" /> Flagged
+                </Badge>
+              )}
+              {hasBoundsAlert && (
+                <Badge className="bg-red-500/90 text-white text-xs" data-testid="bounds-review-badge">
+                  QTY OUT OF BOUNDS
                 </Badge>
               )}
             </div>
@@ -201,13 +207,15 @@ export default function SalesOrderReviewPage() {
                   size="sm"
                   className="bg-emerald-600 hover:bg-emerald-700 text-white"
                   onClick={handleApprove}
-                  disabled={actionLoading}
+                  disabled={actionLoading || hasBoundsAlert}
                   data-testid="review-approve-btn"
                 >
                   {actionLoading ? (
                     <><Loader2 className="w-4 h-4 animate-spin mr-1.5" />
                       {approveStatus === 'submitting' ? 'Creating SO in BC...' : 'Approving...'}
                     </>
+                  ) : hasBoundsAlert ? (
+                    <>Blocked — Qty Review Required</>
                   ) : (
                     <><Send className="w-4 h-4 mr-1.5" /> Approve & Submit to BC</>
                   )}

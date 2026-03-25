@@ -804,12 +804,42 @@ async def sales_order_preflight(doc_id: str):
             duplicate_detail = f"PO '{external_doc_no}' already used on SO {dup_so} (doc {dup['id'][:8]}...)"
             warnings.append(duplicate_detail)
 
+    # ── Quantity Bounds Check ──
+    bounds_check = {"in_bounds": True, "violations": []}
+    if customer_no and resolved_lines:
+        try:
+            from services.order_line_patterns import check_quantity_bounds
+            main_items = [ln for ln in resolved_lines if not ln.get("suggested") and ln.get("lineType") != "Comment"]
+            bounds_check = await check_quantity_bounds(db, customer_no, main_items)
+            if not bounds_check["in_bounds"]:
+                for v in bounds_check["violations"]:
+                    errors.append(
+                        f"QUANTITY OUT OF BOUNDS: {v['item_no']} — PO qty {v['po_quantity']} is outside "
+                        f"historical range [{v['expected_min']}–{v['expected_max']}] "
+                        f"(mean {v['mean']}, ±2σ). {v['severity'].upper()} — requires review."
+                    )
+                # Flag document for review
+                await db.hub_documents.update_one(
+                    {"id": doc_id},
+                    {"$set": {
+                        "bounds_alert": True,
+                        "bounds_violations": bounds_check["violations"],
+                        "workflow_status": "bounds_review",
+                    }},
+                )
+                ready = False  # Block approval
+        except Exception as e:
+            logger.warning("[Preflight] Bounds check error: %s", str(e))
+
     # ── Validation Checklist ──
     validation_checklist = [
         {"label": "Customer resolved in BC", "passed": bool(customer_no), "detail": f"{customer_no} — {customer_name}" if customer_no else "Not resolved"},
         {"label": "Required fields present", "passed": "customer_no" not in missing_fields, "detail": f"Missing: {', '.join(missing_fields)}" if missing_fields else "All present"},
         {"label": "Duplicate check", "passed": not duplicate_found, "detail": duplicate_detail, "blocking": False},
         {"label": "Lines resolved", "passed": bool(resolved_lines), "detail": f"{len(resolved_lines)} line(s)" if resolved_lines else "No lines"},
+        {"label": "Quantity bounds check", "passed": bounds_check["in_bounds"],
+         "detail": f"{len(bounds_check['violations'])} item(s) outside historical range — requires review" if not bounds_check["in_bounds"] else "All quantities within historical norms",
+         "blocking": not bounds_check["in_bounds"]},
         {"label": "Extraction completeness", "passed": extraction_completeness >= 0.5, "detail": f"{int(extraction_completeness * 100)}% of fields extracted", "blocking": False},
         {"label": "BC credentials configured", "passed": HAS_CREDENTIALS, "detail": "Connected" if HAS_CREDENTIALS else "Not configured"},
     ]
@@ -850,6 +880,7 @@ async def sales_order_preflight(doc_id: str):
             "code": inventory_workspace["code"],
             "negative_balance_policy": inventory_workspace.get("negative_balance_policy", "warn_only"),
         } if inventory_workspace else None,
+        "bounds_check": bounds_check,
     }
 
 

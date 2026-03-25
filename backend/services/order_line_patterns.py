@@ -480,3 +480,113 @@ def _item_matches(item_no: str, trigger_exact: str, trigger_pattern: str = None)
         regex = trigger_pattern.replace("*", ".*")
         return bool(re.match(regex, item_no, re.IGNORECASE))
     return False
+
+
+async def check_quantity_bounds(db, customer_no: str, line_items: list) -> dict:
+    """Check PO line quantities against historical bounds for this customer.
+
+    Uses ±2 standard deviations from the historical mean as bounds.
+    Returns:
+    {
+        "in_bounds": bool,           # True if all items are within bounds
+        "violations": [              # List of out-of-bounds items
+            {
+                "item_no": "C-9874-10001833",
+                "description": "24oz Jar...",
+                "po_quantity": 620.0,
+                "expected_min": 24.53,
+                "expected_max": 99.41,
+                "mean": 61.97,
+                "std_dev": 18.72,
+                "sample_count": 5,
+                "deviation_factor": 2.5,  # How many σ away
+                "severity": "critical",   # critical (>3σ), warning (>2σ)
+            }
+        ],
+    }
+    """
+    if not customer_no or not line_items:
+        return {"in_bounds": True, "violations": []}
+
+    # Get all patterns for this customer that have qty_history
+    patterns = await db.order_line_patterns.find(
+        {"customer_no": customer_no, "qty_history": {"$exists": True}},
+        {"_id": 0},
+    ).to_list(100)
+
+    if not patterns:
+        return {"in_bounds": True, "violations": []}
+
+    # Build lookup: item_no → qty_history
+    bounds_lookup = {}
+    for p in patterns:
+        trigger = p.get("trigger_item_no", "")
+        trigger_pattern = p.get("trigger_item_pattern", "")
+        qty_hist = p.get("qty_history", {})
+        if qty_hist.get("sample_count", 0) >= 2:
+            bounds_lookup[trigger] = {
+                "pattern": trigger_pattern,
+                "history": qty_hist,
+            }
+
+    violations = []
+    for item in line_items:
+        item_no = item.get("item_no") or item.get("lineObjectNumber") or ""
+        po_qty = float(item.get("quantity") or item.get("qty") or 0)
+        desc = item.get("description") or ""
+
+        if not item_no or po_qty <= 0:
+            continue
+
+        # Find matching bounds
+        matched_bounds = None
+        for trigger, bdata in bounds_lookup.items():
+            if _item_matches(item_no, trigger, bdata.get("pattern")):
+                matched_bounds = bdata["history"]
+                break
+
+        if not matched_bounds:
+            continue
+
+        mean = matched_bounds.get("mean", 0)
+        std_dev = matched_bounds.get("std_dev", 0)
+        sample_count = matched_bounds.get("sample_count", 0)
+
+        if std_dev <= 0 or mean <= 0:
+            continue
+
+        # Calculate bounds: mean ± 2σ
+        lower_bound = max(0, mean - 2 * std_dev)
+        upper_bound = mean + 2 * std_dev
+
+        if lower_bound <= po_qty <= upper_bound:
+            continue  # Within bounds
+
+        # Calculate how many σ away
+        deviation_factor = abs(po_qty - mean) / std_dev if std_dev > 0 else 0
+        severity = "critical" if deviation_factor > 3 else "warning"
+
+        violations.append({
+            "item_no": item_no,
+            "description": desc[:80],
+            "po_quantity": po_qty,
+            "expected_min": round(lower_bound, 3),
+            "expected_max": round(upper_bound, 3),
+            "mean": round(mean, 3),
+            "std_dev": round(std_dev, 3),
+            "sample_count": sample_count,
+            "deviation_factor": round(deviation_factor, 2),
+            "severity": severity,
+        })
+
+    in_bounds = len(violations) == 0
+
+    if not in_bounds:
+        logger.warning(
+            "[BoundsCheck] Customer %s: %d violation(s) detected — PO flagged for review",
+            customer_no, len(violations),
+        )
+    else:
+        logger.info("[BoundsCheck] Customer %s: all %d items within bounds", customer_no, len(line_items))
+
+    return {"in_bounds": in_bounds, "violations": violations}

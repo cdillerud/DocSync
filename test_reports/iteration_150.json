@@ -1,0 +1,75 @@
+{
+  "summary": "Completed testing of Quantity Bounds Checking feature. All backend tests pass (7/7). Frontend correctly shows bounds alert banner, QTY OUT OF BOUNDS badge, blocked approve button, and Bounds Review status in queue.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Queue Page", "issues": ["QTY ALERT badge may be truncated in narrow document name column - cosmetic only"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_quantity_bounds_check.py",
+    "/app/test_reports/pytest/quantity_bounds_check_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_quantity_bounds_check.py"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7 tests passed)",
+    "frontend": "100% (All UI interactions verified)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "POST /api/sales-dashboard/demo/run-batch seeds batch-child documents with C-9874 items. qty_history data seeded in order_line_patterns collection with mean=60.95, std_dev=2.72 for C-9874-10001833",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Quantity Bounds Checking feature fully tested. Backend preflight endpoint at /api/gpi-integration/sales-orders/preflight/{doc_id} returns bounds_check with in_bounds, violations array. When qty is outside ±2σ, document gets bounds_alert=true and workflow_status='bounds_review'. Frontend review page at /review/{doc_id} shows red 'Quantity Out of Bounds' banner with violation details, 'QTY OUT OF BOUNDS' badge in header, and disabled approve button showing 'Blocked — Qty Review Required'. Queue page at /queue shows 'Bounds Review' status in RED and 'QTY ALERT' badge next to document name.",
+  "features_tested": {
+    "backend": [
+      "POST /api/gpi-integration/sales-orders/preflight/{doc_id} returns bounds_check with in_bounds=true for normal qty (62.062 M) - PASS",
+      "POST /api/gpi-integration/sales-orders/preflight/{doc_id} returns bounds_check with in_bounds=false for out-of-bounds qty (620) - PASS",
+      "Violation includes item_no, po_quantity, expected_min, expected_max, mean, std_dev, deviation_factor, severity - PASS",
+      "Document gets bounds_alert=true and workflow_status='bounds_review' when violation detected - PASS",
+      "ready=false when bounds violation exists (blocking approval) - PASS",
+      "Validation checklist includes 'Quantity bounds check' item - PASS",
+      "Deviation factor calculated correctly (620 is ~205σ from mean 60.95) - PASS",
+      "Severity is 'critical' for >3σ deviation - PASS"
+    ],
+    "frontend": [
+      "Review Page: Red 'Quantity Out of Bounds — Review Required' banner appears with BLOCKED badge - PASS",
+      "Review Page: Violation details show item_no, PO qty, expected range, historical avg, deviation factor - PASS",
+      "Review Page: CRITICAL severity badge shown for large deviation - PASS",
+      "Review Page: 'QTY OUT OF BOUNDS' badge appears in page header - PASS",
+      "Review Page: Approve button shows 'Blocked — Qty Review Required' and is disabled - PASS",
+      "Review Page: Validation checklist shows 'Quantity bounds check' as failed (red) - PASS",
+      "Review Page: Normal qty doc does NOT show bounds alert and approve button works normally - PASS",
+      "Queue Page: Flagged doc shows 'Bounds Review' status in RED - PASS",
+      "Queue Page: 'QTY ALERT' badge appears next to document name - PASS"
+    ]
+  },
+  "mocked_apis": {
+    "BC Sandbox": "DEMO_MODE=true - BC Sales Order creation is mocked",
+    "SharePoint Graph API": "DEMO_MODE=true - SharePoint integration is mocked"
+  },
+  "bounds_calculation_verification": {
+    "item": "C-9874-10001833",
+    "historical_data": {
+      "mean": 60.95,
+      "std_dev": 2.72,
+      "sample_count": 10
+    },
+    "bounds": {
+      "lower": "60.95 - 2*2.72 = 55.51",
+      "upper": "60.95 + 2*2.72 = 66.39"
+    },
+    "test_cases": {
+      "normal_qty_62.062": "Within bounds [55.51, 66.39] - in_bounds=true",
+      "out_of_bounds_qty_620": "Outside bounds, deviation_factor = |620-60.95|/2.72 = 205.53σ - in_bounds=false, severity=critical"
+    }
+  }
+}

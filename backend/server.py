@@ -3023,6 +3023,27 @@ async def _internal_intake_document(
             normalized_fields
         )
     
+    # ── Sales Rep Auto-Assignment ──
+    # For sales-eligible documents (Sales_Order, PurchaseOrder, etc.),
+    # look up the customer → rep mapping and route to My Queue or Triage.
+    sales_assign_result = None
+    try:
+        from services.sales_auto_assign import auto_assign_sales_rep
+        # Build a minimal doc dict with all available data
+        assign_doc = {
+            "document_type": suggested_type,
+            "suggested_job_type": suggested_type,
+            "ai_confidence": confidence,
+            "extracted_fields": extracted_fields,
+            "normalized_fields": validation_results.get("normalized_fields", {}),
+            "vendor_name": vendor_alias_result.get("vendor_canonical") or normalized_fields.get("vendor_raw"),
+        }
+        sales_assign_result = await auto_assign_sales_rep(db, doc_id, assign_doc)
+        if sales_assign_result:
+            logger.info("[INTAKE] Sales auto-assign for %s: %s", doc_id[:8], sales_assign_result)
+    except Exception as sa_err:
+        logger.warning("[INTAKE] Sales auto-assign error for %s: %s", doc_id[:8], str(sa_err))
+
     # Create workflow audit trail entry
     workflow_run_id = uuid.uuid4().hex[:8]
     workflow = {
@@ -3550,6 +3571,23 @@ async def intake_document(
     
     await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
     
+    # ── Sales Rep Auto-Assignment (Upload path) ──
+    try:
+        from services.sales_auto_assign import auto_assign_sales_rep
+        assign_doc = {
+            "document_type": suggested_type,
+            "suggested_job_type": suggested_type,
+            "ai_confidence": confidence,
+            "extracted_fields": extracted_fields,
+            "normalized_fields": validation_results.get("normalized_fields", {}),
+            "vendor_name": vendor_alias_result.get("vendor_canonical") or normalized_fields.get("vendor_raw"),
+        }
+        upload_assign_result = await auto_assign_sales_rep(db, doc_id, assign_doc)
+        if upload_assign_result:
+            logger.info("[INTAKE-UPLOAD] Sales auto-assign for %s: %s", doc_id[:8], upload_assign_result)
+    except Exception as sa_err:
+        logger.warning("[INTAKE-UPLOAD] Sales auto-assign error for %s: %s", doc_id[:8], str(sa_err))
+
     # Create workflow run for intake
     workflow_steps = [
         {"step": "receive_document", "status": "completed", "result": {"source": source, "hash": computed_hash}},

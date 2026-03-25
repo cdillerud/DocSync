@@ -686,3 +686,40 @@ async def seed_review_data():
         "reps": [r["email"] for r in reps],
         "statuses": {"pending_rep_review": 9, "flagged": 3, "approved": 3, "triage": 3},
     }
+
+
+@router.post("/run-auto-assign")
+async def run_auto_assign():
+    """Run the sales auto-assignment pipeline on all sales-eligible documents
+    that don't yet have a rep assigned. Useful for re-processing historical data.
+    """
+    db = get_db()
+    from services.sales_auto_assign import auto_assign_sales_rep
+
+    query = {
+        "document_type": {"$in": list(SALES_ELIGIBLE_TYPES)},
+        "$or": [
+            {"assigned_rep_email": {"$exists": False}},
+            {"assigned_rep_email": ""},
+            {"assigned_rep_email": None},
+            {"sales_review_status": "triage"},
+        ],
+    }
+
+    docs = await db.hub_documents.find(query, {"_id": 0}).to_list(1000)
+    results = {"assigned": 0, "triage": 0, "skipped": 0, "errors": 0}
+
+    for doc in docs:
+        try:
+            result = await auto_assign_sales_rep(db, doc["id"], doc)
+            if result and result.get("assigned"):
+                results["assigned"] += 1
+            elif result:
+                results["triage"] += 1
+            else:
+                results["skipped"] += 1
+        except Exception as e:
+            logger.warning("Auto-assign error for %s: %s", doc.get("id", "?")[:8], str(e))
+            results["errors"] += 1
+
+    return {"status": "completed", "processed": len(docs), **results}

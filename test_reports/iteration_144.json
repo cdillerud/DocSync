@@ -1,0 +1,88 @@
+{
+  "summary": "Sales Auto-Assignment Pipeline testing complete. All 14 backend API tests passed. The run-auto-assign endpoint correctly processes triage documents and routes them based on customer->rep mappings. Documents without rep mappings stay in triage as expected.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_sales_auto_assign.py",
+    "/app/test_reports/pytest/sales_auto_assign_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "No API endpoint exists to create customer_rep_overrides - this is only available via direct service call. Consider adding POST /api/sales-dashboard/rep-overrides endpoint for admin use."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_sales_auto_assign.py"
+  ],
+  "success_rate": {
+    "backend": "100% (14/14 tests passed)",
+    "frontend": "N/A (backend only testing)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "POST /api/sales-dashboard/seed-review-data creates 18 documents (15 assigned + 3 triage)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Sales Auto-Assignment Pipeline fully tested. Key endpoints: POST /api/sales-dashboard/run-auto-assign processes unassigned/triage docs and attempts to assign reps based on customer_rep_overrides or BC cache. SALES_ELIGIBLE_TYPES = {Sales_Order, SalesOrder, Order_Confirmation, PurchaseOrder}. AUTO_APPROVE_CONFIDENCE = 0.95. The auto-assign is hooked into both _internal_intake_document (email path at ~line 3026) and intake_document (upload path at ~line 3574) in server.py. Documents without rep mappings route to triage status.",
+  "verified_features": {
+    "run_auto_assign_endpoint": {
+      "status": "PASS",
+      "endpoint": "POST /api/sales-dashboard/run-auto-assign",
+      "verified": [
+        "Returns 200 with status=completed",
+        "Returns processed, assigned, triage, skipped, errors counts",
+        "Processes documents with sales_review_status=triage or no assigned_rep_email",
+        "Routes to triage when no rep mapping exists",
+        "Idempotent - running multiple times doesn't cause errors"
+      ]
+    },
+    "sales_auto_assign_service": {
+      "status": "PASS",
+      "file": "/app/backend/services/sales_auto_assign.py",
+      "verified": [
+        "Correctly identifies sales-eligible doc types",
+        "Checks customer_no first, then customer_name for rep lookup",
+        "Uses customer_rep_overrides for name-based matching",
+        "Routes to triage when no rep found",
+        "Sets sales_review_status to pending_rep_review or auto_approved based on confidence",
+        "Creates sales_review_history audit entries"
+      ]
+    },
+    "intake_pipeline_hooks": {
+      "status": "PASS",
+      "verified": [
+        "Auto-assign hooked into _internal_intake_document (email path) at server.py ~line 3026",
+        "Auto-assign hooked into intake_document (upload path) at server.py ~line 3574",
+        "Both paths import and call auto_assign_sales_rep from services/sales_auto_assign.py",
+        "Errors are caught and logged without breaking the intake pipeline"
+      ]
+    },
+    "rep_assignment_service": {
+      "status": "PASS",
+      "file": "/app/backend/services/rep_assignment_service.py",
+      "verified": [
+        "get_rep_for_customer checks overrides first, then BC cache",
+        "Returns rep_email, rep_name, salesperson_code, source",
+        "Returns None when no mapping exists"
+      ]
+    },
+    "document_intake_endpoint": {
+      "status": "PASS",
+      "endpoint": "POST /api/documents/intake",
+      "verified": [
+        "Endpoint exists and accepts file uploads",
+        "Returns 422 for missing file (proper validation)",
+        "Pipeline executes classification, validation, and auto-assign steps"
+      ]
+    }
+  },
+  "mocked_apis": {
+    "note": "BC Sandbox and SharePoint Graph API calls remain mocked in preview environment",
+    "mocked_list": ["Business Central API", "SharePoint Graph API"]
+  }
+}

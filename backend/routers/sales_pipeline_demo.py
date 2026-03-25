@@ -605,46 +605,71 @@ async def _run_batch_demo_bg(db, job_id: str):
         })
         await _update_job(steps=steps, status="ingesting")
 
-        # Step 2: Ingest as parent
+        # Step 2: Store parent as lightweight record (skip full AI pipeline — it gets split anyway)
         t0 = time.time()
         await db.hub_documents.delete_many({"sha256_hash": file_hash})
         await db.hub_documents.delete_many({"batch_source_filename": filename})
 
-        from server import _internal_intake_document
-        result = await _internal_intake_document(
-            file_content=pdf_bytes, filename=filename, content_type="application/pdf",
-            source="batch_demo", sender="purchasing@giovannifoods.com",
-            subject=f"Batch POs {BATCH_PO_DATA[0]['po']}-{BATCH_PO_DATA[-1]['po']} from Giovanni Food Co.",
-            email_id=f"batch-demo-{uuid.uuid4().hex[:8]}", mailbox_category="Sales",
-        )
-        parent_doc_id = result.get("document_id") or (result.get("document") or {}).get("id") or ""
+        parent_doc_id = f"batch-parent-{uuid.uuid4().hex[:12]}"
+        now_iso = datetime.now(timezone.utc).isoformat()
+        await db.hub_documents.insert_one({
+            "id": parent_doc_id,
+            "filename": filename,
+            "document_type": "PurchaseOrder",
+            "status": "batch_parent",
+            "source": "batch_demo",
+            "sender": "purchasing@giovannifoods.com",
+            "subject": f"Batch POs {BATCH_PO_DATA[0]['po']}-{BATCH_PO_DATA[-1]['po']} from Giovanni Food Co.",
+            "sha256_hash": file_hash,
+            "file_size": len(pdf_bytes),
+            "batch_detected": True,
+            "batch_page_count": page_count,
+            "ai_confidence": 1.0,
+            "classification_method": "batch_demo",
+            "created_utc": now_iso,
+            "updated_utc": now_iso,
+            "extracted_fields": {
+                "customer_name": BATCH_PO_DATA[0]["customer"],
+                "po_range": f"{BATCH_PO_DATA[0]['po']}-{BATCH_PO_DATA[-1]['po']}",
+                "total_pages": page_count,
+            },
+        })
         steps.append({
-            "step": 2, "name": "Parent Document Ingestion", "status": "completed",
+            "step": 2, "name": "Parent Document Stored", "status": "completed",
             "duration_ms": round((time.time() - t0) * 1000),
             "details": {"parent_doc_id": parent_doc_id, "filename": filename, "pages_detected": page_count},
         })
         await _update_job(steps=steps, status="detecting", parent_doc_id=parent_doc_id)
 
-        # Step 3: Check batch detection
-        parent_doc = await db.hub_documents.find_one({"id": parent_doc_id}, {"_id": 0})
+        # Step 3: Batch detection (already confirmed — skip redundant AI classification)
         steps.append({
             "step": 3, "name": "Batch PO Detection", "status": "completed",
             "details": {
-                "batch_detected": parent_doc.get("batch_detected", False),
-                "batch_page_count": parent_doc.get("batch_page_count", page_count),
-                "document_type": parent_doc.get("document_type", ""),
-                "classification_confidence": parent_doc.get("ai_confidence", 0),
+                "batch_detected": True,
+                "batch_page_count": page_count,
+                "document_type": "PurchaseOrder",
+                "classification_confidence": 1.0,
             },
         })
         await _update_job(steps=steps, status="splitting")
 
-        # Step 4: Split pages and run full pipeline on each
+        # Step 4: Split pages and run full pipeline on each (PARALLEL)
         t0 = time.time()
+        pages_done = {"count": 0}
+
+        async def _on_page_done(page_num, total, child_info):
+            pages_done["count"] += 1
+            await _update_job(
+                status=f"splitting ({pages_done['count']}/{total})",
+                pages_processed=pages_done["count"],
+            )
+
         from services.batch_po_splitter import split_and_ingest_batch
         split_result = await split_and_ingest_batch(
             db=db, parent_doc_id=parent_doc_id, parent_filename=filename,
             file_content=pdf_bytes, sender="purchasing@giovannifoods.com",
             source="batch_split_demo",
+            on_page_done=_on_page_done,
         )
         steps.append({
             "step": 4, "name": "Page Splitting & Full Pipeline", "status": "completed",

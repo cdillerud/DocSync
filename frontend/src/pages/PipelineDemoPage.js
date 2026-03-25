@@ -360,7 +360,11 @@ export default function PipelineDemoPage() {
                   <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
                     <div
                       className="h-full bg-primary rounded-full transition-all duration-700"
-                      style={{ width: `${Math.min((batchSteps.length / 5) * 100, 100)}%` }}
+                      style={{ width: `${Math.min(
+                        batchStatus?.startsWith('splitting') ? 60 + ((parseInt(batchStatus.match(/\d+/)?.[0] || '0') / 5) * 30) :
+                        batchSteps.length >= 5 ? 100 :
+                        (batchSteps.length / 5) * 60
+                      , 100)}%` }}
                     />
                   </div>
                 </div>

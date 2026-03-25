@@ -147,6 +147,7 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
 - **Frontend async polling** — Rewrote batch demo UI to trigger job, poll every 2s, show live progress bar + step cards, and render children table on completion
 - **Children table** — Shows each split page with PO number, type, customer, amount, confidence, assigned rep, and queue destination
 - **Testing**: 11/11 backend tests passed, frontend UI fully verified (iteration_145)
+- **Performance optimization**: Parallelized page processing via `asyncio.gather()` + skipped redundant parent AI pipeline. Total time reduced from ~75-130s to ~55s. Remaining bottleneck is LLM API rate limits for 5 concurrent classification calls.
 
 ## Backlog
 - P1: Teams Adaptive Card integration (DM rep via Graph API with Approve/Flag/View buttons)

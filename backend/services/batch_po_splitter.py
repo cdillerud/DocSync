@@ -96,8 +96,10 @@ async def split_and_ingest_batch(
     sender: str = "",
     source: str = "batch_split",
     subject: str = "",
+    on_page_done=None,
 ) -> dict:
     """Split a multi-page PO PDF and ingest each page through the full pipeline.
+    Pages are processed in parallel for speed.
 
     Args:
         db: Motor database instance
@@ -107,10 +109,12 @@ async def split_and_ingest_batch(
         sender: Email sender (forwarded to child docs)
         source: Capture source
         subject: Email subject
+        on_page_done: Optional async callback(page_num, total, child_info) for progress
 
     Returns:
         dict with split results: {status, children_count, children: [...]}
     """
+    import asyncio
     from server import _internal_intake_document
 
     now = datetime.now(timezone.utc).isoformat()
@@ -120,20 +124,13 @@ async def split_and_ingest_batch(
     if not pages:
         return {"status": "error", "reason": "no_pages_found", "children_count": 0, "children": []}
 
-    # Generate child filenames from parent
-    # e.g. "Purchase Orders 61312-61361.pdf" → "Purchase Orders 61312-61361_p1.pdf"
     base_name = parent_filename.rsplit(".", 1)[0] if "." in parent_filename else parent_filename
     ext = parent_filename.rsplit(".", 1)[1] if "." in parent_filename else "pdf"
 
-    children = []
-    errors = []
-
-    for page_info in pages:
+    async def _process_page(page_info):
         page_num = page_info["page_num"]
         child_filename = f"{base_name}_p{page_num}.{ext}"
-
         try:
-            # Remove any existing doc with same hash (allow re-splits)
             await db.hub_documents.delete_many({"sha256_hash": page_info["page_hash"]})
 
             result = await _internal_intake_document(
@@ -153,7 +150,6 @@ async def split_and_ingest_batch(
                 or ""
             )
 
-            # Link child to parent
             if child_doc_id:
                 await db.hub_documents.update_one(
                     {"id": child_doc_id},
@@ -172,22 +168,31 @@ async def split_and_ingest_batch(
                 "status": "success",
                 "document_type": result.get("document_type") or (result.get("document") or {}).get("document_type") or "",
             }
-            children.append(child_info)
-            logger.info(
-                "[BatchSplit] Page %d/%d → doc %s (%s)",
-                page_num, len(pages), child_doc_id[:8] if child_doc_id else "?", child_filename,
-            )
+            logger.info("[BatchSplit] Page %d/%d → doc %s", page_num, len(pages), child_doc_id[:8] if child_doc_id else "?")
+
+            if on_page_done:
+                await on_page_done(page_num, len(pages), child_info)
+
+            return child_info
 
         except Exception as e:
             logger.error("[BatchSplit] Error on page %d: %s", page_num, str(e))
-            errors.append({"page_num": page_num, "error": str(e)})
-            children.append({
+            err_info = {
                 "page_num": page_num,
                 "child_doc_id": "",
                 "filename": child_filename,
                 "status": "error",
                 "error": str(e),
-            })
+            }
+            if on_page_done:
+                await on_page_done(page_num, len(pages), err_info)
+            return err_info
+
+    # Run all pages in parallel
+    children = await asyncio.gather(*[_process_page(p) for p in pages])
+    children = sorted(children, key=lambda c: c["page_num"])
+
+    errors = [c for c in children if c["status"] == "error"]
 
     # Update parent doc with split metadata
     await db.hub_documents.update_one(
@@ -203,10 +208,7 @@ async def split_and_ingest_batch(
     )
 
     status = "success" if not errors else ("partial" if children else "error")
-    logger.info(
-        "[BatchSplit] Complete: parent=%s children=%d errors=%d",
-        parent_doc_id[:8], len(children), len(errors),
-    )
+    logger.info("[BatchSplit] Complete: parent=%s children=%d errors=%d", parent_doc_id[:8], len(children), len(errors))
 
     return {
         "status": status,

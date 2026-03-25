@@ -173,6 +173,7 @@ export default function UnifiedQueuePage() {
       if (searchQuery) params.append("search", searchQuery);
       if (dateFrom) params.append("date_from", dateFrom);
       if (dateTo) params.append("date_to", dateTo);
+      params.append("limit", "500");
       
       // Use new queue_view and include_cleared params
       if (activeTab === "pending") {
@@ -180,28 +181,29 @@ export default function UnifiedQueuePage() {
         params.append("include_cleared", showCleared ? "true" : "false");
       } else if (activeTab === "completed") {
         params.append("queue_view", "false");
-        params.append("status", "Completed");
+        // Only set tab-level status if user hasn't picked a specific status
+        if (statusFilter === "ALL") {
+          params.append("status", "Completed");
+        }
         params.append("include_cleared", "true");
       } else if (activeTab === "all") {
         params.append("queue_view", "false");
         params.append("include_cleared", "true");
       }
       
+      // Status dropdown filter (only if user selected something specific)
       if (statusFilter !== "ALL") params.append("status", statusFilter);
-      
-      const response = await api.get(`/documents?${params.toString()}`);
-      let docs = response.data.documents || [];
 
-      // Client-side workflow category filtering
+      // Workflow category → send matching doc types as a server-side filter
       if (workflowCategory !== "all") {
         const allowedTypes = WORKFLOW_CATEGORIES[workflowCategory]?.types || [];
-        if (allowedTypes.length > 0) {
-          docs = docs.filter(d => {
-            const dt = d.document_type || d.doc_type || "";
-            return allowedTypes.includes(dt);
-          });
+        if (allowedTypes.length > 0 && docTypeFilter === "ALL") {
+          params.append("document_types", allowedTypes.join(","));
         }
       }
+      
+      const response = await api.get(`/documents?${params.toString()}`);
+      const docs = response.data.documents || [];
 
       setDocuments(docs);
       setSelectedDocs(new Set()); // Clear selection on refresh

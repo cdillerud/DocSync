@@ -167,8 +167,9 @@ async def diagnose_document(doc_id: str):
 @router.get("")
 async def list_documents(
     status: str = Query(None), document_type: str = Query(None),
+    document_types: str = Query(None, description="Comma-separated list of doc types (for workflow category filter)"),
     category: str = Query(None),
-    search: str = Query(None), skip: int = Query(0), limit: int = Query(50),
+    search: str = Query(None), skip: int = Query(0), limit: int = Query(500),
     include_cleared: bool = Query(False, description="Include auto-cleared documents in results"),
     queue_view: bool = Query(True, description="Queue view mode - hides completed/cleared docs by default"),
     date_from: str = Query(None, description="Filter: created on or after this date (YYYY-MM-DD)"),
@@ -189,6 +190,7 @@ async def list_documents(
         fq["$or"] = [{"status": status_regex}, {"workflow_status": status_regex}]
 
     # Type filter: search across doc_type, document_type, and suggested_job_type
+    # Single type (from dropdown)
     if document_type:
         type_regex = {"$regex": f"^{document_type}$", "$options": "i"}
         type_conditions = [
@@ -197,10 +199,21 @@ async def list_documents(
             {"suggested_job_type": type_regex},
         ]
         if "$or" in fq:
-            # Already have $or from status filter, wrap both in $and
             fq = {"$and": [{"$or": fq.pop("$or")}, {"$or": type_conditions}]}
         else:
             fq["$or"] = type_conditions
+    # Multiple types (from workflow category buttons like AP/Sales/Ops)
+    elif document_types:
+        type_list = [t.strip() for t in document_types.split(",") if t.strip()]
+        if type_list:
+            type_conditions = []
+            for t in type_list:
+                tr = {"$regex": f"^{t}$", "$options": "i"}
+                type_conditions.extend([{"doc_type": tr}, {"document_type": tr}, {"suggested_job_type": tr}])
+            if "$or" in fq:
+                fq = {"$and": [{"$or": fq.pop("$or")}, {"$or": type_conditions}]}
+            else:
+                fq["$or"] = type_conditions
 
     if category:
         fq["category"] = category

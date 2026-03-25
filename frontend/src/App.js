@@ -17,6 +17,7 @@ import SalespersonDashboardPage from "@/pages/SalespersonDashboardPage";
 import IntelligenceHubPage from "@/pages/IntelligenceHubPage";
 import IntegrationsHubPage from "@/pages/IntegrationsHubPage";
 import SettingsHubPage from "@/pages/SettingsHubPage";
+import InsightsPage from "@/pages/InsightsPage";
 import BakeOffPage from "@/pages/BakeOffPage";
 import SalesOrderReviewPage from "@/pages/SalesOrderReviewPage";
 
@@ -36,6 +37,7 @@ function AppRoutes() {
         <Route path="documents/:id" element={<DocumentDetailPage />} />
         <Route path="review/:id" element={<SalesOrderReviewPage />} />
         <Route path="sales-inventory" element={<SalesInventoryHubPage />} />
+        <Route path="insights" element={<InsightsPage />} />
         <Route path="config" element={<SettingsHubPage />} />
         {/* Keep old pages accessible but not in nav */}
         <Route path="intelligence" element={<IntelligenceHubPage />} />

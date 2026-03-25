@@ -11,17 +11,18 @@ import {
 import { ScrollArea } from '../components/ui/scroll-area';
 import { Badge } from '../components/ui/badge';
 import {
-  LayoutDashboard, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, ShoppingCart, ClipboardList, Brain, FolderTree, ArrowLeftRight, Sparkles, Tag, Wrench, Bug, FlaskConical
+  LayoutDashboard, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, ShoppingCart, ClipboardList, Brain, FolderTree, ArrowLeftRight, Sparkles, Tag, Wrench, Bug, FlaskConical, TrendingUp
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { APP_VERSION, CHANGELOG } from '../lib/version';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
-// Simplified navigation — focused on daily workflows
+// Core navigation — daily workflows + key modules
 const navItems = [
   { to: '/', icon: Files, label: 'Inbox', exact: true },
-  { to: '/sales-inventory', icon: ShoppingCart, label: 'Pipeline Demo' },
+  { to: '/sales-inventory', icon: ShoppingCart, label: 'Sales' },
+  { to: '/insights', icon: TrendingUp, label: 'Insights' },
   { to: '/config', icon: Settings, label: 'Settings' },
 ];
 
@@ -70,7 +71,8 @@ export default function Layout() {
     const path = location.pathname;
     if (path === '/') return 'Inbox';
     if (path === '/documents') return 'Inbox';
-    if (path === '/sales-inventory') return 'Pipeline Demo';
+    if (path === '/sales-inventory') return 'Sales';
+    if (path === '/insights') return 'Insights';
     if (path === '/config') return 'Settings';
     if (path.startsWith('/documents/')) return 'Document Detail';
     if (path.startsWith('/review/')) return 'Sales Order Review';

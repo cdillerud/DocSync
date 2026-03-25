@@ -1,0 +1,80 @@
+{
+  "summary": "Completed testing of new Insights page with charts, restored Sales nav item (4 sidebar items total), and insights-trends API. All backend tests pass (13/13). All frontend UI elements verified working correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_insights_trends_api.py",
+    "/app/test_reports/pytest/insights_trends_api_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_insights_trends_api.py"
+  ],
+  "success_rate": {
+    "backend": "100% (13/13 tests passed)",
+    "frontend": "100% (All UI interactions verified)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "No new seed data created. Used existing documents from previous test iterations.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Insights page fully tested with recharts integration. Sidebar now has 4 items (Inbox, Sales, Insights, Settings). InsightsPage displays 4 summary cards (Total Ingested, Avg Auto Rate, Avg AI Confidence, Vendor Resolve) and 2 charts (Daily Ingestion Volume bar chart, Automation & AI Learning Trends area chart). Period selector (7d, 14d, 30d) works correctly. Sales page has 6 tabs (Pipeline Demo, My Queue, Triage, Sales Orders, Rep Performance, Inventory Ledger). Document row click navigates to detail page correctly.",
+  "features_tested": {
+    "backend": [
+      "GET /api/dashboard/insights-trends returns 200 - PASS",
+      "insights-trends returns daily array, bakeoff_runs, period_days - PASS",
+      "insights-trends daily entry has all required fields (date, ingested, auto_rate, validation_rate, exception_rate, ai_confidence, vendor_resolve_rate) - PASS",
+      "insights-trends daily values are numeric - PASS",
+      "insights-trends rates are valid percentages (0-100) - PASS",
+      "insights-trends period selector days=7 works - PASS",
+      "insights-trends period selector days=14 works - PASS",
+      "insights-trends period selector days=30 works - PASS",
+      "GET /api/dashboard/inbox-stats returns 200 - PASS",
+      "inbox-stats returns all 7 required fields - PASS",
+      "POST /api/auth/login with admin/admin returns 200 - PASS",
+      "POST /api/auth/login with invalid credentials returns 401/403 - PASS",
+      "GET /api/documents returns 200 with documents list - PASS"
+    ],
+    "frontend": [
+      "Login flow with admin/admin credentials - PASS",
+      "Sidebar shows 4 nav items (Inbox, Sales, Insights, Settings) - PASS",
+      "Inbox page loads with stats strip (Today count, Auto-validated %, Pending review, Qty alerts, AI confidence) - PASS",
+      "Inbox tabs (All, Accounting, Sales) filter documents - PASS",
+      "Insights page loads with 4 summary cards - PASS",
+      "Insights page shows Daily Ingestion Volume bar chart - PASS",
+      "Insights page shows Automation & AI Learning Trends area chart - PASS",
+      "Insights page period selector (7d, 14d, 30d) works - PASS",
+      "Sales page loads with all 6 tabs (Pipeline Demo, My Queue, Triage, Sales Orders, Rep Performance, Inventory Ledger) - PASS",
+      "Clicking document row navigates to document detail page - PASS",
+      "Document detail page loads with full intelligence info - PASS"
+    ]
+  },
+  "mocked_apis": {
+    "BC Sandbox": "DEMO_MODE=true - BC Sales Order creation is mocked",
+    "SharePoint Graph API": "DEMO_MODE=true - SharePoint integration is mocked"
+  },
+  "insights_page_values_observed": {
+    "total_ingested": 5,
+    "avg_auto_rate": "100.0%",
+    "avg_ai_confidence": "97.0%",
+    "vendor_resolve": "100.0%",
+    "daily_data_points": 1,
+    "bakeoff_runs": 0
+  },
+  "inbox_stats_values_observed": {
+    "ingested_today": 5,
+    "avg_daily_7d": 0.7,
+    "auto_validation_rate": "100%",
+    "pending_review": 1,
+    "bounds_alerts": 1,
+    "avg_ai_confidence": "99.3%"
+  }
+}

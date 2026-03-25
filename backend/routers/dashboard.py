@@ -976,3 +976,72 @@ async def get_inbox_stats():
         "avg_ai_confidence": avg_conf,
         "total_documents": total,
     }
+
+
+@router.get("/insights-trends")
+async def get_insights_trends(days: int = Query(30, le=90)):
+    """
+    Daily trending data for the Insights page:
+    ingestion volume, auto-validation rate, AI confidence, vendor resolve rate.
+    """
+    db = get_db()
+    tz = GPI_TZ
+    cutoff = (datetime.now(tz) - timedelta(days=days)).astimezone(timezone.utc).isoformat()
+
+    # Daily aggregation: total, auto-processed, validated, avg confidence
+    pipeline = [
+        {"$match": {"created_utc": {"$gte": cutoff}, "status": {"$ne": "batch_parent"}}},
+        {"$addFields": {"day": {"$substr": ["$created_utc", 0, 10]}}},
+        {"$group": {
+            "_id": "$day",
+            "total": {"$sum": 1},
+            "auto_processed": {"$sum": {"$cond": [
+                {"$or": [
+                    {"$eq": ["$automation_decision", "auto"]},
+                    {"$eq": ["$auto_cleared", True]},
+                    {"$eq": ["$sales_review_status", "auto_approved"]},
+                ]}, 1, 0
+            ]}},
+            "validated": {"$sum": {"$cond": [
+                {"$eq": [{"$ifNull": ["$validation_results.all_passed", False]}, True]},
+                1, 0
+            ]}},
+            "exceptions": {"$sum": {"$cond": [{"$eq": ["$status", "Exception"]}, 1, 0]}},
+            "avg_confidence": {"$avg": {"$ifNull": ["$ai_confidence", None]}},
+            "vendor_resolved": {"$sum": {"$cond": [
+                {"$and": [
+                    {"$ne": [{"$ifNull": ["$vendor_canonical", None]}, None]},
+                    {"$ne": ["$vendor_canonical", ""]},
+                ]}, 1, 0
+            ]}},
+        }},
+        {"$sort": {"_id": 1}},
+    ]
+    daily_raw = await db.hub_documents.aggregate(pipeline).to_list(days)
+
+    daily = []
+    for d in daily_raw:
+        total = d["total"]
+        daily.append({
+            "date": d["_id"],
+            "ingested": total,
+            "auto_rate": round((d["auto_processed"] / total * 100) if total > 0 else 0, 1),
+            "validation_rate": round((d["validated"] / total * 100) if total > 0 else 0, 1),
+            "exception_rate": round((d["exceptions"] / total * 100) if total > 0 else 0, 1),
+            "ai_confidence": round((d["avg_confidence"] or 0) * 100, 1),
+            "vendor_resolve_rate": round((d["vendor_resolved"] / total * 100) if total > 0 else 0, 1),
+        })
+
+    # Bakeoff accuracy snapshots (latest runs)
+    bakeoff_runs = await db.intake_benchmark_runs.find(
+        {"status": {"$in": ["completed", "active"]}},
+        {"_id": 0, "id": 1, "name": 1, "created_at": 1, "summary.total_docs": 1,
+         "summary.avg_folder_score": 1, "summary.folder_accuracy_pct": 1,
+         "summary.avg_extraction_score": 1}
+    ).sort("created_at", -1).limit(10).to_list(10)
+
+    return {
+        "daily": daily,
+        "bakeoff_runs": bakeoff_runs,
+        "period_days": days,
+    }

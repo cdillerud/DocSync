@@ -170,10 +170,18 @@ async def list_documents(
     category: str = Query(None),
     search: str = Query(None), skip: int = Query(0), limit: int = Query(50),
     include_cleared: bool = Query(False, description="Include auto-cleared documents in results"),
-    queue_view: bool = Query(True, description="Queue view mode - hides completed/cleared docs by default")
+    queue_view: bool = Query(True, description="Queue view mode - hides completed/cleared docs by default"),
+    date_from: str = Query(None, description="Filter: created on or after this date (YYYY-MM-DD)"),
+    date_to: str = Query(None, description="Filter: created on or before this date (YYYY-MM-DD)")
 ):
     db = get_db()
     fq = {"is_duplicate": {"$ne": True}}  # Always exclude duplicates
+
+    # Date range filter — append T00:00:00 / T23:59:59 to cover the full day
+    if date_from:
+        fq["created_utc"] = {"$gte": f"{date_from}T00:00:00"}
+    if date_to:
+        fq.setdefault("created_utc", {})["$lte"] = f"{date_to}T23:59:59.999999"
 
     # Status filter: check both status and workflow_status fields (case-insensitive)
     if status:

@@ -188,9 +188,9 @@ async def get_vendor_pending_queue(
     if max_amount is not None:
         fq.setdefault("amount_float", {})["$lte"] = max_amount
     if date_from:
-        fq["created_utc"] = {"$gte": date_from}
+        fq["created_utc"] = {"$gte": f"{date_from}T00:00:00"}
     if date_to:
-        fq.setdefault("created_utc", {})["$lte"] = date_to
+        fq.setdefault("created_utc", {})["$lte"] = f"{date_to}T23:59:59.999999"
 
     total = await db.hub_documents.count_documents(fq)
     docs = await db.hub_documents.find(fq, {"_id": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)

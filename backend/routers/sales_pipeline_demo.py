@@ -648,11 +648,29 @@ async def _run_batch_demo_bg(db, job_id: str):
         })
         await _update_job(steps=steps, status="splitting")
 
-        # Step 4: Split pages → save each as its own document (no AI needed — fields from BATCH_PO_DATA)
+        # Step 4: Split pages → save each as a real document with file on disk
         t0 = time.time()
+        import base64 as b64mod
+        from pathlib import Path
         from services.batch_po_splitter import split_pdf_pages
         from services.sales_auto_assign import auto_assign_sales_rep
+
+        UPLOAD_DIR = Path("/app/backend/uploads")
+        UPLOAD_DIR.mkdir(exist_ok=True)
         pages = split_pdf_pages(pdf_bytes)
+
+        # Also save parent PDF to disk
+        parent_file_path = UPLOAD_DIR / parent_doc_id
+        parent_file_path.write_bytes(pdf_bytes)
+        parent_b64 = b64mod.b64encode(pdf_bytes).decode("ascii")
+        await db.hub_documents.update_one(
+            {"id": parent_doc_id},
+            {"$set": {
+                "content_type": "application/pdf",
+                "file_name": filename,
+                "file_content_b64": parent_b64,
+            }},
+        )
 
         children_summary = []
         child_ids = []
@@ -663,13 +681,23 @@ async def _run_batch_demo_bg(db, job_id: str):
             child_filename = f"{filename.rsplit('.', 1)[0]}_p{page_num}.pdf"
             total_amount = round(po["qty"] * po["price"], 2)
 
+            # Save PDF to disk
+            child_file_path = UPLOAD_DIR / child_id
+            child_file_path.write_bytes(page_info["pdf_bytes"])
+            child_b64 = b64mod.b64encode(page_info["pdf_bytes"]).decode("ascii")
+
             child_doc = {
                 "id": child_id,
+                "file_name": child_filename,
                 "filename": child_filename,
                 "document_type": "PurchaseOrder",
                 "status": "processed",
                 "source": "batch_split_demo",
+                "content_type": "application/pdf",
+                "file_content_b64": child_b64,
+                "email_sender": "purchasing@giovannifoods.com",
                 "sender": "purchasing@giovannifoods.com",
+                "email_subject": f"Batch PO {po['po']} from {po['customer']}",
                 "sha256_hash": page_info["page_hash"],
                 "file_size": page_info["page_size"],
                 "ai_confidence": 0.97,
@@ -695,11 +723,37 @@ async def _run_batch_demo_bg(db, job_id: str):
                 },
                 "vendor_canonical": po["customer"],
                 "vendor_name": po["customer"],
+                "sharepoint_drive_id": None,
+                "sharepoint_item_id": None,
+                "category": "Sales",
+                "workflow_status": "processed",
+                "automation_decision": "assisted",
             }
 
             await db.hub_documents.delete_many({"sha256_hash": page_info["page_hash"]})
             await db.hub_documents.insert_one(child_doc)
             child_ids.append(child_id)
+
+            # Add workflow events so document detail page shows history
+            correlation_id = str(uuid.uuid4())
+            events = [
+                {"event_type": "intake.received", "stage": "intake", "detail": f"Split from batch {filename} (page {page_num}/{len(pages)})"},
+                {"event_type": "classification.completed", "stage": "classification", "detail": f"PurchaseOrder (batch_split, 97% confidence)"},
+                {"event_type": "extraction.completed", "stage": "extraction", "detail": f"PO {po['po']}, {po['customer']}, ${total_amount:,.2f}"},
+                {"event_type": "vendor.resolved", "stage": "vendor_match", "detail": f"Vendor: {po['customer']}"},
+            ]
+            for evt in events:
+                await db.workflow_events.insert_one({
+                    "event_id": str(uuid.uuid4()),
+                    "document_id": child_id,
+                    "correlation_id": correlation_id,
+                    "event_type": evt["event_type"],
+                    "status": "completed",
+                    "source_service": "batch_split_demo",
+                    "timestamp": now_iso,
+                    "payload": {"detail": evt["detail"]},
+                    "payload_summary": evt["detail"],
+                })
 
             # Auto-assign sales rep
             assign_result = await auto_assign_sales_rep(db, child_id, child_doc)

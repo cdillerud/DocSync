@@ -1165,6 +1165,7 @@ function EventTimelineItem({ event }) {
   };
   
   const formatEventType = (type) => {
+    if (!type) return 'Unknown Event';
     return type.split('.').map(part => 
       part.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
     ).join(' › ');

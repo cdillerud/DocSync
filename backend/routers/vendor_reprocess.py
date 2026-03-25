@@ -106,6 +106,18 @@ async def _reprocess_single(doc: dict, dry_run: bool = False) -> dict:
                     "old_method": old_method,
                 }
             match_result = await lookup_vendor_alias(vendor_normalized)
+
+            # If alias/BC lookup failed but we have an extracted vendor name,
+            # use it directly as the canonical — bootstraps the learning loop
+            if not match_result.get("vendor_canonical") and vendor_raw:
+                cleaned = vendor_raw.strip()
+                if cleaned.lower() not in ("unknown", "n/a", "gamer packaging", "gamer packaging inc"):
+                    match_result = {
+                        "vendor_canonical": cleaned,
+                        "vendor_match_method": "extracted_field",
+                        "vendor_name": cleaned,
+                        "vendor_no": "",
+                    }
     else:
         vendor_raw = await _get_vendor_raw(doc)
         vendor_normalized = ""

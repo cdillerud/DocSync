@@ -38,6 +38,18 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
 - **Auto-Post Readiness Improvements**: Active vendor resolution
 - **PO Resolution Fix**: Dash-suffixed PO support (e.g., 106975-3)
 
+### Current Session Fixes (March 25, 2026 - Fork)
+- **Learned Dunnage Patterns Feature (P0 - COMPLETE)**: Implemented the full "Learned Dunnage Patterns" feature for the Sales module. The system now auto-suggests dunnage lines (pallets, tier sheets, top frames) based on historical order patterns.
+  - Backend: `order_line_patterns.py` service analyzes historical orders to learn associations between primary items and ancillary items
+  - Backend: Preflight endpoint (`POST /api/gpi-integration/sales-orders/preflight/{doc_id}`) returns `suggested` lines with `source: learned_pattern`
+  - Backend: Fixed UOM-aware qty_ratio calculation (M = per 1000) so suggested quantities are correct (22 pallets, 308 tier sheets, 22 top frames for 62.062 M qty)
+  - Frontend: New `PatternSuggestions` component in `CreateBCSalesOrderPanel.js` — shows a "Suggested Additions" panel with per-line "Add" buttons and "Add All" bulk action
+  - Frontend: Pattern-sourced lines display sparkle icon visual distinction in the editable line table
+  - Frontend: "Applied" confirmation banner after all suggestions added
+  - Demo seed data: Batch PO Split seeds patterns for C-9874 glass jar items with Giovanni/C-10250 customer
+  - `forwardRef` added to `CreateBCSalesOrderPanel` for parent access to `editedLines` (used by `SalesOrderReviewPage` approve flow)
+  - Testing: 100% pass rate on backend and frontend (iteration_147)
+
 ### Current Session Fixes (March 24, 2026 - Fork)
 - **Auto-Close Confidence Fix (P0)**: Fixed pipeline where documents like `0303691.pdf` failed to auto-close despite being "slam dunk" easy docs. Root cause: when AI extraction (Gemini LLM) fails/times out, `confidence=0.0` propagated to ALL downstream systems — workflow handler (`_update_standard_workflow_status`) treated it as classification failure and bailed, auto-resolution skipped it, auto-clear rejected it. Three-part fix:
   1. **Confidence bump after classification**: After `classify_document_type` successfully classifies a doc (doc_type != Other/Unknown), confidence is bumped to 0.85 so downstream systems don't treat it as failed.

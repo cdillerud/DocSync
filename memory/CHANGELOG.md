@@ -1,5 +1,21 @@
 # GPI Document Hub - Changelog
 
+## [2026-03-25] Learned Dunnage Patterns Feature
+
+### Added
+- **Learned Dunnage Patterns** — AI service that learns dunnage/ancillary line associations from historical orders and auto-suggests them during Sales Order review
+  - Backend: `order_line_patterns.py` pattern learning service with `get_suggested_lines()` and `learn_patterns_from_history()`
+  - Backend: Preflight endpoint injects `suggested` lines with metadata (confidence, frequency, occurrences)
+  - Frontend: `PatternSuggestions` component with "Add All" and per-line "Add" buttons
+  - Frontend: Sparkle icon visual distinction for pattern-sourced lines in editable table
+  - Demo: Batch PO Split seeds Giovanni glass jar dunnage patterns (pallets, tier sheets, top frames)
+  - Fixed UOM-aware qty_ratio calculations for M (per 1000) quantities
+
+### Changed
+- `CreateBCSalesOrderPanel` wrapped with `forwardRef` for parent access to edited lines
+- Pattern-sourced lines separated from PO lines at preflight load time (shown in Suggested Additions panel, not mixed into line table)
+
+
 ## [2026-03-16] SharePoint Folder Routing Feature
 
 ### Added

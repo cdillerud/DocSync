@@ -567,37 +567,39 @@ function PatternSuggestions({ suggestions, onAddOne, onAddAll, editedLines }) {
   return (
     <div className="rounded-md border border-indigo-200 dark:border-indigo-800/60 overflow-hidden" data-testid="pattern-suggestions-panel">
       {/* Header */}
-      <button
-        className="w-full flex items-center gap-2 px-3 py-2.5 bg-indigo-50 dark:bg-indigo-950/30 hover:bg-indigo-100/80 dark:hover:bg-indigo-900/30 transition-colors text-left"
-        onClick={() => setCollapsed(!collapsed)}
-        data-testid="pattern-suggestions-toggle"
-      >
-        <Sparkles className="w-4 h-4 text-indigo-500 shrink-0" />
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-semibold text-indigo-800 dark:text-indigo-200">
-            Suggested Additions
-            <Badge variant="outline" className="ml-2 text-[9px] h-4 px-1.5 border-indigo-300 dark:border-indigo-700 text-indigo-600 dark:text-indigo-300 font-normal">
-              {suggestions.length} line{suggestions.length !== 1 ? 's' : ''}
-            </Badge>
-          </p>
-          <p className="text-[10px] text-indigo-600/80 dark:text-indigo-400/80 mt-0.5">
-            Based on {occurrences}+ historical orders &middot; {confidence}% confidence
-          </p>
+      <div className="flex items-center gap-2 px-3 py-2.5 bg-indigo-50 dark:bg-indigo-950/30">
+        <div
+          className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer hover:opacity-80 transition-opacity"
+          onClick={() => setCollapsed(!collapsed)}
+          data-testid="pattern-suggestions-toggle"
+        >
+          <Sparkles className="w-4 h-4 text-indigo-500 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-indigo-800 dark:text-indigo-200">
+              Suggested Additions
+              <Badge variant="outline" className="ml-2 text-[9px] h-4 px-1.5 border-indigo-300 dark:border-indigo-700 text-indigo-600 dark:text-indigo-300 font-normal">
+                {suggestions.length} line{suggestions.length !== 1 ? 's' : ''}
+              </Badge>
+            </p>
+            <p className="text-[10px] text-indigo-600/80 dark:text-indigo-400/80 mt-0.5">
+              Based on {occurrences}+ historical orders &middot; {confidence}% confidence
+            </p>
+          </div>
+          {collapsed ? (
+            <ChevronDown className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+          ) : (
+            <ChevronUp className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+          )}
         </div>
         <Button
           variant="ghost" size="sm"
           className="h-6 text-[10px] px-2 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-200/50 dark:hover:bg-indigo-800/40 shrink-0"
-          onClick={(e) => { e.stopPropagation(); onAddAll(); }}
+          onClick={onAddAll}
           data-testid="pattern-add-all-btn"
         >
           <Plus className="w-3 h-3 mr-0.5" /> Add All
         </Button>
-        {collapsed ? (
-          <ChevronDown className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-        ) : (
-          <ChevronUp className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-        )}
-      </button>
+      </div>
 
       {/* Suggestion list */}
       {!collapsed && (

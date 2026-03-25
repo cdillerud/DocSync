@@ -3,6 +3,7 @@
 ## Prioritized Backlog
 
 ### P0 — Completed
+- ~~Learned Dunnage Patterns~~ (2026-03-25) — Full-stack feature: backend pattern learning + frontend Suggested Additions UI
 - ~~Refactor server.py monolith~~ (2026-03-11)
 - ~~Document Handler Extraction~~ (2026-03-15, iter_109)
 - ~~Workflow Handler Extraction~~ (2026-03-15, iter_110) — 25 of 32 handlers extracted
@@ -18,6 +19,8 @@
 - ~~Vendor Resolution Observability + Negative Feedback Loop~~ (2026-03-16, iter_116) — per-doc resolution objects, rejection memory, guardrails, analytics, 71 tests
 
 ### P1 — Next Up
+- **Rep Overrides Management UI** — Admin screen to easily map customers to reps without DB scripts
+- **Teams Adaptive Card Integration** — Webhook handler for "Approve" → BC Sales Order
 - **Admin UI for Item Mapping Rules** — CRUD interface for managing item mapping rules
 - **Continue Orchestration Extraction** — document_handlers.py, sharepoint helpers, email polling still import from server.py
 - **Batch AR Release Evaluation** — Auto-evaluate all sales docs through AR gate in pipeline
@@ -39,6 +42,10 @@
 - **Refactor monolithic files** — `backend/routers/inventory_ledger.py` and `frontend/src/pages/InventoryLedgerPage.js`
 
 ### P3 — Future/Backlog
+- Vendor Inventory Dashboard
+- Product/BOM (Bill of Materials) module
+- Production-ready email service and Entra ID SSO
+- Continue `server.py` extraction (ongoing)
 - Routing engine extensions: stable_vendor auto-approval, layout family trust scoring, dynamic policy thresholds
 - Implement Outbound Document Delivery module
 - Admin UI for item mapping rules

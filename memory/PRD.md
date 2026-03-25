@@ -132,6 +132,14 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
 - **Verified end-to-end**: Created override → ran auto-assign → Bragg doc moved from triage to John Smith's queue
 - **Testing**: 14/14 backend tests passed
 
+### Pipeline Demo + Rich Demo Data (March 25, 2026)
+- **Pipeline Demo tab** — "Run Pipeline" button generates a real PO PDF, feeds it through the full intake pipeline (AI classification, vendor resolution, BC validation, auto-assignment), shows 7 stages with step-by-step details
+- **3 demo scenarios**: Bragg Rush PO (auto-assigns to John Smith), Huy Fong Large Order (auto-assigns to Maria Garcia), Unknown Customer (routes to Triage)
+- **27 realistic demo documents** seeded across 4 reps, 12 real GPI customers, 5 triage items
+- **Sender domain matching** added to auto-assign — matches `purchasing@bragg.com` → Bragg override → John Smith
+- **12 customer→rep overrides** seeded for auto-assignment to work in demos
+- Files: `routers/sales_pipeline_demo.py`, `pages/PipelineDemoPage.js`
+
 ## Backlog
 - P1: Teams Adaptive Card integration (DM rep via Graph API with Approve/Flag/View buttons)
 - P1: Webhook handler for Teams "Approve" action → BC SO creation

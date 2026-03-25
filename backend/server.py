@@ -3037,6 +3037,7 @@ async def _internal_intake_document(
             "extracted_fields": extracted_fields,
             "normalized_fields": validation_results.get("normalized_fields", {}),
             "vendor_name": vendor_alias_result.get("vendor_canonical") or normalized_fields.get("vendor_raw"),
+            "email_sender": sender,
         }
         sales_assign_result = await auto_assign_sales_rep(db, doc_id, assign_doc)
         if sales_assign_result:
@@ -3581,6 +3582,7 @@ async def intake_document(
             "extracted_fields": extracted_fields,
             "normalized_fields": validation_results.get("normalized_fields", {}),
             "vendor_name": vendor_alias_result.get("vendor_canonical") or normalized_fields.get("vendor_raw"),
+            "email_sender": sender,
         }
         upload_assign_result = await auto_assign_sales_rep(db, doc_id, assign_doc)
         if upload_assign_result:

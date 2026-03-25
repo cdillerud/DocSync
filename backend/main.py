@@ -58,6 +58,7 @@ from routers.email_polling import router as email_polling_router
 from routers.vendors import router as vendors_router
 from routers.migration_routes import router as migration_routes_router
 from routers.sales_dashboard import router as sales_dashboard_router
+from routers.sales_pipeline_demo import router as sales_pipeline_demo_router
 from routers.salesperson_dashboard import router as salesperson_dashboard_router
 from routers.inventory_ledger import router as inventory_ledger_router, incoming_supply_router
 from routers.inventory_items import router as inventory_items_router
@@ -126,6 +127,7 @@ app.include_router(email_polling_router, prefix="/api")
 app.include_router(vendors_router, prefix="/api")
 app.include_router(migration_routes_router, prefix="/api")
 app.include_router(sales_dashboard_router, prefix="/api")
+app.include_router(sales_pipeline_demo_router, prefix="/api")
 app.include_router(salesperson_dashboard_router, prefix="/api")
 app.include_router(inventory_ledger_router, prefix="/api")
 app.include_router(incoming_supply_router, prefix="/api")

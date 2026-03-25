@@ -62,7 +62,11 @@ async def auto_assign_sales_rep(db, doc_id: str, doc: dict) -> Optional[dict]:
     customer_name = (
         normalized.get("customer_name")
         or extracted.get("customer_name")
+        or extracted.get("company_name")
+        or extracted.get("bill_to_name")
+        or extracted.get("ship_to_name")
         or doc.get("vendor_name")
+        or doc.get("vendor_canonical")
         or ""
     )
 
@@ -72,8 +76,10 @@ async def auto_assign_sales_rep(db, doc_id: str, doc: dict) -> Optional[dict]:
 
     # If no rep from customer_no, try by customer name match in overrides
     if not rep_result and customer_name:
+        import re
+        escaped_name = re.escape(customer_name)
         override = await db.customer_rep_overrides.find_one(
-            {"customer_name": {"$regex": f"^{customer_name}$", "$options": "i"}, "active": True},
+            {"customer_name": {"$regex": f"^{escaped_name}$", "$options": "i"}, "active": True},
             {"_id": 0},
         )
         if override:
@@ -83,6 +89,47 @@ async def auto_assign_sales_rep(db, doc_id: str, doc: dict) -> Optional[dict]:
                 "salesperson_code": override.get("salesperson_code", ""),
                 "source": "override_name_match",
             }
+
+    # If still no rep, try partial/fuzzy name match against overrides
+    if not rep_result and customer_name and len(customer_name) >= 4:
+        import re
+        # Try substring match (e.g. "Bragg" matching "Bragg Live Food Products, LLC")
+        first_word = customer_name.split()[0] if customer_name.split() else ""
+        if first_word and len(first_word) >= 3:
+            escaped_word = re.escape(first_word)
+            override = await db.customer_rep_overrides.find_one(
+                {"customer_name": {"$regex": escaped_word, "$options": "i"}, "active": True},
+                {"_id": 0},
+            )
+            if override:
+                rep_result = {
+                    "rep_email": override.get("rep_email", ""),
+                    "rep_name": override.get("rep_name", ""),
+                    "salesperson_code": override.get("salesperson_code", ""),
+                    "source": "override_partial_match",
+                }
+
+    # Last resort: try sender email domain → known customer mapping
+    if not rep_result:
+        sender_email = doc.get("email_sender") or ""
+        if sender_email and "@" in sender_email:
+            domain = sender_email.split("@")[1].lower()
+            # Check if any override customer name contains a word from the domain
+            domain_base = domain.split(".")[0]  # e.g. "bragg" from "bragg.com"
+            if domain_base and len(domain_base) >= 3:
+                import re
+                escaped_domain = re.escape(domain_base)
+                override = await db.customer_rep_overrides.find_one(
+                    {"customer_name": {"$regex": escaped_domain, "$options": "i"}, "active": True},
+                    {"_id": 0},
+                )
+                if override:
+                    rep_result = {
+                        "rep_email": override.get("rep_email", ""),
+                        "rep_name": override.get("rep_name", ""),
+                        "salesperson_code": override.get("salesperson_code", ""),
+                        "source": "sender_domain_match",
+                    }
 
     # Determine routing
     if rep_result and rep_result.get("rep_email"):

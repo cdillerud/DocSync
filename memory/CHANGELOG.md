@@ -22,6 +22,17 @@
 - Preflight endpoint auto-triggers BC history learning on first encounter
 - Demo batch seed includes ENERGY pattern alongside existing dunnage patterns
 
+### Added — Quantity Bounds Checking
+- **Statistical bounds checking** (±2σ from historical mean) on PO line quantities
+- `check_quantity_bounds()` function compares PO qty against historical stats per item per customer
+- Preflight response includes `bounds_check` with `in_bounds` flag and violation details (item, expected range, deviation factor, severity)
+- Out-of-bounds: document flagged with `bounds_alert: true`, `workflow_status: bounds_review`, `ready: false`
+- Red "Quantity Out of Bounds — Review Required" banner with per-violation CRITICAL/WARNING badges
+- "Approve & Submit to BC" button blocked ("Blocked — Qty Review Required")
+- Queue shows "Bounds Review" red status and "QTY ALERT" badge
+- Validation checklist includes "Quantity bounds check" item
+- Demo seed: `qty_history` with mean, std_dev, min, max, sample_count per item
+
 
 ## [2026-03-16] SharePoint Folder Routing Feature
 

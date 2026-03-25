@@ -59,6 +59,17 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
   - Frontend: ENERGY surcharge appears in Suggested Additions panel with "seen in 80% of orders" and editable price in line table
   - Testing: 100% pass rate (iteration_149)
 
+- **Quantity Bounds Checking (P0 - COMPLETE)**: Statistical bounds checking on PO line quantities to catch fat-finger errors and anomalies before they hit BC.
+  - Backend: `check_quantity_bounds()` in `order_line_patterns.py` compares PO qty against ±2σ from historical mean
+  - Backend: Preflight returns `bounds_check` with violations (item_no, expected range, deviation factor, severity)
+  - Backend: Violations set `ready: false`, flag doc with `bounds_alert: true` and `workflow_status: bounds_review`
+  - Backend: Validation checklist includes "Quantity bounds check" item
+  - Frontend (Review): Red "Quantity Out of Bounds — Review Required" banner with BLOCKED badge, per-violation details (CRITICAL/WARNING severity)
+  - Frontend (Review): "Approve & Submit to BC" button disabled, reads "Blocked — Qty Review Required"
+  - Frontend (Queue): "Bounds Review" status in RED, "QTY ALERT" badge next to file name
+  - Demo seed: Historical qty stats for each item (mean, σ, sample count) from 10 simulated orders
+  - Testing: 100% pass rate (iteration_150)
+
 ### Current Session Fixes (March 24, 2026 - Fork)
 - **Auto-Close Confidence Fix (P0)**: Fixed pipeline where documents like `0303691.pdf` failed to auto-close despite being "slam dunk" easy docs. Root cause: when AI extraction (Gemini LLM) fails/times out, `confidence=0.0` propagated to ALL downstream systems — workflow handler (`_update_standard_workflow_status`) treated it as classification failure and bailed, auto-resolution skipped it, auto-clear rejected it. Three-part fix:
   1. **Confidence bump after classification**: After `classify_document_type` successfully classifies a doc (doc_type != Other/Unknown), confidence is bumped to 0.85 so downstream systems don't treat it as failed.

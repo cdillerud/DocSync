@@ -219,8 +219,11 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
   - Backend: `GET /api/dashboard/insights-trends` endpoint (daily aggregation pipeline)
   - Testing: 100% backend (13/13), 100% frontend — iteration_152
 
-- **Processed Tab (P0 - COMPLETE)**: Added a "Processed" tab to the inbox that shows only terminal/done documents (exported, completed, posted, archived, auto-filed). The All/Accounting/Sales tabs now only show active docs needing attention. Uses backend `queue_view=true` for active tabs and client-side `isTerminal()` filter for the Processed tab.
-  - Testing: 100% frontend — iteration_153
+- **Processed Tab (P0 - COMPLETE)**: Added a "Processed" tab to the inbox that shows only terminal/done documents (exported, completed, posted, archived, auto-filed). The All/Accounting/Sales tabs now only show active docs needing attention. Uses backend `queue_view=true` for active tabs and client-side `isTerminal()` filter for the Processed tab. batch_parent containers excluded from both active inbox and Processed tab.
+  - Testing: 100% frontend — iteration_153, iteration_154
+
+- **Real Pipeline Batch Split (P0 - COMPLETE)**: Removed the demo shortcut that pre-populated fake fields. Batch PO split now uses `split_and_ingest_batch()` which runs each page through the full intake pipeline: AI classification → extraction → validation → routing → auto-assign. Patterns (dunnage, energy surcharge, qty bounds) are seeded before split so preflight checks work. ~70s for 5 pages through real AI vs instant fake.
+  - Testing: 100% backend (9/9), 100% frontend — iteration_154
 
 ## Backlog
 - P1: Teams Adaptive Card integration (DM rep via Graph API with Approve/Flag/View buttons)

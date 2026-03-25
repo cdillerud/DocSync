@@ -89,6 +89,8 @@ const STATUS_LABELS = {
   exported: "Exported",
   Completed: "Completed",
   completed: "Completed",
+  AutoFiled: "Auto-Filed",
+  auto_filed: "Auto-Filed",
   FileMissing: "File Missing",
   file_missing: "File Missing",
   Posted: "Posted",
@@ -108,7 +110,7 @@ const getStatusBadge = (status) => {
     ? "bg-green-500/20 text-green-400"
     : lower.includes("exception") || lower.includes("rejected") || lower.includes("fail")
     ? "bg-red-500/20 text-red-400"
-    : lower.includes("review") || lower.includes("pending") || lower.includes("vendor")
+    : lower.includes("review") || lower.includes("pending") || lower.includes("vendor") || lower.includes("autofiled") || lower.includes("auto-filed") || lower.includes("auto_filed")
     ? "bg-yellow-500/20 text-yellow-400"
     : lower.includes("classif") || lower.includes("extract") || lower.includes("linked")
     ? "bg-blue-500/20 text-blue-400"

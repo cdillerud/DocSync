@@ -433,12 +433,28 @@ async def _validate_bc_match_inner(
                     normalized_fields.get("vendor")
                     or extracted_fields.get("vendor", "")
                 )
+
+                # If reference intelligence already resolved a canonical vendor, prefer it
+                ref_canonical = extracted_fields.get("_vendor_canonical") or ""
+                if ref_canonical and not vendor_name:
+                    vendor_name = ref_canonical
+
                 if vendor_name:
                     from services.unified_vendor_matcher import match_vendor_unified
 
-                    unified_result = await match_vendor_unified(
-                        db, vendor_name, match_threshold,
-                    )
+                    # Try canonical name first if available, fall back to extracted
+                    names_to_try = []
+                    if ref_canonical and ref_canonical.lower() != vendor_name.lower():
+                        names_to_try.append(ref_canonical)
+                    names_to_try.append(vendor_name)
+
+                    unified_result = None
+                    for try_name in names_to_try:
+                        unified_result = await match_vendor_unified(
+                            db, try_name, match_threshold,
+                        )
+                        if unified_result.get("matched"):
+                            break
 
                     vendor_result: Dict[str, Any] = {
                         "matched": unified_result.get("matched", False),
@@ -494,19 +510,24 @@ async def _validate_bc_match_inner(
                             validation_results["bc_record_id"] = vendor_result["selected_vendor"].get("id")
                             validation_results["bc_record_info"] = vendor_result["selected_vendor"]
                     else:
-                        validation_results["all_passed"] = False
                         validation_results["match_method"] = "none"
                         details = f"No vendor found matching '{vendor_name}' (checked: {', '.join(unified_result.get('sources_checked', []))})"
                         if vendor_result["vendor_candidates"]:
                             top = vendor_result["vendor_candidates"][0]
                             details += f". Best candidate: {top['display_name']} ({top['score']:.0%})"
+                        # If vendor was already resolved by ref intel, downgrade to non-required warning
+                        check_required = True
+                        if ref_canonical and vendor_result["vendor_candidates"]:
+                            check_required = False  # Ref intel resolved it — just a warning
                         validation_results["checks"].append({
                             "check_name": "vendor_match",
                             "passed": False,
                             "details": details,
-                            "required": True,
+                            "required": check_required,
                             "candidates_available": len(vendor_result["vendor_candidates"]) > 0,
                         })
+                        if check_required:
+                            validation_results["all_passed"] = False
 
                 # ---- PO validation ----
                 po_number = (

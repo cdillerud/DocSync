@@ -1794,6 +1794,9 @@ async def on_document_ingested(doc_id: str, source: str = "unknown"):
         
         # Run BC validation
         from services.bc_validation_service import validate_bc_match
+        # Pass vendor_canonical from ref intel to help validation
+        if doc.get("vendor_canonical"):
+            extracted_fields.setdefault("_vendor_canonical", doc["vendor_canonical"])
         validation_results = await validate_bc_match(job_type, extracted_fields, job_configs)
         
         # Make automation decision
@@ -1873,13 +1876,23 @@ async def on_document_ingested(doc_id: str, source: str = "unknown"):
                     if filing_match:
                         folder_path = filing_match["folder_path"]
                         auto_now = datetime.now(timezone.utc).isoformat()
+
+                        # Determine final status based on validation outcome:
+                        # If validation has required failures, mark as "AutoFiled" (not "Completed")
+                        # so reps can still see the validation issue needs resolution.
+                        has_required_failures = any(
+                            not c.get("passed") and c.get("required")
+                            for c in validation_results.get("checks", [])
+                        )
+                        auto_clear_status = "Completed" if not has_required_failures else "AutoFiled"
+
                         await db.hub_documents.update_one({"id": doc_id}, {"$set": {
                             "auto_cleared": True,
                             "auto_clear_decision": "Cleared",
                             "auto_clear_reason": f"Auto-filed (learned from {filing_match['count']} previous filings)",
-                            "auto_clear_details": {"method": "ai_auto_file", "pattern_count": filing_match["count"]},
-                            "status": "Completed",
-                            "workflow_status": "completed",
+                            "auto_clear_details": {"method": "ai_auto_file", "pattern_count": filing_match["count"], "validation_override": has_required_failures},
+                            "status": auto_clear_status,
+                            "workflow_status": "completed" if not has_required_failures else "auto_filed",
                             "sharepoint_folder_suggestion": folder_path,
                             "filed_at": auto_now,
                             "filed_folder": folder_path,
@@ -1945,9 +1958,7 @@ async def _update_standard_workflow_status(
     - Import -> Classification -> Customer Match -> BC Validation -> Export/Create
     """
     from services.square9_workflow import (
-        initialize_retry_state, increment_retry, validate_location_code,
-        validate_required_fields, determine_square9_stage, Square9Stage,
-        reset_retry_counter
+        initialize_retry_state, increment_retry, determine_square9_stage, reset_retry_counter
     )
     
     doc = await db.hub_documents.find_one({"id": doc_id})
@@ -2824,6 +2835,10 @@ async def _internal_intake_document(
     # Run BC validation (existing logic — now enriched with PO resolution candidates)
     try:
         from services.bc_validation_service import validate_bc_match
+        # Pass vendor_canonical from ref intel if available
+        vendor_canonical = doc.get("vendor_canonical") if doc else ""
+        if vendor_canonical:
+            extracted_fields.setdefault("_vendor_canonical", vendor_canonical)
         validation_results = await validate_bc_match(suggested_type, extracted_fields, job_configs)
     except Exception as bc_err:
         logger.warning("BC validation failed for %s: %s", doc_id, str(bc_err))
@@ -6469,7 +6484,7 @@ class ShadowModeConfig(BaseModel):
 
 
 from services.bc_sandbox_service import (
-    get_vendor, search_vendors_by_name, validate_vendor_exists,
+    get_vendor, validate_vendor_exists,
     get_customer, get_purchase_order, get_purchase_invoice, get_sales_invoice,
     validate_invoice_exists, validate_ap_invoice_in_bc, validate_sales_invoice_in_bc,
     validate_purchase_order_in_bc, get_bc_sandbox_status,
@@ -6605,7 +6620,6 @@ async def reingest_single_document(doc_id: str):
     
     # Import classification and workflow functions
     from services.workflow_engine import DocType, WorkflowStatus
-    from services.bc_simulation_service import run_full_export_simulation
     
     # Step 1: Determine doc_type from existing data or re-classify
     doc_type = doc.get("doc_type", "OTHER")
@@ -6656,7 +6670,6 @@ async def reingest_single_document(doc_id: str):
         await db.pilot_simulation_results.insert_one(result_copy)
     
     # Step 5: Create simulation history entry
-    from services.workflow_engine import SimulationHistoryEntry
     sim_history_entry = SimulationHistoryEntry.create_batch_simulation_entry(
         document_id=doc_id,
         simulation_results=results_dict

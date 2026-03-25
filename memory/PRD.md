@@ -140,6 +140,14 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
 - **12 customer→rep overrides** seeded for auto-assignment to work in demos
 - Files: `routers/sales_pipeline_demo.py`, `pages/PipelineDemoPage.js`
 
+### Batch PO Split Demo — Async Processing (March 25, 2026 - Fork)
+- **Fixed backend crash** — `BackgroundTasks` was used as a type hint without being imported at module level; added to FastAPI import
+- **Async background processing** — `POST /api/sales-dashboard/demo/run-batch` returns `job_id` immediately, processes 5 pages in background (~75s)
+- **Polling endpoint** — `GET /api/sales-dashboard/demo/batch-status/{job_id}` tracks progress: started → ingesting → detecting → splitting → summarizing → completed
+- **Frontend async polling** — Rewrote batch demo UI to trigger job, poll every 2s, show live progress bar + step cards, and render children table on completion
+- **Children table** — Shows each split page with PO number, type, customer, amount, confidence, assigned rep, and queue destination
+- **Testing**: 11/11 backend tests passed, frontend UI fully verified (iteration_145)
+
 ## Backlog
 - P1: Teams Adaptive Card integration (DM rep via Graph API with Approve/Flag/View buttons)
 - P1: Webhook handler for Teams "Approve" action → BC SO creation

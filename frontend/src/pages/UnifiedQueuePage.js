@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import {
   Search, RefreshCw, FileText, ChevronRight, Trash2, Play,
   Receipt, ShoppingCart, Inbox, FolderInput, Brain,
-  TrendingUp, ShieldCheck, AlertTriangle, Clock,
+  TrendingUp, ShieldCheck, AlertTriangle, Clock, CheckCircle2,
 } from "lucide-react";
 import api, { bulkResubmitDocuments, bulkDeleteDocuments, deleteDocument, bulkFileAndClear, batchAutoResolve, triggerAutoResolve } from "@/lib/api";
 
@@ -70,6 +70,18 @@ const getTypeColor = (type) => {
 const AP_TYPES = ["AP_Invoice", "AP_INVOICE", "Purchase_Order", "PURCHASE_ORDER", "Remittance", "REMITTANCE", "Credit_Memo", "PURCHASE_CREDIT_MEMO"];
 const SALES_TYPES = ["Sales_Order", "SALES_ORDER", "Sales_PO", "Sales_Quote", "Order_Confirmation", "SALES_INVOICE", "SALES_CREDIT_MEMO", "PurchaseOrder", "Purchase_Order"];
 
+// Terminal statuses — docs that are "done"
+const TERMINAL_STATUSES = ["Completed", "Posted", "Archived", "completed", "posted", "archived", "exported", "auto_filed", "AutoFiled"];
+const DONE_WORKFLOW_STATUSES = ["completed", "exported", "validation_passed", "processed"];
+
+function isTerminal(doc) {
+  const s = (doc.status || "").toLowerCase();
+  const ws = (doc.workflow_status || "").toLowerCase();
+  return TERMINAL_STATUSES.some(t => t.toLowerCase() === s) ||
+         DONE_WORKFLOW_STATUSES.some(t => t.toLowerCase() === ws) ||
+         doc.auto_cleared === true;
+}
+
 export default function UnifiedQueuePage() {
   const navigate = useNavigate();
   const [documents, setDocuments] = useState([]);
@@ -78,7 +90,7 @@ export default function UnifiedQueuePage() {
   const [activeTab, setActiveTab] = useState("all");
   const [selectedDocs, setSelectedDocs] = useState(new Set());
   const [bulkProcessing, setBulkProcessing] = useState(false);
-  const [counts, setCounts] = useState({ all: 0, accounting: 0, sales: 0 });
+  const [counts, setCounts] = useState({ all: 0, accounting: 0, sales: 0, processed: 0 });
   const [stats, setStats] = useState(null);
 
   // ── Fetch Inbox Stats ──
@@ -99,11 +111,20 @@ export default function UnifiedQueuePage() {
   const fetchDocuments = useCallback(async () => {
     setLoading(true);
     try {
+      const isProcessedTab = activeTab === "processed";
       const params = new URLSearchParams();
       if (searchQuery) params.append("search", searchQuery);
       params.append("limit", "500");
-      params.append("queue_view", "false");
-      params.append("include_cleared", "true");
+
+      if (isProcessedTab) {
+        // Show all docs, then filter to terminal client-side
+        params.append("queue_view", "false");
+        params.append("include_cleared", "true");
+      } else {
+        // Active work: hide completed/exported/archived
+        params.append("queue_view", "true");
+        params.append("include_cleared", "false");
+      }
 
       // Tab-level type filtering
       if (activeTab === "accounting") {
@@ -113,15 +134,25 @@ export default function UnifiedQueuePage() {
       }
 
       const response = await api.get(`/documents?${params.toString()}`);
-      const docs = response.data.documents || [];
+      let docs = response.data.documents || [];
+
+      if (isProcessedTab) {
+        // Only show terminal/done docs
+        docs = docs.filter(isTerminal);
+      }
+
       setDocuments(docs);
       setSelectedDocs(new Set());
 
-      // Count per tab (from full data if on "all", otherwise fetch separately)
+      // Fetch counts for all tabs (only when on "all" tab to avoid excessive calls)
       if (activeTab === "all") {
-        const apCount = docs.filter(d => AP_TYPES.includes(d.document_type || d.doc_type)).length;
-        const salesCount = docs.filter(d => SALES_TYPES.includes(d.document_type || d.doc_type)).length;
-        setCounts({ all: docs.length, accounting: apCount, sales: salesCount });
+        // Active docs are what we just got
+        const activeDocs = docs;
+        const apCount = activeDocs.filter(d => AP_TYPES.includes(d.document_type || d.doc_type)).length;
+        const salesCount = activeDocs.filter(d => SALES_TYPES.includes(d.document_type || d.doc_type)).length;
+        // Get processed count from response metadata
+        const processedCount = response.data.counts?.completed || 0;
+        setCounts({ all: activeDocs.length, accounting: apCount, sales: salesCount, processed: processedCount });
       }
     } catch (err) {
       console.error("Failed to fetch documents:", err);
@@ -313,12 +344,13 @@ export default function UnifiedQueuePage() {
         </div>
       )}
 
-      {/* ─── Tabs: All | Accounting | Sales ─── */}
+      {/* ─── Tabs: All | Accounting | Sales | Processed ─── */}
       <div className="flex items-center gap-1 border-b border-border/60">
         {[
           { key: "all", label: "All", icon: Inbox, count: counts.all },
           { key: "accounting", label: "Accounting", icon: Receipt, count: counts.accounting },
           { key: "sales", label: "Sales", icon: ShoppingCart, count: counts.sales },
+          { key: "processed", label: "Processed", icon: CheckCircle2, count: counts.processed },
         ].map(({ key, label, icon: Icon, count }) => (
           <button
             key={key}

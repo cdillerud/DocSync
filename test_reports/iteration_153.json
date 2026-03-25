@@ -1,0 +1,74 @@
+{
+  "summary": "Completed frontend testing of new 'Processed' tab feature. All 4 inbox tabs (All, Accounting, Sales, Processed) are present and working correctly. Terminal status documents are properly filtered - shown only in Processed tab, hidden from All/Accounting/Sales tabs. Document navigation, search, stats strip, Insights page, and Sales page all working correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "CreateBCSalesOrderPanel",
+        "issues": ["HTML nesting warnings in console: <div> inside <p>, <span> inside <tbody>/<tr> - hydration warnings but not blocking functionality"]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_153.json"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Minor: Console shows HTML nesting warnings in CreateBCSalesOrderPanel.js - Badge component inside <p> tag and <span> wrapper inside <tbody>. These cause React hydration warnings but don't break functionality."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (frontend-only testing)",
+    "frontend": "100% (All features verified working)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "No new seed data created. Used existing documents from previous test iterations.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Processed tab feature fully tested. Inbox now has 4 tabs: All (17 active docs), Accounting (0 docs), Sales (17 docs), Processed (4 terminal docs). The filtering works correctly - All/Accounting/Sales tabs use queue_view=true to hide terminal docs, while Processed tab uses queue_view=false and client-side isTerminal() filter to show only completed/exported/posted/archived/auto_filed docs. Document click in Processed tab navigates to detail page correctly. Sales page has 6 tabs (Pipeline Demo, My Queue, Triage, Sales Orders, Rep Performance, Inventory Ledger). Insights page shows charts correctly.",
+  "features_tested": {
+    "frontend": [
+      "Login flow with admin/admin credentials - PASS",
+      "All 4 inbox tabs present (All, Accounting, Sales, Processed) - PASS",
+      "All tab shows 17 active documents (no terminal statuses) - PASS",
+      "Accounting tab shows 0 documents (filtered by AP types) - PASS",
+      "Sales tab shows 17 documents (filtered by Sales types) - PASS",
+      "Processed tab shows 4 terminal documents with 'Processed' status - PASS",
+      "Tab counts are accurate (All:17, Accounting:0, Sales:17, Processed:4) - PASS",
+      "Clicking document in Processed tab navigates to detail page - PASS",
+      "Stats strip shows correctly (Today:5, Auto-validated:100%, Pending:1, Qty alerts:1, AI confidence:99.3%) - PASS",
+      "Search functionality works - PASS",
+      "Insights page loads with charts - PASS",
+      "Sales page loads with all 6 tabs - PASS"
+    ]
+  },
+  "mocked_apis": {
+    "BC Sandbox": "DEMO_MODE=true - BC Sales Order creation is mocked",
+    "SharePoint Graph API": "DEMO_MODE=true - SharePoint integration is mocked"
+  },
+  "tab_counts_observed": {
+    "all": 17,
+    "accounting": 0,
+    "sales": 17,
+    "processed": 4
+  },
+  "processed_tab_documents": [
+    "Purchase_Orders_61312-61316_p5.pdf - Giovanni Food Company - Purchase Order - Processed",
+    "Purchase_Orders_61312-61316_p4.pdf - Giovanni Food Company - Purchase Order - Processed",
+    "Purchase_Orders_61312-61316_p3.pdf - Giovanni Food Company - Purchase Order - Processed",
+    "Purchase_Orders_61312-61316_p2.pdf - Giovanni Food Company - Purchase Order - Processed"
+  ],
+  "inbox_stats_values_observed": {
+    "ingested_today": 5,
+    "avg_daily_7d": "0.7/d avg",
+    "auto_validation_rate": "100%",
+    "pending_review": 1,
+    "bounds_alerts": 1,
+    "avg_ai_confidence": "99.3%"
+  }
+}

@@ -62,7 +62,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://inside-sales-queue.preview.emergentagent.com"
+    "api_url": "https://po-splitter-pipeline.preview.emergentagent.com"
   },
   "seed_data_created": {
     "entity_resolutions": "4 resolutions for doc 80c7ab51 (customer ambiguous, vendor unmatched, PO matched, invoice ambiguous), 3 resolutions for doc e4624c82 (customer matched, vendor unmatched, invoice ambiguous)",

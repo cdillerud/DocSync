@@ -441,3 +441,269 @@ async def run_pipeline_demo(scenario_id: str = Query("bragg-rush")):
         "total_duration_ms": total_ms,
         "steps": steps,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# BATCH PO DEMO — Generate a multi-page PO PDF and show splitting
+# ═══════════════════════════════════════════════════════════════════
+
+BATCH_PO_DATA = [
+    {"po": "PO-61312", "customer": "Giovanni Food Co., Inc.", "item": "Glass, 24oz, Bulk, 2821/Plt", "qty": 62062, "price": 0.23474},
+    {"po": "PO-61313", "customer": "Giovanni Food Co., Inc.", "item": "Glass, 16oz, Bulk, 3600/Plt", "qty": 43200, "price": 0.18920},
+    {"po": "PO-61314", "customer": "Giovanni Food Co., Inc.", "item": "Glass, 12oz, Flint, 4032/Plt", "qty": 80640, "price": 0.14225},
+    {"po": "PO-61315", "customer": "Giovanni Food Co., Inc.", "item": "Metal Cap 63mm Gold Lug", "qty": 185000, "price": 0.04850},
+    {"po": "PO-61316", "customer": "Giovanni Food Co., Inc.", "item": "Label, Marinara 24oz, 4-Color", "qty": 65000, "price": 0.06300},
+]
+
+
+def _generate_batch_po_pdf(po_data: list) -> bytes:
+    """Generate a multi-page PDF with one PO per page."""
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors
+    from reportlab.lib.units import inch
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
+    styles = getSampleStyleSheet()
+    elements = []
+
+    title_style = ParagraphStyle('POTitle', parent=styles['Title'], fontSize=18, spaceAfter=6)
+    header_style = ParagraphStyle('Header', parent=styles['Normal'], fontSize=10, spaceAfter=2)
+    bold_style = ParagraphStyle('Bold', parent=styles['Normal'], fontSize=10, fontName='Helvetica-Bold')
+    small_style = ParagraphStyle('Small', parent=styles['Normal'], fontSize=8, textColor=colors.grey)
+
+    now = datetime.now(timezone.utc)
+
+    for i, po in enumerate(po_data):
+        if i > 0:
+            elements.append(PageBreak())
+
+        total = round(po["qty"] * po["price"], 2)
+
+        elements.append(Paragraph("PURCHASE ORDER", title_style))
+        elements.append(Spacer(1, 4))
+
+        info_data = [
+            ["PO Number:", po["po"], "Date:", now.strftime("%m/%d/%Y")],
+            ["Customer:", po["customer"], "Due Date:", (now + timedelta(days=30)).strftime("%m/%d/%Y")],
+            ["Ship To:", "Giovanni Foods, 8800 Sixty Road, Baldwinsville, NY 13027", "", ""],
+        ]
+        info_table = Table(info_data, colWidths=[80, 220, 80, 160])
+        info_table.setStyle(TableStyle([
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ]))
+        elements.append(info_table)
+        elements.append(Spacer(1, 16))
+
+        # Line item table
+        headers = ["Line", "Description", "Qty", "Unit Price", "Amount"]
+        table_data = [headers]
+        table_data.append(["1", po["item"], f"{po['qty']:,}", f"${po['price']:.5f}", f"${total:,.2f}"])
+        table_data.append(["", "", "", "TOTAL:", f"${total:,.2f}"])
+
+        line_table = Table(table_data, colWidths=[35, 240, 70, 70, 80])
+        line_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a365d')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('ALIGN', (2, 0), (-1, -1), 'RIGHT'),
+            ('GRID', (0, 0), (-1, -2), 0.5, colors.grey),
+            ('LINEBELOW', (0, -1), (-1, -1), 1.5, colors.HexColor('#1a365d')),
+            ('FONTNAME', (3, -1), (-1, -1), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ]))
+        elements.append(line_table)
+        elements.append(Spacer(1, 16))
+
+        elements.append(Paragraph(
+            f"Page {i + 1} of {len(po_data)}  |  Batch POs {po_data[0]['po']} – {po_data[-1]['po']}",
+            small_style,
+        ))
+
+    doc.build(elements)
+    return buf.getvalue()
+
+
+@router.post("/run-batch")
+async def run_batch_demo(background_tasks: BackgroundTasks):
+    """Demo: Generate a multi-page batch PO PDF, ingest it, then split each page.
+    Returns immediately with job_id. Poll /demo/batch-status/{job_id} for results.
+    """
+    from fastapi import BackgroundTasks
+    db = get_db()
+    job_id = uuid.uuid4().hex[:12]
+
+    # Store initial status in DB
+    await db.demo_batch_jobs.update_one(
+        {"job_id": job_id},
+        {"$set": {
+            "job_id": job_id,
+            "status": "started",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "total_pages": len(BATCH_PO_DATA),
+            "steps": [],
+            "children": [],
+        }},
+        upsert=True,
+    )
+
+    background_tasks.add_task(_run_batch_demo_bg, db, job_id)
+
+    return {
+        "status": "started",
+        "job_id": job_id,
+        "total_pages": len(BATCH_PO_DATA),
+        "message": f"Batch split started — {len(BATCH_PO_DATA)} pages will be processed. Poll /demo/batch-status/{job_id}",
+    }
+
+
+@router.get("/batch-status/{job_id}")
+async def batch_status(job_id: str):
+    """Poll for batch demo results."""
+    db = get_db()
+    job = await db.demo_batch_jobs.find_one({"job_id": job_id}, {"_id": 0})
+    if not job:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+async def _run_batch_demo_bg(db, job_id: str):
+    """Background: generate batch PDF, ingest parent, then split & pipeline each page."""
+    start_time = time.time()
+    steps = []
+
+    async def _update_job(**kwargs):
+        await db.demo_batch_jobs.update_one({"job_id": job_id}, {"$set": kwargs})
+
+    try:
+        # Step 1: Generate multi-page PDF
+        t0 = time.time()
+        pdf_bytes = _generate_batch_po_pdf(BATCH_PO_DATA)
+        filename = f"Purchase_Orders_{BATCH_PO_DATA[0]['po']}-{BATCH_PO_DATA[-1]['po']}.pdf"
+        file_hash = hashlib.sha256(pdf_bytes).hexdigest()
+
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        page_count = len(reader.pages)
+
+        steps.append({
+            "step": 1, "name": "Batch PO Generation", "status": "completed",
+            "duration_ms": round((time.time() - t0) * 1000),
+            "details": {
+                "filename": filename, "pages": page_count,
+                "po_range": f"{BATCH_PO_DATA[0]['po']} – {BATCH_PO_DATA[-1]['po']}",
+                "customer": BATCH_PO_DATA[0]["customer"],
+                "total_value": round(sum(p["qty"] * p["price"] for p in BATCH_PO_DATA), 2),
+            },
+        })
+        await _update_job(steps=steps, status="ingesting")
+
+        # Step 2: Ingest as parent
+        t0 = time.time()
+        await db.hub_documents.delete_many({"sha256_hash": file_hash})
+        await db.hub_documents.delete_many({"batch_source_filename": filename})
+
+        from server import _internal_intake_document
+        result = await _internal_intake_document(
+            file_content=pdf_bytes, filename=filename, content_type="application/pdf",
+            source="batch_demo", sender="purchasing@giovannifoods.com",
+            subject=f"Batch POs {BATCH_PO_DATA[0]['po']}-{BATCH_PO_DATA[-1]['po']} from Giovanni Food Co.",
+            email_id=f"batch-demo-{uuid.uuid4().hex[:8]}", mailbox_category="Sales",
+        )
+        parent_doc_id = result.get("document_id") or (result.get("document") or {}).get("id") or ""
+        steps.append({
+            "step": 2, "name": "Parent Document Ingestion", "status": "completed",
+            "duration_ms": round((time.time() - t0) * 1000),
+            "details": {"parent_doc_id": parent_doc_id, "filename": filename, "pages_detected": page_count},
+        })
+        await _update_job(steps=steps, status="detecting", parent_doc_id=parent_doc_id)
+
+        # Step 3: Check batch detection
+        parent_doc = await db.hub_documents.find_one({"id": parent_doc_id}, {"_id": 0})
+        steps.append({
+            "step": 3, "name": "Batch PO Detection", "status": "completed",
+            "details": {
+                "batch_detected": parent_doc.get("batch_detected", False),
+                "batch_page_count": parent_doc.get("batch_page_count", page_count),
+                "document_type": parent_doc.get("document_type", ""),
+                "classification_confidence": parent_doc.get("ai_confidence", 0),
+            },
+        })
+        await _update_job(steps=steps, status="splitting")
+
+        # Step 4: Split pages and run full pipeline on each
+        t0 = time.time()
+        from services.batch_po_splitter import split_and_ingest_batch
+        split_result = await split_and_ingest_batch(
+            db=db, parent_doc_id=parent_doc_id, parent_filename=filename,
+            file_content=pdf_bytes, sender="purchasing@giovannifoods.com",
+            source="batch_split_demo",
+        )
+        steps.append({
+            "step": 4, "name": "Page Splitting & Full Pipeline", "status": "completed",
+            "duration_ms": round((time.time() - t0) * 1000),
+            "details": {
+                "pages_split": split_result["total_pages"],
+                "children_created": split_result["children_success"],
+                "errors": split_result["children_errors"],
+            },
+        })
+        await _update_job(steps=steps, status="summarizing")
+
+        # Step 5: Gather child results
+        children_summary = []
+        for child in split_result.get("children", []):
+            if child.get("child_doc_id"):
+                child_doc = await db.hub_documents.find_one(
+                    {"id": child["child_doc_id"]},
+                    {"_id": 0, "id": 1, "document_type": 1, "extracted_fields": 1,
+                     "sales_review_status": 1, "assigned_rep_name": 1, "assigned_rep_email": 1,
+                     "ai_confidence": 1, "batch_page_num": 1},
+                )
+                if child_doc:
+                    ef = child_doc.get("extracted_fields") or {}
+                    children_summary.append({
+                        "page": child_doc.get("batch_page_num", child["page_num"]),
+                        "doc_id": child["child_doc_id"][:12] + "...",
+                        "type": child_doc.get("document_type", ""),
+                        "po_number": ef.get("po_number", ""),
+                        "customer": ef.get("customer_name") or ef.get("company_name", ""),
+                        "amount": ef.get("amount", ""),
+                        "confidence": child_doc.get("ai_confidence", 0),
+                        "assigned_rep": child_doc.get("assigned_rep_name", "Unassigned"),
+                        "review_status": child_doc.get("sales_review_status", ""),
+                        "queue": "My Queue" if child_doc.get("assigned_rep_email") else "Triage",
+                    })
+
+        steps.append({
+            "step": 5, "name": "Child Documents Summary", "status": "completed",
+            "details": {
+                "children": children_summary,
+                "assigned_count": sum(1 for c in children_summary if c["queue"] == "My Queue"),
+                "triage_count": sum(1 for c in children_summary if c["queue"] == "Triage"),
+            },
+        })
+
+        total_ms = round((time.time() - start_time) * 1000)
+        await _update_job(
+            steps=steps, status="completed",
+            parent_doc_id=parent_doc_id,
+            total_pages=page_count,
+            children_created=split_result["children_success"],
+            children=children_summary,
+            total_duration_ms=total_ms,
+            completed_at=datetime.now(timezone.utc).isoformat(),
+        )
+        logger.info("[BatchDemo] Complete: %d pages → %d children in %dms", page_count, split_result["children_success"], total_ms)
+
+    except Exception as e:
+        logger.error("[BatchDemo] Failed: %s", str(e))
+        await _update_job(status="error", error=str(e), steps=steps)

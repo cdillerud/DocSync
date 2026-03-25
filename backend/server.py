@@ -3045,6 +3045,25 @@ async def _internal_intake_document(
     except Exception as sa_err:
         logger.warning("[INTAKE] Sales auto-assign error for %s: %s", doc_id[:8], str(sa_err))
 
+    # ── Batch PO Detection ──
+    # If this is a multi-page Purchase Order, flag it for batch splitting
+    try:
+        from services.batch_po_splitter import detect_batch_po
+        batch_info = detect_batch_po(file_content, suggested_type)
+        if batch_info.get("should_split"):
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    "batch_detected": True,
+                    "batch_page_count": batch_info["page_count"],
+                    "batch_split_suggested": True,
+                }},
+            )
+            logger.info("[INTAKE] Batch PO detected: %s (%d pages) — flagged for splitting",
+                        doc_id[:8], batch_info["page_count"])
+    except Exception as bd_err:
+        logger.warning("[INTAKE] Batch detection error for %s: %s", doc_id[:8], str(bd_err))
+
     # Create workflow audit trail entry
     workflow_run_id = uuid.uuid4().hex[:8]
     workflow = {

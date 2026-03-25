@@ -33,6 +33,11 @@ export default function PipelineDemoPage() {
   const [animatingStep, setAnimatingStep] = useState(0);
   const timerRef = useRef(null);
 
+  // Batch demo state
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchSteps, setBatchSteps] = useState([]);
+  const [batchResult, setBatchResult] = useState(null);
+
   useEffect(() => {
     (async () => {
       try {
@@ -236,6 +241,160 @@ export default function PipelineDemoPage() {
           </CardContent>
         </Card>
       )}
+      {/* Batch PO Split Demo */}
+      <div className="border-t border-border pt-6 mt-2" data-testid="batch-demo-section">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+          <div>
+            <h2 className="text-xl font-bold tracking-tight flex items-center gap-2" style={{ fontFamily: 'Chivo, sans-serif' }}>
+              <FileText className="w-5 h-5 text-cyan-500" />
+              Batch PO Split Demo
+            </h2>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Watch a multi-page PO get split into individual orders &mdash; each page through the full pipeline
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              size="lg"
+              className="h-10 px-6"
+              onClick={async () => {
+                setBatchRunning(true);
+                setBatchSteps([]);
+                setBatchResult(null);
+                try {
+                  const res = await fetch(`${API}/api/sales-dashboard/demo/run-batch`, { method: 'POST' });
+                  if (!res.ok) throw new Error('Batch demo failed');
+                  const data = await res.json();
+                  setBatchSteps(data.steps || []);
+                  setBatchResult(data);
+                  toast.success(`Batch split: ${data.children_created} child documents created`);
+                } catch (err) {
+                  toast.error('Batch demo failed: ' + err.message);
+                } finally {
+                  setBatchRunning(false);
+                }
+              }}
+              disabled={batchRunning}
+              data-testid="run-batch-btn"
+            >
+              {batchRunning ? (
+                <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Splitting & Processing...</>
+              ) : (
+                <><Play className="w-4 h-4 mr-2" /> Run Batch Split</>
+              )}
+            </Button>
+            {batchSteps.length > 0 && (
+              <Button variant="outline" size="lg" className="h-10" onClick={() => { setBatchSteps([]); setBatchResult(null); }}>
+                <RotateCcw className="w-4 h-4 mr-2" /> Reset
+              </Button>
+            )}
+          </div>
+        </div>
+
+        <div className="mb-4 flex flex-wrap gap-4 text-xs text-muted-foreground">
+          <span><strong>Customer:</strong> Giovanni Food Co., Inc.</span>
+          <span><strong>POs:</strong> 61312 – 61316 (5 pages)</span>
+          <span><strong>Items:</strong> Glass jars, caps, labels</span>
+          <span><strong>Total Value:</strong> $35,564</span>
+          <Badge variant="outline" className="text-[10px] bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300 border-cyan-200 dark:border-cyan-700">
+            1 PDF → 5 Sales Orders
+          </Badge>
+        </div>
+
+        {/* Batch Steps */}
+        {batchSteps.length > 0 && (
+          <div className="space-y-3">
+            {batchSteps.map((step, i) => {
+              const BATCH_STEP_CFG = {
+                1: { icon: FileText, color: 'blue' },
+                2: { icon: Inbox, color: 'violet' },
+                3: { icon: Brain, color: 'amber' },
+                4: { icon: Zap, color: 'cyan' },
+                5: { icon: ClipboardCheck, color: 'green' },
+              };
+              const cfg = BATCH_STEP_CFG[step.step] || { icon: CheckCircle2, color: 'blue' };
+
+              return (
+                <StepCard
+                  key={step.step}
+                  num={step.step}
+                  Icon={cfg.icon}
+                  label={step.name}
+                  color={cfg.color}
+                  isAnimating={false}
+                  isWaiting={false}
+                  isComplete={true}
+                  step={step}
+                />
+              );
+            })}
+
+            {/* Children table */}
+            {batchResult && batchSteps[4]?.details?.children?.length > 0 && (
+              <Card className="border border-border" data-testid="batch-children-table">
+                <CardContent className="p-0">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border bg-muted/40 text-xs text-muted-foreground uppercase tracking-wider">
+                          <th className="text-left py-2.5 px-4 font-medium">Page</th>
+                          <th className="text-left py-2.5 px-3 font-medium">PO Number</th>
+                          <th className="text-left py-2.5 px-3 font-medium">Type</th>
+                          <th className="text-left py-2.5 px-3 font-medium">Customer</th>
+                          <th className="text-right py-2.5 px-3 font-medium">Amount</th>
+                          <th className="text-center py-2.5 px-3 font-medium">Confidence</th>
+                          <th className="text-left py-2.5 px-3 font-medium">Assigned Rep</th>
+                          <th className="text-left py-2.5 px-4 font-medium">Queue</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {batchSteps[4].details.children.map((child, ci) => (
+                          <tr key={ci} className="border-b border-border/50 hover:bg-muted/30">
+                            <td className="py-2.5 px-4 text-xs font-mono">{child.page}</td>
+                            <td className="py-2.5 px-3 text-xs font-mono font-medium">{child.po_number || '-'}</td>
+                            <td className="py-2.5 px-3 text-xs">{child.type || '-'}</td>
+                            <td className="py-2.5 px-3 text-xs">{child.customer || '-'}</td>
+                            <td className="py-2.5 px-3 text-xs text-right font-mono">
+                              {child.amount ? `$${Number(child.amount).toLocaleString()}` : '-'}
+                            </td>
+                            <td className="py-2.5 px-3 text-xs text-center">
+                              {child.confidence ? `${(child.confidence * 100).toFixed(0)}%` : '-'}
+                            </td>
+                            <td className="py-2.5 px-3 text-xs">{child.assigned_rep || 'Unassigned'}</td>
+                            <td className="py-2.5 px-4">
+                              {child.queue === 'My Queue' ? (
+                                <Badge className="text-[10px] bg-emerald-600 text-white">{child.assigned_rep}'s Queue</Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-[10px] bg-orange-100 text-orange-800 border-orange-300">Triage</Badge>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        )}
+
+        {batchResult && (
+          <Card className="border-2 border-cyan-500/30 bg-cyan-500/5 mt-3" data-testid="batch-result">
+            <CardContent className="p-5">
+              <div className="flex items-center gap-3">
+                <CheckCircle2 className="w-6 h-6 text-emerald-500" />
+                <div>
+                  <p className="font-bold text-base">Batch Split Complete</p>
+                  <p className="text-xs text-muted-foreground">
+                    {batchResult.total_pages} pages → {batchResult.children_created} child documents &mdash; {batchResult.total_duration_ms}ms total
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
     </div>
   );
 }

@@ -6,6 +6,7 @@ on a modular APIRouter so server.py's api_router can be cleaned up.
 Simple CRUD routes are implemented directly using deps.get_db().
 """
 
+import io
 import logging
 import hashlib
 import uuid
@@ -1196,6 +1197,151 @@ async def split_document(doc_id: str, request: SplitRequest, background_tasks: B
         "original_doc_id": doc_id,
         "new_documents": new_docs,
     }
+
+
+@router.post("/{doc_id}/split-batch")
+async def split_batch_po(doc_id: str, background_tasks: BackgroundTasks):
+    """One-click batch split: split every page into its own document and run
+    the full intake pipeline (classify → extract → validate → auto-assign)
+    on each one. Designed for multi-PO PDFs where each page = 1 PO.
+    """
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Check if already split
+    if doc.get("batch_split"):
+        existing_children = doc.get("batch_children_ids", [])
+        return {
+            "success": False,
+            "message": f"Document already split into {len(existing_children)} children",
+            "children_ids": existing_children,
+        }
+
+    file_path = _resolve_file_path(doc_id, doc.get("file_name", ""))
+    if not file_path:
+        raise HTTPException(
+            status_code=400,
+            detail="File not on disk (may have been filed to SharePoint). Cannot split.",
+        )
+
+    # Read the PDF and check page count
+    from pypdf import PdfReader
+    try:
+        with open(file_path, "rb") as f:
+            file_content = f.read()
+        reader = PdfReader(io.BytesIO(file_content))
+        page_count = len(reader.pages)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Cannot read PDF: {str(e)[:200]}")
+
+    if page_count < 2:
+        return {
+            "success": False,
+            "message": "Single-page document — nothing to split",
+            "page_count": page_count,
+        }
+
+    # Run the split in background so the API returns immediately
+    background_tasks.add_task(
+        _run_batch_split,
+        db, doc_id, doc.get("file_name", "document.pdf"), file_content,
+        doc.get("email_sender", ""), page_count,
+    )
+
+    return {
+        "success": True,
+        "message": f"Batch split started: {page_count} pages will be processed",
+        "page_count": page_count,
+        "parent_doc_id": doc_id,
+        "status": "processing",
+    }
+
+
+async def _run_batch_split(db, parent_doc_id, parent_filename, file_content, sender, page_count):
+    """Background task: split each page and run full intake pipeline."""
+    from services.batch_po_splitter import split_and_ingest_batch
+
+    logger.info("[BatchSplit] Starting split of %s (%d pages)", parent_doc_id[:8], page_count)
+
+    try:
+        result = await split_and_ingest_batch(
+            db=db,
+            parent_doc_id=parent_doc_id,
+            parent_filename=parent_filename,
+            file_content=file_content,
+            sender=sender,
+            source="batch_split",
+        )
+        logger.info(
+            "[BatchSplit] Complete: %s → %d children (%d errors)",
+            parent_doc_id[:8], result["children_count"], result["children_errors"],
+        )
+    except Exception as e:
+        logger.error("[BatchSplit] Failed for %s: %s", parent_doc_id[:8], str(e))
+        # Mark parent as failed
+        await db.hub_documents.update_one(
+            {"id": parent_doc_id},
+            {"$set": {
+                "batch_split": False,
+                "batch_split_error": str(e),
+                "updated_utc": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+
+
+
+@router.get("/{doc_id}/split-status")
+async def get_split_status(doc_id: str):
+    """Check the status of a batch split operation."""
+    db = get_db()
+    doc = await db.hub_documents.find_one(
+        {"id": doc_id},
+        {"_id": 0, "id": 1, "file_name": 1, "batch_split": 1, "batch_detected": 1,
+         "batch_page_count": 1, "batch_children_count": 1, "batch_children_ids": 1,
+         "batch_split_at": 1, "batch_split_error": 1, "batch_split_suggested": 1},
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    children_ids = doc.get("batch_children_ids", [])
+    children_details = []
+    if children_ids:
+        async for child in db.hub_documents.find(
+            {"id": {"$in": children_ids}},
+            {"_id": 0, "id": 1, "file_name": 1, "document_type": 1, "status": 1,
+             "sales_review_status": 1, "assigned_rep_name": 1, "assigned_rep_email": 1,
+             "batch_page_num": 1, "extracted_fields": 1, "ai_confidence": 1},
+        ).sort("batch_page_num", 1):
+            ef = child.get("extracted_fields") or {}
+            children_details.append({
+                "id": child.get("id"),
+                "page_num": child.get("batch_page_num"),
+                "file_name": child.get("file_name"),
+                "document_type": child.get("document_type"),
+                "status": child.get("status"),
+                "sales_review_status": child.get("sales_review_status", ""),
+                "assigned_rep": child.get("assigned_rep_name", ""),
+                "po_number": ef.get("po_number", ""),
+                "customer": ef.get("customer_name") or ef.get("company_name", ""),
+                "amount": ef.get("amount", ""),
+                "confidence": child.get("ai_confidence", 0),
+            })
+
+    return {
+        "document_id": doc_id,
+        "file_name": doc.get("file_name", ""),
+        "batch_detected": doc.get("batch_detected", False),
+        "batch_page_count": doc.get("batch_page_count", 0),
+        "batch_split": doc.get("batch_split", False),
+        "batch_split_at": doc.get("batch_split_at"),
+        "batch_children_count": doc.get("batch_children_count", 0),
+        "children": children_details,
+        "split_complete": len(children_details) == doc.get("batch_page_count", 0),
+        "error": doc.get("batch_split_error"),
+    }
+
 
 
 @router.post("/{doc_id}/delete-pages")

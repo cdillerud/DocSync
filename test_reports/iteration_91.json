@@ -75,7 +75,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://inside-sales-queue.preview.emergentagent.com"
+    "api_url": "https://po-splitter-pipeline.preview.emergentagent.com"
   },
   "seed_data_used": {
     "existing_saved_view": "My High Priority Unassigned (SV-C66BD1B6) - set as default",

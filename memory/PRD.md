@@ -225,6 +225,9 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
 - **Real Pipeline Batch Split (P0 - COMPLETE)**: Removed the demo shortcut that pre-populated fake fields. Batch PO split now uses `split_and_ingest_batch()` which runs each page through the full intake pipeline: AI classification → extraction → validation → routing → auto-assign. Patterns (dunnage, energy surcharge, qty bounds) are seeded before split so preflight checks work. ~70s for 5 pages through real AI vs instant fake.
   - Testing: 100% backend (9/9), 100% frontend — iteration_154
 
+- **Demo Scaffolding Removed + Batches Tab (P0 - COMPLETE)**: Removed Pipeline Demo tab from Sales module. Sales now defaults to My Queue. Added "Batches" tab to Inbox showing all batch parent containers (17 total) with a re-process button on each. The `POST /api/documents/{doc_id}/reprocess-batch` endpoint deletes old children and re-runs `split_and_ingest_batch` through the real pipeline.
+  - Testing: 100% backend (11/11), 100% frontend — iteration_155
+
 ## Backlog
 - P1: Teams Adaptive Card integration (DM rep via Graph API with Approve/Flag/View buttons)
 - P1: Webhook handler for Teams "Approve" action → BC SO creation

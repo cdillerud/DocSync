@@ -109,8 +109,24 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
 - **NEW: `extracted_field` fallback** — when alias/BC lookup fails, use AI-extracted vendor name directly as canonical, creating sender mappings for future docs
 - **Result: Folder accuracy 97.3% → 100%. Vendor auto-resolve 22.6% → 86.4%**
 
+### Sales Module Phase 1: Inside Sales Rep Review (March 25, 2026 - Fork)
+- **Built "My Queue" tab** — Rep selects themselves from dropdown, sees assigned documents with status badges (Pending Review / Approved / Flagged)
+- **Built "Triage Queue" tab** — Unassigned documents with "Assign" button to route to a rep
+- **Approve action** — `POST /api/sales-dashboard/queue/{id}/approve` marks doc as approved, ready for BC SO creation
+- **Flag action** — `POST /api/sales-dashboard/queue/{id}/flag` with notes modal, flags doc for attention
+- **Assign action** — `POST /api/sales-dashboard/queue/{id}/assign` moves triage doc to rep's queue
+- **Reps endpoint** — `GET /api/sales-dashboard/reps` lists reps from BC cache, overrides, and documents
+- **My Queue endpoint** — `GET /api/sales-dashboard/my-queue?rep_email=...` with status/search/sort filters
+- **Triage Queue endpoint** — `GET /api/sales-dashboard/triage-queue` for unassigned docs
+- **Seed data** — `POST /api/sales-dashboard/seed-review-data` creates 18 test docs (15 assigned + 3 triage)
+- **Tab structure updated**: Sales & Inventory now has 5 tabs: My Queue (default), Triage (with badge count), Sales Orders, Rep Performance, Inventory Ledger
+- **Testing**: 21/21 backend tests passed, frontend UI fully verified
+- Files: `routers/sales_dashboard.py`, `pages/MyQueuePage.js`, `pages/TriageQueuePage.js`, `pages/SalesInventoryHubPage.js`
+
 ## Backlog
-- P2: Vendor Inventory Dashboard and Sales module
+- P1: Teams Adaptive Card integration (DM rep via Graph API with Approve/Flag/View buttons)
+- P1: Webhook handler for Teams "Approve" action → BC SO creation
+- P2: Vendor Inventory Dashboard
 - P2: Product/BOM (Bill of Materials) module
 - P2: Production-ready email service and Entra ID SSO
 - P3: Continue server.py extraction (5 remaining `from server import` calls)

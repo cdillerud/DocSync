@@ -52,7 +52,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://dunnage-learn.preview.emergentagent.com"
+    "api_url": "https://batch-split-router.preview.emergentagent.com"
   },
   "seed_data_used": "Each test creates unique items with UUID prefixes to avoid cross-test interference. Test workspaces created per test class with deactivation on teardown.",
   "retest_needed": false,

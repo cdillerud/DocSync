@@ -10,7 +10,7 @@ import requests
 import os
 import uuid
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://dunnage-learn.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://batch-split-router.preview.emergentagent.com').rstrip('/')
 
 # Test document with Widget A/Widget B lines (no existing SO)
 DOC_ID_ELIGIBLE = "44b2e236-c1ab-4e0e-9c23-23f542d68a71"

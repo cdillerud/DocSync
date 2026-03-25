@@ -2,41 +2,39 @@ import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import UnifiedQueuePage from './UnifiedQueuePage';
 import UploadPage from './UploadPage';
-import FileImportPage from './FileImportPage';
-
-const TABS = [
-  { key: 'queue', label: 'Queue' },
-  { key: 'upload', label: 'Upload' },
-  { key: 'import', label: 'File Import' },
-];
+import { Upload } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
+} from '@/components/ui/dialog';
 
 export default function DocumentsHubPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get('tab') || 'queue';
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [searchParams] = useSearchParams();
 
-  const setTab = (tab) => setSearchParams({ tab }, { replace: true });
+  // Support legacy ?tab=upload URL
+  const showUpload = searchParams.get('tab') === 'upload' || uploadOpen;
 
   return (
     <div data-testid="documents-hub-page">
-      <div className="flex items-center gap-1 border-b border-border mb-6">
-        {TABS.map(({ key, label }) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            data-testid={`tab-${key}`}
-            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === key
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+      {/* Upload button in top-right corner */}
+      <div className="flex items-center justify-between mb-4">
+        <div />
+        <Dialog open={showUpload} onOpenChange={setUploadOpen}>
+          <DialogTrigger asChild>
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs" data-testid="upload-btn">
+              <Upload className="w-3.5 h-3.5" /> Upload Documents
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Upload Documents</DialogTitle>
+            </DialogHeader>
+            <UploadPage />
+          </DialogContent>
+        </Dialog>
       </div>
-      {activeTab === 'queue' && <UnifiedQueuePage />}
-      {activeTab === 'upload' && <UploadPage />}
-      {activeTab === 'import' && <FileImportPage />}
+      <UnifiedQueuePage />
     </div>
   );
 }

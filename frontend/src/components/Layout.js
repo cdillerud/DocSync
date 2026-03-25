@@ -18,16 +18,11 @@ import { APP_VERSION, CHANGELOG } from '../lib/version';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
-// Consolidated navigation — 7 items + temporary Bake-Off
+// Simplified navigation — focused on daily workflows
 const navItems = [
-  { to: '/', icon: LayoutDashboard, label: 'Dashboard', exact: true },
-  { to: '/documents', icon: Files, label: 'Documents' },
-  { to: '/sales-inventory', icon: ShoppingCart, label: 'Sales & Inventory' },
-  { to: '/intelligence', icon: Brain, label: 'Intelligence' },
-  { to: '/operations-queue', icon: ClipboardList, label: 'Operations' },
-  { to: '/integrations', icon: ArrowLeftRight, label: 'Integrations' },
+  { to: '/', icon: Files, label: 'Inbox', exact: true },
+  { to: '/sales-inventory', icon: ShoppingCart, label: 'Pipeline Demo' },
   { to: '/config', icon: Settings, label: 'Settings' },
-  { to: '/intake-benchmark', icon: FlaskConical, label: 'Intake Benchmark' },
 ];
 
 export default function Layout() {
@@ -73,16 +68,13 @@ export default function Layout() {
 
   const getPageTitle = () => {
     const path = location.pathname;
-    if (path === '/') return 'Dashboard';
-    if (path === '/documents') return 'Documents';
-    if (path === '/sales-inventory') return 'Sales & Inventory';
-    if (path === '/intelligence') return 'Intelligence';
-    if (path === '/operations-queue') return 'Operations';
-    if (path === '/integrations') return 'Integrations';
+    if (path === '/') return 'Inbox';
+    if (path === '/documents') return 'Inbox';
+    if (path === '/sales-inventory') return 'Pipeline Demo';
     if (path === '/config') return 'Settings';
-    if (path === '/intake-benchmark') return 'Intake Benchmark';
     if (path.startsWith('/documents/')) return 'Document Detail';
-    return 'GPI Document Hub';
+    if (path.startsWith('/review/')) return 'Sales Order Review';
+    return 'GPI Hub';
   };
 
   return (

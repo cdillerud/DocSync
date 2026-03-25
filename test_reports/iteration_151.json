@@ -1,0 +1,75 @@
+{
+  "summary": "Completed testing of simplified inbox UI with All/Accounting/Sales tabs and stats strip. All backend tests pass (13/13). Frontend correctly displays simplified sidebar (3 items), stats strip (5 metrics), tabs with filtering, document table, bulk actions, and upload dialog.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "CreateBCSalesOrderPanel", "issues": ["Console warnings about HTML nesting: <div> inside <p>, <tr> inside <span>, <span> inside <tbody>. These are cosmetic React hydration warnings that don't affect functionality."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_inbox_stats_api.py",
+    "/app/test_reports/pytest/inbox_stats_api_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Minor: CreateBCSalesOrderPanel has HTML nesting issues causing React hydration warnings. Consider fixing <p> containing <div> (Badge inside p tag) and <tbody> containing <span> wrapper around <tr> elements."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_inbox_stats_api.py"
+  ],
+  "success_rate": {
+    "backend": "100% (13/13 tests passed)",
+    "frontend": "100% (All UI interactions verified)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "No new seed data created. Used existing documents from previous test iterations.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Simplified inbox UI fully tested. Sidebar reduced from 8+ items to 3 (Inbox, Pipeline Demo, Settings). Stats strip shows 5 metrics: Today count, Auto-validated %, Pending review, Qty alerts (conditional), AI confidence. Tabs (All/Accounting/Sales) filter documents by type. Document table has 6 columns: checkbox, Document, Vendor/Customer, Type, Status, Date, Actions. Bulk actions (Retry, File, Ref Intel, Delete) appear when docs selected. Upload dialog opens correctly. Document row click navigates to detail page (/documents/{id} or /review/{id} for sales). QTY ALERT badge shows on flagged documents.",
+  "features_tested": {
+    "backend": [
+      "GET /api/dashboard/inbox-stats returns 200 - PASS",
+      "inbox-stats returns all 7 required fields (ingested_today, avg_daily_7d, auto_validation_rate, pending_review, bounds_alerts, avg_ai_confidence, total_documents) - PASS",
+      "inbox-stats field types are numeric - PASS",
+      "inbox-stats values are non-negative - PASS",
+      "auto_validation_rate is valid percentage (0-100) - PASS",
+      "avg_ai_confidence is valid percentage (0-100) - PASS",
+      "GET /api/documents returns 200 with documents list - PASS",
+      "Documents endpoint with accounting filter works - PASS",
+      "Documents endpoint with sales filter works - PASS",
+      "Documents endpoint with search query works - PASS",
+      "POST /api/auth/login with admin/admin returns 200 - PASS",
+      "POST /api/auth/login with invalid credentials returns 401/403 - PASS"
+    ],
+    "frontend": [
+      "Login flow with admin/admin credentials - PASS",
+      "Simplified sidebar shows only 3 items (Inbox, Pipeline Demo, Settings) - PASS",
+      "Stats strip displays 5 metrics correctly - PASS",
+      "Tab switching between All/Accounting/Sales works - PASS",
+      "Document table shows correct 6 columns - PASS",
+      "Search input filters documents - PASS",
+      "Refresh button reloads document list - PASS",
+      "Upload Documents dialog opens and closes - PASS",
+      "Document row click navigates to detail page - PASS",
+      "Bulk actions appear when docs selected (Retry, File, Ref Intel, Delete) - PASS",
+      "QTY ALERT badge shows on flagged documents - PASS"
+    ]
+  },
+  "mocked_apis": {
+    "BC Sandbox": "DEMO_MODE=true - BC Sales Order creation is mocked",
+    "SharePoint Graph API": "DEMO_MODE=true - SharePoint integration is mocked"
+  },
+  "stats_strip_values_observed": {
+    "ingested_today": 5,
+    "avg_daily_7d": 0.7,
+    "auto_validation_rate": "100%",
+    "pending_review": 1,
+    "bounds_alerts": 1,
+    "avg_ai_confidence": "99.3%"
+  }
+}

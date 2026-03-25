@@ -31,36 +31,21 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-        <Route index element={<DashboardPage />} />
+        <Route index element={<DocumentsHubPage />} />
         <Route path="documents" element={<DocumentsHubPage />} />
         <Route path="documents/:id" element={<DocumentDetailPage />} />
         <Route path="review/:id" element={<SalesOrderReviewPage />} />
         <Route path="sales-inventory" element={<SalesInventoryHubPage />} />
+        <Route path="config" element={<SettingsHubPage />} />
+        {/* Keep old pages accessible but not in nav */}
         <Route path="intelligence" element={<IntelligenceHubPage />} />
         <Route path="operations-queue" element={<OperationsQueuePage />} />
         <Route path="integrations" element={<IntegrationsHubPage />} />
-        <Route path="config" element={<SettingsHubPage />} />
         <Route path="intake-benchmark" element={<BakeOffPage />} />
-        {/* Redirects for old URLs */}
-        <Route path="queue" element={<Navigate to="/documents" replace />} />
-        <Route path="upload" element={<Navigate to="/documents?tab=upload" replace />} />
-        <Route path="file-import" element={<Navigate to="/documents?tab=import" replace />} />
-        <Route path="vendors" element={<Navigate to="/config?tab=vendors" replace />} />
-        <Route path="vendor-intelligence" element={<Navigate to="/config?tab=vendors" replace />} />
-        <Route path="stable-vendors" element={<Navigate to="/config?tab=stable-vendors" replace />} />
-        <Route path="sales-orders" element={<Navigate to="/sales-inventory" replace />} />
-        <Route path="inventory-ledger" element={<Navigate to="/sales-inventory?tab=inventory" replace />} />
-        <Route path="document-review" element={<Navigate to="/intelligence" replace />} />
-        <Route path="document-bundles" element={<Navigate to="/intelligence?tab=bundles" replace />} />
-        <Route path="document-lifecycle" element={<Navigate to="/intelligence?tab=lifecycle" replace />} />
-        <Route path="label-correction-insights" element={<Navigate to="/intelligence?tab=labels" replace />} />
-        <Route path="layout-fingerprints" element={<Navigate to="/intelligence?tab=layouts" replace />} />
-        <Route path="sharepoint-routing" element={<Navigate to="/integrations" replace />} />
-        <Route path="bc-integration" element={<Navigate to="/integrations?tab=bc" replace />} />
-        <Route path="email-parser" element={<Navigate to="/config?tab=email" replace />} />
-        <Route path="settings" element={<Navigate to="/config" replace />} />
-        <Route path="automation-rules" element={<Navigate to="/config?tab=automation" replace />} />
-        <Route path="templates" element={<Navigate to="/config" replace />} />
+        {/* Redirects */}
+        <Route path="queue" element={<Navigate to="/" replace />} />
+        <Route path="upload" element={<Navigate to="/?tab=upload" replace />} />
+        <Route path="dashboard" element={<Navigate to="/" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

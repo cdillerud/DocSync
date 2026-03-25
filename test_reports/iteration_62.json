@@ -63,7 +63,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://dunnage-learn.preview.emergentagent.com"
+    "api_url": "https://batch-split-router.preview.emergentagent.com"
   },
   "seed_data_used": "Used existing Hormel Foods workspace (ID: 366bfcce-4d68-4daf-b9f4-cb05a35de8c8) with 10+ balance rows including SHORT/LOW/OK status items. Backend tests created TEST_EXPORT_REGRESS_* items for regression verification.",
   "retest_needed": false,

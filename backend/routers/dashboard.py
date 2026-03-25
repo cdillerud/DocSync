@@ -905,3 +905,74 @@ async def get_email_stats():
 # ==================== PHASE 6: SHADOW MODE INSTRUMENTATION ====================
 
 
+
+
+@router.get("/inbox-stats")
+async def get_inbox_stats():
+    """Compact stats for the inbox header: ingestion, validation, auto-filing."""
+    db = get_db()
+    tz = GPI_TZ
+
+    now_ct = datetime.now(tz)
+    today_start = now_ct.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start_utc = today_start.astimezone(timezone.utc).isoformat()
+    seven_days_ago_utc = (today_start - timedelta(days=7)).astimezone(timezone.utc).isoformat()
+
+    # Total docs & today's count
+    total = await db.hub_documents.count_documents({})
+    # exclude batch_parent docs from ingestion count — they're containers, not individual docs
+    today_filter = {"created_utc": {"$gte": today_start_utc}, "status": {"$ne": "batch_parent"}}
+    ingested_today = await db.hub_documents.count_documents(today_filter)
+
+    # 7-day daily average (excluding batch parents)
+    seven_d_filter = {"created_utc": {"$gte": seven_days_ago_utc}, "status": {"$ne": "batch_parent"}}
+    ingested_7d = await db.hub_documents.count_documents(seven_d_filter)
+    avg_daily = round(ingested_7d / 7, 1)
+
+    # Auto-validation rate: docs where automation_decision=auto OR auto_cleared=True
+    auto_processed = await db.hub_documents.count_documents({
+        "$or": [
+            {"automation_decision": "auto"},
+            {"auto_cleared": True},
+            {"sales_review_status": "auto_approved"},
+        ]
+    })
+    non_batch_total = await db.hub_documents.count_documents({"status": {"$ne": "batch_parent"}})
+    auto_rate = round((auto_processed / non_batch_total * 100), 1) if non_batch_total > 0 else 0
+
+    # Pending review (docs needing human attention)
+    pending_review = await db.hub_documents.count_documents({
+        "status": {"$nin": ["Completed", "Posted", "Archived", "batch_parent", "auto_filed"]},
+        "workflow_status": {"$in": [
+            "NeedsReview", "needs_review", "pending_review",
+            "vendor_pending", "bounds_review", "bc_validation_pending",
+        ]}
+    })
+    # Fallback: also count docs just marked with certain statuses
+    pending_simple = await db.hub_documents.count_documents({
+        "status": {"$in": ["NeedsReview", "needs_review", "pending_review"]},
+    })
+    pending = max(pending_review, pending_simple)
+
+    # Bounds alerts (active)
+    bounds_alerts = await db.hub_documents.count_documents({"bounds_alert": True})
+
+    # Avg AI confidence (sampled from last 200 docs for speed)
+    conf_docs = await db.hub_documents.find(
+        {"ai_confidence": {"$exists": True, "$ne": None}},
+        {"_id": 0, "ai_confidence": 1}
+    ).sort("created_utc", -1).limit(200).to_list(200)
+    if conf_docs:
+        avg_conf = round(sum(d["ai_confidence"] for d in conf_docs) / len(conf_docs) * 100, 1)
+    else:
+        avg_conf = 0
+
+    return {
+        "ingested_today": ingested_today,
+        "avg_daily_7d": avg_daily,
+        "auto_validation_rate": auto_rate,
+        "pending_review": pending,
+        "bounds_alerts": bounds_alerts,
+        "avg_ai_confidence": avg_conf,
+        "total_documents": total,
+    }

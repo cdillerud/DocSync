@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -11,9 +11,10 @@ import { Textarea } from '../components/ui/textarea';
 import { toast } from 'sonner';
 import {
   Loader2, CheckCircle2, Flag, ArrowLeft, ExternalLink,
-  FileText, XCircle,
+  FileText, XCircle, Send,
 } from 'lucide-react';
 import CreateBCSalesOrderPanel from '../components/CreateBCSalesOrderPanel';
+import { createSalesOrderFromDocument, salesOrderPreflight } from '../lib/api';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -25,6 +26,8 @@ export default function SalesOrderReviewPage() {
   const [flagDialog, setFlagDialog] = useState(false);
   const [flagReason, setFlagReason] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+  const [approveStatus, setApproveStatus] = useState(''); // '', 'submitting', 'approving', 'done'
+  const panelRef = useRef(null);
 
   const fetchDoc = useCallback(async () => {
     try {
@@ -43,17 +46,39 @@ export default function SalesOrderReviewPage() {
 
   const handleApprove = async () => {
     setActionLoading(true);
+    setApproveStatus('submitting');
     try {
+      // Step 1: Create Sales Order in BC
+      const soRes = await createSalesOrderFromDocument(doc.id, {
+        editedLines: panelRef.current?.getEditedLines?.() || null,
+      });
+
+      const soData = soRes.data;
+      if (!soData.success && !soData.already_exists) {
+        throw new Error(soData.error_message || soData.message || 'BC Sales Order creation failed');
+      }
+
+      const soNumber = soData.bc_record_no || soData.number || '';
+      toast.success(soData.already_exists
+        ? `Sales Order ${soNumber} already exists in BC`
+        : `Sales Order ${soNumber} created in BC`
+      );
+
+      // Step 2: Mark as approved
+      setApproveStatus('approving');
       const res = await fetch(`${API}/api/sales-dashboard/review/${encodeURIComponent(id)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'approve' }),
+        body: JSON.stringify({ action: 'approve', bc_sales_order_no: soNumber }),
       });
       if (!res.ok) throw new Error('Approve failed');
+
       toast.success('Document approved');
+      setApproveStatus('done');
       await fetchDoc();
     } catch (err) {
       toast.error(err.message);
+      setApproveStatus('');
     } finally {
       setActionLoading(false);
     }
@@ -149,7 +174,7 @@ export default function SalesOrderReviewPage() {
       </div>
 
       {/* BC Sales Order Panel — the main review content */}
-      <CreateBCSalesOrderPanel document={doc} onUpdate={fetchDoc} autoRun forceShow />
+      <CreateBCSalesOrderPanel ref={panelRef} document={doc} onUpdate={fetchDoc} autoRun forceShow />
 
       {/* Approve / Flag actions */}
       {!isApproved && (
@@ -179,8 +204,13 @@ export default function SalesOrderReviewPage() {
                   disabled={actionLoading}
                   data-testid="review-approve-btn"
                 >
-                  {actionLoading ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <CheckCircle2 className="w-4 h-4 mr-1.5" />}
-                  Approve
+                  {actionLoading ? (
+                    <><Loader2 className="w-4 h-4 animate-spin mr-1.5" />
+                      {approveStatus === 'submitting' ? 'Creating SO in BC...' : 'Approving...'}
+                    </>
+                  ) : (
+                    <><Send className="w-4 h-4 mr-1.5" /> Approve & Submit to BC</>
+                  )}
                 </Button>
               </div>
             </div>

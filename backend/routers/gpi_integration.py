@@ -654,6 +654,40 @@ async def sales_order_preflight(doc_id: str):
     # Resolve sales lines (extracted or fallback) with item mapping
     resolved_lines = await _resolve_sales_lines(doc, customer_no=customer_no or "")
 
+    # Auto-suggest dunnage lines from learned patterns
+    suggested_lines = []
+    if customer_no and resolved_lines:
+        try:
+            from services.order_line_patterns import get_suggested_lines
+            main_items = [ln for ln in resolved_lines if ln.get("lineType") != "Comment" and ln.get("unitPrice", 0) > 0]
+            suggested_lines = await get_suggested_lines(db, customer_no, main_items)
+            if suggested_lines:
+                for sl in suggested_lines:
+                    resolved_lines.append({
+                        "lineType": sl["line_type"],
+                        "lineObjectNumber": sl.get("item_no", ""),
+                        "description": sl["description"],
+                        "quantity": sl.get("quantity", 0),
+                        "unitPrice": sl.get("unit_price", 0),
+                        "source": "learned_pattern",
+                        "suggested": True,
+                        "pattern_confidence": sl.get("confidence", 0),
+                        "pattern_frequency": sl.get("frequency", 0),
+                        "pattern_occurrences": sl.get("occurrences", 0),
+                        "mapping": {
+                            "matched": bool(sl.get("item_no")),
+                            "target_type": "item" if sl.get("item_no") else "comment",
+                            "target_no": sl.get("item_no", ""),
+                            "confidence": sl.get("confidence", 0),
+                            "method": "learned_pattern",
+                            "mapping_id": None,
+                            "catalog_validated": False,
+                        },
+                    })
+                warnings.append(f"{len(suggested_lines)} dunnage line(s) auto-suggested from {suggested_lines[0].get('occurrences', 0)}+ historical orders.")
+        except Exception as e:
+            logger.warning("[Preflight] Pattern suggestion error: %s", str(e))
+
     if not resolved_lines:
         errors.append("No sales lines could be resolved. The document has no extracted line items, no total amount, and no fallback G/L account or item code is configured. Header-only orders are not allowed.")
     else:
@@ -3449,3 +3483,37 @@ async def create_cost_only_so_from_document(doc_id: str):
     except Exception as e:
         logger.error("[SH-SO] Cost-only SO creation failed for %s: %s", doc_id[:8], str(e))
         raise HTTPException(status_code=502, detail=f"BC API error: {str(e)[:200]}")
+
+
+# ════════════════════════════════════════════════════════════════════════
+# ORDER LINE PATTERN LEARNING
+# ════════════════════════════════════════════════════════════════════════
+
+@router.post("/order-patterns/learn/{customer_no}")
+async def learn_order_patterns(customer_no: str):
+    """Analyze historical orders for a customer and learn dunnage patterns."""
+    db = get_db()
+    from services.order_line_patterns import learn_patterns_from_history
+    result = await learn_patterns_from_history(db, customer_no)
+    return result
+
+
+@router.get("/order-patterns/{customer_no}")
+async def get_order_patterns(customer_no: str):
+    """Get learned dunnage patterns for a customer."""
+    db = get_db()
+    patterns = await db.order_line_patterns.find(
+        {"customer_no": customer_no}, {"_id": 0}
+    ).to_list(100)
+    return {"customer_no": customer_no, "patterns": patterns}
+
+
+@router.post("/order-patterns/suggest")
+async def suggest_order_lines(payload: dict):
+    """Get dunnage suggestions for given items and customer."""
+    db = get_db()
+    from services.order_line_patterns import get_suggested_lines
+    customer_no = payload.get("customer_no", "")
+    line_items = payload.get("line_items", [])
+    suggestions = await get_suggested_lines(db, customer_no, line_items)
+    return {"customer_no": customer_no, "suggestions": suggestions}

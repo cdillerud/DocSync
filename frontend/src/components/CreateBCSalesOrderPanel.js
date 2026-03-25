@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { salesOrderPreflight, createSalesOrderFromDocument, createIncomingFromShortage, reconcileSalesOrder } from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -14,6 +14,7 @@ import {
   AlertTriangle, ChevronRight, User, Calendar,
   FileText, Hash, Shield, XCircle, Pencil, RotateCcw,
   Plus, Trash2, Copy, Server, Warehouse, Package, TruckIcon,
+  Sparkles, ChevronDown, ChevronUp,
 } from 'lucide-react';
 
 const ELIGIBLE_TYPES = new Set(['Sales_Order', 'SalesOrder', 'Order_Confirmation', 'PurchaseOrder']);
@@ -23,7 +24,7 @@ function isEligible(doc) {
   return ELIGIBLE_TYPES.has(doc?.document_type);
 }
 
-export default function CreateBCSalesOrderPanel({ document, onUpdate, autoRun = false, forceShow = false }) {
+const CreateBCSalesOrderPanel = forwardRef(function CreateBCSalesOrderPanel({ document, onUpdate, autoRun = false, forceShow = false }, ref) {
   const [state, setState] = useState('idle');
   const [preflight, setPreflight] = useState(null);
   const [error, setError] = useState(null);
@@ -33,6 +34,8 @@ export default function CreateBCSalesOrderPanel({ document, onUpdate, autoRun = 
   const [editedLines, setEditedLines] = useState(null);
   // Snapshot of the original resolved lines from preflight (for reset)
   const [originalLines, setOriginalLines] = useState(null);
+  // Learned pattern suggestions (separated from main lines)
+  const [patternSuggestions, setPatternSuggestions] = useState([]);
   const autoRanRef = useRef(false);
 
   const existingSO = document?.bc_sales_order;
@@ -49,10 +52,15 @@ export default function CreateBCSalesOrderPanel({ document, onUpdate, autoRun = 
         setResult(data.existing_sales_order);
         setState('success');
       } else {
-        // Deep clone resolved lines into editable state
-        const cloned = JSON.parse(JSON.stringify(data.resolved_lines || []));
+        // Separate learned-pattern suggestions from actual PO lines
+        const allLines = data.resolved_lines || [];
+        const regularLines = allLines.filter(ln => !ln.suggested);
+        const suggestedLines = allLines.filter(ln => ln.suggested);
+
+        const cloned = JSON.parse(JSON.stringify(regularLines));
         setEditedLines(cloned);
-        setOriginalLines(JSON.parse(JSON.stringify(data.resolved_lines || [])));
+        setOriginalLines(JSON.parse(JSON.stringify(regularLines)));
+        setPatternSuggestions(suggestedLines);
         setState('preflight');
       }
     } catch (err) {
@@ -60,6 +68,13 @@ export default function CreateBCSalesOrderPanel({ document, onUpdate, autoRun = 
       setState('error');
     }
   }, [document.id]);
+
+  // Expose methods to parent via ref
+  useImperativeHandle(ref, () => ({
+    getEditedLines: () => editedLines,
+    getPreflight: () => preflight,
+  }), [editedLines, preflight]);
+
 
   // Auto-run preflight when rendered on the review page
   useEffect(() => {
@@ -215,8 +230,10 @@ export default function CreateBCSalesOrderPanel({ document, onUpdate, autoRun = 
             customerOverride={customerOverride}
             setCustomerOverride={setCustomerOverride}
             onConfirm={handleCreate}
-            onCancel={() => { setState('idle'); setPreflight(null); setEditedLines(null); }}
+            onCancel={() => { setState('idle'); setPreflight(null); setEditedLines(null); setPatternSuggestions([]); }}
             onCreateShortageSupply={handleCreateShortageSupply}
+            patternSuggestions={patternSuggestions}
+            setPatternSuggestions={setPatternSuggestions}
           />
         )}
         {state === 'creating' && <LoadingState message="Creating Sales Order in BC..." />}
@@ -234,7 +251,7 @@ export default function CreateBCSalesOrderPanel({ document, onUpdate, autoRun = 
       </CardContent>
     </Card>
   );
-}
+});
 
 function LoadingState({ message = 'Running preflight checks...' }) {
   return (
@@ -252,6 +269,7 @@ function LoadingState({ message = 'Running preflight checks...' }) {
 function PreflightReview({
   data, editedLines, setEditedLines, originalLines, resetLines,
   customerOverride, setCustomerOverride, onConfirm, onCancel, onCreateShortageSupply,
+  patternSuggestions, setPatternSuggestions,
 }) {
   const mv = data.mapped_values || {};
   const ds = data.document_summary || {};
@@ -266,6 +284,23 @@ function PreflightReview({
     return editedLines.reduce((sum, ln) => sum + (parseFloat(ln.quantity) || 0) * (parseFloat(ln.unitPrice) || 0), 0);
   }, [editedLines]);
 
+  // Handler: add a single suggestion to the editable lines
+  const addSuggestion = useCallback((idx) => {
+    const suggestion = patternSuggestions[idx];
+    if (!suggestion) return;
+    setEditedLines(prev => [...prev, { ...suggestion, source: 'learned_pattern' }]);
+    setPatternSuggestions(prev => prev.filter((_, i) => i !== idx));
+    toast.success(`Added: ${suggestion.description}`);
+  }, [patternSuggestions, setEditedLines, setPatternSuggestions]);
+
+  // Handler: add all suggestions
+  const addAllSuggestions = useCallback(() => {
+    if (!patternSuggestions.length) return;
+    setEditedLines(prev => [...prev, ...patternSuggestions.map(s => ({ ...s, source: 'learned_pattern' }))]);
+    toast.success(`Added ${patternSuggestions.length} suggested line(s)`);
+    setPatternSuggestions([]);
+  }, [patternSuggestions, setEditedLines, setPatternSuggestions]);
+
   return (
     <div className="space-y-5" data-testid="bc-so-preflight-view">
       {/* ─── A. Environment Banner ─── */}
@@ -279,6 +314,14 @@ function PreflightReview({
 
       {/* ─── C2. Inventory Summary ─── */}
       <InventorySummary invSummary={data.inventory_summary} invWorkspace={data.inventory_workspace} />
+
+      {/* ─── C3. Learned Pattern Suggestions ─── */}
+      <PatternSuggestions
+        suggestions={patternSuggestions}
+        onAddOne={addSuggestion}
+        onAddAll={addAllSuggestions}
+        editedLines={editedLines}
+      />
 
       {/* ─── Customer override if missing ─── */}
       {!mv.customer_no && (
@@ -493,6 +536,111 @@ function InventorySummary({ invSummary, invWorkspace }) {
 }
 
 // ════════════════════════════════════════════════════════════════
+// C3. LEARNED PATTERN SUGGESTIONS
+// ════════════════════════════════════════════════════════════════
+
+function PatternSuggestions({ suggestions, onAddOne, onAddAll, editedLines }) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  // Also show a count of already-applied pattern lines
+  const appliedCount = (editedLines || []).filter(ln => ln.source === 'learned_pattern').length;
+
+  if (!suggestions?.length && !appliedCount) return null;
+
+  // All suggestions already applied
+  if (!suggestions?.length && appliedCount > 0) {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-indigo-50/60 dark:bg-indigo-950/20 border border-indigo-200/60 dark:border-indigo-800/40" data-testid="pattern-suggestions-applied">
+        <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+        <span className="text-[11px] text-indigo-700 dark:text-indigo-300">
+          {appliedCount} learned dunnage line{appliedCount !== 1 ? 's' : ''} added to this order
+        </span>
+        <CheckCircle2 className="w-3 h-3 text-indigo-400 ml-auto" />
+      </div>
+    );
+  }
+
+  const topSuggestion = suggestions[0] || {};
+  const confidence = Math.round((topSuggestion.pattern_confidence || 0) * 100);
+  const occurrences = topSuggestion.pattern_occurrences || 0;
+
+  return (
+    <div className="rounded-md border border-indigo-200 dark:border-indigo-800/60 overflow-hidden" data-testid="pattern-suggestions-panel">
+      {/* Header */}
+      <button
+        className="w-full flex items-center gap-2 px-3 py-2.5 bg-indigo-50 dark:bg-indigo-950/30 hover:bg-indigo-100/80 dark:hover:bg-indigo-900/30 transition-colors text-left"
+        onClick={() => setCollapsed(!collapsed)}
+        data-testid="pattern-suggestions-toggle"
+      >
+        <Sparkles className="w-4 h-4 text-indigo-500 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-semibold text-indigo-800 dark:text-indigo-200">
+            Suggested Additions
+            <Badge variant="outline" className="ml-2 text-[9px] h-4 px-1.5 border-indigo-300 dark:border-indigo-700 text-indigo-600 dark:text-indigo-300 font-normal">
+              {suggestions.length} line{suggestions.length !== 1 ? 's' : ''}
+            </Badge>
+          </p>
+          <p className="text-[10px] text-indigo-600/80 dark:text-indigo-400/80 mt-0.5">
+            Based on {occurrences}+ historical orders &middot; {confidence}% confidence
+          </p>
+        </div>
+        <Button
+          variant="ghost" size="sm"
+          className="h-6 text-[10px] px-2 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-200/50 dark:hover:bg-indigo-800/40 shrink-0"
+          onClick={(e) => { e.stopPropagation(); onAddAll(); }}
+          data-testid="pattern-add-all-btn"
+        >
+          <Plus className="w-3 h-3 mr-0.5" /> Add All
+        </Button>
+        {collapsed ? (
+          <ChevronDown className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+        ) : (
+          <ChevronUp className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+        )}
+      </button>
+
+      {/* Suggestion list */}
+      {!collapsed && (
+        <div className="divide-y divide-indigo-100 dark:divide-indigo-900/40 bg-white dark:bg-transparent">
+          {suggestions.map((s, idx) => (
+            <div key={idx} className="flex items-center gap-3 px-3 py-2 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 transition-colors group" data-testid={`pattern-suggestion-${idx}`}>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <Badge variant="secondary" className={`text-[8px] h-4 px-1 shrink-0 ${
+                    s.lineType === 'Item' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                      : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                  }`}>
+                    {s.lineType}
+                  </Badge>
+                  <span className="text-[11px] font-medium truncate">{s.description}</span>
+                </div>
+                <div className="flex items-center gap-3 mt-0.5 text-[10px] text-muted-foreground">
+                  {s.lineObjectNumber && (
+                    <span className="font-mono">{s.lineObjectNumber}</span>
+                  )}
+                  {s.quantity > 0 && <span>Qty: {s.quantity}</span>}
+                  <span className="text-indigo-500 dark:text-indigo-400">
+                    seen in {Math.round((s.pattern_frequency || 0) * 100)}% of orders
+                  </span>
+                </div>
+              </div>
+              <Button
+                variant="outline" size="sm"
+                className="h-6 text-[10px] px-2.5 border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 opacity-70 group-hover:opacity-100 transition-opacity shrink-0"
+                onClick={() => onAddOne(idx)}
+                data-testid={`pattern-add-${idx}-btn`}
+              >
+                <Plus className="w-3 h-3 mr-0.5" /> Add
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
 // D. EDITABLE LINE TABLE
 // ════════════════════════════════════════════════════════════════
 
@@ -620,20 +768,25 @@ function EditableLine({ index, line, updateLine, removeLine, onCreateShortageSup
     }]);
   };
 
+  const isPatternLine = line.source === 'learned_pattern';
+
   return (
-    <tr className="border-b border-border/50 last:border-0 group" data-testid={`so-line-${index}`}>
+    <tr className={`border-b border-border/50 last:border-0 group ${isPatternLine ? 'bg-indigo-50/30 dark:bg-indigo-950/10' : ''}`} data-testid={`so-line-${index}`}>
       {/* Type */}
       <td className="py-1 px-1.5">
-        <Select value={line.lineType} onValueChange={(v) => updateLine(index, 'lineType', v)}>
-          <SelectTrigger className="h-6 text-[10px] px-1.5 border-0 bg-transparent">
-            <SelectValue>
-              <Badge variant="secondary" className={`text-[9px] h-4 px-1 ${typeBadgeClass}`}>{line.lineType}</Badge>
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            {LINE_TYPES.map(t => <SelectItem key={t} value={t} className="text-xs">{t}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-0.5">
+          {isPatternLine && <Sparkles className="w-2.5 h-2.5 text-indigo-400 shrink-0" />}
+          <Select value={line.lineType} onValueChange={(v) => updateLine(index, 'lineType', v)}>
+            <SelectTrigger className="h-6 text-[10px] px-1.5 border-0 bg-transparent">
+              <SelectValue>
+                <Badge variant="secondary" className={`text-[9px] h-4 px-1 ${typeBadgeClass}`}>{line.lineType}</Badge>
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {LINE_TYPES.map(t => <SelectItem key={t} value={t} className="text-xs">{t}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
       </td>
       {/* Description */}
       <td className="py-1 px-1.5">
@@ -872,3 +1025,6 @@ function ErrorDisplay({ error, onRetry, onDismiss }) {
     </div>
   );
 }
+
+
+export default CreateBCSalesOrderPanel;

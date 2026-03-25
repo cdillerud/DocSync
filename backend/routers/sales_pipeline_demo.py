@@ -951,6 +951,37 @@ async def _run_batch_demo_bg(db, job_id: str):
         })
         await _update_job(steps=steps, status="summarizing")
 
+        # Seed learned dunnage patterns for the demo
+        # (In production, these would be learned from historical BC orders)
+        # NOTE: qty_ratio values are calibrated for M UOM (qty/1000) since BC quantities use M
+        _GLASS_JAR_DUNNAGE = [
+            {"line_type": "Comment", "item_no": "", "description": "2,821/plt, 22 plt/TL, 62,062/TL",
+             "qty_ratio": None, "fixed_qty": None, "unit_price": 0, "occurrences": 15, "frequency": 1.0},
+            {"line_type": "Comment", "item_no": "", "description": '56x44x89", 2,199 lbs/plt, 14 ts/plt',
+             "qty_ratio": None, "fixed_qty": None, "unit_price": 0, "occurrences": 15, "frequency": 1.0},
+            {"line_type": "Item", "item_no": "OIPALLET", "description": "OI Pallet - RETURN REQUIRED",
+             "qty_ratio": 0.3546, "fixed_qty": None, "unit_price": 0, "occurrences": 15, "frequency": 1.0},
+            {"line_type": "Item", "item_no": "OITIERSHEET", "description": "OI Tier Sheet - RETURN REQUIRED",
+             "qty_ratio": 4.963, "fixed_qty": None, "unit_price": 0, "occurrences": 15, "frequency": 1.0},
+            {"line_type": "Item", "item_no": "OITOPFRAME", "description": "OI Top Frame - RETURN REQUIRED",
+             "qty_ratio": 0.3546, "fixed_qty": None, "unit_price": 0, "occurrences": 15, "frequency": 1.0},
+        ]
+        for po_data_item in BATCH_PO_DATA:
+            for item in po_data_item.get("items", []):
+                await db.order_line_patterns.update_one(
+                    {"customer_no": "C-10250", "trigger_item_no": item["no"]},
+                    {"$set": {
+                        "customer_no": "C-10250",
+                        "trigger_item_no": item["no"],
+                        "trigger_item_pattern": f"{item['no'].split('-')[0]}-{item['no'].split('-')[1]}-*" if '-' in item["no"] else f"{item['no'][:4]}*",
+                        "associated_lines": _GLASS_JAR_DUNNAGE if item["no"].startswith("C-9874") else [],
+                        "total_orders_analyzed": 15,
+                        "confidence": 1.0,
+                        "last_updated": now_iso,
+                    }},
+                    upsert=True,
+                )
+
         # Step 5: Summary
         steps.append({
             "step": 5, "name": "Child Documents Summary", "status": "completed",

@@ -674,6 +674,9 @@ async def sales_order_preflight(doc_id: str):
                         "pattern_confidence": sl.get("confidence", 0),
                         "pattern_frequency": sl.get("frequency", 0),
                         "pattern_occurrences": sl.get("occurrences", 0),
+                        "trigger_item": sl.get("trigger_item", ""),
+                        "qty_ratio": sl.get("qty_ratio"),
+                        "fixed_qty": sl.get("fixed_qty"),
                         "mapping": {
                             "matched": bool(sl.get("item_no")),
                             "target_type": "item" if sl.get("item_no") else "comment",

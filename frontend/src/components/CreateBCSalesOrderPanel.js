@@ -284,22 +284,40 @@ function PreflightReview({
     return editedLines.reduce((sum, ln) => sum + (parseFloat(ln.quantity) || 0) * (parseFloat(ln.unitPrice) || 0), 0);
   }, [editedLines]);
 
+  // Recalculate a suggestion's quantity based on current trigger item qty
+  const recalcSuggestionQty = useCallback((suggestion, lines) => {
+    if (!suggestion.qty_ratio || !suggestion.trigger_item) return suggestion;
+    const triggerLine = (lines || []).find(ln => ln.lineObjectNumber === suggestion.trigger_item && ln.source !== 'learned_pattern');
+    if (!triggerLine) return suggestion;
+    const triggerQty = parseFloat(triggerLine.quantity) || 0;
+    return { ...suggestion, quantity: Math.round(triggerQty * suggestion.qty_ratio) };
+  }, []);
+
   // Handler: add a single suggestion to the editable lines
   const addSuggestion = useCallback((idx) => {
     const suggestion = patternSuggestions[idx];
     if (!suggestion) return;
-    setEditedLines(prev => [...prev, { ...suggestion, source: 'learned_pattern' }]);
+    setEditedLines(prev => {
+      const recalced = recalcSuggestionQty(suggestion, prev);
+      return [...prev, { ...recalced, source: 'learned_pattern' }];
+    });
     setPatternSuggestions(prev => prev.filter((_, i) => i !== idx));
     toast.success(`Added: ${suggestion.description}`);
-  }, [patternSuggestions, setEditedLines, setPatternSuggestions]);
+  }, [patternSuggestions, setEditedLines, setPatternSuggestions, recalcSuggestionQty]);
 
   // Handler: add all suggestions
   const addAllSuggestions = useCallback(() => {
     if (!patternSuggestions.length) return;
-    setEditedLines(prev => [...prev, ...patternSuggestions.map(s => ({ ...s, source: 'learned_pattern' }))]);
+    setEditedLines(prev => {
+      const recalced = patternSuggestions.map(s => {
+        const r = recalcSuggestionQty(s, prev);
+        return { ...r, source: 'learned_pattern' };
+      });
+      return [...prev, ...recalced];
+    });
     toast.success(`Added ${patternSuggestions.length} suggested line(s)`);
     setPatternSuggestions([]);
-  }, [patternSuggestions, setEditedLines, setPatternSuggestions]);
+  }, [patternSuggestions, setEditedLines, setPatternSuggestions, recalcSuggestionQty]);
 
   return (
     <div className="space-y-5" data-testid="bc-so-preflight-view">
@@ -545,6 +563,27 @@ function PatternSuggestions({ suggestions, onAddOne, onAddAll, editedLines }) {
   // Also show a count of already-applied pattern lines
   const appliedCount = (editedLines || []).filter(ln => ln.source === 'learned_pattern').length;
 
+  // Build a map of current trigger item quantities from editedLines
+  const triggerQtyMap = useMemo(() => {
+    const map = {};
+    for (const ln of (editedLines || [])) {
+      if (ln.lineObjectNumber && ln.source !== 'learned_pattern') {
+        map[ln.lineObjectNumber] = parseFloat(ln.quantity) || 0;
+      }
+    }
+    return map;
+  }, [editedLines]);
+
+  // Compute live quantities for each suggestion based on current trigger item qty
+  const liveQuantities = useMemo(() => {
+    return (suggestions || []).map(s => {
+      if (s.qty_ratio && s.trigger_item && triggerQtyMap[s.trigger_item] !== undefined) {
+        return Math.round(triggerQtyMap[s.trigger_item] * s.qty_ratio);
+      }
+      return s.quantity || 0;
+    });
+  }, [suggestions, triggerQtyMap]);
+
   if (!suggestions?.length && !appliedCount) return null;
 
   // All suggestions already applied
@@ -620,7 +659,7 @@ function PatternSuggestions({ suggestions, onAddOne, onAddAll, editedLines }) {
                   {s.lineObjectNumber && (
                     <span className="font-mono">{s.lineObjectNumber}</span>
                   )}
-                  {s.quantity > 0 && <span>Qty: {s.quantity}</span>}
+                  {liveQuantities[idx] > 0 && <span>Qty: {liveQuantities[idx]}</span>}
                   <span className="text-indigo-500 dark:text-indigo-400">
                     seen in {Math.round((s.pattern_frequency || 0) * 100)}% of orders
                   </span>
@@ -658,6 +697,18 @@ function EditableLineTable({ lines, setLines, linesEdited, resetLines, orderTota
         if (value === 'Comment') {
           next[idx].lineObjectNumber = '';
           next[idx].mapping = { ...next[idx].mapping, matched: false, target_type: 'comment', target_no: '' };
+        }
+      }
+      // If changing quantity on a trigger item, recalculate all associated pattern lines
+      if (field === 'quantity') {
+        const changedItem = next[idx].lineObjectNumber;
+        if (changedItem) {
+          const newQty = parseFloat(value) || 0;
+          for (let i = 0; i < next.length; i++) {
+            if (next[i].source === 'learned_pattern' && next[i].trigger_item === changedItem && next[i].qty_ratio) {
+              next[i] = { ...next[i], quantity: Math.round(newQty * next[i].qty_ratio) };
+            }
+          }
         }
       }
       return next;

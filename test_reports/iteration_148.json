@@ -1,0 +1,73 @@
+{
+  "summary": "Completed testing of Learned Dunnage Patterns dynamic recalculation feature. All backend and frontend features working correctly. Backend preflight endpoint returns qty_ratio and trigger_item fields on suggested lines. Frontend dynamically recalculates dunnage quantities when trigger item qty changes.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Review Page", "issues": ["React hydration warnings in console (div in p, span in tbody, tr in span) - cosmetic only, doesn't affect functionality"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_dunnage_recalculation.py",
+    "/app/test_reports/pytest/dunnage_recalculation_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Minor: React hydration warnings due to nested HTML elements (div in p, span in tbody) - should be fixed for cleaner console output but doesn't affect functionality"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_dunnage_recalculation.py"
+  ],
+  "success_rate": {
+    "backend": "100% (6/6 tests passed)",
+    "frontend": "100% (All UI interactions verified)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "POST /api/sales-dashboard/demo/run-batch seeds batch-child documents with C-9874 items that trigger dunnage suggestions",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Learned Dunnage Patterns dynamic recalculation feature fully tested. Backend preflight endpoint at /api/gpi-integration/sales-orders/preflight/{doc_id} returns qty_ratio, trigger_item, and fixed_qty fields on suggested lines. Frontend review page at /review/{doc_id} shows Suggested Additions panel with live quantities based on current trigger item qty. After clicking Add All, changing the trigger item qty automatically recalculates all associated pattern lines using the formula: qty = round(trigger_qty * qty_ratio). Comment lines (no qty_ratio) stay at qty 0.",
+  "features_tested": {
+    "backend": [
+      "POST /api/gpi-integration/sales-orders/preflight/{doc_id} returns qty_ratio field - PASS",
+      "POST /api/gpi-integration/sales-orders/preflight/{doc_id} returns trigger_item field - PASS",
+      "Suggested quantities correct for 62.062M qty: OIPALLET=22, OITIERSHEET=308, OITOPFRAME=22 - PASS",
+      "Suggested quantities correct for 43.2M qty: OIPALLET=15, OITIERSHEET=214, OITOPFRAME=15 - PASS",
+      "Comment lines have no qty_ratio and stay at qty 0 - PASS",
+      "Recalculation formula accuracy: qty = round(trigger_qty * qty_ratio) - PASS"
+    ],
+    "frontend": [
+      "Suggestion panel shows live quantities based on current trigger item qty - PASS",
+      "Add All button adds suggestions with correct quantities - PASS",
+      "Changing trigger item qty from 62 to 50 recalculates OIPALLET from 22→18 - PASS",
+      "Changing trigger item qty from 62 to 50 recalculates OITIERSHEET from 308→248 - PASS",
+      "Changing trigger item qty from 62 to 50 recalculates OITOPFRAME from 22→18 - PASS",
+      "Comment lines stay at qty 0 regardless of trigger item qty changes - PASS"
+    ]
+  },
+  "mocked_apis": {
+    "BC Sandbox": "DEMO_MODE=true - BC Sales Order creation is mocked",
+    "SharePoint Graph API": "DEMO_MODE=true - SharePoint integration is mocked"
+  },
+  "calculation_verification": {
+    "qty_62.062M": {
+      "OIPALLET": "62.062 * 0.3546 = 22.01 → 22",
+      "OITIERSHEET": "62.062 * 4.963 = 308.01 → 308",
+      "OITOPFRAME": "62.062 * 0.3546 = 22.01 → 22"
+    },
+    "qty_50M": {
+      "OIPALLET": "50 * 0.3546 = 17.73 → 18",
+      "OITIERSHEET": "50 * 4.963 = 248.15 → 248",
+      "OITOPFRAME": "50 * 0.3546 = 17.73 → 18"
+    },
+    "qty_43.2M": {
+      "OIPALLET": "43.2 * 0.3546 = 15.32 → 15",
+      "OITIERSHEET": "43.2 * 4.963 = 214.40 → 214",
+      "OITOPFRAME": "43.2 * 0.3546 = 15.32 → 15"
+    }
+  }
+}

@@ -258,6 +258,8 @@ async def get_suggested_lines(db, customer_no: str, line_items: list) -> list:
                     "occurrences": assoc["occurrences"],
                     "frequency": assoc["frequency"],
                     "trigger_item": pattern["trigger_item_no"],
+                    "qty_ratio": assoc.get("qty_ratio"),
+                    "fixed_qty": assoc.get("fixed_qty"),
                 })
 
     logger.info(

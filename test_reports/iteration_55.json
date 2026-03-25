@@ -51,7 +51,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://gpi-hardening-1.preview.emergentagent.com"
+    "api_url": "https://inside-sales-queue.preview.emergentagent.com"
   },
   "seed_data_used": "Hormel Foods workspace with items: SPAM-12OZ (600 OH, 300 IN, 200 CM = 700 AV), SPAM-LITE (200 OH, 999 CM = -799 AV SHORT), DINTY-150Z (1000 OH = OK). Karlin Foods workspace with block_commitment policy.",
   "retest_needed": false,

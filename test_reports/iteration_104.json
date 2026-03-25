@@ -62,7 +62,7 @@
   },
   "test_credentials": {
     "auth": "admin / admin",
-    "api_url": "https://gpi-hardening-1.preview.emergentagent.com"
+    "api_url": "https://inside-sales-queue.preview.emergentagent.com"
   },
   "seed_data_created": {},
   "retest_needed": false,

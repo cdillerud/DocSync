@@ -578,113 +578,323 @@ async def assign_document(doc_id: str, body: AssignRequest):
 
 @router.post("/seed-review-data")
 async def seed_review_data():
-    """Seed test data for the Inside Sales Rep Review feature.
-    Creates sample sales documents with rep assignments for development/testing.
+    """Seed rich, production-realistic demo data for the Inside Sales Rep Review feature.
+    Creates realistic sales documents, rep assignments, overrides, and audit trails.
     """
     db = get_db()
+    import random
+    random.seed(42)  # Reproducible demo data
 
     now = datetime.now(timezone.utc)
+
+    # ── Sales Reps ──
     reps = [
-        {"email": "jsmith@gamerpackaging.com", "name": "John Smith", "code": "JS"},
-        {"email": "mgarcia@gamerpackaging.com", "name": "Maria Garcia", "code": "MG"},
-        {"email": "bwilson@gamerpackaging.com", "name": "Bob Wilson", "code": "BW"},
+        {"email": "jsmith@gamerpackaging.com", "name": "John Smith", "code": "JS", "region": "West Coast"},
+        {"email": "mgarcia@gamerpackaging.com", "name": "Maria Garcia", "code": "MG", "region": "Southwest"},
+        {"email": "bwilson@gamerpackaging.com", "name": "Bob Wilson", "code": "BW", "region": "Midwest"},
+        {"email": "lchen@gamerpackaging.com", "name": "Lisa Chen", "code": "LC", "region": "Northeast"},
     ]
 
+    # ── Real GPI customers (realistic packaging industry names) ──
     customers = [
-        {"no": "C-1001", "name": "Bragg Live Food Products, LLC"},
-        {"no": "C-1002", "name": "Palmer's (ET Browne)"},
-        {"no": "C-1003", "name": "Karlin Foods International"},
-        {"no": "C-1004", "name": "House of Wines"},
-        {"no": "C-1005", "name": "Wing Nien Foods"},
+        {"no": "C-10147", "name": "Bragg Live Food Products, LLC", "city": "Santa Barbara, CA", "rep_idx": 0},
+        {"no": "C-10203", "name": "Palmer's (ET Browne Drug Co.)", "city": "Englewood Cliffs, NJ", "rep_idx": 3},
+        {"no": "C-10089", "name": "Karlin Foods International", "city": "Vernon, CA", "rep_idx": 0},
+        {"no": "C-10312", "name": "House of Wines Inc.", "city": "City of Industry, CA", "rep_idx": 0},
+        {"no": "C-10455", "name": "Wing Nien Foods Mfg.", "city": "San Francisco, CA", "rep_idx": 0},
+        {"no": "C-10521", "name": "Pacific Coast Producers", "city": "Woodland, CA", "rep_idx": 1},
+        {"no": "C-10678", "name": "Bob's Red Mill Natural Foods", "city": "Milwaukie, OR", "rep_idx": 2},
+        {"no": "C-10734", "name": "Huy Fong Foods Inc.", "city": "Irwindale, CA", "rep_idx": 1},
+        {"no": "C-10802", "name": "Spectrum Brands (United Pet)", "city": "Blacksburg, VA", "rep_idx": 2},
+        {"no": "C-10999", "name": "Nature's Path Foods", "city": "Richmond, BC", "rep_idx": 3},
+        {"no": "C-11023", "name": "Stonewall Kitchen", "city": "York, ME", "rep_idx": 3},
+        {"no": "C-11150", "name": "Tillamook Creamery", "city": "Tillamook, OR", "rep_idx": 2},
     ]
 
-    sample_docs = []
-    statuses = ["pending_rep_review", "pending_rep_review", "pending_rep_review", "flagged", "approved"]
-    doc_types = list(SALES_ELIGIBLE_TYPES)
+    # ── Realistic PO scenarios ──
+    scenarios = [
+        # (status, flag_notes, channel, hours_ago, confidence, doc_type)
+        # John Smith's queue — mix of pending, flagged, approved
+        {"rep": 0, "cust": 0, "status": "pending_rep_review", "flag": "", "channel": "email",
+         "hours": 2, "conf": 0.92, "type": "PurchaseOrder", "po": "PO-2026-4471",
+         "amount": 18750.00, "lines": 4, "ship": "Drop Ship"},
+        {"rep": 0, "cust": 2, "status": "pending_rep_review", "flag": "", "channel": "email",
+         "hours": 5, "conf": 0.88, "type": "Sales_Order", "po": "SO-KF-8832",
+         "amount": 42100.50, "lines": 8, "ship": "Warehouse"},
+        {"rep": 0, "cust": 3, "status": "flagged",
+         "flag": "Customer called — wants to change ship-to from Vernon warehouse to new Rancho Cucamonga facility. Need updated address before creating SO.",
+         "channel": "email", "hours": 8, "conf": 0.85, "type": "PurchaseOrder", "po": "HW-PO-1122",
+         "amount": 7890.00, "lines": 2, "ship": "Drop Ship"},
+        {"rep": 0, "cust": 4, "status": "pending_rep_review", "flag": "", "channel": "SHADOW_PILOT_UPLOAD",
+         "hours": 12, "conf": 0.94, "type": "Order_Confirmation", "po": "WNF-OC-5567",
+         "amount": 31200.00, "lines": 6, "ship": "Drop Ship"},
+        {"rep": 0, "cust": 0, "status": "approved", "flag": "", "channel": "email",
+         "hours": 26, "conf": 0.96, "type": "PurchaseOrder", "po": "PO-2026-4398",
+         "amount": 12450.00, "lines": 3, "ship": "Warehouse"},
+        {"rep": 0, "cust": 2, "status": "approved", "flag": "", "channel": "email",
+         "hours": 48, "conf": 0.91, "type": "Sales_Order", "po": "SO-KF-8790",
+         "amount": 56780.25, "lines": 12, "ship": "Warehouse"},
+        {"rep": 0, "cust": 4, "status": "flagged",
+         "flag": "PO amount doesn't match quote Q-2026-889. Customer quoted $24,500 but PO shows $26,100. Need to verify with buyer before approving.",
+         "channel": "email", "hours": 36, "conf": 0.87, "type": "PurchaseOrder", "po": "WNF-PO-3301",
+         "amount": 26100.00, "lines": 5, "ship": "Drop Ship"},
 
-    for i in range(15):
-        rep = reps[i % len(reps)]
-        cust = customers[i % len(customers)]
-        status = statuses[i % len(statuses)]
-        doc_type = doc_types[i % len(doc_types)]
-        created = (now - timedelta(hours=i * 6)).isoformat()
-        amount = round(1000 + (i * 2345.67), 2)
+        # Maria Garcia's queue
+        {"rep": 1, "cust": 5, "status": "pending_rep_review", "flag": "", "channel": "email",
+         "hours": 1, "conf": 0.93, "type": "PurchaseOrder", "po": "PCP-45821",
+         "amount": 89500.00, "lines": 15, "ship": "Warehouse"},
+        {"rep": 1, "cust": 7, "status": "pending_rep_review", "flag": "", "channel": "email",
+         "hours": 3, "conf": 0.90, "type": "Sales_Order", "po": "HFF-SO-2026-112",
+         "amount": 145000.00, "lines": 22, "ship": "Warehouse"},
+        {"rep": 1, "cust": 5, "status": "flagged",
+         "flag": "Rush order — customer needs delivery by Friday. Standard lead time is 10 days. Check if we have stock in LA warehouse.",
+         "channel": "SHADOW_PILOT_UPLOAD", "hours": 6, "conf": 0.89, "type": "PurchaseOrder", "po": "PCP-45799-RUSH",
+         "amount": 34200.00, "lines": 4, "ship": "Drop Ship"},
+        {"rep": 1, "cust": 7, "status": "approved", "flag": "", "channel": "email",
+         "hours": 30, "conf": 0.95, "type": "PurchaseOrder", "po": "HFF-PO-2026-098",
+         "amount": 67800.00, "lines": 10, "ship": "Warehouse"},
+        {"rep": 1, "cust": 7, "status": "pending_rep_review", "flag": "", "channel": "email",
+         "hours": 4, "conf": 0.91, "type": "Order_Confirmation", "po": "HFF-OC-2026-115",
+         "amount": 52300.00, "lines": 8, "ship": "Drop Ship"},
+
+        # Bob Wilson's queue
+        {"rep": 2, "cust": 6, "status": "pending_rep_review", "flag": "", "channel": "email",
+         "hours": 2, "conf": 0.96, "type": "PurchaseOrder", "po": "BRM-PO-78234",
+         "amount": 28900.00, "lines": 6, "ship": "Warehouse"},
+        {"rep": 2, "cust": 8, "status": "pending_rep_review", "flag": "", "channel": "email",
+         "hours": 7, "conf": 0.82, "type": "Sales_Order", "po": "SB-UP-2026-445",
+         "amount": 19600.00, "lines": 3, "ship": "Drop Ship"},
+        {"rep": 2, "cust": 11, "status": "flagged",
+         "flag": "Duplicate PO? We received TC-PO-9921 last week and it was already approved. Customer may have re-sent. Verify before creating a second SO.",
+         "channel": "email", "hours": 10, "conf": 0.78, "type": "PurchaseOrder", "po": "TC-PO-9921",
+         "amount": 41500.00, "lines": 7, "ship": "Warehouse"},
+        {"rep": 2, "cust": 6, "status": "approved", "flag": "", "channel": "email",
+         "hours": 52, "conf": 0.94, "type": "PurchaseOrder", "po": "BRM-PO-78190",
+         "amount": 15300.00, "lines": 4, "ship": "Warehouse"},
+        {"rep": 2, "cust": 11, "status": "pending_rep_review", "flag": "", "channel": "SHADOW_PILOT_UPLOAD",
+         "hours": 14, "conf": 0.86, "type": "Order_Confirmation", "po": "TC-OC-2026-330",
+         "amount": 73200.00, "lines": 11, "ship": "Warehouse"},
+
+        # Lisa Chen's queue
+        {"rep": 3, "cust": 1, "status": "pending_rep_review", "flag": "", "channel": "email",
+         "hours": 1, "conf": 0.91, "type": "PurchaseOrder", "po": "PLM-PO-2026-5544",
+         "amount": 95400.00, "lines": 18, "ship": "Warehouse"},
+        {"rep": 3, "cust": 9, "status": "pending_rep_review", "flag": "", "channel": "email",
+         "hours": 4, "conf": 0.88, "type": "Sales_Order", "po": "NP-SO-CA-7721",
+         "amount": 63100.00, "lines": 9, "ship": "Drop Ship"},
+        {"rep": 3, "cust": 10, "status": "flagged",
+         "flag": "New customer — no BC record yet. Need to create customer card in Business Central before we can generate the Sales Order. AR team notified.",
+         "channel": "email", "hours": 9, "conf": 0.84, "type": "PurchaseOrder", "po": "SK-PO-NEW-001",
+         "amount": 8750.00, "lines": 2, "ship": "Drop Ship"},
+        {"rep": 3, "cust": 1, "status": "approved", "flag": "", "channel": "email",
+         "hours": 40, "conf": 0.97, "type": "PurchaseOrder", "po": "PLM-PO-2026-5501",
+         "amount": 112000.00, "lines": 24, "ship": "Warehouse"},
+        {"rep": 3, "cust": 9, "status": "pending_rep_review", "flag": "", "channel": "SHADOW_PILOT_UPLOAD",
+         "hours": 16, "conf": 0.90, "type": "Order_Confirmation", "po": "NP-OC-CA-7718",
+         "amount": 47800.00, "lines": 7, "ship": "Warehouse"},
+    ]
+
+    # ── Build documents ──
+    sample_docs = []
+    item_names = [
+        "12oz Clear PET Bottle", "16oz HDPE Jar", "Shrink Sleeve Label (4-color)",
+        "Corrugated Shipper 24-ct", "6-pack Carrier", "Tamper-Evident Cap 38mm",
+        "Custom Printed Film Roll", "Stand-Up Pouch 8oz", "Clamshell Blister Pack",
+        "Kraft Mailer Box 10x8x4", "Poly Bag 2mil", "Foam Cushion Insert",
+        "Glass Bottle 750ml", "Metal Tin 4oz Round", "Paperboard Folding Carton",
+        "Corrugated Display Shipper", "Blister Card 6x9", "Vacuum Pouch 12x16",
+    ]
+
+    for s in scenarios:
+        rep = reps[s["rep"]]
+        cust = customers[s["cust"]]
+        created = (now - timedelta(hours=s["hours"])).isoformat()
+
+        # Build realistic line items
+        num_lines = s["lines"]
+        line_total = s["amount"]
+        lines = []
+        for li in range(num_lines):
+            item = item_names[(s["cust"] + li) % len(item_names)]
+            qty = random.choice([500, 1000, 2000, 2500, 5000, 10000, 15000, 25000])
+            unit_price = round(line_total / num_lines / qty * random.uniform(0.8, 1.2), 4)
+            lines.append({
+                "line_no": li + 1,
+                "item_no": f"PKG-{1000 + (s['cust'] * 10 + li)}",
+                "description": item,
+                "quantity": qty,
+                "unit_price": unit_price,
+                "line_amount": round(qty * unit_price, 2),
+                "uom": "EA",
+            })
+
+        history = []
+        if s["status"] == "approved":
+            history.append({"action": "auto_assigned", "at": (now - timedelta(hours=s["hours"] + 2)).isoformat(),
+                            "by": "system", "rep_email": rep["email"], "source": "bc_cache"})
+            history.append({"action": "approved", "at": (now - timedelta(hours=s["hours"] - 4)).isoformat(),
+                            "by": rep["email"]})
+        elif s["status"] == "flagged":
+            history.append({"action": "auto_assigned", "at": (now - timedelta(hours=s["hours"] + 1)).isoformat(),
+                            "by": "system", "rep_email": rep["email"], "source": "bc_cache"})
+            history.append({"action": "flagged", "at": (now - timedelta(hours=s["hours"] - 1)).isoformat(),
+                            "by": rep["email"], "notes": s["flag"]})
+        else:
+            history.append({"action": "auto_assigned", "at": created,
+                            "by": "system", "rep_email": rep["email"], "source": "bc_cache"})
 
         doc = {
             "id": str(uuid.uuid4()),
-            "file_name": f"PO-{10000 + i}-{cust['name'].split()[0]}.pdf",
-            "document_type": doc_type,
+            "file_name": f"{s['po']}.pdf",
+            "document_type": s["type"],
             "created_utc": created,
             "updated_utc": created,
-            "capture_channel": "email" if i % 2 == 0 else "SHADOW_PILOT_UPLOAD",
-            "status": "ready" if status == "approved" else "pending",
+            "capture_channel": s["channel"],
+            "email_sender": f"purchasing@{cust['name'].split()[0].lower().replace(',','').replace('.','')}.com",
+            "status": "ready" if s["status"] == "approved" else "pending",
             "assigned_rep_email": rep["email"],
             "assigned_rep_name": rep["name"],
             "assigned_salesperson_code": rep["code"],
-            "sales_review_status": status,
-            "flag_notes": "Customer requested different ship date" if status == "flagged" else "",
-            "sales_review_history": [],
+            "sales_review_status": s["status"],
+            "rep_assignment_source": "bc_cache",
+            "rep_assigned_utc": created,
+            "flag_notes": s["flag"],
+            "sales_review_history": history,
             "extracted_fields": {
-                "po_number": f"PO-{10000 + i}",
+                "po_number": s["po"],
                 "customer_name": cust["name"],
-                "order_date": (now - timedelta(days=i)).strftime("%m/%d/%y"),
-                "amount": str(amount),
-                "line_items": [{"item": f"PKG-{j}", "qty": 1000 * (j + 1)} for j in range(i % 4 + 1)],
+                "customer_no": cust["no"],
+                "order_date": (now - timedelta(hours=s["hours"])).strftime("%m/%d/%Y"),
+                "amount": str(s["amount"]),
+                "ship_to_city": cust["city"],
+                "shipping_method": s["ship"],
+                "line_items": lines,
+                "buyer_name": random.choice(["Sarah Johnson", "Mike Torres", "Amy Lee", "David Park", "Rachel Kim"]),
+                "buyer_email": f"buyer@{cust['name'].split()[0].lower().replace(',','').replace('.','')}.com",
             },
             "normalized_fields": {
                 "bc_customer_no": cust["no"],
                 "customer_name": cust["name"],
-                "po_number": f"PO-{10000 + i}",
-                "amount": amount,
+                "po_number": s["po"],
+                "amount": s["amount"],
             },
             "vendor_name": cust["name"],
-            "ai_confidence": round(0.7 + (i % 4) * 0.08, 2),
+            "vendor_canonical": cust["name"],
+            "ai_confidence": s["conf"],
         }
         sample_docs.append(doc)
 
-    # Add 3 unassigned docs for the triage queue
-    for i in range(3):
-        cust = customers[i]
-        created = (now - timedelta(hours=i * 3 + 1)).isoformat()
+    # ── Triage docs (no rep assigned — realistic scenarios) ──
+    triage_scenarios = [
+        {"cust_name": "Valley Fresh Produce Co.", "po": "VFP-PO-2026-001", "amount": 14200.00,
+         "lines": 3, "hours": 3, "conf": 0.76,
+         "sender": "orders@valleyfreshproduce.com",
+         "note": "New customer — no existing record in BC. Email came from unknown domain."},
+        {"cust_name": "Artisan Spice Traders", "po": "AST-8844", "amount": 6500.00,
+         "lines": 2, "hours": 7, "conf": 0.81,
+         "sender": "procurement@artisanspice.com",
+         "note": "Customer name not in system. Possibly a DBA of an existing account."},
+        {"cust_name": "Green Valley Organics", "po": "GVO-PO-45123", "amount": 38900.00,
+         "lines": 7, "hours": 1, "conf": 0.88,
+         "sender": "ap@greenvalleyorganics.com",
+         "note": "High-value order from unrecognized sender. Could be a sub-brand of Nature's Path."},
+        {"cust_name": "Coastal Beverage Group", "po": "CBG-2026-REQ-112", "amount": 72000.00,
+         "lines": 14, "hours": 5, "conf": 0.72,
+         "sender": "purchasing@coastalbev.com",
+         "note": "Large order, unclear which territory. Customer has locations in CA and TX."},
+        {"cust_name": "Heritage Foods International", "po": "", "amount": 22350.00,
+         "lines": 5, "hours": 11, "conf": 0.65,
+         "sender": "info@heritagefoods.co",
+         "note": "No PO number found in document. Appears to be an informal order via email body."},
+    ]
+
+    for ts in triage_scenarios:
+        created = (now - timedelta(hours=ts["hours"])).isoformat()
+        lines = []
+        for li in range(ts["lines"]):
+            item = item_names[(li * 3) % len(item_names)]
+            qty = random.choice([1000, 2500, 5000])
+            lines.append({
+                "line_no": li + 1,
+                "item_no": f"PKG-{9000 + li}",
+                "description": item,
+                "quantity": qty,
+                "unit_price": round(ts["amount"] / ts["lines"] / qty, 4),
+                "line_amount": round(ts["amount"] / ts["lines"], 2),
+                "uom": "EA",
+            })
+
         doc = {
             "id": str(uuid.uuid4()),
-            "file_name": f"UNKNOWN-ORDER-{i + 1}.pdf",
-            "document_type": "Sales_Order",
+            "file_name": f"{ts['po'] or 'EMAIL-ORDER'}-{ts['cust_name'].split()[0]}.pdf",
+            "document_type": "PurchaseOrder" if ts["po"] else "Sales_Order",
             "created_utc": created,
             "updated_utc": created,
             "capture_channel": "email",
+            "email_sender": ts["sender"],
             "status": "pending",
             "assigned_rep_email": "",
             "assigned_rep_name": "",
             "sales_review_status": "triage",
             "flag_notes": "",
-            "sales_review_history": [],
+            "sales_review_history": [
+                {"action": "routed_to_triage", "at": created, "by": "system",
+                 "reason": "no_rep_found", "note": ts["note"]},
+            ],
             "extracted_fields": {
-                "po_number": f"UNK-{9000 + i}",
-                "customer_name": cust["name"],
-                "amount": str(round(500 + i * 750, 2)),
-                "line_items": [{"item": "PKG-X", "qty": 500}],
+                "po_number": ts["po"],
+                "customer_name": ts["cust_name"],
+                "amount": str(ts["amount"]),
+                "line_items": lines,
             },
             "normalized_fields": {
-                "customer_name": cust["name"],
-                "amount": round(500 + i * 750, 2),
+                "customer_name": ts["cust_name"],
+                "amount": ts["amount"],
             },
-            "vendor_name": cust["name"],
-            "ai_confidence": 0.55,
+            "vendor_name": ts["cust_name"],
+            "ai_confidence": ts["conf"],
         }
         sample_docs.append(doc)
 
-    # Clear existing seeded data and insert fresh
+    # ── Clear and insert ──
     await db.hub_documents.delete_many({"document_type": {"$in": list(SALES_ELIGIBLE_TYPES)}})
     if sample_docs:
         await db.hub_documents.insert_many(sample_docs)
 
-    logger.info("[SalesReview] Seeded %d review documents", len(sample_docs))
+    # ── Seed customer→rep overrides for the assigned customers ──
+    await db.customer_rep_overrides.delete_many({})
+    overrides = []
+    for cust in customers:
+        rep = reps[cust["rep_idx"]]
+        overrides.append({
+            "id": str(uuid.uuid4()),
+            "customer_no": cust["no"],
+            "customer_name": cust["name"],
+            "rep_email": rep["email"],
+            "rep_name": rep["name"],
+            "salesperson_code": rep["code"],
+            "active": True,
+            "created_utc": now.isoformat(),
+            "updated_utc": now.isoformat(),
+        })
+    if overrides:
+        await db.customer_rep_overrides.insert_many(overrides)
+
+    # Count by status
+    counts = {}
+    for d in sample_docs:
+        st = d["sales_review_status"]
+        counts[st] = counts.get(st, 0) + 1
+
+    logger.info("[SalesReview] Seeded %d review documents + %d rep overrides", len(sample_docs), len(overrides))
     return {
         "status": "success",
         "seeded_count": len(sample_docs),
-        "reps": [r["email"] for r in reps],
-        "statuses": {"pending_rep_review": 9, "flagged": 3, "approved": 3, "triage": 3},
+        "reps": [{"name": r["name"], "email": r["email"], "region": r["region"]} for r in reps],
+        "rep_overrides_seeded": len(overrides),
+        "status_breakdown": counts,
+        "customers": len(customers),
+        "triage_docs": len(triage_scenarios),
     }
 
 

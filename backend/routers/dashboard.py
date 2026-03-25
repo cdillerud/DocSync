@@ -465,7 +465,7 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
     AUTO_RESOLVE_METHODS = [
         "alias_match", "bc_exact_match", "bc_search", "fuzzy_match",
         "alias", "learned_alias", "exact_name", "normalized",
-        "sender_email", "sender_domain",
+        "sender_email", "sender_domain", "extracted_field",
     ]
     vendor_auto_resolved_total = await db.hub_documents.count_documents({
         "$and": [

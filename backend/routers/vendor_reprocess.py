@@ -66,24 +66,46 @@ async def _reprocess_single(doc: dict, dry_run: bool = False) -> dict:
     # Fall back to text-based vendor matching
     if not match_result.get("vendor_canonical"):
         vendor_raw = await _get_vendor_raw(doc)
+        vendor_normalized = ""
         if not vendor_raw:
-            return {
-                "doc_id": doc_id,
-                "action": "skipped",
-                "reason": "no_vendor_raw_string",
-                "old_method": old_method,
-            }
+            # Last resort: check email_subject for vendor hints
+            subject = doc.get("email_subject") or ""
+            # Only use subject if it looks like it contains a company name (not just internal comms)
+            if not subject or "gamer" in subject.lower():
+                vendor_raw = ""
+            else:
+                vendor_raw = ""  # email subjects are too noisy for automated matching
 
-        vendor_normalized = normalize_vendor_name(vendor_raw)
-        if not vendor_normalized:
-            return {
-                "doc_id": doc_id,
-                "action": "skipped",
-                "reason": "normalized_to_empty",
-                "vendor_raw": vendor_raw,
-                "old_method": old_method,
-            }
-        match_result = await lookup_vendor_alias(vendor_normalized)
+        if not vendor_raw:
+            # FALLBACK: Use extracted_fields.vendor directly as canonical
+            extracted = doc.get("extracted_fields") or {}
+            extracted_vendor = (extracted.get("vendor") or extracted.get("vendor_name") or "").strip()
+            if extracted_vendor and extracted_vendor.lower() not in ("unknown", "n/a", "", "gamer packaging", "gamer packaging inc"):
+                match_result = {
+                    "vendor_canonical": extracted_vendor,
+                    "vendor_match_method": "extracted_field",
+                    "vendor_name": extracted_vendor,
+                    "vendor_no": "",
+                }
+                vendor_raw = extracted_vendor
+            else:
+                return {
+                    "doc_id": doc_id,
+                    "action": "skipped",
+                    "reason": "no_vendor_raw_string",
+                    "old_method": old_method,
+                }
+        else:
+            vendor_normalized = normalize_vendor_name(vendor_raw)
+            if not vendor_normalized:
+                return {
+                    "doc_id": doc_id,
+                    "action": "skipped",
+                    "reason": "normalized_to_empty",
+                    "vendor_raw": vendor_raw,
+                    "old_method": old_method,
+                }
+            match_result = await lookup_vendor_alias(vendor_normalized)
     else:
         vendor_raw = await _get_vendor_raw(doc)
         vendor_normalized = ""

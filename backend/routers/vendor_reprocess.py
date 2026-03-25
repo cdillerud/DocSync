@@ -367,3 +367,120 @@ async def clear_sender_mappings():
         "status": "cleared",
         "deleted_count": result.deleted_count,
     }
+
+
+@router.post("/resolve-by-sender")
+async def resolve_unresolved_by_sender(
+    limit: int = Query(2000, ge=1, le=5000),
+    dry_run: bool = Query(False),
+):
+    """
+    Find ALL docs with vendor_match_method='none' that have an email_sender,
+    and try to resolve them via sender email/domain lookup.
+    No doc_type restriction — this catches docs the main reprocess misses.
+    """
+    from services.vendor_matching import lookup_vendor_by_sender, learn_sender_vendor
+    from services.vendor_resolution_service import build_resolution_object
+    db = get_db()
+
+    EXCLUDED_SENDER_DOMAINS = {"gamerpackaging.com"}
+
+    docs = await db.hub_documents.find(
+        {
+            "vendor_match_method": {"$in": ["none", None]},
+            "email_sender": {"$exists": True, "$ne": None, "$ne": ""},
+        },
+        {"_id": 0, "id": 1, "email_sender": 1, "vendor_canonical": 1,
+         "vendor_match_method": 1, "vendor_resolution": 1,
+         "vendor_name_raw": 1, "extracted_fields": 1}
+    ).limit(limit).to_list(limit)
+
+    resolved = 0
+    skipped_internal = 0
+    no_match = 0
+    already_resolved = 0
+    details = []
+
+    for doc in docs:
+        doc_id = doc.get("id", "?")
+        sender = (doc.get("email_sender") or "").strip().lower()
+        domain = sender.split("@")[-1] if "@" in sender else ""
+
+        if domain in EXCLUDED_SENDER_DOMAINS:
+            skipped_internal += 1
+            continue
+
+        if doc.get("vendor_canonical"):
+            already_resolved += 1
+            continue
+
+        match_result = await lookup_vendor_by_sender(sender)
+        vendor = match_result.get("vendor_canonical")
+
+        if not vendor:
+            # Try domain-level: find ANY email mapping from this domain
+            domain_entries = await db.sender_vendor_map.find(
+                {"sender_domain": domain, "vendor_canonical": {"$exists": True, "$ne": None}},
+                {"_id": 0, "vendor_canonical": 1, "vendor_name": 1, "vendor_no": 1}
+            ).to_list(50)
+            # Only use domain if ALL entries agree on the same vendor
+            vendors_seen = set(e["vendor_canonical"] for e in domain_entries if e.get("vendor_canonical"))
+            if len(vendors_seen) == 1:
+                v = domain_entries[0]
+                match_result = {
+                    "vendor_canonical": v["vendor_canonical"],
+                    "vendor_match_method": "sender_domain",
+                    "vendor_name": v.get("vendor_name", ""),
+                    "vendor_no": v.get("vendor_no", ""),
+                }
+                vendor = v["vendor_canonical"]
+
+        if not vendor:
+            no_match += 1
+            if len(details) < 30:
+                details.append({"doc_id": doc_id, "sender": sender, "action": "no_match"})
+            continue
+
+        if dry_run:
+            resolved += 1
+            details.append({"doc_id": doc_id, "sender": sender, "vendor": vendor, "action": "would_resolve"})
+            continue
+
+        vendor_raw = (doc.get("vendor_name_raw") or
+                      (doc.get("extracted_fields") or {}).get("vendor") or "")
+        resolution = build_resolution_object(vendor_raw, match_result)
+
+        update = {
+            "vendor_canonical": vendor,
+            "vendor_match_method": match_result.get("vendor_match_method", "sender_domain"),
+            "vendor_name": match_result.get("vendor_name", ""),
+            "vendor_no": match_result.get("vendor_no", ""),
+            "vendor_resolution": resolution,
+            "vendor_reprocessed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.hub_documents.update_one({"id": doc_id}, {"$set": update})
+        resolved += 1
+
+        # Reinforce learning
+        try:
+            await learn_sender_vendor(
+                sender_email=sender,
+                vendor_canonical=vendor,
+                vendor_name=match_result.get("vendor_name", ""),
+                vendor_no=match_result.get("vendor_no", ""),
+            )
+        except Exception:
+            pass
+
+        if len(details) < 30:
+            details.append({"doc_id": doc_id, "sender": sender, "vendor": vendor, "action": "resolved"})
+
+    return {
+        "total_scanned": len(docs),
+        "resolved": resolved,
+        "no_match": no_match,
+        "skipped_internal": skipped_internal,
+        "already_resolved": already_resolved,
+        "dry_run": dry_run,
+        "sample_details": details,
+    }

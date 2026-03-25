@@ -86,6 +86,22 @@ DEMO_SCENARIOS = [
             {"sku": "PKG-3010", "desc": "Printed Film Roll (Granola)", "qty": 5000, "price": 0.18},
         ],
     },
+    {
+        "id": "giovanni-glass",
+        "label": "Giovanni Food Co. — Glass Jars (Real PO Style)",
+        "customer": "Giovanni Food Co., Inc.",
+        "customer_no": "C-10250",
+        "buyer": "Purchasing Dept.",
+        "buyer_email": "purchasing@giovannifoods.com",
+        "sender_email": "purchasing@giovannifoods.com",
+        "po_number": "PO-61312",
+        "ship_to": "Giovanni Foods\n8800 Sixty Road\nBaldwinsville, NY 13027\nUSA",
+        "ship_method": "Outbound Freight",
+        "notes": "Batch PO 61312-61361. First PO correlates to BC SO/PO 112115. Glass, 24oz, Bulk, 2821/Plt.",
+        "items": [
+            {"sku": "GLS-24OZ-BLK", "desc": "Glass, 24oz, Bulk, 2821/Plt", "qty": 62062, "price": 0.23474},
+        ],
+    },
 ]
 
 

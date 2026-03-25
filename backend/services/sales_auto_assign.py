@@ -24,7 +24,7 @@ from services.rep_assignment_service import get_rep_for_customer
 logger = logging.getLogger(__name__)
 
 SALES_ELIGIBLE_TYPES = {
-    "Sales_Order", "SalesOrder", "Order_Confirmation", "PurchaseOrder",
+    "Sales_Order", "SalesOrder", "Order_Confirmation", "PurchaseOrder", "Purchase_Order",
 }
 
 # High-confidence threshold for auto-approval (skip rep review)
@@ -113,16 +113,41 @@ async def auto_assign_sales_rep(db, doc_id: str, doc: dict) -> Optional[dict]:
     if not rep_result:
         sender_email = doc.get("email_sender") or ""
         if sender_email and "@" in sender_email:
+            import re
             domain = sender_email.split("@")[1].lower()
-            # Check if any override customer name contains a word from the domain
-            domain_base = domain.split(".")[0]  # e.g. "bragg" from "bragg.com"
+            domain_base = domain.split(".")[0]  # e.g. "giovannifoods" from "giovannifoods.com"
             if domain_base and len(domain_base) >= 3:
-                import re
+                # Strategy 1: Full domain base match (e.g. "bragg" in "Bragg Live Food...")
                 escaped_domain = re.escape(domain_base)
                 override = await db.customer_rep_overrides.find_one(
                     {"customer_name": {"$regex": escaped_domain, "$options": "i"}, "active": True},
                     {"_id": 0},
                 )
+                # Strategy 2: Check if customer name's first word is IN the domain
+                # e.g. "giovanni" (from "Giovanni Food Co.") is in "giovannifoods"
+                # Pick the longest match to avoid false positives ("foods" matching multiple)
+                if not override:
+                    all_overrides = await db.customer_rep_overrides.find(
+                        {"active": True}, {"_id": 0}
+                    ).to_list(500)
+                    best_match = None
+                    best_match_len = 0
+                    for ov in all_overrides:
+                        cust_name = (ov.get("customer_name") or "").lower()
+                        cust_words = [w for w in re.split(r'[\s,.\-]+', cust_name) if len(w) >= 3]
+                        for word in cust_words:
+                            match_len = 0
+                            if word in domain_base:
+                                match_len = len(word)
+                            elif domain_base in word:
+                                match_len = len(domain_base)
+                            if match_len > best_match_len:
+                                best_match = ov
+                                best_match_len = match_len
+                    # Only accept if the match covers a significant portion of the domain
+                    if best_match and best_match_len >= min(5, len(domain_base) * 0.5):
+                        override = best_match
+
                 if override:
                     rep_result = {
                         "rep_email": override.get("rep_email", ""),

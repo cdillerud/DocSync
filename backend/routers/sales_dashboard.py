@@ -24,7 +24,7 @@ from deps import get_db
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sales-dashboard", tags=["Sales Dashboard"])
 
-SALES_ELIGIBLE_TYPES = {"Sales_Order", "SalesOrder", "Order_Confirmation", "PurchaseOrder"}
+SALES_ELIGIBLE_TYPES = {"Sales_Order", "SalesOrder", "Order_Confirmation", "PurchaseOrder", "Purchase_Order"}
 
 # Sales review statuses used by the Inside Sales Rep Review flow
 REVIEW_STATUSES = {
@@ -609,6 +609,7 @@ async def seed_review_data():
         {"no": "C-10999", "name": "Nature's Path Foods", "city": "Richmond, BC", "rep_idx": 3},
         {"no": "C-11023", "name": "Stonewall Kitchen", "city": "York, ME", "rep_idx": 3},
         {"no": "C-11150", "name": "Tillamook Creamery", "city": "Tillamook, OR", "rep_idx": 2},
+        {"no": "C-10250", "name": "Giovanni Food Co., Inc.", "city": "Baldwinsville, NY", "rep_idx": 3},
     ]
 
     # ── Realistic PO scenarios ──
@@ -692,6 +693,18 @@ async def seed_review_data():
         {"rep": 3, "cust": 9, "status": "pending_rep_review", "flag": "", "channel": "SHADOW_PILOT_UPLOAD",
          "hours": 16, "conf": 0.90, "type": "Order_Confirmation", "po": "NP-OC-CA-7718",
          "amount": 47800.00, "lines": 7, "ship": "Warehouse"},
+
+        # Giovanni Food Co. — mirrors real PO-61312
+        {"rep": 3, "cust": 12, "status": "pending_rep_review", "flag": "", "channel": "email",
+         "hours": 3, "conf": 0.98, "type": "Purchase_Order", "po": "PO-61312",
+         "amount": 14568.43, "lines": 1, "ship": "Outbound Freight"},
+        {"rep": 3, "cust": 12, "status": "pending_rep_review", "flag": "", "channel": "email",
+         "hours": 3, "conf": 0.97, "type": "Purchase_Order", "po": "PO-61325",
+         "amount": 22340.00, "lines": 2, "ship": "Outbound Freight"},
+        {"rep": 3, "cust": 12, "status": "flagged",
+         "flag": "Batch PO 61312-61361 received as single PDF (47 pages). Need to split and verify each PO against BC. PO-61340 line items don't match quote.",
+         "channel": "email", "hours": 5, "conf": 0.95, "type": "Purchase_Order", "po": "PO-61340",
+         "amount": 8925.00, "lines": 1, "ship": "Outbound Freight"},
     ]
 
     # ── Build documents ──

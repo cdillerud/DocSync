@@ -982,6 +982,34 @@ async def _run_batch_demo_bg(db, job_id: str):
                     upsert=True,
                 )
 
+        # Seed customer-level pattern: Energy Surcharge
+        # (In production, learn_from_bc_posted_orders() would discover this from BC history)
+        _ENERGY_SURCHARGE = {
+            "customer_no": "C-10250",
+            "trigger_item_no": "*",
+            "trigger_item_pattern": "*",
+            "associated_lines": [
+                {
+                    "line_type": "Item",
+                    "item_no": "ENERGY",
+                    "description": "Energy Surcharge",
+                    "qty_ratio": None,
+                    "fixed_qty": 1,
+                    "unit_price": 497.36,
+                    "occurrences": 8,
+                    "frequency": 0.80,
+                },
+            ],
+            "total_orders_analyzed": 10,
+            "confidence": 0.80,
+            "last_updated": now_iso,
+        }
+        await db.order_line_patterns.update_one(
+            {"customer_no": "C-10250", "trigger_item_no": "*"},
+            {"$set": _ENERGY_SURCHARGE},
+            upsert=True,
+        )
+
         # Step 5: Summary
         steps.append({
             "step": 5, "name": "Child Documents Summary", "status": "completed",

@@ -658,7 +658,17 @@ async def sales_order_preflight(doc_id: str):
     suggested_lines = []
     if customer_no and resolved_lines:
         try:
-            from services.order_line_patterns import get_suggested_lines
+            from services.order_line_patterns import get_suggested_lines, learn_from_bc_posted_orders
+            # Check if customer-level patterns exist; if not, try learning from BC
+            has_customer_pattern = await db.order_line_patterns.find_one(
+                {"customer_no": customer_no, "trigger_item_no": "*"}, {"_id": 1}
+            )
+            if not has_customer_pattern:
+                try:
+                    await learn_from_bc_posted_orders(db, customer_no, order_limit=10, threshold=0.75)
+                except Exception as e:
+                    logger.debug("[Preflight] BC pattern learning skipped: %s", str(e))
+
             main_items = [ln for ln in resolved_lines if ln.get("lineType") != "Comment" and ln.get("unitPrice", 0) > 0]
             suggested_lines = await get_suggested_lines(db, customer_no, main_items)
             if suggested_lines:

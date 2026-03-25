@@ -1,0 +1,65 @@
+{
+  "summary": "Completed testing of ENERGY Surcharge Customer-Level Pattern feature. All backend tests pass (7/7). Frontend shows ENERGY surcharge in Suggested Additions panel with 'seen in 80% of orders', Add All adds all 6 suggestions including ENERGY, Order Total correctly includes ENERGY ($15,065.79 = $14,568.43 + $497.36).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Review Page", "issues": ["React hydration warnings in console (div in p, span in tbody, tr in span) - cosmetic only, doesn't affect functionality"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_energy_surcharge_pattern.py",
+    "/app/test_reports/pytest/energy_surcharge_pattern_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Minor: React hydration warnings due to nested HTML elements (div in p, span in tbody) - should be fixed for cleaner console output but doesn't affect functionality"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_energy_surcharge_pattern.py"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7 tests passed)",
+    "frontend": "100% (All UI interactions verified)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "POST /api/sales-dashboard/demo/run-batch seeds batch-child documents with C-9874 items AND customer-level ENERGY surcharge pattern (trigger_item='*')",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "ENERGY Surcharge Customer-Level Pattern feature fully tested. Backend preflight endpoint at /api/gpi-integration/sales-orders/preflight/{doc_id} returns ENERGY surcharge as a suggested line with trigger_item='*', fixed_qty=1, unit_price=497.36, pattern_frequency=0.8 (80%). Frontend review page at /review/{doc_id} shows ENERGY in Suggested Additions panel. After clicking Add All, ENERGY line appears in editable table with Qty=1 and Price=$497.36. Order Total correctly includes ENERGY surcharge. The price field is editable. Customer-level pattern (trigger_item='*') is stored in order_line_patterns collection.",
+  "features_tested": {
+    "backend": [
+      "POST /api/gpi-integration/sales-orders/preflight/{doc_id} returns ENERGY surcharge - PASS",
+      "ENERGY has trigger_item='*' (customer-level pattern) - PASS",
+      "ENERGY has lineType='Item', lineObjectNumber='ENERGY', description='Energy Surcharge' - PASS",
+      "ENERGY has fixed_qty=1, quantity=1, unitPrice=497.36 - PASS",
+      "ENERGY has pattern_frequency=0.8 (80%), pattern_occurrences=8 - PASS",
+      "Total 6 suggested lines (5 dunnage + 1 ENERGY) for C-9874 items - PASS",
+      "Product-level dunnage patterns still work correctly - PASS",
+      "Customer-level pattern stored in order_line_patterns collection - PASS"
+    ],
+    "frontend": [
+      "Suggested Additions panel shows 6 lines badge - PASS",
+      "ENERGY surcharge visible in suggestions panel with 'seen in 80% of orders' - PASS",
+      "Add All button adds all 6 suggestions to editable table - PASS",
+      "'6 learned dunnage lines added to this order' confirmation message - PASS",
+      "Order Total includes ENERGY surcharge ($15,065.79 = $14,568.43 + $497.36) - PASS",
+      "Sparkle icons visible on pattern lines - PASS",
+      "LINE PREVIEW shows 7 lines (1 product + 6 suggested) - PASS",
+      "ENERGY price field is editable in the line table - PASS (verified via data-testid)"
+    ]
+  },
+  "mocked_apis": {
+    "BC Sandbox": "DEMO_MODE=true - BC Sales Order creation is mocked",
+    "SharePoint Graph API": "DEMO_MODE=true - SharePoint integration is mocked",
+    "BC posted sales invoices query": "Falls back to seeded demo data"
+  },
+  "calculation_verification": {
+    "order_total": "$14,568.43 (product) + $497.36 (ENERGY) = $15,065.79",
+    "energy_frequency": "8 occurrences / 10 orders = 80%"
+  }
+}

@@ -1216,18 +1216,20 @@ async def fix_truth_and_output():
             for vf in valid_folders
         ) if truth else False
         
-        # Special case: Inspection_Form with empty truth — GPI routing is correct,
-        # S9 misroutes these to Miscellaneous. Adopt GPI's routing as truth.
-        if not truth and doc_type == "Inspection_Form":
-            new_truth = "Vendor Credit Memos/Sent to Quality"
-            truth_fixed = True
+        # Inspection_Form: GPI routing is authoritative ("Vendor Credit Memos/Sent to Quality").
+        # S9 misroutes these to Miscellaneous. Always fix truth to match GPI.
+        if doc_type == "Inspection_Form":
+            gpi_correct = "Vendor Credit Memos/Sent to Quality"
+            if not _folders_match(truth, gpi_correct):
+                new_truth = gpi_correct
+                truth_fixed = True
         # If truth is non-standard AND S9 has a valid value, adopt S9 as truth
         elif not truth_is_valid and s9:
             new_truth = s9
             truth_fixed = True
         
         # If truth and S9 both exist but truth is clearly wrong (GPI + S9 agree, truth differs)
-        if not truth_fixed and s9 and truth:
+        if not truth_fixed and s9 and truth and doc_type != "Inspection_Form":
             if (old_output.lower() == s9.lower() and 
                 not _folders_match(truth, old_output)):
                 new_truth = s9
@@ -1293,7 +1295,7 @@ async def fix_truth_and_output():
             "doc_type": doc_type,
             "old_output": old_output,
             "new_output": folder_path,
-            "old_truth": truth if truth_fixed else "",
+            "old_truth": truth,
             "new_truth": new_truth if truth_fixed else "(unchanged)",
             "s9": s9[:60],
             "truth_fixed": truth_fixed,

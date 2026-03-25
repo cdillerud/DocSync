@@ -208,8 +208,18 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
   - Frontend: Auto-refreshes every 60s
   - Testing: 100% backend (13/13), 100% frontend — iteration_151
 
+- **Sidebar Rebalanced + Sales Restored (P0 - COMPLETE)**: Expanded sidebar from 3 to 4 items: Inbox, Sales, Insights, Settings. Sales module fully restored with all 6 tabs (Pipeline Demo, My Queue, Triage, Sales Orders, Rep Performance, Inventory Ledger). Document detail pages with full intelligence info accessible via row click.
+
+- **Insights Page with AI Learning Trends (P0 - COMPLETE)**: New `/insights` page showing processing trends and automation performance:
+  - 4 summary cards: Total Ingested, Avg Auto Rate, Avg AI Confidence, Vendor Resolve Rate
+  - Daily Ingestion Volume bar chart (recharts)
+  - Automation & AI Learning Trends area chart (auto-validation rate, AI confidence, vendor resolve rate over time)
+  - S9 Benchmark Runs comparison (when bakeoff data exists)
+  - Period selector: 7d / 14d / 30d
+  - Backend: `GET /api/dashboard/insights-trends` endpoint (daily aggregation pipeline)
+  - Testing: 100% backend (13/13), 100% frontend — iteration_152
+
 ## Backlog
-- P1: Rep Overrides management UI (Admin screen to map customers to reps without DB scripts)
 - P1: Teams Adaptive Card integration (DM rep via Graph API with Approve/Flag/View buttons)
 - P1: Webhook handler for Teams "Approve" action → BC SO creation
 - P2: Vendor Inventory Dashboard

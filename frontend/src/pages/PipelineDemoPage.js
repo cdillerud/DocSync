@@ -37,6 +37,9 @@ export default function PipelineDemoPage() {
   const [batchRunning, setBatchRunning] = useState(false);
   const [batchSteps, setBatchSteps] = useState([]);
   const [batchResult, setBatchResult] = useState(null);
+  const [batchJobId, setBatchJobId] = useState(null);
+  const [batchStatus, setBatchStatus] = useState('');
+  const batchPollRef = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -49,7 +52,10 @@ export default function PipelineDemoPage() {
         toast.error('Failed to load demo scenarios');
       }
     })();
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (batchPollRef.current) clearInterval(batchPollRef.current);
+    };
   }, []);
 
   const runDemo = async () => {
@@ -258,33 +264,70 @@ export default function PipelineDemoPage() {
               size="lg"
               className="h-10 px-6"
               onClick={async () => {
+                if (batchPollRef.current) clearInterval(batchPollRef.current);
                 setBatchRunning(true);
                 setBatchSteps([]);
                 setBatchResult(null);
+                setBatchJobId(null);
+                setBatchStatus('starting');
                 try {
                   const res = await fetch(`${API}/api/sales-dashboard/demo/run-batch`, { method: 'POST' });
-                  if (!res.ok) throw new Error('Batch demo failed');
+                  if (!res.ok) throw new Error('Batch demo failed to start');
                   const data = await res.json();
-                  setBatchSteps(data.steps || []);
-                  setBatchResult(data);
-                  toast.success(`Batch split: ${data.children_created} child documents created`);
+                  const jobId = data.job_id;
+                  setBatchJobId(jobId);
+                  setBatchStatus('polling');
+                  toast.info(`Batch job started — processing ${data.total_pages} pages...`);
+
+                  // Poll for status every 2 seconds
+                  batchPollRef.current = setInterval(async () => {
+                    try {
+                      const pollRes = await fetch(`${API}/api/sales-dashboard/demo/batch-status/${jobId}`);
+                      if (!pollRes.ok) return;
+                      const job = await pollRes.json();
+                      setBatchSteps(job.steps || []);
+                      setBatchStatus(job.status);
+
+                      if (job.status === 'completed') {
+                        clearInterval(batchPollRef.current);
+                        batchPollRef.current = null;
+                        setBatchResult(job);
+                        setBatchRunning(false);
+                        toast.success(`Batch split complete: ${job.children_created || 0} child documents in ${job.total_duration_ms}ms`);
+                      } else if (job.status === 'error') {
+                        clearInterval(batchPollRef.current);
+                        batchPollRef.current = null;
+                        setBatchRunning(false);
+                        toast.error('Batch demo failed: ' + (job.error || 'Unknown error'));
+                      }
+                    } catch (pollErr) {
+                      // Polling error — don't stop, just skip this tick
+                    }
+                  }, 2000);
                 } catch (err) {
-                  toast.error('Batch demo failed: ' + err.message);
-                } finally {
                   setBatchRunning(false);
+                  setBatchStatus('');
+                  toast.error('Batch demo failed: ' + err.message);
                 }
               }}
               disabled={batchRunning}
               data-testid="run-batch-btn"
             >
               {batchRunning ? (
-                <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Splitting & Processing...</>
+                <><Loader2 className="w-4 h-4 animate-spin mr-2" /> {batchStatus === 'polling' ? `Processing (${batchSteps.length}/5 steps)...` : 'Starting...'}</>
               ) : (
                 <><Play className="w-4 h-4 mr-2" /> Run Batch Split</>
               )}
             </Button>
-            {batchSteps.length > 0 && (
-              <Button variant="outline" size="lg" className="h-10" onClick={() => { setBatchSteps([]); setBatchResult(null); }}>
+            {(batchSteps.length > 0 || batchResult) && (
+              <Button variant="outline" size="lg" className="h-10" onClick={() => {
+                if (batchPollRef.current) clearInterval(batchPollRef.current);
+                setBatchSteps([]);
+                setBatchResult(null);
+                setBatchJobId(null);
+                setBatchStatus('');
+                setBatchRunning(false);
+              }}>
                 <RotateCcw className="w-4 h-4 mr-2" /> Reset
               </Button>
             )}
@@ -301,10 +344,30 @@ export default function PipelineDemoPage() {
           </Badge>
         </div>
 
-        {/* Batch Steps */}
-        {batchSteps.length > 0 && (
+        {/* Batch Steps — live progress */}
+        {(batchSteps.length > 0 || batchRunning) && (
           <div className="space-y-3">
-            {batchSteps.map((step, i) => {
+            {/* Progress bar while running */}
+            {batchRunning && (
+              <div className="flex items-center gap-3 p-3 rounded-lg border border-primary/20 bg-primary/5">
+                <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium">Processing Batch PO Split</p>
+                  <p className="text-xs text-muted-foreground">
+                    Stage: <span className="font-mono font-semibold">{batchStatus}</span>
+                    {batchSteps.length > 0 && ` — ${batchSteps.length} step(s) complete`}
+                  </p>
+                  <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className="h-full bg-primary rounded-full transition-all duration-700"
+                      style={{ width: `${Math.min((batchSteps.length / 5) * 100, 100)}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {batchSteps.map((step) => {
               const BATCH_STEP_CFG = {
                 1: { icon: FileText, color: 'blue' },
                 2: { icon: Inbox, color: 'violet' },
@@ -329,8 +392,8 @@ export default function PipelineDemoPage() {
               );
             })}
 
-            {/* Children table */}
-            {batchResult && batchSteps[4]?.details?.children?.length > 0 && (
+            {/* Children table — from completed result */}
+            {batchResult && (batchResult.children?.length > 0 || batchSteps.find(s => s.step === 5)?.details?.children?.length > 0) && (
               <Card className="border border-border" data-testid="batch-children-table">
                 <CardContent className="p-0">
                   <div className="overflow-x-auto">
@@ -348,7 +411,7 @@ export default function PipelineDemoPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {batchSteps[4].details.children.map((child, ci) => (
+                        {(batchResult.children || batchSteps.find(s => s.step === 5)?.details?.children || []).map((child, ci) => (
                           <tr key={ci} className="border-b border-border/50 hover:bg-muted/30">
                             <td className="py-2.5 px-4 text-xs font-mono">{child.page}</td>
                             <td className="py-2.5 px-3 text-xs font-mono font-medium">{child.po_number || '-'}</td>
@@ -379,7 +442,7 @@ export default function PipelineDemoPage() {
           </div>
         )}
 
-        {batchResult && (
+        {batchResult && batchResult.status === 'completed' && (
           <Card className="border-2 border-cyan-500/30 bg-cyan-500/5 mt-3" data-testid="batch-result">
             <CardContent className="p-5">
               <div className="flex items-center gap-3">
@@ -387,7 +450,7 @@ export default function PipelineDemoPage() {
                 <div>
                   <p className="font-bold text-base">Batch Split Complete</p>
                   <p className="text-xs text-muted-foreground">
-                    {batchResult.total_pages} pages → {batchResult.children_created} child documents &mdash; {batchResult.total_duration_ms}ms total
+                    {batchResult.total_pages} pages &rarr; {batchResult.children_created || batchResult.children?.length || 0} child documents &mdash; {batchResult.total_duration_ms}ms total
                   </p>
                 </div>
               </div>
@@ -449,6 +512,8 @@ function StepCard({ num, Icon, label, color, isAnimating, isWaiting, isComplete,
                 {Object.entries(step.details).map(([key, val]) => {
                   if (val === '' || val === null || val === undefined) return null;
                   if (Array.isArray(val) && val.length === 0) return null;
+                  // Skip arrays of objects (children) — rendered separately
+                  if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'object') return null;
                   const displayVal = typeof val === 'boolean' ? (val ? 'Yes' : 'No')
                     : Array.isArray(val) ? val.join(', ')
                     : typeof val === 'number' ? (key.includes('amount') || key.includes('total') ? `$${val.toLocaleString()}` : key.includes('confidence') || key.includes('score') ? `${(val * 100).toFixed(1)}%` : val.toString())

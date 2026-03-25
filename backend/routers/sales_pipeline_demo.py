@@ -20,7 +20,7 @@ import random
 import time
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, BackgroundTasks
 from deps import get_db
 
 logger = logging.getLogger(__name__)
@@ -536,7 +536,6 @@ async def run_batch_demo(background_tasks: BackgroundTasks):
     """Demo: Generate a multi-page batch PO PDF, ingest it, then split each page.
     Returns immediately with job_id. Poll /demo/batch-status/{job_id} for results.
     """
-    from fastapi import BackgroundTasks
     db = get_db()
     job_id = uuid.uuid4().hex[:12]
 

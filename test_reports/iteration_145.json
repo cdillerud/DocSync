@@ -1,0 +1,107 @@
+{
+  "summary": "Batch PO Split Demo feature testing complete. All 11 backend API tests passed. Frontend UI verified - Pipeline Demo page loads with both Single PO Pipeline Demo and Batch PO Split Demo sections. Run Batch Split button triggers async job with polling progress. Backend processes 5 pages through full AI pipeline in ~75 seconds.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_batch_po_split_demo.py",
+    "/app/test_reports/pytest/batch_po_split_demo_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_batch_po_split_demo.py"
+  ],
+  "success_rate": {
+    "backend": "100% (11/11 tests passed)",
+    "frontend": "100% (All UI components verified)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "Batch demo generates 5-page PDF from BATCH_PO_DATA (PO-61312 through PO-61316)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Batch PO Split Demo feature fully tested. Backend endpoints: POST /api/sales-dashboard/demo/run-batch (returns job_id immediately), GET /api/sales-dashboard/demo/batch-status/{job_id} (poll for progress). Frontend: Pipeline Demo tab at /sales-inventory?tab=pipeline-demo with data-testid='run-batch-btn' for batch demo and data-testid='run-pipeline-btn' for single PO demo. Batch processing takes 60-90 seconds to complete 5 pages through full AI pipeline. Status transitions: started -> ingesting -> detecting -> splitting -> summarizing -> completed. Children have page/type/po_number/customer/amount/confidence/assigned_rep/queue fields.",
+  "verified_features": {
+    "backend_run_batch_endpoint": {
+      "status": "PASS",
+      "endpoint": "POST /api/sales-dashboard/demo/run-batch",
+      "verified": [
+        "Returns 200 with job_id and status='started'",
+        "Returns total_pages=5",
+        "Returns message with poll URL",
+        "Background task starts immediately"
+      ]
+    },
+    "backend_batch_status_endpoint": {
+      "status": "PASS",
+      "endpoint": "GET /api/sales-dashboard/demo/batch-status/{job_id}",
+      "verified": [
+        "Returns job progress with steps array",
+        "Returns 404 for invalid job_id",
+        "Status transitions: started -> ingesting -> detecting -> splitting -> summarizing -> completed",
+        "Completed job has children array with 5 entries"
+      ]
+    },
+    "backend_batch_processing": {
+      "status": "PASS",
+      "verified": [
+        "5 steps complete: Batch PO Generation, Parent Document Ingestion, Batch PO Detection, Page Splitting & Full Pipeline, Child Documents Summary",
+        "Each child has: page, doc_id, type, po_number, customer, amount, confidence, assigned_rep, queue",
+        "PO numbers extracted: PO-61312 through PO-61316",
+        "All 5 children assigned to rep (Lisa Chen) with auto_approved status",
+        "Processing time ~75 seconds for 5 pages"
+      ]
+    },
+    "backend_single_po_pipeline": {
+      "status": "PASS",
+      "endpoint": "POST /api/sales-dashboard/demo/run",
+      "verified": [
+        "Returns 200 with status='success'",
+        "Returns 7 steps for single PO pipeline",
+        "Returns document_id and total_duration_ms",
+        "Returns 404 for invalid scenario_id"
+      ]
+    },
+    "backend_scenarios_endpoint": {
+      "status": "PASS",
+      "endpoint": "GET /api/sales-dashboard/demo/scenarios",
+      "verified": [
+        "Returns 4 scenarios",
+        "Each scenario has id, label, customer, po_number, item_count, total, will_auto_assign"
+      ]
+    },
+    "frontend_pipeline_demo_page": {
+      "status": "PASS",
+      "url": "/sales-inventory?tab=pipeline-demo",
+      "verified": [
+        "Pipeline Demo tab loads correctly",
+        "Pipeline Demo section with scenario selector (data-testid='scenario-selector')",
+        "Run Pipeline button (data-testid='run-pipeline-btn')",
+        "Batch PO Split Demo section visible",
+        "Run Batch Split button (data-testid='run-batch-btn')",
+        "Giovanni Food Co. info displayed (POs: 61312-61316, 5 pages, $35,564)",
+        "Badge showing '1 PDF → 5 Sales Orders'"
+      ]
+    },
+    "frontend_batch_demo_interaction": {
+      "status": "PASS",
+      "verified": [
+        "Run Batch Split button clickable",
+        "Button changes to 'Processing (0/5 steps)...' during processing",
+        "Progress card shows 'Processing Batch PO Split' with 'Stage: polling'",
+        "Toast notification 'Batch job started — processing 5 pages...'",
+        "Polling interval is 2 seconds as specified"
+      ]
+    }
+  },
+  "mocked_apis": {
+    "note": "BC Sandbox and SharePoint Graph API calls are mocked via DEMO_MODE - expected behavior",
+    "mocked_list": ["Business Central API", "SharePoint Graph API"]
+  }
+}

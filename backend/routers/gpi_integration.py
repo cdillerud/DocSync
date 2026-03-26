@@ -164,30 +164,86 @@ def _resolve_so_routing_fields(doc: dict, so_type: str) -> dict:
     return routing
 
 
-async def _build_pi_lines_with_mapping(doc: dict, db) -> list:
-    """Build BC Purchase Invoice lines with intelligent item mapping.
+async def _build_pi_lines_with_mapping(doc: dict, db, vendor_no: str = "") -> list:
+    """Build BC Purchase Invoice lines with intelligent vendor profile-based mapping.
     
-    Business rules for PI lines:
-    1. Extract ALL line items from the document
-    2. If AI extracted a specific item_number/SKU, use item_mapping_service to resolve it
-    3. Otherwise, default to the configured FREIGHT item (BC_PI_FREIGHT_ITEM)
-    4. Description is ALWAYS the PO/BOL reference (matching the Square9/BC pattern)
-    5. Each line gets its own qty/cost from the extraction
+    Business rules:
+    1. Fetch the vendor's invoice profile from BC history
+    2. Use the profile's dominant line type and GL account/item code
+    3. If AI extracted a specific item_number/SKU, use it (overrides profile)
+    4. Description follows the vendor's historical pattern (PO ref, BOL ref, etc.)
+    5. Flag deviations from the vendor's typical invoice pattern
     
-    The existing GL 60500 keyword mappings are for Sales Orders, not Purchase Invoices.
-    PI lines use the FREIGHT item because BC tracks freight costs at the item level.
+    The profile learns from what's IN BC — making our output as accurate as a human.
+    """
+    from services.vendor_invoice_profile_service import (
+        get_or_build_profile, build_smart_pi_lines, detect_deviations
+    )
+
+    doc_id = doc.get("id", "")
+    
+    # Get the PO/BOL reference
+    po_ref = _resolve_po_reference(doc)
+    
+    # Resolve vendor_no if not passed
+    if not vendor_no:
+        vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
+        if not vendor_no:
+            vi = await _resolve_vendor_no(doc)
+            vendor_no = vi.get("vendor_no", "")
+    
+    # Fetch the vendor's invoice profile from BC history
+    profile = await get_or_build_profile(db, vendor_no)
+    
+    if profile.get("bc_invoice_count", 0) > 0:
+        # Use profile-driven line builder (learns from BC)
+        bc_lines = build_smart_pi_lines(doc, profile, po_reference=po_ref)
+        deviations = detect_deviations(doc, profile, bc_lines)
+        
+        if deviations:
+            for d in deviations:
+                logger.info("[PI Lines] Deviation for %s: [%s] %s", doc_id, d["severity"], d["message"])
+            
+            # Store deviations on the document for review
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    "pi_deviations": deviations,
+                    "pi_profile_used": {
+                        "vendor_no": vendor_no,
+                        "default_line_type": profile.get("default_line_type"),
+                        "default_gl_account": profile.get("default_gl_account"),
+                        "default_item_code": profile.get("default_item_code"),
+                        "bc_invoice_count": profile.get("bc_invoice_count", 0),
+                        "description_pattern": profile.get("description_pattern"),
+                    },
+                }}
+            )
+        
+        logger.info(
+            "[PI Lines] Using vendor profile for %s: type=%s, gl=%s, item=%s, pattern=%s (%d BC invoices analyzed)",
+            vendor_no, profile.get("default_line_type"), profile.get("default_gl_account"),
+            profile.get("default_item_code"), profile.get("description_pattern"),
+            profile.get("bc_invoice_count", 0),
+        )
+        return bc_lines
+    
+    # Fallback: No BC history — use extraction + defaults (old behavior)
+    logger.info("[PI Lines] No vendor profile for %s — falling back to extraction defaults", vendor_no)
+    return await _build_pi_lines_fallback(doc, db, po_ref)
+
+
+
+async def _build_pi_lines_fallback(doc: dict, db, po_ref: str) -> list:
+    """Fallback PI line builder when no vendor profile exists.
+    Uses extraction + default FREIGHT item (original behavior).
     """
     ef = doc.get("extracted_fields") or {}
     nf = doc.get("normalized_fields") or {}
     doc_id = doc.get("id", "")
-    
-    # Get the PO/BOL reference — this goes in Description for ALL PI lines
-    po_ref = _resolve_po_reference(doc)
-    
-    # Collect line items from all sources
+
     line_items = nf.get("line_items") or ef.get("line_items") or doc.get("line_items") or []
-    
-    # If no line items extracted, create a single line from the total amount
+
     if not line_items:
         total_amount = 0
         for field in ["amount", "amount_float", "invoice_amount", "total_amount", "balance_due"]:
@@ -199,16 +255,14 @@ async def _build_pi_lines_with_mapping(doc: dict, db) -> list:
                     break
                 except (ValueError, TypeError):
                     continue
-        
         if total_amount <= 0:
             return []
-        
         line_items = [{
             "description": po_ref or f"Per invoice {ef.get('invoice_number', '')}".strip(),
             "quantity": 1,
             "unit_price": total_amount,
         }]
-    
+
     bc_lines = []
     for idx, li in enumerate(line_items):
         desc = str(li.get("description", "")).strip()
@@ -216,13 +270,11 @@ async def _build_pi_lines_with_mapping(doc: dict, db) -> list:
         unit_cost = float(li.get("unit_price", 0) or li.get("unitCost", 0) or li.get("unit_cost", 0) or 0)
         if unit_cost == 0:
             unit_cost = float(li.get("total", 0) or li.get("amount", 0) or 0)
-        
-        # Check if the line has an explicit item number or SKU from AI extraction
+
         explicit_item = li.get("item_number") or li.get("sku") or li.get("lineObjectNumber") or ""
         explicit_gl = li.get("gl_account") or li.get("account_number") or ""
-        
+
         if explicit_item:
-            # AI extracted a specific item — validate it via the mapping service
             mapping_result = await map_line_to_item(db, description=desc, extracted_sku=explicit_item, doc_id=doc_id)
             bc_line = {
                 "lineType": mapping_result.get("line_type", "Item"),
@@ -232,7 +284,6 @@ async def _build_pi_lines_with_mapping(doc: dict, db) -> list:
                 "unitCost": unit_cost,
             }
         elif explicit_gl:
-            # Line has an explicit GL account from extraction
             bc_line = {
                 "lineType": "Account",
                 "lineObjectNumber": explicit_gl,
@@ -241,7 +292,6 @@ async def _build_pi_lines_with_mapping(doc: dict, db) -> list:
                 "unitCost": unit_cost,
             }
         else:
-            # No explicit item/GL — use the default FREIGHT item for PI lines
             bc_line = {
                 "lineType": "Item",
                 "lineObjectNumber": BC_PI_FREIGHT_ITEM,
@@ -249,22 +299,9 @@ async def _build_pi_lines_with_mapping(doc: dict, db) -> list:
                 "quantity": qty,
                 "unitCost": unit_cost,
             }
-            # Record what we mapped for learning
-            mapping_result = {"matched": True, "target_type": "item", "target_no": BC_PI_FREIGHT_ITEM,
-                             "method": "pi_default_freight", "confidence": 0.85, "line_type": "Item",
-                             "original_description": desc}
-        
+
         bc_lines.append(bc_line)
-        
-        # Record mapping history for learning
-        try:
-            mr = mapping_result if 'mapping_result' in dir() else {
-                "matched": True, "target_type": "item", "target_no": bc_line.get("lineObjectNumber", ""),
-                "method": "explicit", "confidence": 1.0, "original_description": desc}
-            await record_mapping_history(db, doc_id, idx, desc, mr)
-        except Exception:
-            pass
-    
+
     return bc_lines
 
 
@@ -1670,7 +1707,7 @@ async def auto_create_pi_from_document(doc_id: str, db) -> dict:
         # Step 2: Add line items using AI-driven item mapping
         line_results = None
         if result.get("bc_system_id"):
-            bc_lines = await _build_pi_lines_with_mapping(doc, db)
+            bc_lines = await _build_pi_lines_with_mapping(doc, db, vendor_no=vendor_no)
 
             if bc_lines:
                 try:
@@ -1906,8 +1943,9 @@ async def retry_purchase_invoice_lines(doc_id: str):
         logger.warning("PI %s: failed to delete existing lines: %s", bc_record_no, str(e))
         delete_result["errors"].append({"error": f"Delete failed: {str(e)}"})
 
-    # Step 2: Build new lines using AI-driven item mapping
-    bc_lines = await _build_pi_lines_with_mapping(doc, db)
+    # Step 2: Build new lines using vendor profile-driven mapping
+    vendor_no = existing_pi.get("vendor_no", "") or doc.get("bc_vendor_number", "") or doc.get("vendor_no", "")
+    bc_lines = await _build_pi_lines_with_mapping(doc, db, vendor_no=vendor_no)
 
     if not bc_lines:
         raise HTTPException(status_code=422, detail="No line items found and no total amount to create a fallback line. Re-process the document first.")
@@ -2028,10 +2066,10 @@ async def create_purchase_invoice_from_document(
         logger.error("Failed to create purchase invoice from doc %s: %s", doc_id, str(e))
         raise HTTPException(status_code=502, detail=f"BC API error: {str(e)}")
 
-    # Step 2: Add line items using AI-driven item mapping
+    # Step 2: Add line items using vendor profile-driven mapping
     line_results = None
     if result.get("success") and result.get("bc_system_id"):
-        bc_lines = await _build_pi_lines_with_mapping(doc, db)
+        bc_lines = await _build_pi_lines_with_mapping(doc, db, vendor_no=vendor_no)
 
         if bc_lines:
             try:

@@ -243,6 +243,18 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
   2. **No cached vendor**: MEXUS wasn't in `hub_bc_vendors` cache, so alias bootstrap never created an alias. Fixed by adding startup-seeded manual aliases for known OCR variants ("MEXUS, INC", "MEXUS, INC.", "MEXUS INC" → MEXUS).
   - Files: `services/unified_vendor_matcher.py`, `server.py`
 
+### Vendor Invoice Profile Learning (March 26, 2026 - Fork)
+- **NEW: Learn from BC History for AP Invoice Posting (P0 - COMPLETE)**:
+  - Created `services/vendor_invoice_profile_service.py` — queries BC for historical purchase invoices per vendor, analyzes line patterns (GL accounts, item codes, line types, descriptions, amounts), builds a cached profile.
+  - **Smart PI Line Builder**: `_build_pi_lines_with_mapping()` now queries the vendor's historical profile before building lines. Uses the vendor's actual GL accounts and line types from BC instead of blindly defaulting to FREIGHT.
+  - **Deviation Detection**: Flags anomalies — amount outliers (>2σ from vendor average), unusual GL accounts, line count deviations.
+  - **API Endpoints**:
+    - `GET /api/ap-review/vendor-profile/{vendor_no}` — view vendor's learned invoice profile
+    - `GET /api/ap-review/pi-preflight/{doc_id}` — preview planned PI payload with sources and deviation flags
+  - **Profile auto-populates**: payment terms from vendor card, GL accounts from historical pattern, description format (PO ref vs BOL vs invoice ref), line type (Item vs Account)
+  - **Caching**: Profiles cached in `vendor_invoice_profiles` MongoDB collection, 24h TTL
+  - Files: `services/vendor_invoice_profile_service.py`, `routers/gpi_integration.py`, `routers/ap_review.py`
+
 ## Backlog
 - P1: Rep Overrides management UI (Admin screen to map customers to reps without DB scripts)
 - P1: Teams Adaptive Card integration (DM rep via Graph API with Approve/Flag/View buttons)

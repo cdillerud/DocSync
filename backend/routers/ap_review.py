@@ -710,3 +710,123 @@ async def get_extraction_status(doc_id: str):
         "extracted_fields": doc.get("extracted_fields", {}),
         "line_items": doc.get("line_items", [])
     }
+
+
+@ap_review_router.get("/vendor-profile/{vendor_no}")
+async def get_vendor_profile(vendor_no: str, refresh: bool = False):
+    """Get the vendor's invoice profile (learned from BC history).
+    
+    Shows what GL accounts, line types, description patterns, and amounts
+    are typical for this vendor — used to auto-populate PI lines.
+    """
+    from services.vendor_invoice_profile_service import build_vendor_profile, get_or_build_profile
+    
+    db = get_db()
+    if refresh:
+        profile = await build_vendor_profile(db, vendor_no, force_refresh=True)
+    else:
+        profile = await get_or_build_profile(db, vendor_no)
+    
+    return {
+        "vendor_no": profile.get("vendor_no"),
+        "vendor_name": profile.get("vendor_name"),
+        "bc_invoice_count": profile.get("bc_invoice_count", 0),
+        "local_posting_count": profile.get("local_posting_count", 0),
+        "default_line_type": profile.get("default_line_type"),
+        "default_gl_account": profile.get("default_gl_account"),
+        "default_item_code": profile.get("default_item_code"),
+        "description_pattern": profile.get("description_pattern"),
+        "line_patterns": profile.get("line_patterns", {}),
+        "amount_stats": profile.get("amount_stats", {}),
+        "vendor_card": profile.get("vendor_card", {}),
+        "sources": profile.get("sources", {}),
+        "last_updated": profile.get("last_updated"),
+    }
+
+
+@ap_review_router.get("/pi-preflight/{doc_id}")
+async def pi_preflight(doc_id: str):
+    """Preview what the Purchase Invoice will look like before posting to BC.
+    
+    Shows the planned header, lines (with source — profile vs default vs extracted),
+    and any deviation flags from the vendor's historical pattern.
+    """
+    from services.vendor_invoice_profile_service import (
+        get_or_build_profile, build_smart_pi_lines, detect_deviations
+    )
+    
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    ef = doc.get("extracted_fields") or {}
+    nf = doc.get("normalized_fields") or {}
+    
+    # Resolve vendor
+    vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
+    vendor_name = doc.get("vendor_canonical") or ef.get("vendor") or ""
+    
+    if not vendor_no:
+        return {
+            "doc_id": doc_id,
+            "ready": False,
+            "reason": "Vendor not resolved — cannot build PI without a BC vendor number.",
+        }
+    
+    # Get vendor profile
+    profile = await get_or_build_profile(db, vendor_no)
+    
+    # Build lines using the profile
+    from routers.gpi_integration import _resolve_po_reference
+    po_ref = _resolve_po_reference(doc)
+    planned_lines = build_smart_pi_lines(doc, profile, po_reference=po_ref)
+    
+    # Detect deviations
+    deviations = detect_deviations(doc, profile, planned_lines)
+    
+    # Build planned header
+    invoice_number = ef.get("invoice_number") or nf.get("invoice_number") or ""
+    invoice_date = ef.get("invoice_date") or nf.get("invoice_date") or ""
+    total_amount = sum(l.get("unitCost", 0) * l.get("quantity", 1) for l in planned_lines)
+    
+    has_critical = any(d["severity"] == "critical" for d in deviations)
+    
+    return {
+        "doc_id": doc_id,
+        "ready": True,
+        "needs_review": has_critical,
+        "vendor": {
+            "vendor_no": vendor_no,
+            "vendor_name": vendor_name,
+            "profile_available": profile.get("bc_invoice_count", 0) > 0,
+            "bc_invoices_analyzed": profile.get("bc_invoice_count", 0),
+        },
+        "planned_header": {
+            "vendorNo": vendor_no,
+            "vendorInvoiceNo": invoice_number,
+            "documentDate": invoice_date,
+            "postingDate": invoice_date,
+            "po_reference": po_ref,
+        },
+        "planned_lines": [
+            {
+                "lineType": line.get("lineType"),
+                "lineObjectNumber": line.get("lineObjectNumber"),
+                "description": line.get("description"),
+                "quantity": line.get("quantity"),
+                "unitCost": line.get("unitCost"),
+                "source": line.get("source", "unknown"),
+            }
+            for line in planned_lines
+        ],
+        "total_amount": round(total_amount, 2),
+        "deviations": deviations,
+        "profile_summary": {
+            "default_line_type": profile.get("default_line_type"),
+            "default_gl_account": profile.get("default_gl_account"),
+            "default_item_code": profile.get("default_item_code"),
+            "description_pattern": profile.get("description_pattern"),
+            "amount_stats": profile.get("amount_stats", {}),
+        },
+    }

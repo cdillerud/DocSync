@@ -1054,7 +1054,17 @@ async def _reprocess_document_inner_dh(doc_id: str, doc: dict, reclassify: bool,
     # This handles auto-completion for shipping docs with PO/BOL/ship_date present
     doc_type_value = doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type") or ""
     workflow_completed = False
-    if doc_type_value and doc_type_value.upper() != "AP_INVOICE":
+
+    # === AP INVOICES: Simple auto-post or NeedsReview ===
+    if doc_type_value and doc_type_value.upper().replace(" ", "_") in ("AP_INVOICE", "PURCHASE_INVOICE"):
+        from services.ap_auto_post_service import attempt_ap_auto_post
+        post_result = await attempt_ap_auto_post(doc_id, db, source="reprocess")
+        new_status = post_result.get("status", "NeedsReview")
+        workflow_completed = post_result.get("posted", False)
+        logger.info("[REPROCESS] AP auto-post for %s: %s (%s)", doc_id[:8], new_status, post_result.get("reason", ""))
+
+    # === NON-AP DOCUMENTS: Standard workflow ===
+    elif doc_type_value:
         try:
             from server import _update_standard_workflow_status, compute_ap_normalized_fields
             norm_fields = compute_ap_normalized_fields(extracted_fields)
@@ -1068,95 +1078,21 @@ async def _reprocess_document_inner_dh(doc_id: str, doc: dict, reclassify: bool,
         except Exception as wf_err:
             logger.warning("[REPROCESS] Workflow update error for %s: %s", doc_id[:8], str(wf_err))
 
-    # Run auto-clear evaluation (may auto-complete eligible docs)
-    try:
-        from services.auto_clear_service import evaluate_auto_clear, get_auto_clear_update, AutoClearDecision
-        doc_for_eval = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-        if doc_for_eval:
-            ac_decision, ac_reason, ac_details = evaluate_auto_clear(
-                doc_for_eval, validation_results=validation_results
-            )
-            ac_update = get_auto_clear_update(ac_decision, ac_details)
-
-            # CRITICAL: If auto-clear says NEEDS_REVIEW, FORCE status to NeedsReview
-            # regardless of what all_passed said (PO not found is non-required but still blocks)
-            if ac_decision == AutoClearDecision.NEEDS_REVIEW:
-                ac_update["status"] = "NeedsReview"
-                ac_update["workflow_status"] = "needs_review"
-                ac_update["square9_stage"] = "needs_review"
-                new_status = "NeedsReview"
-                new_workflow_status = "needs_review"
-                logger.info("[REPROCESS] Auto-clear BLOCKED for %s: %s — forcing NeedsReview", doc_id[:8], ac_reason)
-
-            await db.hub_documents.update_one({"id": doc_id}, {"$set": ac_update})
-
-            if ac_decision == AutoClearDecision.CLEARED:
-                new_status = "Completed"
-                workflow_completed = True
-                logger.info("[REPROCESS] Document %s AUTO-CLEARED: %s", doc_id[:8], ac_reason)
-
-            # Emit event so derived state updates
-            # Write directly to DB since EventService singleton may not be initialized
-            from datetime import timedelta
-            reprocess_ts = datetime.now(timezone.utc)
-            
-            # 1) Emit system.reprocessed to reset derived state
-            await db.workflow_events.insert_one({
-                "event_id": str(uuid.uuid4()),
-                "document_id": doc_id,
-                "event_type": "system.reprocessed",
-                "timestamp": reprocess_ts.isoformat(),
-                "source_service": "document_handlers",
-                "payload": {"trigger": "manual_reprocess"},
-            })
-            
-            # 2) Emit new automation decision (100ms later to guarantee ordering)
-            is_cleared = ac_decision == AutoClearDecision.CLEARED
-            await db.workflow_events.insert_one({
-                "event_id": str(uuid.uuid4()),
-                "document_id": doc_id,
-                "event_type": "automation.decision.completed",
-                "timestamp": (reprocess_ts + timedelta(milliseconds=100)).isoformat(),
-                "source_service": "auto_clear_service",
-                "payload": {
-                    "decision": "NeedsReview" if ac_decision == AutoClearDecision.NEEDS_REVIEW else ac_decision.value,
-                    "auto_clear": is_cleared,
-                    "reason": ac_reason,
-                },
-            })
-            logger.info("[REPROCESS] Emitted system.reprocessed + automation.decision for %s: %s", doc_id[:8], ac_decision.value)
-
-            # 3) Re-derive state from the updated event history
-            try:
-                from services.derived_state_service import get_derived_state_service, DerivedStateService
-                dss = get_derived_state_service()
-                if not dss:
-                    dss = DerivedStateService(db)
-                await dss.update_document_derived_state(doc_id)
-                logger.info("[REPROCESS] Derived state updated for %s", doc_id[:8])
-            except Exception as dss_err:
-                logger.warning("[REPROCESS] Derived state update failed for %s: %s", doc_id[:8], str(dss_err))
-
-    except Exception as ac_err:
-        logger.warning("[REPROCESS] Auto-clear error for %s: %s", doc_id[:8], str(ac_err))
-
-    # Emit workflow tracking event (separate from auto-clear)
-    if workflow_completed:
+        # Run auto-clear for non-AP docs
         try:
-            await db.workflow_events.insert_one({
-                "event_id": str(uuid.uuid4()),
-                "document_id": doc_id,
-                "event_type": "automation.decision.completed",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "source_service": "reprocess_workflow",
-                "payload": {
-                    "decision": "Cleared",
-                    "auto_clear": True,
-                    "reason": f"Reprocess: {doc_type_value} workflow completed — status={new_status}",
-                },
-            })
-        except Exception as evt_err:
-            logger.error("[REPROCESS] Event write error: %s", str(evt_err))
+            from services.auto_clear_service import evaluate_auto_clear, get_auto_clear_update, AutoClearDecision
+            doc_for_eval = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+            if doc_for_eval:
+                ac_decision, ac_reason, ac_details = evaluate_auto_clear(
+                    doc_for_eval, validation_results=validation_results
+                )
+                ac_update = get_auto_clear_update(ac_decision, ac_details)
+                await db.hub_documents.update_one({"id": doc_id}, {"$set": ac_update})
+                if ac_decision == AutoClearDecision.CLEARED:
+                    new_status = "Completed"
+                    workflow_completed = True
+        except Exception as ac_err:
+            logger.warning("[REPROCESS] Auto-clear error for %s: %s", doc_id[:8], str(ac_err))
 
     workflow = {
         "id": str(uuid.uuid4()),

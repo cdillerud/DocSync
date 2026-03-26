@@ -321,54 +321,49 @@ async def save_ap_review(doc_id: str, data: APReviewData):
 @ap_review_router.post("/documents/{doc_id}/mark-ready")
 async def mark_ready_for_post(doc_id: str):
     """
-    Mark a document as ready for posting to BC.
-    Sets review_status to 'ready_for_post'.
+    Mark a document as ready and AUTO-POST to BC.
+    
+    After human review + corrections, this triggers the actual BC posting.
+    Simple rules: if vendor + PO + fields are good → post. Otherwise → error.
     """
-    logger.info(f"AP Review Mark Ready: doc_id={doc_id}")
+    logger.info(f"AP Review Mark Ready → Auto-Post: doc_id={doc_id}")
     
     db = get_db()
     
-    # Find document
     doc = await db.hub_documents.find_one({"id": doc_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    # Validate required fields
+    # Validate minimum required fields
+    ef = doc.get("extracted_fields") or {}
     missing_fields = []
-    if not doc.get("vendor_id") and not doc.get("vendor_canonical"):
+    if not doc.get("bc_vendor_number") and not doc.get("vendor_canonical"):
         missing_fields.append("vendor")
-    if not doc.get("invoice_number_clean") and not doc.get("extracted_fields", {}).get("invoice_number"):
+    if not doc.get("invoice_number_clean") and not ef.get("invoice_number"):
         missing_fields.append("invoice_number")
-    if not doc.get("amount_float") and not doc.get("extracted_fields", {}).get("amount"):
+    if not doc.get("amount_float") and not ef.get("amount"):
         missing_fields.append("amount")
     
     if missing_fields:
         raise HTTPException(
             status_code=400, 
-            detail=f"Cannot mark ready: missing required fields: {', '.join(missing_fields)}"
+            detail=f"Cannot post: missing required fields: {', '.join(missing_fields)}"
         )
     
-    # Update status
-    await db.hub_documents.update_one(
-        {"id": doc_id},
-        {"$set": {
-            "review_status": "ready_for_post",
-            "bc_posting_status": "not_posted",
-            "status": "ReadyForPost",
-            "workflow_status": "ready_for_post",
-            "updated_utc": datetime.now(timezone.utc).isoformat()
-        }}
-    )
+    # Attempt auto-post to BC
+    from services.ap_auto_post_service import attempt_ap_auto_post
+    result = await attempt_ap_auto_post(doc_id, db, source="mark_ready")
     
     updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     
-    logger.info(f"AP Review Mark Ready SUCCESS: doc_id={doc_id}")
-    
     return {
-        "success": True,
-        "message": "Document marked as ready for posting",
-        "review_status": "ready_for_post",
-        "document": updated_doc
+        "success": result.get("success", False),
+        "posted": result.get("posted", False),
+        "message": result.get("reason", ""),
+        "status": result.get("status", ""),
+        "bc_record_no": result.get("bc_record_no"),
+        "review_status": "posted" if result.get("posted") else "ready_for_post",
+        "document": updated_doc,
     }
 
 

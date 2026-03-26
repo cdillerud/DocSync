@@ -2725,6 +2725,26 @@ async def _internal_intake_document(
     ai_classification_audit = classification_result.get("ai_classification")
     classification_method = classification_result.get("classification_method", "unknown")
     
+    # CRITICAL: Sync suggested_type with deterministic classification result.
+    # When AI extraction fails (suggested_type="Unknown") but deterministic classification
+    # succeeds (e.g. mailbox:AP → AP_INVOICE), suggested_type must be updated so ALL
+    # downstream code (status checks, auto-post routing, job configs) use the correct type.
+    _DOC_TYPE_TO_SUGGESTED = {
+        "AP_INVOICE": "AP_Invoice", "PURCHASE_ORDER": "Purchase_Order",
+        "SALES_INVOICE": "AR_Invoice", "DS_SALES_ORDER": "DS_Sales_Order",
+        "WH_SALES_ORDER": "WH_Sales_Order", "SH_INVOICE": "SH_Invoice",
+        "SALES_CREDIT_MEMO": "Credit_Memo", "PURCHASE_CREDIT_MEMO": "Credit_Memo",
+        "STATEMENT": "Statement", "QUALITY_DOC": "Quality_Document",
+    }
+    if doc_type_value not in ("Other", "Unknown", "OTHER", "Unknown_Document"):
+        new_suggested = _DOC_TYPE_TO_SUGGESTED.get(doc_type_value, doc_type_value)
+        if suggested_type in ("Unknown", "Other", "Unknown_Document") and new_suggested != suggested_type:
+            logger.info(
+                "Syncing suggested_type for %s: %s → %s (classified via %s)",
+                doc_id, suggested_type, new_suggested, classification_method
+            )
+            suggested_type = new_suggested
+    
     # FIX: If deterministic classification succeeded but AI extraction returned 0.0 confidence,
     # bump confidence so downstream workflow/auto-resolution don't treat this as a failure.
     if doc_type_value not in ("Other", "Unknown", "Unknown_Document") and confidence < 0.5:
@@ -2736,8 +2756,8 @@ async def _internal_intake_document(
         confidence = classification_confidence
     
     logger.info(
-        "Document %s classified as %s (category: %s, method: %s)",
-        doc_id, doc_type_value, category, classification_method
+        "Document %s classified as %s (category: %s, method: %s, suggested: %s)",
+        doc_id, doc_type_value, category, classification_method, suggested_type
     )
     
     # Phase 7: Compute normalized fields (flat, stored on document)
@@ -3136,7 +3156,7 @@ async def _internal_intake_document(
     # SKIP for AP_Invoice — handled by strict ap_auto_post_service above
     # =================================================================
     auto_clear_result = None
-    is_ap_invoice = suggested_type in ("AP_Invoice", "AP Invoice")
+    is_ap_invoice = suggested_type in ("AP_Invoice", "AP Invoice") or doc_type_value == "AP_INVOICE"
     if is_ap_invoice:
         logger.info("[Auto-Clear] SKIPPED for AP_Invoice %s — using strict ap_auto_post_service", doc_id)
         auto_clear_result = {"decision": "skipped", "reason": "AP invoices use strict auto-post service", "cleared": False}
@@ -3467,6 +3487,23 @@ async def intake_document(
     ai_classification_audit = classification_result.get("ai_classification")
     classification_method = classification_result.get("classification_method", "unknown")
     
+    # CRITICAL: Sync suggested_type with deterministic classification result.
+    _DOC_TYPE_TO_SUGGESTED = {
+        "AP_INVOICE": "AP_Invoice", "PURCHASE_ORDER": "Purchase_Order",
+        "SALES_INVOICE": "AR_Invoice", "DS_SALES_ORDER": "DS_Sales_Order",
+        "WH_SALES_ORDER": "WH_Sales_Order", "SH_INVOICE": "SH_Invoice",
+        "SALES_CREDIT_MEMO": "Credit_Memo", "PURCHASE_CREDIT_MEMO": "Credit_Memo",
+        "STATEMENT": "Statement", "QUALITY_DOC": "Quality_Document",
+    }
+    if doc_type_value not in ("Other", "Unknown", "OTHER", "Unknown_Document"):
+        new_suggested = _DOC_TYPE_TO_SUGGESTED.get(doc_type_value, doc_type_value)
+        if suggested_type in ("Unknown", "Other", "Unknown_Document") and new_suggested != suggested_type:
+            logger.info(
+                "Syncing suggested_type for %s: %s → %s (classified via %s)",
+                doc_id, suggested_type, new_suggested, classification_method
+            )
+            suggested_type = new_suggested
+    
     # FIX: If deterministic classification succeeded but AI extraction returned 0.0 confidence,
     # bump confidence so downstream workflow/auto-resolution don't treat this as a failure.
     if doc_type_value not in ("Other", "Unknown", "Unknown_Document") and confidence < 0.5:
@@ -3478,8 +3515,8 @@ async def intake_document(
         confidence = classification_confidence
     
     logger.info(
-        "Document %s classified as %s (category: %s, method: %s)",
-        doc_id, doc_type_value, category, classification_method
+        "Document %s classified as %s (category: %s, method: %s, suggested: %s)",
+        doc_id, doc_type_value, category, classification_method, suggested_type
     )
     
     # Phase 7: Compute normalized fields (flat, stored on document)

@@ -1,0 +1,94 @@
+{
+  "summary": "Completed testing of suggested_type sync logic bug fix. All 21 backend tests passed (100%). Frontend verified: Login with admin/admin works, dashboard loads with BC CONNECTED status. The fix correctly syncs suggested_type with deterministic classification result when AI extraction fails.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_suggested_type_sync.py",
+    "/app/test_reports/pytest/suggested_type_sync_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_suggested_type_sync.py"
+  ],
+  "success_rate": {
+    "backend": "100% (21/21 tests passed)",
+    "frontend": "100% (Login and dashboard load verified)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "No seed data created - fresh environment with no documents",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "suggested_type sync logic fully tested. The fix adds _DOC_TYPE_TO_SUGGESTED mapping in both intake functions (_internal_intake_document and intake_document) to sync suggested_type with deterministic classification result when AI extraction fails. Key verifications: (1) classify_from_mailbox_category('AP') returns AP_INVOICE, (2) _DOC_TYPE_TO_SUGGESTED mapping exists with AP_INVOICE → AP_Invoice, (3) sync logic only triggers when suggested_type is Unknown/Other, (4) auto-clear skip checks both suggested_type and doc_type_value, (5) check_ap_ready_to_post accepts AP_INVOICE/PURCHASE_INVOICE doc_type.",
+  "features_tested": {
+    "backend": [
+      "GET /api/health - Returns 200 with status=healthy - PASS",
+      "classify_from_mailbox_category('AP') returns AP_INVOICE - PASS",
+      "classify_from_mailbox_category('SALES') returns SALES_INVOICE - PASS",
+      "classify_from_mailbox_category('PURCHASE') returns PURCHASE_ORDER - PASS",
+      "classify_from_mailbox_category('UNKNOWN') returns OTHER - PASS",
+      "_DOC_TYPE_TO_SUGGESTED mapping exists in server.py - PASS",
+      "Sync logic exists in _internal_intake_document function - PASS",
+      "Sync logic exists in intake_document function (appears 2+ times) - PASS",
+      "Sync only triggers when suggested_type is Unknown/Other - PASS",
+      "Sync preserves successful AI classification - PASS",
+      "All expected doc_type mappings exist (AP_INVOICE, PURCHASE_ORDER, etc.) - PASS",
+      "Auto-clear skip checks both suggested_type and doc_type_value - PASS",
+      "Auto-clear logs skip message for AP_Invoice - PASS",
+      "check_ap_ready_to_post accepts doc_type=AP_INVOICE - PASS",
+      "check_ap_ready_to_post accepts doc_type=PURCHASE_INVOICE - PASS",
+      "check_ap_ready_to_post uses document_type and suggested_job_type as fallbacks - PASS",
+      "ap_auto_post_service checks all doc_type fields - PASS",
+      "doc_type is normalized for comparison - PASS",
+      "classification_helpers.py checks mailbox_category - PASS",
+      "Confidence bump logic exists (0.85 for deterministic classification) - PASS",
+      "Confidence bump only triggers when AI confidence < 0.5 - PASS"
+    ],
+    "frontend": [
+      "Login page loads with GPI Document Hub title - PASS",
+      "Login with admin/admin credentials - PASS",
+      "Dashboard loads after login - PASS",
+      "Sidebar shows: Inbox, Sales, Insights, Settings - PASS",
+      "BC CONNECTED status visible (green dot) - PASS",
+      "BC status shows READ: Production, WRITE: Sandbox_11_3_2025 - PASS",
+      "Tabs visible: All, Accounting, Sales, Processed, Batches - PASS",
+      "Welcome toast notification displayed - PASS"
+    ]
+  },
+  "code_verification": {
+    "server_py_lines_2723_2756": "VERIFIED - _DOC_TYPE_TO_SUGGESTED sync logic in _internal_intake_document",
+    "server_py_lines_3485_3520": "VERIFIED - _DOC_TYPE_TO_SUGGESTED sync logic in intake_document",
+    "server_py_line_3159": "VERIFIED - is_ap_invoice checks both suggested_type and doc_type_value",
+    "classification_helpers_py_lines_67_75": "VERIFIED - mailbox category classification calls classify_from_mailbox_category",
+    "ap_auto_post_service_py_lines_35_36": "VERIFIED - doc_type check uses doc_type, document_type, and suggested_job_type fallbacks"
+  },
+  "bug_fix_verification": {
+    "original_bug": "Document from AP mailbox gets doc_type=AP_INVOICE but document_type=Unknown and suggested_job_type=Unknown because AI extraction returned Unknown and deterministic classification result was never propagated back to suggested_type",
+    "fix_applied": "Added _DOC_TYPE_TO_SUGGESTED sync logic in both intake functions to map deterministic doc_type (e.g., AP_INVOICE) back to suggested_type (e.g., AP_Invoice) when AI extraction fails",
+    "fix_verified": true,
+    "verification_details": [
+      "Sync logic exists in both _internal_intake_document and intake_document functions",
+      "Sync only triggers when suggested_type is Unknown/Other/Unknown_Document",
+      "Sync preserves successful AI classification (doesn't override when AI succeeded)",
+      "Auto-clear skip now checks both suggested_type AND doc_type_value as fallback",
+      "check_ap_ready_to_post accepts both AP_INVOICE and PURCHASE_INVOICE doc_types"
+    ]
+  },
+  "bc_status": {
+    "demo_mode": false,
+    "bc_write_enabled": true,
+    "read_environment": "Production",
+    "write_environment": "Sandbox_11_3_2025"
+  },
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "note": "BC Sandbox credentials are REAL (DEMO_MODE=false). No mocked APIs."
+  }
+}

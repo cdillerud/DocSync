@@ -475,7 +475,7 @@ async def get_vendor(vendor_number: str) -> BCLookupResult:
         BCLookupResult with vendor data or error
     """
     start_time = time.time()
-    endpoint = f"vendors?$filter=number eq '{vendor_number}'"
+    endpoint = f"vendors?$filter=number eq '{vendor_number.replace(chr(39), chr(39)+chr(39))}'"
     
     logger.info("BC Sandbox: get_vendor called, vendor_number=%s", vendor_number)
     
@@ -512,7 +512,7 @@ async def get_vendor(vendor_number: str) -> BCLookupResult:
             response = await client.get(
                 url,
                 headers={"Authorization": f"Bearer {token}"},
-                params={"$filter": f"number eq '{vendor_number}'"}
+                params={"$filter": f"number eq '{vendor_number.replace(chr(39), chr(39)+chr(39))}'"}
             )
             
             elapsed_ms = int((time.time() - start_time) * 1000)
@@ -543,8 +543,8 @@ async def get_vendor(vendor_number: str) -> BCLookupResult:
                 )
             else:
                 return BCLookupResult(
-                    status=BCLookupStatus.ERROR,
-                    error=f"BC API error: {response.status_code}",
+                    status=BCLookupStatus.NOT_FOUND if response.status_code == 400 else BCLookupStatus.ERROR,
+                    error=f"BC lookup returned {response.status_code}",
                     timing_ms=elapsed_ms,
                     endpoint=endpoint,
                     response_size=response_size
@@ -585,7 +585,7 @@ async def search_vendors_by_name(name_fragment: str, limit: int = 20) -> BCLooku
         bc_env = BC_SANDBOX_ENVIRONMENT
         env_label = "Sandbox"
     
-    endpoint = f"vendors?$filter=contains(displayName,'{name_fragment}')"
+    endpoint = f"vendors?$filter=contains(displayName,'{name_fragment.replace(chr(39), chr(39)+chr(39))}')"
     
     logger.info("BC %s: search_vendors_by_name called, fragment=%s", env_label, name_fragment)
     
@@ -641,8 +641,8 @@ async def search_vendors_by_name(name_fragment: str, limit: int = 20) -> BCLooku
                 )
             else:
                 return BCLookupResult(
-                    status=BCLookupStatus.ERROR,
-                    error=f"BC API error: {response.status_code}",
+                    status=BCLookupStatus.NOT_FOUND if response.status_code == 400 else BCLookupStatus.ERROR,
+                    error=f"BC lookup returned {response.status_code}",
                     timing_ms=elapsed_ms,
                     endpoint=endpoint,
                     response_size=response_size
@@ -756,8 +756,8 @@ async def get_customer(customer_number: str) -> BCLookupResult:
                 )
             else:
                 return BCLookupResult(
-                    status=BCLookupStatus.ERROR,
-                    error=f"BC API error: {response.status_code}",
+                    status=BCLookupStatus.NOT_FOUND if response.status_code == 400 else BCLookupStatus.ERROR,
+                    error=f"BC lookup returned {response.status_code}",
                     timing_ms=elapsed_ms,
                     endpoint=endpoint,
                     response_size=response_size
@@ -852,8 +852,8 @@ async def get_purchase_order(po_number: str) -> BCLookupResult:
                 )
             else:
                 return BCLookupResult(
-                    status=BCLookupStatus.ERROR,
-                    error=f"BC API error: {response.status_code}",
+                    status=BCLookupStatus.NOT_FOUND if response.status_code == 400 else BCLookupStatus.ERROR,
+                    error=f"BC lookup returned {response.status_code}",
                     timing_ms=elapsed_ms,
                     endpoint=endpoint,
                     response_size=response_size
@@ -948,8 +948,8 @@ async def get_purchase_invoice(invoice_number: str) -> BCLookupResult:
                 )
             else:
                 return BCLookupResult(
-                    status=BCLookupStatus.ERROR,
-                    error=f"BC API error: {response.status_code}",
+                    status=BCLookupStatus.NOT_FOUND if response.status_code == 400 else BCLookupStatus.ERROR,
+                    error=f"BC lookup returned {response.status_code}",
                     timing_ms=elapsed_ms,
                     endpoint=endpoint,
                     response_size=response_size
@@ -1044,8 +1044,8 @@ async def get_sales_invoice(invoice_number: str) -> BCLookupResult:
                 )
             else:
                 return BCLookupResult(
-                    status=BCLookupStatus.ERROR,
-                    error=f"BC API error: {response.status_code}",
+                    status=BCLookupStatus.NOT_FOUND if response.status_code == 400 else BCLookupStatus.ERROR,
+                    error=f"BC lookup returned {response.status_code}",
                     timing_ms=elapsed_ms,
                     endpoint=endpoint,
                     response_size=response_size

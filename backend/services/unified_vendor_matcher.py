@@ -24,6 +24,13 @@ from services.bc_access import get_bc_adapter
 logger = logging.getLogger(__name__)
 
 
+def _odata_escape(value: str) -> str:
+    """Escape a string for safe use inside OData $filter single-quoted values."""
+    # OData single-quote escaping: ' → ''
+    return value.replace("'", "''")
+
+
+
 class UnifiedVendorMatcher:
     """
     Unified vendor matching across all data sources.
@@ -287,10 +294,11 @@ class UnifiedVendorMatcher:
             
             async with httpx.AsyncClient(timeout=30) as client:
                 # Try vendor number match first
+                safe_name = _odata_escape(vendor_name)
                 resp = await client.get(
                     f"https://api.businesscentral.dynamics.com/v2.0/{self.bc_tenant_id}/{self.bc_environment}/api/v2.0/companies({company_id})/vendors",
                     headers={"Authorization": f"Bearer {token}"},
-                    params={"$filter": f"number eq '{vendor_name}'"}
+                    params={"$filter": f"number eq '{safe_name}'"}
                 )
                 
                 if resp.status_code == 200:
@@ -310,12 +318,13 @@ class UnifiedVendorMatcher:
                 first_word = vendor_name.split()[0] if vendor_name else ""
                 if len(first_word) >= 3:
                     vendors = []
+                    safe_first = _odata_escape(first_word)
                     
                     # Strategy 1: Try exact case contains
                     resp = await client.get(
                         f"https://api.businesscentral.dynamics.com/v2.0/{self.bc_tenant_id}/{self.bc_environment}/api/v2.0/companies({company_id})/vendors",
                         headers={"Authorization": f"Bearer {token}"},
-                        params={"$filter": f"contains(displayName, '{first_word}')"}
+                        params={"$filter": f"contains(displayName, '{safe_first}')"}
                     )
                     if resp.status_code == 200:
                         vendors = resp.json().get("value", [])

@@ -231,7 +231,15 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
 - **AP Writes to BC Sandbox Enabled + Reporting (P0 - COMPLETE)**: AP Invoice → BC Sandbox pipeline fully built (`POST /api/ap-review/documents/{doc_id}/post-to-bc`). DEMO_MODE=false, BC credentials live, writes target Sandbox_11_3_2025. Added `GET /api/dashboard/ap-metrics` endpoint returning: total AP docs, posted count, failed count, pending review, validation rate, success rate, avg time to post, error breakdown. Insights page updated with "AP Invoice Posting — BC Sandbox" section.
   - Testing: 100% backend (14/14), 100% frontend — iteration_156
 
+### BC Custom API 404 Fix (March 26, 2026 - Fork)
+- **Fixed 404 on AP Invoice POST to BC Sandbox (P0 - COMPLETE)**: Root cause: `BC_COMPANY_ID` env var was empty, causing `_build_url()` to generate URLs without the required `companies({companyId})/` segment. Fix: Added `_resolve_company_id()` which auto-detects the company ID from BC's standard API on first custom API call and caches it. `_api_request()` now resolves company ID before building the URL.
+  - Before: `.../api/gpi/integration/v1.0/purchaseInvoiceRequests` → 404
+  - After: `.../api/gpi/integration/v1.0/companies({companyId})/purchaseInvoiceRequests` → correct
+  - Added debug logging of full URL on every GPI API request for visibility
+  - File: `services/gpi_integration_service.py`
+
 ## Backlog
+- P1: Rep Overrides management UI (Admin screen to map customers to reps without DB scripts)
 - P1: Teams Adaptive Card integration (DM rep via Graph API with Approve/Flag/View buttons)
 - P1: Webhook handler for Teams "Approve" action → BC SO creation
 - P2: Vendor Inventory Dashboard

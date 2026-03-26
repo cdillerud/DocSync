@@ -10,7 +10,7 @@ sys.path.insert(0, '/app/backend')
 
 
 # Test configuration
-API_BASE_URL = "https://batch-split-router.preview.emergentagent.com"
+API_BASE_URL = "https://inbox-insights-stats.preview.emergentagent.com"
 
 
 @pytest.fixture

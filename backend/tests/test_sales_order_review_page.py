@@ -13,7 +13,7 @@ import pytest
 import requests
 import time
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://batch-split-router.preview.emergentagent.com")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://inbox-insights-stats.preview.emergentagent.com")
 
 
 class TestBatchDemoSetup:

@@ -51,6 +51,9 @@ BC_SO_FALLBACK_ITEM_CODE = os.environ.get('BC_SO_FALLBACK_ITEM_CODE', os.environ
 # Token cache
 _token_cache = {"access_token": None, "expires_at": 0}
 
+# Company ID cache (auto-detected from BC when BC_COMPANY_ID env var is empty)
+_company_id_cache = {"id": None}
+
 # Check if real BC credentials are available
 HAS_CREDENTIALS = bool(BC_TENANT_ID and BC_CLIENT_ID and BC_CLIENT_SECRET)
 
@@ -88,11 +91,26 @@ def _check_write_protection(operation: str):
         )
 
 
-def _build_url(entity_set: str, environment: str = None) -> str:
-    """Build the URL for a GPI custom API entity set."""
-    env = environment or BC_WRITE_ENVIRONMENT
+async def _resolve_company_id() -> str:
+    """Resolve BC company ID — use env var if set, otherwise auto-detect via standard API and cache."""
     if BC_COMPANY_ID:
-        return f"{GPI_API_BASE}/{BC_TENANT_ID}/{env}/api/{GPI_API_GROUP}/companies({BC_COMPANY_ID})/{entity_set}"
+        return BC_COMPANY_ID
+    if _company_id_cache["id"]:
+        return _company_id_cache["id"]
+    cid = await _get_company_id_standard_api()
+    _company_id_cache["id"] = cid
+    logger.info("Auto-detected BC company ID: %s", cid)
+    return cid
+
+
+def _build_url(entity_set: str, environment: str = None, company_id: str = None) -> str:
+    """Build the URL for a GPI custom API entity set.
+    Always includes companies({companyId}) when a company_id is available.
+    """
+    env = environment or BC_WRITE_ENVIRONMENT
+    cid = company_id or BC_COMPANY_ID
+    if cid:
+        return f"{GPI_API_BASE}/{BC_TENANT_ID}/{env}/api/{GPI_API_GROUP}/companies({cid})/{entity_set}"
     return f"{GPI_API_BASE}/{BC_TENANT_ID}/{env}/api/{GPI_API_GROUP}/{entity_set}"
 
 
@@ -102,12 +120,15 @@ async def _api_request(method: str, entity_set: str, payload: Optional[Dict] = N
         raise ValueError("BC credentials not configured. Set BC_TENANT_ID, BC_CLIENT_ID, BC_CLIENT_SECRET in .env")
 
     token = await _get_token()
-    url = _build_url(entity_set, environment=environment)
+    company_id = await _resolve_company_id()
+    url = _build_url(entity_set, environment=environment, company_id=company_id)
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
+
+    logger.info("GPI API %s → %s", method, url)
 
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
         if method == "GET":
@@ -118,7 +139,7 @@ async def _api_request(method: str, entity_set: str, payload: Optional[Dict] = N
             raise ValueError(f"Unsupported method: {method}")
 
         if resp.status_code >= 400:
-            logger.error("GPI API %s %s failed: %s %s", method, entity_set, resp.status_code, resp.text[:500])
+            logger.error("GPI API %s %s failed: %s %s — URL: %s", method, entity_set, resp.status_code, resp.text[:500], url)
         resp.raise_for_status()
         return resp.json()
 

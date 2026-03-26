@@ -66,7 +66,7 @@
   },
   "test_credentials": {
     "auth": "admin / admin",
-    "api_url": "https://batch-split-router.preview.emergentagent.com"
+    "api_url": "https://inbox-insights-stats.preview.emergentagent.com"
   },
   "seed_data_created": {},
   "retest_needed": false,

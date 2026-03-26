@@ -11,7 +11,7 @@ import uuid
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 if not BASE_URL:
-    BASE_URL = "https://batch-split-router.preview.emergentagent.com"
+    BASE_URL = "https://inbox-insights-stats.preview.emergentagent.com"
 
 
 class TestItemMappingsAPI:

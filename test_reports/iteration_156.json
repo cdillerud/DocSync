@@ -1,0 +1,78 @@
+{
+  "summary": "Completed testing of AP metrics endpoint and Insights page AP section. All backend tests passed (14/14). Frontend verified: Login works, Insights page shows AP Invoice Posting section with empty state, Sales page defaults to My Queue (Pipeline Demo removed), Batches tab shows 17 batch_parent documents, BC Connected status visible in sidebar.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ap_metrics_iteration156.py",
+    "/app/test_reports/pytest/ap_metrics_iteration156_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_ap_metrics_iteration156.py"
+  ],
+  "success_rate": {
+    "backend": "100% (14/14 tests passed)",
+    "frontend": "100% (All features verified working)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "No new seed data created. Used existing 17 batch_parent documents.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "AP metrics endpoint and Insights page AP section fully tested. There are 0 AP_Invoice documents in the system - all docs are PurchaseOrder/Sales_Order types. AP metrics returns all zeros as expected. AP post-to-bc and mark-ready endpoints return 404 for invalid docs. DEMO_MODE=false in .env - BC Sandbox credentials are REAL. BC Connected status shows in sidebar with READ: Production, WRITE: Sandbox_11_3_2025.",
+  "features_tested": {
+    "backend": [
+      "GET /api/health - Returns 200 - PASS",
+      "GET /api/dashboard/ap-metrics - Returns 200 with valid structure - PASS",
+      "GET /api/dashboard/ap-metrics - Returns zeros when no AP docs - PASS",
+      "POST /api/ap-review/documents/{invalid_id}/post-to-bc - Returns 404 - PASS",
+      "POST /api/ap-review/documents/{nonexistent_uuid}/post-to-bc - Returns 404 - PASS",
+      "POST /api/ap-review/documents/{invalid_id}/mark-ready - Returns 404 - PASS",
+      "POST /api/documents/{invalid_id}/reprocess-batch - Returns 404 - PASS",
+      "GET /api/dashboard/insights-trends - Returns 200 with valid structure - PASS",
+      "GET /api/dashboard/stats - Returns 200 with demo_mode=false - PASS",
+      "GET /api/dashboard/inbox-stats - Returns 200 with valid structure - PASS"
+    ],
+    "frontend": [
+      "Login flow with admin/admin credentials - PASS",
+      "BC Connected status visible in sidebar (green dot) - PASS",
+      "Insights page loads with Processing Insights title - PASS",
+      "Insights page shows summary cards (Total Ingested, Avg Auto Rate, AI Confidence, Vendor Resolve) - PASS",
+      "Insights page shows Daily Ingestion Volume chart - PASS",
+      "Insights page shows Automation & AI Learning Trends chart - PASS",
+      "Insights page shows AP Invoice Posting — BC Sandbox section - PASS",
+      "AP metrics section shows empty state message (no AP docs) - PASS",
+      "Sales page defaults to My Queue tab - PASS",
+      "Sales page tabs: My Queue, Triage, Sales Orders, Rep Performance, Inventory Ledger - PASS",
+      "Pipeline Demo tab removed from Sales page - PASS",
+      "Inbox Batches tab shows 17 batch_parent documents - PASS",
+      "Batches tab has reprocess buttons (RotateCcw icons) - PASS"
+    ]
+  },
+  "ap_metrics_response": {
+    "total_ap": 0,
+    "posted_to_bc": 0,
+    "failed": 0,
+    "pending_review": 0,
+    "validation_rate": 0,
+    "success_rate": 0,
+    "error_breakdown": []
+  },
+  "bc_status": {
+    "demo_mode": false,
+    "sidebar_status": "BC CONNECTED",
+    "read_environment": "Production",
+    "write_environment": "Sandbox_11_3_2025"
+  },
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "note": "BC Sandbox credentials are REAL (DEMO_MODE=false). External BC API may timeout in preview env but endpoints validate correctly."
+  }
+}

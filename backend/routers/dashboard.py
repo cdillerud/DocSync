@@ -1045,3 +1045,75 @@ async def get_insights_trends(days: int = Query(30, le=90)):
         "bakeoff_runs": bakeoff_runs,
         "period_days": days,
     }
+
+
+@router.get("/ap-metrics")
+async def get_ap_metrics():
+    """AP Invoice posting metrics: submitted, failed, pending, timing, errors."""
+    db = get_db()
+
+    AP_TYPES = ["AP_Invoice", "AP_INVOICE", "Purchase_Invoice", "PURCHASE_INVOICE", "PurchaseInvoice"]
+
+    total_ap = await db.hub_documents.count_documents({"document_type": {"$in": AP_TYPES}})
+    posted = await db.hub_documents.count_documents({
+        "document_type": {"$in": AP_TYPES},
+        "bc_posting_status": "posted",
+    })
+    failed = await db.hub_documents.count_documents({
+        "document_type": {"$in": AP_TYPES},
+        "bc_posting_status": "failed",
+    })
+    pending_review = await db.hub_documents.count_documents({
+        "document_type": {"$in": AP_TYPES},
+        "bc_posting_status": {"$nin": ["posted", "failed"]},
+        "status": {"$nin": ["Completed", "Posted", "Archived", "batch_parent"]},
+    })
+
+    # Validation pass rate
+    validated = await db.hub_documents.count_documents({
+        "document_type": {"$in": AP_TYPES},
+        "validation_results.all_passed": True,
+    })
+    validation_rate = round((validated / total_ap * 100) if total_ap > 0 else 0, 1)
+
+    # Average time from ingestion to BC posting (for posted docs)
+    posted_docs = await db.hub_documents.find(
+        {"document_type": {"$in": AP_TYPES}, "bc_posting_status": "posted",
+         "created_utc": {"$exists": True}, "bc_posted_at": {"$exists": True}},
+        {"_id": 0, "created_utc": 1, "bc_posted_at": 1}
+    ).limit(100).to_list(100)
+    avg_time_hours = 0
+    if posted_docs:
+        deltas = []
+        for d in posted_docs:
+            try:
+                created = datetime.fromisoformat(d["created_utc"].replace("Z", "+00:00"))
+                posted_at = datetime.fromisoformat(d["bc_posted_at"].replace("Z", "+00:00"))
+                delta_h = (posted_at - created).total_seconds() / 3600
+                if delta_h > 0:
+                    deltas.append(delta_h)
+            except Exception:
+                pass
+        if deltas:
+            avg_time_hours = round(sum(deltas) / len(deltas), 1)
+
+    # Error breakdown (top reasons)
+    error_pipeline = [
+        {"$match": {"document_type": {"$in": AP_TYPES}, "bc_posting_status": "failed", "bc_posting_error": {"$exists": True}}},
+        {"$group": {"_id": "$bc_posting_error", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 5},
+    ]
+    errors_raw = await db.hub_documents.aggregate(error_pipeline).to_list(5)
+    error_breakdown = [{"reason": e["_id"][:80], "count": e["count"]} for e in errors_raw if e["_id"]]
+
+    return {
+        "total_ap": total_ap,
+        "posted_to_bc": posted,
+        "failed": failed,
+        "pending_review": pending_review,
+        "validation_rate": validation_rate,
+        "avg_time_to_post_hours": avg_time_hours,
+        "success_rate": round((posted / total_ap * 100) if total_ap > 0 else 0, 1),
+        "error_breakdown": error_breakdown,
+    }

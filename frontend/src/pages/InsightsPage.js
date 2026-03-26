@@ -6,7 +6,7 @@ import {
 } from 'recharts';
 import {
   TrendingUp, ShieldCheck, Brain, Zap, BarChart3,
-  RefreshCw, Calendar,
+  RefreshCw, Calendar, FileCheck, FileX, Clock3, Receipt,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import api from '@/lib/api';
@@ -61,6 +61,7 @@ function ChartTooltipContent({ active, payload, label }) {
 
 export default function InsightsPage() {
   const [trends, setTrends] = useState(null);
+  const [apMetrics, setApMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [days, setDays] = useState(30);
 
@@ -68,8 +69,12 @@ export default function InsightsPage() {
     const fetchTrends = async () => {
       setLoading(true);
       try {
-        const res = await api.get(`/dashboard/insights-trends?days=${days}`);
-        setTrends(res.data);
+        const [trendsRes, apRes] = await Promise.all([
+          api.get(`/dashboard/insights-trends?days=${days}`),
+          api.get('/dashboard/ap-metrics').catch(() => ({ data: null })),
+        ]);
+        setTrends(trendsRes.data);
+        setApMetrics(apRes.data);
       } catch (err) {
         console.error('Failed to load insights:', err);
       } finally {
@@ -230,6 +235,39 @@ export default function InsightsPage() {
           </div>
         </div>
       )}
+
+      {/* AP Invoice Posting Metrics */}
+      <div className="border border-border/60 rounded-lg p-4" data-testid="ap-metrics">
+        <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+          <Receipt className="w-4 h-4 text-sky-400" />
+          AP Invoice Posting — BC Sandbox
+        </h3>
+        {apMetrics && apMetrics.total_ap > 0 ? (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <StatCard icon={FileCheck} label="Posted to BC" value={apMetrics.posted_to_bc} sub={`${apMetrics.success_rate}% success`} color="text-emerald-400" />
+              <StatCard icon={FileX} label="Failed" value={apMetrics.failed} sub="posting errors" color="text-red-400" />
+              <StatCard icon={Clock3} label="Avg Post Time" value={apMetrics.avg_time_to_post_hours > 0 ? `${apMetrics.avg_time_to_post_hours}h` : '—'} sub="ingestion → BC" color="text-amber-400" />
+              <StatCard icon={ShieldCheck} label="Validation Rate" value={`${apMetrics.validation_rate}%`} sub={`${apMetrics.total_ap} total AP docs`} color="text-violet-400" />
+            </div>
+            {apMetrics.error_breakdown?.length > 0 && (
+              <div className="mt-2">
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Top Errors</div>
+                {apMetrics.error_breakdown.map((e, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs text-muted-foreground py-0.5">
+                    <span className="font-medium text-red-400">{e.count}x</span>
+                    <span className="truncate">{e.reason}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="text-sm text-muted-foreground py-4 text-center">
+            No AP invoices processed yet. AP docs will appear here as they're ingested and posted to BC Sandbox.
+          </div>
+        )}
+      </div>
     </div>
   );
 }

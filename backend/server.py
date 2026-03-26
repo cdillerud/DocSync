@@ -3030,28 +3030,23 @@ async def _internal_intake_document(
             ap_validation
         )
         
-        # AUTO-POST: Attempt automatic posting to BC for eligible AP invoices
-        if AUTO_POST_ENABLED:
-            # Refresh document after workflow update to get latest state
-            updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-            if updated_doc:
-                try:
-                    bc_service = get_bc_service()
-                    auto_post_result = await attempt_auto_post(doc_id, updated_doc, db, bc_service)
-                    
-                    if auto_post_result.eligible:
-                        if auto_post_result.success:
-                            logger.info("AUTO-POST: Document %s auto-posted to BC as %s", 
-                                       doc_id, auto_post_result.bc_document_number)
-                            final_status = "Posted"  # Update final status for return
-                        else:
-                            logger.warning("AUTO-POST: Document %s eligible but failed: %s", 
-                                          doc_id, auto_post_result.error)
-                    else:
-                        logger.debug("AUTO-POST: Document %s not eligible: %s", 
-                                    doc_id, auto_post_result.reason)
-                except Exception as e:
-                    logger.error("AUTO-POST: Exception for %s: %s", doc_id, str(e))
+        # STRICT AP AUTO-POST: Binary decision — auto-post or NeedsReview
+        try:
+            from services.ap_auto_post_service import attempt_ap_auto_post
+            ap_result = await attempt_ap_auto_post(doc_id, db, source="auto")
+            if ap_result.get("posted"):
+                final_status = "Posted"
+                logger.info("[AP Auto-Post] Document %s auto-posted to BC: %s", doc_id, ap_result.get("bc_record_no"))
+            elif ap_result.get("status") == "ReadyForPost":
+                final_status = "ReadyForPost"
+                logger.info("[AP Auto-Post] Document %s ready but BC writes disabled", doc_id)
+            else:
+                final_status = "NeedsReview"
+                logger.info("[AP Auto-Post] Document %s → NeedsReview: %s", doc_id, ap_result.get("reason"))
+            # Update final status in document
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": {"status": final_status}})
+        except Exception as e:
+            logger.error("[AP Auto-Post] Exception for %s: %s", doc_id, str(e))
     else:
         # For non-AP documents, use simplified workflow
         await _update_standard_workflow_status(
@@ -3138,94 +3133,78 @@ async def _internal_intake_document(
     
     # =================================================================
     # AUTO-CLEAR EVALUATION (Square9/Zetadocs aligned)
-    # Evaluate if document should be auto-cleared from queue
+    # SKIP for AP_Invoice — handled by strict ap_auto_post_service above
     # =================================================================
     auto_clear_result = None
-    try:
-        # Refresh document to get latest state
-        doc_for_eval = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-        if doc_for_eval:
-            auto_clear_decision, auto_clear_reason, auto_clear_details = evaluate_auto_clear(
-                doc_for_eval,
-                validation_results=validation_results
-            )
-            
-            # Apply auto-clear update
-            auto_clear_update = get_auto_clear_update(auto_clear_decision, auto_clear_details)
-
-            # CRITICAL: If auto-clear says NEEDS_REVIEW, FORCE status to NeedsReview
-            if auto_clear_decision == AutoClearDecision.NEEDS_REVIEW:
-                auto_clear_update["status"] = "NeedsReview"
-                auto_clear_update["workflow_status"] = "needs_review"
-                auto_clear_update["square9_stage"] = "needs_review"
-                final_status = "NeedsReview"
-                logger.info("[Auto-Clear] BLOCKED for %s: %s — forcing NeedsReview", doc_id, auto_clear_reason)
-
-            await db.hub_documents.update_one({"id": doc_id}, {"$set": auto_clear_update})
-            
-            auto_clear_result = {
-                "decision": auto_clear_decision.value,
-                "reason": auto_clear_reason,
-                "cleared": auto_clear_decision == AutoClearDecision.CLEARED
-            }
-            
-            if auto_clear_decision == AutoClearDecision.CLEARED:
-                final_status = "Completed"  # Override final status
-                logger.info("[Auto-Clear] Document %s AUTO-CLEARED: %s", doc_id, auto_clear_reason)
+    is_ap_invoice = suggested_type in ("AP_Invoice", "AP Invoice")
+    if is_ap_invoice:
+        logger.info("[Auto-Clear] SKIPPED for AP_Invoice %s — using strict ap_auto_post_service", doc_id)
+        auto_clear_result = {"decision": "skipped", "reason": "AP invoices use strict auto-post service", "cleared": False}
+    else:
+        try:
+            doc_for_eval = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+            if doc_for_eval:
+                auto_clear_decision, auto_clear_reason, auto_clear_details = evaluate_auto_clear(
+                    doc_for_eval,
+                    validation_results=validation_results
+                )
                 
-                # Record positive classification confirmation
-                try:
-                    from services.classification_feedback_service import record_confirmation, _build_doc_context
-                    doc_type_confirmed = (doc_for_eval.get("document_type") or 
-                                          doc_for_eval.get("suggested_job_type") or "")
-                    await record_confirmation(
-                        doc_id=doc_id,
-                        confirmed_type=doc_type_confirmed,
-                        confirmation_source="auto_clear",
-                        doc_context=_build_doc_context(doc_for_eval),
-                    )
-                except Exception as cf_err:
-                    logger.debug("[Auto-Clear] Classification confirmation failed for %s: %s", doc_id, cf_err)
-                
-                # AUTO-CREATE PURCHASE INVOICE in BC sandbox for AP_Invoice docs
-                try:
-                    doc_type = (doc_for_eval.get("document_type") or 
-                                doc_for_eval.get("suggested_job_type") or "")
-                    if doc_type == "AP_Invoice":
-                        from routers.gpi_integration import auto_create_pi_from_document
-                        pi_result = await auto_create_pi_from_document(doc_id, db)
-                        if pi_result.get("success") and not pi_result.get("skipped"):
-                            logger.info("[AutoPI] Purchase Invoice %s auto-created for doc %s",
-                                       pi_result.get("bc_record_no", ""), doc_id)
-                        elif pi_result.get("skipped"):
-                            logger.debug("[AutoPI] Skipped for doc %s: %s", doc_id, pi_result.get("reason", ""))
-                        else:
-                            logger.warning("[AutoPI] Failed for doc %s: %s", doc_id, pi_result.get("reason", ""))
-                except Exception as pi_err:
-                    logger.error("[AutoPI] Error auto-creating PI for doc %s: %s", doc_id, str(pi_err))
+                auto_clear_update = get_auto_clear_update(auto_clear_decision, auto_clear_details)
 
-                # AUTO-FILE shipping documents (Shipping_Document, Warehouse_Receipt)
-                try:
-                    doc_type = (doc_for_eval.get("document_type") or 
-                                doc_for_eval.get("suggested_job_type") or "")
-                    if doc_type in ("Shipping_Document", "Warehouse_Receipt", "Warehouse_Document"):
-                        from services.shipping_auto_file_service import auto_file_shipping_document
-                        file_result = await auto_file_shipping_document(doc_id, db)
-                        if file_result.get("success") and not file_result.get("skipped"):
-                            logger.info("[AutoFile] Shipping doc %s auto-filed to '%s' (loc=%s, intl=%s)",
-                                       doc_id, file_result.get("folder_path", ""),
-                                       file_result.get("location_code", "?"),
-                                       file_result.get("is_international", False))
-                        elif file_result.get("skipped"):
-                            logger.debug("[AutoFile] Skipped for doc %s: %s", doc_id, file_result.get("reason", ""))
-                        else:
-                            logger.warning("[AutoFile] Failed for doc %s: %s", doc_id, file_result.get("reason", ""))
-                except Exception as af_err:
-                    logger.error("[AutoFile] Error auto-filing doc %s: %s", doc_id, str(af_err))
-            else:
-                logger.debug("[Auto-Clear] Document %s NOT cleared: %s", doc_id, auto_clear_reason)
-    except Exception as e:
-        logger.error("[Auto-Clear] Error evaluating document %s: %s", doc_id, str(e))
+                if auto_clear_decision == AutoClearDecision.NEEDS_REVIEW:
+                    auto_clear_update["status"] = "NeedsReview"
+                    auto_clear_update["workflow_status"] = "needs_review"
+                    auto_clear_update["square9_stage"] = "needs_review"
+                    final_status = "NeedsReview"
+                    logger.info("[Auto-Clear] BLOCKED for %s: %s — forcing NeedsReview", doc_id, auto_clear_reason)
+
+                await db.hub_documents.update_one({"id": doc_id}, {"$set": auto_clear_update})
+                
+                auto_clear_result = {
+                    "decision": auto_clear_decision.value,
+                    "reason": auto_clear_reason,
+                    "cleared": auto_clear_decision == AutoClearDecision.CLEARED
+                }
+                
+                if auto_clear_decision == AutoClearDecision.CLEARED:
+                    final_status = "Completed"
+                    logger.info("[Auto-Clear] Document %s AUTO-CLEARED: %s", doc_id, auto_clear_reason)
+                    
+                    try:
+                        from services.classification_feedback_service import record_confirmation, _build_doc_context
+                        doc_type_confirmed = (doc_for_eval.get("document_type") or 
+                                              doc_for_eval.get("suggested_job_type") or "")
+                        await record_confirmation(
+                            doc_id=doc_id,
+                            confirmed_type=doc_type_confirmed,
+                            confirmation_source="auto_clear",
+                            doc_context=_build_doc_context(doc_for_eval),
+                        )
+                    except Exception as cf_err:
+                        logger.debug("[Auto-Clear] Classification confirmation failed for %s: %s", doc_id, cf_err)
+
+                    # AUTO-FILE shipping documents (non-AP only)
+                    try:
+                        doc_type = (doc_for_eval.get("document_type") or 
+                                    doc_for_eval.get("suggested_job_type") or "")
+                        if doc_type in ("Shipping_Document", "Warehouse_Receipt", "Warehouse_Document"):
+                            from services.shipping_auto_file_service import auto_file_shipping_document
+                            file_result = await auto_file_shipping_document(doc_id, db)
+                            if file_result.get("success") and not file_result.get("skipped"):
+                                logger.info("[AutoFile] Shipping doc %s auto-filed to '%s' (loc=%s, intl=%s)",
+                                           doc_id, file_result.get("folder_path", ""),
+                                           file_result.get("location_code", "?"),
+                                           file_result.get("is_international", False))
+                            elif file_result.get("skipped"):
+                                logger.debug("[AutoFile] Skipped for doc %s: %s", doc_id, file_result.get("reason", ""))
+                            else:
+                                logger.warning("[AutoFile] Failed for doc %s: %s", doc_id, file_result.get("reason", ""))
+                    except Exception as af_err:
+                        logger.error("[AutoFile] Error auto-filing doc %s: %s", doc_id, str(af_err))
+                else:
+                    logger.debug("[Auto-Clear] Document %s NOT cleared: %s", doc_id, auto_clear_reason)
+        except Exception as e:
+            logger.error("[Auto-Clear] Error evaluating document %s: %s", doc_id, str(e))
     
     # =================================================================
     # DOCUMENT ROUTING (Auto-Clear Gate)
@@ -7251,6 +7230,23 @@ async def shutdown_db_client():
             await _sales_polling_task
         except asyncio.CancelledError:
             logger.info("Sales email polling worker stopped")
+    # Cancel pilot summary scheduler if running
+    if _pilot_summary_task and not _pilot_summary_task.done():
+        _pilot_summary_task.cancel()
+        try:
+            await _pilot_summary_task
+        except asyncio.CancelledError:
+            logger.info("Pilot summary scheduler stopped")
+    # Stop BC cache background sync
+    cache = get_cache_service()
+    if cache:
+        cache.stop_background_sync()
+    # Stop auto-resolution workers
+    auto_resolve = get_auto_resolve_service()
+    if auto_resolve:
+        auto_resolve.stop()
+    client.close()
+
     # Cancel pilot summary scheduler if running
     if _pilot_summary_task and not _pilot_summary_task.done():
         _pilot_summary_task.cancel()

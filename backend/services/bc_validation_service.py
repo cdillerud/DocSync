@@ -291,7 +291,7 @@ async def _validate_po(
             if not required:
                 validation_results["warnings"].append({
                     "check_name": "po_not_found",
-                    "details": f"PO '{po_number}' was extracted but not found in BC - not blocking",
+                    "details": f"PO '{po_number}' was extracted but not found in BC - requires review",
                 })
 
 

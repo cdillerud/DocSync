@@ -473,6 +473,46 @@ def evaluate_auto_clear(
             )
 
     # =================================================================
+    # CHECK 5a-AP: BC Validation Warnings (AP invoices)
+    # PO not found in BC = MUST go to review, never auto-clear
+    # =================================================================
+    if doc_type in ("AP_Invoice", "AP_INVOICE", "Purchase_Invoice"):
+        val_results = doc.get("validation_results") or {}
+        val_warnings = val_results.get("warnings") or []
+        # Also check for po_not_found in the checks array
+        val_checks = val_results.get("checks") or []
+
+        po_found_in_bc = True  # assume ok unless we find evidence otherwise
+        blocking_warnings = []
+
+        for w in val_warnings:
+            check_name = w.get("check_name", "") if isinstance(w, dict) else str(w)
+            if "po_not_found" in check_name or "po_multi_source" in check_name:
+                po_found_in_bc = False
+                blocking_warnings.append(check_name)
+
+        # Also check if validation explicitly failed PO
+        for c in val_checks:
+            if isinstance(c, dict) and c.get("check_name") in ("po_validation", "po_match"):
+                if not c.get("passed", True):
+                    po_found_in_bc = False
+                    blocking_warnings.append(c.get("check_name", "po_check"))
+
+        details["checks"].append({
+            "check": "ap_po_bc_validation",
+            "passed": po_found_in_bc,
+            "value": {"warnings": blocking_warnings},
+            "message": f"AP PO in BC: {'validated' if po_found_in_bc else 'PO not found in BC — blocking auto-clear'}",
+        })
+
+        if not po_found_in_bc:
+            return (
+                AutoClearDecision.NEEDS_REVIEW,
+                f"AP invoice cannot auto-clear: PO not validated in BC ({', '.join(blocking_warnings)})",
+                details,
+            )
+
+    # =================================================================
     # CHECK 5b: BC Draft Ready (for AP invoices)
     # =================================================================
     if type_config.get("require_bc_draft_ready"):

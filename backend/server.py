@@ -1864,6 +1864,7 @@ async def on_document_ingested(doc_id: str, source: str = "unknown"):
                     run_id, old_status, new_status, decision, validation_results.get("match_score", 0.0))
 
         # Auto-file check: if this doc type + vendor pattern has been filed enough times, auto-clear it
+        # SAFETY: Must still pass PO validation checks — never auto-file if PO is missing from BC
         if new_status == "NeedsReview":
             try:
                 doc_type_for_filing = doc.get("document_type") or doc.get("suggested_job_type") or "Unknown"
@@ -1884,37 +1885,59 @@ async def on_document_ingested(doc_id: str, source: str = "unknown"):
                             not c.get("passed") and c.get("required")
                             for c in validation_results.get("checks", [])
                         )
-                        auto_clear_status = "Completed" if not has_required_failures else "AutoFiled"
 
-                        await db.hub_documents.update_one({"id": doc_id}, {"$set": {
-                            "auto_cleared": True,
-                            "auto_clear_decision": "Cleared",
-                            "auto_clear_reason": f"Auto-filed (learned from {filing_match['count']} previous filings)",
-                            "auto_clear_details": {"method": "ai_auto_file", "pattern_count": filing_match["count"], "validation_override": has_required_failures},
-                            "status": auto_clear_status,
-                            "workflow_status": "completed" if not has_required_failures else "auto_filed",
-                            "sharepoint_folder_suggestion": folder_path,
-                            "filed_at": auto_now,
-                            "filed_folder": folder_path,
-                            "updated_utc": auto_now,
-                        }})
-                        await db.filing_actions.update_one(
-                            {"_id": filing_match.get("_id", filing_match)},
-                            {"$inc": {"auto_filed_count": 1}, "$set": {"last_auto_filed_at": auto_now}},
-                        )
-                        logger.info("[Workflow:%s] Auto-filed doc %s to '%s' (pattern count: %d)",
-                                    run_id, doc_id, folder_path, filing_match["count"])
-                        # Record positive classification confirmation
-                        try:
-                            from services.classification_feedback_service import record_confirmation, _build_doc_context
-                            await record_confirmation(
-                                doc_id=doc_id,
-                                confirmed_type=doc_type_for_filing,
-                                confirmation_source="auto_clear",
-                                doc_context=_build_doc_context(doc),
+                        # CRITICAL: Block auto-file if PO not found in BC (AP invoices)
+                        # PO checks are optional (required=False) but MUST still block auto-filing
+                        has_po_blocker = False
+                        if doc_type_for_filing in ("AP_Invoice", "AP_INVOICE", "Purchase_Invoice"):
+                            val_warnings = validation_results.get("warnings", [])
+                            val_checks = validation_results.get("checks", [])
+                            for w in val_warnings:
+                                wn = w.get("check_name", "") if isinstance(w, dict) else str(w)
+                                if "po_not_found" in wn or "po_bc_api_error" in wn:
+                                    has_po_blocker = True
+                                    break
+                            if not has_po_blocker:
+                                for c in val_checks:
+                                    if isinstance(c, dict) and c.get("check_name") in ("po_validation", "po_match"):
+                                        if not c.get("passed", True):
+                                            has_po_blocker = True
+                                            break
+
+                        if has_po_blocker:
+                            logger.info("[Workflow:%s] Auto-file BLOCKED for %s: PO not found in BC — sending to review",
+                                        run_id, doc_id)
+                        elif not has_required_failures:
+                            auto_clear_status = "Completed"
+                            await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+                                "auto_cleared": True,
+                                "auto_clear_decision": "Cleared",
+                                "auto_clear_reason": f"Auto-filed (learned from {filing_match['count']} previous filings)",
+                                "auto_clear_details": {"method": "ai_auto_file", "pattern_count": filing_match["count"], "validation_override": False},
+                                "status": auto_clear_status,
+                                "workflow_status": "completed",
+                                "sharepoint_folder_suggestion": folder_path,
+                                "filed_at": auto_now,
+                                "filed_folder": folder_path,
+                                "updated_utc": auto_now,
+                            }})
+                            await db.filing_actions.update_one(
+                                {"_id": filing_match.get("_id", filing_match)},
+                                {"$inc": {"auto_filed_count": 1}, "$set": {"last_auto_filed_at": auto_now}},
                             )
-                        except Exception:
-                            pass
+                            logger.info("[Workflow:%s] Auto-filed doc %s to '%s' (pattern count: %d)",
+                                        run_id, doc_id, folder_path, filing_match["count"])
+                            # Record positive classification confirmation
+                            try:
+                                from services.classification_feedback_service import record_confirmation, _build_doc_context
+                                await record_confirmation(
+                                    doc_id=doc_id,
+                                    confirmed_type=doc_type_for_filing,
+                                    confirmation_source="auto_clear",
+                                    doc_context=_build_doc_context(doc),
+                                )
+                            except Exception:
+                                pass
             except Exception as af_err:
                 logger.warning("[Workflow:%s] Auto-file check failed for %s: %s", run_id, doc_id, str(af_err))
         

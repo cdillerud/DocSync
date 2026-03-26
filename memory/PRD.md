@@ -243,6 +243,12 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
   2. **No cached vendor**: MEXUS wasn't in `hub_bc_vendors` cache, so alias bootstrap never created an alias. Fixed by adding startup-seeded manual aliases for known OCR variants ("MEXUS, INC", "MEXUS, INC.", "MEXUS INC" → MEXUS).
   - Files: `services/unified_vendor_matcher.py`, `server.py`
 
+### Critical Auto-Clear Bypass Fix (March 26, 2026 - Fork)
+- **CRITICAL FIX: Auto-File Bypass of PO Validation (P0 - COMPLETE)**: AP invoices were being auto-cleared even when PO was not found in BC. Root cause: `on_document_ingested()` had a SEPARATE auto-file path (line 1866-1917) that learned from filing patterns (3+ previous filings) and bypassed the `evaluate_auto_clear` PO validation entirely. The only guard was `has_required_failures` but PO validation is `required=False`, so it always passed. Fix: Added `has_po_blocker` guard that checks `validation_results.warnings` for `po_not_found`/`po_bc_api_error` before allowing auto-file for AP invoices.
+  - Before: AP invoice with PO not found → auto-filed → status "Completed" → bypassed review
+  - After: AP invoice with PO not found → auto-file BLOCKED → stays in "NeedsReview"
+  - File: `server.py` (on_document_ingested function, auto-file guard)
+
 ### Vendor Invoice Profile Learning (March 26, 2026 - Fork)
 - **NEW: Learn from BC History for AP Invoice Posting (P0 - COMPLETE)**:
   - Created `services/vendor_invoice_profile_service.py` — queries BC for historical purchase invoices per vendor, analyzes line patterns (GL accounts, item codes, line types, descriptions, amounts), builds a cached profile.

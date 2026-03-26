@@ -6881,6 +6881,35 @@ async def startup():
         VENDOR_ALIAS_MAP[alias["alias_string"]] = alias.get("vendor_name") or alias.get("vendor_no")
         VENDOR_ALIAS_MAP[alias["normalized_alias"]] = alias.get("vendor_name") or alias.get("vendor_no")
 
+    # Seed known manual vendor aliases (OCR variants → BC vendor)
+    _MANUAL_ALIASES = [
+        {"alias": "MEXUS, INC", "normalized": "mexus", "vendor_name": "Mexus Inc", "vendor_no": "MEXUS"},
+        {"alias": "MEXUS, INC.", "normalized": "mexus", "vendor_name": "Mexus Inc", "vendor_no": "MEXUS"},
+        {"alias": "MEXUS INC", "normalized": "mexus", "vendor_name": "Mexus Inc", "vendor_no": "MEXUS"},
+    ]
+    for ma in _MANUAL_ALIASES:
+        existing = await db.vendor_aliases.find_one({"normalized_alias": ma["normalized"]})
+        if not existing:
+            await db.vendor_aliases.insert_one({
+                "alias_string": ma["alias"],
+                "normalized_alias": ma["normalized"],
+                "alias": ma["alias"],
+                "normalized": ma["normalized"],
+                "canonical_vendor_id": ma["vendor_no"],
+                "vendor_no": ma["vendor_no"],
+                "vendor_name": ma["vendor_name"],
+                "vendor_id": ma["vendor_no"],
+                "source": "manual_resolution",
+                "confidence": 1.0,
+                "usage_count": 0,
+                "first_seen": datetime.now(timezone.utc).isoformat(),
+                "last_seen": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+            VENDOR_ALIAS_MAP[ma["alias"]] = ma["vendor_name"]
+            VENDOR_ALIAS_MAP[ma["normalized"]] = ma["vendor_name"]
+            logger.info("Seeded manual vendor alias: %s → %s (%s)", ma["alias"], ma["vendor_name"], ma["vendor_no"])
+
     # Bootstrap: create normalized aliases for all BC vendor names
     try:
         bc_vendors = await db.hub_bc_vendors.find({}, {"_id": 0, "displayName": 1, "number": 1}).to_list(2000)

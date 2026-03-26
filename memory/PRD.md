@@ -238,6 +238,11 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
   - Added debug logging of full URL on every GPI API request for visibility
   - File: `services/gpi_integration_service.py`
 
+- **Fixed MEXUS vendor matching failure (P0 - COMPLETE)**: Invoice "86431.pdf" from "MEXUS, INC" couldn't match BC vendor "Mexus Inc" (No: MEXUS). Two root causes:
+  1. **Comma in first_word**: `vendor_name.split()[0]` produced "MEXUS," (with trailing comma) → BC OData `contains(displayName, 'MEXUS,')` returned 0 results. Fixed by adding `.rstrip('.,;:')` to strip trailing punctuation from first_word in both BC and Spiro fuzzy search paths.
+  2. **No cached vendor**: MEXUS wasn't in `hub_bc_vendors` cache, so alias bootstrap never created an alias. Fixed by adding startup-seeded manual aliases for known OCR variants ("MEXUS, INC", "MEXUS, INC.", "MEXUS INC" → MEXUS).
+  - Files: `services/unified_vendor_matcher.py`, `server.py`
+
 ## Backlog
 - P1: Rep Overrides management UI (Admin screen to map customers to reps without DB scripts)
 - P1: Teams Adaptive Card integration (DM rep via Graph API with Approve/Flag/View buttons)

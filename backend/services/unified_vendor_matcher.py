@@ -246,7 +246,7 @@ class UnifiedVendorMatcher:
             }
         
         # Fuzzy search
-        first_word = vendor_name.split()[0] if vendor_name else ""
+        first_word = vendor_name.split()[0].rstrip('.,;:') if vendor_name else ""
         if len(first_word) >= 3:
             candidates = await self.db.spiro_companies.find(
                 {"name": {"$regex": f"^{re.escape(first_word)}", "$options": "i"}},
@@ -315,7 +315,7 @@ class UnifiedVendorMatcher:
                 
                 # Try display name search - BC's OData is case-sensitive quirky
                 # Try multiple filter strategies
-                first_word = vendor_name.split()[0] if vendor_name else ""
+                first_word = vendor_name.split()[0].rstrip('.,;:') if vendor_name else ""
                 # Strip non-alpha chars for a clean search prefix
                 alpha_only = ''.join(c for c in first_word if c.isalpha())
                 if len(first_word) >= 3:

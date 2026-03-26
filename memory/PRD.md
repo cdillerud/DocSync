@@ -274,6 +274,13 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
   - Testing: 100% (19/19 backend, all frontend verified — iteration_157)
   - Files: `server.py`
 
+- **CRITICAL: suggested_type sync with deterministic classification (P0 - COMPLETE)**:
+  - Root cause: When AI extraction fails (confidence 0.00, type Unknown), the `suggested_type` variable stayed "Unknown" even when deterministic classification (mailbox:AP) correctly identified the doc as AP_INVOICE. This caused `document_type` and `suggested_job_type` fields in DB to store "Unknown", breaking: status routing, auto-post pipeline, job config lookup, and UI display.
+  - Fix: Added `_DOC_TYPE_TO_SUGGESTED` mapping in both intake functions. After deterministic classification succeeds, `suggested_type` is synced from enum format (AP_INVOICE) to display format (AP_Invoice). Only triggered when `suggested_type` is Unknown/Other.
+  - Auto-clear skip now checks both `suggested_type` AND `doc_type_value` as fallback.
+  - Testing: 100% (21/21 backend, all frontend verified — iteration_158)
+  - Files: `server.py`
+
 ## Backlog
 - P1: Rep Overrides management UI (Admin screen to map customers to reps without DB scripts)
 - P1: Teams Adaptive Card integration (DM rep via Graph API with Approve/Flag/View buttons)

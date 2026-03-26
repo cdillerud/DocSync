@@ -4320,21 +4320,45 @@ async def _reprocess_document_inner(doc_id: str, doc: dict, reclassify: bool):
                 new_status = "Completed"
                 logger.info("[REPROCESS] Document %s AUTO-CLEARED: %s", doc_id[:8], auto_clear_reason)
 
-            # Emit event so derived state updates
+            # Emit events directly to DB and re-derive state
+            from datetime import timedelta as td
+            reprocess_ts = datetime.now(timezone.utc)
+            
+            # 1) system.reprocessed to reset derived state
+            await db.workflow_events.insert_one({
+                "event_id": str(uuid.uuid4()),
+                "document_id": doc_id,
+                "event_type": "system.reprocessed",
+                "timestamp": reprocess_ts.isoformat(),
+                "source_service": "reprocess",
+                "payload": {"trigger": "manual_reprocess"},
+            })
+            
+            # 2) New automation decision (100ms later to guarantee ordering)
+            is_cleared = auto_clear_decision == AutoClearDecision.CLEARED
+            await db.workflow_events.insert_one({
+                "event_id": str(uuid.uuid4()),
+                "document_id": doc_id,
+                "event_type": "automation.decision.completed",
+                "timestamp": (reprocess_ts + td(milliseconds=100)).isoformat(),
+                "source_service": "auto_clear_service",
+                "payload": {
+                    "decision": "NeedsReview" if auto_clear_decision == AutoClearDecision.NEEDS_REVIEW else auto_clear_decision.value,
+                    "auto_clear": is_cleared,
+                    "reason": auto_clear_reason,
+                },
+            })
+            logger.info("[REPROCESS] Emitted events for %s: %s", doc_id[:8], auto_clear_decision.value)
+
+            # 3) Re-derive state
             try:
-                from services.event_service import get_event_service
-                evt_svc = get_event_service()
-                if evt_svc:
-                    await evt_svc.emit(
-                        doc_id, "automation.decision.completed",
-                        payload={
-                            "decision": auto_clear_decision.value,
-                            "reason": auto_clear_reason,
-                        },
-                        source="auto_clear_service",
-                    )
-            except Exception:
-                pass
+                from services.derived_state_service import get_derived_state_service, DerivedStateService
+                dss = get_derived_state_service()
+                if not dss:
+                    dss = DerivedStateService(db)
+                await dss.update_document_derived_state(doc_id)
+            except Exception as dss_err:
+                logger.warning("[REPROCESS] Derived state error: %s", str(dss_err))
 
     except Exception as ac_err:
         logger.warning("[REPROCESS] Auto-clear error for %s: %s", doc_id[:8], str(ac_err))

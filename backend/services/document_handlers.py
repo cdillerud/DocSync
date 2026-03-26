@@ -1096,76 +1096,67 @@ async def _reprocess_document_inner_dh(doc_id: str, doc: dict, reclassify: bool,
                 logger.info("[REPROCESS] Document %s AUTO-CLEARED: %s", doc_id[:8], ac_reason)
 
             # Emit event so derived state updates
+            # Write directly to DB since EventService singleton may not be initialized
+            from datetime import timedelta
+            reprocess_ts = datetime.now(timezone.utc)
+            
+            # 1) Emit system.reprocessed to reset derived state
+            await db.workflow_events.insert_one({
+                "event_id": str(uuid.uuid4()),
+                "document_id": doc_id,
+                "event_type": "system.reprocessed",
+                "timestamp": reprocess_ts.isoformat(),
+                "source_service": "document_handlers",
+                "payload": {"trigger": "manual_reprocess"},
+            })
+            
+            # 2) Emit new automation decision (100ms later to guarantee ordering)
+            is_cleared = ac_decision == AutoClearDecision.CLEARED
+            await db.workflow_events.insert_one({
+                "event_id": str(uuid.uuid4()),
+                "document_id": doc_id,
+                "event_type": "automation.decision.completed",
+                "timestamp": (reprocess_ts + timedelta(milliseconds=100)).isoformat(),
+                "source_service": "auto_clear_service",
+                "payload": {
+                    "decision": "NeedsReview" if ac_decision == AutoClearDecision.NEEDS_REVIEW else ac_decision.value,
+                    "auto_clear": is_cleared,
+                    "reason": ac_reason,
+                },
+            })
+            logger.info("[REPROCESS] Emitted system.reprocessed + automation.decision for %s: %s", doc_id[:8], ac_decision.value)
+
+            # 3) Re-derive state from the updated event history
             try:
-                from services.event_service import get_event_service
-                evt_svc = get_event_service()
-                if evt_svc:
-                    await evt_svc.emit(
-                        doc_id, "automation.decision.completed",
-                        payload={
-                            "decision": ac_decision.value,
-                            "reason": ac_reason,
-                        },
-                        source="auto_clear_service",
-                    )
-            except Exception:
-                pass
+                from services.derived_state_service import get_derived_state_service, DerivedStateService
+                dss = get_derived_state_service()
+                if not dss:
+                    dss = DerivedStateService(db)
+                await dss.update_document_derived_state(doc_id)
+                logger.info("[REPROCESS] Derived state updated for %s", doc_id[:8])
+            except Exception as dss_err:
+                logger.warning("[REPROCESS] Derived state update failed for %s: %s", doc_id[:8], str(dss_err))
 
     except Exception as ac_err:
         logger.warning("[REPROCESS] Auto-clear error for %s: %s", doc_id[:8], str(ac_err))
 
-    # Emit automation.decision.completed event so derived state updates
-    # This is separate from the workflow update to ensure it always runs
+    # Emit workflow tracking event (separate from auto-clear)
     if workflow_completed:
         try:
-            from services.event_service import get_event_service
-            evt_svc = get_event_service()
-            if evt_svc:
-                await evt_svc.emit(
-                    document_id=doc_id,
-                    event_type="automation.decision.completed",
-                    status="completed",
-                    source_service="reprocess_workflow",
-                    payload={
-                        "decision": "Cleared",
-                        "auto_clear": True,
-                        "reason": f"Reprocess: {doc_type_value} workflow completed — status={new_status}",
-                    },
-                )
-                logger.info("[REPROCESS] Emitted automation.decision.completed for %s via EventService", doc_id[:8])
-            else:
-                # Fallback: write event directly to DB if EventService not available
-                from datetime import datetime as dt_mod
-                await db.workflow_events.insert_one({
-                    "event_id": str(uuid.uuid4()),
-                    "document_id": doc_id,
-                    "event_type": "automation.decision.completed",
-                    "status": "completed",
-                    "source_service": "reprocess_workflow",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "payload": {
-                        "decision": "Cleared",
-                        "auto_clear": True,
-                        "reason": f"Reprocess: {doc_type_value} workflow completed",
-                    },
-                })
-                logger.info("[REPROCESS] Emitted automation.decision.completed for %s via direct DB", doc_id[:8])
+            await db.workflow_events.insert_one({
+                "event_id": str(uuid.uuid4()),
+                "document_id": doc_id,
+                "event_type": "automation.decision.completed",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "source_service": "reprocess_workflow",
+                "payload": {
+                    "decision": "Cleared",
+                    "auto_clear": True,
+                    "reason": f"Reprocess: {doc_type_value} workflow completed — status={new_status}",
+                },
+            })
         except Exception as evt_err:
-            logger.error("[REPROCESS] FAILED to emit event for %s: %s", doc_id[:8], str(evt_err))
-            # Last resort: write directly to DB
-            try:
-                await db.workflow_events.insert_one({
-                    "event_id": str(uuid.uuid4()),
-                    "document_id": doc_id,
-                    "event_type": "automation.decision.completed",
-                    "status": "completed",
-                    "source_service": "reprocess_workflow",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "payload": {"decision": "Cleared", "auto_clear": True, "reason": "reprocess fallback"},
-                })
-                logger.info("[REPROCESS] Emitted event for %s via fallback DB insert", doc_id[:8])
-            except Exception as fb_err:
-                logger.error("[REPROCESS] CRITICAL: Could not emit event for %s: %s", doc_id[:8], str(fb_err))
+            logger.error("[REPROCESS] Event write error: %s", str(evt_err))
 
     workflow = {
         "id": str(uuid.uuid4()),

@@ -244,13 +244,14 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
   - Files: `services/unified_vendor_matcher.py`, `server.py`
 
 ### Critical Auto-Clear Bypass Fix (March 26, 2026 - Fork)
-- **CRITICAL FIX: THREE auto-clear bypass paths letting AP invoices through (P0 - COMPLETE)**:
-  1. **Auto-File path** (`on_document_ingested`, server.py): Learned filing patterns auto-cleared without PO check. Fixed with `has_po_blocker` guard.
-  2. **Reprocess path** (document_handlers.py + server.py): `evaluate_auto_clear` returned NEEDS_REVIEW but status stayed "Validated" because `get_auto_clear_update` didn't override status. Fixed: NEEDS_REVIEW now forces `status: NeedsReview`, `workflow_status: needs_review`.
-  3. **Auto-clear fields not reset on reprocess**: Old `auto_cleared: True` persisted through reprocess. Fixed: reprocess now resets `auto_cleared`, `auto_clear_decision`, `auto_clear_reason`, `auto_clear_details` before re-evaluation.
-  4. **Event-derived status**: Added new `automation.decision.completed` event emission during reprocess so the "Derived from: Event history" display updates.
-  - Before: Reprocess → all_passed=True (PO non-required) → auto-cleared stays → "Completed"
-  - After: Reprocess → auto_cleared reset → evaluate_auto_clear → NEEDS_REVIEW → forces "NeedsReview"
+- **CRITICAL FIX: FOUR auto-clear bypass issues letting AP invoices through (P0 - COMPLETE)**:
+  1. **Auto-File bypass** (`on_document_ingested`, server.py): Added `has_po_blocker` guard.
+  2. **Status not overridden on NEEDS_REVIEW**: `get_auto_clear_update` didn't touch `status` — fixed to force `NeedsReview`.
+  3. **auto_cleared fields not reset on reprocess**: Added explicit reset of `auto_cleared`, `auto_clear_decision`, etc.
+  4. **Derived state not updated after reprocess (ROOT CAUSE)**: `get_event_service()` returned None from document_handlers context, so NO events were emitted. The "Derived from: Event history" display kept showing old auto_clear event. Fixed: Write events directly to MongoDB (`system.reprocessed` + new `automation.decision.completed`), then call `DerivedStateService.update_document_derived_state()` to re-derive. Used 100ms timestamp offset to guarantee event ordering.
+  - **Before**: Reprocess → no new events → derived state shows old "completed" from original auto_clear event
+  - **After**: Reprocess → reset auto_cleared → evaluate_auto_clear → NEEDS_REVIEW → emit system.reprocessed + automation.decision(NeedsReview) → re-derive → "reviewing"
+  - E2E test: completed → NeedsReview → derived.workflow=reviewing ✓
   - Files: `server.py`, `services/document_handlers.py`
 
 ### Vendor Invoice Profile Learning (March 26, 2026 - Fork)

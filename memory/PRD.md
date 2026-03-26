@@ -264,6 +264,16 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
   - **Caching**: Profiles cached in `vendor_invoice_profiles` MongoDB collection, 24h TTL
   - Files: `services/vendor_invoice_profile_service.py`, `routers/gpi_integration.py`, `routers/ap_review.py`
 
+### Strict Binary AP Auto-Post Wiring (March 26, 2026 - Fork)
+- **CRITICAL: Finished wiring strict ap_auto_post_service into main intake pipeline (P0 - COMPLETE)**:
+  - **Intake pipeline** (`server.py` line ~3033): Replaced old `auto_post_service.attempt_auto_post` with `ap_auto_post_service.attempt_ap_auto_post`. AP invoices now go through strict 4-condition check (classified as AP_Invoice + required fields extracted + vendor matched + PO matched → Auto-Post, else → NeedsReview).
+  - **Auto-clear bypass eliminated** (`server.py` line ~3139): AP_Invoice documents are now SKIPPED entirely in the auto-clear evaluation block. They only use the strict binary auto-post service. This permanently fixes the recurring issue where documents were incorrectly auto-clearing as "Completed" despite missing POs.
+  - **Dead code removed**: Removed AP_Invoice auto-create PI code from the auto-clear CLEARED block (was creating purchase invoices for AP docs that shouldn't have been cleared).
+  - **Fixed pre-existing indentation error** at line ~7255 in server.py shutdown handler.
+  - All 3 pipeline paths verified: intake (server.py) ✓, reprocess (document_handlers.py) ✓, mark-ready (ap_review.py) ✓
+  - Testing: 100% (19/19 backend, all frontend verified — iteration_157)
+  - Files: `server.py`
+
 ## Backlog
 - P1: Rep Overrides management UI (Admin screen to map customers to reps without DB scripts)
 - P1: Teams Adaptive Card integration (DM rep via Graph API with Approve/Flag/View buttons)
@@ -273,3 +283,4 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
 - P2: Production-ready email service and Entra ID SSO
 - P3: Continue server.py extraction (5 remaining `from server import` calls)
 - P3: Investigate 205 `no_bc_match` batch failures
+- P3: Clean up dead code in `auto_clear_service.py` (AP invoice paths no longer used)

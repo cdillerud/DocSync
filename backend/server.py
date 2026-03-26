@@ -3152,6 +3152,15 @@ async def _internal_intake_document(
             
             # Apply auto-clear update
             auto_clear_update = get_auto_clear_update(auto_clear_decision, auto_clear_details)
+
+            # CRITICAL: If auto-clear says NEEDS_REVIEW, FORCE status to NeedsReview
+            if auto_clear_decision == AutoClearDecision.NEEDS_REVIEW:
+                auto_clear_update["status"] = "NeedsReview"
+                auto_clear_update["workflow_status"] = "needs_review"
+                auto_clear_update["square9_stage"] = "needs_review"
+                final_status = "NeedsReview"
+                logger.info("[Auto-Clear] BLOCKED for %s: %s — forcing NeedsReview", doc_id, auto_clear_reason)
+
             await db.hub_documents.update_one({"id": doc_id}, {"$set": auto_clear_update})
             
             auto_clear_result = {
@@ -4260,7 +4269,12 @@ async def _reprocess_document_inner(doc_id: str, doc: dict, reclassify: bool):
         "transaction_action": transaction_action,
         "reprocessed_utc": datetime.now(timezone.utc).isoformat(),
         "updated_utc": datetime.now(timezone.utc).isoformat(),
-        "last_error": None  # Clear any previous errors on successful reprocess
+        "last_error": None,  # Clear any previous errors on successful reprocess
+        # CRITICAL: Reset auto-clear fields so reprocess starts fresh
+        "auto_cleared": False,
+        "auto_clear_decision": None,
+        "auto_clear_reason": None,
+        "auto_clear_details": None,
     }
     
     await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
@@ -4291,10 +4305,37 @@ async def _reprocess_document_inner(doc_id: str, doc: dict, reclassify: bool):
                 doc_for_eval, validation_results=validation_results
             )
             auto_clear_update = get_auto_clear_update(auto_clear_decision, auto_clear_details)
+
+            # CRITICAL: If auto-clear says NEEDS_REVIEW, FORCE status to NeedsReview
+            if auto_clear_decision == AutoClearDecision.NEEDS_REVIEW:
+                auto_clear_update["status"] = "NeedsReview"
+                auto_clear_update["workflow_status"] = "needs_review"
+                auto_clear_update["square9_stage"] = "needs_review"
+                new_status = "NeedsReview"
+                new_workflow_status = "needs_review"
+                logger.info("[REPROCESS] Auto-clear BLOCKED for %s: %s — forcing NeedsReview", doc_id[:8], auto_clear_reason)
+
             await db.hub_documents.update_one({"id": doc_id}, {"$set": auto_clear_update})
             if auto_clear_decision == AutoClearDecision.CLEARED:
                 new_status = "Completed"
                 logger.info("[REPROCESS] Document %s AUTO-CLEARED: %s", doc_id[:8], auto_clear_reason)
+
+            # Emit event so derived state updates
+            try:
+                from services.event_service import get_event_service
+                evt_svc = get_event_service()
+                if evt_svc:
+                    await evt_svc.emit(
+                        doc_id, "automation.decision.completed",
+                        payload={
+                            "decision": auto_clear_decision.value,
+                            "reason": auto_clear_reason,
+                        },
+                        source="auto_clear_service",
+                    )
+            except Exception:
+                pass
+
     except Exception as ac_err:
         logger.warning("[REPROCESS] Auto-clear error for %s: %s", doc_id[:8], str(ac_err))
 

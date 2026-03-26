@@ -1041,6 +1041,11 @@ async def _reprocess_document_inner_dh(doc_id: str, doc: dict, reclassify: bool,
         "reprocessed_utc": datetime.now(timezone.utc).isoformat(),
         "updated_utc": datetime.now(timezone.utc).isoformat(),
         "last_error": None,
+        # CRITICAL: Reset auto-clear fields so reprocess starts fresh
+        "auto_cleared": False,
+        "auto_clear_decision": None,
+        "auto_clear_reason": None,
+        "auto_clear_details": None,
     }
 
     await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
@@ -1072,11 +1077,40 @@ async def _reprocess_document_inner_dh(doc_id: str, doc: dict, reclassify: bool,
                 doc_for_eval, validation_results=validation_results
             )
             ac_update = get_auto_clear_update(ac_decision, ac_details)
+
+            # CRITICAL: If auto-clear says NEEDS_REVIEW, FORCE status to NeedsReview
+            # regardless of what all_passed said (PO not found is non-required but still blocks)
+            if ac_decision == AutoClearDecision.NEEDS_REVIEW:
+                ac_update["status"] = "NeedsReview"
+                ac_update["workflow_status"] = "needs_review"
+                ac_update["square9_stage"] = "needs_review"
+                new_status = "NeedsReview"
+                new_workflow_status = "needs_review"
+                logger.info("[REPROCESS] Auto-clear BLOCKED for %s: %s — forcing NeedsReview", doc_id[:8], ac_reason)
+
             await db.hub_documents.update_one({"id": doc_id}, {"$set": ac_update})
+
             if ac_decision == AutoClearDecision.CLEARED:
                 new_status = "Completed"
                 workflow_completed = True
                 logger.info("[REPROCESS] Document %s AUTO-CLEARED: %s", doc_id[:8], ac_reason)
+
+            # Emit event so derived state updates
+            try:
+                from services.event_service import get_event_service
+                evt_svc = get_event_service()
+                if evt_svc:
+                    await evt_svc.emit(
+                        doc_id, "automation.decision.completed",
+                        payload={
+                            "decision": ac_decision.value,
+                            "reason": ac_reason,
+                        },
+                        source="auto_clear_service",
+                    )
+            except Exception:
+                pass
+
     except Exception as ac_err:
         logger.warning("[REPROCESS] Auto-clear error for %s: %s", doc_id[:8], str(ac_err))
 

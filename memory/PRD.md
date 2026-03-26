@@ -244,10 +244,14 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
   - Files: `services/unified_vendor_matcher.py`, `server.py`
 
 ### Critical Auto-Clear Bypass Fix (March 26, 2026 - Fork)
-- **CRITICAL FIX: Auto-File Bypass of PO Validation (P0 - COMPLETE)**: AP invoices were being auto-cleared even when PO was not found in BC. Root cause: `on_document_ingested()` had a SEPARATE auto-file path (line 1866-1917) that learned from filing patterns (3+ previous filings) and bypassed the `evaluate_auto_clear` PO validation entirely. The only guard was `has_required_failures` but PO validation is `required=False`, so it always passed. Fix: Added `has_po_blocker` guard that checks `validation_results.warnings` for `po_not_found`/`po_bc_api_error` before allowing auto-file for AP invoices.
-  - Before: AP invoice with PO not found → auto-filed → status "Completed" → bypassed review
-  - After: AP invoice with PO not found → auto-file BLOCKED → stays in "NeedsReview"
-  - File: `server.py` (on_document_ingested function, auto-file guard)
+- **CRITICAL FIX: THREE auto-clear bypass paths letting AP invoices through (P0 - COMPLETE)**:
+  1. **Auto-File path** (`on_document_ingested`, server.py): Learned filing patterns auto-cleared without PO check. Fixed with `has_po_blocker` guard.
+  2. **Reprocess path** (document_handlers.py + server.py): `evaluate_auto_clear` returned NEEDS_REVIEW but status stayed "Validated" because `get_auto_clear_update` didn't override status. Fixed: NEEDS_REVIEW now forces `status: NeedsReview`, `workflow_status: needs_review`.
+  3. **Auto-clear fields not reset on reprocess**: Old `auto_cleared: True` persisted through reprocess. Fixed: reprocess now resets `auto_cleared`, `auto_clear_decision`, `auto_clear_reason`, `auto_clear_details` before re-evaluation.
+  4. **Event-derived status**: Added new `automation.decision.completed` event emission during reprocess so the "Derived from: Event history" display updates.
+  - Before: Reprocess → all_passed=True (PO non-required) → auto-cleared stays → "Completed"
+  - After: Reprocess → auto_cleared reset → evaluate_auto_clear → NEEDS_REVIEW → forces "NeedsReview"
+  - Files: `server.py`, `services/document_handlers.py`
 
 ### Vendor Invoice Profile Learning (March 26, 2026 - Fork)
 - **NEW: Learn from BC History for AP Invoice Posting (P0 - COMPLETE)**:

@@ -265,11 +265,28 @@ async def _validate_po(
     required: bool,
 ) -> None:
     """Validate a PO number against BC purchaseOrders."""
-    resp = await c.get(
-        api_url_fn("purchaseOrders", company_id),
-        headers={"Authorization": f"Bearer {token}"},
-        params={"$filter": f"number eq '{po_number}'"},
-    )
+    try:
+        resp = await c.get(
+            api_url_fn("purchaseOrders", company_id),
+            headers={"Authorization": f"Bearer {token}"},
+            params={"$filter": f"number eq '{po_number.replace(chr(39), chr(39)+chr(39))}'"},
+        )
+    except Exception as e:
+        # Network/timeout error — treat as inconclusive, NOT "not found"
+        validation_results["warnings"].append({
+            "check_name": "po_bc_api_error",
+            "details": f"BC API error during PO lookup for '{po_number}': {str(e)[:100]} — treating as unverified",
+        })
+        if required:
+            validation_results["all_passed"] = False
+        validation_results["checks"].append({
+            "check_name": "po_validation",
+            "passed": False,
+            "details": f"PO '{po_number}' could not be verified — BC API error",
+            "required": required,
+        })
+        return
+
     if resp.status_code == 200:
         pos = resp.json().get("value", [])
         if pos:
@@ -293,6 +310,20 @@ async def _validate_po(
                     "check_name": "po_not_found",
                     "details": f"PO '{po_number}' was extracted but not found in BC - requires review",
                 })
+    else:
+        # Non-200 response (400, 401, 429, 500) — inconclusive, NOT "not found"
+        if required:
+            validation_results["all_passed"] = False
+        validation_results["checks"].append({
+            "check_name": "po_validation",
+            "passed": False,
+            "details": f"PO '{po_number}' could not be verified — BC returned {resp.status_code}",
+            "required": required,
+        })
+        validation_results["warnings"].append({
+            "check_name": "po_bc_api_error",
+            "details": f"BC API returned {resp.status_code} for PO '{po_number}' — needs manual verification",
+        })
 
 
 # ---------------------------------------------------------------------------

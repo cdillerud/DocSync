@@ -487,7 +487,7 @@ def evaluate_auto_clear(
 
         for w in val_warnings:
             check_name = w.get("check_name", "") if isinstance(w, dict) else str(w)
-            if "po_not_found" in check_name or "po_multi_source" in check_name:
+            if "po_not_found" in check_name or "po_multi_source" in check_name or "po_bc_api_error" in check_name:
                 po_found_in_bc = False
                 blocking_warnings.append(check_name)
 

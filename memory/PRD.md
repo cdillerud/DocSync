@@ -281,6 +281,16 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
   - Testing: 100% (21/21 backend, all frontend verified — iteration_158)
   - Files: `server.py`
 
+- **CRITICAL: Vendor Profile Learning from BC Cache + PO-Aware Auto-Post (P0 - COMPLETE)**:
+  - Root cause: Profile service only queried BC API (which returns 0 in preview), ignoring 18,731 posted purchase invoices in local `bc_reference_cache`. The system couldn't learn that Tumalo Creek (TUMALOC) never has POs.
+  - Fix 1: Added `_learn_from_reference_cache()` — aggregates `bc_reference_cache` for count, PO rate, amount stats when BC API fails. For TUMALOC: 18,731 invoices, 0% PO rate, avg $1,685.66.
+  - Fix 2: Vendor profile now includes `po_expected` flag. Set to `False` when historical PO rate < 10%.
+  - Fix 3: `check_ap_ready_to_post` now accepts `vendor_profile` param. When `po_expected=False`, PO validation is skipped entirely.
+  - Fix 4: `attempt_ap_auto_post` loads vendor profile before calling the check.
+  - Fix 5: `bc_validation_service` PO candidate filtering now excludes BOL numbers and invoice numbers (preventing BOL/invoice number misidentification as PO).
+  - Testing: 100% (19/19 backend, all frontend verified — iteration_159)
+  - Files: `vendor_invoice_profile_service.py`, `ap_auto_post_service.py`, `bc_validation_service.py`, `routers/ap_review.py`
+
 ## Backlog
 - P1: Rep Overrides management UI (Admin screen to map customers to reps without DB scripts)
 - P1: Teams Adaptive Card integration (DM rep via Graph API with Approve/Flag/View buttons)

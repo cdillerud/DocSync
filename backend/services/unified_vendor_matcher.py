@@ -316,6 +316,8 @@ class UnifiedVendorMatcher:
                 # Try display name search - BC's OData is case-sensitive quirky
                 # Try multiple filter strategies
                 first_word = vendor_name.split()[0] if vendor_name else ""
+                # Strip non-alpha chars for a clean search prefix
+                alpha_only = ''.join(c for c in first_word if c.isalpha())
                 if len(first_word) >= 3:
                     vendors = []
                     safe_first = _odata_escape(first_word)
@@ -348,6 +350,21 @@ class UnifiedVendorMatcher:
                         )
                         if resp.status_code == 200:
                             vendors = resp.json().get("value", [])
+
+                    # Strategy 4: Shorter prefix (first 4 chars) — catches hyphenated
+                    # names like "Citi-Cargo" when doc says "CITICARGO"
+                    if not vendors and len(alpha_only) >= 4:
+                        short_prefix = _odata_escape(alpha_only[:4])
+                        for variant in [short_prefix, short_prefix.title(), short_prefix.lower()]:
+                            resp = await client.get(
+                                f"https://api.businesscentral.dynamics.com/v2.0/{self.bc_tenant_id}/{self.bc_environment}/api/v2.0/companies({company_id})/vendors",
+                                headers={"Authorization": f"Bearer {token}"},
+                                params={"$filter": f"contains(tolower(displayName), '{variant.lower()}')"}
+                            )
+                            if resp.status_code == 200:
+                                vendors = resp.json().get("value", [])
+                                if vendors:
+                                    break
                     
                     if vendors:
                         best = None

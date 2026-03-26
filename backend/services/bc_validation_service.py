@@ -621,7 +621,10 @@ async def _validate_bc_match_inner(
                                 po_found = True
                                 break
                         if not po_found:
-                            await _validate_po(c, token, _api_url, company_id, po_candidates_to_check[0], validation_results, required=False)
+                            # PO WAS extracted but NOT found in BC — this MUST block validation
+                            # for AP invoices. The document needs manual review.
+                            validation_results["all_passed"] = False
+                            await _validate_po(c, token, _api_url, company_id, po_candidates_to_check[0], validation_results, required=True)
                             if len(tried) > 1:
                                 validation_results["warnings"].append({
                                     "check_name": "po_multi_source_tried",

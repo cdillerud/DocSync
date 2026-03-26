@@ -244,15 +244,13 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
   - Files: `services/unified_vendor_matcher.py`, `server.py`
 
 ### Critical Auto-Clear Bypass Fix (March 26, 2026 - Fork)
-- **CRITICAL FIX: FOUR auto-clear bypass issues letting AP invoices through (P0 - COMPLETE)**:
-  1. **Auto-File bypass** (`on_document_ingested`, server.py): Added `has_po_blocker` guard.
-  2. **Status not overridden on NEEDS_REVIEW**: `get_auto_clear_update` didn't touch `status` — fixed to force `NeedsReview`.
-  3. **auto_cleared fields not reset on reprocess**: Added explicit reset of `auto_cleared`, `auto_clear_decision`, etc.
-  4. **Derived state not updated after reprocess (ROOT CAUSE)**: `get_event_service()` returned None from document_handlers context, so NO events were emitted. The "Derived from: Event history" display kept showing old auto_clear event. Fixed: Write events directly to MongoDB (`system.reprocessed` + new `automation.decision.completed`), then call `DerivedStateService.update_document_derived_state()` to re-derive. Used 100ms timestamp offset to guarantee event ordering.
-  - **Before**: Reprocess → no new events → derived state shows old "completed" from original auto_clear event
-  - **After**: Reprocess → reset auto_cleared → evaluate_auto_clear → NEEDS_REVIEW → emit system.reprocessed + automation.decision(NeedsReview) → re-derive → "reviewing"
-  - E2E test: completed → NeedsReview → derived.workflow=reviewing ✓
-  - Files: `server.py`, `services/document_handlers.py`
+- **CRITICAL FIX: 5-layer AP Invoice auto-clear bypass (P0 - COMPLETE)**:
+  1. **ROOT CAUSE: PO validation was non-blocking** (`bc_validation_service.py`): `PO_IF_PRESENT` mode called `_validate_po(required=False)` so `all_passed` stayed True even when PO not found. Fixed: now sets `all_passed=False` and `required=True` when PO candidates exist but none found in BC.
+  2. **Auto-File bypass**: Added `has_po_blocker` guard in `on_document_ingested`.
+  3. **Status override**: NEEDS_REVIEW now forces `status=NeedsReview`.
+  4. **auto_cleared reset**: Reprocess resets all auto_clear fields.
+  5. **Derived state events**: Write events directly to MongoDB + call DerivedStateService.
+  - Files: `services/bc_validation_service.py`, `server.py`, `services/document_handlers.py`
 
 ### Vendor Invoice Profile Learning (March 26, 2026 - Fork)
 - **NEW: Learn from BC History for AP Invoice Posting (P0 - COMPLETE)**:

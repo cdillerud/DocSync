@@ -1,0 +1,108 @@
+{
+  "summary": "Completed testing of vendor invoice profile learning fix for Tumalo Creek (TUMALOC). All 19 backend tests passed (100%). Frontend verified: Login with admin/admin works, dashboard loads with BC CONNECTED status. The fix correctly learns from bc_reference_cache when BC API fails, sets po_expected=False for vendors with 0% PO rate, and skips PO validation for such vendors.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_vendor_profile_learning.py",
+    "/app/test_reports/pytest/vendor_profile_learning_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_vendor_profile_learning.py"
+  ],
+  "success_rate": {
+    "backend": "100% (19/19 tests passed)",
+    "frontend": "100% (Login and dashboard load verified)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "No seed data created - used existing bc_reference_cache with 18,731 TUMALOC entries",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Vendor profile learning fix fully tested. Key verifications: (1) _learn_from_reference_cache returns correct stats for TUMALOC (count=18731, po_rate=0.0, avg_amount=$1685.66), (2) build_vendor_profile sets po_expected=False when po_rate < 10%, (3) GET /api/ap-review/vendor-profile/TUMALOC returns po_expected=False, (4) check_ap_ready_to_post skips PO check when vendor_profile.po_expected=False, (5) attempt_ap_auto_post loads vendor profile before calling check_ap_ready_to_post, (6) bc_validation_service filters BOL and invoice numbers from PO candidates.",
+  "features_tested": {
+    "backend": [
+      "GET /api/health - Returns 200 with status=healthy - PASS",
+      "_learn_from_reference_cache returns correct stats for TUMALOC (count=18731, po_rate=0.0) - PASS",
+      "_learn_from_reference_cache returns None for unknown vendor - PASS",
+      "build_vendor_profile returns po_expected=False for TUMALOC - PASS",
+      "build_vendor_profile caches result in vendor_invoice_profiles collection - PASS",
+      "GET /api/ap-review/vendor-profile/TUMALOC?refresh=true returns po_expected=False - PASS",
+      "GET /api/ap-review/vendor-profile/UNKNOWN returns po_expected=True (default) - PASS",
+      "check_ap_ready_to_post skips PO check when po_expected=False - PASS",
+      "check_ap_ready_to_post enforces PO check when po_expected=True - PASS",
+      "check_ap_ready_to_post enforces PO check when no profile provided - PASS",
+      "attempt_ap_auto_post imports and uses vendor_invoice_profile_service - PASS",
+      "bc_validation_service filters out BOL numbers from PO candidates - PASS",
+      "bc_validation_service filters out invoice numbers from PO candidates - PASS",
+      "bc_validation_service logs PO candidate exclusions - PASS",
+      "_learn_from_reference_cache function exists with correct structure - PASS",
+      "build_vendor_profile uses cache fallback when BC API returns 0 - PASS",
+      "Vendor profile includes po_expected field - PASS",
+      "vendor-profile endpoint exists in ap_review.py - PASS",
+      "vendor-profile endpoint returns po_expected field - PASS"
+    ],
+    "frontend": [
+      "Login page loads with GPI Document Hub title - PASS",
+      "Login with admin/admin credentials - PASS",
+      "Dashboard loads after login - PASS",
+      "Sidebar shows: Inbox, Sales, Insights, Settings - PASS",
+      "BC CONNECTED status visible (green dot) - PASS",
+      "BC status shows READ: Production, WRITE: Sandbox_11_3_2025 - PASS",
+      "Tabs visible: All, Accounting, Sales, Processed, Batches - PASS",
+      "Welcome toast notification displayed - PASS"
+    ]
+  },
+  "code_verification": {
+    "vendor_invoice_profile_service_lines_161_215": "VERIFIED - _learn_from_reference_cache aggregates bc_reference_cache for count, po_rate, amount_stats",
+    "vendor_invoice_profile_service_lines_300_410": "VERIFIED - build_vendor_profile uses cache fallback and sets po_expected based on po_rate < 0.1",
+    "ap_auto_post_service_lines_24_85": "VERIFIED - check_ap_ready_to_post accepts vendor_profile param and skips PO check when po_expected=False",
+    "ap_auto_post_service_lines_95_105": "VERIFIED - attempt_ap_auto_post loads vendor profile via get_or_build_profile before calling check_ap_ready_to_post",
+    "bc_validation_service_lines_565_600": "VERIFIED - PO candidate filtering excludes BOL numbers and invoice numbers with logging",
+    "ap_review_py_lines_725_739": "VERIFIED - vendor-profile endpoint returns po_expected field"
+  },
+  "bug_fix_verification": {
+    "original_bug": "Tumalo Creek freight invoices were failing PO validation because BOL numbers and invoice numbers were being treated as PO candidates, then failing PO validation. BC reference cache shows bc_order_number is ALWAYS empty for TUMALOC (0 out of 18,731 invoices have PO).",
+    "fix_applied": [
+      "vendor_invoice_profile_service now learns from bc_reference_cache when BC API fails",
+      "Profiles include po_expected flag based on historical PO rate (< 10% = po_expected=False)",
+      "ap_auto_post_service uses vendor profile to skip PO requirement for vendors where PO is never expected",
+      "bc_validation_service filters out BOL and invoice numbers from PO candidates"
+    ],
+    "fix_verified": true,
+    "verification_details": [
+      "TUMALOC has 18,731 entries in bc_reference_cache with 0 having bc_order_number set",
+      "po_rate calculated as 0.0 (0/18731)",
+      "po_expected correctly set to False for TUMALOC",
+      "check_ap_ready_to_post returns ready=True even when PO is extracted but not matched (for vendors with po_expected=False)",
+      "BOL and invoice numbers are excluded from PO candidate list before validation"
+    ]
+  },
+  "tumaloc_profile_data": {
+    "vendor_no": "TUMALOC",
+    "bc_invoice_count": 18731,
+    "po_rate": 0.0,
+    "po_expected": false,
+    "avg_amount": 1685.66,
+    "min_amount": 0,
+    "max_amount": 11393.37,
+    "sources_bc_cache": 18731
+  },
+  "bc_status": {
+    "demo_mode": false,
+    "bc_write_enabled": true,
+    "read_environment": "Production",
+    "write_environment": "Sandbox_11_3_2025"
+  },
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "note": "BC API calls fail in preview env (invalid tenant) but bc_reference_cache in MongoDB has real data from BC sync. The fix correctly uses cache as fallback."
+  }
+}

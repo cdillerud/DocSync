@@ -569,13 +569,40 @@ async def _validate_bc_match_inner(
                 po_resolution_number = extracted_fields.get("_po_resolution_number", "")
                 all_candidates = list(extracted_fields.get("_po_all_candidates", []))
                 
+                # Filter out numbers that are NOT POs:
+                # - BOL numbers (already identified as Bill of Lading)
+                # - Invoice numbers (the document's own invoice number)
+                # These get misidentified as PO candidates on freight invoices.
+                _exclude_from_po = set()
+                bol_num = (
+                    normalized_fields.get("bol_number") or extracted_fields.get("bol_number")
+                    or normalized_fields.get("bol") or extracted_fields.get("bol")
+                    or ""
+                )
+                if bol_num:
+                    _exclude_from_po.add(str(bol_num).strip())
+                inv_num = (
+                    normalized_fields.get("invoice_number") or extracted_fields.get("invoice_number")
+                    or normalized_fields.get("invoice_number_clean") or ""
+                )
+                if inv_num:
+                    _exclude_from_po.add(str(inv_num).strip())
+                    # Also exclude with/without leading zeros (e.g., "0305132" ↔ "305132")
+                    _exclude_from_po.add(str(inv_num).strip().lstrip("0") or "0")
+
                 # Build ordered list: AI extraction first, then PO resolution best, then all candidates
                 po_candidates_to_check = []
                 seen = set()
                 for candidate in [po_number, po_resolution_number] + all_candidates:
-                    if candidate and candidate not in seen:
-                        seen.add(candidate)
-                        po_candidates_to_check.append(candidate)
+                    candidate_clean = str(candidate).strip() if candidate else ""
+                    candidate_stripped = candidate_clean.lstrip("0") or "0"
+                    if candidate_clean and candidate_clean not in seen:
+                        seen.add(candidate_clean)
+                        # Skip if this is actually a BOL or invoice number
+                        if candidate_clean in _exclude_from_po or candidate_stripped in _exclude_from_po:
+                            logger.info("[PO-Filter] Excluding '%s' from PO candidates (matches BOL or invoice number)", candidate_clean)
+                            continue
+                        po_candidates_to_check.append(candidate_clean)
 
                 if po_mode == "PO_REQUIRED":
                     if not po_candidates_to_check:

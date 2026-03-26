@@ -21,8 +21,13 @@ from typing import Dict, Tuple
 logger = logging.getLogger(__name__)
 
 
-def check_ap_ready_to_post(doc: dict) -> Tuple[bool, str, list]:
+def check_ap_ready_to_post(doc: dict, vendor_profile: dict = None) -> Tuple[bool, str, list]:
     """Check if an AP invoice passes the 4 conditions for auto-posting.
+    
+    Args:
+        doc: Document from MongoDB
+        vendor_profile: Optional vendor profile from vendor_invoice_profile_service.
+                       Used to determine if PO is expected for this vendor.
     
     Returns: (ready, reason, failures)
     """
@@ -53,24 +58,31 @@ def check_ap_ready_to_post(doc: dict) -> Tuple[bool, str, list]:
 
     # 3. Vendor matched in BC
     vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
-    vendor_match = doc.get("vendor_match_method") or val.get("match_method") or ""
     if not vendor_no:
         failures.append("Vendor not resolved to BC vendor number")
 
-    # 4. PO matched in BC
-    po_passed = False
-    for check in val.get("checks", []):
-        if check.get("check_name") in ("po_validation", "po_match") and check.get("passed"):
-            po_passed = True
-            break
+    # 4. PO check — vendor-profile-aware
+    # If the vendor profile says PO is never expected (e.g. freight carriers like Tumalo Creek),
+    # skip the PO requirement entirely. We learned this from BC history.
+    vp = vendor_profile or {}
+    po_expected = vp.get("po_expected", True)
     
-    # Also accept if there's no PO extracted at all (some invoices legitimately have no PO)
-    po_extracted = bool(
-        ef.get("po_number") or nf.get("po_number") or 
-        doc.get("po_number_clean") or ef.get("order_number")
-    )
-    if po_extracted and not po_passed:
-        failures.append("PO extracted but not found/matched in BC")
+    if po_expected:
+        po_passed = False
+        for check in val.get("checks", []):
+            if check.get("check_name") in ("po_validation", "po_match") and check.get("passed"):
+                po_passed = True
+                break
+        
+        # Accept if no PO was extracted at all (some invoices legitimately have no PO)
+        po_extracted = bool(
+            ef.get("po_number") or nf.get("po_number") or 
+            doc.get("po_number_clean") or ef.get("order_number")
+        )
+        if po_extracted and not po_passed:
+            failures.append("PO extracted but not found/matched in BC")
+    else:
+        logger.info("[AP Auto-Post] PO check SKIPPED for vendor %s — BC history shows PO never expected", vendor_no)
 
     if failures:
         return False, f"AP invoice not ready: {'; '.join(failures)}", failures
@@ -92,7 +104,17 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
     if not doc:
         return {"success": False, "posted": False, "reason": "Document not found", "status": "error"}
 
-    ready, reason, failures = check_ap_ready_to_post(doc)
+    # Load vendor profile to get PO expectations, learned from BC history
+    vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
+    vendor_profile = None
+    if vendor_no:
+        try:
+            from services.vendor_invoice_profile_service import get_or_build_profile
+            vendor_profile = await get_or_build_profile(db, vendor_no)
+        except Exception as vp_err:
+            logger.warning("[AP Auto-Post] Could not load vendor profile for %s: %s", vendor_no, vp_err)
+
+    ready, reason, failures = check_ap_ready_to_post(doc, vendor_profile=vendor_profile)
 
     if not ready:
         # Set to NeedsReview

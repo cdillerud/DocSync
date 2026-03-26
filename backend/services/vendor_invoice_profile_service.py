@@ -158,6 +158,65 @@ async def fetch_vendor_invoices_from_bc(
     return invoices
 
 
+
+async def _learn_from_reference_cache(db, vendor_no: str) -> Optional[Dict]:
+    """Learn vendor patterns from the BC reference cache.
+    
+    The cache stores posted purchase invoices synced from BC, with fields like
+    bc_amount, bc_order_number, bc_external_document_no, bc_posting_date, etc.
+    When the BC API returns 0 (creds fail, timeout), the cache is our fallback.
+    """
+    try:
+        pipeline = [
+            {"$match": {"bc_vendor_no": vendor_no, "bc_entity_type": "posted_purchase_invoice"}},
+            {"$group": {
+                "_id": None,
+                "count": {"$sum": 1},
+                "total_amount": {"$sum": "$bc_amount"},
+                "avg_amount": {"$avg": "$bc_amount"},
+                "min_amount": {"$min": "$bc_amount"},
+                "max_amount": {"$max": "$bc_amount"},
+                "has_order_count": {"$sum": {
+                    "$cond": [{"$and": [
+                        {"$ne": ["$bc_order_number", ""]},
+                        {"$ne": ["$bc_order_number", None]},
+                    ]}, 1, 0]
+                }},
+                "has_external_doc_count": {"$sum": {
+                    "$cond": [{"$and": [
+                        {"$ne": ["$bc_external_document_no", ""]},
+                        {"$ne": ["$bc_external_document_no", None]},
+                    ]}, 1, 0]
+                }},
+            }},
+        ]
+        results = await db.bc_reference_cache.aggregate(pipeline).to_list(length=1)
+        if not results:
+            return None
+        
+        s = results[0]
+        count = s["count"]
+        po_rate = s["has_order_count"] / count if count > 0 else 0
+        
+        return {
+            "count": count,
+            "po_rate": po_rate,
+            "has_order_count": s["has_order_count"],
+            "has_external_doc_count": s["has_external_doc_count"],
+            "amount_stats": {
+                "avg_amount": round(s["avg_amount"], 2) if s["avg_amount"] else 0,
+                "amount_stddev": 0,  # Can't compute stddev in simple aggregation
+                "min_amount": round(s["min_amount"], 2) if s["min_amount"] else 0,
+                "max_amount": round(s["max_amount"], 2) if s["max_amount"] else 0,
+                "sample_count": count,
+            },
+        }
+    except Exception as e:
+        logger.warning("[VendorProfile] Cache stats error for %s: %s", vendor_no, e)
+        return None
+
+
+
 async def fetch_local_posting_history(db, vendor_no: str, limit: int = 20) -> List[Dict]:
     """Fetch previously posted documents from our own MongoDB for this vendor.
     These represent invoices we successfully created in BC before.
@@ -304,10 +363,22 @@ async def build_vendor_profile(
     bc_invoices = await fetch_vendor_invoices_from_bc(vendor_no)
     local_history = await fetch_local_posting_history(db, vendor_no)
 
+    # ── FALLBACK: Learn from BC reference cache when API returns 0 ──
+    # The cache has posted purchase invoices synced from BC.
+    # This covers cases where API calls fail (creds, timeout) but cache has rich data.
+    cache_stats = None
+    if not bc_invoices:
+        cache_stats = await _learn_from_reference_cache(db, vendor_no)
+        if cache_stats and cache_stats.get("count", 0) > 0:
+            logger.info(
+                "[VendorProfile] BC API returned 0 invoices for %s but cache has %d — using cache data",
+                vendor_no, cache_stats["count"],
+            )
+
     # Analyze BC invoice patterns
     line_patterns = _analyze_line_patterns(bc_invoices) if bc_invoices else {}
 
-    # Amount statistics from BC invoices
+    # Amount statistics — from BC invoices first, fallback to cache
     amounts = []
     for inv in bc_invoices:
         amt = inv.get("totalAmountExcludingTax") or inv.get("totalAmountIncludingTax") or 0
@@ -323,6 +394,20 @@ async def build_vendor_profile(
             "max_amount": round(max(amounts), 2),
             "sample_count": len(amounts),
         }
+    elif cache_stats and cache_stats.get("amount_stats"):
+        amount_stats = cache_stats["amount_stats"]
+
+    # Determine if this vendor typically has PO references
+    # by checking bc_order_number in cached entries
+    po_expected = True  # default: assume PO expected
+    if cache_stats and cache_stats.get("count", 0) >= 5:
+        po_rate = cache_stats.get("po_rate", 1.0)
+        if po_rate < 0.1:  # Less than 10% of invoices have a PO → PO not expected
+            po_expected = False
+            logger.info("[VendorProfile] Vendor %s: PO not expected (%.0f%% PO rate from %d cached invoices)",
+                       vendor_no, po_rate * 100, cache_stats["count"])
+
+    invoice_count = len(bc_invoices) or (cache_stats.get("count", 0) if cache_stats else 0)
 
     # Build the profile
     profile = {
@@ -335,8 +420,9 @@ async def build_vendor_profile(
             "tax_liable": vendor_card.get("taxLiable", False) if vendor_card else False,
             "blocked": vendor_card.get("blocked", "") if vendor_card else "",
         },
-        "bc_invoice_count": len(bc_invoices),
+        "bc_invoice_count": invoice_count,
         "local_posting_count": len(local_history),
+        "po_expected": po_expected,
         "line_patterns": line_patterns,
         "amount_stats": amount_stats,
         "default_line_type": line_patterns.get("dominant_line_type", "Account"),
@@ -352,6 +438,7 @@ async def build_vendor_profile(
         "last_updated": datetime.now(timezone.utc).isoformat(),
         "sources": {
             "bc_invoices": len(bc_invoices),
+            "bc_cache": cache_stats.get("count", 0) if cache_stats else 0,
             "local_documents": len(local_history),
             "vendor_card": bool(vendor_card),
         },
@@ -364,8 +451,10 @@ async def build_vendor_profile(
         upsert=True,
     )
     logger.info(
-        "[VendorProfile] Profile built for %s: %d BC invoices, default=%s/%s, avg=$%s",
-        vendor_no, len(bc_invoices),
+        "[VendorProfile] Profile built for %s: %d invoices (api=%d, cache=%d), po_expected=%s, default=%s/%s, avg=$%s",
+        vendor_no, invoice_count, len(bc_invoices),
+        cache_stats.get("count", 0) if cache_stats else 0,
+        po_expected,
         profile["default_line_type"], profile["default_gl_account"] or profile["default_item_code"],
         amount_stats.get("avg_amount", "N/A"),
     )
@@ -605,6 +694,7 @@ def _empty_profile(vendor_no: str) -> Dict:
         "vendor_card": {},
         "bc_invoice_count": 0,
         "local_posting_count": 0,
+        "po_expected": True,
         "line_patterns": {},
         "amount_stats": {},
         "default_line_type": "Account",
@@ -612,5 +702,5 @@ def _empty_profile(vendor_no: str) -> Dict:
         "default_item_code": "",
         "description_pattern": "po_reference",
         "last_updated": None,
-        "sources": {"bc_invoices": 0, "local_documents": 0, "vendor_card": False},
+        "sources": {"bc_invoices": 0, "bc_cache": 0, "local_documents": 0, "vendor_card": False},
     }

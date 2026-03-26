@@ -727,6 +727,7 @@ async def get_vendor_profile(vendor_no: str, refresh: bool = False):
         "vendor_name": profile.get("vendor_name"),
         "bc_invoice_count": profile.get("bc_invoice_count", 0),
         "local_posting_count": profile.get("local_posting_count", 0),
+        "po_expected": profile.get("po_expected", True),
         "default_line_type": profile.get("default_line_type"),
         "default_gl_account": profile.get("default_gl_account"),
         "default_item_code": profile.get("default_item_code"),

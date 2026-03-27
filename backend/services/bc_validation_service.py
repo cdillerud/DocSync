@@ -569,18 +569,11 @@ async def _validate_bc_match_inner(
                 po_resolution_number = extracted_fields.get("_po_resolution_number", "")
                 all_candidates = list(extracted_fields.get("_po_all_candidates", []))
                 
-                # Filter out numbers that are NOT POs:
-                # - BOL numbers (already identified as Bill of Lading)
-                # - Invoice numbers (the document's own invoice number)
-                # These get misidentified as PO candidates on freight invoices.
+                # Filter out the document's own invoice number from PO candidates.
+                # An invoice number should never be tried as a PO.
+                # NOTE: BOL numbers are NOT filtered — on freight invoices (e.g. Tumalo Creek),
+                # the BOL often IS the PO number or references a real PO.
                 _exclude_from_po = set()
-                bol_num = (
-                    normalized_fields.get("bol_number") or extracted_fields.get("bol_number")
-                    or normalized_fields.get("bol") or extracted_fields.get("bol")
-                    or ""
-                )
-                if bol_num:
-                    _exclude_from_po.add(str(bol_num).strip())
                 inv_num = (
                     normalized_fields.get("invoice_number") or extracted_fields.get("invoice_number")
                     or normalized_fields.get("invoice_number_clean") or ""
@@ -598,9 +591,9 @@ async def _validate_bc_match_inner(
                     candidate_stripped = candidate_clean.lstrip("0") or "0"
                     if candidate_clean and candidate_clean not in seen:
                         seen.add(candidate_clean)
-                        # Skip if this is actually a BOL or invoice number
+                        # Skip if this is the invoice number itself
                         if candidate_clean in _exclude_from_po or candidate_stripped in _exclude_from_po:
-                            logger.info("[PO-Filter] Excluding '%s' from PO candidates (matches BOL or invoice number)", candidate_clean)
+                            logger.info("[PO-Filter] Excluding '%s' from PO candidates (matches invoice number)", candidate_clean)
                             continue
                         po_candidates_to_check.append(candidate_clean)
 

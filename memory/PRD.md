@@ -282,13 +282,12 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
   - Files: `server.py`
 
 - **CRITICAL: Vendor Profile Learning from BC Cache + PO-Aware Auto-Post (P0 - COMPLETE)**:
-  - Root cause: Profile service only queried BC API (which returns 0 in preview), ignoring 18,731 posted purchase invoices in local `bc_reference_cache`. The system couldn't learn that Tumalo Creek (TUMALOC) never has POs.
-  - Fix 1: Added `_learn_from_reference_cache()` — aggregates `bc_reference_cache` for count, PO rate, amount stats when BC API fails. For TUMALOC: 18,731 invoices, 0% PO rate, avg $1,685.66.
-  - Fix 2: Vendor profile now includes `po_expected` flag. Set to `False` when historical PO rate < 10%.
-  - Fix 3: `check_ap_ready_to_post` now accepts `vendor_profile` param. When `po_expected=False`, PO validation is skipped entirely.
-  - Fix 4: `attempt_ap_auto_post` loads vendor profile before calling the check.
-  - Fix 5: `bc_validation_service` PO candidate filtering now excludes BOL numbers and invoice numbers (preventing BOL/invoice number misidentification as PO).
-  - Testing: 100% (19/19 backend, all frontend verified — iteration_159)
+  - Root cause: Profile service only queried BC API (which returns 0 in preview), ignoring 18,731 posted purchase invoices in local `bc_reference_cache`. The system couldn't learn vendor patterns.
+  - Fix 1: Added `_learn_from_reference_cache()` — aggregates `bc_reference_cache` for count, PO rate, amount stats when BC API fails. For TUMALOC: 18,731 invoices, avg $1,685.66.
+  - Fix 2: Vendor profile now reports `po_expected` (defaults to True). NOT auto-set to False based on `bc_order_number` emptiness, because users confirmed freight BOLs often ARE POs — the order field is just not linked in BC.
+  - Fix 3: `bc_validation_service` PO candidate filtering now excludes the document's own invoice number (prevents 305132 from being tried as a PO on invoice 0305132). BOL numbers are NOT filtered — user confirmed they often match POs.
+  - Fix 4: `check_ap_ready_to_post` accepts vendor_profile param, `attempt_ap_auto_post` loads profile.
+  - Testing: 100% (iterations 157-159)
   - Files: `vendor_invoice_profile_service.py`, `ap_auto_post_service.py`, `bc_validation_service.py`, `routers/ap_review.py`
 
 ## Backlog

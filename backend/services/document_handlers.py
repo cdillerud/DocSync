@@ -534,6 +534,10 @@ async def intake_document(
         "line_items": normalized_fields.get("line_items", []),
         "vendor_canonical": vendor_alias_result.get("vendor_canonical"),
         "vendor_match_method": vendor_alias_result.get("vendor_match_method"),
+        "bc_vendor_number": (
+            vendor_alias_result.get("vendor_no")
+            or (validation_results.get("vendor_result", {}).get("selected_vendor", {}).get("number"))
+        ),
         "possible_duplicate": duplicate_result.get("possible_duplicate", False),
         "duplicate_of_document_id": duplicate_result.get("duplicate_of_document_id"),
         "validation_errors": ap_validation.get("validation_errors", []),

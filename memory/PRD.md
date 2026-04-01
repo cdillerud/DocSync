@@ -290,6 +290,14 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
   - Testing: 100% (iterations 157-159)
   - Files: `vendor_invoice_profile_service.py`, `ap_auto_post_service.py`, `bc_validation_service.py`, `routers/ap_review.py`
 
+- **CRITICAL: bc_vendor_number never written during intake/reprocess (P0 - COMPLETE)**:
+  - Root cause: The intake `update_data` dict in `server.py` and `document_handlers.py` stored `vendor_canonical` and `vendor_match_method` but NEVER stored `bc_vendor_number`. The vendor_alias_result had `vendor_no` but it was dropped. Additionally, when the initial vendor_alias lookup failed (common for freight vendors like Tumalo Creek), the vendor was later resolved by BC validation/auto-resolution — but auto-post ran before that and couldn't see the vendor.
+  - Fix 1: `bc_vendor_number` now sourced from vendor_alias_result first, falling back to `validation_results.vendor_result.selected_vendor.number` (which BC validation always populates on match).
+  - Fix 2: `check_ap_ready_to_post` now also checks `validation_results` for vendor number as a fallback.
+  - Impact: Tumalo Creek documents (and all AP invoices) now properly have `bc_vendor_number` set at intake time, even when the initial vendor alias lookup fails.
+  - Testing: Manual (unit tests on check_ap_ready_to_post — all pass)
+  - Files: `server.py`, `document_handlers.py`, `ap_auto_post_service.py`
+
 ## Backlog
 - P1: Rep Overrides management UI (Admin screen to map customers to reps without DB scripts)
 - P1: Teams Adaptive Card integration (DM rep via Graph API with Approve/Flag/View buttons)

@@ -2987,6 +2987,10 @@ async def _internal_intake_document(
         # Phase 7: Vendor alias results
         "vendor_canonical": vendor_alias_result.get("vendor_canonical"),
         "vendor_match_method": vendor_alias_result.get("vendor_match_method"),
+        "bc_vendor_number": (
+            vendor_alias_result.get("vendor_no")
+            or (validation_results.get("vendor_result", {}).get("selected_vendor", {}).get("number"))
+        ),
         # Phase 7: Vendor resolution observability
         "vendor_resolution": _build_vendor_resolution(
             vendor_raw=normalized_fields.get("vendor_raw", ""),
@@ -3613,6 +3617,10 @@ async def intake_document(
         # Phase 7: Vendor alias results
         "vendor_canonical": vendor_alias_result.get("vendor_canonical"),
         "vendor_match_method": vendor_alias_result.get("vendor_match_method"),
+        "bc_vendor_number": (
+            vendor_alias_result.get("vendor_no")
+            or (validation_results.get("vendor_result", {}).get("selected_vendor", {}).get("number"))
+        ),
         # Phase 7: Vendor resolution observability
         "vendor_resolution": _build_vendor_resolution(
             vendor_raw=normalized_fields.get("vendor_raw", ""),

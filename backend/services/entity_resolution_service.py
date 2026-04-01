@@ -175,7 +175,7 @@ async def _resolve_vendor(db, source_value: str) -> Dict[str, Any]:
     if not candidates or candidates[0]["score"] < HIGH_CONFIDENCE:
         aliases = await db.vendor_aliases.find(
             {}, {"_id": 0, "alias_string": 1, "vendor_name": 1, "vendor_no": 1, "canonical_vendor_id": 1}
-        ).to_list(500)
+        ).to_list(2000)
         seen = {c.get("entity_id") for c in candidates}
         for a in aliases:
             alias_str = a.get("alias_string") or a.get("vendor_name") or ""

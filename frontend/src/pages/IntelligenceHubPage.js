@@ -5,6 +5,7 @@ import DocumentBundleReviewPage from './DocumentBundleReviewPage';
 import DocumentLifecyclePage from './DocumentLifecyclePage';
 import LabelCorrectionInsightsPage from './LabelCorrectionInsightsPage';
 import LayoutFingerprintsPage from './LayoutFingerprintsPage';
+import KnowledgeBasePage from './KnowledgeBasePage';
 
 const TABS = [
   { key: 'review', label: 'Doc Intelligence' },
@@ -12,6 +13,7 @@ const TABS = [
   { key: 'lifecycle', label: 'Lifecycle' },
   { key: 'labels', label: 'Label Insights' },
   { key: 'layouts', label: 'Layout Families' },
+  { key: 'knowledge', label: 'Knowledge Base' },
 ];
 
 export default function IntelligenceHubPage() {
@@ -43,6 +45,7 @@ export default function IntelligenceHubPage() {
       {activeTab === 'lifecycle' && <DocumentLifecyclePage />}
       {activeTab === 'labels' && <LabelCorrectionInsightsPage />}
       {activeTab === 'layouts' && <LayoutFingerprintsPage />}
+      {activeTab === 'knowledge' && <KnowledgeBasePage />}
     </div>
   );
 }

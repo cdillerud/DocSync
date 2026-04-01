@@ -68,6 +68,7 @@ from routers.mailbox_sources import router as mailbox_sources_router
 from routers.file_import import router as file_import_router
 from routers.bc_integration import router as bc_integration_router
 from routers.gpi_integration import router as gpi_integration_router
+from routers.knowledge_seed import router as knowledge_seed_router
 from routers.documents import router as documents_router, register_server_routes as register_doc_routes
 from routers.workflows import router as workflows_router, register_server_routes as register_wf_routes
 from routers.reference_intelligence import router as ref_intel_router, register_server_routes as register_ri_routes
@@ -159,6 +160,7 @@ app.include_router(po_resolution_router, prefix="/api")
 app.include_router(bakeoff_router, prefix="/api")
 app.include_router(feedback_health_router, prefix="/api")
 app.include_router(reprocess_comparison_router, prefix="/api")
+app.include_router(knowledge_seed_router, prefix="/api")
 
 # ==================== SALES MODULE ====================
 app.include_router(sales_router)

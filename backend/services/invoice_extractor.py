@@ -174,12 +174,13 @@ JSON Response format:
 If you cannot extract a field, set it to null. Always provide a confidence score."""
 
 
-async def extract_invoice_data(file_path: str) -> InvoiceExtractionResult:
+async def extract_invoice_data(file_path: str, vendor_context: str = "") -> InvoiceExtractionResult:
     """
     Extract structured data from an invoice PDF using Gemini AI.
     
     Args:
         file_path: Path to the PDF file on disk
+        vendor_context: Optional vendor profile context to enrich the prompt
         
     Returns:
         InvoiceExtractionResult with extracted data
@@ -262,9 +263,14 @@ async def extract_invoice_data(file_path: str) -> InvoiceExtractionResult:
             system_message="You are an expert invoice data extraction system. Always respond with valid JSON only."
         ).with_model("gemini", "gemini-2.5-flash")
         
+        # Build extraction prompt with optional vendor context
+        prompt = EXTRACTION_PROMPT
+        if vendor_context:
+            prompt = vendor_context + "\n\n" + EXTRACTION_PROMPT
+        
         # Send message with file attachment
         user_message = UserMessage(
-            text=EXTRACTION_PROMPT,
+            text=prompt,
             file_contents=[file_content]
         )
         
@@ -360,7 +366,29 @@ async def extract_and_update_document(doc_id: str, file_path: str, db) -> Dict[s
     Returns:
         Dict with extraction result and updated fields
     """
-    result = await extract_invoice_data(file_path)
+    # Build vendor context from profile (if vendor is already known)
+    vendor_context = ""
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "vendor_canonical": 1, "bc_vendor_number": 1, "vendor_raw": 1, "matched_vendor_no": 1})
+    if doc:
+        vendor_key = doc.get("bc_vendor_number") or doc.get("matched_vendor_no") or doc.get("vendor_canonical") or ""
+        if vendor_key:
+            profile = await db.vendor_invoice_profiles.find_one(
+                {"$or": [{"vendor_no": vendor_key}, {"vendor_name": {"$regex": f"^{vendor_key}$", "$options": "i"}}]},
+                {"_id": 0}
+            )
+            if profile:
+                stats = profile.get("amount_stats", {})
+                parts = [f"VENDOR INTELLIGENCE for '{profile.get('vendor_name', vendor_key)}':"]
+                if stats.get("count", 0) > 0:
+                    parts.append(f"  - Historical: {stats['count']} invoices, avg ${stats.get('mean', 0):,.2f}, range ${stats.get('min', 0):,.2f}-${stats.get('max', 0):,.2f}")
+                if profile.get("po_expected") is not None:
+                    parts.append(f"  - PO expected: {'YES' if profile['po_expected'] else 'NO — this vendor does not use PO numbers'}")
+                po_pat = profile.get("po_patterns", {})
+                if po_pat.get("has_patterns"):
+                    parts.append(f"  - Typical ref format: avg length {po_pat.get('avg_length', '?')}, {po_pat.get('numeric_only_pct', 0)*100:.0f}% numeric")
+                vendor_context = "\n".join(parts)
+    
+    result = await extract_invoice_data(file_path, vendor_context=vendor_context)
     
     if not result.success:
         return {

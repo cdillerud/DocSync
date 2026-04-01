@@ -279,66 +279,101 @@ async def build_feedback_context_for_prompt(db, vendor_id: str = "", doc_type: s
     
     This is called by the classification pipeline before sending a document
     to the LLM. It enriches the prompt with:
-    - Recent corrections for this vendor
+    - Recent corrections for this vendor (from classification_corrections)
     - Classification patterns the AI got wrong before
-    - Vendor aliases learned from corrections
-    - General recent corrections (even without vendor context)
+    - Vendor profile intelligence (amounts, PO patterns, frequency)
+    - Vendor aliases learned from corrections AND BC cache
+    - General recent corrections
     
-    This is HOW the AI gets smarter — every correction becomes a few-shot example.
+    This is HOW the AI gets smarter — every correction becomes a few-shot example,
+    and every vendor profile becomes contextual intelligence.
     """
     context_parts = []
     
-    # 1. Vendor-specific corrections
+    # 1. Vendor-specific corrections (from rich classification_corrections)
     if vendor_id:
-        # Try both exact match and case-insensitive
         vendor_upper = vendor_id.upper().strip()
-        corrections = await db.classification_feedback.find(
+        vendor_lower = vendor_id.lower().strip()
+        
+        corrections = await db.classification_corrections.find(
             {"$or": [
-                {"vendor": vendor_id},
-                {"vendor": vendor_upper},
-                {"vendor_id": vendor_id},
-                {"vendor_id": vendor_upper},
+                {"vendor_canonical": {"$regex": f"^{vendor_id}$", "$options": "i"}},
+                {"vendor_raw": {"$regex": f"^{vendor_id}$", "$options": "i"}},
+                {"vendor_canonical": vendor_upper},
+                {"vendor_raw": vendor_upper},
             ]},
-            {"_id": 0, "ai_predicted": 1, "human_corrected": 1, "file_name": 1}
-        ).sort("learned_at", -1).limit(5).to_list(5)
+            {"_id": 0}
+        ).sort("corrected_at", -1).limit(5).to_list(5)
         
         if corrections:
             context_parts.append(f"LEARNED CORRECTIONS for vendor '{vendor_id}':")
             for c in corrections:
+                text_hint = f" (text: '{c.get('text_snippet', '')[:80]}...')" if c.get('text_snippet') else ""
                 context_parts.append(
                     f"  - File '{c.get('file_name', '?')}' was misclassified as "
-                    f"'{c.get('ai_predicted', '?')}', correct type is '{c.get('human_corrected', '?')}'"
+                    f"'{c.get('original_type', '?')}', correct type is '{c.get('corrected_type', '?')}'{text_hint}"
                 )
     
-    # 2. General classification corrections (recent)
+    # 2. General classification corrections for this doc_type
     if doc_type:
-        type_corrections = await db.classification_feedback.find(
-            {"ai_predicted": doc_type},
-            {"_id": 0, "ai_predicted": 1, "human_corrected": 1}
-        ).sort("learned_at", -1).limit(3).to_list(3)
+        type_corrections = await db.classification_corrections.find(
+            {"original_type": doc_type},
+            {"_id": 0, "original_type": 1, "corrected_type": 1, "vendor_canonical": 1}
+        ).sort("corrected_at", -1).limit(5).to_list(5)
         
         if type_corrections:
-            context_parts.append(f"NOTE: Documents predicted as '{doc_type}' are sometimes actually:")
+            context_parts.append(f"NOTE: Documents classified as '{doc_type}' are sometimes actually:")
             for c in type_corrections:
-                context_parts.append(f"  - '{c.get('human_corrected', '?')}'")
+                vendor_hint = f" (vendor: {c.get('vendor_canonical', '?')})" if c.get('vendor_canonical') else ""
+                context_parts.append(f"  - '{c.get('corrected_type', '?')}'{vendor_hint}")
     
-    # 3. Vendor aliases
+    # 3. Vendor invoice profile intelligence (from BC cache seed)
+    if vendor_id:
+        vendor_upper = vendor_id.upper().strip()
+        profile = await db.vendor_invoice_profiles.find_one(
+            {"$or": [{"vendor_no": vendor_id}, {"vendor_no": vendor_upper}, {"vendor_name": {"$regex": f"^{vendor_id}$", "$options": "i"}}]},
+            {"_id": 0}
+        )
+        if profile:
+            stats = profile.get("amount_stats", {})
+            freq = profile.get("posting_frequency", {})
+            context_parts.append(f"VENDOR PROFILE — '{profile.get('vendor_name', vendor_id)}' ({profile.get('vendor_no', '')}):")
+            if stats.get("count", 0) > 0:
+                context_parts.append(
+                    f"  - Historical: {stats['count']} invoices, avg ${stats.get('mean', 0):,.2f}, "
+                    f"range ${stats.get('min', 0):,.2f}-${stats.get('max', 0):,.2f}"
+                )
+            if profile.get("po_expected") is not None:
+                context_parts.append(f"  - PO expected: {'YES' if profile['po_expected'] else 'NO (this vendor may not use PO numbers)'}")
+            po_patterns = profile.get("po_patterns", {})
+            if po_patterns.get("has_patterns"):
+                context_parts.append(
+                    f"  - PO format: avg length {po_patterns.get('avg_length', '?')}, "
+                    f"{po_patterns.get('numeric_only_pct', 0)*100:.0f}% numeric-only"
+                )
+            if freq.get("frequency") and freq["frequency"] != "unknown":
+                context_parts.append(f"  - Posting frequency: {freq['frequency']} ({freq.get('avg_per_month', '?')}/month)")
+    
+    # 4. Vendor aliases (from ALL sources — BC cache, Spiro, user corrections)
     if vendor_id:
         vendor_upper = vendor_id.upper().strip()
         aliases = await db.vendor_aliases.find(
             {"$or": [
-                {"vendor_no": vendor_id, "source": "user_correction"},
-                {"vendor_no": vendor_upper, "source": "user_correction"},
+                {"vendor_no": vendor_id},
+                {"vendor_no": vendor_upper},
+                {"canonical_vendor_id": vendor_id},
+                {"canonical_vendor_id": vendor_upper},
             ]},
-            {"_id": 0, "alias": 1, "canonical_name": 1}
+            {"_id": 0, "alias_string": 1, "alias": 1, "vendor_name": 1, "source": 1}
         ).limit(10).to_list(10)
         
         if aliases:
             context_parts.append("KNOWN VENDOR NAME VARIATIONS:")
             for a in aliases:
-                context_parts.append(f"  - '{a.get('alias', '?')}' = '{a.get('canonical_name', '?')}'")
+                name = a.get("alias_string") or a.get("alias") or "?"
+                context_parts.append(f"  - '{name}' → '{a.get('vendor_name', '?')}' (source: {a.get('source', '?')})")
     
-    # 4. Routing corrections for this vendor
+    # 5. Routing corrections for this vendor
     if vendor_id:
         routing = await db.routing_feedback.find(
             {"vendor_id": vendor_id},
@@ -353,19 +388,19 @@ async def build_feedback_context_for_prompt(db, vendor_id: str = "", doc_type: s
                     f"should be '{r.get('human_moved_to', '?')}'"
                 )
     
-    # 5. General recent corrections (always included, even without vendor context)
+    # 6. General recent corrections (always included, even without vendor context)
     # This ensures EVERY LLM call benefits from the feedback loop
-    recent = await db.classification_feedback.find(
+    recent = await db.classification_corrections.find(
         {},
-        {"_id": 0, "ai_predicted": 1, "human_corrected": 1, "file_name": 1, "vendor": 1}
-    ).sort("learned_at", -1).limit(5).to_list(5)
+        {"_id": 0, "original_type": 1, "corrected_type": 1, "file_name": 1, "vendor_canonical": 1}
+    ).sort("corrected_at", -1).limit(8).to_list(8)
     
     if recent:
         context_parts.append("RECENT SYSTEM-WIDE CORRECTIONS (learn from these):")
         for c in recent:
-            vendor_label = c.get("vendor", "unknown")
+            vendor_label = c.get("vendor_canonical", "unknown")
             context_parts.append(
-                f"  - Vendor '{vendor_label}': '{c.get('ai_predicted', '?')}' → '{c.get('human_corrected', '?')}'"
+                f"  - Vendor '{vendor_label}': '{c.get('original_type', '?')}' → '{c.get('corrected_type', '?')}'"
                 f" (file: {c.get('file_name', '?')})"
             )
     

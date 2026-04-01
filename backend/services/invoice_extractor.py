@@ -366,28 +366,24 @@ async def extract_and_update_document(doc_id: str, file_path: str, db) -> Dict[s
     Returns:
         Dict with extraction result and updated fields
     """
-    # Build vendor context from profile (if vendor is already known)
+    # Build vendor context from BC historical data (Phase 2 — context-rich extraction)
     vendor_context = ""
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "vendor_canonical": 1, "bc_vendor_number": 1, "vendor_raw": 1, "matched_vendor_no": 1})
-    if doc:
-        vendor_key = doc.get("bc_vendor_number") or doc.get("matched_vendor_no") or doc.get("vendor_canonical") or ""
-        if vendor_key:
-            profile = await db.vendor_invoice_profiles.find_one(
-                {"$or": [{"vendor_no": vendor_key}, {"vendor_name": {"$regex": f"^{vendor_key}$", "$options": "i"}}]},
-                {"_id": 0}
-            )
-            if profile:
-                stats = profile.get("amount_stats", {})
-                parts = [f"VENDOR INTELLIGENCE for '{profile.get('vendor_name', vendor_key)}':"]
-                if stats.get("count", 0) > 0:
-                    parts.append(f"  - Historical: {stats['count']} invoices, avg ${stats.get('mean', 0):,.2f}, range ${stats.get('min', 0):,.2f}-${stats.get('max', 0):,.2f}")
-                if profile.get("po_expected") is not None:
-                    parts.append(f"  - PO expected: {'YES' if profile['po_expected'] else 'NO — this vendor does not use PO numbers'}")
-                po_pat = profile.get("po_patterns", {})
-                if po_pat.get("has_patterns"):
-                    parts.append(f"  - Typical ref format: avg length {po_pat.get('avg_length', '?')}, {po_pat.get('numeric_only_pct', 0)*100:.0f}% numeric")
-                vendor_context = "\n".join(parts)
-    
+    try:
+        from services.vendor_context_builder import build_extraction_context
+        doc_record = await db.hub_documents.find_one(
+            {"id": doc_id},
+            {"_id": 0, "vendor_canonical": 1, "bc_vendor_number": 1,
+             "vendor_raw": 1, "matched_vendor_no": 1}
+        )
+        if doc_record:
+            v_no = doc_record.get("bc_vendor_number") or doc_record.get("matched_vendor_no") or ""
+            v_name = doc_record.get("vendor_canonical") or doc_record.get("vendor_raw") or ""
+            vendor_context = await build_extraction_context(db, vendor_no=v_no, vendor_name=v_name)
+            if vendor_context:
+                logger.info("[EXTRACT] Injected %d chars of vendor context for %s", len(vendor_context), v_no or v_name)
+    except Exception as e:
+        logger.debug("[EXTRACT] Vendor context build failed (non-blocking): %s", e)
+
     result = await extract_invoice_data(file_path, vendor_context=vendor_context)
     
     if not result.success:

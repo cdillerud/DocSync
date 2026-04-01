@@ -1,0 +1,106 @@
+{
+  "summary": "Phase 2: Context-Rich LLM Calls testing completed. All 13 backend tests passed (100%). Fixed a bug in ap_auto_post_service._record_success_feedback where vendor alias upsert was failing due to missing alias_id (MongoDB unique index constraint). Frontend verified: Knowledge Base tab in Intelligence Hub shows correct metrics (962 aliases, 122 domains, 603 profiles, 278K BC cache), health badge shows 'Healthy' (green), auto_confirm:1 source visible in Alias Sources.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_vendor_context_builder.py",
+    "/app/test_reports/pytest/vendor_context_builder_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_vendor_context_builder.py",
+    "/app/backend/services/ap_auto_post_service.py"
+  ],
+  "success_rate": {
+    "backend": "100% (13/13 tests passed)",
+    "frontend": "100% (Login, Intelligence Hub, Knowledge Base tab verified)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "No new seed data created - tested existing seeded knowledge base",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 2 Context-Rich LLM Calls fully tested. Key verifications: (1) build_extraction_context returns ~885 chars for TUMALOC with vendor profile, 3 BC invoice examples, and aliases, (2) build_classification_context returns entity distribution showing 100% purchase invoices for TUMALOC with STRONG SIGNAL, (3) Vendor name resolution via aliases works (Tumalo Creek Transportation -> TUMALOC), (4) _record_success_feedback creates classification_corrections with source='auto_confirm' and vendor_aliases with confirm_count, (5) Classification pipeline imports and uses build_classification_context, (6) Invoice extractor imports and uses build_extraction_context, (7) Knowledge Base tab shows 962 aliases (including auto_confirm:1), 603 profiles, 278K BC cache, (8) Fixed bug: added $setOnInsert for alias_id in vendor alias upsert to avoid MongoDB duplicate key error.",
+  "features_tested": {
+    "backend": [
+      "build_extraction_context returns rich context with vendor profile - PASS",
+      "build_extraction_context includes 3 real BC invoice examples - PASS",
+      "build_extraction_context includes known name variants (aliases) - PASS",
+      "build_extraction_context returns ~885 chars for TUMALOC - PASS",
+      "build_classification_context returns entity distribution - PASS",
+      "build_classification_context shows 100% purchase invoices for TUMALOC - PASS",
+      "build_classification_context includes STRONG SIGNAL indicator - PASS",
+      "build_classification_context resolves vendor_name to vendor_no via aliases - PASS",
+      "build_extraction_context works with vendor_name only - PASS",
+      "build_extraction_context returns empty for unknown vendor - PASS",
+      "_record_success_feedback creates classification_corrections with source='auto_confirm' - PASS",
+      "_record_success_feedback creates vendor_aliases with confirm_count - PASS (after fix)",
+      "GET /api/knowledge-seed/status returns correct metrics - PASS",
+      "Classification pipeline imports build_classification_context - PASS",
+      "Invoice extractor imports build_extraction_context - PASS",
+      "Feedback loop uses classification_corrections - PASS",
+      "Feedback loop uses vendor_invoice_profiles - PASS",
+      "API health check - PASS"
+    ],
+    "frontend": [
+      "Login page loads with GPI Document Hub title - PASS",
+      "Login with admin/admin credentials - PASS",
+      "Intelligence Hub has 'Knowledge Base' tab - PASS",
+      "Knowledge Base page loads with data-testid='knowledge-base-page' - PASS",
+      "Health badge shows 'Healthy' (green) - PASS",
+      "Run Full Seed button present - PASS",
+      "Metric cards display: Vendor Aliases=962, Domain Mappings=122, Vendor Profiles=603, BC Reference Cache=278,817 - PASS",
+      "Metric cards display: Classification Corrections=117, Feedback Examples=2, Vendor Type Patterns=9 - PASS",
+      "Alias Sources breakdown shows: user_correction:3, auto_learned:3, bc_cache_seed:954, auto_confirm:1, manual_resolution:1 - PASS",
+      "Domain Mapping Sources breakdown shows: unknown:14, spiro_domain_seed:108 - PASS"
+    ]
+  },
+  "bug_fix_applied": {
+    "file": "/app/backend/services/ap_auto_post_service.py",
+    "issue": "Vendor alias upsert in _record_success_feedback was failing with MongoDB duplicate key error on alias_id index",
+    "root_cause": "The upsert operation did not include alias_id, causing MongoDB to insert with null alias_id which conflicted with existing records",
+    "fix": "Added $setOnInsert: {alias_id: str(uuid.uuid4())} to the update operation to generate unique alias_id on insert",
+    "verification": "Test test_record_success_feedback_creates_vendor_alias_with_confirm_count now passes"
+  },
+  "api_verification": {
+    "GET /api/knowledge-seed/status": {
+      "status_code": 200,
+      "response_structure": {
+        "knowledge_base": {
+          "vendor_aliases": {"total": 962, "by_source": {"bc_cache_seed": 954, "user_correction": 3, "auto_learned": 3, "auto_confirm": 1, "manual_resolution": 1}},
+          "sender_domain_mappings": {"total": 122, "by_source": {"spiro_domain_seed": 108, "unknown": 14}},
+          "vendor_invoice_profiles": 603,
+          "bc_reference_cache": 278817,
+          "classification_corrections": 117
+        },
+        "health": {"aliases_healthy": true, "domains_healthy": true, "profiles_healthy": true, "overall": "good"}
+      }
+    }
+  },
+  "vendor_context_builder_verification": {
+    "build_extraction_context_TUMALOC": {
+      "context_length": "~885 chars",
+      "includes_vendor_profile": true,
+      "includes_invoice_examples": true,
+      "includes_aliases": true,
+      "sample_content": "VENDOR PROFILE — 'Tumalo Creek Transportation' (TUMALOC): Historical invoices: 18,713, avg amount: $1,687.28, PO EXPECTED: YES"
+    },
+    "build_classification_context_TUMALOC": {
+      "context_length": "~315 chars",
+      "includes_entity_distribution": true,
+      "includes_strong_signal": true,
+      "sample_content": "BC ENTITY HISTORY for vendor 'TUMALOC' (18,731 total records): AP Invoices (purchase): 18,731 (100%) → STRONG SIGNAL"
+    }
+  },
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "note": "No APIs are mocked. All data comes from real MongoDB collections (bc_reference_cache, vendor_invoice_profiles, vendor_aliases, classification_corrections)."
+  }
+}

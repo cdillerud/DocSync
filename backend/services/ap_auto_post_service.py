@@ -170,6 +170,10 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
             "source": source,
         })
         logger.info("[AP Auto-Post] All checks passed for %s but BC_WRITE_ENABLED=false", doc_id[:8])
+
+        # Auto-confirm: Record successful automation as positive feedback
+        await _record_success_feedback(db, doc_id, "ReadyForPost", source)
+
         return {"success": True, "posted": False, "reason": "BC writes disabled", "status": "ReadyForPost"}
 
     # Actually post to BC
@@ -200,6 +204,10 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
                 "bc_record_no": result.get("bc_record_no"),
             })
             logger.info("[AP Auto-Post] SUCCESS for %s: BC PI #%s", doc_id[:8], result.get("bc_record_no"))
+
+            # Auto-confirm: Record successful BC post as positive feedback
+            await _record_success_feedback(db, doc_id, "Posted", source)
+
             return {
                 "success": True, "posted": True,
                 "reason": f"Posted to BC as PI #{result.get('bc_record_no')}",
@@ -282,3 +290,80 @@ async def _write_event(db, doc_id: str, event_type: str, payload: dict):
             pass
     except Exception as e:
         logger.warning("[AP Auto-Post] Event write error: %s", e)
+
+
+async def _record_success_feedback(db, doc_id: str, outcome: str, source: str):
+    """
+    Record successful automation as positive feedback.
+    
+    When a document reaches ReadyForPost or Posted, we know that:
+    - The classification was correct
+    - The extraction was correct
+    - The vendor match was correct
+    
+    Store this as a confirmed-correct signal that the feedback loop
+    can use to reinforce patterns.
+    """
+    try:
+        doc = await db.hub_documents.find_one(
+            {"id": doc_id},
+            {"_id": 0, "doc_type": 1, "suggested_job_type": 1, "vendor_canonical": 1,
+             "bc_vendor_number": 1, "filename": 1, "file_name": 1,
+             "extracted_fields": 1, "classification_method": 1, "ai_confidence": 1}
+        )
+        if not doc:
+            return
+
+        now = datetime.now(timezone.utc).isoformat()
+        doc_type = doc.get("doc_type") or doc.get("suggested_job_type") or ""
+        vendor = doc.get("vendor_canonical") or doc.get("bc_vendor_number") or ""
+        fname = doc.get("filename") or doc.get("file_name") or ""
+
+        # Record as confirmed classification correction (positive)
+        await db.classification_corrections.update_one(
+            {"doc_id": doc_id, "source": "auto_confirm"},
+            {"$set": {
+                "doc_id": doc_id,
+                "original_type": doc_type,
+                "corrected_type": doc_type,  # Same = confirmed correct
+                "corrected_by": "system_auto_confirm",
+                "corrected_at": now,
+                "file_name": fname,
+                "vendor_raw": vendor,
+                "vendor_canonical": vendor,
+                "text_snippet": f"[auto-confirmed {outcome}] file={fname}",
+                "classification_method": doc.get("classification_method", ""),
+                "classification_confidence": doc.get("ai_confidence", 0),
+                "source": "auto_confirm",
+                "outcome": outcome,
+                "auto_post_source": source,
+            }},
+            upsert=True,
+        )
+
+        # Also record vendor alias reinforcement if we have both canonical name and vendor no
+        vendor_no = doc.get("bc_vendor_number", "")
+        if vendor_no and vendor:
+            import uuid as uuid_mod
+            await db.vendor_aliases.update_one(
+                {"alias_string": vendor, "vendor_no": vendor_no},
+                {
+                    "$set": {
+                        "alias_string": vendor,
+                        "alias": vendor.upper(),
+                        "normalized_alias": vendor.lower(),
+                        "vendor_no": vendor_no,
+                        "canonical_vendor_id": vendor_no,
+                        "vendor_name": vendor,
+                        "source": "auto_confirm",
+                        "learned_at": now,
+                    },
+                    "$inc": {"confirm_count": 1},
+                    "$setOnInsert": {"alias_id": str(uuid_mod.uuid4())},
+                },
+                upsert=True,
+            )
+
+        logger.info("[AP Auto-Post] Recorded success feedback for %s (%s)", doc_id[:8], outcome)
+    except Exception as e:
+        logger.debug("[AP Auto-Post] Success feedback recording failed (non-blocking): %s", e)

@@ -436,6 +436,27 @@ async def stage_classify_llm(
         except Exception as e:
             logger.debug("[CLASSIFY:LLM] Feedback loop injection failed: %s", e)
 
+        # 3. BC-powered classification intelligence — entity distribution + domain hints
+        try:
+            from services.vendor_context_builder import build_classification_context
+            from deps import get_db
+            ctx_db = get_db()
+            sender_email = doc.get("sender_email", "")
+            classification_ctx = await build_classification_context(
+                ctx_db,
+                vendor_no=vendor_id,
+                vendor_name=vendor_name,
+                sender_email=sender_email,
+            )
+            if classification_ctx:
+                dynamic_prompt += "\n\n" + classification_ctx
+                logger.info(
+                    "[CLASSIFY:LLM] Injected %d chars of BC classification intelligence",
+                    len(classification_ctx),
+                )
+        except Exception as e:
+            logger.debug("[CLASSIFY:LLM] Classification context injection failed: %s", e)
+
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=f"classify-{uuid.uuid4()}",

@@ -17,6 +17,7 @@ server.py retains a thin compatibility wrapper that delegates here.
 
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 import httpx
@@ -540,6 +541,45 @@ async def _validate_bc_match_inner(
                         if vendor_result["selected_vendor"]:
                             validation_results["bc_record_id"] = vendor_result["selected_vendor"].get("id")
                             validation_results["bc_record_info"] = vendor_result["selected_vendor"]
+                        
+                        # AUTO-LEARN: Save this vendor match as an alias so future lookups
+                        # resolve instantly without hitting BC API
+                        if vendor_result["score"] >= 0.9 and vendor_name and vendor_result["selected_vendor"]:
+                            try:
+                                resolved_no = vendor_result["selected_vendor"].get("number", "")
+                                resolved_name = vendor_result["selected_vendor"].get("displayName", "")
+                                if resolved_no and vendor_name:
+                                    import uuid
+                                    from services.vendor_name_helpers import normalize_vendor_name
+                                    alias_key = normalize_vendor_name(vendor_name).upper()
+                                    await db.vendor_aliases.update_one(
+                                        {"alias_string": alias_key},
+                                        {"$set": {
+                                            "alias": alias_key,
+                                            "alias_string": alias_key,
+                                            "alias_raw": vendor_name,
+                                            "normalized_alias": alias_key.lower(),
+                                            "vendor_no": resolved_no,
+                                            "vendor_name": resolved_name,
+                                            "canonical_vendor_id": resolved_no,
+                                            "source": "auto_learned",
+                                            "match_method": vendor_result["match_method"],
+                                            "match_score": vendor_result["score"],
+                                            "updated_at": datetime.now(timezone.utc).isoformat(),
+                                        },
+                                        "$setOnInsert": {
+                                            "alias_id": str(uuid.uuid4()),
+                                            "created_at": datetime.now(timezone.utc).isoformat(),
+                                        }},
+                                        upsert=True,
+                                    )
+                                    logger.info(
+                                        "[AutoLearn] Saved vendor alias: '%s' → %s (%s) via %s @ %.0f%%",
+                                        vendor_name, resolved_no, resolved_name,
+                                        vendor_result["match_method"], vendor_result["score"] * 100,
+                                    )
+                            except Exception as learn_err:
+                                logger.debug("[AutoLearn] Failed to save alias: %s", learn_err)
                     else:
                         validation_results["match_method"] = "none"
                         details = f"No vendor found matching '{vendor_name}' (checked: {', '.join(unified_result.get('sources_checked', []))})"

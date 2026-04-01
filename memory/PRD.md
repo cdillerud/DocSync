@@ -305,6 +305,14 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
   - Fix: Added full AP auto-post flow to reprocess handler: updates bc_vendor_number from validation_results → calls attempt_ap_auto_post → sets status to Posted, ReadyForPost, or NeedsReview. Auto-clear skipped for AP invoices. Fallback status forced to NeedsReview for AP invoices that would otherwise stay as "Failed".
   - Files: `server.py` (reprocess handler)
 
+- **Auto-learn vendor aliases from BC validation matches (P0 - COMPLETE)**:
+  - When BC validation matches a vendor at ≥90% confidence, the raw name → vendor number mapping is automatically saved to `vendor_aliases` collection as an alias.
+  - This means: first time "TUMALO CREEK Transportation" is matched to TUMALOC via BC API, it's saved. Next time, the initial alias lookup finds it instantly — no BC API call needed, no timing gap.
+  - Required fields for alias records: `alias_id` (uuid), `alias_string`, `alias`, `normalized_alias`, `canonical_vendor_id`, `vendor_no`, `vendor_name`, `source=auto_learned`.
+  - Fixed broken TUMALOC alias (empty alias field) and seeded common variations.
+  - Fixed startup crash when loading aliases with missing `alias_string` field.
+  - Files: `bc_validation_service.py`, `server.py` (startup alias loading)
+
 ## Backlog
 - P1: Rep Overrides management UI (Admin screen to map customers to reps without DB scripts)
 - P1: Teams Adaptive Card integration (DM rep via Graph API with Approve/Flag/View buttons)

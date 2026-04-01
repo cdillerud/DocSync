@@ -7048,8 +7048,13 @@ async def startup():
     # Load vendor aliases into memory
     aliases = await db.vendor_aliases.find({}, {"_id": 0}).to_list(500)
     for alias in aliases:
-        VENDOR_ALIAS_MAP[alias["alias_string"]] = alias.get("vendor_name") or alias.get("vendor_no")
-        VENDOR_ALIAS_MAP[alias["normalized_alias"]] = alias.get("vendor_name") or alias.get("vendor_no")
+        alias_str = alias.get("alias_string") or alias.get("alias") or ""
+        norm_alias = alias.get("normalized_alias") or alias_str.lower()
+        vendor_val = alias.get("vendor_name") or alias.get("vendor_no")
+        if alias_str and vendor_val:
+            VENDOR_ALIAS_MAP[alias_str] = vendor_val
+        if norm_alias and vendor_val:
+            VENDOR_ALIAS_MAP[norm_alias] = vendor_val
 
     # Seed known manual vendor aliases (OCR variants → BC vendor)
     _MANUAL_ALIASES = [

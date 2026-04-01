@@ -18,40 +18,23 @@
 ### AP Auto-Post Pipeline (Complete)
 - Strict binary 4-condition check, wired into all flows
 
-### Phase 1: Bulk Knowledge Seeding (Complete)
-- 962 vendor aliases, 122 domain mappings, 603 vendor profiles from BC/Spiro
-
-### Phase 2: Context-Rich LLM Calls (Complete)
-- Vendor context builder with real BC invoice examples + profile intelligence
+### Knowledge Intelligence (Complete)
+- Phase 1: 962 vendor aliases, 122 domain mappings, 603 vendor profiles from BC/Spiro
+- Phase 2: Context-rich LLM calls with real BC invoice examples + vendor profiles
 - Auto-confirm on success for positive reinforcement
-- Classification + extraction prompts enriched with BC history
+- Auto-seed scheduler: startup + every 6h + post-BC-sync
 
-### Auto-Seed Scheduler (Complete)
-- Startup + every 6h + post-BC-sync triggers
-
-### Intelligent Multi-Page Document Splitting (April 1, 2026 — COMPLETE)
-- **Problem**: Multi-page PDFs with multiple invoices/BOLs arrived as single documents, causing misclassification
-- **Solution**: Intelligent boundary detection + auto-split
-  - `document_boundary_service.py`: Page fingerprinting (vendor hints, invoice/PO/BOL numbers, letterhead detection)
-  - Boundary scoring: vendor change (+3), ref number change (+3), letterhead transition (+2), doc type change (+2), threshold ≥ 2
-  - Groups contiguous pages belonging to same logical document (e.g., 2-page invoice stays together)
-  - `batch_po_splitter.py` expanded: SPLITTABLE_TYPES now includes AP_Invoice, BOL, Unknown, etc.
-  - `split_and_ingest_batch()` accepts boundary groups for smart splitting, falls back to per-page
-  - Auto-split wired into main intake pipeline (server.py)
-  - API endpoints: GET `/{doc_id}/boundary-analysis`, POST `/{doc_id}/auto-split`
-- **Test results**: 5-page PDF with 3 vendors → correctly split into 3 groups (pages 1-2, page 3, pages 4-5). Single-vendor 3-page invoice → correctly kept together.
-- Testing: 100% (20/20 backend — iteration_163)
+### Intelligent Multi-Page Document Splitting (Complete)
+- **Boundary detection service**: Page fingerprinting (vendor, invoice/PO/BOL numbers, letterhead)
+- **Smart grouping**: Contiguous same-vendor same-invoice pages stay together
+- **All doc types**: AP_Invoice, BOL, Unknown, PO, SO all splittable
+- **Auto-split in intake pipeline**: Multi-page PDFs detected and split during ingestion
+- **Split Preview UI**: Page thumbnail strip with boundary markers, group color coding, vendor hints, reference numbers, "Split into N docs" button
+- API: GET `/{doc_id}/boundary-analysis`, POST `/{doc_id}/auto-split`
+- Testing: 100% boundary detection, 100% frontend (iteration_163, 164)
 
 ### Derived State Fix (Complete)
-- ReadyForPost documents show "Validated" + "Ready" (not "Failed")
-
-## Key API Endpoints
-- `GET /api/knowledge-seed/status` — KB health + scheduler
-- `POST /api/knowledge-seed/run-all` — Manual full seed
-- `GET /api/documents/{doc_id}` — Document detail with derived state
-- `GET /api/documents/{doc_id}/boundary-analysis` — Preview page boundary detection
-- `POST /api/documents/{doc_id}/auto-split` — Trigger boundary-aware splitting
-- `POST /api/documents/{doc_id}/reprocess` — Reprocessing
+- ReadyForPost documents show correct badges
 
 ## Backlog
 - P1: Rep Overrides management UI

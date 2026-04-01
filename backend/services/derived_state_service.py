@@ -326,13 +326,24 @@ class DerivedStateService:
                     automation_state = AutomationState.AUTONOMOUS.value
                     workflow_state = WorkflowState.COMPLETED.value
                     state_reason = "Auto-posted"
+                elif decision == "ReadyForPost":
+                    automation_state = AutomationState.AUTONOMOUS.value
+                    workflow_state = WorkflowState.READY.value
+                    state_reason = "Ready for processing"
+                    validation_state = "pass"  # If auto-post says ready, validation is effectively passed
                 elif decision == "NeedsReview":
                     needs_review = True
                     workflow_state = WorkflowState.REVIEWING.value
                     automation_state = AutomationState.ASSISTED.value
+                    state_reason = payload.get("reason", "Awaiting review")
                 elif decision == "ReadyForApproval":
                     workflow_state = WorkflowState.READY.value
                     automation_state = AutomationState.ASSISTED.value
+                elif decision == "Posted":
+                    automation_state = AutomationState.AUTONOMOUS.value
+                    workflow_state = WorkflowState.COMPLETED.value
+                    state_reason = "Posted to BC"
+                    validation_state = "pass"
             
             # Review events
             elif event_type == "review.assigned":
@@ -530,6 +541,7 @@ class DerivedStateService:
             "Classified": WorkflowState.PROCESSING.value,
             "Validated": WorkflowState.READY.value,
             "Valid": WorkflowState.READY.value,
+            "ReadyForPost": WorkflowState.READY.value,
             "NeedsReview": WorkflowState.REVIEWING.value,
             "Exception": WorkflowState.REVIEWING.value,
             "LinkedToBC": WorkflowState.COMPLETED.value,

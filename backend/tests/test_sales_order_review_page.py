@@ -13,7 +13,7 @@ import pytest
 import requests
 import time
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://ap-status-sync.preview.emergentagent.com")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://intelligent-inbox-8.preview.emergentagent.com")
 
 
 class TestBatchDemoSetup:

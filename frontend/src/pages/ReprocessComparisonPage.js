@@ -385,6 +385,7 @@ export default function ReprocessComparisonPage() {
               <span className="text-emerald-400">Improved: {status.improved}</span>
               <span className="text-red-400">Regressed: {status.regressed}</span>
               <span>Unchanged: {status.unchanged}</span>
+              {(status.recovered ?? 0) > 0 && <span className="text-blue-400">Recovered: {status.recovered}</span>}
               <span>Errors: {status.errors}</span>
             </div>
           </CardContent>
@@ -394,12 +395,13 @@ export default function ReprocessComparisonPage() {
       {/* Summary (when comparison complete) */}
       {hasResults && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3" data-testid="comparison-summary-cards">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3" data-testid="comparison-summary-cards">
             <StatCard label="Total" value={status.processed || status.total_documents || status.total} icon={FileText} />
             <StatCard label="Changed" value={status.changed ?? 0} color="text-amber-400" icon={BarChart3} />
             <StatCard label="Improved" value={status.improved ?? 0} color="text-emerald-400" icon={TrendingUp} />
             <StatCard label="Regressed" value={status.regressed ?? 0} color="text-red-400" icon={ArrowDownRight} />
             <StatCard label="Unchanged" value={status.unchanged ?? 0} icon={Shield} />
+            <StatCard label="Recovered" value={status.recovered ?? 0} color="text-blue-400" icon={RefreshCw} />
             <StatCard label="Skipped" value={status.skipped ?? 0} color="text-muted-foreground" icon={Minus} />
             <Card className="border border-border">
               <CardContent className="p-3 text-center">

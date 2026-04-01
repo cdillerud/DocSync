@@ -25,12 +25,9 @@
 - Auto-seed scheduler: startup + every 6h + post-BC-sync
 
 ### Intelligent Multi-Page Document Splitting (Complete)
-- **Boundary detection service**: Page fingerprinting (vendor, invoice/PO/BOL numbers, letterhead)
-- **Smart grouping**: Contiguous same-vendor same-invoice pages stay together
-- **All doc types**: AP_Invoice, BOL, Unknown, PO, SO all splittable
-- **Auto-split in intake pipeline**: Multi-page PDFs detected and split during ingestion
-- **Split Preview UI**: Page thumbnail strip with boundary markers, group color coding, vendor hints, reference numbers, "Split into N docs" button
-- API: GET `/{doc_id}/boundary-analysis`, POST `/{doc_id}/auto-split`
+- Boundary detection service with page fingerprinting
+- Smart grouping, auto-split in intake pipeline
+- Split Preview UI with page thumbnails and boundary markers
 
 ### Derived State Fix (Complete)
 - ReadyForPost documents show correct badges
@@ -39,6 +36,7 @@
 - **Compare (Preview)**: Re-runs LLM classification on all docs, shows before/after without touching production
 - **Apply Improvements**: Commits only improved results (higher confidence, better classification) back to production
 - **Full Pipeline Reprocess**: Re-runs entire pipeline (classify + extract + validate + vendor match) on non-terminal docs
+- **File Recovery**: Automatically recovers files from MongoDB file_content_b64 or SharePoint when not on disk
 - **Frontend**: Settings > Before/After tab with progress tracking, summary cards, field change breakdown, document-level results table
 - API: POST `/run`, GET `/status`, POST `/apply/{run_id}`, GET `/apply-status`, POST `/run-full`, GET `/full-status`
 

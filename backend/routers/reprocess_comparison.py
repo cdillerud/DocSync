@@ -11,6 +11,7 @@ The comparison stores:
 """
 
 import asyncio
+import base64
 import logging
 import os
 import uuid
@@ -26,6 +27,64 @@ logger = logging.getLogger("reprocess_comparison")
 router = APIRouter(prefix="/reprocess-comparison", tags=["Reprocess Comparison"])
 
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/app/backend/uploads"))
+
+
+async def _recover_file_to_disk(doc: dict, doc_id: str, db) -> Optional[Path]:
+    """Try to recover a document file to disk from MongoDB or SharePoint.
+    
+    Returns the file path if recovered, None if all methods fail.
+    """
+    file_path = UPLOAD_DIR / doc_id
+
+    # Method 1: Recover from file_content_b64 stored in MongoDB
+    b64_content = doc.get("file_content_b64")
+    if not b64_content:
+        # Re-fetch from DB with the b64 field (excluded from default queries)
+        full_doc = await db.hub_documents.find_one(
+            {"id": doc_id},
+            {"_id": 0, "file_content_b64": 1}
+        )
+        if full_doc:
+            b64_content = full_doc.get("file_content_b64")
+
+    if b64_content:
+        try:
+            content = base64.b64decode(b64_content)
+            file_path.write_bytes(content)
+            logger.info("[FileRecover] Recovered %s from b64 (%d bytes)", doc_id[:8], len(content))
+            return file_path
+        except Exception as e:
+            logger.warning("[FileRecover] b64 decode failed for %s: %s", doc_id[:8], e)
+
+    # Method 2: Download from SharePoint via Graph API
+    drive_id = doc.get("sharepoint_drive_id", "")
+    item_id = doc.get("sharepoint_item_id", "")
+    if drive_id and item_id:
+        try:
+            from services.config_service import get_graph_token, DEMO_MODE
+            if not DEMO_MODE:
+                import httpx
+                token = await get_graph_token()
+                if token and token != "mock-graph-token":
+                    graph_url = (
+                        f"https://graph.microsoft.com/v1.0/drives/{drive_id}"
+                        f"/items/{item_id}/content"
+                    )
+                    async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+                        resp = await client.get(
+                            graph_url,
+                            headers={"Authorization": f"Bearer {token}"},
+                        )
+                    if resp.status_code == 200:
+                        file_path.write_bytes(resp.content)
+                        logger.info("[FileRecover] Downloaded %s from SharePoint (%d bytes)", doc_id[:8], len(resp.content))
+                        return file_path
+                    else:
+                        logger.warning("[FileRecover] SharePoint download failed for %s: HTTP %d", doc_id[:8], resp.status_code)
+        except Exception as e:
+            logger.warning("[FileRecover] SharePoint download error for %s: %s", doc_id[:8], e)
+
+    return None
 
 # Module-level run state
 _current_run: Dict[str, Any] = {"status": "idle"}
@@ -186,16 +245,23 @@ async def _run_comparison(run_id: str, limit: int, doc_type_filter: str):
                 if alt_path.exists():
                     file_path = alt_path
                 else:
-                    results.append({
-                        "doc_id": doc_id,
-                        "file_name": file_name,
-                        "status": "skipped",
-                        "reason": "file_not_on_disk",
-                        "before": before,
-                    })
-                    _current_run["errors"] += 1
-                    _current_run["processed"] = i + 1
-                    continue
+                    # Try to recover file from MongoDB b64 or SharePoint
+                    recovered = await _recover_file_to_disk(doc, doc_id, db)
+                    if recovered:
+                        file_path = recovered
+                        _current_run.setdefault("recovered", 0)
+                        _current_run["recovered"] += 1
+                    else:
+                        results.append({
+                            "doc_id": doc_id,
+                            "file_name": file_name,
+                            "status": "skipped",
+                            "reason": "file_not_on_disk",
+                            "before": before,
+                        })
+                        _current_run["errors"] += 1
+                        _current_run["processed"] = i + 1
+                        continue
 
             # Re-run classification pipeline
             from services.classification_pipeline import stage_classify_llm
@@ -302,6 +368,7 @@ async def _run_comparison(run_id: str, limit: int, doc_type_filter: str):
         "processed": total_processed,
         "skipped": len([r for r in results if r["status"] == "skipped"]),
         "errors": len([r for r in results if r["status"] == "error"]),
+        "recovered": _current_run.get("recovered", 0),
         "changed": total_changed,
         "unchanged": total_processed - total_changed,
         "improved": _current_run["improved"],
@@ -644,13 +711,19 @@ async def _run_full_reprocess(run_id: str, limit: int, doc_type_filter: str, ski
         try:
             file_path = UPLOAD_DIR / doc_id
             if not file_path.exists():
-                _full_reprocess_state["skipped_no_file"] += 1
-                _full_reprocess_state["processed"] = i + 1
-                continue
+                # Try to recover file from MongoDB b64 or SharePoint
+                recovered = await _recover_file_to_disk(doc, doc_id, db)
+                if recovered:
+                    file_path = recovered
+                    _full_reprocess_state.setdefault("recovered", 0)
+                    _full_reprocess_state["recovered"] += 1
+                else:
+                    _full_reprocess_state["skipped_no_file"] += 1
+                    _full_reprocess_state["processed"] = i + 1
+                    continue
 
             # Snapshot before
             before_confidence = float(doc.get("ai_confidence") or 0)
-            before_type = doc.get("suggested_job_type") or doc.get("document_type") or "Unknown"
 
             # Use the single-doc reprocess handler which runs the full pipeline
             from services.document_handlers import reprocess_document

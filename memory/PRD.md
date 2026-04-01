@@ -1,7 +1,7 @@
 # GPI Document Hub — Product Requirements
 
 ## Core Philosophy
-**Learn → Apply → Improve → Learn.** Every document processed, every correction made, every interaction makes the system smarter. Use ALL available data on everything — every interaction, every calculation, every routing decision. The system must continuously self-improve through feedback loops at every layer. Document
+**Learn → Apply → Improve → Learn.** Every document processed, every correction made, every interaction makes the system smarter. Use ALL available data — every interaction, every calculation, every routing decision. The system must continuously self-improve through feedback loops at every layer.
 
 ## Original Problem Statement
 Build a document intelligence platform (GPI Hub) to automate document-to-ERP completions, decouple legacy systems, and improve automated multi-source PO extraction. Key capabilities:
@@ -14,9 +14,9 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
 ## Architecture
 - **Backend**: FastAPI (Python) on port 8001
 - **Frontend**: React on port 3000
-- **Database**: MongoDB
-- **Integrations**: OpenAI GPT-4o / Gemini 3 Pro (Emergent LLM Key), Dynamics 365 BC, MS Graph (Email/SharePoint)
-- **Key Pattern**: Derived state via workflow events — UI updates based on event timeline
+- **Database**: MongoDB (gpi_document_hub)
+- **Integrations**: OpenAI GPT-4o / Gemini (Emergent LLM Key), Dynamics 365 BC, MS Graph (Email/SharePoint)
+- **Key Pattern**: Event-driven derived state — UI badges computed from workflow_events timeline
 
 ## What's Implemented
 
@@ -25,7 +25,7 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
 - Multi-field text search with MongoDB $text index
 - AI extraction + deterministic classification pipeline
 - Drop-Ship PO auto-creation in BC
-- Intake Benchmark testing suite with auto-post readiness scoring
+- Intake Benchmark testing suite
 - SharePoint file preview with fallback logic
 - Email polling (AP, Sales, dynamic UI-configured mailboxes)
 - Event emission with direct DB fallback (hardened)
@@ -35,53 +35,62 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
 - `ap_auto_post_service.py`: 4-condition check (classified + fields extracted + vendor matched + PO matched)
 - Wired into intake (`server.py`), reprocess (`document_handlers.py`), mark-ready (`ap_review.py`)
 - AP invoices bypass old auto_clear entirely
-- Vendor profile learning from BC cache (`vendor_invoice_profile_service.py`)
+- Vendor profile learning from BC cache
 - Vendor alias auto-learning from successful BC validation
-- `bc_vendor_number` properly stored during intake/reprocess
 
 ### Derived State / Status Badge Fix (April 1, 2026 - COMPLETE)
-- **Root cause**: `automation.decision.completed` events with both `auto_clear=True` AND `decision="ReadyForPost"` were handled by the `auto_clear` branch first in `derived_state_service.py`, which set `workflow_state="completed"` but never set `validation_state="pass"`. Earlier `bc.validation.completed` events left `validation_state="fail"` — the frontend read this and showed "Failed" badge.
-- **Fix**: Restructured `_derive_from_events()` to check `decision` field FIRST (ReadyForPost/Posted/NeedsReview) before falling back to `auto_clear`/`auto_post` booleans.
-  - ReadyForPost: validation_state=pass, workflow_state=ready, clears blocking_issues, needs_review=False
-  - Posted: validation_state=pass, workflow_state=completed, clears blocking_issues
-  - NeedsReview: workflow_state=reviewing, needs_review=True
-  - auto_clear/auto_post without decision: backward-compatible completed state with validation_state=pass
-- **Legacy fallback fix**: `_derive_from_legacy()` now handles `status="ReadyForPost"` before `auto_cleared=True` override.
-- **Frontend**: Added "Ready to Post" label and green color for ReadyForPost/ready_for_post in `UnifiedQueuePage.js`
-- **Testing**: 100% (8/8 backend, full frontend verification — iteration_160)
-- **Files**: `services/derived_state_service.py`, `pages/UnifiedQueuePage.js`
+- **Root cause**: `auto_clear=True` shadowed `decision="ReadyForPost"` in event handler
+- **Fix**: Restructured to check `decision` FIRST, then fallback to `auto_clear/auto_post`
+- ReadyForPost → validation_state=pass, workflow_state=ready, clears blocking_issues/needs_review
+- Testing: 100% (iteration_160)
 
-### Previous Session Work (See CHANGELOG for full history)
-- UX Simplification (3-item → 4-item sidebar)
-- Inbox Stats Strip, Insights Page
-- Processed Tab, Batches Tab
-- Sales Module Phase 1 (My Queue, Triage, Auto-Assign, Pipeline Demo)
-- Learned Dunnage Patterns, Energy Surcharge, Quantity Bounds
-- AP Writes to BC Sandbox
-- BC Custom API 404 Fix, MEXUS vendor fix
-- Auto-Close Confidence Fix, File Persistence Fix
-- Folder Routing 100% accuracy
+### Phase 1: Bulk Knowledge Seeding (April 1, 2026 - COMPLETE)
+- **Problem**: System had 278K BC records, 11K Spiro companies, 117 corrections but was barely using them. LLM flying blind.
+- **Solution**: Built `knowledge_seed_service.py` + API endpoints + admin UI
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Vendor Aliases | 7 | 961 | 137x |
+| Sender-Domain Mappings | 14 | 122 | 9x |
+| Vendor Invoice Profiles | 3 | 603 | 201x |
+| Feedback to LLM | ~0 context | Rich profiles + 117 corrections + aliases | ∞ |
+
+- **Vendor Profiles** include: amount stats (mean/median/min/max), PO expected flag, PO format patterns, posting frequency
+- **Feedback Prompt Builder** fixed to use `classification_corrections` (117 records) instead of empty `classification_feedback` (2 records), now injects vendor profile intelligence
+- **Extraction Prompt** enriched with vendor context from profiles
+- **Entity Resolution** alias limit increased 500→2000
+- **Knowledge Base admin page** added to Intelligence Hub with health monitoring + Run Full Seed button
+- Testing: 100% (17/17 backend, full frontend — iteration_161)
 
 ## Key API Endpoints
 - `GET /api/documents/search` — Multi-field text search
 - `GET /api/documents/{doc_id}` — Document detail with derived state
 - `POST /api/documents/{doc_id}/reprocess` — Document reprocessing
 - `POST /api/ap-review/documents/{doc_id}/mark-ready` — Triggers direct BC post
-- `POST /api/ap-review/documents/{doc_id}/post-to-bc` — Direct BC posting
 - `GET /api/dashboard/inbox-stats` — Inbox metrics
-- `GET /api/dashboard/insights-trends` — Insights aggregations
+- `GET /api/knowledge-seed/status` — Knowledge base health metrics
+- `POST /api/knowledge-seed/run-all` — Run all 3 seeders (idempotent)
 
-## Known Limitations
-- BC Sandbox and SharePoint Graph API calls fail in preview (DEMO_MODE=false, but BC creds may not work in preview)
-- Documents stuck at 0.00 confidence from before the fix can be reprocessed via `POST /api/documents/{doc_id}/reprocess?reclassify=true`
+## Key Collections
+- `bc_reference_cache`: 278,817 records (posted invoices, shipments, POs)
+- `vendor_aliases`: 961 (name variant → BC vendor number)
+- `vendor_invoice_profiles`: 603 (amount stats, PO patterns, frequency)
+- `sender_vendor_map`: 122 (email domain → vendor)
+- `classification_corrections`: 117 (human corrections → few-shot examples)
+- `spiro_companies`: 11,700 (CRM data)
 
 ## Backlog
-- P1: Rep Overrides management UI (Admin screen to map customers to reps without DB scripts)
-- P1: Teams Adaptive Card integration (DM rep via Graph API with Approve/Flag/View buttons)
-- P1: Webhook handler for Teams "Approve" action → BC SO creation
+
+### Phase 2: Context-Rich LLM Calls (Next Priority)
+- P0: Enrich extraction prompt with BC historical examples (few-shot with REAL invoice data)
+- P0: Enrich classification with folder path → doc type patterns from 21K folder_classifications
+- P1: Auto-confirm on success — when a doc auto-posts, record as positive reinforcement
+
+### Existing Backlog
+- P1: Rep Overrides management UI (Admin screen to map customers to reps)
+- P1: Teams Adaptive Card integration (webhook for Approve → BC SO)
 - P2: Vendor Inventory Dashboard
 - P2: Product/BOM (Bill of Materials) module
 - P2: Production-ready email service and Entra ID SSO
-- P3: Continue server.py extraction (5 remaining `from server import` calls)
-- P3: Investigate 205 `no_bc_match` batch failures
-- P3: Clean up dead code in `auto_clear_service.py` (AP invoice paths no longer used)
+- P3: Continue server.py extraction
+- P3: Clean up dead code in auto_clear_service.py

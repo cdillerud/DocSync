@@ -1,0 +1,101 @@
+{
+  "summary": "Bulk Reprocess feature testing completed. Backend: 12/12 tests passed (100%). Frontend: All UI elements verified working. The AI Reprocess & Comparison page correctly displays under Settings > Before/After tab with Compare (Preview) and Full Pipeline Reprocess buttons visible and clickable.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_reprocess_comparison.py",
+    "/app/test_reports/pytest/reprocess_comparison_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_reprocess_comparison.py"
+  ],
+  "success_rate": {
+    "backend": "100% (12/12 tests passed)",
+    "frontend": "100% (all UI elements verified)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "None - used existing comparison runs in database",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Bulk Reprocess feature fully tested. Key verifications: (1) GET /api/reprocess-comparison/status returns idle state, (2) GET /api/reprocess-comparison/apply-status returns idle state, (3) GET /api/reprocess-comparison/full-status returns idle state, (4) POST /api/reprocess-comparison/run starts comparison and returns run_id with status=started, (5) GET /api/reprocess-comparison/runs returns list of previous runs, (6) POST /api/reprocess-comparison/apply/{run_id} with non-existent run returns error, (7) POST /api/reprocess-comparison/run-full starts full reprocess and returns run_id with status=started, (8) Frontend Settings > Before/After tab shows AI Reprocess & Comparison page, (9) Compare (Preview) button visible and clickable - triggers toast 'Comparison started: cmp-xxx', (10) Full Pipeline Reprocess button visible and clickable.",
+  "features_tested": {
+    "backend_api": [
+      "GET /api/reprocess-comparison/status returns 200 with status=idle - PASS",
+      "GET /api/reprocess-comparison/apply-status returns 200 with status=idle - PASS",
+      "GET /api/reprocess-comparison/full-status returns 200 with status=idle - PASS",
+      "GET /api/reprocess-comparison/runs returns 200 with list of runs - PASS",
+      "POST /api/reprocess-comparison/run returns run_id and status=started - PASS",
+      "POST /api/reprocess-comparison/run with doc_type filter works - PASS",
+      "POST /api/reprocess-comparison/apply/{non-existent} returns error - PASS",
+      "POST /api/reprocess-comparison/apply/{valid-run} starts apply - PASS",
+      "POST /api/reprocess-comparison/run-full returns run_id and status=started - PASS",
+      "GET /api/reprocess-comparison/results/{non-existent} returns error - PASS",
+      "GET /api/reprocess-comparison/results/{valid-run} returns results - PASS",
+      "GET /api/reprocess-comparison/results/{run}?changes_only=true works - PASS"
+    ],
+    "frontend_ui": [
+      "Settings page accessible via sidebar - PASS",
+      "Before/After tab visible in Settings tabs - PASS",
+      "AI Reprocess & Comparison page loads - PASS",
+      "Page title 'AI Reprocess & Comparison' displayed - PASS",
+      "Description text displayed - PASS",
+      "Compare (Preview) button visible - PASS",
+      "Compare (Preview) button clickable - triggers API call - PASS",
+      "Full Pipeline Reprocess button visible - PASS",
+      "Previous apply status card displayed - PASS",
+      "Previous full reprocess status card displayed - PASS",
+      "No comparison data message displayed when idle - PASS",
+      "Toast notification shows on comparison start - PASS"
+    ]
+  },
+  "api_verification": {
+    "GET /api/reprocess-comparison/status": {
+      "status_code": 200,
+      "response": {"status": "idle"}
+    },
+    "GET /api/reprocess-comparison/apply-status": {
+      "status_code": 200,
+      "response": {"status": "idle"}
+    },
+    "GET /api/reprocess-comparison/full-status": {
+      "status_code": 200,
+      "response": {"status": "idle"}
+    },
+    "GET /api/reprocess-comparison/runs": {
+      "status_code": 200,
+      "response_structure": {"runs": "array of run objects with run_id, status, total, filter, started_at, finished_at, summary"}
+    },
+    "POST /api/reprocess-comparison/run": {
+      "status_code": 200,
+      "response": {"run_id": "cmp-xxx", "status": "started", "limit": 5, "filter": "all"}
+    },
+    "POST /api/reprocess-comparison/apply/{non-existent}": {
+      "status_code": 200,
+      "response": {"error": "Run not found", "run_id": "non-existent-run-id"}
+    },
+    "POST /api/reprocess-comparison/run-full": {
+      "status_code": 200,
+      "response": {"run_id": "full-xxx", "status": "started", "limit": 3, "filter": "all", "skip_terminal": true}
+    }
+  },
+  "data_testid_attributes_verified": [
+    "settings-hub-page",
+    "tab-reprocess",
+    "reprocess-comparison-page",
+    "start-comparison-btn",
+    "start-full-reprocess-btn"
+  ],
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "note": "All endpoints are live against real MongoDB"
+  }
+}

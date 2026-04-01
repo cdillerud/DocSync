@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import {
   PlayCircle, RefreshCw, Loader2, CheckCircle2, XCircle, ArrowUpRight,
   ArrowDownRight, Minus, AlertTriangle, FileText, BarChart3, Zap,
+  Upload, Rocket, Shield, TrendingUp,
 } from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -41,6 +42,20 @@ function FieldChange({ field, change }) {
   );
 }
 
+function StatCard({ label, value, color = '', icon: Icon }) {
+  return (
+    <Card className="border border-border">
+      <CardContent className="p-3 text-center">
+        <div className="flex items-center justify-center gap-1.5 mb-1">
+          {Icon && <Icon className={`w-3.5 h-3.5 ${color || 'text-muted-foreground'}`} />}
+          <p className="text-[10px] text-muted-foreground">{label}</p>
+        </div>
+        <p className={`text-xl font-bold font-mono ${color}`}>{value}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function ReprocessComparisonPage() {
   const [status, setStatus] = useState(null);
   const [results, setResults] = useState(null);
@@ -48,6 +63,12 @@ export default function ReprocessComparisonPage() {
   const [starting, setStarting] = useState(false);
   const [changesOnly, setChangesOnly] = useState(false);
   const [polling, setPolling] = useState(false);
+  const [applyState, setApplyState] = useState(null);
+  const [applyPolling, setApplyPolling] = useState(false);
+  const [fullState, setFullState] = useState(null);
+  const [fullPolling, setFullPolling] = useState(false);
+  const [startingFull, setStartingFull] = useState(false);
+  const [applying, setApplying] = useState(false);
 
   const fetchResults = useCallback(async (runId, onlyChanges = false) => {
     try {
@@ -75,7 +96,29 @@ export default function ReprocessComparisonPage() {
     }
   }, [changesOnly, fetchResults]);
 
-  // Poll while running
+  const fetchApplyStatus = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/reprocess-comparison/apply-status`);
+      const data = await res.json();
+      setApplyState(data);
+      return data;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const fetchFullStatus = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/reprocess-comparison/full-status`);
+      const data = await res.json();
+      setFullState(data);
+      return data;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  // Poll comparison while running
   useEffect(() => {
     if (!polling) return;
     const interval = setInterval(async () => {
@@ -88,12 +131,46 @@ export default function ReprocessComparisonPage() {
     return () => clearInterval(interval);
   }, [polling, changesOnly, fetchStatus, fetchResults]);
 
-  useEffect(() => { fetchStatus(); }, [fetchStatus]);
+  // Poll apply status
+  useEffect(() => {
+    if (!applyPolling) return;
+    const interval = setInterval(async () => {
+      const s = await fetchApplyStatus();
+      if (s && s.status !== 'running') {
+        setApplyPolling(false);
+        if (s.status === 'completed') {
+          toast.success(`Applied ${s.applied} improvements to production!`);
+        }
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [applyPolling, fetchApplyStatus]);
+
+  // Poll full reprocess status
+  useEffect(() => {
+    if (!fullPolling) return;
+    const interval = setInterval(async () => {
+      const s = await fetchFullStatus();
+      if (s && s.status !== 'running') {
+        setFullPolling(false);
+        if (s.status === 'completed') {
+          toast.success(`Full reprocess complete: ${s.success} docs updated, ${s.improved} improved`);
+        }
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [fullPolling, fetchFullStatus]);
+
+  useEffect(() => {
+    fetchStatus();
+    fetchApplyStatus();
+    fetchFullStatus();
+  }, [fetchStatus, fetchApplyStatus, fetchFullStatus]);
 
   const startRun = async () => {
     setStarting(true);
     try {
-      const res = await fetch(`${API_URL}/api/reprocess-comparison/run`, { method: 'POST' });
+      const res = await fetch(`${API_URL}/api/reprocess-comparison/run?limit=500`, { method: 'POST' });
       const data = await res.json();
       if (data.error) {
         toast.error(data.error);
@@ -109,25 +186,77 @@ export default function ReprocessComparisonPage() {
     }
   };
 
+  const applyImprovements = async () => {
+    if (!status?.run_id) return;
+    setApplying(true);
+    try {
+      const res = await fetch(
+        `${API_URL}/api/reprocess-comparison/apply/${status.run_id}?improved_only=true`,
+        { method: 'POST' }
+      );
+      const data = await res.json();
+      if (data.error) {
+        toast.error(data.error);
+      } else {
+        toast.success('Applying improvements...');
+        setApplyPolling(true);
+      }
+    } catch {
+      toast.error('Failed to start apply');
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const startFullReprocess = async () => {
+    setStartingFull(true);
+    try {
+      const res = await fetch(
+        `${API_URL}/api/reprocess-comparison/run-full?limit=500&skip_terminal=true`,
+        { method: 'POST' }
+      );
+      const data = await res.json();
+      if (data.error) {
+        toast.error(data.error);
+      } else {
+        toast.success(`Full reprocess started: ${data.run_id}`);
+        setFullPolling(true);
+      }
+    } catch {
+      toast.error('Failed to start full reprocess');
+    } finally {
+      setStartingFull(false);
+    }
+  };
+
   const isRunning = status?.status === 'running';
   const isComplete = status?.status === 'completed';
+  const hasResults = isComplete && (status.total > 0 || status.total_documents > 0 || status.processed > 0);
   const progressPct = isRunning && status.total > 0
     ? Math.round((status.processed / status.total) * 100)
     : 0;
 
+  const isFullRunning = fullState?.status === 'running';
+  const isFullComplete = fullState?.status === 'completed';
+  const fullProgressPct = isFullRunning && fullState.total > 0
+    ? Math.round((fullState.processed / fullState.total) * 100)
+    : 0;
+
+  const isApplyRunning = applyState?.status === 'running';
+
   return (
     <div className="space-y-6" data-testid="reprocess-comparison-page">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight" style={{ fontFamily: 'Chivo, sans-serif' }}>
-            Before / After Comparison
+            AI Reprocess & Comparison
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Re-run the improved LLM pipeline on all documents. Compare old vs new results without overwriting production data.
+            Re-run the knowledge-seeded AI pipeline on documents. Compare results, then apply improvements.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           {!isRunning && (
             <Button
               onClick={startRun}
@@ -136,30 +265,117 @@ export default function ReprocessComparisonPage() {
               data-testid="start-comparison-btn"
             >
               {starting ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlayCircle className="w-4 h-4" />}
-              Run Comparison
+              Compare (Preview)
             </Button>
           )}
-          {isComplete && status.run_id && (
+          {hasResults && (status.improved ?? 0) > 0 && !isApplyRunning && (
             <Button
-              variant="outline"
-              size="sm"
-              className="h-9 text-xs gap-1"
-              onClick={() => fetchResults(status.run_id, changesOnly)}
-              data-testid="refresh-results-btn"
+              onClick={applyImprovements}
+              disabled={applying}
+              variant="default"
+              className="h-9 gap-1.5 bg-emerald-600 hover:bg-emerald-700"
+              data-testid="apply-improvements-btn"
             >
-              <RefreshCw className="w-3 h-3" /> Refresh
+              {applying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+              Apply {status.improved} Improvements
+            </Button>
+          )}
+          {!isFullRunning && (
+            <Button
+              onClick={startFullReprocess}
+              disabled={startingFull}
+              variant="outline"
+              className="h-9 gap-1.5 border-amber-700 text-amber-400 hover:bg-amber-900/20"
+              data-testid="start-full-reprocess-btn"
+            >
+              {startingFull ? <Loader2 className="w-4 h-4 animate-spin" /> : <Rocket className="w-4 h-4" />}
+              Full Pipeline Reprocess
             </Button>
           )}
         </div>
       </div>
 
-      {/* Progress (while running) */}
-      {isRunning && (
-        <Card className="border border-amber-700/50" data-testid="comparison-progress">
+      {/* Apply status */}
+      {isApplyRunning && applyState && (
+        <Card className="border border-emerald-700/50" data-testid="apply-progress">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3 mb-2">
+              <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+              <span className="text-sm font-medium">Applying improvements to production...</span>
+              <span className="text-xs text-muted-foreground ml-auto font-mono">
+                {applyState.applied ?? 0} / {applyState.total ?? 0}
+              </span>
+            </div>
+            <Progress value={applyState.total > 0 ? Math.round(((applyState.applied || 0) / applyState.total) * 100) : 0} className="h-2" />
+          </CardContent>
+        </Card>
+      )}
+
+      {applyState?.status === 'completed' && (
+        <Card className="border border-emerald-700/50 bg-emerald-950/20" data-testid="apply-complete">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+              <div>
+                <p className="text-sm font-medium text-emerald-300">
+                  Applied {applyState.applied} improvements to production
+                </p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  {applyState.skipped} skipped | {applyState.errors} errors | {applyState.finished_at?.split('T')[0]}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Full Reprocess Progress */}
+      {isFullRunning && fullState && (
+        <Card className="border border-amber-700/50" data-testid="full-reprocess-progress">
           <CardContent className="p-4">
             <div className="flex items-center gap-3 mb-2">
               <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
-              <span className="text-sm font-medium">Processing documents...</span>
+              <span className="text-sm font-medium">Full pipeline reprocess running...</span>
+              <span className="text-xs text-muted-foreground ml-auto font-mono">
+                {fullState.processed} / {fullState.total}
+              </span>
+            </div>
+            <Progress value={fullProgressPct} className="h-2" />
+            <div className="flex gap-4 mt-2 text-[10px] text-muted-foreground">
+              <span className="text-emerald-400">Success: {fullState.success}</span>
+              <span className="text-blue-400">Improved: {fullState.improved}</span>
+              <span className="text-red-400">Errors: {fullState.errors}</span>
+              <span>No File: {fullState.skipped_no_file}</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {isFullComplete && fullState && (
+        <Card className="border border-amber-700/50 bg-amber-950/20" data-testid="full-reprocess-complete">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <Rocket className="w-5 h-5 text-amber-400" />
+              <div>
+                <p className="text-sm font-medium text-amber-300">
+                  Full reprocess complete: {fullState.success}/{fullState.total} documents updated
+                </p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  {fullState.improved} improved | {fullState.errors} errors | {fullState.skipped_no_file} no file
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Comparison Progress (while running) */}
+      {isRunning && (
+        <Card className="border border-blue-700/50" data-testid="comparison-progress">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3 mb-2">
+              <Loader2 className="w-4 h-4 animate-spin text-blue-400" />
+              <span className="text-sm font-medium">Comparing documents (preview only)...</span>
               <span className="text-xs text-muted-foreground ml-auto font-mono">
                 {status.processed} / {status.total}
               </span>
@@ -175,49 +391,22 @@ export default function ReprocessComparisonPage() {
         </Card>
       )}
 
-      {/* Summary (when complete) */}
-      {isComplete && (status.total > 0 || status.total_documents > 0 || status.processed > 0) && (
+      {/* Summary (when comparison complete) */}
+      {hasResults && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3" data-testid="comparison-summary-cards">
+            <StatCard label="Total" value={status.processed || status.total_documents || status.total} icon={FileText} />
+            <StatCard label="Changed" value={status.changed ?? 0} color="text-amber-400" icon={BarChart3} />
+            <StatCard label="Improved" value={status.improved ?? 0} color="text-emerald-400" icon={TrendingUp} />
+            <StatCard label="Regressed" value={status.regressed ?? 0} color="text-red-400" icon={ArrowDownRight} />
+            <StatCard label="Unchanged" value={status.unchanged ?? 0} icon={Shield} />
+            <StatCard label="Skipped" value={status.skipped ?? 0} color="text-muted-foreground" icon={Minus} />
             <Card className="border border-border">
               <CardContent className="p-3 text-center">
-                <p className="text-[10px] text-muted-foreground">Total</p>
-                <p className="text-xl font-bold font-mono">{status.processed || status.total_documents || status.total}</p>
-              </CardContent>
-            </Card>
-            <Card className="border border-border">
-              <CardContent className="p-3 text-center">
-                <p className="text-[10px] text-muted-foreground">Changed</p>
-                <p className="text-xl font-bold font-mono text-amber-400">{status.changed ?? 0}</p>
-              </CardContent>
-            </Card>
-            <Card className="border border-border">
-              <CardContent className="p-3 text-center">
-                <p className="text-[10px] text-muted-foreground">Improved</p>
-                <p className="text-xl font-bold font-mono text-emerald-400">{status.improved ?? 0}</p>
-              </CardContent>
-            </Card>
-            <Card className="border border-border">
-              <CardContent className="p-3 text-center">
-                <p className="text-[10px] text-muted-foreground">Regressed</p>
-                <p className="text-xl font-bold font-mono text-red-400">{status.regressed ?? 0}</p>
-              </CardContent>
-            </Card>
-            <Card className="border border-border">
-              <CardContent className="p-3 text-center">
-                <p className="text-[10px] text-muted-foreground">Unchanged</p>
-                <p className="text-xl font-bold font-mono">{status.unchanged ?? 0}</p>
-              </CardContent>
-            </Card>
-            <Card className="border border-border">
-              <CardContent className="p-3 text-center">
-                <p className="text-[10px] text-muted-foreground">Skipped</p>
-                <p className="text-xl font-bold font-mono text-muted-foreground">{status.skipped ?? 0}</p>
-              </CardContent>
-            </Card>
-            <Card className="border border-border">
-              <CardContent className="p-3 text-center">
-                <p className="text-[10px] text-muted-foreground">Avg Conf &Delta;</p>
+                <div className="flex items-center justify-center gap-1.5 mb-1">
+                  <Zap className="w-3.5 h-3.5 text-blue-400" />
+                  <p className="text-[10px] text-muted-foreground">Avg Conf Delta</p>
+                </div>
                 <p className={`text-xl font-bold font-mono ${(status.avg_confidence_delta ?? 0) > 0 ? 'text-emerald-400' : (status.avg_confidence_delta ?? 0) < 0 ? 'text-red-400' : ''}`}>
                   {(status.avg_confidence_delta ?? 0) > 0 ? '+' : ''}{status.avg_confidence_delta ?? 0}
                 </p>
@@ -250,12 +439,12 @@ export default function ReprocessComparisonPage() {
       )}
 
       {/* No data message */}
-      {isComplete && !status.total && !status.total_documents && !status.processed && (
+      {isComplete && !hasResults && (
         <Card className="border border-border" data-testid="no-data-card">
           <CardContent className="p-8 text-center">
             <FileText className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
             <p className="text-sm text-muted-foreground">
-              No documents found to compare. Upload or process documents first, then run the comparison.
+              No comparison data yet. Click "Compare (Preview)" to re-run the AI pipeline and see before/after results.
             </p>
           </CardContent>
         </Card>
@@ -269,18 +458,31 @@ export default function ReprocessComparisonPage() {
               <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                 <Zap className="w-3 h-3" /> Document Results ({results.total_results})
               </CardTitle>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 text-[10px]"
-                onClick={() => {
-                  setChangesOnly(!changesOnly);
-                  if (status?.run_id) fetchResults(status.run_id, !changesOnly);
-                }}
-                data-testid="toggle-changes-only"
-              >
-                {changesOnly ? 'Show All' : 'Changes Only'}
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-[10px]"
+                  onClick={() => {
+                    setChangesOnly(!changesOnly);
+                    if (status?.run_id) fetchResults(status.run_id, !changesOnly);
+                  }}
+                  data-testid="toggle-changes-only"
+                >
+                  {changesOnly ? 'Show All' : 'Changes Only'}
+                </Button>
+                {isComplete && status.run_id && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-[10px] gap-1"
+                    onClick={() => fetchResults(status.run_id, changesOnly)}
+                    data-testid="refresh-results-btn"
+                  >
+                    <RefreshCw className="w-3 h-3" /> Refresh
+                  </Button>
+                )}
+              </div>
             </div>
           </CardHeader>
           <CardContent className="pt-0">

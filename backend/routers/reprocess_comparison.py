@@ -415,3 +415,273 @@ async def list_comparison_runs():
         {}, {"_id": 0}
     ).sort("started_at", -1).limit(20).to_list(20)
     return {"runs": runs}
+
+
+# =============================================================================
+# APPLY IMPROVEMENTS — Commit improved results back to production
+# =============================================================================
+
+_apply_state: Dict[str, Any] = {"status": "idle"}
+
+
+@router.post("/apply/{run_id}")
+async def apply_improvements(
+    run_id: str,
+    background_tasks: BackgroundTasks,
+    improved_only: bool = Query(True, description="Only apply docs that improved"),
+):
+    """Apply comparison results back to production documents.
+    
+    By default only applies documents where the new pipeline produced better
+    results (higher confidence, better classification). Set improved_only=false
+    to apply all changes.
+    """
+    global _apply_state
+
+    if _apply_state.get("status") == "running":
+        return {
+            "error": "An apply operation is already running",
+            "run_id": _apply_state.get("run_id"),
+        }
+
+    db = get_db()
+    run_meta = await db.reprocess_comparison_runs.find_one(
+        {"run_id": run_id}, {"_id": 0}
+    )
+    if not run_meta:
+        return {"error": "Run not found", "run_id": run_id}
+
+    if run_meta.get("status") != "completed":
+        return {"error": "Run is not completed yet", "status": run_meta.get("status")}
+
+    background_tasks.add_task(_apply_results, run_id, improved_only)
+
+    return {
+        "status": "started",
+        "run_id": run_id,
+        "improved_only": improved_only,
+    }
+
+
+@router.get("/apply-status")
+async def apply_status():
+    """Get the status of the current apply operation."""
+    return _apply_state
+
+
+async def _apply_results(run_id: str, improved_only: bool):
+    """Background task: apply comparison results back to production."""
+    global _apply_state
+    db = get_db()
+
+    query: Dict[str, Any] = {"run_id": run_id, "status": "compared"}
+    if improved_only:
+        query["delta.fields_improved"] = {"$gt": 0}
+        query["delta.fields_regressed"] = 0
+
+    results = await db.reprocess_comparison_results.find(query, {"_id": 0}).to_list(5000)
+
+    _apply_state = {
+        "status": "running",
+        "run_id": run_id,
+        "total": len(results),
+        "applied": 0,
+        "skipped": 0,
+        "errors": 0,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    for i, r in enumerate(results):
+        doc_id = r.get("doc_id", "")
+        after = r.get("after", {})
+
+        if not doc_id or not after:
+            _apply_state["skipped"] += 1
+            continue
+
+        try:
+            update_fields = {
+                "updated_utc": datetime.now(timezone.utc).isoformat(),
+                "reprocessed_utc": datetime.now(timezone.utc).isoformat(),
+                "reprocessed_from": f"comparison_apply_{run_id}",
+            }
+
+            if after.get("doc_type"):
+                update_fields["suggested_job_type"] = after["doc_type"]
+                update_fields["document_type"] = after["doc_type"]
+            if after.get("confidence"):
+                update_fields["ai_confidence"] = after["confidence"]
+                update_fields["classification_confidence"] = after["confidence"]
+            if after.get("vendor_raw"):
+                update_fields["vendor_raw"] = after["vendor_raw"]
+            if after.get("po_number"):
+                update_fields.setdefault("extracted_fields", {})
+                update_fields["extracted_fields"]["po_number"] = after["po_number"]
+            if after.get("invoice_number"):
+                update_fields.setdefault("extracted_fields", {})
+                update_fields["extracted_fields"]["invoice_number"] = after["invoice_number"]
+            if after.get("total_amount"):
+                update_fields.setdefault("extracted_fields", {})
+                update_fields["extracted_fields"]["total_amount"] = after["total_amount"]
+
+            # Use $set for flat fields and dot notation for nested extracted_fields
+            set_ops = {}
+            for k, v in update_fields.items():
+                if k == "extracted_fields" and isinstance(v, dict):
+                    for ek, ev in v.items():
+                        set_ops[f"extracted_fields.{ek}"] = ev
+                else:
+                    set_ops[k] = v
+
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": set_ops})
+            _apply_state["applied"] += 1
+
+        except Exception as e:
+            logger.error("Apply failed for %s: %s", doc_id, e)
+            _apply_state["errors"] += 1
+
+        _apply_state["processed"] = i + 1
+
+    _apply_state["status"] = "completed"
+    _apply_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+    # Update run metadata
+    await db.reprocess_comparison_runs.update_one(
+        {"run_id": run_id},
+        {"$set": {
+            "applied": True,
+            "applied_at": _apply_state["finished_at"],
+            "applied_count": _apply_state["applied"],
+            "applied_improved_only": improved_only,
+        }},
+    )
+
+    logger.info(
+        "Apply run %s complete: %d applied, %d skipped, %d errors",
+        run_id, _apply_state["applied"], _apply_state["skipped"], _apply_state["errors"],
+    )
+
+
+# =============================================================================
+# FULL PIPELINE REPROCESS — Re-runs classify + extract + vendor match + validate
+# =============================================================================
+
+_full_reprocess_state: Dict[str, Any] = {"status": "idle"}
+
+
+@router.post("/run-full")
+async def start_full_reprocess(
+    background_tasks: BackgroundTasks,
+    limit: int = Query(100, ge=1, le=2000, description="Max documents to reprocess"),
+    doc_type: str = Query("", description="Filter by document type (empty = all)"),
+    skip_terminal: bool = Query(True, description="Skip Completed/Posted/Archived documents"),
+):
+    """Full pipeline reprocess: re-classify + re-extract + re-validate all matching documents.
+    
+    Unlike the comparison run, this UPDATES production data directly.
+    Use the comparison run first to preview changes, then use this to apply the full pipeline.
+    """
+    global _full_reprocess_state
+
+    if _full_reprocess_state.get("status") == "running":
+        return {
+            "error": "A full reprocess is already running",
+            "run_id": _full_reprocess_state.get("run_id"),
+            "processed": _full_reprocess_state.get("processed", 0),
+            "total": _full_reprocess_state.get("total", 0),
+        }
+
+    run_id = f"full-{uuid.uuid4().hex[:8]}"
+    background_tasks.add_task(_run_full_reprocess, run_id, limit, doc_type, skip_terminal)
+
+    return {
+        "run_id": run_id,
+        "status": "started",
+        "limit": limit,
+        "filter": doc_type or "all",
+        "skip_terminal": skip_terminal,
+    }
+
+
+@router.get("/full-status")
+async def full_reprocess_status():
+    """Get the status of the current full reprocess."""
+    return _full_reprocess_state
+
+
+async def _run_full_reprocess(run_id: str, limit: int, doc_type_filter: str, skip_terminal: bool):
+    """Background task: full pipeline reprocess on each document."""
+    global _full_reprocess_state
+    db = get_db()
+
+    query: Dict[str, Any] = {}
+    if doc_type_filter:
+        query["suggested_job_type"] = doc_type_filter
+    if skip_terminal:
+        query["status"] = {"$nin": ["Completed", "Posted", "Archived", "LinkedToBC", "batch_parent"]}
+
+    total = await db.hub_documents.count_documents(query)
+    actual_limit = min(limit, total)
+
+    _full_reprocess_state = {
+        "status": "running",
+        "run_id": run_id,
+        "total": actual_limit,
+        "processed": 0,
+        "success": 0,
+        "improved": 0,
+        "errors": 0,
+        "skipped_no_file": 0,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    cursor = db.hub_documents.find(query, {"_id": 0}).limit(actual_limit)
+    docs = await cursor.to_list(actual_limit)
+
+    for i, doc in enumerate(docs):
+        doc_id = doc.get("id", "?")
+
+        try:
+            file_path = UPLOAD_DIR / doc_id
+            if not file_path.exists():
+                _full_reprocess_state["skipped_no_file"] += 1
+                _full_reprocess_state["processed"] = i + 1
+                continue
+
+            # Snapshot before
+            before_confidence = float(doc.get("ai_confidence") or 0)
+            before_type = doc.get("suggested_job_type") or doc.get("document_type") or "Unknown"
+
+            # Use the single-doc reprocess handler which runs the full pipeline
+            from services.document_handlers import reprocess_document
+            result = await reprocess_document(doc_id, reclassify=True)
+
+            if result.get("reprocessed"):
+                _full_reprocess_state["success"] += 1
+                # Check if improved
+                new_doc = result.get("document", {})
+                after_confidence = float(new_doc.get("ai_confidence") or 0)
+                if after_confidence > before_confidence:
+                    _full_reprocess_state["improved"] += 1
+            else:
+                _full_reprocess_state["skipped_no_file"] += 1
+
+        except Exception as e:
+            logger.error("Full reprocess failed for %s: %s", doc_id, e)
+            _full_reprocess_state["errors"] += 1
+
+        _full_reprocess_state["processed"] = i + 1
+
+        # Rate limit protection
+        if (i + 1) % 3 == 0:
+            await asyncio.sleep(2)
+
+    _full_reprocess_state["status"] = "completed"
+    _full_reprocess_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+    logger.info(
+        "Full reprocess %s complete: %d/%d success, %d improved, %d errors, %d no_file",
+        run_id, _full_reprocess_state["success"], actual_limit,
+        _full_reprocess_state["improved"], _full_reprocess_state["errors"],
+        _full_reprocess_state["skipped_no_file"],
+    )

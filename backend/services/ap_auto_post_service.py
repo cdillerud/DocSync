@@ -60,7 +60,7 @@ def check_ap_ready_to_post(doc: dict, vendor_profile: dict = None) -> Tuple[bool
     vendor_no = (
         doc.get("bc_vendor_number")
         or doc.get("vendor_no")
-        or (doc.get("validation_results") or {}).get("vendor_result", {}).get("selected_vendor", {}).get("number")
+        or (doc.get("validation_results") or {}).get("bc_record_info", {}).get("number")
         or ""
     )
     if not vendor_no:

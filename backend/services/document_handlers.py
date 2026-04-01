@@ -536,7 +536,7 @@ async def intake_document(
         "vendor_match_method": vendor_alias_result.get("vendor_match_method"),
         "bc_vendor_number": (
             vendor_alias_result.get("vendor_no")
-            or (validation_results.get("vendor_result", {}).get("selected_vendor", {}).get("number"))
+            or (validation_results.get("bc_record_info") or {}).get("number")
         ),
         "possible_duplicate": duplicate_result.get("possible_duplicate", False),
         "duplicate_of_document_id": duplicate_result.get("duplicate_of_document_id"),

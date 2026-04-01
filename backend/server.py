@@ -2989,7 +2989,7 @@ async def _internal_intake_document(
         "vendor_match_method": vendor_alias_result.get("vendor_match_method"),
         "bc_vendor_number": (
             vendor_alias_result.get("vendor_no")
-            or (validation_results.get("vendor_result", {}).get("selected_vendor", {}).get("number"))
+            or (validation_results.get("bc_record_info") or {}).get("number")
         ),
         # Phase 7: Vendor resolution observability
         "vendor_resolution": _build_vendor_resolution(
@@ -3619,7 +3619,7 @@ async def intake_document(
         "vendor_match_method": vendor_alias_result.get("vendor_match_method"),
         "bc_vendor_number": (
             vendor_alias_result.get("vendor_no")
-            or (validation_results.get("vendor_result", {}).get("selected_vendor", {}).get("number"))
+            or (validation_results.get("bc_record_info") or {}).get("number")
         ),
         # Phase 7: Vendor resolution observability
         "vendor_resolution": _build_vendor_resolution(
@@ -4319,7 +4319,7 @@ async def _reprocess_document_inner(doc_id: str, doc: dict, reclassify: bool):
         # AP INVOICES: Run strict auto-post service (binary: auto-post or NeedsReview)
         try:
             # Update bc_vendor_number from validation results before auto-post
-            vendor_from_val = (validation_results.get("vendor_result", {}).get("selected_vendor", {}).get("number"))
+            vendor_from_val = (validation_results.get("bc_record_info") or {}).get("number")
             if vendor_from_val:
                 await db.hub_documents.update_one({"id": doc_id}, {"$set": {"bc_vendor_number": vendor_from_val}})
             

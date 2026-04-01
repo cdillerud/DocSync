@@ -398,15 +398,18 @@ async def build_vendor_profile(
         amount_stats = cache_stats["amount_stats"]
 
     # Determine PO expectation from cache data.
-    # NOTE: bc_order_number being empty in posted PIs does NOT mean POs don't exist.
-    # Freight vendors (e.g. Tumalo Creek) have POs, but whoever enters PIs in BC
-    # doesn't always fill in the order reference field.
-    # We track the rate for visibility but do NOT auto-set po_expected=False.
+    # If a vendor has thousands of posted PIs and NONE have bc_order_number,
+    # POs are clearly not part of their workflow. The system learns this from BC history.
+    po_expected = True  # default
     po_rate = 0.0
-    if cache_stats and cache_stats.get("count", 0) >= 5:
-        po_rate = cache_stats.get("po_rate", 0.0)
-    # po_expected defaults to True — only set to False via explicit admin override
-    po_expected = True
+    if cache_stats and cache_stats.get("count", 0) >= 10:
+        po_rate = cache_stats.get("po_rate", 1.0)
+        if po_rate < 0.05:  # Less than 5% of invoices have a PO
+            po_expected = False
+            logger.info(
+                "[VendorProfile] Learned from BC: vendor %s has %d posted PIs, %.1f%% have POs → po_expected=False",
+                vendor_no, cache_stats["count"], po_rate * 100,
+            )
 
     invoice_count = len(bc_invoices) or (cache_stats.get("count", 0) if cache_stats else 0)
 

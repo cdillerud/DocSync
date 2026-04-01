@@ -1057,6 +1057,77 @@ async def get_document_pages(doc_id: str):
     }
 
 
+@router.get("/{doc_id}/boundary-analysis")
+async def analyze_document_boundaries_endpoint(doc_id: str):
+    """Analyze a multi-page document to detect logical document boundaries.
+    
+    Returns page fingerprints, detected boundaries, and recommended page groups
+    for splitting. Preview endpoint — doesn't actually split anything.
+    """
+    from services.document_boundary_service import analyze_document_boundaries
+
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    file_path = _resolve_file_path(doc_id, doc.get("file_name", ""))
+    if not file_path:
+        raise HTTPException(status_code=404, detail="File not found on disk")
+
+    with open(file_path, "rb") as f:
+        file_content = f.read()
+
+    analysis = analyze_document_boundaries(file_content)
+    return {
+        "document_id": doc_id,
+        "filename": doc.get("filename") or doc.get("file_name") or "",
+        "analysis": analysis,
+    }
+
+
+@router.post("/{doc_id}/auto-split")
+async def auto_split_document(doc_id: str):
+    """Auto-split a multi-page document using intelligent boundary detection.
+    
+    Each logical document group runs through the full intake pipeline.
+    """
+    from services.document_boundary_service import analyze_document_boundaries
+    from services.batch_po_splitter import split_and_ingest_batch
+
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    file_path = _resolve_file_path(doc_id, doc.get("file_name", ""))
+    if not file_path:
+        raise HTTPException(status_code=404, detail="File not found on disk")
+
+    with open(file_path, "rb") as f:
+        file_content = f.read()
+
+    # Analyze boundaries
+    analysis = analyze_document_boundaries(file_content)
+    if not analysis.get("should_split"):
+        return {"success": False, "reason": "Single document — no split needed", "analysis": analysis}
+
+    # Split using boundary groups
+    result = await split_and_ingest_batch(
+        db=db,
+        parent_doc_id=doc_id,
+        parent_filename=doc.get("filename") or doc.get("file_name") or "document.pdf",
+        file_content=file_content,
+        sender=doc.get("sender_email") or doc.get("sender") or "",
+        source="manual_auto_split",
+        subject=doc.get("subject") or "",
+        groups=analysis.get("groups"),
+    )
+
+    return {"success": True, "result": result, "analysis": analysis}
+
+
+
 class SplitSpec(BaseModel):
     pages: list
     label: str = ""

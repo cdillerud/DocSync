@@ -1,0 +1,103 @@
+{
+  "summary": "Document Boundary Service testing completed. All 20 backend tests passed (100%). Verified intelligent multi-page PDF splitting with boundary detection, including: (1) analyze_document_boundaries correctly detects logical document boundaries based on vendor changes, invoice number changes, and letterhead transitions, (2) Same-vendor same-invoice multi-page docs stay together (no false splits), (3) Single-page PDFs return should_split=False, (4) detect_batch_po accepts AP_Invoice, BOL, Unknown types, (5) GET /api/documents/{doc_id}/boundary-analysis returns boundary analysis, (6) POST /api/documents/{doc_id}/auto-split triggers boundary-aware splitting, (7) split_and_ingest_batch accepts groups parameter for boundary-aware splitting.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_document_boundary_service.py",
+    "/app/test_reports/pytest/document_boundary_service_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_document_boundary_service.py"
+  ],
+  "success_rate": {
+    "backend": "100% (20/20 tests passed)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "Created synthetic multi-page PDFs using reportlab for testing boundary detection",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Document Boundary Service fully tested. Key verifications: (1) document_boundary_service.py correctly extracts page fingerprints (vendor hints, invoice numbers, letterhead detection), (2) Boundary detection uses scoring system: vendor change +3, ref number change +3, letterhead transition +2, doc type change +2, threshold >= 2, (3) batch_po_splitter.py SPLITTABLE_TYPES includes AP_Invoice, BOL, Unknown, (4) detect_batch_po returns groups and boundaries from boundary analysis, (5) GET /api/documents/{doc_id}/boundary-analysis endpoint works, (6) POST /api/documents/{doc_id}/auto-split endpoint works with boundary-aware splitting, (7) Intake pipeline auto-detects and auto-splits multi-page documents.",
+  "features_tested": {
+    "document_boundary_service": [
+      "analyze_document_boundaries detects 3 logical docs from 5-page PDF with 3 vendors - PASS",
+      "Same-vendor same-invoice multi-page docs stay together (no false splits) - PASS",
+      "Single-page PDFs return should_split=False - PASS",
+      "fingerprint_page extracts vendor hints from page text - PASS",
+      "fingerprint_page extracts invoice/PO numbers - PASS",
+      "fingerprint_page detects blank pages - PASS",
+      "detect_boundaries identifies vendor changes as boundaries - PASS",
+      "detect_boundaries keeps same-vendor same-invoice pages together - PASS"
+    ],
+    "batch_po_splitter": [
+      "detect_batch_po accepts AP_Invoice type - PASS",
+      "detect_batch_po accepts BOL type - PASS",
+      "detect_batch_po accepts Unknown type - PASS",
+      "detect_batch_po returns groups and boundaries - PASS",
+      "Single-page PDF returns should_split=False - PASS",
+      "SPLITTABLE_TYPES includes AP_Invoice, BOL, Unknown - PASS",
+      "split_and_ingest_batch accepts groups parameter - PASS"
+    ],
+    "api_endpoints": [
+      "GET /api/documents/{doc_id}/boundary-analysis returns valid analysis - PASS",
+      "GET /api/documents/{doc_id}/boundary-analysis returns 404 for missing doc - PASS",
+      "POST /api/documents/{doc_id}/auto-split triggers boundary-aware splitting - PASS",
+      "POST /api/documents/{doc_id}/auto-split returns 404 for missing doc - PASS"
+    ],
+    "intake_pipeline": [
+      "Intake pipeline auto-detects multi-page documents - PASS",
+      "Intake pipeline sets batch_detected, batch_page_count, batch_groups - PASS"
+    ]
+  },
+  "api_verification": {
+    "GET /api/documents/{doc_id}/boundary-analysis": {
+      "status_code": 200,
+      "response_structure": {
+        "document_id": "string",
+        "filename": "string",
+        "analysis": {
+          "total_pages": "int",
+          "should_split": "bool",
+          "document_count": "int",
+          "groups": "list of {group_num, pages, page_range, page_count, vendor_hint, doc_type_hints, ref_numbers}",
+          "boundaries": "list of page numbers where new docs start",
+          "fingerprints": "list of page fingerprints"
+        }
+      }
+    },
+    "POST /api/documents/{doc_id}/auto-split": {
+      "status_code": 200,
+      "response_structure": {
+        "success": "bool",
+        "result": {
+          "status": "success|partial|error",
+          "parent_doc_id": "string",
+          "split_mode": "boundary_aware|per_page",
+          "total_pages": "int",
+          "children_count": "int",
+          "children": "list of child doc info"
+        },
+        "analysis": "boundary analysis result"
+      }
+    }
+  },
+  "boundary_detection_signals": {
+    "vendor_name_change": "+3 score",
+    "reference_number_change": "+3 score (invoice_no, po_no, bol_no)",
+    "letterhead_transition": "+2 score",
+    "doc_type_change": "+2 score",
+    "boundary_threshold": ">= 2 score triggers new document boundary"
+  },
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "note": "No APIs are mocked. All tests use real document_boundary_service and batch_po_splitter modules."
+  }
+}

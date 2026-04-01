@@ -3102,8 +3102,8 @@ async def _internal_intake_document(
     except Exception as sa_err:
         logger.warning("[INTAKE] Sales auto-assign error for %s: %s", doc_id[:8], str(sa_err))
 
-    # ── Batch PO Detection ──
-    # If this is a multi-page Purchase Order, flag it for batch splitting
+    # ── Batch Document Detection (all types) ──
+    # If this is a multi-page document, detect boundaries and flag for splitting
     try:
         from services.batch_po_splitter import detect_batch_po
         batch_info = detect_batch_po(file_content, suggested_type)
@@ -3113,13 +3113,33 @@ async def _internal_intake_document(
                 {"$set": {
                     "batch_detected": True,
                     "batch_page_count": batch_info["page_count"],
+                    "batch_document_count": batch_info.get("document_count", batch_info["page_count"]),
                     "batch_split_suggested": True,
+                    "batch_split_mode": batch_info.get("split_mode", "per_page"),
+                    "batch_boundaries": batch_info.get("boundaries", []),
+                    "batch_groups": batch_info.get("groups", []),
+                    "status": "batch_parent",
                 }},
             )
-            logger.info("[INTAKE] Batch PO detected: %s (%d pages) — flagged for splitting",
-                        doc_id[:8], batch_info["page_count"])
+            logger.info("[INTAKE] Multi-page doc detected: %s (%d pages, %d logical docs) — auto-splitting",
+                        doc_id[:8], batch_info["page_count"], batch_info.get("document_count", batch_info["page_count"]))
+
+            # Auto-split: run each logical document through the full pipeline
+            from services.batch_po_splitter import split_and_ingest_batch
+            split_result = await split_and_ingest_batch(
+                db=db,
+                parent_doc_id=doc_id,
+                parent_filename=filename,
+                file_content=file_content,
+                sender=sender,
+                source="auto_split",
+                subject=subject,
+                groups=batch_info.get("groups"),
+            )
+            logger.info("[INTAKE] Auto-split complete for %s: %d children (%d errors)",
+                        doc_id[:8], split_result["children_count"], split_result["children_errors"])
     except Exception as bd_err:
-        logger.warning("[INTAKE] Batch detection error for %s: %s", doc_id[:8], str(bd_err))
+        logger.warning("[INTAKE] Batch detection/split error for %s: %s", doc_id[:8], str(bd_err))
 
     # Create workflow audit trail entry
     workflow_run_id = uuid.uuid4().hex[:8]

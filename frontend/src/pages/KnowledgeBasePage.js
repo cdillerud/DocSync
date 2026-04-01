@@ -139,11 +139,16 @@ export default function KnowledgeBasePage() {
             />
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <MetricCard
               label="Classification Corrections"
               value={kb.classification_corrections || 0}
               subtext="Human corrections → LLM few-shot"
+            />
+            <MetricCard
+              label="Auto-Confirm Feedback"
+              value={kb.auto_confirm_feedback || 0}
+              subtext="Positive reinforcement from successes"
             />
             <MetricCard
               label="Feedback Examples"
@@ -197,6 +202,29 @@ export default function KnowledgeBasePage() {
             </div>
             <div className="text-xs text-muted-foreground">
               Completed in {seedResult.total_elapsed_seconds}s
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {status?.scheduler && (
+        <Card data-testid="scheduler-status">
+          <CardHeader className="pb-2"><CardTitle className="text-sm">Auto-Seed Scheduler</CardTitle></CardHeader>
+          <CardContent className="text-sm space-y-1.5">
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary" className="bg-emerald-500/15 text-emerald-400 text-[10px]">Active</Badge>
+              <span className="text-muted-foreground">{status.scheduler.seed_frequency}</span>
+            </div>
+            {status.scheduler.last_bc_sync && (
+              <div className="text-xs text-muted-foreground">
+                Last BC sync: {new Date(status.scheduler.last_bc_sync).toLocaleString()}
+                {status.scheduler.last_bc_sync_records != null && (
+                  <span> ({status.scheduler.last_bc_sync_records.toLocaleString()} records)</span>
+                )}
+              </div>
+            )}
+            <div className="text-xs text-muted-foreground">
+              Knowledge base auto-updates after every BC cache refresh and on a 6-hour schedule.
             </div>
           </CardContent>
         </Card>

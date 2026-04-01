@@ -399,6 +399,19 @@ class BCReferenceCacheService:
             total_records, duration_ms, "incremental" if incremental else "bulk"
         )
 
+        # Auto-seed knowledge base after successful cache sync
+        if total_records > 0:
+            try:
+                from services.knowledge_seed_service import run_full_knowledge_seed
+                logger.info("[BC Cache] Triggering auto knowledge seed after sync (%d new records)", total_records)
+                seed_result = await run_full_knowledge_seed(self.db)
+                logger.info("[BC Cache] Knowledge seed complete: aliases=%s, profiles=%s, domains=%s",
+                    seed_result.get("vendor_aliases", {}).get("total_aliases"),
+                    seed_result.get("vendor_profiles", {}).get("total_profiles"),
+                    seed_result.get("sender_domains", {}).get("total_sender_mappings"))
+            except Exception as e:
+                logger.warning("[BC Cache] Auto knowledge seed failed (non-blocking): %s", e)
+
         return {
             "status": "completed",
             "mode": "incremental" if incremental else "bulk",

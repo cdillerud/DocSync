@@ -7212,7 +7212,26 @@ async def startup():
             await asyncio.sleep(3600)  # 1 hour
     asyncio.create_task(_shipment_sync_scheduler())
     logger.info("BC Shipment Sync scheduler started (interval: 1h)")
-    
+
+    # Start Knowledge Base auto-seed scheduler (on startup + every 6h)
+    async def _knowledge_seed_scheduler():
+        """Background worker: keep knowledge base fresh after BC cache changes."""
+        await asyncio.sleep(30)  # Let BC cache and other services initialize first
+        while True:
+            try:
+                from services.knowledge_seed_service import run_full_knowledge_seed
+                logger.info("[KnowledgeSeed] Starting scheduled knowledge seed")
+                result = await run_full_knowledge_seed(db)
+                aliases = result.get("vendor_aliases", {}).get("total_aliases", 0)
+                profiles = result.get("vendor_profiles", {}).get("total_profiles", 0)
+                domains = result.get("sender_domains", {}).get("total_sender_mappings", 0)
+                logger.info("[KnowledgeSeed] Scheduled seed complete: aliases=%s, profiles=%s, domains=%s", aliases, profiles, domains)
+            except Exception as e:
+                logger.warning("[KnowledgeSeed] Scheduled seed failed: %s", e)
+            await asyncio.sleep(6 * 3600)  # Every 6 hours
+    asyncio.create_task(_knowledge_seed_scheduler())
+    logger.info("Knowledge Seed scheduler started (on startup + every 6h)")
+
     # Initialize Auto-Resolution Service
     ref_intel_service = get_reference_intelligence_service()
     auto_resolve = set_auto_resolve_service(db, ref_intel_service, event_service)

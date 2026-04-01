@@ -78,6 +78,14 @@ async def seed_status():
     feedback_examples = await db.classification_feedback.count_documents({})
     vendor_type_patterns = await db.vendor_type_patterns.count_documents({})
 
+    # Auto-confirm feedback count
+    auto_confirms = await db.classification_corrections.count_documents({"source": "auto_confirm"})
+
+    # Last BC cache sync time
+    cache_meta = await db.bc_reference_cache_meta.find_one({"_id": "last_sync"}, {"_id": 0})
+    last_bc_sync = cache_meta.get("timestamp") if cache_meta else None
+    last_bc_records = cache_meta.get("records_synced") if cache_meta else None
+
     return {
         "knowledge_base": {
             "vendor_aliases": {"total": alias_count, "by_source": alias_by_source},
@@ -85,6 +93,7 @@ async def seed_status():
             "vendor_invoice_profiles": profile_count,
             "bc_reference_cache": bc_cache_count,
             "classification_corrections": corrections,
+            "auto_confirm_feedback": auto_confirms,
             "classification_feedback_examples": feedback_examples,
             "vendor_type_patterns": vendor_type_patterns,
         },
@@ -93,5 +102,11 @@ async def seed_status():
             "domains_healthy": domain_count >= 5,
             "profiles_healthy": profile_count >= 20,
             "overall": "good" if (alias_count >= 50 and profile_count >= 20) else "needs_seeding",
+        },
+        "scheduler": {
+            "auto_seed": "enabled",
+            "seed_frequency": "every 6 hours + after BC cache sync",
+            "last_bc_sync": last_bc_sync,
+            "last_bc_sync_records": last_bc_records,
         }
     }

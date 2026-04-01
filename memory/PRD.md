@@ -34,11 +34,16 @@
 
 ### Bulk Reprocess & Comparison (Complete - Feb 2026)
 - **Compare (Preview)**: Re-runs LLM classification on all docs, shows before/after without touching production
-- **Apply Improvements**: Commits only improved results (higher confidence, better classification) back to production
-- **Full Pipeline Reprocess**: Re-runs entire pipeline (classify + extract + validate + vendor match) on non-terminal docs
-- **File Recovery**: Automatically recovers files from MongoDB file_content_b64 or SharePoint when not on disk
-- **Frontend**: Settings > Before/After tab with progress tracking, summary cards, field change breakdown, document-level results table
-- API: POST `/run`, GET `/status`, POST `/apply/{run_id}`, GET `/apply-status`, POST `/run-full`, GET `/full-status`
+- **Apply Improvements**: Commits only improved results back to production
+- **Full Pipeline Reprocess**: Re-runs entire pipeline on non-terminal docs
+- **File Recovery**: Recovers files from MongoDB file_content_b64 or SharePoint when not on disk
+- **Smart Delta Scoring (Feb 2026)**:
+  - BC-match fields (vendor_no, vendor_canonical, vendor_match_method) excluded from improved/regressed scoring — shown dimmed with asterisk
+  - Vendor name comparison is case-insensitive
+  - Amount comparison normalizes $, commas, currency codes
+  - Confidence micro-jitter (<=0.02) is ignored
+  - PO/invoice/amount changes only scored when one side is empty (found vs lost)
+- **Frontend**: Settings > Before/After tab with progress, summary cards, field change breakdown, document-level results
 
 ## Backlog
 - P1: Rep Overrides management UI

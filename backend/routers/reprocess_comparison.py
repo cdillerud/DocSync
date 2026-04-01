@@ -113,8 +113,41 @@ def _snapshot_doc(doc: dict) -> dict:
     }
 
 
+def _normalize_amount(val) -> str:
+    """Normalize monetary amounts for comparison: strip $, commas, USD, whitespace."""
+    s = str(val or "").strip()
+    if not s:
+        return ""
+    for ch in ("$", ",", "USD", "CAD", "EUR"):
+        s = s.replace(ch, "")
+    s = s.strip()
+    try:
+        return f"{float(s):.2f}"
+    except (ValueError, TypeError):
+        return s
+
+
+def _normalize_vendor_name(val) -> str:
+    """Normalize vendor name for comparison: lowercase + strip punctuation."""
+    s = str(val or "").strip()
+    if not s:
+        return ""
+    return s.lower().replace(",", "").replace(".", "").replace("  ", " ").strip()
+
+
+# Fields set by BC matching / vendor resolution — NOT by LLM classification.
+# Changes in these fields are artifacts, not AI improvements or regressions.
+BC_MATCH_FIELDS = {"vendor_no", "vendor_canonical", "vendor_match_method"}
+
+
 def _compare_snapshots(before: dict, after: dict) -> dict:
-    """Compare before/after snapshots and compute delta."""
+    """Compare before/after snapshots and compute delta.
+
+    Excludes BC-match fields (vendor_no, vendor_canonical, vendor_match_method)
+    from the improved/regressed tally since those come from a separate matching
+    step, not from LLM classification.
+    Normalizes vendor names (case-insensitive) and amounts (strip $, commas).
+    """
     changes = {}
     improved = 0
     regressed = 0
@@ -126,9 +159,9 @@ def _compare_snapshots(before: dict, after: dict) -> dict:
     else:
         unchanged += 1
 
-    # Confidence
+    # Confidence — ignore micro-jitter (<=0.02)
     conf_delta = after["confidence"] - before["confidence"]
-    if abs(conf_delta) > 0.01:
+    if abs(conf_delta) > 0.02:
         changes["confidence"] = {
             "before": before["confidence"],
             "after": after["confidence"],
@@ -141,24 +174,55 @@ def _compare_snapshots(before: dict, after: dict) -> dict:
     else:
         unchanged += 1
 
-    # Vendor
-    if before["vendor_raw"] != after["vendor_raw"]:
+    # Vendor raw — case-insensitive comparison
+    if _normalize_vendor_name(before["vendor_raw"]) != _normalize_vendor_name(after["vendor_raw"]):
+        # Only count as a real change if one side is empty and the other isn't
+        b_empty = not str(before["vendor_raw"]).strip()
+        a_empty = not str(after["vendor_raw"]).strip()
         changes["vendor_raw"] = {"before": before["vendor_raw"], "after": after["vendor_raw"]}
+        if b_empty and not a_empty:
+            improved += 1  # AI found a vendor where there was none
+        elif not b_empty and a_empty:
+            regressed += 1  # AI lost the vendor name
 
-    if before["vendor_no"] != after["vendor_no"]:
-        changes["vendor_no"] = {"before": before["vendor_no"], "after": after["vendor_no"]}
+    # vendor_no, vendor_canonical, vendor_match_method — show but DO NOT score
+    for field in ("vendor_no", "vendor_canonical", "vendor_match_method"):
+        bv = str(before.get(field, "") or "").strip()
+        av = str(after.get(field, "") or "").strip()
+        if bv != av:
+            changes[field] = {"before": bv, "after": av, "bc_match_artifact": True}
 
     # PO number
-    if str(before["po_number"]) != str(after["po_number"]):
+    if str(before["po_number"]).strip() != str(after["po_number"]).strip():
         changes["po_number"] = {"before": before["po_number"], "after": after["po_number"]}
+        # Score: empty -> found = improved; found -> empty = regressed
+        b_empty = not str(before["po_number"]).strip()
+        a_empty = not str(after["po_number"]).strip()
+        if b_empty and not a_empty:
+            improved += 1
+        elif not b_empty and a_empty:
+            regressed += 1
 
     # Invoice number
-    if str(before["invoice_number"]) != str(after["invoice_number"]):
+    if str(before["invoice_number"]).strip() != str(after["invoice_number"]).strip():
         changes["invoice_number"] = {"before": before["invoice_number"], "after": after["invoice_number"]}
+        b_empty = not str(before["invoice_number"]).strip()
+        a_empty = not str(after["invoice_number"]).strip()
+        if b_empty and not a_empty:
+            improved += 1
+        elif not b_empty and a_empty:
+            regressed += 1
 
-    # Total amount
-    if str(before["total_amount"]) != str(after["total_amount"]):
+    # Total amount — normalized comparison
+    norm_before_amt = _normalize_amount(before["total_amount"])
+    norm_after_amt = _normalize_amount(after["total_amount"])
+    if norm_before_amt != norm_after_amt:
         changes["total_amount"] = {"before": before["total_amount"], "after": after["total_amount"]}
+        # Only score if one side is empty
+        if not norm_before_amt and norm_after_amt:
+            improved += 1
+        elif norm_before_amt and not norm_after_amt:
+            regressed += 1
 
     # Line items count
     li_delta = after["line_items_count"] - before["line_items_count"]
@@ -173,7 +237,10 @@ def _compare_snapshots(before: dict, after: dict) -> dict:
         else:
             regressed += 1
 
-    has_changes = len(changes) > 0
+    # Filter out BC-match artifacts from "has_changes" determination
+    real_changes = {k: v for k, v in changes.items() if not (isinstance(v, dict) and v.get("bc_match_artifact"))}
+    has_changes = len(real_changes) > 0
+
     return {
         "has_changes": has_changes,
         "changes": changes,

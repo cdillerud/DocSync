@@ -27,9 +27,12 @@ function DeltaBadge({ delta }) {
 }
 
 function FieldChange({ field, change }) {
+  const isBcArtifact = change.bc_match_artifact;
   return (
-    <div className="flex items-center gap-2 text-[11px]">
-      <span className="text-muted-foreground font-medium w-24 shrink-0">{field}</span>
+    <div className={`flex items-center gap-2 text-[11px] ${isBcArtifact ? 'opacity-30' : ''}`}>
+      <span className="text-muted-foreground font-medium w-24 shrink-0">
+        {field}{isBcArtifact ? ' *' : ''}
+      </span>
       <span className="text-red-400 line-through truncate max-w-[120px]">{String(change.before || '(empty)')}</span>
       <ArrowUpRight className="w-3 h-3 text-muted-foreground shrink-0" />
       <span className="text-emerald-400 truncate max-w-[120px]">{String(change.after || '(empty)')}</span>
@@ -428,12 +431,20 @@ export default function ReprocessComparisonPage() {
                 <div className="flex flex-wrap gap-2">
                   {Object.entries(status.field_change_counts)
                     .sort((a, b) => b[1] - a[1])
-                    .map(([field, count]) => (
-                      <Badge key={field} variant="outline" className="text-xs gap-1">
-                        {field}: <span className="font-mono font-bold">{count}</span>
-                      </Badge>
-                    ))}
+                    .map(([field, count]) => {
+                      const isBcArtifact = ['vendor_no', 'vendor_canonical', 'vendor_match_method'].includes(field);
+                      return (
+                        <Badge
+                          key={field}
+                          variant="outline"
+                          className={`text-xs gap-1 ${isBcArtifact ? 'opacity-30' : ''}`}
+                        >
+                          {field}{isBcArtifact ? ' *' : ''}: <span className="font-mono font-bold">{count}</span>
+                        </Badge>
+                      );
+                    })}
                 </div>
+                <p className="text-[10px] text-muted-foreground mt-2 opacity-50">* BC-match fields (not scored as AI improvements/regressions)</p>
               </CardContent>
             </Card>
           )}

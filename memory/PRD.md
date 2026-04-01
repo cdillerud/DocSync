@@ -1,7 +1,7 @@
 # GPI Document Hub — Product Requirements
 
 ## Core Philosophy
-**Learn → Apply → Improve → Learn.** Every document processed, every correction, every interaction makes the system smarter.
+**Learn -> Apply -> Improve -> Learn.** Every document processed, every correction, every interaction makes the system smarter.
 
 ## Architecture
 - **Backend**: FastAPI (Python) on port 8001
@@ -31,10 +31,16 @@
 - **Auto-split in intake pipeline**: Multi-page PDFs detected and split during ingestion
 - **Split Preview UI**: Page thumbnail strip with boundary markers, group color coding, vendor hints, reference numbers, "Split into N docs" button
 - API: GET `/{doc_id}/boundary-analysis`, POST `/{doc_id}/auto-split`
-- Testing: 100% boundary detection, 100% frontend (iteration_163, 164)
 
 ### Derived State Fix (Complete)
 - ReadyForPost documents show correct badges
+
+### Bulk Reprocess & Comparison (Complete - Feb 2026)
+- **Compare (Preview)**: Re-runs LLM classification on all docs, shows before/after without touching production
+- **Apply Improvements**: Commits only improved results (higher confidence, better classification) back to production
+- **Full Pipeline Reprocess**: Re-runs entire pipeline (classify + extract + validate + vendor match) on non-terminal docs
+- **Frontend**: Settings > Before/After tab with progress tracking, summary cards, field change breakdown, document-level results table
+- API: POST `/run`, GET `/status`, POST `/apply/{run_id}`, GET `/apply-status`, POST `/run-full`, GET `/full-status`
 
 ## Backlog
 - P1: Rep Overrides management UI
@@ -43,3 +49,4 @@
 - P2: Product/BOM module
 - P2: Production-ready email / Entra ID SSO
 - P3: server.py extraction, auto_clear_service cleanup
+- P3: Investigate 205 no_bc_match batch failures

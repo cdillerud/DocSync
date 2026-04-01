@@ -19,6 +19,7 @@ import {
 import { Square9WorkflowTracker } from '../components/Square9WorkflowTracker';
 import APReviewPanel from '../components/APReviewPanel';
 import PDFPreviewPanel from '../components/PDFPreviewPanel';
+import SplitPreviewPanel from '../components/SplitPreviewPanel';
 import ReferenceIntelligencePanel from '../components/ReferenceIntelligencePanel';
 import FreightGLRoutingPanel from '../components/FreightGLRoutingPanel';
 import APValidationPanel from '../components/APValidationPanel';
@@ -1001,6 +1002,9 @@ export default function DocumentDetailPage() {
 
           {/* PDF Preview - show for ALL documents */}
           <PDFPreviewPanel document={doc} />
+          
+          {/* Split Preview - show for multi-page documents */}
+          <SplitPreviewPanel document={doc} onSplitComplete={fetchDoc} />
           
           {/* AP Review Panel - only for AP Invoice documents */}
           {(doc.document_type === 'AP_Invoice' || doc.suggested_job_type === 'AP_Invoice') && (

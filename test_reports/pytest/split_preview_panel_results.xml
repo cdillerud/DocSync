@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="17" skipped="0" tests="17" time="1011.294" timestamp="2026-04-01T19:23:56.563831+00:00" hostname="agent-env-b189b14f-1f88-4c2a-9422-38c074483ead"><testcase classname="tests.test_split_preview_panel.TestBoundaryAnalysisEndpoint" name="test_boundary_analysis_returns_3_groups" time="60.144"><failure message="AssertionError: Expected 200, got 502&#10;assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">tests/test_split_preview_panel.py:22: in test_boundary_analysis_returns_3_groups
+    assert response.status_code == 200, f"Expected 200, got {response.status_code}"
+E   AssertionError: Expected 200, got 502
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="tests.test_split_preview_panel.TestBoundaryAnalysisEndpoint" name="test_boundary_analysis_groups_have_correct_pages" time="60.158"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">tests/test_split_preview_panel.py:36: in test_boundary_analysis_groups_have_correct_pages
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="tests.test_split_preview_panel.TestBoundaryAnalysisEndpoint" name="test_boundary_analysis_groups_have_vendor_hints" time="60.150"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">tests/test_split_preview_panel.py:60: in test_boundary_analysis_groups_have_vendor_hints
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="tests.test_split_preview_panel.TestBoundaryAnalysisEndpoint" name="test_boundary_analysis_groups_have_doc_type_hints" time="60.137"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">tests/test_split_preview_panel.py:74: in test_boundary_analysis_groups_have_doc_type_hints
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="tests.test_split_preview_panel.TestBoundaryAnalysisEndpoint" name="test_boundary_analysis_groups_have_ref_numbers" time="60.213"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">tests/test_split_preview_panel.py:87: in test_boundary_analysis_groups_have_ref_numbers
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="tests.test_split_preview_panel.TestBoundaryAnalysisEndpoint" name="test_boundary_analysis_returns_boundaries" time="60.200"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">tests/test_split_preview_panel.py:108: in test_boundary_analysis_returns_boundaries
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="tests.test_split_preview_panel.TestBoundaryAnalysisEndpoint" name="test_boundary_analysis_returns_fingerprints" time="60.172"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">tests/test_split_preview_panel.py:118: in test_boundary_analysis_returns_fingerprints
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="tests.test_split_preview_panel.TestBoundaryAnalysisEndpoint" name="test_boundary_analysis_404_for_missing_doc" time="60.136"><failure message="AssertionError: Expected 404, got 502&#10;assert 502 == 404&#10; +  where 502 = &lt;Response [502]&gt;.status_code">tests/test_split_preview_panel.py:133: in test_boundary_analysis_404_for_missing_doc
+    assert response.status_code == 404, f"Expected 404, got {response.status_code}"
+E   AssertionError: Expected 404, got 502
+E   assert 502 == 404
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="tests.test_split_preview_panel.TestAutoSplitEndpoint" name="test_auto_split_returns_success_structure" time="60.190"><failure message="AssertionError: Expected 200, got 502&#10;assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">tests/test_split_preview_panel.py:146: in test_auto_split_returns_success_structure
+    assert response.status_code == 200, f"Expected 200, got {response.status_code}"
+E   AssertionError: Expected 200, got 502
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="tests.test_split_preview_panel.TestAutoSplitEndpoint" name="test_auto_split_404_for_missing_doc" time="60.190"><failure message="AssertionError: Expected 404, got 502&#10;assert 502 == 404&#10; +  where 502 = &lt;Response [502]&gt;.status_code">tests/test_split_preview_panel.py:162: in test_auto_split_404_for_missing_doc
+    assert response.status_code == 404, f"Expected 404, got {response.status_code}"
+E   AssertionError: Expected 404, got 502
+E   assert 502 == 404
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="tests.test_split_preview_panel.TestDocumentVisibilityConditions" name="test_document_has_batch_detected_flag" time="60.154"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">tests/test_split_preview_panel.py:172: in test_document_has_batch_detected_flag
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="tests.test_split_preview_panel.TestDocumentVisibilityConditions" name="test_document_has_batch_page_count" time="60.212"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">tests/test_split_preview_panel.py:181: in test_document_has_batch_page_count
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="tests.test_split_preview_panel.TestDocumentVisibilityConditions" name="test_document_has_batch_split_suggested" time="60.142"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">tests/test_split_preview_panel.py:190: in test_document_has_batch_split_suggested
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="tests.test_split_preview_panel.TestDocumentVisibilityConditions" name="test_document_not_already_split" time="60.193"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">tests/test_split_preview_panel.py:199: in test_document_not_already_split
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="tests.test_split_preview_panel.TestDocumentVisibilityConditions" name="test_document_has_no_batch_parent_id" time="60.148"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">tests/test_split_preview_panel.py:210: in test_document_has_no_batch_parent_id
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="tests.test_split_preview_panel.TestAnalysisResponseStructure" name="test_analysis_has_all_required_fields" time="60.145"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">tests/test_split_preview_panel.py:225: in test_analysis_has_all_required_fields
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="tests.test_split_preview_panel.TestAnalysisResponseStructure" name="test_group_structure_is_complete" time="48.437"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">tests/test_split_preview_panel.py:246: in test_group_structure_is_complete
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase></testsuite></testsuites>

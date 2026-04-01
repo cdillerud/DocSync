@@ -4268,6 +4268,13 @@ async def _reprocess_document_inner(doc_id: str, doc: dict, reclassify: bool):
     elif decision == "needs_review":
         new_status = "NeedsReview"
     
+    # CRITICAL: For AP invoices, force NeedsReview when validation fails.
+    # Never leave AP invoices in "Failed" status — the strict binary system
+    # requires either Posted/ReadyForPost or NeedsReview.
+    is_ap_invoice = doc_type_for_conf.upper().replace(" ", "_") in ("AP_INVOICE", "PURCHASE_INVOICE")
+    if is_ap_invoice and new_status not in ("Validated", "ValidationPassed", "Posted", "ReadyForPost", "NeedsReview"):
+        new_status = "NeedsReview"
+    
     # Update document
     # Map status to workflow_status for consistency in queue display
     workflow_status_map = {
@@ -4306,7 +4313,34 @@ async def _reprocess_document_inner(doc_id: str, doc: dict, reclassify: bool):
     # For non-AP document types, run the type-specific workflow (warehouse/sales)
     # This handles auto-completion for shipping docs with PO/BOL/ship_date present
     doc_type_value = doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type") or ""
-    if doc_type_value and doc_type_value.upper() != "AP_INVOICE":
+    is_ap_reprocess = doc_type_value.upper().replace(" ", "_") in ("AP_INVOICE", "PURCHASE_INVOICE")
+    
+    if is_ap_reprocess:
+        # AP INVOICES: Run strict auto-post service (binary: auto-post or NeedsReview)
+        try:
+            # Update bc_vendor_number from validation results before auto-post
+            vendor_from_val = (validation_results.get("vendor_result", {}).get("selected_vendor", {}).get("number"))
+            if vendor_from_val:
+                await db.hub_documents.update_one({"id": doc_id}, {"$set": {"bc_vendor_number": vendor_from_val}})
+            
+            from services.ap_auto_post_service import attempt_ap_auto_post
+            ap_result = await attempt_ap_auto_post(doc_id, db, source="reprocess")
+            if ap_result.get("posted"):
+                new_status = "Posted"
+                logger.info("[REPROCESS] AP Auto-Post: %s posted to BC: %s", doc_id[:8], ap_result.get("bc_record_no"))
+            elif ap_result.get("status") == "ReadyForPost":
+                new_status = "ReadyForPost"
+                logger.info("[REPROCESS] AP Auto-Post: %s ready but BC writes disabled", doc_id[:8])
+            else:
+                new_status = "NeedsReview"
+                logger.info("[REPROCESS] AP Auto-Post: %s → NeedsReview: %s", doc_id[:8], ap_result.get("reason"))
+            
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": {"status": new_status}})
+        except Exception as ap_err:
+            logger.error("[REPROCESS] AP Auto-Post error for %s: %s", doc_id[:8], str(ap_err))
+            new_status = "NeedsReview"
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": {"status": "NeedsReview"}})
+    elif doc_type_value and doc_type_value.upper() != "AP_INVOICE":
         try:
             normalized_fields = compute_ap_normalized_fields(extracted_fields)
             logger.info("[REPROCESS] Running _update_standard_workflow_status for %s", doc_id[:8])
@@ -4322,70 +4356,94 @@ async def _reprocess_document_inner(doc_id: str, doc: dict, reclassify: bool):
             logger.warning("[REPROCESS] Workflow update error for %s: %s", doc_id[:8], str(wf_err))
     
     # Run auto-clear evaluation (may auto-complete eligible docs)
-    try:
-        doc_for_eval = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-        if doc_for_eval:
-            auto_clear_decision, auto_clear_reason, auto_clear_details = evaluate_auto_clear(
-                doc_for_eval, validation_results=validation_results
-            )
-            auto_clear_update = get_auto_clear_update(auto_clear_decision, auto_clear_details)
+    # SKIP for AP invoices — they use the strict ap_auto_post_service above
+    if is_ap_reprocess:
+        logger.info("[REPROCESS] Auto-clear SKIPPED for AP_Invoice %s — using strict auto-post", doc_id[:8])
+        # Emit reprocess event for AP invoices
+        from datetime import timedelta as td
+        reprocess_ts = datetime.now(timezone.utc)
+        await db.workflow_events.insert_one({
+            "event_id": str(uuid.uuid4()),
+            "document_id": doc_id,
+            "event_type": "system.reprocessed",
+            "timestamp": reprocess_ts.isoformat(),
+            "source_service": "ap_auto_post_service",
+            "payload": {"trigger": "manual_reprocess"},
+        })
+        await db.workflow_events.insert_one({
+            "event_id": str(uuid.uuid4()),
+            "document_id": doc_id,
+            "event_type": "automation.decision.completed",
+            "timestamp": (reprocess_ts + td(milliseconds=100)).isoformat(),
+            "source_service": "ap_auto_post_service",
+            "payload": {"decision": new_status, "reason": "AP strict auto-post reprocess"},
+        })
+        try:
+            from services.derived_state_service import get_derived_state_service, DerivedStateService
+            dss = get_derived_state_service()
+            if not dss:
+                dss = DerivedStateService(db)
+            await dss.update_document_derived_state(doc_id)
+        except Exception as dss_err:
+            logger.warning("[REPROCESS] Derived state error: %s", str(dss_err))
+    else:
+        try:
+            doc_for_eval = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+            if doc_for_eval:
+                auto_clear_decision, auto_clear_reason, auto_clear_details = evaluate_auto_clear(
+                    doc_for_eval, validation_results=validation_results
+                )
+                auto_clear_update = get_auto_clear_update(auto_clear_decision, auto_clear_details)
 
-            # CRITICAL: If auto-clear says NEEDS_REVIEW, FORCE status to NeedsReview
-            if auto_clear_decision == AutoClearDecision.NEEDS_REVIEW:
-                auto_clear_update["status"] = "NeedsReview"
-                auto_clear_update["workflow_status"] = "needs_review"
-                auto_clear_update["square9_stage"] = "needs_review"
-                new_status = "NeedsReview"
-                new_workflow_status = "needs_review"
-                logger.info("[REPROCESS] Auto-clear BLOCKED for %s: %s — forcing NeedsReview", doc_id[:8], auto_clear_reason)
+                if auto_clear_decision == AutoClearDecision.NEEDS_REVIEW:
+                    auto_clear_update["status"] = "NeedsReview"
+                    auto_clear_update["workflow_status"] = "needs_review"
+                    auto_clear_update["square9_stage"] = "needs_review"
+                    new_status = "NeedsReview"
+                    new_workflow_status = "needs_review"
+                    logger.info("[REPROCESS] Auto-clear BLOCKED for %s: %s — forcing NeedsReview", doc_id[:8], auto_clear_reason)
 
-            await db.hub_documents.update_one({"id": doc_id}, {"$set": auto_clear_update})
-            if auto_clear_decision == AutoClearDecision.CLEARED:
-                new_status = "Completed"
-                logger.info("[REPROCESS] Document %s AUTO-CLEARED: %s", doc_id[:8], auto_clear_reason)
+                await db.hub_documents.update_one({"id": doc_id}, {"$set": auto_clear_update})
+                if auto_clear_decision == AutoClearDecision.CLEARED:
+                    new_status = "Completed"
+                    logger.info("[REPROCESS] Document %s AUTO-CLEARED: %s", doc_id[:8], auto_clear_reason)
 
-            # Emit events directly to DB and re-derive state
-            from datetime import timedelta as td
-            reprocess_ts = datetime.now(timezone.utc)
-            
-            # 1) system.reprocessed to reset derived state
-            await db.workflow_events.insert_one({
-                "event_id": str(uuid.uuid4()),
-                "document_id": doc_id,
-                "event_type": "system.reprocessed",
-                "timestamp": reprocess_ts.isoformat(),
-                "source_service": "reprocess",
-                "payload": {"trigger": "manual_reprocess"},
-            })
-            
-            # 2) New automation decision (100ms later to guarantee ordering)
-            is_cleared = auto_clear_decision == AutoClearDecision.CLEARED
-            await db.workflow_events.insert_one({
-                "event_id": str(uuid.uuid4()),
-                "document_id": doc_id,
-                "event_type": "automation.decision.completed",
-                "timestamp": (reprocess_ts + td(milliseconds=100)).isoformat(),
-                "source_service": "auto_clear_service",
-                "payload": {
-                    "decision": "NeedsReview" if auto_clear_decision == AutoClearDecision.NEEDS_REVIEW else auto_clear_decision.value,
-                    "auto_clear": is_cleared,
-                    "reason": auto_clear_reason,
-                },
-            })
-            logger.info("[REPROCESS] Emitted events for %s: %s", doc_id[:8], auto_clear_decision.value)
+                from datetime import timedelta as td
+                reprocess_ts = datetime.now(timezone.utc)
+                await db.workflow_events.insert_one({
+                    "event_id": str(uuid.uuid4()),
+                    "document_id": doc_id,
+                    "event_type": "system.reprocessed",
+                    "timestamp": reprocess_ts.isoformat(),
+                    "source_service": "reprocess",
+                    "payload": {"trigger": "manual_reprocess"},
+                })
+                is_cleared = auto_clear_decision == AutoClearDecision.CLEARED
+                await db.workflow_events.insert_one({
+                    "event_id": str(uuid.uuid4()),
+                    "document_id": doc_id,
+                    "event_type": "automation.decision.completed",
+                    "timestamp": (reprocess_ts + td(milliseconds=100)).isoformat(),
+                    "source_service": "auto_clear_service",
+                    "payload": {
+                        "decision": "NeedsReview" if auto_clear_decision == AutoClearDecision.NEEDS_REVIEW else auto_clear_decision.value,
+                        "auto_clear": is_cleared,
+                        "reason": auto_clear_reason,
+                    },
+                })
+                logger.info("[REPROCESS] Emitted events for %s: %s", doc_id[:8], auto_clear_decision.value)
 
-            # 3) Re-derive state
-            try:
-                from services.derived_state_service import get_derived_state_service, DerivedStateService
-                dss = get_derived_state_service()
-                if not dss:
-                    dss = DerivedStateService(db)
-                await dss.update_document_derived_state(doc_id)
-            except Exception as dss_err:
-                logger.warning("[REPROCESS] Derived state error: %s", str(dss_err))
+                try:
+                    from services.derived_state_service import get_derived_state_service, DerivedStateService
+                    dss = get_derived_state_service()
+                    if not dss:
+                        dss = DerivedStateService(db)
+                    await dss.update_document_derived_state(doc_id)
+                except Exception as dss_err:
+                    logger.warning("[REPROCESS] Derived state error: %s", str(dss_err))
 
-    except Exception as ac_err:
-        logger.warning("[REPROCESS] Auto-clear error for %s: %s", doc_id[:8], str(ac_err))
+        except Exception as ac_err:
+            logger.warning("[REPROCESS] Auto-clear error for %s: %s", doc_id[:8], str(ac_err))
 
     # Log reprocess workflow (Square9 aligned)
     workflow = {

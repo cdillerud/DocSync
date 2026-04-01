@@ -298,6 +298,13 @@ Build a document intelligence platform (GPI Hub) to automate document-to-ERP com
   - Testing: Manual (unit tests on check_ap_ready_to_post — all pass)
   - Files: `server.py`, `document_handlers.py`, `ap_auto_post_service.py`
 
+- **CRITICAL: Reprocess handler missing AP auto-post + "Failed" status bug (P0 - COMPLETE)**:
+  - Root cause 1: The reprocess handler (`_reprocess_document_inner`) never called `ap_auto_post_service` for AP invoices. It ran validation → status logic → auto-clear, but the AP-specific auto-post path was completely absent.
+  - Root cause 2: Status logic `if all_passed → Validated; elif needs_review → NeedsReview` left AP invoices at old status ("Failed") when `all_passed=False` and decision wasn't "needs_review".
+  - Root cause 3: Auto-clear still ran on AP invoices during reprocess (even though intake now skips it).
+  - Fix: Added full AP auto-post flow to reprocess handler: updates bc_vendor_number from validation_results → calls attempt_ap_auto_post → sets status to Posted, ReadyForPost, or NeedsReview. Auto-clear skipped for AP invoices. Fallback status forced to NeedsReview for AP invoices that would otherwise stay as "Failed".
+  - Files: `server.py` (reprocess handler)
+
 ## Backlog
 - P1: Rep Overrides management UI (Admin screen to map customers to reps without DB scripts)
 - P1: Teams Adaptive Card integration (DM rep via Graph API with Approve/Flag/View buttons)

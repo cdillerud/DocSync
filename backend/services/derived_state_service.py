@@ -315,35 +315,55 @@ class DerivedStateService:
                 warnings.append(f"SharePoint upload failed: {payload.get('error', 'unknown')}")
             
             # Automation decision events
+            # IMPORTANT: Check `decision` field FIRST — it carries the semantic
+            # intent (ReadyForPost / Posted / NeedsReview).  The legacy
+            # `auto_clear` / `auto_post` booleans are secondary signals that
+            # must NOT shadow a concrete decision value.
             elif event_type == "automation.decision.completed":
                 decision = payload.get("decision", "")
+                has_automation_decision = True
                 
-                if payload.get("auto_clear"):
-                    automation_state = AutomationState.AUTONOMOUS.value
-                    workflow_state = WorkflowState.COMPLETED.value
-                    state_reason = "Auto-cleared"
-                elif payload.get("auto_post"):
-                    automation_state = AutomationState.AUTONOMOUS.value
-                    workflow_state = WorkflowState.COMPLETED.value
-                    state_reason = "Auto-posted"
-                elif decision == "ReadyForPost":
+                if decision == "ReadyForPost":
                     automation_state = AutomationState.AUTONOMOUS.value
                     workflow_state = WorkflowState.READY.value
-                    state_reason = "Ready for processing"
-                    validation_state = "pass"  # If auto-post says ready, validation is effectively passed
+                    validation_state = ValidationState.PASS.value
+                    state_reason = "Ready for posting"
+                    blocking_issues = []
+                    needs_review = False
+                    review_queue = None
+                elif decision == "Posted":
+                    automation_state = AutomationState.AUTONOMOUS.value
+                    workflow_state = WorkflowState.COMPLETED.value
+                    validation_state = ValidationState.PASS.value
+                    state_reason = f"Posted to BC: {payload.get('bc_record_no', '')}"
+                    blocking_issues = []
+                    needs_review = False
+                    review_queue = None
                 elif decision == "NeedsReview":
                     needs_review = True
                     workflow_state = WorkflowState.REVIEWING.value
                     automation_state = AutomationState.ASSISTED.value
                     state_reason = payload.get("reason", "Awaiting review")
+                    review_queue = "accounting_review"
                 elif decision == "ReadyForApproval":
                     workflow_state = WorkflowState.READY.value
                     automation_state = AutomationState.ASSISTED.value
-                elif decision == "Posted":
+                elif payload.get("auto_clear"):
                     automation_state = AutomationState.AUTONOMOUS.value
                     workflow_state = WorkflowState.COMPLETED.value
-                    state_reason = "Posted to BC"
-                    validation_state = "pass"
+                    validation_state = ValidationState.PASS.value
+                    state_reason = "Auto-cleared"
+                    blocking_issues = []
+                    needs_review = False
+                    review_queue = None
+                elif payload.get("auto_post"):
+                    automation_state = AutomationState.AUTONOMOUS.value
+                    workflow_state = WorkflowState.COMPLETED.value
+                    validation_state = ValidationState.PASS.value
+                    state_reason = "Auto-posted"
+                    blocking_issues = []
+                    needs_review = False
+                    review_queue = None
             
             # Review events
             elif event_type == "review.assigned":
@@ -577,18 +597,30 @@ class DerivedStateService:
         # Derive automation_state from auto_cleared and other flags
         automation_state = AutomationState.MANUAL.value
         
-        if document.get("auto_cleared"):
+        # ReadyForPost takes precedence — doc passed all checks but BC writes
+        # are disabled; it should show as READY, not COMPLETED.
+        if status == "ReadyForPost":
+            automation_state = AutomationState.AUTONOMOUS.value
+            workflow_state = WorkflowState.READY.value
+            validation_state = ValidationState.PASS.value
+        elif status == "Posted":
+            automation_state = AutomationState.AUTONOMOUS.value
+            workflow_state = WorkflowState.COMPLETED.value
+            validation_state = ValidationState.PASS.value
+        elif document.get("auto_cleared") and status != "NeedsReview":
             automation_state = AutomationState.AUTONOMOUS.value
             workflow_state = WorkflowState.COMPLETED.value
         elif document.get("auto_posted"):
             automation_state = AutomationState.AUTONOMOUS.value
             workflow_state = WorkflowState.COMPLETED.value
-        elif document.get("ai_confidence") or 0 > 0.9 and validation_state == ValidationState.PASS.value:
+        elif (document.get("ai_confidence") or 0) > 0.9 and validation_state == ValidationState.PASS.value:
             automation_state = AutomationState.ASSISTED.value
         
         # Generate state reason
         state_reason = ""
-        if blocking_issues:
+        if status == "ReadyForPost":
+            state_reason = "Ready for posting — all checks passed"
+        elif blocking_issues:
             state_reason = f"Blocked: {blocking_issues[0]}"
         elif document.get("auto_cleared"):
             state_reason = document.get("auto_clear_reason", "Auto-cleared")

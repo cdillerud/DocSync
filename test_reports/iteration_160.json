@@ -1,0 +1,89 @@
+{
+  "summary": "Completed testing of derived_state_service.py fix for ReadyForPost decision handling. All 8 backend tests passed (100%). Frontend verified: ReadyForPost documents correctly display 'Validated' (green) badge and 'Ready to Post' status, NOT 'Failed' (red). The fix correctly checks the 'decision' field FIRST before 'auto_clear'/'auto_post' booleans.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_derived_state_readyforpost.py",
+    "/app/test_reports/pytest/derived_state_readyforpost_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_derived_state_readyforpost.py"
+  ],
+  "success_rate": {
+    "backend": "100% (8/8 tests passed)",
+    "frontend": "100% (Login, dashboard, document detail page verified)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "Created test documents with ReadyForPost status and workflow_events in workflow_events collection",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "ReadyForPost derived state fix fully tested. Key verifications: (1) automation.decision.completed with decision='ReadyForPost' sets validation_state='pass', workflow_state='ready', needs_review=False, blocking_issues=[], (2) NeedsReview decision sets workflow_state='reviewing', needs_review=True, (3) Posted decision sets workflow_state='completed', validation_state='pass', (4) Legacy fallback for ReadyForPost status correctly maps to validation_state='pass', workflow_state='ready', (5) auto_clear=True without decision still sets workflow_state='completed' (backward compat), (6) Frontend UnifiedQueuePage shows 'Ready to Post' (green) for ReadyForPost status, (7) Frontend DocumentDetailPage shows 'Validated' (green) badge for validation_state='pass'.",
+  "features_tested": {
+    "backend": [
+      "GET /api/health - Returns 200 with status=healthy - PASS",
+      "ReadyForPost decision sets validation_state='pass' - PASS",
+      "ReadyForPost decision sets workflow_state='ready' - PASS",
+      "ReadyForPost decision sets needs_review=False - PASS",
+      "ReadyForPost decision clears blocking_issues - PASS",
+      "derived_state is computed from events (derived_from='events') - PASS",
+      "NeedsReview decision sets workflow_state='reviewing', needs_review=True - PASS",
+      "Posted decision sets workflow_state='completed', validation_state='pass' - PASS",
+      "Legacy ReadyForPost status maps to validation_state='pass', workflow_state='ready' - PASS",
+      "auto_clear=True without decision sets workflow_state='completed' - PASS"
+    ],
+    "frontend": [
+      "Login page loads with GPI Document Hub title - PASS",
+      "Login with admin/admin credentials - PASS",
+      "Dashboard loads after login - PASS",
+      "Tabs visible: All, Accounting, Sales, Processed, Batches - PASS",
+      "BC CONNECTED status visible (green dot) - PASS",
+      "ReadyForPost document shows 'Ready to Post' status badge (green) in queue - PASS",
+      "Document detail page shows 'Validated' badge (green) for ReadyForPost document - PASS",
+      "Document Status card shows: VALIDATION=pass, WORKFLOW=ready, AUTOMATION=autonomous - PASS",
+      "State reason shows 'Ready for posting' - PASS",
+      "Derived from shows 'Event history' - PASS"
+    ]
+  },
+  "code_verification": {
+    "derived_state_service_lines_318_366": "VERIFIED - automation.decision.completed handler checks decision field FIRST (ReadyForPost/Posted/NeedsReview) before auto_clear/auto_post booleans",
+    "derived_state_service_lines_600_610": "VERIFIED - Legacy fallback handles ReadyForPost status before auto_cleared override, sets validation_state='pass', workflow_state='ready'",
+    "ap_auto_post_service_lines_154_173": "VERIFIED - ReadyForPost event writes auto_clear:True + decision:ReadyForPost",
+    "UnifiedQueuePage_lines_49_50": "VERIFIED - STATUS_LABELS includes ReadyForPost/ready_for_post showing 'Ready to Post'",
+    "UnifiedQueuePage_line_56": "VERIFIED - getStatusColor returns green for ready_for_post status",
+    "DocumentDetailPage_lines_460_469": "VERIFIED - validation badge shows 'Validated' (green) for validation_state='pass'"
+  },
+  "bug_fix_verification": {
+    "original_bug": "AP invoices marked as ReadyForPost by ap_auto_post_service displayed 'Failed' (red) validation badge instead of 'Validated/Pass' (green). Root cause: automation.decision.completed events with both auto_clear=True and decision=ReadyForPost were handled by the auto_clear branch first, never reaching the ReadyForPost branch which sets validation_state='pass'.",
+    "fix_applied": [
+      "derived_state_service.py: Restructured automation.decision.completed handler to check 'decision' field FIRST before 'auto_clear'/'auto_post' booleans",
+      "derived_state_service.py: Legacy fallback now handles ReadyForPost status before auto_cleared override",
+      "Frontend already had correct STATUS_LABELS and getStatusColor for ReadyForPost"
+    ],
+    "fix_verified": true,
+    "verification_details": [
+      "Created test document with status=ReadyForPost, auto_cleared=True, and workflow_events including automation.decision.completed with decision='ReadyForPost' and auto_clear=True",
+      "GET /api/documents/{doc_id} returns derived_state.validation_state='pass' and workflow_state='ready'",
+      "Frontend document detail page shows 'Validated' (green) badge, not 'Failed' (red)",
+      "Frontend queue shows 'Ready to Post' (green) status badge"
+    ]
+  },
+  "bc_status": {
+    "demo_mode": false,
+    "bc_write_enabled": true,
+    "read_environment": "Production",
+    "write_environment": "Sandbox_11_3_2025"
+  },
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "note": "No APIs are mocked. BC Sandbox credentials are REAL (DEMO_MODE=false)."
+  }
+}

@@ -47,10 +47,13 @@ const STATUS_LABELS = {
   Archived: "Archived", archived: "Archived",
   Exception: "Exception", batch_parent: "Batch",
   auto_approved: "Approved",
+  ReadyForPost: "Ready to Post", ready_for_post: "Ready to Post",
+  Failed: "Failed",
 };
 
 const getStatusColor = (status) => {
   const s = (status || "").toLowerCase();
+  if (s.includes("ready_for_post") || s === "readyforpost") return "bg-emerald-500/15 text-emerald-400";
   if (s.includes("complete") || s.includes("posted") || s.includes("approved") || s.includes("exported") || s === "validated" || s === "validationpassed") return "bg-emerald-500/15 text-emerald-400";
   if (s.includes("bounds") || s.includes("exception") || s.includes("rejected") || s.includes("fail")) return "bg-red-500/15 text-red-400";
   if (s.includes("review") || s.includes("pending") || s.includes("vendor")) return "bg-amber-500/15 text-amber-400";

@@ -1,0 +1,136 @@
+<analysis>**original_problem_statement**: 
+The user requested continuous refinement of the Sales/AP Modules and the Document Inbox:
+1. Finish wiring the strict, binary AP Auto-Post logic (Auto-Post vs Needs Review) into the main intake pipeline, replacing the leaky  system.
+2. Fix classification bugs where AP mailbox documents get stuck as Unknown.
+3. Improve BC Learning: Handle freight vendors (like Tumalo Creek) that legitimately do not use POs, preventing them from failing PO validation.
+4. Reduce the volume of Needs Review documents by auto-learning vendor aliases from successful Business Central validations.
+5. Fix UI status badge sync issues where documents correctly marked as ReadyForPost by the backend still display as Failed or Auto-cleared in the frontend.
+
+**User's preferred language**: English (INSTRUCT next agent to respond in English only)
+
+**what currently exists?** 
+The strict  is fully wired into both the main intake () and reprocess () pipelines. The classification sync bug ( remaining Unknown) is fixed. The  now queries the local  (bypassing preview BC API limitations) to learn if a vendor typically uses POs ( flag) and skips PO validation if they don't. Vendor aliases are now auto-learned during successful BC validations. The agent was actively debugging why the UI still shows Failed for documents that successfully reached ReadyForPost.
+
+**Last working item**:
+    - Last item agent was working: Fixing the  so that documents marked as ReadyForPost by the  correctly display that status in the frontend, rather than inheriting a legacy Failed status from earlier BC Validation steps.
+    - Status: IN PROGRESS
+    - Agent Testing Done: N
+    - Which testing method agent to use? backend testing agent / manual testing by curl to simulate the pipeline and check the derived state.
+    - User Testing Done: N
+
+**All Pending/In progress Issue list**:
+  Issue 1: Derived State / Status Badge not reflecting ReadyForPost (P0)
+     - Attempted fixes: The agent updated  (around line 340 and 570) to recognize the  decision and map it correctly. However, the user provided another screenshot showing the status still says Failed on production. The agent tried to query the DB for the document but couldn't find it.
+     - Next debug checklist: 
+        1. **CRITICAL AWARENESS**: The user is testing on **Production**, which is why querying the specific  in your Preview environment DB returns NOT FOUND.
+        2. Create a mock document in your preview DB, run it through the  to get a ReadyForPost decision, and then trigger .
+        3. Verify if  staying as fail (from an earlier BC validation event) is overriding the workflow state in the frontend.
+     - Why fix this issue and what will be achieved with the fix? The backend is making the correct automation decisions, but the frontend UI is displaying incorrect, alarming statuses (Failed), breaking user trust.
+     - Status: IN PROGRESS
+     - Is recurring issue? Y (Status sync issues have been a recurring theme).
+     - Should Test frontend/backend/both after fix? both
+     - Blocked on other issue: None
+
+**In progress Task List**:
+  None. (Focus is entirely on Issue 1).
+
+**Upcoming and Future Tasks**
+    Upcoming Tasks:
+    - P1: Build Rep Overrides management UI (Admin screen to map customers to reps without using DB scripts).
+    - P1: Teams Adaptive Card integration (webhook handler for Approve -> BC Sales Order).
+    
+    Future Tasks:
+    - P2: Vendor Inventory Dashboard.
+    - P2: Product/BOM (Bill of Materials) module.
+    - P2: Production-ready email service and Entra ID SSO.
+    - P3: Continue  extraction.
+
+**Completed work in this session**
+- Wired  into main intake  and bypassed old  (DONE)
+- Fixed AP document classification bug updating  from deterministic classification (DONE)
+- Upgraded  to learn  flag from local cache (DONE)
+- Fixed missing  storage in  and  (DONE)
+- Fixed  reprocess pipeline to properly execute  (DONE)
+- Implemented vendor alias auto-learning from successful BC validation to reduce Needs Review volume (DONE)
+
+**Earlier issues found/mentioned but not fixed**
+None.
+
+**Known issue recurrence from previous fork**
+  - Issue recurrence in previous fork: Documents showing wrong status/leaking through validation.
+  - Recurrence count: 4+
+  - Status: IN PROGRESS
+  Note: Be extremely diligent with . The backend logic is mostly correct now, but the translation to the frontend UI state is fragile.
+
+**Code Architecture**
+
+
+**Key Technical Concepts**
+- **po_expected Learning**: For vendors like Tumalo Creek (freight), they legitimate do not have POs. The profile service checks the  and if historical invoices have 0 POs, it sets , allowing the document to bypass PO validation and Auto-Post successfully.
+- **Derived State**: The frontend doesn't read raw database columns; it relies on  parsing the event history (like ) to compute the badge status.
+
+**key DB schema**
+  - : Stores the processed files.
+  - : Stores normalized mappings to bypass fuzzy search failures. (Has unique indexes on  and ).
+
+**changes in tech stack**
+  - None
+
+**All files of reference**
+- 
+-  
+- 
+- 
+- 
+- 
+- 
+
+**Areas that need refactoring**:
+-  has a lot of dead code now that AP invoices bypass it entirely.
+
+**key api endpoints**
+- : Triggers direct BC post.
+- : Re-runs extraction and the AP pipeline.
+
+**Critical Info for New Agent**
+- **PRODUCTION VS PREVIEW MUDDLE**: The user is sending screenshots and document IDs (like ) from their **Production** environment. The previous agent wasted time querying the preview database for these IDs and assuming it failed. Trust the user's screenshots for the *state* of the app, but test your fixes using mock documents in your *local preview* environment.
+- The backend logic for auto-posting is actually succeeding now (events show ), but  is failing to translate this successfully to the UI, leaving the document labeled as Failed. Focus heavily on how derived state parses events.
+
+**documents and test reports created in this job**
+  - 
+  - 
+  - 
+  - 
+
+**Last 10 User Messages and any pending HUMAN messages** 
+1. **User**: Provided screenshot showing doc  stuck as Failed despite fixes.
+2. **Agent**: Fixed  pathing in  and updated reprocess handlers.
+3. **User**: Provided screenshot of same doc showing Needs Review but still Failed badge.
+4. **Agent**: Fixed pathing again, verified backend.
+5. **User**: How can we learn patterns for these sort of documents? can we not learn from what is IN BC for a vendor??
+6. **Agent**: Re-enabled profile learning to set  based on cache history.
+7. **User**: we need a strategy to reduce the amount of AP invoices needing review. Can you help me create something???
+8. **Agent**: Implemented Vendor Alias Auto-learning from successful BC Validation.
+9. **User**: Provided screenshot of doc . Shows auto-post succeeded (ReadyForPost), but UI badge still says Failed.
+10. **Agent**: Began debugging , but got confused because the production doc ID wasn't in the preview DB.
+
+**Project Health Check:**
+- Broken: Status badge UI state computation ().
+- Mocked: .
+
+**3rd Party Integrations** 
+	 •	OpenAI/Gemini — uses Emergent LLM Key
+	 •	Dynamics 365 BC — requires User API Key
+	 •	MS Graph (Email/SharePoint) — requires User API Key
+
+**Testing status**
+  - Testing agent used after significant changes: YES
+  - Troubleshoot agent used after agent stuck in loop: NO
+  - Test files created: None explicitly added to 
+  - Known regressions: None, just pending UI translation logic.
+
+**Credentials to test flow:**
+Frontend login:  / 
+
+**What agent forgot to execute**
+The agent forgot that the user is interacting with the live Production system, so searching the local Preview MongoDB for the specific  from the screenshots will always fail. Create your own test data or use / to manually invoke the derived state service with a mocked  event payload.</analysis>

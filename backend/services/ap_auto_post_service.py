@@ -344,7 +344,6 @@ async def _record_success_feedback(db, doc_id: str, outcome: str, source: str):
         # Also record vendor alias reinforcement if we have both canonical name and vendor no
         vendor_no = doc.get("bc_vendor_number", "")
         if vendor_no and vendor:
-            import uuid as uuid_mod
             await db.vendor_aliases.update_one(
                 {"alias_string": vendor, "vendor_no": vendor_no},
                 {
@@ -359,7 +358,7 @@ async def _record_success_feedback(db, doc_id: str, outcome: str, source: str):
                         "learned_at": now,
                     },
                     "$inc": {"confirm_count": 1},
-                    "$setOnInsert": {"alias_id": str(uuid_mod.uuid4())},
+                    "$setOnInsert": {"alias_id": str(uuid.uuid4())},
                 },
                 upsert=True,
             )

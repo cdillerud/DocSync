@@ -1,7 +1,7 @@
 # GPI Document Hub — Product Requirements
 
 ## Core Philosophy
-**Learn → Apply → Improve → Learn.** Every document processed, every correction, every interaction makes the system smarter. Use ALL available data.
+**Learn → Apply → Improve → Learn.** Every document processed, every correction, every interaction makes the system smarter.
 
 ## Architecture
 - **Backend**: FastAPI (Python) on port 8001
@@ -12,44 +12,46 @@
 ## What's Implemented
 
 ### Core Features (Complete)
-- Document ingestion pipeline (email, upload, SharePoint)
-- AI extraction + deterministic classification
-- Drop-Ship PO auto-creation in BC
+- Document ingestion, AI extraction, classification, vendor matching, auto-post
 - Intake Benchmark, SharePoint preview, Email polling, Event emission
 
 ### AP Auto-Post Pipeline (Complete)
-- Strict binary 4-condition check, wired into intake/reprocess/mark-ready
+- Strict binary 4-condition check, wired into all flows
 
 ### Phase 1: Bulk Knowledge Seeding (Complete)
-| Metric | Before | After |
-|--------|--------|-------|
-| Vendor Aliases | 7 | 962 |
-| Sender-Domain Mappings | 14 | 122 |
-| Vendor Invoice Profiles | 3 | 603 |
+- 962 vendor aliases, 122 domain mappings, 603 vendor profiles from BC/Spiro
 
 ### Phase 2: Context-Rich LLM Calls (Complete)
-- **Vendor Context Builder**: Real BC invoice examples + profile + classification signals injected into every LLM call
-- **Auto-Confirm on Success**: Positive feedback loop from ReadyForPost/Posted outcomes
-- **Feedback Bridge Fixed**: 117 corrections now reach the LLM
+- Vendor context builder with real BC invoice examples + profile intelligence
+- Auto-confirm on success for positive reinforcement
+- Classification + extraction prompts enriched with BC history
 
-### Auto-Seed Scheduler (April 1, 2026 — Complete)
-- **Startup seed**: Runs 30s after backend starts
-- **Periodic seed**: Every 6 hours
-- **Post-sync seed**: Auto-triggers after every BC cache refresh
-- **Idempotent**: Safe to run repeatedly — uses upserts, skips existing entries
-- **Non-blocking**: Failures logged but never crash the pipeline
-- **UI**: Scheduler status visible in Knowledge Base admin page
-- Files: `server.py` (scheduler task), `bc_reference_cache_service.py` (post-sync hook), `routers/knowledge_seed.py` (status endpoint with scheduler info), `pages/KnowledgeBasePage.js` (scheduler card)
+### Auto-Seed Scheduler (Complete)
+- Startup + every 6h + post-BC-sync triggers
+
+### Intelligent Multi-Page Document Splitting (April 1, 2026 — COMPLETE)
+- **Problem**: Multi-page PDFs with multiple invoices/BOLs arrived as single documents, causing misclassification
+- **Solution**: Intelligent boundary detection + auto-split
+  - `document_boundary_service.py`: Page fingerprinting (vendor hints, invoice/PO/BOL numbers, letterhead detection)
+  - Boundary scoring: vendor change (+3), ref number change (+3), letterhead transition (+2), doc type change (+2), threshold ≥ 2
+  - Groups contiguous pages belonging to same logical document (e.g., 2-page invoice stays together)
+  - `batch_po_splitter.py` expanded: SPLITTABLE_TYPES now includes AP_Invoice, BOL, Unknown, etc.
+  - `split_and_ingest_batch()` accepts boundary groups for smart splitting, falls back to per-page
+  - Auto-split wired into main intake pipeline (server.py)
+  - API endpoints: GET `/{doc_id}/boundary-analysis`, POST `/{doc_id}/auto-split`
+- **Test results**: 5-page PDF with 3 vendors → correctly split into 3 groups (pages 1-2, page 3, pages 4-5). Single-vendor 3-page invoice → correctly kept together.
+- Testing: 100% (20/20 backend — iteration_163)
 
 ### Derived State Fix (Complete)
-- Fixed ReadyForPost documents showing "Failed" badge
+- ReadyForPost documents show "Validated" + "Ready" (not "Failed")
 
 ## Key API Endpoints
-- `GET /api/knowledge-seed/status` — KB health + scheduler status
-- `POST /api/knowledge-seed/run-all` — Manual full seed (idempotent)
+- `GET /api/knowledge-seed/status` — KB health + scheduler
+- `POST /api/knowledge-seed/run-all` — Manual full seed
 - `GET /api/documents/{doc_id}` — Document detail with derived state
+- `GET /api/documents/{doc_id}/boundary-analysis` — Preview page boundary detection
+- `POST /api/documents/{doc_id}/auto-split` — Trigger boundary-aware splitting
 - `POST /api/documents/{doc_id}/reprocess` — Reprocessing
-- `POST /api/ap-review/documents/{doc_id}/mark-ready` — BC post
 
 ## Backlog
 - P1: Rep Overrides management UI

@@ -175,3 +175,102 @@ async def close_all_gaps():
         results["knowledge_seed"] = {"error": str(e)}
 
     return {"success": True, "results": results}
+
+
+@router.get("/learning-proof/{vendor_id}")
+async def show_learning_proof(vendor_id: str, doc_type: str = "AP_Invoice"):
+    """
+    PROOF endpoint: Shows exactly what the LLM sees when processing a document
+    for a given vendor. This is the injected context from ALL learning sources.
+    
+    Usage: GET /api/knowledge-seed/learning-proof/TUMALOC?doc_type=AP_Invoice
+    """
+    db = get_db()
+    result = {"vendor_id": vendor_id, "doc_type": doc_type, "learning_sources": {}}
+
+    # 1. Feedback context (what gets injected into the LLM prompt)
+    from services.feedback_loop_service import build_feedback_context_for_prompt
+    feedback_context = await build_feedback_context_for_prompt(db, vendor_id=vendor_id, doc_type=doc_type)
+    result["learning_sources"]["feedback_prompt_injection"] = {
+        "chars": len(feedback_context),
+        "content": feedback_context if feedback_context else "(empty — no corrections for this vendor yet)",
+    }
+
+    # 2. VEP profile (vendor extraction profile)
+    from services.vendor_extraction_profile_service import get_vep_service
+    vep_svc = get_vep_service()
+    vep_profile = None
+    if vep_svc:
+        vep_profile = await vep_svc.get_profile(vendor_id)
+    if vep_profile:
+        result["learning_sources"]["vendor_extraction_profile"] = {
+            "enabled": vep_profile.get("enabled"),
+            "reference_priority": vep_profile.get("reference_priority_order"),
+            "doc_type_bias": vep_profile.get("document_type_bias"),
+            "po_expected": vep_profile.get("po_expected"),
+            "amount_stats": vep_profile.get("amount_stats"),
+            "learning_source": vep_profile.get("learning_source"),
+        }
+    else:
+        result["learning_sources"]["vendor_extraction_profile"] = "(no VEP profile for this vendor)"
+
+    # 3. Vendor invoice profile (BC historical data)
+    vip = await db.vendor_invoice_profiles.find_one(
+        {"$or": [{"vendor_no": vendor_id}, {"vendor_no": vendor_id.upper()}]},
+        {"_id": 0}
+    )
+    if vip:
+        result["learning_sources"]["bc_invoice_history"] = {
+            "invoice_count": vip.get("bc_invoice_count"),
+            "po_expected": vip.get("po_expected"),
+            "external_ref_rate": vip.get("external_ref_rate"),
+            "amount_stats": vip.get("amount_stats"),
+            "posting_frequency": vip.get("posting_frequency"),
+            "po_patterns": vip.get("po_patterns"),
+        }
+    else:
+        result["learning_sources"]["bc_invoice_history"] = "(no BC invoice history for this vendor)"
+
+    # 4. Vendor aliases
+    aliases = await db.vendor_aliases.find(
+        {"$or": [{"vendor_no": vendor_id}, {"vendor_no": vendor_id.upper()},
+                 {"canonical_vendor_id": vendor_id}, {"canonical_vendor_id": vendor_id.upper()}]},
+        {"_id": 0, "alias_string": 1, "alias": 1, "vendor_name": 1, "source": 1}
+    ).limit(20).to_list(20)
+    result["learning_sources"]["vendor_aliases"] = [
+        {"name": a.get("alias_string") or a.get("alias", "?"), "source": a.get("source", "?")}
+        for a in aliases
+    ] if aliases else "(no aliases for this vendor)"
+
+    # 5. Classification corrections for this vendor
+    corrections = await db.classification_corrections.find(
+        {"$or": [
+            {"vendor_canonical": {"$regex": f"^{vendor_id}$", "$options": "i"}},
+            {"vendor_no": {"$regex": f"^{vendor_id}$", "$options": "i"}},
+        ]},
+        {"_id": 0, "original_type": 1, "corrected_type": 1, "file_name": 1, "text_snippet": 1}
+    ).sort("corrected_at", -1).limit(10).to_list(10)
+    result["learning_sources"]["classification_corrections"] = [
+        {"from": c.get("original_type"), "to": c.get("corrected_type"),
+         "file": c.get("file_name", "?"), "has_text": bool(c.get("text_snippet"))}
+        for c in corrections
+    ] if corrections else "(no corrections for this vendor)"
+
+    # 6. Few-shot examples that would be included
+    from services.classification_feedback_service import get_few_shot_examples
+    few_shot = await get_few_shot_examples(vendor_no=vendor_id)
+    result["learning_sources"]["few_shot_examples"] = [
+        {"from": ex.get("original_type"), "to": ex.get("corrected_type"),
+         "file": ex.get("file_name", "?"), "has_text": bool(ex.get("text_snippet"))}
+        for ex in few_shot
+    ] if few_shot else "(no few-shot examples available)"
+
+    # Summary
+    active_sources = sum(1 for v in result["learning_sources"].values()
+                         if not isinstance(v, str) or not v.startswith("("))
+    result["summary"] = {
+        "active_learning_sources": f"{active_sources}/6",
+        "verdict": "LEARNING" if active_sources >= 2 else "MINIMAL" if active_sources >= 1 else "NOT LEARNING",
+    }
+
+    return result

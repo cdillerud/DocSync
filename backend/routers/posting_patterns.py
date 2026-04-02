@@ -324,14 +324,17 @@ async def posting_learning_proof(vendor_no: str):
         },
         "consistency": {
             "overall_score": f"{consistency.get('overall', 0)*100:.0f}%",
-            "line_count_consistency": f"{consistency.get('line_count', 0)*100:.0f}%",
-            "item_choice_consistency": f"{consistency.get('item_choice', 0)*100:.0f}%",
-            "line_type_consistency": f"{consistency.get('line_type', 0)*100:.0f}%",
-            "item_dominance": f"{consistency.get('item_dominance', 0)*100:.0f}%",
-            "amount_tightness": f"{consistency.get('amount_tightness', 0)*100:.0f}%",
-            "ref_coverage": f"{consistency.get('ref_coverage', 0)*100:.0f}%",
-            "tax_uniformity": f"{consistency.get('tax_uniformity', 0)*100:.0f}%",
-            "uom_uniformity": f"{consistency.get('uom_uniformity', 0)*100:.0f}%",
+            "dimensions": {
+                "line_count": f"{consistency.get('line_count', 0)*100:.0f}% — same # of lines every time",
+                "item_choice": f"{consistency.get('item_choice', 0)*100:.0f}% — same item/GL combo every time",
+                "item_dominance": f"{consistency.get('item_dominance', 0)*100:.0f}% — one clear primary item",
+                "line_type": f"{consistency.get('line_type', 0)*100:.0f}% — always same line type (Item/Account/Charge)",
+                "ref_pattern_uniformity": f"{consistency.get('ref_pattern_uniformity', 0)*100:.0f}% — same description format every time",
+                "ref_coverage": f"{consistency.get('ref_coverage', 0)*100:.0f}% — lines with structured reference #",
+                "tax_uniformity": f"{consistency.get('tax_uniformity', 0)*100:.0f}% — always same tax code",
+                "uom_uniformity": f"{consistency.get('uom_uniformity', 0)*100:.0f}% — always same unit of measure",
+            },
+            "amount_tightness": f"{consistency.get('amount_tightness', 0)*100:.0f}% (informational — not weighted)",
             "interpretation": (
                 "HIGHLY PREDICTABLE — safe for auto-posting"
                 if consistency.get("overall", 0) >= 0.8 else

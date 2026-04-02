@@ -325,26 +325,30 @@ def _compute_consistency(
     else:
         scores["item_dominance"] = 0
 
-    # 5. Amount tightness — low coefficient of variation = tight range
-    # CV < 0.3 = very tight (score ~1.0), CV > 1.5 = wild (score ~0.0)
+    # 5. Amount tightness — kept for info but NOT weighted in overall
+    # (User feedback: "I care about structure, not dollar variability")
     if line_amounts and len(line_amounts) > 1:
         mean_amt = statistics.mean(line_amounts)
         stdev_amt = statistics.stdev(line_amounts)
         cv = stdev_amt / mean_amt if mean_amt > 0 else 999
-        # Map CV to 0-1 score: CV=0 → 1.0, CV=0.3 → 0.8, CV=1.0 → 0.3, CV=2.0 → 0.0
         scores["amount_tightness"] = round(max(0, min(1, 1.0 - (cv * 0.5))), 3)
     elif line_amounts:
         scores["amount_tightness"] = 1.0
     else:
         scores["amount_tightness"] = 0
 
-    # 6. Reference coverage — % of lines that have ANY structured reference
+    # 6. Reference pattern consistency — do they always format descriptions the same way?
+    # This is STRUCTURAL: not "do they have refs" but "do they use the SAME format every time"
     total_refs = sum(ref_pattern_counts.values())
-    # Exclude "descriptive_text_only" — that's the absence of a reference
-    structured_refs = total_refs - ref_pattern_counts.get("descriptive_text_only", 0)
-    if total_lines > 0:
-        scores["ref_coverage"] = round(structured_refs / total_lines, 3)
+    if total_refs > 0:
+        top_ref_pattern_count = max(ref_pattern_counts.values())
+        # What % of lines follow the dominant pattern?
+        scores["ref_pattern_uniformity"] = round(top_ref_pattern_count / total_refs, 3)
+        # Also track: what % of lines have ANY structured reference
+        structured_refs = total_refs - ref_pattern_counts.get("descriptive_text_only", 0)
+        scores["ref_coverage"] = round(structured_refs / max(total_lines, 1), 3)
     else:
+        scores["ref_pattern_uniformity"] = 0
         scores["ref_coverage"] = 0
 
     # 7. Tax code uniformity — do they always use the same tax code?
@@ -353,7 +357,6 @@ def _compute_consistency(
         total_tax_lines = sum(tax_code_counts.values()) or 1
         scores["tax_uniformity"] = round(top_tax / total_tax_lines, 3)
     else:
-        # No tax codes at all = perfectly uniform (they never use tax codes)
         scores["tax_uniformity"] = 1.0
 
     # 8. UOM uniformity — always same unit of measure?
@@ -364,16 +367,17 @@ def _compute_consistency(
     else:
         scores["uom_uniformity"] = 1.0
 
-    # Overall consistency — weighted average across all 8 dimensions
+    # Overall consistency — STRUCTURAL FORMAT ONLY
+    # Measures: "Does the human always build the invoice the same way?"
+    # Excludes amount variability (dollar values don't affect posting structure)
     weights = {
-        "line_count": 0.15,
-        "item_choice": 0.20,
-        "line_type": 0.10,
-        "item_dominance": 0.15,
-        "amount_tightness": 0.10,
-        "ref_coverage": 0.10,
-        "tax_uniformity": 0.10,
-        "uom_uniformity": 0.10,
+        "line_count": 0.20,            # Same # of lines every time
+        "item_choice": 0.20,           # Same item/GL combo every time
+        "item_dominance": 0.15,        # One clear primary item/GL
+        "line_type": 0.10,             # Always Item / always Account
+        "ref_pattern_uniformity": 0.15, # Same description format every time
+        "tax_uniformity": 0.10,        # Same tax code every time
+        "uom_uniformity": 0.10,        # Same UOM every time
     }
     overall = sum(scores.get(k, 0) * w for k, w in weights.items())
     scores["overall"] = round(overall, 3)

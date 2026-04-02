@@ -558,27 +558,60 @@ class BusinessCentralService:
         """
         Get line items for a specific purchase invoice.
         This is where the GL accounts, quantities, and amounts live.
+        Tries multiple approaches since BC API field names vary by version.
         """
         if self.use_mock:
             return []
 
         token = await get_bc_token(environment=BC_READ_ENVIRONMENT)
         company_id = await self._get_company_id(environment=BC_READ_ENVIRONMENT)
+        headers = {"Authorization": f"Bearer {token}"}
 
+        # Approach 1: Sub-entity navigation (standard v2.0)
         url = (f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/"
                f"companies({company_id})/purchaseInvoices({invoice_id})/purchaseInvoiceLines")
-        params = {
-            "$select": "id,lineType,lineObjectNumber,description,quantity,"
-                       "unitPrice,lineAmount,discountAmount,discountPercent,"
-                       "taxCode,taxPercent,amountIncludingTax",
-        }
 
         async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
-            resp = await client.get(url, headers={"Authorization": f"Bearer {token}"}, params=params)
+            # Try without $select first — get all fields, then we know what exists
+            resp = await client.get(url, headers=headers)
+            if resp.status_code == 200:
+                lines = resp.json().get("value", [])
+                if lines:
+                    return lines
+
+            # Approach 2: Try the standalone purchaseInvoiceLines entity with filter
+            url2 = (f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/"
+                    f"companies({company_id})/purchaseInvoiceLines")
+            params2 = {"$filter": f"documentId eq {invoice_id}", "$top": "50"}
+            resp2 = await client.get(url2, headers=headers, params=params2)
+            if resp2.status_code == 200:
+                lines = resp2.json().get("value", [])
+                if lines:
+                    return lines
+
+            # Approach 3: Try OData v4 endpoint (some BC setups use this)
+            url3 = (f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/ODataV4/"
+                    f"Company('{company_id}')/PurchInvLines")
+            params3 = {"$filter": f"Document_No eq '{invoice_id}'", "$top": "50"}
+            resp3 = await client.get(url3, headers=headers, params=params3)
+            if resp3.status_code == 200:
+                lines = resp3.json().get("value", [])
+                if lines:
+                    return lines
+
+            # Log what we got so the user can debug
+            logger.warning(
+                "PI lines: All approaches failed for invoice %s. "
+                "Approach1=%s, Approach2=%s, Approach3=%s",
+                invoice_id, resp.status_code, resp2.status_code, resp3.status_code
+            )
+            # Log first response body for debugging
             if resp.status_code != 200:
-                logger.error("PI lines query failed: %s - %s", resp.status_code, resp.text[:200])
-                return []
-            return resp.json().get("value", [])
+                logger.debug("PI lines approach1 body: %s", resp.text[:300])
+            if resp2.status_code != 200:
+                logger.debug("PI lines approach2 body: %s", resp2.text[:300])
+
+            return []
 
     
     # =========================================================================

@@ -97,6 +97,46 @@ async def analyze_single_vendor(vendor_no: str, limit: int = Query(default=100, 
     return result
 
 
+@router.get("/debug-lines/{vendor_no}")
+async def debug_invoice_lines(vendor_no: str):
+    """
+    Debug endpoint: Get one invoice for a vendor and try to fetch its lines.
+    Shows exactly what BC returns so we can fix field mapping.
+    """
+    db = get_db()
+    bc = get_bc_service()
+
+    # Get one invoice
+    pi_result = await bc.get_posted_purchase_invoices(vendor_id=vendor_no, limit=1)
+    invoices = pi_result.get("invoices", [])
+
+    if not invoices:
+        return {"error": "No invoices found", "raw_response": pi_result}
+
+    inv = invoices[0]
+    inv_id = inv.get("id", "")
+
+    # Show the invoice fields we got
+    result = {
+        "invoice_sample": inv,
+        "invoice_id": inv_id,
+        "line_attempts": {},
+    }
+
+    # Try to get lines
+    lines = await bc.get_purchase_invoice_lines(inv_id)
+    result["lines_found"] = len(lines)
+    if lines:
+        # Show first line with all its fields
+        result["line_sample"] = lines[0]
+        result["line_fields"] = list(lines[0].keys())
+    else:
+        result["line_sample"] = None
+        result["line_fields"] = []
+
+    return result
+
+
 async def _run_top_analysis(top_n: int):
     """Background task: analyze top vendors."""
     global _analysis_status

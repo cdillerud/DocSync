@@ -79,9 +79,30 @@
 ### Derived State Fix (Complete)
 - ReadyForPost documents show correct badges
 
+### BC Posting Pattern Analyzer (Complete - Apr 2026)
+- **New service**: `posting_pattern_analyzer.py` queries BC for how humans actually post invoices
+- Analyzes: GL accounts, line items, amount distributions, tax patterns, descriptions, PO mapping
+- Builds vendor-specific posting templates with confidence levels (high/medium/low)
+- Templates attached to ReadyForPost documents for reviewer reference
+- Auto-post service loads posting profiles to replicate human posting behavior
+- **Endpoints**: `/api/posting-patterns/status`, `/analyze/{vendor_no}`, `/analyze-top`, `/learning-proof/{vendor_no}`
+- **Result**: System learns from thousands of historical BC postings per vendor
+
+### LLM Learning Pipeline Gap Fixes (Complete - Apr 2026)
+- Classification corrections now feed into unified feedback loop
+- VEP profiles seeded from BC cache — 13 → 469 profiles
+- Few-shot builder works without text_snippet
+- Same-type correction noise filtered, 2,288 junk entries purged on production
+- Feedback events: 100% application rate (was 0% on production)
+- New `/api/knowledge-seed/close-all-gaps` and `/learning-proof/{vendor_id}` endpoints
+
 ## Backlog
+- P0: Deploy to production and run `POST /api/posting-patterns/analyze-top?top_n=20` to build profiles for top 20 vendors
+- P1: Phase 2 — Confidence-based auto-post toggle (admin setting to enable BC auto-posting for stable vendors)
+- P1: Phase 3 — BC Draft → Review → Post flow (auto-create draft PI, one-click approve)
 - P1: Rep Overrides management UI
 - P1: Teams Adaptive Card integration
+- P2: Stable vendor threshold tuning (lower from 100% to 85%)
 - P2: Vendor Inventory Dashboard
 - P2: Product/BOM module
 - P2: Production-ready email / Entra ID SSO

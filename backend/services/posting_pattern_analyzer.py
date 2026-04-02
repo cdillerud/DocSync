@@ -108,6 +108,9 @@ async def analyze_vendor_posting_patterns(
     gl_account_counts = defaultdict(int)
     item_counts = defaultdict(int)
     description_patterns = defaultdict(int)
+    uom_counts = defaultdict(int)
+    tax_code_counts = defaultdict(int)
+    line_amounts = []
     lines_per_invoice = []
 
     for inv in sample_invoices:
@@ -121,6 +124,7 @@ async def analyze_vendor_posting_patterns(
                 all_lines.append(line)
                 line_type = line.get("lineType", "unknown")
                 line_type_counts[line_type] += 1
+                # BC uses lineObjectNumber for both GL accounts and item numbers
                 obj_no = line.get("lineObjectNumber", "")
                 if obj_no:
                     if line_type == "Account":
@@ -132,6 +136,18 @@ async def analyze_vendor_posting_patterns(
                     # Normalize description for pattern detection
                     desc_norm = desc.strip().upper()[:50]
                     description_patterns[desc_norm] += 1
+                # Track unit of measure patterns
+                uom = line.get("unitOfMeasureCode", "")
+                if uom:
+                    uom_counts[uom] += 1
+                # Track tax codes
+                tax_code = line.get("taxCode", "")
+                if tax_code:
+                    tax_code_counts[tax_code] += 1
+                # Track line amounts (BC uses netAmount, not lineAmount)
+                line_amt = line.get("netAmount") or line.get("lineAmount") or line.get("unitCost", 0)
+                if isinstance(line_amt, (int, float)) and line_amt > 0:
+                    line_amounts.append(float(line_amt))
         except Exception as e:
             logger.debug("Failed to get lines for PI %s: %s", inv_id, str(e))
 
@@ -149,9 +165,15 @@ async def analyze_vendor_posting_patterns(
         "top_gl_accounts": dict(sorted(gl_account_counts.items(), key=lambda x: -x[1])[:10]),
         "top_items": dict(sorted(item_counts.items(), key=lambda x: -x[1])[:10]),
         "top_descriptions": dict(sorted(description_patterns.items(), key=lambda x: -x[1])[:15]),
-    }
-
-    # 4. Build the posting template (what the auto-post should do)
+        "uom_distribution": dict(sorted(uom_counts.items(), key=lambda x: -x[1])[:5]),
+        "tax_code_distribution": dict(sorted(tax_code_counts.items(), key=lambda x: -x[1])[:5]),
+        "line_amount_stats": {
+            "mean": round(statistics.mean(line_amounts), 2) if line_amounts else 0,
+            "median": round(statistics.median(line_amounts), 2) if line_amounts else 0,
+            "min": round(min(line_amounts), 2) if line_amounts else 0,
+            "max": round(max(line_amounts), 2) if line_amounts else 0,
+        } if line_amounts else {},
+    }    # 4. Build the posting template (what the auto-post should do)
     result["posting_template"] = _build_posting_template(result)
     result["status"] = "analyzed"
 

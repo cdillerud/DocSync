@@ -51,6 +51,21 @@
 - Compare (Preview), Apply Improvements, Full Pipeline Reprocess
 - File recovery from MongoDB b64 or SharePoint
 
+### Manual PO Override (Complete - Feb 2026)
+- `POST /api/ap-review/documents/{doc_id}/override-po` — sets `manual_po_override=True` and re-runs auto-post
+- `mark-ready` endpoint also sets override flag
+- `check_ap_ready_to_post()` skips PO check when override is set or source is mark_ready/manual_override
+- UI: "Override PO Check" button in Document Detail derived state card
+
+### Derived State Vendor/PO Fix (Complete - Apr 2026)
+- **Root cause**: `vendor.match.failed` event added "Vendor not matched" to blocking_issues, but when `bc.validation.failed` fired (PO-only failure), the stale vendor block was never cleared — even when the vendor_match check PASSED
+- **Fix 1**: `bc.validation.failed` handler now checks if vendor is NOT in failed_checks → clears stale vendor blocks
+- **Fix 2**: `automation.decision.completed` NeedsReview now REPLACES blocking_issues with actual auto-post failures
+- **Fix 3**: `validation.completed` warning handler clears vendor blocks when `vendor_resolved=True`
+- **Fix 4**: Post-processing checks individual BC validation checks (not just overall status) to clear vendor blocks
+- **Fix 5**: Post-processing checks `manual_po_override` flag and clears PO blocking issues + updates state_reason
+- **Result**: Documents no longer show contradictory "Vendor not matched" blocking issues when vendor IS matched at 100%
+
 ### Derived State Fix (Complete)
 - ReadyForPost documents show correct badges
 

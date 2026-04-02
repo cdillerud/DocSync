@@ -326,15 +326,19 @@ async def posting_learning_proof(vendor_no: str):
             "overall_score": f"{consistency.get('overall', 0)*100:.0f}%",
             "dimensions": {
                 "line_count": f"{consistency.get('line_count', 0)*100:.0f}% — same # of lines every time",
-                "item_choice": f"{consistency.get('item_choice', 0)*100:.0f}% — same item/GL combo every time",
-                "item_dominance": f"{consistency.get('item_dominance', 0)*100:.0f}% — one clear primary item",
+                "item_family": f"{consistency.get('item_family', 0)*100:.0f}% — always same item FAMILY (e.g., all FREIGHT variants)",
+                "item_dominance": f"{consistency.get('item_dominance', 0)*100:.0f}% — one clear primary item within family",
                 "line_type": f"{consistency.get('line_type', 0)*100:.0f}% — always same line type (Item/Account/Charge)",
                 "ref_pattern_uniformity": f"{consistency.get('ref_pattern_uniformity', 0)*100:.0f}% — same description format every time",
                 "ref_coverage": f"{consistency.get('ref_coverage', 0)*100:.0f}% — lines with structured reference #",
                 "tax_uniformity": f"{consistency.get('tax_uniformity', 0)*100:.0f}% — always same tax code",
                 "uom_uniformity": f"{consistency.get('uom_uniformity', 0)*100:.0f}% — always same unit of measure",
             },
-            "amount_tightness": f"{consistency.get('amount_tightness', 0)*100:.0f}% (informational — not weighted)",
+            "item_families_detected": consistency.get("item_families_seen", {}),
+            "informational": {
+                "exact_item_choice": f"{consistency.get('exact_item_choice', 0)*100:.0f}% — exact same item every time (variants are expected)",
+                "amount_tightness": f"{consistency.get('amount_tightness', 0)*100:.0f}% — dollar range tightness (not weighted)",
+            },
             "interpretation": (
                 "HIGHLY PREDICTABLE — safe for auto-posting"
                 if consistency.get("overall", 0) >= 0.8 else

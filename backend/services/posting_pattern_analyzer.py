@@ -264,18 +264,27 @@ def _compute_consistency(
     ref_pattern_counts, uom_counts, tax_code_counts, line_amounts,
 ) -> Dict[str, Any]:
     """
-    Compute a consistency score across 8 dimensions.
-    High consistency = very predictable, safe to auto-post.
+    Compute a STRUCTURAL consistency score — how predictably does the
+    human construct invoices for this vendor?
 
-    Dimensions (weighted):
-      1. line_count (15%)     — same # of lines every time?
-      2. item_choice (20%)    — same item combo every time?
-      3. line_type (10%)      — always Item / always Account?
-      4. item_dominance (15%) — one clear winner item/GL?
-      5. amount_tightness (10%) — coefficient of variation (stdev/mean)
-      6. ref_coverage (10%)   — % of lines with structured reference numbers
-      7. tax_uniformity (10%) — always same tax code?
-      8. uom_uniformity (10%) — always same unit of measure?
+    Key insight: FREIGHT-DS vs FREIGHT-WH are not "inconsistency" — they're
+    contextual routing variants of the same FREIGHT family. The system should
+    score family consistency (always freight?) separately from exact item
+    choice (always FREIGHT-DS specifically?).
+
+    Dimensions (weighted for structural format):
+      1. line_count (18%)              — same # of lines every time
+      2. item_family (20%)             — always same item FAMILY (FREIGHT-*, etc.)
+      3. item_dominance (12%)          — one clear primary item within family
+      4. line_type (10%)               — always Item / always Account
+      5. ref_pattern_uniformity (15%)  — same description format every time
+      6. tax_uniformity (10%)          — always same tax code
+      7. uom_uniformity (10%)          — always same unit of measure
+      8. ref_coverage (5%)             — lines with structured reference #
+
+    NOT weighted (informational only):
+      - amount_tightness — dollar variability doesn't affect posting structure
+      - exact_item_choice — tracked but item_family is what matters
     """
     scores = {}
 
@@ -289,31 +298,36 @@ def _compute_consistency(
     else:
         scores["line_count"] = 0
 
-    # 2. Item choice consistency — do they always use the same item combo?
+    # 2. Item FAMILY consistency — group items by prefix
+    # FREIGHT-DS, FREIGHT-WH, FREIGHT-INTL → all "FREIGHT" family
+    # 5100-010, 5100-020 → all "5100" family
+    all_items = {**item_counts, **gl_account_counts}
+    if all_items:
+        family_counts = defaultdict(int)
+        for item_code, count in all_items.items():
+            family = _extract_item_family(item_code)
+            family_counts[family] += count
+        total_item_lines = sum(family_counts.values()) or 1
+        top_family_count = max(family_counts.values())
+        scores["item_family"] = round(top_family_count / total_item_lines, 3)
+        scores["item_families_seen"] = dict(family_counts)
+    else:
+        scores["item_family"] = 0
+        scores["item_families_seen"] = {}
+
+    # Also track exact item choice (informational, not in overall)
     if per_invoice_items:
         non_empty = [t for t in per_invoice_items if t]
         if non_empty:
             most_common_combo = max(set(non_empty), key=non_empty.count)
             same_items = sum(1 for t in non_empty if t == most_common_combo)
-            scores["item_choice"] = round(same_items / len(non_empty), 3)
+            scores["exact_item_choice"] = round(same_items / len(non_empty), 3)
         else:
-            scores["item_choice"] = 0
+            scores["exact_item_choice"] = 0
     else:
-        scores["item_choice"] = 0
+        scores["exact_item_choice"] = 0
 
-    # 3. Line type consistency — always Item? Always Account? Mixed?
-    if per_invoice_line_types:
-        non_empty = [t for t in per_invoice_line_types if t]
-        if non_empty:
-            most_common_type = max(set(non_empty), key=non_empty.count)
-            same_type = sum(1 for t in non_empty if t == most_common_type)
-            scores["line_type"] = round(same_type / len(non_empty), 3)
-        else:
-            scores["line_type"] = 0
-    else:
-        scores["line_type"] = 0
-
-    # 4. Dominant item/GL concentration — is there one clear winner?
+    # 3. Item dominance — within the family, is there one clear primary?
     if item_counts:
         top_count = max(item_counts.values())
         total_item_lines = sum(item_counts.values()) or 1
@@ -325,8 +339,19 @@ def _compute_consistency(
     else:
         scores["item_dominance"] = 0
 
-    # 5. Amount tightness — kept for info but NOT weighted in overall
-    # (User feedback: "I care about structure, not dollar variability")
+    # 4. Line type consistency — always Item? Always Account? Mixed?
+    if per_invoice_line_types:
+        non_empty = [t for t in per_invoice_line_types if t]
+        if non_empty:
+            most_common_type = max(set(non_empty), key=non_empty.count)
+            same_type = sum(1 for t in non_empty if t == most_common_type)
+            scores["line_type"] = round(same_type / len(non_empty), 3)
+        else:
+            scores["line_type"] = 0
+    else:
+        scores["line_type"] = 0
+
+    # 5. Amount tightness — informational only, NOT weighted
     if line_amounts and len(line_amounts) > 1:
         mean_amt = statistics.mean(line_amounts)
         stdev_amt = statistics.stdev(line_amounts)
@@ -337,21 +362,18 @@ def _compute_consistency(
     else:
         scores["amount_tightness"] = 0
 
-    # 6. Reference pattern consistency — do they always format descriptions the same way?
-    # This is STRUCTURAL: not "do they have refs" but "do they use the SAME format every time"
+    # 6. Reference pattern uniformity — same description FORMAT every time
     total_refs = sum(ref_pattern_counts.values())
     if total_refs > 0:
         top_ref_pattern_count = max(ref_pattern_counts.values())
-        # What % of lines follow the dominant pattern?
         scores["ref_pattern_uniformity"] = round(top_ref_pattern_count / total_refs, 3)
-        # Also track: what % of lines have ANY structured reference
         structured_refs = total_refs - ref_pattern_counts.get("descriptive_text_only", 0)
         scores["ref_coverage"] = round(structured_refs / max(total_lines, 1), 3)
     else:
         scores["ref_pattern_uniformity"] = 0
         scores["ref_coverage"] = 0
 
-    # 7. Tax code uniformity — do they always use the same tax code?
+    # 7. Tax code uniformity — always same tax code?
     if tax_code_counts:
         top_tax = max(tax_code_counts.values())
         total_tax_lines = sum(tax_code_counts.values()) or 1
@@ -368,21 +390,42 @@ def _compute_consistency(
         scores["uom_uniformity"] = 1.0
 
     # Overall consistency — STRUCTURAL FORMAT ONLY
-    # Measures: "Does the human always build the invoice the same way?"
-    # Excludes amount variability (dollar values don't affect posting structure)
+    # "Does the human always build the invoice the same WAY?"
+    # Item family > exact item. Dollar amounts excluded.
     weights = {
-        "line_count": 0.20,            # Same # of lines every time
-        "item_choice": 0.20,           # Same item/GL combo every time
-        "item_dominance": 0.15,        # One clear primary item/GL
-        "line_type": 0.10,             # Always Item / always Account
-        "ref_pattern_uniformity": 0.15, # Same description format every time
-        "tax_uniformity": 0.10,        # Same tax code every time
-        "uom_uniformity": 0.10,        # Same UOM every time
+        "line_count": 0.18,
+        "item_family": 0.20,
+        "item_dominance": 0.12,
+        "line_type": 0.10,
+        "ref_pattern_uniformity": 0.15,
+        "tax_uniformity": 0.10,
+        "uom_uniformity": 0.10,
+        "ref_coverage": 0.05,
     }
     overall = sum(scores.get(k, 0) * w for k, w in weights.items())
     scores["overall"] = round(overall, 3)
 
     return scores
+
+
+def _extract_item_family(item_code: str) -> str:
+    """
+    Extract the family/category from an item code.
+    FREIGHT-DS, FREIGHT-WH, FREIGHT-INTL → "FREIGHT"
+    5100-010, 5100-020 → "5100"
+    PALLET-48x40, PALLET-48x48 → "PALLET"
+    """
+    code = item_code.strip().upper()
+    # Split on common delimiters: dash, period, space
+    for delim in ['-', '.', ' ']:
+        if delim in code:
+            return code.split(delim)[0]
+    # If no delimiter, try to split at the boundary of letters→digits
+    match = re.match(r'^([A-Z]+)', code)
+    if match and len(match.group(1)) >= 2:
+        return match.group(1)
+    # No clear family — the whole code IS the family
+    return code
 
 
 def _build_posting_template(analysis: Dict) -> Dict[str, Any]:

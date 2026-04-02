@@ -99,6 +99,16 @@
 - **Endpoints**: `/settings` (GET/PUT), `/ready-queue`, `/vendor-summary`, `/draft-preview/{doc_id}`, `/create-draft/{doc_id}`
 - **Frontend**: `PostingPatternsDashboard.js` with stats, vendor profiles, ready queue, settings panel, confidence breakdown
 
+### Posting Pattern Analyzer Tightening (Complete - Apr 2026)
+- **Line sample: 20 → 75**: Analyzes lines from up to 75 invoices (was 20), ensuring vendors with 1-line invoices reach sufficient line counts for high confidence
+- **Consistency scoring**: 4-dimension weighted score (line_count 25%, item_choice 35%, line_type 15%, item_dominance 25%) measuring how predictable a vendor's posting behavior is
+- **Confidence: consistency-weighted**: 30 invoices + 25 lines + 80% consistency = HIGH (previously required 50 inv + 50 lines with no consistency check)
+- **Full item distribution**: Template now includes ALL items/GL accounts/Charge lines with usage rates and rank (primary/secondary/rare), not just the top one
+- **Line-level tax codes**: Tracked separately from invoice-level tax (catches TAXABLE-coded lines on $0-tax invoices)
+- **Richer reference patterns**: 7 pattern types (freight_prefix, bol, order_number, po_prefix, invoice_ref, embedded_ref, descriptive_text), each with count and rate
+- **Charge line tracking**: Charge-type lines (fuel surcharges, etc.) now captured in templates
+- **Learning proof enriched**: Shows consistency breakdown, per-item usage rates, pattern interpretation
+
 ### LLM Learning Pipeline Gap Fixes (Complete - Apr 2026)
 - Classification corrections now feed into unified feedback loop
 - VEP profiles seeded from BC cache — 13 → 469 profiles

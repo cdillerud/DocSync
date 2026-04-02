@@ -101,8 +101,8 @@ async def analyze_vendor_posting_patterns(
     result["vendor_invoice_number_rate"] = round(has_vendor_invoice_no / max(len(invoices), 1), 3)
     result["vendor_names_seen"] = list(vendor_names_seen)
 
-    # 3. Analyze line items for a sample of invoices (up to 50)
-    sample_invoices = invoices[:50]
+    # 3. Analyze line items for a sample of invoices (up to 20 to stay fast)
+    sample_invoices = invoices[:20]
     all_lines = []
     line_type_counts = defaultdict(int)
     gl_account_counts = defaultdict(int)

@@ -3,12 +3,16 @@ GPI Document Hub — Posting Pattern Analysis API
 
 Endpoints to analyze BC posting patterns and build vendor posting profiles.
 """
+import asyncio
 import logging
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, BackgroundTasks
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/posting-patterns", tags=["posting-patterns"])
+
+# Track background analysis status
+_analysis_status = {"running": False, "last_result": None, "progress": "idle"}
 
 
 def get_db():
@@ -93,19 +97,106 @@ async def analyze_single_vendor(vendor_no: str, limit: int = Query(default=100, 
     return result
 
 
+async def _run_top_analysis(top_n: int):
+    """Background task: analyze top vendors."""
+    global _analysis_status
+    _analysis_status = {"running": True, "last_result": None, "progress": "starting"}
+    try:
+        db = get_db()
+        bc = get_bc_service()
+        from services.posting_pattern_analyzer import build_all_vendor_posting_profiles
+
+        # Analyze vendors one at a time and update progress
+        from services.posting_pattern_analyzer import (
+            analyze_vendor_posting_patterns,
+            MIN_INVOICES_FOR_PROFILE,
+        )
+        cursor = db.vendor_invoice_profiles.find(
+            {"bc_invoice_count": {"$gte": MIN_INVOICES_FOR_PROFILE}},
+            {"_id": 0, "vendor_no": 1, "vendor_name": 1, "bc_invoice_count": 1}
+        ).sort("bc_invoice_count", -1).limit(top_n)
+        vendors = await cursor.to_list(top_n)
+
+        results = {"vendors_queued": len(vendors), "analyzed": 0, "errors": 0, "skipped": 0, "vendor_details": []}
+
+        for i, v in enumerate(vendors):
+            vendor_no = v.get("vendor_no", "")
+            if not vendor_no:
+                continue
+            _analysis_status["progress"] = f"Analyzing {vendor_no} ({i+1}/{len(vendors)})"
+
+            # Check if recent analysis exists
+            from datetime import datetime, timezone
+            existing = await db.posting_pattern_analysis.find_one(
+                {"vendor_no": vendor_no, "status": "analyzed"},
+                {"_id": 0, "analyzed_at": 1}
+            )
+            if existing and existing.get("analyzed_at"):
+                try:
+                    dt = datetime.fromisoformat(existing["analyzed_at"].replace("Z", "+00:00"))
+                    if (datetime.now(timezone.utc) - dt).days < 7:
+                        results["skipped"] += 1
+                        continue
+                except (ValueError, TypeError):
+                    pass
+
+            try:
+                analysis = await analyze_vendor_posting_patterns(db, bc, vendor_no)
+                if analysis.get("status") == "analyzed":
+                    results["analyzed"] += 1
+                    results["vendor_details"].append({
+                        "vendor_no": vendor_no,
+                        "vendor_name": v.get("vendor_name", ""),
+                        "invoices": analysis.get("invoices_analyzed", 0),
+                        "lines": analysis.get("lines_analyzed", 0),
+                        "confidence": analysis.get("posting_template", {}).get("confidence", "?"),
+                    })
+                else:
+                    results["errors"] += 1
+                    logger.warning("Vendor %s analysis status: %s, error: %s",
+                                   vendor_no, analysis.get("status"), analysis.get("error", ""))
+            except Exception as e:
+                results["errors"] += 1
+                logger.error("Failed to analyze vendor %s: %s", vendor_no, str(e))
+
+            # Brief pause to avoid BC API throttling
+            await asyncio.sleep(0.5)
+
+        _analysis_status = {"running": False, "last_result": results, "progress": "complete"}
+        logger.info("[PostingPatterns] Background analysis complete: analyzed=%d, errors=%d, skipped=%d",
+                     results["analyzed"], results["errors"], results["skipped"])
+
+    except Exception as e:
+        _analysis_status = {"running": False, "last_result": {"error": str(e)}, "progress": "failed"}
+        logger.error("[PostingPatterns] Background analysis failed: %s", str(e))
+
+
 @router.post("/analyze-top")
-async def analyze_top_vendors(top_n: int = Query(default=20, le=100)):
+async def analyze_top_vendors(background_tasks: BackgroundTasks, top_n: int = Query(default=20, le=100)):
     """
     Analyze posting patterns for the top N vendors by invoice volume.
-    This is the main "learn from humans" endpoint — it queries BC production,
-    studies how invoices were posted, and builds posting templates.
+    Runs in background to avoid nginx timeout. Check progress via GET /analyze-top/status.
     """
-    db = get_db()
-    bc = get_bc_service()
+    global _analysis_status
+    if _analysis_status.get("running"):
+        return {
+            "status": "already_running",
+            "progress": _analysis_status.get("progress", ""),
+            "message": "Analysis is already in progress. Check GET /analyze-top/status for progress.",
+        }
 
-    from services.posting_pattern_analyzer import build_all_vendor_posting_profiles
-    result = await build_all_vendor_posting_profiles(db, bc, top_n=top_n)
-    return result
+    background_tasks.add_task(_run_top_analysis, top_n)
+    return {
+        "status": "started",
+        "vendors_to_analyze": top_n,
+        "message": f"Background analysis started for top {top_n} vendors. Check GET /api/posting-patterns/analyze-top/status for progress.",
+    }
+
+
+@router.get("/analyze-top/status")
+async def get_analysis_status():
+    """Check the status of a background analyze-top job."""
+    return _analysis_status
 
 
 @router.get("/learning-proof/{vendor_no}")

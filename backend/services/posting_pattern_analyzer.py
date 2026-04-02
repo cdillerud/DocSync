@@ -112,6 +112,8 @@ async def analyze_vendor_posting_patterns(
     tax_code_counts = defaultdict(int)
     line_amounts = []
     lines_per_invoice = []
+    ref_pattern_counts = defaultdict(int)
+    description2_patterns = defaultdict(int)
 
     for inv in sample_invoices:
         inv_id = inv.get("id")
@@ -132,10 +134,24 @@ async def analyze_vendor_posting_patterns(
                     elif line_type == "Item":
                         item_counts[obj_no] += 1
                 desc = line.get("description", "")
+                desc2 = line.get("description2", "")
                 if desc:
                     # Normalize description for pattern detection
                     desc_norm = desc.strip().upper()[:50]
                     description_patterns[desc_norm] += 1
+                    # Detect reference number pattern in description
+                    # Common patterns: "FREIGHT 49611", "46133", "W110700"
+                    import re
+                    ref_match = re.search(r'(?:FREIGHT\s+)?([A-Z]?\d{4,7})', desc.upper())
+                    if ref_match:
+                        ref_type = "bol_in_description"
+                        if desc.upper().startswith("FREIGHT"):
+                            ref_type = "freight_prefix_plus_ref"
+                        elif desc.upper().startswith("W"):
+                            ref_type = "order_number_ref"
+                        ref_pattern_counts[ref_type] += 1
+                if desc2:
+                    description2_patterns[desc2.strip().upper()[:50]] += 1
                 # Track unit of measure patterns
                 uom = line.get("unitOfMeasureCode", "")
                 if uom:
@@ -173,6 +189,8 @@ async def analyze_vendor_posting_patterns(
             "min": round(min(line_amounts), 2) if line_amounts else 0,
             "max": round(max(line_amounts), 2) if line_amounts else 0,
         } if line_amounts else {},
+        "reference_in_description": dict(ref_pattern_counts),
+        "description2_values": dict(sorted(description2_patterns.items(), key=lambda x: -x[1])[:10]),
     }    # 4. Build the posting template (what the auto-post should do)
     result["posting_template"] = _build_posting_template(result)
     result["status"] = "analyzed"
@@ -255,6 +273,30 @@ def _build_posting_template(analysis: Dict) -> Dict[str, Any]:
         template["confidence"] = "medium"
     else:
         template["confidence"] = "low"
+
+    # Reference number pattern — how humans put BOL/order refs on lines
+    ref_patterns = analysis.get("line_patterns", {}).get("reference_in_description", {})
+    desc2_values = analysis.get("line_patterns", {}).get("description2_values", {})
+    if ref_patterns:
+        dominant_pattern = max(ref_patterns, key=ref_patterns.get)
+        total_refs = sum(ref_patterns.values())
+        total_lines_count = sum(analysis.get("line_patterns", {}).get("line_types", {}).values()) or 1
+        template["reference_handling"] = {
+            "pattern": dominant_pattern,
+            "usage_rate": round(total_refs / total_lines_count, 2),
+            "description": (
+                "BOL/order number in description field after 'FREIGHT' prefix"
+                if dominant_pattern == "freight_prefix_plus_ref"
+                else "Reference number placed directly in description field"
+            ),
+            "all_patterns": dict(ref_patterns),
+        }
+    if desc2_values:
+        template["description2_usage"] = {
+            "has_data": True,
+            "top_values": list(desc2_values.keys())[:5],
+            "description": "description2 field carries additional reference data",
+        }
 
     return template
 

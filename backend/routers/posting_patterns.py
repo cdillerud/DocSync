@@ -289,6 +289,8 @@ async def posting_learning_proof(vendor_no: str):
                 "line_count": template.get("typical_line_count", 1),
                 "tax_handling": template.get("tax_handling", "?"),
                 "line_templates": template.get("line_templates", []),
+                "reference_handling": template.get("reference_handling", {}),
+                "description2_usage": template.get("description2_usage", {}),
             },
         },
         "verdict": f"LEARNED ({template.get('confidence', '?').upper()} confidence)" if profile.get("invoices_analyzed", 0) >= 3 else "INSUFFICIENT DATA",

@@ -88,6 +88,17 @@
 - **Endpoints**: `/api/posting-patterns/status`, `/analyze/{vendor_no}`, `/analyze-top`, `/learning-proof/{vendor_no}`
 - **Result**: System learns from thousands of historical BC postings per vendor
 
+### BC Auto-Post Phase 2: Template-Driven Draft Creation (Complete - Apr 2026)
+- **Posting Intelligence Dashboard**: New `/posting-intelligence` page with full-stack vendor profile view
+- **Auto-Post Settings**: Admin-configurable toggle, confidence threshold (high/medium/low), min invoices analyzed
+- **Ready Queue**: Shows all ReadyForPost documents with their posting template confidence and draft status
+- **Draft PI Preview**: Preview exactly what a Draft Purchase Invoice would look like before creating it in BC
+- **Create Draft PI**: One-click draft creation using learned posting templates
+- **Vendor Summary**: Aggregated view of all analyzed vendors with auto-post eligibility status
+- **Template-Enhanced Lines**: `_build_pi_lines_with_mapping` now uses posting templates for reference patterns (BOL/freight)
+- **Endpoints**: `/settings` (GET/PUT), `/ready-queue`, `/vendor-summary`, `/draft-preview/{doc_id}`, `/create-draft/{doc_id}`
+- **Frontend**: `PostingPatternsDashboard.js` with stats, vendor profiles, ready queue, settings panel, confidence breakdown
+
 ### LLM Learning Pipeline Gap Fixes (Complete - Apr 2026)
 - Classification corrections now feed into unified feedback loop
 - VEP profiles seeded from BC cache — 13 → 469 profiles
@@ -98,11 +109,11 @@
 
 ## Backlog
 - P0: Deploy to production and run `POST /api/posting-patterns/analyze-top?top_n=20` to build profiles for top 20 vendors
-- P1: Phase 2 — Confidence-based auto-post toggle (admin setting to enable BC auto-posting for stable vendors)
-- P1: Phase 3 — BC Draft → Review → Post flow (auto-create draft PI, one-click approve)
+- P1: Phase 3 — BC Draft Review + Post flow (reviewer approves draft PI in BC, one-click post)
 - P1: Rep Overrides management UI
 - P1: Teams Adaptive Card integration
 - P2: Stable vendor threshold tuning (lower from 100% to 85%)
+- P2: Auto-delete on max retries (Square9 alignment)
 - P2: Vendor Inventory Dashboard
 - P2: Product/BOM module
 - P2: Production-ready email / Entra ID SSO

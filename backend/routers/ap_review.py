@@ -264,6 +264,25 @@ async def save_ap_review(doc_id: str, data: APReviewData):
         else:
             update_data["document_type"] = data.document_type
     
+    # ── UNIFIED FEEDBACK LOOP: Record corrections for learning ──
+    try:
+        from services.feedback_loop_service import record_feedback
+        vendor_id = doc.get("vendor_canonical") or doc.get("vendor_no") or ""
+        
+        # Classification correction — feed into unified feedback loop
+        if data.document_type is not None:
+            original_type = doc.get("document_type") or doc.get("suggested_job_type") or ""
+            if data.document_type != original_type:
+                await record_feedback(db, "classification_correction", doc_id, vendor_id,
+                    before={"doc_type": original_type},
+                    after={"doc_type": data.document_type},
+                    metadata={
+                        "file_name": doc.get("file_name", ""),
+                        "vendor_canonical": doc.get("vendor_canonical", ""),
+                    })
+    except Exception as e:
+        logger.debug("AP Review feedback recording skipped: %s", e)
+    
     # Update document
     await db.hub_documents.update_one(
         {"id": doc_id},

@@ -209,23 +209,30 @@ async def seed_sender_domain_mappings(db) -> Dict[str, Any]:
     created_domain = 0
     skipped = 0
 
-    # Source 1: Documents with sender_email + resolved vendor
+    # Source 1: Documents with sender_email OR sender field + resolved vendor
+    # Note: Some documents use "sender" instead of "sender_email" — check both
     cursor = db.hub_documents.find(
         {
-            "sender_email": {"$exists": True, "$ne": None, "$ne": ""},
             "$or": [
-                {"bc_vendor_number": {"$exists": True, "$ne": None, "$ne": ""}},
-                {"vendor_canonical": {"$exists": True, "$ne": None, "$ne": ""}},
+                {"sender_email": {"$exists": True, "$nin": [None, ""]}},
+                {"sender": {"$exists": True, "$nin": [None, ""]}},
+            ],
+            "$and": [
+                {"$or": [
+                    {"bc_vendor_number": {"$exists": True, "$nin": [None, ""]}},
+                    {"vendor_canonical": {"$exists": True, "$nin": [None, ""]}},
+                    {"vendor_no": {"$exists": True, "$nin": [None, ""]}},
+                ]}
             ],
         },
-        {"_id": 0, "sender_email": 1, "sender_domain": 1,
+        {"_id": 0, "sender_email": 1, "sender": 1, "sender_domain": 1,
          "bc_vendor_number": 1, "vendor_canonical": 1, "vendor_no": 1}
     )
 
     domain_vendor_map = defaultdict(lambda: defaultdict(int))
 
     async for doc in cursor:
-        sender = doc.get("sender_email", "")
+        sender = doc.get("sender_email") or doc.get("sender") or ""
         domain = doc.get("sender_domain", "")
         if not domain and "@" in sender:
             domain = sender.split("@")[1].lower()

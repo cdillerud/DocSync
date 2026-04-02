@@ -132,7 +132,16 @@ async def _apply_immediate_feedback(db, event: Dict):
     # Mark event as applied
     if applied:
         await _mark_applied(db, event)
-
+    else:
+        # If the event can't be learned from (e.g., malformed payload),
+        # still mark it as applied to prevent infinite replay loops.
+        # This covers legacy events with empty or mismatched payloads.
+        event_id = event.get("_id")
+        if event_id:
+            await db[FEEDBACK_COLLECTION].update_one(
+                {"_id": event_id},
+                {"$set": {"applied": True, "applied_at": datetime.now(timezone.utc).isoformat(), "apply_note": "marked_unlearnable"}}
+            )
 
 async def _mark_applied(db, event: Dict):
     """Mark a feedback event as consumed/applied."""
@@ -199,10 +208,20 @@ async def _learn_classification_pattern(db, event: Dict):
     }
     
     # Also store file metadata for pattern recognition
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_name": 1, "vendor_canonical": 1})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {
+        "_id": 0, "file_name": 1, "vendor_canonical": 1,
+        "raw_text": 1, "extracted_text": 1, "extracted_fields": 1
+    })
     if doc:
         example["file_name"] = doc.get("file_name", "")
         example["vendor"] = doc.get("vendor_canonical", "")
+        # Build text_snippet for few-shot examples
+        raw_text = doc.get("raw_text") or doc.get("extracted_text") or ""
+        if not raw_text:
+            ef = doc.get("extracted_fields") or {}
+            parts = [str(v) for v in ef.values() if v and not isinstance(v, (list, dict))]
+            raw_text = " | ".join(parts)
+        example["text_snippet"] = raw_text[:500]
     
     await db.classification_feedback.update_one(
         {"document_id": doc_id},
@@ -215,11 +234,13 @@ async def _learn_classification_pattern(db, event: Dict):
         {"document_id": doc_id},
         {"$set": {
             "document_id": doc_id,
+            "doc_id": doc_id,
             "original_type": before_type,
             "corrected_type": after_type,
             "vendor_no": event.get("vendor_id", ""),
             "vendor_canonical": example.get("vendor", ""),
             "file_name": example.get("file_name", ""),
+            "text_snippet": example.get("text_snippet", ""),
             "corrected_at": datetime.now(timezone.utc).isoformat(),
             "source": "user_correction",
         }},
@@ -491,9 +512,13 @@ async def build_feedback_context_for_prompt(db, vendor_id: str = "", doc_type: s
                 {"vendor_raw": {"$regex": f"^{vendor_id}$", "$options": "i"}},
                 {"vendor_canonical": vendor_upper},
                 {"vendor_raw": vendor_upper},
+                {"vendor_no": vendor_upper},
             ]},
             {"_id": 0}
         ).sort("corrected_at", -1).limit(5).to_list(5)
+        
+        # Filter out same-type "corrections" (noise)
+        corrections = [c for c in corrections if c.get("original_type") != c.get("corrected_type")]
         
         if corrections:
             context_parts.append(f"LEARNED CORRECTIONS for vendor '{vendor_id}':")
@@ -581,7 +606,7 @@ async def build_feedback_context_for_prompt(db, vendor_id: str = "", doc_type: s
     # 6. General recent corrections (always included, even without vendor context)
     # This ensures EVERY LLM call benefits from the feedback loop
     recent = await db.classification_corrections.find(
-        {},
+        {"$expr": {"$ne": ["$original_type", "$corrected_type"]}},
         {"_id": 0, "original_type": 1, "corrected_type": 1, "file_name": 1, "vendor_canonical": 1}
     ).sort("corrected_at", -1).limit(8).to_list(8)
     

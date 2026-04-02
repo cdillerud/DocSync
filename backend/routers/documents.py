@@ -716,6 +716,18 @@ async def update_document(doc_id: str, update: DocumentUpdate):
         from services.feedback_loop_service import record_feedback
         vendor_id = doc.get("vendor_canonical") or doc.get("vendor_no") or ""
         
+        # Classification correction — feed into unified feedback loop
+        if update.document_type is not None:
+            original_type = doc.get("document_type") or doc.get("suggested_job_type") or ""
+            if update.document_type != original_type:
+                await record_feedback(db, "classification_correction", doc_id, vendor_id,
+                    before={"doc_type": original_type},
+                    after={"doc_type": update.document_type},
+                    metadata={
+                        "file_name": doc.get("file_name", ""),
+                        "vendor_canonical": doc.get("vendor_canonical", ""),
+                    })
+        
         # Vendor correction
         if update.vendor_canonical is not None or update.vendor_name is not None:
             old_vendor = doc.get("vendor_canonical") or doc.get("vendor_name") or ""

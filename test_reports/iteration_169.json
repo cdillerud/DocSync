@@ -1,0 +1,81 @@
+{
+  "summary": "LLM Learning Pipeline Gap Fixes testing completed. All 27 backend tests passed. Verified: (1) GET /api/knowledge-seed/status returns comprehensive metrics with overall=good, (2) POST /api/knowledge-seed/close-all-gaps runs all gap closers without errors, (3) POST /api/feedback-loop/replay shows 0 unapplied events (no infinite replay loop), (4) VEP profiles seeded from BC cache (469 profiles), (5) Classification corrections enriched with text_snippet (6/6), (6) Feedback events 100% applied (51/51).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_llm_learning_pipeline_gaps.py",
+    "/app/test_reports/pytest/llm_learning_pipeline_gaps_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Code review confirms all gap fixes are properly implemented:",
+    "1. knowledge_seed.py close-all-gaps endpoint correctly orchestrates all gap closers",
+    "2. classification_feedback_service.py get_few_shot_examples() no longer requires text_snippet (line 234-241)",
+    "3. feedback_loop_service.py _learn_classification_pattern stores text_snippet (line 218-224)",
+    "4. feedback_loop_service.py build_feedback_context_for_prompt filters same-type corrections (line 521)",
+    "5. feedback_loop_service.py _apply_immediate_feedback marks unlearnable events as applied (line 136-144)",
+    "6. vendor_extraction_profile_service.py seed_from_bc_cache creates VEP profiles from BC data (line 384-464)",
+    "7. knowledge_seed_service.py seed_sender_domain_mappings checks both 'sender' and 'sender_email' fields (line 217-219)"
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (27/27 tests passed)",
+    "frontend": "N/A (backend only testing)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "None - used existing knowledge base data",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "LLM Learning Pipeline Gap Fixes fully tested. Key metrics verified: VEP=469 (up from 13), Aliases=963, Feedback=51/51 (100% applied), Corrections=6 with text_snippet. All endpoints working: /api/knowledge-seed/status (overall=good), /api/knowledge-seed/close-all-gaps (success=true, no errors), /api/feedback-loop/replay (total=0 unapplied), /api/feedback-loop/health (comprehensive stats). The close-all-gaps endpoint is idempotent and safe to call multiple times.",
+  "features_tested": {
+    "api_tests": [
+      "GET /api/knowledge-seed/status - Returns 200 with knowledge_base, health, scheduler sections - PASS",
+      "GET /api/knowledge-seed/status - overall health is 'good' - PASS",
+      "GET /api/knowledge-seed/status - feedback_events shows total=51, applied=51, rate=100% - PASS",
+      "GET /api/knowledge-seed/status - vendor_extraction_profiles=469 - PASS",
+      "GET /api/knowledge-seed/status - classification_corrections_with_snippet=6 - PASS",
+      "POST /api/knowledge-seed/close-all-gaps - Returns 200 with success=true - PASS",
+      "POST /api/knowledge-seed/close-all-gaps - All 5 gap closers run without errors - PASS",
+      "POST /api/knowledge-seed/close-all-gaps - Idempotent (safe to call multiple times) - PASS",
+      "POST /api/feedback-loop/replay - Returns 200 with total=0 (no unapplied events) - PASS",
+      "POST /api/feedback-loop/replay - Idempotent (safe to call multiple times) - PASS",
+      "GET /api/feedback-loop/health - Returns 200 with total_events, applied_events, learning_signals - PASS",
+      "GET /api/feedback-loop/health - Shows 51/51 events applied (100%) - PASS",
+      "POST /api/knowledge-seed/run-all - Returns 200 with success=true - PASS",
+      "GET /api/documents/classification-accuracy - Returns 200 with total_corrections - PASS"
+    ],
+    "gap_fixes_verified": [
+      "VEP seed_from_bc_cache: 469 profiles created from BC cache data - VERIFIED",
+      "Classification corrections backfill: 6/6 corrections have text_snippet - VERIFIED",
+      "Feedback events replay: 0 unapplied events (no infinite loop) - VERIFIED",
+      "Sender domain seed: 122 mappings (checks both 'sender' and 'sender_email') - VERIFIED",
+      "Few-shot builder: Works without text_snippet (uses filename+vendor) - VERIFIED (code review)",
+      "Same-type corrections filtered: build_feedback_context_for_prompt filters noise - VERIFIED (code review)",
+      "Unlearnable events marked applied: _apply_immediate_feedback marks them - VERIFIED (code review)"
+    ]
+  },
+  "knowledge_base_metrics": {
+    "vendor_aliases": 963,
+    "sender_domain_mappings": 122,
+    "vendor_invoice_profiles": 603,
+    "vendor_extraction_profiles": 469,
+    "bc_reference_cache": 278817,
+    "classification_corrections": 6,
+    "classification_corrections_with_snippet": 6,
+    "feedback_events_total": 51,
+    "feedback_events_applied": 51,
+    "feedback_events_rate": "100%",
+    "overall_health": "good"
+  },
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "note": "All endpoints are live against real MongoDB. BC API calls may fail due to token acquisition issues (external dependency)."
+  }
+}

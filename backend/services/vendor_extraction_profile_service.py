@@ -375,9 +375,93 @@ class VendorExtractionProfileService:
         while self._running:
             try:
                 await self.generate_all_profiles()
+                # Also seed from BC cache on each cycle
+                await self.seed_from_bc_cache()
             except Exception as e:
                 logger.error("[VendorExtractionProfiles] Learning error: %s", str(e))
             await asyncio.sleep(PROFILE_LEARN_INTERVAL)
+
+    async def seed_from_bc_cache(self) -> Dict[str, Any]:
+        """
+        Seed baseline VEP profiles from vendor_invoice_profiles (BC cache data)
+        for vendors that don't already have a VEP profile from document intelligence.
+        
+        This expands coverage from ~13 (doc-based) to potentially 600+ vendors,
+        using BC invoice history to set PO expectations, amount ranges, and
+        default reference priorities.
+        """
+        cursor = self.db.vendor_invoice_profiles.find(
+            {"bc_invoice_count": {"$gte": 3}},  # At least 3 invoices to be meaningful
+            {"_id": 0}
+        )
+
+        created = 0
+        skipped = 0
+        now = datetime.now(timezone.utc).isoformat()
+
+        async for vip in cursor:
+            vendor_no = vip.get("vendor_no", "")
+            vendor_name = vip.get("vendor_name", vendor_no)
+            if not vendor_no:
+                continue
+
+            # Skip if VEP profile already exists (from document intelligence)
+            existing = await self.collection.find_one(
+                {"$or": [{"vendor_no": vendor_no}, {"vendor_name": vendor_name}]},
+                {"_id": 0, "vendor_no": 1}
+            )
+            if existing:
+                skipped += 1
+                continue
+
+            # Build baseline profile from BC invoice data
+            po_expected = vip.get("po_expected", False)
+            ext_ref_rate = vip.get("external_ref_rate", 0)
+            amount_stats = vip.get("amount_stats", {})
+
+            # Default reference priority based on BC data
+            ref_priority = ["purchase_order", "posted_purchase_invoice", "posted_sales_shipment"]
+            if ext_ref_rate > 0.5:
+                ref_priority = ["purchase_order", "posted_purchase_invoice", "sales_order"]
+
+            # Confidence adjustments based on BC data patterns
+            adjustments = {}
+            if amount_stats.get("count", 0) >= 10:
+                adjustments["bc_data_rich"] = 0.02  # Small boost for well-known vendors
+
+            profile = {
+                "vendor_no": vendor_no,
+                "vendor_name": vendor_name,
+                "document_type_bias": "purchase_invoice" if po_expected else "unknown",
+                "reference_priority_order": ref_priority,
+                "reference_label_bias": {},
+                "confidence_adjustments": adjustments,
+                "enabled": True,
+                "last_updated": now,
+                "learning_source": ["bc_cache_seed"],
+                "source_invoice_count": vip.get("bc_invoice_count", 0),
+                "source_correction_count": 0,
+                "source_automation_rate": 0,
+                "source_match_rate": ext_ref_rate,
+                "po_expected": po_expected,
+                "amount_stats": amount_stats,
+            }
+
+            await self.collection.update_one(
+                {"vendor_no": vendor_no},
+                {"$set": profile, "$setOnInsert": {"created_at": now}},
+                upsert=True,
+            )
+            created += 1
+
+        result = {
+            "bc_vendors_evaluated": created + skipped,
+            "profiles_created": created,
+            "skipped_existing": skipped,
+        }
+        if created > 0:
+            logger.info("[VendorExtractionProfiles] BC cache seed: %s", result)
+        return result
 
 
 # =============================================================================

@@ -231,8 +231,13 @@ async def get_few_shot_examples(limit_per_type: int = 2, vendor_no: str = "") ->
             type_limit = 2
 
         for ex in group["examples"][:type_limit]:
-            if ex.get("text_snippet") and len(examples) < 12:
-                ex["priority"] = "recent"
+            # Include examples even without text_snippet — use filename+vendor as context
+            if len(examples) < 12:
+                # Skip same-type "corrections" (AP_Invoice -> AP_Invoice is noise, not signal)
+                if ex.get("original_type") == ex.get("corrected_type"):
+                    continue
+                if not ex.get("priority"):
+                    ex["priority"] = "recent"
                 examples.append(ex)
 
     return examples
@@ -283,16 +288,20 @@ async def build_few_shot_prompt_section(vendor_no: str = "") -> str:
 
     for ex in examples:
         snippet = ex.get("text_snippet", "")[:200]
-        vendor = ex.get("vendor", "unknown")
+        vendor = ex.get("vendor") or ex.get("vendor_canonical") or "unknown"
         fname = ex.get("file_name", "unknown")
         orig = ex.get("original_type", "?")
         correct = ex.get("corrected_type", "?")
-        lines.append(
-            f'- File: "{fname}" from vendor "{vendor}"'
-            f'\n  Text snippet: "{snippet}..."'
+        
+        # Build example line — include text snippet when available
+        example_line = f'- File: "{fname}" from vendor "{vendor}"'
+        if snippet:
+            example_line += f'\n  Text snippet: "{snippet}..."'
+        example_line += (
             f"\n  WRONG classification: {orig}"
             f"\n  CORRECT classification: {correct}\n"
         )
+        lines.append(example_line)
 
     return "\n".join(lines)
 
@@ -547,3 +556,92 @@ async def _update_vendor_pattern(vendor: str, doc_type: str, stats: Dict):
         upsert=True,
     )
     stats["vendor_patterns_updated"] += 1
+
+
+
+async def backfill_classification_corrections() -> Dict[str, Any]:
+    """Enrich existing classification_corrections that are missing text_snippet,
+    vendor_no, vendor_canonical, or file_name by looking up the source document.
+    
+    Also removes noise entries (same original_type == corrected_type).
+    """
+    if _db is None:
+        return {"success": False, "reason": "db_not_initialized"}
+
+    stats = {"enriched": 0, "noise_removed": 0, "already_complete": 0, "doc_not_found": 0}
+
+    cursor = _db.classification_corrections.find({}, {"_id": 1, "doc_id": 1, "document_id": 1,
+        "original_type": 1, "corrected_type": 1, "text_snippet": 1,
+        "vendor_no": 1, "vendor_canonical": 1, "file_name": 1, "source": 1})
+
+    async for corr in cursor:
+        corr_id = corr["_id"]
+        doc_id = corr.get("doc_id") or corr.get("document_id", "")
+        orig = corr.get("original_type", "")
+        corrected = corr.get("corrected_type", "")
+
+        # Remove noise: same-type "corrections"
+        if orig and corrected and orig == corrected:
+            await _db.classification_corrections.delete_one({"_id": corr_id})
+            stats["noise_removed"] += 1
+            continue
+
+        # Check if already has all fields
+        has_snippet = bool(corr.get("text_snippet"))
+        has_vendor = bool(corr.get("vendor_no") or corr.get("vendor_canonical"))
+        has_file = bool(corr.get("file_name"))
+        if has_snippet and has_vendor and has_file:
+            stats["already_complete"] += 1
+            continue
+
+        # Lookup the source document to enrich
+        if not doc_id:
+            continue
+
+        hub_doc = await _db.hub_documents.find_one({"id": doc_id}, {
+            "_id": 0, "file_name": 1, "vendor_raw": 1, "vendor_canonical": 1,
+            "vendor_no": 1, "bc_vendor_number": 1, "raw_text": 1,
+            "extracted_text": 1, "extracted_fields": 1,
+        })
+
+        if not hub_doc:
+            stats["doc_not_found"] += 1
+            continue
+
+        updates = {}
+
+        # Enrich text_snippet
+        if not has_snippet:
+            raw_text = hub_doc.get("raw_text") or hub_doc.get("extracted_text") or ""
+            if not raw_text:
+                ef = hub_doc.get("extracted_fields") or {}
+                parts = [str(v) for v in ef.values() if v and not isinstance(v, (list, dict))]
+                raw_text = " | ".join(parts)
+            if raw_text:
+                updates["text_snippet"] = raw_text[:500]
+
+        # Enrich vendor
+        if not has_vendor:
+            v_canonical = hub_doc.get("vendor_canonical") or ""
+            v_no = hub_doc.get("vendor_no") or hub_doc.get("bc_vendor_number") or ""
+            if v_canonical:
+                updates["vendor_canonical"] = v_canonical
+            if v_no:
+                updates["vendor_no"] = v_no
+
+        # Enrich file_name
+        if not has_file and hub_doc.get("file_name"):
+            updates["file_name"] = hub_doc["file_name"]
+
+        # Set source if missing
+        if not corr.get("source"):
+            updates["source"] = "backfill_enrichment"
+
+        if updates:
+            await _db.classification_corrections.update_one({"_id": corr_id}, {"$set": updates})
+            stats["enriched"] += 1
+        else:
+            stats["already_complete"] += 1
+
+    logger.info("[FeedbackBackfill] Classification corrections enriched: %s", stats)
+    return {"success": True, "stats": stats}

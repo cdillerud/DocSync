@@ -53,7 +53,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://reprocess-fix-verify.preview.emergentagent.com"
+    "api_url": "https://ap-inbox-refine.preview.emergentagent.com"
   },
   "seed_data_used": "Each test creates unique items with UUID prefixes to avoid cross-test interference. Test workspace created per module with deactivation on teardown.",
   "retest_needed": false,

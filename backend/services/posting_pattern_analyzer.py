@@ -11,6 +11,7 @@ Collections:
 """
 import logging
 import os
+import re
 import statistics
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -141,7 +142,6 @@ async def analyze_vendor_posting_patterns(
                     description_patterns[desc_norm] += 1
                     # Detect reference number pattern in description
                     # Common patterns: "FREIGHT 49611", "46133", "W110700"
-                    import re
                     ref_match = re.search(r'(?:FREIGHT\s+)?([A-Z]?\d{4,7})', desc.upper())
                     if ref_match:
                         ref_type = "bol_in_description"

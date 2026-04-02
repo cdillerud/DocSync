@@ -21,13 +21,14 @@ from typing import Dict, Tuple
 logger = logging.getLogger(__name__)
 
 
-def check_ap_ready_to_post(doc: dict, vendor_profile: dict = None) -> Tuple[bool, str, list]:
+def check_ap_ready_to_post(doc: dict, vendor_profile: dict = None, source: str = "auto") -> Tuple[bool, str, list]:
     """Check if an AP invoice passes the 4 conditions for auto-posting.
     
     Args:
         doc: Document from MongoDB
         vendor_profile: Optional vendor profile from vendor_invoice_profile_service.
                        Used to determine if PO is expected for this vendor.
+        source: "auto" (intake pipeline), "reprocess", or "mark_ready" (human review)
     
     Returns: (ready, reason, failures)
     """
@@ -35,6 +36,10 @@ def check_ap_ready_to_post(doc: dict, vendor_profile: dict = None) -> Tuple[bool
     ef = doc.get("extracted_fields") or {}
     nf = doc.get("normalized_fields") or {}
     val = doc.get("validation_results") or {}
+
+    # Check for manual override — human reviewer has already approved this document
+    has_manual_override = doc.get("manual_po_override") or doc.get("manual_override")
+    is_human_action = source in ("mark_ready", "manual_override", "human_review")
 
     # 1. Classified as AP_Invoice
     doc_type = doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type") or ""
@@ -66,13 +71,21 @@ def check_ap_ready_to_post(doc: dict, vendor_profile: dict = None) -> Tuple[bool
     if not vendor_no:
         failures.append("Vendor not resolved to BC vendor number")
 
-    # 4. PO check — vendor-profile-aware
-    # If the vendor profile says PO is never expected (e.g. freight carriers like Tumalo Creek),
-    # skip the PO requirement entirely. We learned this from BC history.
+    # 4. PO check — with overrides
+    # Skip PO check if:
+    #   a) Human reviewer already overrode it (manual_po_override flag)
+    #   b) Human is clicking "Mark Ready" right now (source=mark_ready)
+    #   c) Vendor profile says PO is never expected (freight carriers etc.)
     vp = vendor_profile or {}
     po_expected = vp.get("po_expected", True)
     
-    if po_expected:
+    if has_manual_override:
+        logger.info("[AP Auto-Post] PO check SKIPPED — manual override set by reviewer")
+    elif is_human_action:
+        logger.info("[AP Auto-Post] PO check SKIPPED — human review action (%s)", source)
+    elif not po_expected:
+        logger.info("[AP Auto-Post] PO check SKIPPED for vendor %s — BC history shows PO never expected", vendor_no)
+    else:
         po_passed = False
         for check in val.get("checks", []):
             if check.get("check_name") in ("po_validation", "po_match") and check.get("passed"):
@@ -86,8 +99,6 @@ def check_ap_ready_to_post(doc: dict, vendor_profile: dict = None) -> Tuple[bool
         )
         if po_extracted and not po_passed:
             failures.append("PO extracted but not found/matched in BC")
-    else:
-        logger.info("[AP Auto-Post] PO check SKIPPED for vendor %s — BC history shows PO never expected", vendor_no)
 
     if failures:
         return False, f"AP invoice not ready: {'; '.join(failures)}", failures
@@ -119,7 +130,7 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
         except Exception as vp_err:
             logger.warning("[AP Auto-Post] Could not load vendor profile for %s: %s", vendor_no, vp_err)
 
-    ready, reason, failures = check_ap_ready_to_post(doc, vendor_profile=vendor_profile)
+    ready, reason, failures = check_ap_ready_to_post(doc, vendor_profile=vendor_profile, source=source)
 
     if not ready:
         # Set to NeedsReview

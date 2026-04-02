@@ -14,7 +14,7 @@ import pytest
 import requests
 import os
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://intelligent-inbox-8.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://reprocess-fix-verify.preview.emergentagent.com').rstrip('/')
 
 # ---------------------------------------------------------------------------
 # MODULE: PO Resolution Metrics API

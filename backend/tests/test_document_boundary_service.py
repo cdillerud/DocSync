@@ -26,7 +26,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from pypdf import PdfWriter, PdfReader
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://intelligent-inbox-8.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://reprocess-fix-verify.preview.emergentagent.com').rstrip('/')
 
 
 def create_test_pdf_page(vendor_name: str, invoice_number: str, doc_type: str = "INVOICE") -> bytes:

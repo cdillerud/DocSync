@@ -915,6 +915,33 @@ export default function DocumentDetailPage() {
                 {derivedState.state_reason && (
                   <div className="bg-muted/50 rounded-md p-2.5 mb-3">
                     <p className="text-xs text-muted-foreground">{derivedState.state_reason}</p>
+                    {/* PO Override Button — shows when doc is blocked on PO match */}
+                    {derivedState.state_reason.includes('PO') && !doc.manual_po_override && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-2 h-7 text-[10px] gap-1 border-amber-600 text-amber-400 hover:bg-amber-900/20"
+                        onClick={async () => {
+                          try {
+                            await api.post(`/api/ap-review/documents/${doc.id}/override-po`);
+                            toast.success('PO check overridden — re-checking readiness...');
+                            fetchDoc();
+                          } catch (e) {
+                            toast.error('Failed to override PO check');
+                          }
+                        }}
+                        data-testid="override-po-btn"
+                      >
+                        <ShieldAlert className="w-3 h-3" />
+                        Override PO Check — I've reviewed this document
+                      </Button>
+                    )}
+                    {doc.manual_po_override && (
+                      <div className="mt-2 flex items-center gap-1.5 text-[10px] text-emerald-400">
+                        <ShieldCheck className="w-3 h-3" />
+                        PO check overridden by reviewer
+                      </div>
+                    )}
                   </div>
                 )}
                 

@@ -6962,9 +6962,15 @@ async def startup():
     await db.hub_workflow_runs.create_index("started_utc")
     await db.hub_config.create_index("_key", unique=True)
     await db.hub_job_types.create_index("job_type", unique=True)
-    # Vendor aliases indexes
-    await db.vendor_aliases.create_index("alias_id", unique=True)
-    await db.vendor_aliases.create_index("alias_string", unique=True)
+    # Vendor aliases indexes (non-unique — bulk seeding creates many without alias_id)
+    try:
+        await db.vendor_aliases.create_index("alias_id", unique=True, sparse=True)
+    except Exception:
+        pass
+    try:
+        await db.vendor_aliases.create_index("alias_string", sparse=True)
+    except Exception:
+        pass
     await db.vendor_aliases.create_index("normalized_alias")
     await db.vendor_aliases.create_index("vendor_no")
     await db.vendor_aliases.create_index("canonical_vendor_id")

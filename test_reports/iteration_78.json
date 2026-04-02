@@ -65,7 +65,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://intelligent-inbox-8.preview.emergentagent.com"
+    "api_url": "https://reprocess-fix-verify.preview.emergentagent.com"
   },
   "seed_data_used": "Used existing Hormel Foods workspace (customer_id: 366bfcce-4d68-4daf-b9f4-cb05a35de8c8). Draft PO-DRAFT-20260314163256-689B67 (has vendor REG-V001/Regression Vendor, has BC response created with PO#PO-ITEM-B259E1). Draft PO-DRAFT-20260314170144-8ED5A8 (has vendor UI-TEST-V001/UI Test Vendor Inc, has BC response from previous test).",
   "retest_needed": false,

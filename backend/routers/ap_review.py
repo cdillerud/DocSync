@@ -324,7 +324,8 @@ async def mark_ready_for_post(doc_id: str):
     Mark a document as ready and AUTO-POST to BC.
     
     After human review + corrections, this triggers the actual BC posting.
-    Simple rules: if vendor + PO + fields are good → post. Otherwise → error.
+    Sets manual_po_override so the PO check is skipped — the reviewer has
+    confirmed the document is ready regardless of PO match status.
     """
     logger.info(f"AP Review Mark Ready → Auto-Post: doc_id={doc_id}")
     
@@ -350,7 +351,16 @@ async def mark_ready_for_post(doc_id: str):
             detail=f"Cannot post: missing required fields: {', '.join(missing_fields)}"
         )
     
-    # Attempt auto-post to BC
+    # Set manual override flag — persists through reprocessing
+    from datetime import datetime, timezone
+    await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+        "manual_po_override": True,
+        "manual_override": True,
+        "manual_override_by": "reviewer",
+        "manual_override_at": datetime.now(timezone.utc).isoformat(),
+    }})
+    
+    # Attempt auto-post to BC — source="mark_ready" skips PO check
     from services.ap_auto_post_service import attempt_ap_auto_post
     result = await attempt_ap_auto_post(doc_id, db, source="mark_ready")
     
@@ -365,6 +375,44 @@ async def mark_ready_for_post(doc_id: str):
         "review_status": "posted" if result.get("posted") else "ready_for_post",
         "document": updated_doc,
     }
+
+
+@ap_review_router.post("/documents/{doc_id}/override-po")
+async def override_po_check(doc_id: str):
+    """
+    Override the PO validation check for a document.
+    
+    Sets manual_po_override=True which persists through reprocessing.
+    Use this when the PO reference is correct but doesn't match a BC Purchase Order
+    (e.g., freight carriers with internal reference numbers).
+    """
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    from datetime import datetime, timezone
+    await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+        "manual_po_override": True,
+        "manual_override": True,
+        "manual_override_by": "reviewer",
+        "manual_override_at": datetime.now(timezone.utc).isoformat(),
+    }})
+    
+    # Re-run auto-post check now that override is set
+    from services.ap_auto_post_service import attempt_ap_auto_post
+    result = await attempt_ap_auto_post(doc_id, db, source="manual_override")
+    
+    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    
+    return {
+        "success": True,
+        "overridden": True,
+        "auto_post_result": result,
+        "document": updated_doc,
+    }
+
+
 
 
 # =============================================================================

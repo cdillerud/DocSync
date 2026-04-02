@@ -1,0 +1,95 @@
+{
+  "summary": "Post-LLM Refinement Service testing completed. Backend: 18/18 tests passed (100%). Frontend: All UI elements verified working. The comparison delta scoring correctly excludes BC-match artifacts (vendor_no, vendor_canonical, vendor_match_method) from improved/regressed counts. Confidence micro-jitter filtering (<=0.02 threshold) working. BC-match fields shown dimmed with asterisk in frontend.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_reprocess_comparison.py",
+    "/app/backend/tests/test_post_llm_refinement_features.py",
+    "/app/test_reports/pytest/post_llm_refinement_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_post_llm_refinement_features.py"
+  ],
+  "success_rate": {
+    "backend": "100% (18/18 tests passed)",
+    "frontend": "100% (all UI elements verified)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "None - used existing documents in database",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Post-LLM Refinement features fully tested. Key verifications: (1) BC-match artifact exclusion - vendor_no, vendor_canonical, vendor_match_method are tracked but NOT scored as AI improvements/regressions, (2) Confidence micro-jitter filtering - changes <=0.02 are filtered out, (3) Frontend displays BC-match fields dimmed with asterisk and explanatory note, (4) Comparison run cmp-7660ee7c completed with 19 improved, 0 regressed, (5) Apply button shows 'Apply 19 Improvements', (6) All three buttons (Compare Preview, Apply, Full Pipeline Reprocess) visible and functional.",
+  "features_tested": {
+    "backend_api": [
+      "GET /api/reprocess-comparison/status returns 200 with completed status - PASS",
+      "GET /api/reprocess-comparison/apply-status returns 200 with status - PASS",
+      "GET /api/reprocess-comparison/full-status returns 200 with status - PASS",
+      "GET /api/reprocess-comparison/runs returns list of runs - PASS",
+      "POST /api/reprocess-comparison/run?limit=3 starts comparison and returns run_id - PASS",
+      "vendor_no NOT in field_change_counts (excluded as BC-match artifact) - PASS",
+      "Confidence changes <=0.02 filtered out (micro-jitter threshold) - PASS",
+      "BC-match fields marked with bc_match_artifact flag in results - PASS",
+      "Comparison results have proper before/after structure - PASS",
+      "Summary has all required fields including regressed=0 - PASS"
+    ],
+    "frontend_ui": [
+      "Settings > Before/After tab renders correctly - PASS",
+      "AI Reprocess & Comparison page loads - PASS",
+      "Compare (Preview) button visible and clickable - PASS",
+      "Apply Improvements button visible when improvements exist - PASS",
+      "Full Pipeline Reprocess button visible - PASS",
+      "Summary cards display correct stats (19 improved, 0 regressed) - PASS",
+      "Fields That Changed section shows field counts - PASS",
+      "BC-match artifact fields (vendor_match_method) shown dimmed with asterisk - PASS",
+      "Asterisk note explains BC-match fields - PASS",
+      "Document Results table displays comparison details - PASS"
+    ]
+  },
+  "api_verification": {
+    "GET /api/reprocess-comparison/status": {
+      "status_code": 200,
+      "response": {
+        "status": "completed",
+        "run_id": "cmp-7660ee7c",
+        "improved": 19,
+        "regressed": 0,
+        "field_change_counts": {
+          "doc_type": 22,
+          "total_amount": 18,
+          "line_items_count": 18,
+          "po_number": 17,
+          "confidence": 7,
+          "vendor_match_method": 5,
+          "vendor_raw": 1,
+          "invoice_number": 1
+        },
+        "note": "vendor_no NOT in field_change_counts - correctly excluded"
+      }
+    }
+  },
+  "data_testid_attributes_verified": [
+    "reprocess-comparison-page",
+    "start-comparison-btn",
+    "apply-improvements-btn",
+    "start-full-reprocess-btn",
+    "comparison-summary-cards",
+    "field-changes-card",
+    "comparison-results-table"
+  ],
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "note": "All endpoints are live against real MongoDB and LLM classification"
+  },
+  "new_files_created": [
+    "/app/backend/services/post_llm_refinement.py - 5 AI accuracy improvements (vendor normalization, doc type refinement, PO validation, confidence calibration, feedback loop amplification)"
+  ]
+}

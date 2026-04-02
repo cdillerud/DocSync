@@ -402,7 +402,7 @@ async def stage_classify_llm(
                 build_few_shot_prompt_section,
                 build_vendor_hints_prompt_section,
             )
-            few_shot = await build_few_shot_prompt_section()
+            few_shot = await build_few_shot_prompt_section(vendor_no=vendor_id)
             if few_shot:
                 dynamic_prompt += "\n" + few_shot
                 logger.info("[CLASSIFY:LLM] Injected %d chars of few-shot examples", len(few_shot))
@@ -922,6 +922,53 @@ async def run_pipeline(doc_id: str, doc: Dict[str, Any]) -> PipelineResult:
         )
         # Don't stop the pipeline for low extraction — still validate and route
         # but record the failure for visibility
+
+    # ----- Stage 3c: POST-LLM REFINEMENT -----
+    # Vendor normalization, doc type refinement, PO validation, confidence calibration
+    try:
+        from services.post_llm_refinement import refine_classification
+        from deps import get_db as _get_db
+        _db = _get_db()
+        vendor_raw = result.extracted_fields.get("vendor") or doc.get("vendor_raw") or ""
+        vendor_no = doc.get("vendor_no") or doc.get("matched_vendor_no") or ""
+
+        refinement = await refine_classification(
+            _db,
+            doc_type=result.document_type,
+            confidence=result.classification_confidence,
+            extracted_fields=result.extracted_fields,
+            vendor_raw=vendor_raw,
+            vendor_no=vendor_no,
+        )
+
+        # Apply refinement results
+        if refinement.get("refinements_applied"):
+            result.document_type = refinement["doc_type"]
+            result.classification_confidence = refinement["confidence"]
+            result.extracted_fields = refinement["extracted_fields"]
+            result.stages["refine"] = StageResult(
+                stage="refine",
+                status=StageStatus.PASSED,
+                data={
+                    "refinements": refinement["refinements_applied"],
+                    "type_reasoning": refinement.get("type_reasoning", ""),
+                    "vendor_canonical": refinement.get("vendor_canonical", ""),
+                    "vendor_no": refinement.get("vendor_no", ""),
+                },
+                quality_gate_passed=True,
+                duration_ms=0,
+            )
+            logger.info(
+                "[PIPELINE] REFINE for %s: %s",
+                doc_id, ", ".join(refinement["refinements_applied"]),
+            )
+        else:
+            # Store vendor resolution even if no other refinement
+            if refinement.get("vendor_canonical") and refinement["vendor_canonical"] != vendor_raw:
+                result.extracted_fields["vendor"] = refinement["vendor_canonical"]
+
+    except Exception as e:
+        logger.debug("[PIPELINE] Refinement skipped for %s: %s", doc_id, e)
 
     # ----- Stage 4: VALIDATE -----
     validate = await stage_validate(result.document_type, result.extracted_fields)

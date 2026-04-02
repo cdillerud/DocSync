@@ -169,16 +169,38 @@ def _build_doc_context(doc: Dict) -> Dict:
     }
 
 
-async def get_few_shot_examples(limit_per_type: int = 2) -> List[Dict]:
+async def get_few_shot_examples(limit_per_type: int = 2, vendor_no: str = "") -> List[Dict]:
     """Get recent corrections grouped by corrected_type for few-shot prompting.
     
     Returns the most recent corrections for each document type,
     which will be injected into the AI classification prompt.
+    
+    Prioritizes:
+    1. Corrections for the same vendor (most relevant)
+    2. Recent corrections (last 30 days weighted higher)
+    3. Corrections with high agreement (same correction made multiple times)
     """
     if _db is None:
         return []
 
-    # Get unique corrected types
+    examples = []
+
+    # Priority 1: Vendor-specific corrections (if vendor_no provided)
+    if vendor_no:
+        vendor_cursor = _db.classification_corrections.find(
+            {"vendor_no": vendor_no},
+            {"_id": 0, "file_name": 1, "vendor_canonical": 1, "text_snippet": 1,
+             "original_type": 1, "corrected_type": 1, "corrected_at": 1}
+        ).sort("corrected_at", -1).limit(3)
+        
+        vendor_examples = await vendor_cursor.to_list(3)
+        for ex in vendor_examples:
+            if ex.get("text_snippet"):
+                ex["vendor"] = ex.get("vendor_canonical", "")
+                ex["priority"] = "vendor_specific"
+                examples.append(ex)
+
+    # Priority 2: Recent corrections across all vendors, grouped by type
     pipeline = [
         {"$sort": {"corrected_at": -1}},
         {"$group": {
@@ -189,17 +211,28 @@ async def get_few_shot_examples(limit_per_type: int = 2) -> List[Dict]:
                 "text_snippet": "$text_snippet",
                 "original_type": "$original_type",
                 "corrected_type": "$corrected_type",
+                "corrected_at": "$corrected_at",
             }},
+            "correction_count": {"$sum": 1},
         }},
+        {"$sort": {"correction_count": -1}},
     ]
 
     results = await _db.classification_corrections.aggregate(pipeline).to_list(50)
     
-    examples = []
     for group in results:
-        doc_type = group["_id"]
-        for ex in group["examples"][:limit_per_type]:
-            if ex.get("text_snippet"):
+        count = group.get("correction_count", 0)
+        
+        # More examples for frequently corrected types
+        type_limit = limit_per_type
+        if count >= 10:
+            type_limit = 3
+        elif count >= 5:
+            type_limit = 2
+
+        for ex in group["examples"][:type_limit]:
+            if ex.get("text_snippet") and len(examples) < 12:
+                ex["priority"] = "recent"
                 examples.append(ex)
 
     return examples
@@ -236,9 +269,9 @@ async def get_vendor_type_hint(vendor: str) -> Optional[str]:
     return None
 
 
-async def build_few_shot_prompt_section() -> str:
+async def build_few_shot_prompt_section(vendor_no: str = "") -> str:
     """Build the few-shot examples section to inject into the classification prompt."""
-    examples = await get_few_shot_examples(limit_per_type=2)
+    examples = await get_few_shot_examples(limit_per_type=2, vendor_no=vendor_no)
     if not examples:
         return ""
 

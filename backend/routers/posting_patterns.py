@@ -140,16 +140,13 @@ async def debug_invoice_lines(vendor_no: str):
     return result
 
 
-async def _run_top_analysis(top_n: int):
+async def _run_top_analysis(top_n: int, force: bool = False):
     """Background task: analyze top vendors."""
     global _analysis_status
     _analysis_status = {"running": True, "last_result": None, "progress": "starting"}
     try:
         db = get_db()
         bc = get_bc_service()
-        from services.posting_pattern_analyzer import build_all_vendor_posting_profiles
-
-        # Analyze vendors one at a time and update progress
         from services.posting_pattern_analyzer import (
             analyze_vendor_posting_patterns,
             MIN_INVOICES_FOR_PROFILE,
@@ -160,7 +157,7 @@ async def _run_top_analysis(top_n: int):
         ).sort("bc_invoice_count", -1).limit(top_n)
         vendors = await cursor.to_list(top_n)
 
-        results = {"vendors_queued": len(vendors), "analyzed": 0, "errors": 0, "skipped": 0, "vendor_details": []}
+        results = {"vendors_queued": len(vendors), "analyzed": 0, "errors": 0, "skipped": 0, "vendor_details": [], "error_details": [], "force": force}
 
         for i, v in enumerate(vendors):
             vendor_no = v.get("vendor_no", "")
@@ -168,20 +165,21 @@ async def _run_top_analysis(top_n: int):
                 continue
             _analysis_status["progress"] = f"Analyzing {vendor_no} ({i+1}/{len(vendors)})"
 
-            # Check if recent analysis exists
-            from datetime import datetime, timezone
-            existing = await db.posting_pattern_analysis.find_one(
-                {"vendor_no": vendor_no, "status": "analyzed"},
-                {"_id": 0, "analyzed_at": 1}
-            )
-            if existing and existing.get("analyzed_at"):
-                try:
-                    dt = datetime.fromisoformat(existing["analyzed_at"].replace("Z", "+00:00"))
-                    if (datetime.now(timezone.utc) - dt).days < 7:
-                        results["skipped"] += 1
-                        continue
-                except (ValueError, TypeError):
-                    pass
+            # Check if recent analysis exists (skip if < 7 days old, unless force=True)
+            if not force:
+                from datetime import datetime, timezone
+                existing = await db.posting_pattern_analysis.find_one(
+                    {"vendor_no": vendor_no, "status": "analyzed"},
+                    {"_id": 0, "analyzed_at": 1}
+                )
+                if existing and existing.get("analyzed_at"):
+                    try:
+                        dt = datetime.fromisoformat(existing["analyzed_at"].replace("Z", "+00:00"))
+                        if (datetime.now(timezone.utc) - dt).days < 7:
+                            results["skipped"] += 1
+                            continue
+                    except (ValueError, TypeError):
+                        pass
 
             try:
                 analysis = await analyze_vendor_posting_patterns(db, bc, vendor_no)
@@ -193,13 +191,25 @@ async def _run_top_analysis(top_n: int):
                         "invoices": analysis.get("invoices_analyzed", 0),
                         "lines": analysis.get("lines_analyzed", 0),
                         "confidence": analysis.get("posting_template", {}).get("confidence", "?"),
+                        "consistency": analysis.get("consistency", {}).get("overall", 0),
                     })
                 else:
                     results["errors"] += 1
+                    results["error_details"].append({
+                        "vendor_no": vendor_no,
+                        "vendor_name": v.get("vendor_name", ""),
+                        "status": analysis.get("status", "unknown"),
+                        "error": analysis.get("error", "unknown"),
+                    })
                     logger.warning("Vendor %s analysis status: %s, error: %s",
                                    vendor_no, analysis.get("status"), analysis.get("error", ""))
             except Exception as e:
                 results["errors"] += 1
+                results["error_details"].append({
+                    "vendor_no": vendor_no,
+                    "vendor_name": v.get("vendor_name", ""),
+                    "error": str(e),
+                })
                 logger.error("Failed to analyze vendor %s: %s", vendor_no, str(e))
 
             # Brief pause to avoid BC API throttling
@@ -215,10 +225,15 @@ async def _run_top_analysis(top_n: int):
 
 
 @router.post("/analyze-top")
-async def analyze_top_vendors(background_tasks: BackgroundTasks, top_n: int = Query(default=20, le=100)):
+async def analyze_top_vendors(
+    background_tasks: BackgroundTasks,
+    top_n: int = Query(default=20, le=100),
+    force: bool = Query(default=False, description="Force re-analysis even if recent data exists"),
+):
     """
     Analyze posting patterns for the top N vendors by invoice volume.
     Runs in background to avoid nginx timeout. Check progress via GET /analyze-top/status.
+    Use force=true to re-analyze all vendors (bypasses 7-day freshness check).
     """
     global _analysis_status
     if _analysis_status.get("running"):
@@ -228,11 +243,12 @@ async def analyze_top_vendors(background_tasks: BackgroundTasks, top_n: int = Qu
             "message": "Analysis is already in progress. Check GET /analyze-top/status for progress.",
         }
 
-    background_tasks.add_task(_run_top_analysis, top_n)
+    background_tasks.add_task(_run_top_analysis, top_n, force)
     return {
         "status": "started",
         "vendors_to_analyze": top_n,
-        "message": f"Background analysis started for top {top_n} vendors. Check GET /api/posting-patterns/analyze-top/status for progress.",
+        "force": force,
+        "message": f"Background analysis started for top {top_n} vendors{' (FORCE re-analysis)' if force else ''}. Check GET /api/posting-patterns/analyze-top/status for progress.",
     }
 
 

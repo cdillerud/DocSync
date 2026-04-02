@@ -169,10 +169,11 @@ async def _build_pi_lines_with_mapping(doc: dict, db, vendor_no: str = "") -> li
     
     Business rules:
     1. Fetch the vendor's invoice profile from BC history
-    2. Use the profile's dominant line type and GL account/item code
-    3. If AI extracted a specific item_number/SKU, use it (overrides profile)
-    4. Description follows the vendor's historical pattern (PO ref, BOL ref, etc.)
-    5. Flag deviations from the vendor's typical invoice pattern
+    2. Check for posting pattern analysis (richer template from Phase 1)
+    3. Use the profile's dominant line type and GL account/item code
+    4. If AI extracted a specific item_number/SKU, use it (overrides profile)
+    5. Description follows the vendor's historical pattern (PO ref, BOL ref, etc.)
+    6. Flag deviations from the vendor's typical invoice pattern
     
     The profile learns from what's IN BC — making our output as accurate as a human.
     """
@@ -194,10 +195,34 @@ async def _build_pi_lines_with_mapping(doc: dict, db, vendor_no: str = "") -> li
     
     # Fetch the vendor's invoice profile from BC history
     profile = await get_or_build_profile(db, vendor_no)
+
+    # Also check for the richer posting pattern analysis template
+    posting_template = None
+    try:
+        from services.posting_pattern_analyzer import get_posting_profile_for_vendor
+        posting_analysis = await get_posting_profile_for_vendor(db, vendor_no)
+        if posting_analysis:
+            posting_template = posting_analysis.get("posting_template", {})
+    except Exception:
+        pass
     
     if profile.get("bc_invoice_count", 0) > 0:
         # Use profile-driven line builder (learns from BC)
         bc_lines = build_smart_pi_lines(doc, profile, po_reference=po_ref)
+
+        # Enhance lines with posting template reference patterns if available
+        if posting_template and posting_template.get("reference_handling"):
+            ref_handling = posting_template["reference_handling"]
+            ref_pattern = ref_handling.get("pattern", "")
+            for line in bc_lines:
+                desc = line.get("description", "")
+                # If the template says descriptions should include BOL/ref and we have a PO ref
+                if po_ref and ref_pattern in ("freight_prefix_plus_ref", "bol_in_description"):
+                    if ref_pattern == "freight_prefix_plus_ref" and not desc.upper().startswith("FREIGHT"):
+                        line["description"] = f"FREIGHT {po_ref}"
+                    elif ref_pattern == "bol_in_description" and po_ref not in desc:
+                        line["description"] = po_ref
+
         deviations = detect_deviations(doc, profile, bc_lines)
         
         if deviations:
@@ -216,15 +241,17 @@ async def _build_pi_lines_with_mapping(doc: dict, db, vendor_no: str = "") -> li
                         "default_item_code": profile.get("default_item_code"),
                         "bc_invoice_count": profile.get("bc_invoice_count", 0),
                         "description_pattern": profile.get("description_pattern"),
+                        "posting_template_confidence": posting_template.get("confidence", "none") if posting_template else "none",
                     },
                 }}
             )
         
         logger.info(
-            "[PI Lines] Using vendor profile for %s: type=%s, gl=%s, item=%s, pattern=%s (%d BC invoices analyzed)",
+            "[PI Lines] Using vendor profile for %s: type=%s, gl=%s, item=%s, pattern=%s (%d BC invoices analyzed, template=%s)",
             vendor_no, profile.get("default_line_type"), profile.get("default_gl_account"),
             profile.get("default_item_code"), profile.get("description_pattern"),
             profile.get("bc_invoice_count", 0),
+            posting_template.get("confidence", "none") if posting_template else "none",
         )
         return bc_lines
     

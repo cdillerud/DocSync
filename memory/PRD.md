@@ -37,8 +37,18 @@
 - **Added handlers**: `po_correction`, `amount_correction`, `field_edit` (were recorded but never consumed)
 - **Approval reinforcement**: Approvals now create positive classification confirmations and reinforce vendor alias mappings
 - **Replay endpoint**: `POST /api/feedback-loop/replay` retroactively applies all unapplied events
-- **Result**: Application rate went from 0% to 98% (50/51 applied)
+- **Result**: Application rate went from 0% to 100% (51/51 applied)
 - **UI**: "Replay N Unapplied" button on Feedback Loop Health page
+
+### LLM Learning Pipeline Gap Fixes (Complete - Apr 2026)
+- Classification corrections now feed into unified feedback loop (documents.py + ap_review.py)
+- Sender domain seed queries both `sender` and `sender_email` fields
+- VEP profiles seeded from BC cache — 13 → 469 profiles covering all vendors with BC history
+- Few-shot builder no longer requires text_snippet — uses filename+vendor context
+- Same-type correction noise filtered from prompts and backfilled data
+- Unlearnable feedback events force-marked to prevent infinite replay loops
+- New `/api/knowledge-seed/close-all-gaps` endpoint runs all gap closers at once
+- Knowledge status endpoint expanded with VEP, feedback rate, correction enrichment metrics
 
 ### Comparison Delta Scoring (Complete - Feb 2026)
 - BC-match fields excluded from improved/regressed scoring

@@ -244,7 +244,20 @@ class DerivedStateService:
                 validation_state = ValidationState.FAIL.value
                 needs_review = True
                 review_queue = "bc_validation"
-                blocking_issues.extend(payload.get("failed_checks", []))
+                failed_checks = payload.get("failed_checks", [])
+                blocking_issues.extend(failed_checks)
+                # If vendor_match is NOT in the failed list, the vendor passed
+                # — clear any stale "Vendor not matched" blocking issues
+                vendor_failed = any(
+                    "vendor" in fc.lower() for fc in failed_checks
+                )
+                if not vendor_failed:
+                    blocking_issues = [
+                        i for i in blocking_issues
+                        if "Vendor" not in i and "vendor" not in i.lower()
+                    ]
+                    if review_queue == "vendor_pending":
+                        review_queue = "bc_validation"
             
             elif event_type == "bc.validation.overridden":
                 # Override clears the blocking issues
@@ -268,6 +281,9 @@ class DerivedStateService:
                     if bi_count > 0:
                         if not payload.get("vendor_resolved"):
                             blocking_issues.append("Vendor not resolved to BC vendor")
+                        else:
+                            # Vendor IS resolved — clear stale vendor blocks
+                            blocking_issues = [i for i in blocking_issues if "Vendor" not in i and "vendor" not in i.lower()]
                         if not payload.get("invoice_number_present"):
                             blocking_issues.append("Invoice number missing")
                         if not payload.get("invoice_date_present"):
@@ -276,12 +292,18 @@ class DerivedStateService:
                             blocking_issues.append("Total amount missing")
                         if payload.get("is_duplicate"):
                             blocking_issues.append("Duplicate invoice detected")
+                    elif payload.get("vendor_resolved"):
+                        # Even if no blocking issues count, clear stale vendor blocks
+                        blocking_issues = [i for i in blocking_issues if "Vendor" not in i and "vendor" not in i.lower()]
                 elif v_state == "warning":
                     if validation_state != ValidationState.FAIL.value:
                         validation_state = ValidationState.WARNING.value
                     needs_review = True
                     review_queue = "assisted_review"
                     automation_state = AutomationState.ASSISTED.value
+                    # Clear stale vendor blocks if vendor is resolved
+                    if payload.get("vendor_resolved"):
+                        blocking_issues = [i for i in blocking_issues if "Vendor" not in i and "vendor" not in i.lower()]
                     w_count = payload.get("warnings_count", 0)
                     if w_count > 0:
                         warnings.append(f"{w_count} warning(s) detected during AP validation")
@@ -345,6 +367,13 @@ class DerivedStateService:
                     automation_state = AutomationState.ASSISTED.value
                     state_reason = payload.get("reason", "Awaiting review")
                     review_queue = "accounting_review"
+                    # Replace blocking_issues with the actual failures from
+                    # the auto-post service — prevents stale issues like
+                    # "Vendor not matched" persisting when vendor IS matched
+                    # but a different check (like PO) failed.
+                    ap_failures = payload.get("failures", [])
+                    if ap_failures:
+                        blocking_issues = list(ap_failures)
                 elif decision == "ReadyForApproval":
                     workflow_state = WorkflowState.READY.value
                     automation_state = AutomationState.ASSISTED.value
@@ -404,14 +433,52 @@ class DerivedStateService:
         
         # ================================================================
         # POST-PROCESSING: Cross-reference document fields for consistency
-        # If the document has a successful BC validation with vendor resolved,
-        # but stale events left vendor blocking issues, clear them.
+        # If the document has a successful vendor match in BC validation,
+        # clear stale "Vendor not matched" blocking issues — even if the
+        # overall BC validation failed (e.g. because PO failed).
         # ================================================================
         bc_val = document.get("validation_results", {})
+        bc_checks = bc_val.get("checks", [])
+        
+        # Check individual validation checks — vendor can be matched even
+        # when overall validation fails due to PO or other issues
+        vendor_check_passed = any(
+            c.get("check_name") in ("vendor_match", "vendor_resolution", "vendor_validation")
+            and c.get("passed")
+            for c in bc_checks
+        )
+        # Also check if bc_record_info has vendor number — direct proof of match
+        bc_record_info = bc_val.get("bc_record_info") or {}
+        if not vendor_check_passed and bc_record_info.get("number"):
+            vendor_check_passed = True
+        
+        # Also check top-level document fields for vendor resolution
+        if not vendor_check_passed:
+            if (document.get("matched_vendor_no") or document.get("vendor_id") or
+                document.get("bc_vendor_number") or document.get("vendor_no")):
+                vendor_check_passed = True
+        
+        # If vendor IS matched, remove ALL stale vendor blocking issues
+        if vendor_check_passed:
+            vendor_blocks = [i for i in blocking_issues if "Vendor" in i or "vendor" in i.lower()]
+            if vendor_blocks:
+                blocking_issues = [i for i in blocking_issues if i not in vendor_blocks]
+                if review_queue == "vendor_pending":
+                    review_queue = None
+        
+        # Check manual PO override — if set, remove PO-related blocking issues
+        has_manual_override = document.get("manual_po_override") or document.get("manual_override")
+        if has_manual_override:
+            po_blocks = [i for i in blocking_issues if "PO" in i or "po_" in i.lower() or "po " in i.lower()]
+            if po_blocks:
+                blocking_issues = [i for i in blocking_issues if i not in po_blocks]
+            # Update state_reason if it was about PO
+            if state_reason and ("PO" in state_reason or "po " in state_reason.lower()):
+                state_reason = "PO check overridden by reviewer"
+        
+        # Compute overall bc_vs for additional state adjustments
         bc_vs = bc_val.get("validation_status")
         if not bc_vs:
-            # Compute from checks for legacy docs
-            bc_checks = bc_val.get("checks", [])
             bc_failed = [c for c in bc_checks if not c.get("passed", True)]
             bc_req_failed = [c for c in bc_failed if c.get("required", False)]
             if bc_req_failed:
@@ -421,33 +488,13 @@ class DerivedStateService:
             elif bc_val.get("all_passed"):
                 bc_vs = "pass"
         
-        if bc_vs == "pass" and bc_val.get("bc_record_info"):
-            # BC validation fully passed and resolved vendor
-            vendor_blocks = [i for i in blocking_issues if "Vendor" in i or "vendor" in i.lower()]
-            if vendor_blocks:
-                blocking_issues = [i for i in blocking_issues if i not in vendor_blocks]
-                if not blocking_issues:
-                    validation_state = ValidationState.PASS.value if not warnings else ValidationState.WARNING.value
-                    needs_review = False
-                    review_queue = None
-        elif bc_vs == "warn" and bc_val.get("bc_record_info"):
-            # BC validation passed with warnings — still resolved vendor
-            vendor_blocks = [i for i in blocking_issues if "Vendor" in i or "vendor" in i.lower()]
-            if vendor_blocks:
-                blocking_issues = [i for i in blocking_issues if i not in vendor_blocks]
-            if not blocking_issues:
-                validation_state = ValidationState.WARNING.value
+        # If no blocking issues remain after vendor/PO cleanup, upgrade state
+        if not blocking_issues:
+            if validation_state == ValidationState.FAIL.value:
+                validation_state = ValidationState.WARNING.value if warnings else ValidationState.PASS.value
+            if needs_review and not warnings:
                 needs_review = False
                 review_queue = None
-
-        # Also check matched_vendor_no on the document
-        if document.get("matched_vendor_no") or document.get("vendor_id"):
-            vendor_blocks = [i for i in blocking_issues if "Vendor" in i or "vendor" in i.lower()]
-            if vendor_blocks:
-                blocking_issues = [i for i in blocking_issues if i not in vendor_blocks]
-                if not blocking_issues:
-                    if validation_state == ValidationState.FAIL.value:
-                        validation_state = ValidationState.WARNING.value
 
         # Determine final workflow state if still processing
         if workflow_state == WorkflowState.PROCESSING.value:

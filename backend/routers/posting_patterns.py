@@ -266,37 +266,79 @@ async def posting_learning_proof(vendor_no: str):
     amount = profile.get("amount_stats", {})
     lines = profile.get("line_patterns", {})
     tax = profile.get("tax_pattern", {})
+    consistency = profile.get("consistency", {})
+
+    # Build item breakdown with rates
+    item_breakdown = {}
+    for item, count in lines.get("top_items", {}).items():
+        total = sum(lines.get("line_types", {}).values()) or 1
+        item_breakdown[item] = f"{round(count / total * 100)}% ({count}/{total} lines)"
+
+    # Describe reference patterns in human terms
+    ref_handling = template.get("reference_handling", {})
+    ref_patterns_detail = {}
+    for pattern, info in (ref_handling.get("all_patterns") or {}).items():
+        if isinstance(info, dict):
+            ref_patterns_detail[pattern] = f"{info.get('count', 0)} lines ({info.get('rate', 0)*100:.0f}%)"
+        else:
+            ref_patterns_detail[pattern] = f"{info} lines"
 
     proof = {
         "vendor_no": vendor_no,
         "vendor_names": profile.get("vendor_names_seen", []),
         "invoices_studied": profile.get("invoices_analyzed", 0),
+        "invoices_with_lines_studied": profile.get("invoices_with_lines_analyzed", 0),
         "lines_studied": profile.get("lines_analyzed", 0),
         "what_the_system_learned": {
             "typical_invoice_amount": f"${amount.get('mean', 0):,.2f} (range ${amount.get('min', 0):,.2f}-${amount.get('max', 0):,.2f})",
             "typical_line_count": lines.get("lines_per_invoice", {}).get("median", "?"),
+            "primary_items": item_breakdown,
             "primary_gl_accounts": list(lines.get("top_gl_accounts", {}).keys())[:5],
-            "primary_items": list(lines.get("top_items", {}).keys())[:5],
-            "common_descriptions": list(lines.get("top_descriptions", {}).keys())[:5],
+            "charge_items": list(lines.get("charge_items", {}).keys())[:5],
+            "description_format": ref_handling.get("description", "unknown"),
+            "description_pattern_breakdown": ref_patterns_detail,
+            "common_descriptions_sample": list(lines.get("top_descriptions", {}).keys())[:5],
             "units_of_measure": list(lines.get("uom_distribution", {}).keys())[:5],
-            "tax_codes_used": list(lines.get("tax_code_distribution", {}).keys())[:5],
+            "line_tax_codes": list(lines.get("tax_code_distribution", {}).keys())[:5],
+            "invoice_level_tax": f"{tax.get('tax_rate_typical', 0)}% tax" if tax.get("invoices_with_tax", 0) > 0 else "Tax-free at invoice level",
+            "line_tax_code_detail": template.get("line_tax_code", {}),
             "line_amount_stats": lines.get("line_amount_stats", {}),
-            "tax_handling": f"{tax.get('tax_rate_typical', 0)}% tax" if tax.get("invoices_with_tax", 0) > 0 else "Tax-free",
             "currency": profile.get("currency_distribution", {}),
             "vendor_invoice_number_usage": f"{profile.get('vendor_invoice_number_rate', 0)*100:.0f}%",
         },
+        "consistency": {
+            "overall_score": f"{consistency.get('overall', 0)*100:.0f}%",
+            "line_count_consistency": f"{consistency.get('line_count', 0)*100:.0f}%",
+            "item_choice_consistency": f"{consistency.get('item_choice', 0)*100:.0f}%",
+            "line_type_consistency": f"{consistency.get('line_type', 0)*100:.0f}%",
+            "item_dominance": f"{consistency.get('item_dominance', 0)*100:.0f}%",
+            "interpretation": (
+                "HIGHLY PREDICTABLE — safe for auto-posting"
+                if consistency.get("overall", 0) >= 0.8 else
+                "MOSTLY PREDICTABLE — good candidate with review"
+                if consistency.get("overall", 0) >= 0.6 else
+                "VARIABLE — needs human review for each invoice"
+            ),
+        },
         "auto_post_template": {
             "confidence": template.get("confidence", "?"),
+            "consistency_score": template.get("consistency_score", 0),
             "would_create": {
                 "currency": template.get("recommended_currency", "USD"),
                 "line_count": template.get("typical_line_count", 1),
+                "uom": template.get("uom", ""),
                 "tax_handling": template.get("tax_handling", "?"),
+                "line_tax_code": template.get("line_tax_code", {}),
                 "line_templates": template.get("line_templates", []),
                 "reference_handling": template.get("reference_handling", {}),
                 "description2_usage": template.get("description2_usage", {}),
             },
         },
-        "verdict": f"LEARNED ({template.get('confidence', '?').upper()} confidence)" if profile.get("invoices_analyzed", 0) >= 3 else "INSUFFICIENT DATA",
+        "verdict": (
+            f"LEARNED ({template.get('confidence', '?').upper()} confidence, "
+            f"{consistency.get('overall', 0)*100:.0f}% consistent)"
+            if profile.get("invoices_analyzed", 0) >= 3 else "INSUFFICIENT DATA"
+        ),
     }
 
     return proof
@@ -584,7 +626,8 @@ async def get_vendor_posting_summary(limit: int = Query(50, le=200)):
     profiles = await db.posting_pattern_analysis.find(
         {"status": "analyzed"},
         {"_id": 0, "vendor_no": 1, "vendor_names_seen": 1, "invoices_analyzed": 1,
-         "lines_analyzed": 1, "posting_template": 1, "amount_stats": 1,
+         "lines_analyzed": 1, "invoices_with_lines_analyzed": 1,
+         "posting_template": 1, "amount_stats": 1, "consistency": 1,
          "analyzed_at": 1, "tax_pattern": 1, "line_patterns": 1}
     ).sort("invoices_analyzed", -1).limit(limit).to_list(limit)
 
@@ -610,13 +653,16 @@ async def get_vendor_posting_summary(limit: int = Query(50, le=200)):
         template = p.get("posting_template", {})
         amount_stats = p.get("amount_stats", {})
         line_patterns = p.get("line_patterns", {})
+        consistency = p.get("consistency", {})
 
         vendors.append({
             "vendor_no": v_no,
             "vendor_name": (p.get("vendor_names_seen") or ["?"])[0],
             "invoices_analyzed": p.get("invoices_analyzed", 0),
             "lines_analyzed": p.get("lines_analyzed", 0),
+            "invoices_with_lines": p.get("invoices_with_lines_analyzed", 0),
             "confidence": template.get("confidence", "low"),
+            "consistency_score": round(consistency.get("overall", 0) * 100),
             "typical_line_count": template.get("typical_line_count", 0),
             "tax_handling": template.get("tax_handling", "unknown"),
             "currency": template.get("recommended_currency", "USD"),

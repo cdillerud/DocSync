@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 MIN_INVOICES_FOR_PROFILE = 3
 # Max invoices to analyze per vendor (recent history)
 MAX_INVOICES_PER_VENDOR = 200
+# Max invoices to fetch lines for (balance between depth and BC API load)
+MAX_LINE_SAMPLE = 75
 
 
 async def analyze_vendor_posting_patterns(
@@ -88,7 +90,7 @@ async def analyze_vendor_posting_patterns(
     else:
         result["amount_stats"] = {"count": 0}
 
-    # Tax patterns
+    # Tax patterns (invoice-level)
     has_tax = sum(1 for t in tax_amounts if t > 0)
     result["tax_pattern"] = {
         "invoices_with_tax": has_tax,
@@ -102,8 +104,9 @@ async def analyze_vendor_posting_patterns(
     result["vendor_invoice_number_rate"] = round(has_vendor_invoice_no / max(len(invoices), 1), 3)
     result["vendor_names_seen"] = list(vendor_names_seen)
 
-    # 3. Analyze line items for a sample of invoices (up to 20 to stay fast)
-    sample_invoices = invoices[:20]
+    # 3. Analyze line items — sample up to MAX_LINE_SAMPLE invoices
+    sample_size = min(len(invoices), MAX_LINE_SAMPLE)
+    sample_invoices = invoices[:sample_size]
     all_lines = []
     line_type_counts = defaultdict(int)
     gl_account_counts = defaultdict(int)
@@ -115,6 +118,11 @@ async def analyze_vendor_posting_patterns(
     lines_per_invoice = []
     ref_pattern_counts = defaultdict(int)
     description2_patterns = defaultdict(int)
+    # Track per-invoice item choices for consistency scoring
+    per_invoice_items = []
+    per_invoice_line_types = []
+    # Track Charge-type lines separately
+    charge_item_counts = defaultdict(int)
 
     for inv in sample_invoices:
         inv_id = inv.get("id")
@@ -123,10 +131,13 @@ async def analyze_vendor_posting_patterns(
         try:
             lines = await bc_service.get_purchase_invoice_lines(inv_id)
             lines_per_invoice.append(len(lines))
+            inv_items = []
+            inv_line_types = []
             for line in lines:
                 all_lines.append(line)
                 line_type = line.get("lineType", "unknown")
                 line_type_counts[line_type] += 1
+                inv_line_types.append(line_type)
                 # BC uses lineObjectNumber for both GL accounts and item numbers
                 obj_no = line.get("lineObjectNumber", "")
                 if obj_no:
@@ -134,29 +145,24 @@ async def analyze_vendor_posting_patterns(
                         gl_account_counts[obj_no] += 1
                     elif line_type == "Item":
                         item_counts[obj_no] += 1
+                        inv_items.append(obj_no)
+                    elif line_type == "Charge":
+                        charge_item_counts[obj_no] += 1
                 desc = line.get("description", "")
                 desc2 = line.get("description2", "")
                 if desc:
                     # Normalize description for pattern detection
                     desc_norm = desc.strip().upper()[:50]
                     description_patterns[desc_norm] += 1
-                    # Detect reference number pattern in description
-                    # Common patterns: "FREIGHT 49611", "46133", "W110700"
-                    ref_match = re.search(r'(?:FREIGHT\s+)?([A-Z]?\d{4,7})', desc.upper())
-                    if ref_match:
-                        ref_type = "bol_in_description"
-                        if desc.upper().startswith("FREIGHT"):
-                            ref_type = "freight_prefix_plus_ref"
-                        elif desc.upper().startswith("W"):
-                            ref_type = "order_number_ref"
-                        ref_pattern_counts[ref_type] += 1
+                    # Classify the description pattern
+                    _classify_description_ref(desc, ref_pattern_counts)
                 if desc2:
                     description2_patterns[desc2.strip().upper()[:50]] += 1
                 # Track unit of measure patterns
                 uom = line.get("unitOfMeasureCode", "")
                 if uom:
                     uom_counts[uom] += 1
-                # Track tax codes
+                # Track tax codes (line-level — distinct from invoice-level tax)
                 tax_code = line.get("taxCode", "")
                 if tax_code:
                     tax_code_counts[tax_code] += 1
@@ -164,12 +170,16 @@ async def analyze_vendor_posting_patterns(
                 line_amt = line.get("netAmount") or line.get("lineAmount") or line.get("unitCost", 0)
                 if isinstance(line_amt, (int, float)) and line_amt > 0:
                     line_amounts.append(float(line_amt))
+            per_invoice_items.append(tuple(sorted(inv_items)))
+            per_invoice_line_types.append(tuple(sorted(inv_line_types)))
         except Exception as e:
             logger.debug("Failed to get lines for PI %s: %s", inv_id, str(e))
 
     result["lines_analyzed"] = len(all_lines)
+    result["invoices_with_lines_analyzed"] = len(lines_per_invoice)
 
     # Line item patterns
+    total_lines = sum(line_type_counts.values()) or 1
     result["line_patterns"] = {
         "lines_per_invoice": {
             "mean": round(statistics.mean(lines_per_invoice), 1) if lines_per_invoice else 0,
@@ -180,6 +190,7 @@ async def analyze_vendor_posting_patterns(
         "line_types": dict(line_type_counts),
         "top_gl_accounts": dict(sorted(gl_account_counts.items(), key=lambda x: -x[1])[:10]),
         "top_items": dict(sorted(item_counts.items(), key=lambda x: -x[1])[:10]),
+        "charge_items": dict(sorted(charge_item_counts.items(), key=lambda x: -x[1])[:5]),
         "top_descriptions": dict(sorted(description_patterns.items(), key=lambda x: -x[1])[:15]),
         "uom_distribution": dict(sorted(uom_counts.items(), key=lambda x: -x[1])[:5]),
         "tax_code_distribution": dict(sorted(tax_code_counts.items(), key=lambda x: -x[1])[:5]),
@@ -191,11 +202,19 @@ async def analyze_vendor_posting_patterns(
         } if line_amounts else {},
         "reference_in_description": dict(ref_pattern_counts),
         "description2_values": dict(sorted(description2_patterns.items(), key=lambda x: -x[1])[:10]),
-    }    # 4. Build the posting template (what the auto-post should do)
+    }
+
+    # 4. Consistency scoring — how predictable is this vendor?
+    result["consistency"] = _compute_consistency(
+        per_invoice_items, per_invoice_line_types, lines_per_invoice,
+        item_counts, gl_account_counts, total_lines,
+    )
+
+    # 5. Build the posting template (what the auto-post should do)
     result["posting_template"] = _build_posting_template(result)
     result["status"] = "analyzed"
 
-    # 5. Store in DB
+    # 6. Store in DB
     await db.posting_pattern_analysis.update_one(
         {"vendor_no": vendor_no},
         {"$set": result},
@@ -203,6 +222,103 @@ async def analyze_vendor_posting_patterns(
     )
 
     return result
+
+
+def _classify_description_ref(desc: str, ref_counts: Dict[str, int]):
+    """Classify the reference pattern in a line description."""
+    upper = desc.strip().upper()
+    # "FREIGHT 49611" pattern
+    if re.match(r'^FREIGHT\s+[A-Z0-9]{3,}', upper):
+        ref_counts["freight_prefix_plus_ref"] += 1
+        return
+    # "PO 12345" or "PO#12345" pattern
+    if re.match(r'^PO[#\s]+\d+', upper):
+        ref_counts["po_prefix_plus_ref"] += 1
+        return
+    # "W110700" — order number starting with letter
+    if re.match(r'^[A-Z]\d{4,}', upper):
+        ref_counts["order_number_ref"] += 1
+        return
+    # Pure numeric reference "46133"
+    if re.match(r'^\d{4,7}$', upper):
+        ref_counts["bol_in_description"] += 1
+        return
+    # "INV 12345" or "INVOICE 12345"
+    if re.match(r'^INV(OICE)?\s*#?\s*\d+', upper):
+        ref_counts["invoice_ref_in_description"] += 1
+        return
+    # Any other string containing a numeric reference
+    ref_match = re.search(r'[A-Z]?\d{4,7}', upper)
+    if ref_match:
+        ref_counts["embedded_ref"] += 1
+        return
+    # Descriptive text only (no reference number)
+    if upper:
+        ref_counts["descriptive_text_only"] += 1
+
+
+def _compute_consistency(
+    per_invoice_items, per_invoice_line_types, lines_per_invoice,
+    item_counts, gl_account_counts, total_lines,
+) -> Dict[str, Any]:
+    """
+    Compute a consistency score across multiple dimensions.
+    High consistency = very predictable, safe to auto-post.
+    """
+    scores = {}
+
+    # Line count consistency — do they always have the same # of lines?
+    if lines_per_invoice and len(lines_per_invoice) > 1:
+        most_common_count = max(set(lines_per_invoice), key=lines_per_invoice.count)
+        same_count = sum(1 for c in lines_per_invoice if c == most_common_count)
+        scores["line_count"] = round(same_count / len(lines_per_invoice), 3)
+    elif lines_per_invoice:
+        scores["line_count"] = 1.0
+    else:
+        scores["line_count"] = 0
+
+    # Item choice consistency — do they always use the same item?
+    if per_invoice_items:
+        non_empty = [t for t in per_invoice_items if t]
+        if non_empty:
+            most_common_combo = max(set(non_empty), key=non_empty.count)
+            same_items = sum(1 for t in non_empty if t == most_common_combo)
+            scores["item_choice"] = round(same_items / len(non_empty), 3)
+        else:
+            scores["item_choice"] = 0
+    else:
+        scores["item_choice"] = 0
+
+    # Line type consistency — always Item? Always Account? Mixed?
+    if per_invoice_line_types:
+        non_empty = [t for t in per_invoice_line_types if t]
+        if non_empty:
+            most_common_type = max(set(non_empty), key=non_empty.count)
+            same_type = sum(1 for t in non_empty if t == most_common_type)
+            scores["line_type"] = round(same_type / len(non_empty), 3)
+        else:
+            scores["line_type"] = 0
+    else:
+        scores["line_type"] = 0
+
+    # Dominant item/GL concentration — is there one clear winner?
+    if item_counts:
+        top_count = max(item_counts.values())
+        total_item_lines = sum(item_counts.values()) or 1
+        scores["item_dominance"] = round(top_count / total_item_lines, 3)
+    elif gl_account_counts:
+        top_count = max(gl_account_counts.values())
+        total_gl_lines = sum(gl_account_counts.values()) or 1
+        scores["item_dominance"] = round(top_count / total_gl_lines, 3)
+    else:
+        scores["item_dominance"] = 0
+
+    # Overall consistency — weighted average
+    weights = {"line_count": 0.25, "item_choice": 0.35, "line_type": 0.15, "item_dominance": 0.25}
+    overall = sum(scores.get(k, 0) * w for k, w in weights.items())
+    scores["overall"] = round(overall, 3)
+
+    return scores
 
 
 def _build_posting_template(analysis: Dict) -> Dict[str, Any]:
@@ -228,68 +344,110 @@ def _build_posting_template(analysis: Dict) -> Dict[str, Any]:
     if lp.get("median"):
         template["typical_line_count"] = int(lp["median"])
 
-    # Tax handling
+    # Tax handling — cross-reference invoice-level and line-level
     tp = analysis.get("tax_pattern", {})
+    line_tax_codes = analysis.get("line_patterns", {}).get("tax_code_distribution", {})
     if tp.get("invoices_with_tax", 0) > tp.get("invoices_without_tax", 0):
         template["tax_handling"] = "taxable"
         template["typical_tax_rate"] = tp.get("tax_rate_typical", 0)
     else:
         template["tax_handling"] = "no_tax"
+    # Note line-level tax codes even when invoice tax is $0
+    if line_tax_codes:
+        top_tax_code = max(line_tax_codes, key=line_tax_codes.get)
+        total_tax_lines = sum(line_tax_codes.values()) or 1
+        template["line_tax_code"] = {
+            "code": top_tax_code,
+            "usage_rate": round(line_tax_codes[top_tax_code] / total_tax_lines, 2),
+            "note": "Line-level tax code assigned even though invoice-level tax may be $0"
+            if tp.get("invoices_with_tax", 0) == 0 and line_tax_codes else "",
+        }
 
-    # Build line templates from the most common patterns
+    # Build line templates — ALL items and GL accounts with usage rates
     line_types = analysis.get("line_patterns", {}).get("line_types", {})
     gl_accounts = analysis.get("line_patterns", {}).get("top_gl_accounts", {})
     items = analysis.get("line_patterns", {}).get("top_items", {})
-    descriptions = analysis.get("line_patterns", {}).get("top_descriptions", {})
+    charge_items = analysis.get("line_patterns", {}).get("charge_items", {})
+    total_lines = sum(line_types.values()) or 1
 
-    # Primary line template: most common GL account or item
-    if gl_accounts:
-        top_gl = max(gl_accounts, key=gl_accounts.get)
-        top_gl_count = gl_accounts[top_gl]
-        total_lines = sum(line_types.values()) or 1
+    # Add ALL GL account templates (sorted by usage)
+    for gl, count in sorted(gl_accounts.items(), key=lambda x: -x[1]):
+        rate = round(count / total_lines, 3)
+        if rate < 0.02:
+            continue  # Skip noise (< 2% usage)
         template["line_templates"].append({
             "type": "Account",
-            "account_number": top_gl,
-            "usage_rate": round(top_gl_count / total_lines, 2),
-            "typical_description": list(descriptions.keys())[0] if descriptions else "",
+            "account_number": gl,
+            "usage_rate": rate,
+            "rank": "primary" if rate >= 0.5 else "secondary" if rate >= 0.1 else "rare",
         })
 
-    if items:
-        top_item = max(items, key=items.get)
-        top_item_count = items[top_item]
-        total_lines = sum(line_types.values()) or 1
+    # Add ALL Item templates (sorted by usage)
+    for item, count in sorted(items.items(), key=lambda x: -x[1]):
+        rate = round(count / total_lines, 3)
+        if rate < 0.02:
+            continue
         template["line_templates"].append({
             "type": "Item",
-            "item_number": top_item,
-            "usage_rate": round(top_item_count / total_lines, 2),
+            "item_number": item,
+            "usage_rate": rate,
+            "rank": "primary" if rate >= 0.5 else "secondary" if rate >= 0.1 else "rare",
         })
 
-    # Confidence
+    # Add Charge-type templates
+    for charge, count in sorted(charge_items.items(), key=lambda x: -x[1]):
+        rate = round(count / total_lines, 3)
+        if rate < 0.02:
+            continue
+        template["line_templates"].append({
+            "type": "Charge",
+            "item_number": charge,
+            "usage_rate": rate,
+            "rank": "secondary",
+        })
+
+    # UOM
+    uom = analysis.get("line_patterns", {}).get("uom_distribution", {})
+    if uom:
+        template["uom"] = max(uom, key=uom.get)
+
+    # Confidence — consistency-weighted, not just count-based
     inv_count = analysis.get("invoices_analyzed", 0)
     lines_count = analysis.get("lines_analyzed", 0)
-    if inv_count >= 50 and lines_count >= 50:
+    consistency = analysis.get("consistency", {}).get("overall", 0)
+
+    # High: enough data AND consistent patterns
+    # A vendor with 20 identical invoices is more reliable than 50 chaotic ones
+    if (inv_count >= 30 and lines_count >= 25 and consistency >= 0.8) or \
+       (inv_count >= 50 and lines_count >= 40 and consistency >= 0.6) or \
+       (inv_count >= 100 and lines_count >= 50):
         template["confidence"] = "high"
-    elif inv_count >= 10:
+    elif (inv_count >= 10 and lines_count >= 8 and consistency >= 0.5) or \
+         (inv_count >= 20 and lines_count >= 15):
         template["confidence"] = "medium"
     else:
         template["confidence"] = "low"
+
+    template["consistency_score"] = consistency
 
     # Reference number pattern — how humans put BOL/order refs on lines
     ref_patterns = analysis.get("line_patterns", {}).get("reference_in_description", {})
     desc2_values = analysis.get("line_patterns", {}).get("description2_values", {})
     if ref_patterns:
-        dominant_pattern = max(ref_patterns, key=ref_patterns.get)
         total_refs = sum(ref_patterns.values())
-        total_lines_count = sum(analysis.get("line_patterns", {}).get("line_types", {}).values()) or 1
+        # Sort by frequency, build a ranked pattern list
+        sorted_patterns = sorted(ref_patterns.items(), key=lambda x: -x[1])
+        dominant_pattern = sorted_patterns[0][0]
         template["reference_handling"] = {
             "pattern": dominant_pattern,
-            "usage_rate": round(total_refs / total_lines_count, 2),
-            "description": (
-                "BOL/order number in description field after 'FREIGHT' prefix"
-                if dominant_pattern == "freight_prefix_plus_ref"
-                else "Reference number placed directly in description field"
-            ),
-            "all_patterns": dict(ref_patterns),
+            "usage_rate": round(total_refs / total_lines, 2),
+            "description": _describe_ref_pattern(dominant_pattern),
+            "all_patterns": {
+                p: {"count": c, "rate": round(c / total_refs, 2)}
+                for p, c in sorted_patterns
+            },
+            "lines_with_reference": total_refs,
+            "lines_without_reference": total_lines - total_refs,
         }
     if desc2_values:
         template["description2_usage"] = {
@@ -299,6 +457,20 @@ def _build_posting_template(analysis: Dict) -> Dict[str, Any]:
         }
 
     return template
+
+
+def _describe_ref_pattern(pattern: str) -> str:
+    """Human-readable description of a reference pattern."""
+    descriptions = {
+        "freight_prefix_plus_ref": "Human types 'FREIGHT' followed by BOL/reference number (e.g., 'FREIGHT 49611')",
+        "bol_in_description": "Human types the BOL/reference number directly as the description (e.g., '46133')",
+        "order_number_ref": "Human types an order/work number starting with a letter (e.g., 'W110700')",
+        "po_prefix_plus_ref": "Human types 'PO' followed by PO number (e.g., 'PO 12345')",
+        "invoice_ref_in_description": "Human types invoice reference in description (e.g., 'INV 12345')",
+        "embedded_ref": "Reference number embedded within longer description text",
+        "descriptive_text_only": "Free-form description without a structured reference number",
+    }
+    return descriptions.get(pattern, f"Pattern: {pattern}")
 
 
 async def build_all_vendor_posting_profiles(db, bc_service, top_n: int = 50) -> Dict[str, Any]:
@@ -349,6 +521,7 @@ async def build_all_vendor_posting_profiles(db, bc_service, top_n: int = 50) -> 
                     "invoices": analysis.get("invoices_analyzed", 0),
                     "lines": analysis.get("lines_analyzed", 0),
                     "confidence": analysis.get("posting_template", {}).get("confidence", "?"),
+                    "consistency": analysis.get("consistency", {}).get("overall", 0),
                 })
             else:
                 results["errors"] += 1

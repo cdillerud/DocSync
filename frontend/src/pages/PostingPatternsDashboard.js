@@ -55,13 +55,23 @@ function VendorRow({ vendor, onPreviewDraft, onAnalyze }) {
           <span className="text-[10px] font-mono text-muted-foreground">{vendor.vendor_no}</span>
         </div>
         <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-          <span>{vendor.invoices_analyzed} invoices studied</span>
-          <span className="text-border">|</span>
-          <span>{vendor.lines_analyzed} lines</span>
+          <span>{vendor.invoices_analyzed} inv / {vendor.lines_analyzed} lines</span>
+          {vendor.top_items?.length > 0 && (
+            <>
+              <span className="text-border">|</span>
+              <span className="font-mono">{vendor.top_items.join(', ')}</span>
+            </>
+          )}
           {vendor.top_gl_accounts?.length > 0 && (
             <>
               <span className="text-border">|</span>
               <span className="font-mono">GL: {vendor.top_gl_accounts.join(', ')}</span>
+            </>
+          )}
+          {vendor.reference_pattern && (
+            <>
+              <span className="text-border">|</span>
+              <span className="italic">{vendor.reference_pattern.replace(/_/g, ' ')}</span>
             </>
           )}
         </div>
@@ -69,6 +79,11 @@ function VendorRow({ vendor, onPreviewDraft, onAnalyze }) {
 
       <div className="flex items-center gap-2 shrink-0">
         <ConfidenceBadge confidence={vendor.confidence} />
+        {vendor.consistency_score > 0 && (
+          <span className="text-[10px] font-mono text-muted-foreground" data-testid={`consistency-${vendor.vendor_no}`}>
+            {vendor.consistency_score}% consistent
+          </span>
+        )}
         {vendor.ready_docs > 0 && (
           <Badge variant="secondary" className="text-xs" data-testid={`ready-count-${vendor.vendor_no}`}>
             {vendor.ready_docs} ready

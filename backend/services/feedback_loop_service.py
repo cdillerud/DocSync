@@ -103,21 +103,45 @@ async def _apply_immediate_feedback(db, event: Dict):
     and are applied in batch.
     """
     event_type = event["event_type"]
+    applied = False
     
     if event_type == "vendor_correction":
-        await _learn_vendor_alias(db, event)
+        applied = await _learn_vendor_alias(db, event)
     
     elif event_type == "classification_correction":
-        await _learn_classification_pattern(db, event)
+        applied = await _learn_classification_pattern(db, event)
     
     elif event_type == "folder_correction":
-        await _learn_folder_routing(db, event)
+        applied = await _learn_folder_routing(db, event)
     
     elif event_type in ("approval", "rejection"):
-        await _update_vendor_track_record(db, event)
+        applied = await _update_vendor_track_record(db, event)
+    
+    elif event_type == "po_correction":
+        applied = await _learn_po_pattern(db, event)
+    
+    elif event_type == "amount_correction":
+        applied = await _learn_amount_pattern(db, event)
+    
+    elif event_type == "field_edit":
+        applied = await _learn_field_edit(db, event)
     
     elif event_type == "benchmark_mismatch":
-        await _learn_from_benchmark(db, event)
+        applied = await _learn_from_benchmark(db, event)
+    
+    # Mark event as applied
+    if applied:
+        await _mark_applied(db, event)
+
+
+async def _mark_applied(db, event: Dict):
+    """Mark a feedback event as consumed/applied."""
+    event_id = event.get("_id")
+    if event_id:
+        await db[FEEDBACK_COLLECTION].update_one(
+            {"_id": event_id},
+            {"$set": {"applied": True, "applied_at": datetime.now(timezone.utc).isoformat()}}
+        )
 
 
 async def _learn_vendor_alias(db, event: Dict):
@@ -130,29 +154,26 @@ async def _learn_vendor_alias(db, event: Dict):
     vendor_id = event.get("vendor_id", "")
     
     if not before_vendor or not after_vendor or before_vendor == after_vendor:
-        return
+        return False
     
     # Add to vendor_aliases collection
+    normalized = before_vendor.strip().lower().replace(",", "").replace(".", "").replace("  ", " ").strip()
     await db.vendor_aliases.update_one(
-        {"alias": before_vendor.strip().upper()},
+        {"normalized_alias": normalized},
         {"$set": {
-            "alias": before_vendor.strip().upper(),
+            "alias": before_vendor.strip(),
+            "normalized_alias": normalized,
             "canonical_name": after_vendor,
             "vendor_no": vendor_id,
             "source": "user_correction",
             "learned_at": datetime.now(timezone.utc).isoformat(),
-            "correction_count": 1,
         },
         "$inc": {"correction_count": 1}},
         upsert=True,
     )
     
     logger.info("[FeedbackLearn] Vendor alias: '%s' -> '%s' (%s)", before_vendor, after_vendor, vendor_id)
-    
-    await db[FEEDBACK_COLLECTION].update_one(
-        {"_id": event.get("_id")},
-        {"$set": {"applied": True, "applied_at": datetime.now(timezone.utc).isoformat()}}
-    )
+    return True
 
 
 async def _learn_classification_pattern(db, event: Dict):
@@ -165,7 +186,7 @@ async def _learn_classification_pattern(db, event: Dict):
     doc_id = event.get("document_id", "")
     
     if not before_type or not after_type or before_type == after_type:
-        return
+        return False
     
     # Store as classification example
     example = {
@@ -189,20 +210,36 @@ async def _learn_classification_pattern(db, event: Dict):
         upsert=True,
     )
     
+    # Also store in classification_corrections for few-shot prompting
+    await db.classification_corrections.update_one(
+        {"document_id": doc_id},
+        {"$set": {
+            "document_id": doc_id,
+            "original_type": before_type,
+            "corrected_type": after_type,
+            "vendor_no": event.get("vendor_id", ""),
+            "vendor_canonical": example.get("vendor", ""),
+            "file_name": example.get("file_name", ""),
+            "corrected_at": datetime.now(timezone.utc).isoformat(),
+            "source": "user_correction",
+        }},
+        upsert=True,
+    )
+    
     logger.info("[FeedbackLearn] Classification: %s -> %s (doc=%s)", before_type, after_type, doc_id[:20])
+    return True
 
 
 async def _learn_folder_routing(db, event: Dict):
     """
     When a user moves a document to a different folder, record this
-    as a routing correction. Accumulated corrections can be used to
-    adjust routing rules.
+    as a routing correction.
     """
     before_folder = (event.get("before") or {}).get("folder", "")
     after_folder = (event.get("after") or {}).get("folder", "")
     
     if not before_folder or not after_folder or before_folder == after_folder:
-        return
+        return False
     
     await db.routing_feedback.update_one(
         {"document_id": event.get("document_id", "")},
@@ -217,18 +254,21 @@ async def _learn_folder_routing(db, event: Dict):
     )
     
     logger.info("[FeedbackLearn] Routing: '%s' -> '%s'", before_folder[:30], after_folder[:30])
+    return True
 
 
 async def _update_vendor_track_record(db, event: Dict):
     """
     When a user approves or rejects a document, update the vendor's
-    track record. Approvals increase stable vendor score; rejections decrease it.
+    track record AND create a positive/negative reinforcement signal.
+    Approvals confirm the current classification is correct.
     """
     vendor_id = event.get("vendor_id", "")
     if not vendor_id:
-        return
+        return False
     
     is_approval = event["event_type"] == "approval"
+    doc_id = event.get("document_id", "")
     
     # Increment the appropriate counter on the vendor profile
     inc_field = "feedback_approvals" if is_approval else "feedback_rejections"
@@ -240,21 +280,65 @@ async def _update_vendor_track_record(db, event: Dict):
         },
     )
     
-    logger.info("[FeedbackLearn] Vendor %s: %s", vendor_id, "approved" if is_approval else "rejected")
+    # For approvals: create positive reinforcement — confirm this vendor+type combo
+    if is_approval and doc_id:
+        doc = await db.hub_documents.find_one(
+            {"id": doc_id},
+            {"_id": 0, "suggested_job_type": 1, "document_type": 1,
+             "vendor_canonical": 1, "file_name": 1, "extracted_fields": 1}
+        )
+        if doc:
+            doc_type = doc.get("suggested_job_type") or doc.get("document_type") or ""
+            vendor_name = doc.get("vendor_canonical") or ""
+            
+            # Store as a confirmed classification (positive example)
+            if doc_type:
+                await db.classification_corrections.update_one(
+                    {"document_id": doc_id, "source": "approval_confirm"},
+                    {"$set": {
+                        "document_id": doc_id,
+                        "original_type": doc_type,
+                        "corrected_type": doc_type,  # Same type = confirmed correct
+                        "vendor_no": vendor_id,
+                        "vendor_canonical": vendor_name,
+                        "file_name": doc.get("file_name", ""),
+                        "corrected_at": datetime.now(timezone.utc).isoformat(),
+                        "source": "approval_confirm",
+                        "is_positive": True,
+                    }},
+                    upsert=True,
+                )
+            
+            # Reinforce the vendor alias mapping
+            if vendor_name:
+                normalized = vendor_name.strip().lower().replace(",", "").replace(".", "").replace("  ", " ").strip()
+                await db.vendor_aliases.update_one(
+                    {"normalized_alias": normalized},
+                    {
+                        "$set": {
+                            "canonical_name": vendor_name,
+                            "vendor_no": vendor_id,
+                            "last_confirmed_at": datetime.now(timezone.utc).isoformat(),
+                        },
+                        "$inc": {"confirmation_count": 1},
+                    },
+                )
+    
+    logger.info("[FeedbackLearn] Vendor %s: %s (doc=%s)", vendor_id, "approved" if is_approval else "rejected", doc_id[:12])
+    return True
 
 
 async def _learn_from_benchmark(db, event: Dict):
     """
-    When a benchmark run reveals mismatches between GPI Hub and ground truth,
-    each mismatch is a learning signal.
+    When a benchmark run reveals mismatches, each mismatch is a learning signal.
     """
     metadata = event.get("metadata") or {}
-    field = metadata.get("field", "")  # e.g., "folder", "vendor", "doc_type"
+    field = metadata.get("field", "")
     truth = metadata.get("truth", "")
     predicted = metadata.get("predicted", "")
     
     if not field or not truth or not predicted:
-        return
+        return False
     
     await db.benchmark_feedback.insert_one({
         "field": field,
@@ -266,6 +350,113 @@ async def _learn_from_benchmark(db, event: Dict):
     })
     
     logger.info("[FeedbackLearn] Benchmark: %s truth='%s' predicted='%s'", field, truth[:20], predicted[:20])
+    return True
+
+
+async def _learn_po_pattern(db, event: Dict):
+    """
+    When a user corrects a PO number, learn the vendor's PO format.
+    """
+    before_po = str((event.get("before") or {}).get("po_number", "")).strip()
+    after_po = str((event.get("after") or {}).get("po_number", "")).strip()
+    vendor_id = event.get("vendor_id", "")
+    doc_id = event.get("document_id", "")
+    
+    if not after_po:
+        return False
+    
+    # Store the corrected PO for pattern analysis
+    await db.po_corrections.update_one(
+        {"document_id": doc_id},
+        {"$set": {
+            "document_id": doc_id,
+            "vendor_no": vendor_id,
+            "ai_extracted": before_po,
+            "human_corrected": after_po,
+            "po_length": len(after_po),
+            "po_is_numeric": after_po.replace("-", "").replace(" ", "").isdigit(),
+            "learned_at": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True,
+    )
+    
+    # Update vendor profile with PO pattern info
+    if vendor_id:
+        await db.vendor_invoice_profiles.update_one(
+            {"vendor_no": vendor_id},
+            {
+                "$set": {
+                    "po_expected": True,
+                    "last_po_correction_at": datetime.now(timezone.utc).isoformat(),
+                },
+                "$addToSet": {"po_examples": {"$each": [after_po]}},
+            },
+        )
+    
+    logger.info("[FeedbackLearn] PO correction: '%s' -> '%s' (vendor=%s)", before_po, after_po, vendor_id)
+    return True
+
+
+async def _learn_amount_pattern(db, event: Dict):
+    """
+    When a user corrects an amount, learn the vendor's typical amount range.
+    """
+    before_amt = (event.get("before") or {}).get("amount", "")
+    after_amt = (event.get("after") or {}).get("amount", "")
+    vendor_id = event.get("vendor_id", "")
+    doc_id = event.get("document_id", "")
+    
+    if not after_amt:
+        return False
+    
+    await db.amount_corrections.update_one(
+        {"document_id": doc_id},
+        {"$set": {
+            "document_id": doc_id,
+            "vendor_no": vendor_id,
+            "ai_extracted": str(before_amt),
+            "human_corrected": str(after_amt),
+            "learned_at": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True,
+    )
+    
+    logger.info("[FeedbackLearn] Amount correction: '%s' -> '%s' (vendor=%s)", before_amt, after_amt, vendor_id)
+    return True
+
+
+async def _learn_field_edit(db, event: Dict):
+    """
+    When a user edits any field, store it as a general correction signal.
+    """
+    before = event.get("before") or {}
+    after = event.get("after") or {}
+    vendor_id = event.get("vendor_id", "")
+    doc_id = event.get("document_id", "")
+    
+    # Find which fields changed
+    changed_fields = {}
+    for key in set(list(before.keys()) + list(after.keys())):
+        if str(before.get(key, "")) != str(after.get(key, "")):
+            changed_fields[key] = {"before": before.get(key, ""), "after": after.get(key, "")}
+    
+    if not changed_fields:
+        return False
+    
+    await db.field_corrections.update_one(
+        {"document_id": doc_id, "fields": {"$exists": True}},
+        {"$set": {
+            "document_id": doc_id,
+            "vendor_no": vendor_id,
+            "changed_fields": changed_fields,
+            "field_names": list(changed_fields.keys()),
+            "learned_at": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True,
+    )
+    
+    logger.info("[FeedbackLearn] Field edit: %s (vendor=%s, doc=%s)", list(changed_fields.keys()), vendor_id, doc_id[:12])
+    return True
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -293,7 +484,6 @@ async def build_feedback_context_for_prompt(db, vendor_id: str = "", doc_type: s
     # 1. Vendor-specific corrections (from rich classification_corrections)
     if vendor_id:
         vendor_upper = vendor_id.upper().strip()
-        vendor_lower = vendor_id.lower().strip()
         
         corrections = await db.classification_corrections.find(
             {"$or": [
@@ -434,6 +624,9 @@ async def get_feedback_stats(db) -> Dict[str, Any]:
     aliases_learned = await db.vendor_aliases.count_documents({"source": "user_correction"})
     classification_examples = await db.classification_feedback.count_documents({})
     routing_corrections = await db.routing_feedback.count_documents({})
+    po_corrections = await db.po_corrections.count_documents({})
+    amount_corrections = await db.amount_corrections.count_documents({})
+    field_corrections = await db.field_corrections.count_documents({})
     
     return {
         "total_events": total,
@@ -444,5 +637,34 @@ async def get_feedback_stats(db) -> Dict[str, Any]:
             "vendor_aliases_learned": aliases_learned,
             "classification_examples": classification_examples,
             "routing_corrections": routing_corrections,
+            "po_corrections": po_corrections,
+            "amount_corrections": amount_corrections,
+            "field_corrections": field_corrections,
         },
     }
+
+
+async def replay_unapplied_events(db) -> Dict[str, Any]:
+    """
+    Batch-replay all unapplied feedback events.
+    Call this to retroactively apply events that were recorded before
+    the handlers were fixed.
+    """
+    cursor = db[FEEDBACK_COLLECTION].find({"applied": {"$ne": True}})
+    events = await cursor.to_list(5000)
+    
+    results = {"total": len(events), "applied": 0, "skipped": 0, "errors": 0}
+    
+    for event in events:
+        try:
+            await _apply_immediate_feedback(db, event)
+            results["applied"] += 1
+        except Exception as e:
+            logger.warning("[FeedbackReplay] Error for event %s: %s", event.get("event_type"), e)
+            results["errors"] += 1
+    
+    logger.info(
+        "[FeedbackReplay] Replayed %d events: %d applied, %d errors",
+        results["total"], results["applied"], results["errors"],
+    )
+    return results

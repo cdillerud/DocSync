@@ -54,6 +54,7 @@ function EventTypeBadge({ type }) {
 export default function FeedbackLoopHealthPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [replaying, setReplaying] = useState(false);
 
   const fetchHealth = async () => {
     setLoading(true);
@@ -65,6 +66,24 @@ export default function FeedbackLoopHealthPage() {
       toast.error('Failed to load feedback loop health');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const replayUnapplied = async () => {
+    setReplaying(true);
+    try {
+      const res = await fetch(`${API_URL}/api/feedback-loop/replay`, { method: 'POST' });
+      const result = await res.json();
+      if (result.applied > 0) {
+        toast.success(`Replayed ${result.applied} events (${result.errors} errors)`);
+      } else {
+        toast.info('No unapplied events to replay');
+      }
+      fetchHealth();
+    } catch {
+      toast.error('Replay failed');
+    } finally {
+      setReplaying(false);
     }
   };
 
@@ -104,19 +123,33 @@ export default function FeedbackLoopHealthPage() {
             Every interaction is training data. Here is how much the system has learned.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={fetchHealth} className="h-8 text-xs gap-1" data-testid="refresh-feedback-health">
-          <RefreshCw className="w-3 h-3" /> Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={fetchHealth} className="h-8 text-xs gap-1" data-testid="refresh-feedback-health">
+            <RefreshCw className="w-3 h-3" /> Refresh
+          </Button>
+          {pending_events > 0 && (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={replayUnapplied}
+              disabled={replaying}
+              className="h-8 text-xs gap-1 bg-emerald-600 hover:bg-emerald-700"
+              data-testid="replay-feedback-btn"
+            >
+              {replaying ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+              Replay {pending_events} Unapplied
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3" data-testid="feedback-summary-cards">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3" data-testid="feedback-summary-cards">
         <MetricCard icon={Activity} label="Total Events" value={total_events} />
         <MetricCard icon={CheckCircle2} label="Applied" value={applied_events} accent="text-emerald-500" sub={`${appliedPct}% of total`} />
-        <MetricCard icon={Clock} label="Pending" value={pending_events} accent="text-amber-400" />
+        <MetricCard icon={Clock} label="Pending" value={pending_events} accent={pending_events > 0 ? 'text-amber-400' : 'text-muted-foreground'} />
         <MetricCard icon={Users} label="Vendor Aliases" value={learning_signals?.vendor_aliases_learned ?? 0} accent="text-violet-400" />
         <MetricCard icon={Brain} label="Classification Examples" value={learning_signals?.classification_examples ?? 0} accent="text-sky-400" />
-        <MetricCard icon={FolderSync} label="Routing Corrections" value={learning_signals?.routing_corrections ?? 0} accent="text-pink-400" />
       </div>
 
       {/* Applied Progress */}

@@ -8,7 +8,7 @@ classification_feedback, and routing_feedback collections.
 
 from fastapi import APIRouter
 from deps import get_db
-from services.feedback_loop_service import get_feedback_stats
+from services.feedback_loop_service import get_feedback_stats, replay_unapplied_events
 from datetime import datetime, timezone, timedelta
 
 router = APIRouter(prefix="/feedback-loop", tags=["feedback-loop"])
@@ -63,3 +63,14 @@ async def feedback_loop_health():
         "daily_activity": daily_activity,
         "top_corrected_vendors": top_vendors,
     }
+
+
+@router.post("/replay")
+async def replay_feedback():
+    """
+    Retroactively apply all unapplied feedback events.
+    Use this after fixing handlers or to catch up on missed events.
+    """
+    db = get_db()
+    result = await replay_unapplied_events(db)
+    return result

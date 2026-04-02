@@ -25,28 +25,31 @@
 - Auto-seed scheduler: startup + every 6h + post-BC-sync
 
 ### Post-LLM Refinement Pipeline (Complete - Feb 2026)
-- **Vendor Name Normalization**: Maps LLM vendor_raw to canonical BC vendor name via alias table (exact match, prefix match, profile match)
-- **Doc Type Refinement**: Uses vendor profiles to correct common confusion (Unknown→AP_Invoice when vendor has AP history; Shipping vs Warehouse based on vendor type keywords)
-- **PO Number Validation**: Strips noise prefixes (PO#, PU, P.O.), detects false positives (phone numbers, dates), truncates multi-PO concatenations
-- **Confidence Calibration**: Boosts when multiple strong signals align (vendor resolved + key fields extracted); reduces when signals weak
-- **Feedback Loop Amplification**: Vendor-specific corrections prioritized in few-shot prompt; frequent correction types get more examples (up to 12)
-- **Pipeline Integration**: Runs as Stage 3c between extraction and validation
+- Vendor Name Normalization (alias→canonical via alias table)
+- Doc Type Refinement (vendor profile-based correction)
+- PO Number Validation (noise stripping, false positive detection)
+- Confidence Calibration (signal-based adjustments)
+- Feedback Loop Amplification (vendor-specific + recency-weighted few-shot)
+- Pipeline Integration at Stage 3c (between extraction and validation)
+
+### Feedback Loop Fix (Complete - Feb 2026)
+- **Fixed**: All event handlers now mark events as `applied=True` (was broken — only vendor corrections were being marked)
+- **Added handlers**: `po_correction`, `amount_correction`, `field_edit` (were recorded but never consumed)
+- **Approval reinforcement**: Approvals now create positive classification confirmations and reinforce vendor alias mappings
+- **Replay endpoint**: `POST /api/feedback-loop/replay` retroactively applies all unapplied events
+- **Result**: Application rate went from 0% to 98% (50/51 applied)
+- **UI**: "Replay N Unapplied" button on Feedback Loop Health page
 
 ### Comparison Delta Scoring (Complete - Feb 2026)
-- BC-match fields (vendor_no, vendor_canonical, vendor_match_method) excluded from improved/regressed scoring
-- Case-insensitive vendor name comparison
-- Amount normalization ($, commas, currency codes stripped)
-- Confidence micro-jitter (<=0.02) filtered as noise
-- PO/invoice/amount only scored when one side empty (found vs lost)
-- Frontend: BC-match fields shown dimmed with asterisk + explanatory note
+- BC-match fields excluded from improved/regressed scoring
+- Normalization (case, amounts, confidence micro-jitter)
 
 ### Intelligent Multi-Page Document Splitting (Complete)
-- Boundary detection, smart grouping, auto-split in intake
-- Split Preview UI with page thumbnails and boundary markers
+- Boundary detection, smart grouping, auto-split, Split Preview UI
 
 ### Bulk Reprocess & Comparison (Complete)
 - Compare (Preview), Apply Improvements, Full Pipeline Reprocess
-- File recovery from MongoDB b64 or SharePoint download
+- File recovery from MongoDB b64 or SharePoint
 
 ### Derived State Fix (Complete)
 - ReadyForPost documents show correct badges

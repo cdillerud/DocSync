@@ -123,12 +123,18 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
     # Load vendor profile to get PO expectations, learned from BC history
     vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
     vendor_profile = None
+    posting_profile = None
     if vendor_no:
         try:
             from services.vendor_invoice_profile_service import get_or_build_profile
             vendor_profile = await get_or_build_profile(db, vendor_no)
         except Exception as vp_err:
             logger.warning("[AP Auto-Post] Could not load vendor profile for %s: %s", vendor_no, vp_err)
+        try:
+            from services.posting_pattern_analyzer import get_posting_profile_for_vendor
+            posting_profile = await get_posting_profile_for_vendor(db, vendor_no)
+        except Exception as pp_err:
+            logger.debug("[AP Auto-Post] No posting profile for %s: %s", vendor_no, pp_err)
 
     ready, reason, failures = check_ap_ready_to_post(doc, vendor_profile=vendor_profile, source=source)
 
@@ -165,14 +171,20 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
     if not bc_write_enabled:
         # BC writes disabled — mark as ready but don't post
         now = datetime.now(timezone.utc).isoformat()
-        await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+        update_data = {
             "status": "ReadyForPost",
             "workflow_status": "ready_for_post",
             "auto_cleared": True,
             "auto_post_attempted": True,
-            "auto_post_reason": "All checks passed but BC_WRITE_ENABLED=false",
+            "auto_post_reason": "All checks passed — BC writes disabled, queued for manual post",
             "updated_utc": now,
-        }})
+        }
+        # Attach posting template if available (helps human reviewer)
+        if posting_profile and posting_profile.get("posting_template"):
+            update_data["suggested_posting_template"] = posting_profile["posting_template"]
+            update_data["posting_profile_confidence"] = posting_profile["posting_template"].get("confidence", "low")
+
+        await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
         await _write_event(db, doc_id, "automation.decision.completed", {
             "decision": "ReadyForPost",
             "auto_clear": True,

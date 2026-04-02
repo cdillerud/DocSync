@@ -498,6 +498,88 @@ class BusinessCentralService:
         return None
 
 
+    # =========================================================================
+    # POSTED PURCHASE INVOICE ANALYSIS (Learn from Human Postings)
+    # =========================================================================
+
+    async def get_posted_purchase_invoices(
+        self, vendor_id: str = None, limit: int = 100, skip: int = 0
+    ) -> Dict[str, Any]:
+        """
+        Query BC Production for posted (completed) purchase invoices.
+        These represent how humans actually post invoices — the ground truth.
+        """
+        if self.use_mock:
+            return {"invoices": [], "total": 0, "mock": True}
+
+        token = await get_bc_token(environment=BC_READ_ENVIRONMENT)
+        company_id = await self._get_company_id(environment=BC_READ_ENVIRONMENT)
+
+        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseInvoices"
+        params = {
+            "$select": "id,number,vendorNumber,vendorName,vendorInvoiceNumber,"
+                       "invoiceDate,dueDate,currencyCode,totalAmountExcludingTax,"
+                       "totalAmountIncludingTax,totalTaxAmount,status,"
+                       "buyFromAddressLine1,buyFromCity,buyFromState,buyFromPostCode",
+            "$filter": "status eq 'Paid' or status eq 'Open'",
+            "$orderby": "invoiceDate desc",
+            "$top": str(limit),
+            "$skip": str(skip),
+        }
+        if vendor_id:
+            params["$filter"] = f"vendorNumber eq '{vendor_id}' and ({params['$filter']})"
+
+        async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+            resp = await client.get(url, headers={"Authorization": f"Bearer {token}"}, params=params)
+
+            if resp.status_code != 200:
+                # Try simpler query without status filter (some BC setups differ)
+                logger.warning("Posted PI query failed (%s), trying without status filter", resp.status_code)
+                params = {
+                    "$select": "id,number,vendorNumber,vendorName,vendorInvoiceNumber,"
+                               "invoiceDate,dueDate,currencyCode,totalAmountExcludingTax,"
+                               "totalAmountIncludingTax,status",
+                    "$orderby": "invoiceDate desc",
+                    "$top": str(limit),
+                    "$skip": str(skip),
+                }
+                if vendor_id:
+                    params["$filter"] = f"vendorNumber eq '{vendor_id}'"
+                resp = await client.get(url, headers={"Authorization": f"Bearer {token}"}, params=params)
+                if resp.status_code != 200:
+                    logger.error("Posted PI query failed: %s - %s", resp.status_code, resp.text[:300])
+                    return {"invoices": [], "total": 0, "error": resp.text[:300]}
+
+            data = resp.json()
+            invoices = data.get("value", [])
+            return {"invoices": invoices, "total": len(invoices), "mock": False}
+
+    async def get_purchase_invoice_lines(self, invoice_id: str) -> List[Dict[str, Any]]:
+        """
+        Get line items for a specific purchase invoice.
+        This is where the GL accounts, quantities, and amounts live.
+        """
+        if self.use_mock:
+            return []
+
+        token = await get_bc_token(environment=BC_READ_ENVIRONMENT)
+        company_id = await self._get_company_id(environment=BC_READ_ENVIRONMENT)
+
+        url = (f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/"
+               f"companies({company_id})/purchaseInvoices({invoice_id})/purchaseInvoiceLines")
+        params = {
+            "$select": "id,lineType,lineObjectNumber,description,quantity,"
+                       "unitPrice,lineAmount,discountAmount,discountPercent,"
+                       "taxCode,taxPercent,amountIncludingTax",
+        }
+
+        async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+            resp = await client.get(url, headers={"Authorization": f"Bearer {token}"}, params=params)
+            if resp.status_code != 200:
+                logger.error("PI lines query failed: %s - %s", resp.status_code, resp.text[:200])
+                return []
+            return resp.json().get("value", [])
+
     
     # =========================================================================
     # PURCHASE INVOICE METHODS

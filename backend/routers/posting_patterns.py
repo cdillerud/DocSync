@@ -328,12 +328,18 @@ async def posting_learning_proof(vendor_no: str):
             "item_choice_consistency": f"{consistency.get('item_choice', 0)*100:.0f}%",
             "line_type_consistency": f"{consistency.get('line_type', 0)*100:.0f}%",
             "item_dominance": f"{consistency.get('item_dominance', 0)*100:.0f}%",
+            "amount_tightness": f"{consistency.get('amount_tightness', 0)*100:.0f}%",
+            "ref_coverage": f"{consistency.get('ref_coverage', 0)*100:.0f}%",
+            "tax_uniformity": f"{consistency.get('tax_uniformity', 0)*100:.0f}%",
+            "uom_uniformity": f"{consistency.get('uom_uniformity', 0)*100:.0f}%",
             "interpretation": (
                 "HIGHLY PREDICTABLE — safe for auto-posting"
                 if consistency.get("overall", 0) >= 0.8 else
                 "MOSTLY PREDICTABLE — good candidate with review"
                 if consistency.get("overall", 0) >= 0.6 else
                 "VARIABLE — needs human review for each invoice"
+                if consistency.get("overall", 0) >= 0.4 else
+                "UNPREDICTABLE — not suitable for automation"
             ),
         },
         "auto_post_template": {

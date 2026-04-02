@@ -208,6 +208,7 @@ async def analyze_vendor_posting_patterns(
     result["consistency"] = _compute_consistency(
         per_invoice_items, per_invoice_line_types, lines_per_invoice,
         item_counts, gl_account_counts, total_lines,
+        ref_pattern_counts, uom_counts, tax_code_counts, line_amounts,
     )
 
     # 5. Build the posting template (what the auto-post should do)
@@ -260,14 +261,25 @@ def _classify_description_ref(desc: str, ref_counts: Dict[str, int]):
 def _compute_consistency(
     per_invoice_items, per_invoice_line_types, lines_per_invoice,
     item_counts, gl_account_counts, total_lines,
+    ref_pattern_counts, uom_counts, tax_code_counts, line_amounts,
 ) -> Dict[str, Any]:
     """
-    Compute a consistency score across multiple dimensions.
+    Compute a consistency score across 8 dimensions.
     High consistency = very predictable, safe to auto-post.
+
+    Dimensions (weighted):
+      1. line_count (15%)     — same # of lines every time?
+      2. item_choice (20%)    — same item combo every time?
+      3. line_type (10%)      — always Item / always Account?
+      4. item_dominance (15%) — one clear winner item/GL?
+      5. amount_tightness (10%) — coefficient of variation (stdev/mean)
+      6. ref_coverage (10%)   — % of lines with structured reference numbers
+      7. tax_uniformity (10%) — always same tax code?
+      8. uom_uniformity (10%) — always same unit of measure?
     """
     scores = {}
 
-    # Line count consistency — do they always have the same # of lines?
+    # 1. Line count consistency — do they always have the same # of lines?
     if lines_per_invoice and len(lines_per_invoice) > 1:
         most_common_count = max(set(lines_per_invoice), key=lines_per_invoice.count)
         same_count = sum(1 for c in lines_per_invoice if c == most_common_count)
@@ -277,7 +289,7 @@ def _compute_consistency(
     else:
         scores["line_count"] = 0
 
-    # Item choice consistency — do they always use the same item?
+    # 2. Item choice consistency — do they always use the same item combo?
     if per_invoice_items:
         non_empty = [t for t in per_invoice_items if t]
         if non_empty:
@@ -289,7 +301,7 @@ def _compute_consistency(
     else:
         scores["item_choice"] = 0
 
-    # Line type consistency — always Item? Always Account? Mixed?
+    # 3. Line type consistency — always Item? Always Account? Mixed?
     if per_invoice_line_types:
         non_empty = [t for t in per_invoice_line_types if t]
         if non_empty:
@@ -301,7 +313,7 @@ def _compute_consistency(
     else:
         scores["line_type"] = 0
 
-    # Dominant item/GL concentration — is there one clear winner?
+    # 4. Dominant item/GL concentration — is there one clear winner?
     if item_counts:
         top_count = max(item_counts.values())
         total_item_lines = sum(item_counts.values()) or 1
@@ -313,8 +325,56 @@ def _compute_consistency(
     else:
         scores["item_dominance"] = 0
 
-    # Overall consistency — weighted average
-    weights = {"line_count": 0.25, "item_choice": 0.35, "line_type": 0.15, "item_dominance": 0.25}
+    # 5. Amount tightness — low coefficient of variation = tight range
+    # CV < 0.3 = very tight (score ~1.0), CV > 1.5 = wild (score ~0.0)
+    if line_amounts and len(line_amounts) > 1:
+        mean_amt = statistics.mean(line_amounts)
+        stdev_amt = statistics.stdev(line_amounts)
+        cv = stdev_amt / mean_amt if mean_amt > 0 else 999
+        # Map CV to 0-1 score: CV=0 → 1.0, CV=0.3 → 0.8, CV=1.0 → 0.3, CV=2.0 → 0.0
+        scores["amount_tightness"] = round(max(0, min(1, 1.0 - (cv * 0.5))), 3)
+    elif line_amounts:
+        scores["amount_tightness"] = 1.0
+    else:
+        scores["amount_tightness"] = 0
+
+    # 6. Reference coverage — % of lines that have ANY structured reference
+    total_refs = sum(ref_pattern_counts.values())
+    # Exclude "descriptive_text_only" — that's the absence of a reference
+    structured_refs = total_refs - ref_pattern_counts.get("descriptive_text_only", 0)
+    if total_lines > 0:
+        scores["ref_coverage"] = round(structured_refs / total_lines, 3)
+    else:
+        scores["ref_coverage"] = 0
+
+    # 7. Tax code uniformity — do they always use the same tax code?
+    if tax_code_counts:
+        top_tax = max(tax_code_counts.values())
+        total_tax_lines = sum(tax_code_counts.values()) or 1
+        scores["tax_uniformity"] = round(top_tax / total_tax_lines, 3)
+    else:
+        # No tax codes at all = perfectly uniform (they never use tax codes)
+        scores["tax_uniformity"] = 1.0
+
+    # 8. UOM uniformity — always same unit of measure?
+    if uom_counts:
+        top_uom = max(uom_counts.values())
+        total_uom_lines = sum(uom_counts.values()) or 1
+        scores["uom_uniformity"] = round(top_uom / total_uom_lines, 3)
+    else:
+        scores["uom_uniformity"] = 1.0
+
+    # Overall consistency — weighted average across all 8 dimensions
+    weights = {
+        "line_count": 0.15,
+        "item_choice": 0.20,
+        "line_type": 0.10,
+        "item_dominance": 0.15,
+        "amount_tightness": 0.10,
+        "ref_coverage": 0.10,
+        "tax_uniformity": 0.10,
+        "uom_uniformity": 0.10,
+    }
     overall = sum(scores.get(k, 0) * w for k, w in weights.items())
     scores["overall"] = round(overall, 3)
 
@@ -411,19 +471,23 @@ def _build_posting_template(analysis: Dict) -> Dict[str, Any]:
     if uom:
         template["uom"] = max(uom, key=uom.get)
 
-    # Confidence — consistency-weighted, not just count-based
+    # Confidence — consistency-weighted with hard floors
+    # No path to HIGH without ≥50% consistency. No free rides on volume alone.
     inv_count = analysis.get("invoices_analyzed", 0)
     lines_count = analysis.get("lines_analyzed", 0)
     consistency = analysis.get("consistency", {}).get("overall", 0)
 
-    # High: enough data AND consistent patterns
-    # A vendor with 20 identical invoices is more reliable than 50 chaotic ones
-    if (inv_count >= 30 and lines_count >= 25 and consistency >= 0.8) or \
-       (inv_count >= 50 and lines_count >= 40 and consistency >= 0.6) or \
-       (inv_count >= 100 and lines_count >= 50):
+    # HIGH: requires BOTH sufficient data AND consistent patterns
+    if consistency >= 0.5 and (
+        (inv_count >= 30 and lines_count >= 25 and consistency >= 0.8) or
+        (inv_count >= 50 and lines_count >= 40 and consistency >= 0.6) or
+        (inv_count >= 100 and lines_count >= 50 and consistency >= 0.5)
+    ):
         template["confidence"] = "high"
-    elif (inv_count >= 10 and lines_count >= 8 and consistency >= 0.5) or \
-         (inv_count >= 20 and lines_count >= 15):
+    # MEDIUM: reasonable data with some consistency, OR lots of data but messy
+    elif (inv_count >= 10 and lines_count >= 8 and consistency >= 0.4) or \
+         (inv_count >= 20 and lines_count >= 15 and consistency >= 0.3) or \
+         (inv_count >= 50 and lines_count >= 30):
         template["confidence"] = "medium"
     else:
         template["confidence"] = "low"

@@ -6,7 +6,8 @@ import { Input } from '../components/ui/input';
 import { ScrollArea } from '../components/ui/scroll-area';
 import {
   ArrowLeftRight, ChevronLeft, ChevronRight, Loader2,
-  CheckCircle2, XCircle, AlertTriangle, FileText, Search
+  CheckCircle2, XCircle, AlertTriangle, FileText, Search,
+  Layers, Target
 } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -59,6 +60,48 @@ function LineRow({ line, side }) {
           {line.tax_code && <span>Tax: {line.tax_code}</span>}
           {line.uom && <span>UOM: {line.uom}</span>}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function DimensionScoreBar({ name, score, weight }) {
+  const color = score >= 80 ? 'bg-emerald-500' : score >= 50 ? 'bg-amber-500' : 'bg-red-500';
+  const label = name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  return (
+    <div className="flex items-center gap-3 py-1" data-testid={`dim-score-${name}`}>
+      <span className="text-xs w-28 shrink-0 text-muted-foreground">{label}</span>
+      <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+        <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${score}%` }} />
+      </div>
+      <span className="text-xs font-mono w-12 text-right font-semibold">{score}%</span>
+      <span className="text-[10px] text-muted-foreground w-10 text-right">w:{weight}%</span>
+    </div>
+  );
+}
+
+function LineAlignmentRow({ pair }) {
+  const score = pair.score || 0;
+  const color = score >= 80 ? 'text-emerald-500' : score >= 50 ? 'text-amber-500' : 'text-red-500';
+  const bg = score >= 80 ? 'bg-emerald-500/5' : score >= 50 ? 'bg-amber-500/5' : 'bg-red-500/5';
+  return (
+    <div className={`flex items-center gap-3 py-2 px-3 rounded-md ${bg} text-xs`} data-testid={`alignment-pair-${pair.human_idx}`}>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <span className="font-mono font-semibold text-blue-600">{pair.human_item || '—'}</span>
+          <span className="text-muted-foreground truncate">{pair.human_desc}</span>
+        </div>
+        <span className="text-muted-foreground">${Number(pair.human_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+      </div>
+      <div className="shrink-0 text-center w-14">
+        <span className={`font-bold text-sm ${color}`}>{score}%</span>
+      </div>
+      <div className="flex-1 min-w-0 text-right">
+        <div className="flex items-center gap-1.5 justify-end">
+          <span className="text-muted-foreground truncate">{pair.ai_desc}</span>
+          <span className="font-mono font-semibold text-violet-600">{pair.ai_item || '—'}</span>
+        </div>
+        <span className="text-muted-foreground">${Number(pair.ai_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
       </div>
     </div>
   );
@@ -245,6 +288,25 @@ export default function InvoiceTracePage() {
             </CardContent>
           </Card>
 
+          {/* Dimension Scores Breakdown */}
+          {comp.dimension_scores && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Target className="w-4 h-4 text-muted-foreground" />
+                  Weighted Dimension Scores
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-1" data-testid="dimension-scores">
+                  {Object.entries(comp.dimension_scores).map(([name, data]) => (
+                    <DimensionScoreBar key={name} name={name} score={data.score} weight={data.weight} />
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Dimension-by-Dimension Comparison */}
           <Card>
             <CardHeader className="pb-2">
@@ -264,6 +326,47 @@ export default function InvoiceTracePage() {
               </ScrollArea>
             </CardContent>
           </Card>
+
+          {/* Line-by-Line Alignment */}
+          {comp.line_alignment && comp.line_alignment.pairs && comp.line_alignment.pairs.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-muted-foreground" />
+                  Line-by-Line Alignment
+                  <Badge variant="outline" className="ml-2 text-[10px]">
+                    Avg: {comp.line_alignment.avg_score}%
+                  </Badge>
+                  {comp.line_alignment.unmatched_human > 0 && (
+                    <Badge variant="outline" className="text-[10px] text-orange-600 border-orange-300">
+                      +{comp.line_alignment.unmatched_human} unmatched human
+                    </Badge>
+                  )}
+                  {comp.line_alignment.unmatched_ai > 0 && (
+                    <Badge variant="outline" className="text-[10px] text-orange-600 border-orange-300">
+                      +{comp.line_alignment.unmatched_ai} unmatched AI
+                    </Badge>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-1.5 text-xs mb-2 text-muted-foreground">
+                  <div className="flex items-center gap-6 px-3 font-semibold">
+                    <span className="flex-1 text-blue-600">Human Line</span>
+                    <span className="w-14 text-center">Score</span>
+                    <span className="flex-1 text-right text-violet-600">AI Line</span>
+                  </div>
+                </div>
+                <ScrollArea className="max-h-[400px]">
+                  <div className="space-y-1" data-testid="line-alignment">
+                    {comp.line_alignment.pairs.map((pair, i) => (
+                      <LineAlignmentRow key={i} pair={pair} />
+                    ))}
+                  </div>
+                </ScrollArea>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Side-by-Side Lines */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

@@ -97,13 +97,16 @@
 - **Vendor discovery expanded**: Background `analyze-top` scans both endpoints for vendor discovery
 - **Impact**: Maximum possible learning dataset — every invoice ever touched in BC feeds the AI
 
-### Invoice Trace Comparison (Complete - Apr 2026)
+### Invoice Trace Comparison (Enhanced - Apr 2026)
 - **New page**: `/invoice-trace` — side-by-side comparison of human BC postings vs AI template output
 - **Trace endpoint**: `GET /api/posting-patterns/trace/{vendor_no}?invoice_index=N` fetches a real invoice from BC, gets its lines, simulates what the AI template would generate, and computes a multi-dimensional diff
-- **Match rate scoring**: Compares across 7 dimensions (line count, line type, items/GL accounts, description pattern, tax code, UOM, total amount)
+- **Weighted dimension scoring**: Match rate now uses weighted 0-1 scores per dimension instead of binary match/mismatch counting. Dimensions: Items/GL (25%), Amount (20%), Description (20%), Line Count (10%), Line Type (10%), Tax (10%), UOM (5%). Partial credit for family matches, close amounts, pattern matches.
+- **Line-by-line alignment**: Greedy pairing algorithm matches each AI line to the best human line using multi-factor scoring (item match, description similarity, amount closeness, type, tax, UOM). Returns per-pair scores and average alignment.
+- **Enhanced reference extraction**: Extracts ALL references from ALL human lines (not just the first), supports per-line reference mapping for multi-product invoices, distributes references across variable product slots.
+- **Role-aware descriptions**: Zero-cost structural items always use `common_description`, surcharges always use their known name, only primary/variable product lines carry the reference-based description.
+- **Batch trace**: `GET /api/posting-patterns/trace/{vendor_no}/batch?count=N` runs trace across N invoices and returns aggregate avg match rate, per-dimension averages, and per-invoice breakdown.
 - **Invoice navigator**: Browse through vendor's invoices with prev/next controls
-- **Traceable invoice list**: `GET /api/posting-patterns/trace/{vendor_no}/list` lists available invoices for browsing
-- **Frontend**: Full comparison UI with match/mismatch/gap badges, side-by-side line panels, and verdict interpretation
+- **Frontend**: Dimension score breakdown bars, line-by-line alignment panel with per-pair scoring, match/mismatch/gap badges
 
 ### BC Auto-Post Phase 2: Template-Driven Draft Creation (Complete - Apr 2026)
 - **Posting Intelligence Dashboard**: New `/posting-intelligence` page with full-stack vendor profile view

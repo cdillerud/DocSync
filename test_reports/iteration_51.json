@@ -48,7 +48,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://invoice-autopilot-12.preview.emergentagent.com"
+    "api_url": "https://invoice-trace.preview.emergentagent.com"
   },
   "seed_data_creation": "Test document 44b2e236-c1ab-4e0e-9c23-23f542d68a71 has Widget A/Widget B lines. 20 freight mapping rules all point to GL account 60500. BC catalog: 1000 items, 169 GL accounts.",
   "retest_needed": false,

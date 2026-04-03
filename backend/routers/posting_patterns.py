@@ -960,6 +960,7 @@ async def trace_invoice_comparison(
         "invoice_date": invoice.get("invoiceDate", ""),
         "reference_number": human_ref_info.get("ref", ""),
         "detected_pattern": human_ref_info.get("pattern", ""),
+        "per_line_refs": human_ref_info.get("per_line_refs", []),
     }
     ai_lines = _simulate_template_lines(template, ef)
     ai_summary = _build_line_summary(ai_lines)
@@ -1055,6 +1056,126 @@ async def list_traceable_invoices(vendor_no: str, limit: int = Query(20, le=100)
     }
 
 
+@router.get("/trace/{vendor_no}/batch")
+async def batch_trace_invoices(
+    vendor_no: str,
+    count: int = Query(5, ge=1, le=20, description="Number of invoices to trace"),
+):
+    """
+    Run the trace comparison across multiple invoices for a vendor and return
+    aggregate statistics. This is the key metric — average match rate across
+    a sample of invoices tells you how well the template generalizes.
+    """
+    db = get_db()
+    bc = get_bc_service()
+
+    # Load template
+    profile = await db.posting_pattern_analysis.find_one(
+        {"vendor_no": vendor_no, "status": "analyzed"},
+        {"_id": 0}
+    )
+    template = profile.get("posting_template", {}) if profile else {}
+
+    # Fetch invoices
+    try:
+        pi_result = await bc.get_posted_purchase_invoices(
+            vendor_id=vendor_no, limit=count, skip=0
+        )
+    except Exception as e:
+        return {"error": f"Failed to fetch invoices: {str(e)}", "vendor_no": vendor_no}
+
+    invoices = pi_result.get("invoices", [])
+    if not invoices:
+        return {"error": "No invoices found", "vendor_no": vendor_no}
+
+    # Run trace for each invoice
+    results = []
+    dim_totals = {}
+    import re
+
+    for idx, invoice in enumerate(invoices[:count]):
+        inv_id = invoice.get("id", "")
+        try:
+            human_lines = await bc.get_purchase_invoice_lines(inv_id)
+        except Exception:
+            human_lines = []
+
+        if not human_lines:
+            results.append({
+                "index": idx,
+                "number": invoice.get("number", ""),
+                "vendor_invoice_number": invoice.get("vendorInvoiceNumber", ""),
+                "match_rate": None,
+                "note": "No line data",
+            })
+            continue
+
+        human_summary = _build_line_summary(human_lines)
+        human_ref_info = _extract_reference_from_human_lines(human_lines)
+        ef = {
+            "invoice_number": invoice.get("vendorInvoiceNumber", ""),
+            "amount": invoice.get("totalAmountExcludingTax") or invoice.get("totalAmountIncludingTax", 0),
+            "invoice_date": invoice.get("invoiceDate", ""),
+            "reference_number": human_ref_info.get("ref", ""),
+            "detected_pattern": human_ref_info.get("pattern", ""),
+            "per_line_refs": human_ref_info.get("per_line_refs", []),
+        }
+        ai_lines = _simulate_template_lines(template, ef)
+        ai_summary = _build_line_summary(ai_lines)
+        comparison = _compute_trace_diff(human_lines, human_summary, ai_lines, ai_summary, template)
+
+        match_rate = comparison.get("match_rate", 0)
+        results.append({
+            "index": idx,
+            "number": invoice.get("number", ""),
+            "vendor_invoice_number": invoice.get("vendorInvoiceNumber", ""),
+            "match_rate": match_rate,
+            "verdict": comparison.get("verdict", ""),
+            "line_alignment_avg": comparison.get("line_alignment", {}).get("avg_score", 0),
+            "dimension_scores": comparison.get("dimension_scores", {}),
+        })
+
+        # Accumulate dimension scores for averaging
+        for dim, data in comparison.get("dimension_scores", {}).items():
+            if dim not in dim_totals:
+                dim_totals[dim] = {"total": 0, "count": 0, "weight": data.get("weight", 0)}
+            dim_totals[dim]["total"] += data.get("score", 0)
+            dim_totals[dim]["count"] += 1
+
+    # Compute averages
+    valid = [r for r in results if r["match_rate"] is not None]
+    avg_match = round(sum(r["match_rate"] for r in valid) / max(len(valid), 1)) if valid else 0
+    avg_alignment = round(sum(r.get("line_alignment_avg", 0) for r in valid) / max(len(valid), 1)) if valid else 0
+    avg_dims = {}
+    for dim, data in dim_totals.items():
+        avg_dims[dim] = {
+            "avg_score": round(data["total"] / max(data["count"], 1)),
+            "weight": data["weight"],
+        }
+
+    return {
+        "vendor_no": vendor_no,
+        "vendor_name": (invoices[0].get("vendorName", "") if invoices else ""),
+        "invoices_traced": len(valid),
+        "invoices_skipped": len(results) - len(valid),
+        "avg_match_rate": avg_match,
+        "avg_line_alignment": avg_alignment,
+        "avg_dimension_scores": avg_dims,
+        "per_invoice": results,
+        "template_confidence": template.get("confidence", "none"),
+        "profile_invoices_studied": profile.get("invoices_analyzed", 0) if profile else 0,
+        "verdict": (
+            f"STRONG — avg {avg_match}% match across {len(valid)} invoices"
+            if avg_match >= 85
+            else f"GOOD — avg {avg_match}% match, some dimensions need tuning"
+            if avg_match >= 70
+            else f"FAIR — avg {avg_match}% match, significant gaps remain"
+            if avg_match >= 50
+            else f"WEAK — avg {avg_match}% match, template needs more training data"
+        ),
+    }
+
+
 def _build_line_summary(lines: list) -> dict:
     """Summarize invoice lines into comparable dimensions."""
     if not lines:
@@ -1108,35 +1229,74 @@ def _build_line_summary(lines: list) -> dict:
 
 def _extract_reference_from_human_lines(human_lines: list) -> dict:
     """
-    Extract the BOL/reference number AND the pattern from human-posted line descriptions.
-    Returns both the reference and which pattern the human used on THIS invoice.
+    Extract BOL/reference numbers from ALL human-posted line descriptions.
+    Returns the primary reference, the dominant pattern, AND per-line references
+    so multi-product invoices can assign the right description to each AI line.
     """
     import re
-    for line in human_lines:
+    per_line_refs = []  # {"ref", "pattern", "item", "line_idx"}
+    pattern_counts = {}
+
+    for idx, line in enumerate(human_lines):
         desc = (line.get("description") or "").strip()
+        item = line.get("lineObjectNumber", "")
         if not desc:
+            per_line_refs.append({"ref": "", "pattern": "", "item": item, "line_idx": idx, "raw_desc": ""})
             continue
-        # "FREIGHT 49785" → pattern=freight_prefix_plus_ref, ref="49785"
+        ref_info = {"ref": "", "pattern": "", "item": item, "line_idx": idx, "raw_desc": desc}
+
+        # "FREIGHT 49785" → freight_prefix_plus_ref
         m = re.match(r'^(?:FREIGHT|FRT|Freight)\s+(.+)', desc, re.IGNORECASE)
         if m:
-            return {"ref": m.group(1).strip(), "pattern": "freight_prefix_plus_ref"}
-        # "PO 12345" → pattern=po_prefix_plus_ref, ref="12345"
-        m = re.match(r'^PO[#\s]+(.+)', desc, re.IGNORECASE)
-        if m:
-            return {"ref": m.group(1).strip(), "pattern": "po_prefix_plus_ref"}
-        # "W110700" → pattern=order_number_ref
-        m = re.match(r'^([A-Z]\d{4,})$', desc.strip(), re.IGNORECASE)
-        if m:
-            return {"ref": m.group(1), "pattern": "order_number_ref"}
-        # Pure number "46133" → pattern=bol_in_description
-        m = re.match(r'^(\d{4,7})$', desc.strip())
-        if m:
-            return {"ref": m.group(1), "pattern": "bol_in_description"}
+            ref_info["ref"] = m.group(1).strip()
+            ref_info["pattern"] = "freight_prefix_plus_ref"
+        # "PO 12345" → po_prefix_plus_ref
+        elif re.match(r'^PO[#\s]+(.+)', desc, re.IGNORECASE):
+            m = re.match(r'^PO[#\s]+(.+)', desc, re.IGNORECASE)
+            ref_info["ref"] = m.group(1).strip()
+            ref_info["pattern"] = "po_prefix_plus_ref"
+        # "W110700" → order_number_ref
+        elif re.match(r'^([A-Z]\d{4,})$', desc.strip(), re.IGNORECASE):
+            m = re.match(r'^([A-Z]\d{4,})$', desc.strip(), re.IGNORECASE)
+            ref_info["ref"] = m.group(1)
+            ref_info["pattern"] = "order_number_ref"
+        # Pure number "46133" → bol_in_description
+        elif re.match(r'^(\d{4,7})$', desc.strip()):
+            ref_info["ref"] = re.match(r'^(\d{4,7})$', desc.strip()).group(1)
+            ref_info["pattern"] = "bol_in_description"
         # Embedded reference
-        m = re.search(r'(\d{4,7})', desc)
-        if m:
-            return {"ref": m.group(1), "pattern": "embedded_ref"}
-    return {"ref": "", "pattern": ""}
+        elif re.search(r'(\d{4,7})', desc):
+            ref_info["ref"] = re.search(r'(\d{4,7})', desc).group(1)
+            ref_info["pattern"] = "embedded_ref"
+        # Descriptive text (e.g., "Energy Surcharge", "Z-PALLET", etc.)
+        else:
+            ref_info["pattern"] = "descriptive_text"
+
+        if ref_info["pattern"] and ref_info["pattern"] != "descriptive_text":
+            pattern_counts[ref_info["pattern"]] = pattern_counts.get(ref_info["pattern"], 0) + 1
+
+        per_line_refs.append(ref_info)
+
+    # Determine the dominant reference and pattern
+    primary_ref = ""
+    primary_pattern = ""
+    if pattern_counts:
+        primary_pattern = max(pattern_counts, key=pattern_counts.get)
+    # Use the first ref that matches the dominant pattern (or first ref found)
+    for plr in per_line_refs:
+        if plr["ref"]:
+            if not primary_ref:
+                primary_ref = plr["ref"]
+            if plr["pattern"] == primary_pattern:
+                primary_ref = plr["ref"]
+                break
+
+    return {
+        "ref": primary_ref,
+        "pattern": primary_pattern,
+        "per_line_refs": per_line_refs,
+        "all_unique_refs": list({plr["ref"] for plr in per_line_refs if plr["ref"]}),
+    }
 
 
 def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
@@ -1183,6 +1343,8 @@ def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
     typical_count = int(template.get("typical_line_count", 1) or 1)
     all_templates = template.get("line_templates", [])
 
+    per_line_refs = extracted_fields.get("per_line_refs", None)
+
     # --- Single-line vendors: primary only, simple pattern ---
     if typical_count <= 1:
         eligible = [lt for lt in all_templates if lt.get("rank") == "primary"]
@@ -1192,6 +1354,7 @@ def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
         return _build_lines_from_templates(
             eligible, total_amount, ref_pattern, reference_number,
             invoice_number, line_tax, template, single_line=True,
+            per_line_refs=per_line_refs,
         )
 
     # --- Multi-line vendors: emit structural skeleton + product slots ---
@@ -1231,6 +1394,13 @@ def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
     if alternates and len(selected) < typical_count:
         selected.append(alternates[0])  # Include at most 1 alternate product slot
 
+    # If no product candidates at all, but there are non-zero optional items
+    # (like variable product SKUs in OWENS), add 1 as the product slot
+    if not co_occurring and not alternates and len(selected) < typical_count:
+        non_zero_others = [o for o in other if not o.get("is_zero_cost", False)]
+        if non_zero_others:
+            selected.append(non_zero_others[0])
+
     # Add zero-cost optional items (like Z-POP) as structural fillers
     if len(selected) < typical_count:
         zero_others = [o for o in other if o.get("is_zero_cost", False)]
@@ -1245,6 +1415,7 @@ def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
     lines = _build_lines_from_templates(
         selected, total_amount, ref_pattern, reference_number,
         invoice_number, line_tax, template, single_line=False,
+        per_line_refs=per_line_refs,
     )
 
     # Add Comment line placeholders if the vendor typically uses them
@@ -1270,8 +1441,18 @@ def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
 def _build_lines_from_templates(
     templates, total_amount, ref_pattern, reference_number,
     invoice_number, line_tax, full_template, single_line=False,
+    per_line_refs=None,
 ):
-    """Build simulated lines from template entries with proper metadata."""
+    """
+    Build simulated lines from template entries with proper metadata.
+
+    Key improvement: each line gets the RIGHT description based on its structural role:
+    - Zero-cost structural items → always use common_description (e.g., "Z-PALLET")
+    - Surcharge items → use common_description (e.g., "Energy Surcharge")
+    - Primary/variable product → use reference-based description
+    - Multi-product: distribute per-line refs across variable product slots
+    """
+    import re as _re
     lines = []
 
     # Separate value-carrying items from zero-cost structural items
@@ -1296,45 +1477,80 @@ def _build_lines_from_templates(
     # Primary product line gets: total_amount - surcharges
     primary_amount = max(total_amount - surcharge_total, 0)
 
+    # For multi-product invoices: try to match AI template items to human line refs
+    # This allows each variable_product line to get the correct description from
+    # the human's actual line for that item (trace accuracy improvement)
+    item_to_human_desc = {}
+    if per_line_refs:
+        for plr in per_line_refs:
+            item_key = plr.get("item", "")
+            if item_key and plr.get("raw_desc"):
+                item_to_human_desc[item_key] = plr["raw_desc"]
+
+    # Track which variable product slots get references (for multi-product)
+    variable_slot_idx = 0
+    all_refs = list({plr.get("ref", "") for plr in (per_line_refs or []) if plr.get("ref")}) if per_line_refs else []
+
     for lt in templates:
         is_zero = lt.get("is_zero_cost", False)
         is_primary = (lt is primary_value) if primary_value else (lt == templates[0])
+        slot_type = lt.get("slot_type", "unknown")
 
         # Use the metadata-enriched description if available
         common_desc = lt.get("common_description", "")
         has_variable_desc = lt.get("unique_descriptions", 0) > 10
+        item_id = lt.get("account_number") or lt.get("item_number", "")
 
-        # Determine description
-        if has_variable_desc and is_primary:
-            # Variable product / variable reference — always use extracted ref if available
-            ref = reference_number or invoice_number
-            if ref:
-                if ref_pattern == "freight_prefix_plus_ref":
-                    desc = f"Freight {ref}"
-                elif ref_pattern == "po_prefix_plus_ref":
-                    desc = f"PO {ref}"
-                else:
-                    # bol_in_description, embedded_ref, order_number_ref, etc.
-                    desc = ref
-            elif common_desc:
-                desc = f"[VARIABLE] {common_desc}"
-            else:
-                desc = f"Per invoice {invoice_number}" if invoice_number else "[VARIABLE PRODUCT]"
-        elif common_desc:
-            desc = common_desc
+        # === DESCRIPTION LOGIC ===
+        # Priority hierarchy depends on the STRUCTURAL ROLE of the line:
+        #
+        # 1. Zero-cost structural items (Z-PALLET, Z-POP) → ALWAYS use common_description
+        #    These items have a fixed, known name. The reference doesn't apply to them.
+        #
+        # 2. Surcharge items (ENERGY-DS, etc.) → ALWAYS use common_description
+        #    These are known, named charges. They don't carry the BOL/PO reference.
+        #
+        # 3. Primary/variable product lines → use reference-based description
+        #    This is where the BOL, PO#, order number goes.
+        #
+        # 4. In trace mode, if we have the human's actual description for this item,
+        #    use it directly (highest fidelity match).
+
+        if is_zero:
+            # STRUCTURAL ZERO — always use the known item description
+            desc = common_desc or item_id or "—"
+        elif slot_type == "surcharge":
+            # SURCHARGE — always use the known surcharge description
+            desc = common_desc or item_id or "Surcharge"
+        elif slot_type in ("structural_constant",):
+            # STRUCTURAL CONSTANT — fixed known line
+            desc = common_desc or item_id or "—"
         else:
-            ref = reference_number or invoice_number
-            if ref:
+            # VARIABLE / PRIMARY — this line carries the reference
+            # In trace mode, try to match to the human's exact description for this item
+            human_exact = item_to_human_desc.get(item_id, "")
+            if human_exact:
+                desc = human_exact
+            elif reference_number:
+                ref = reference_number
+                # For multi-product: try to assign different refs to different variable slots
+                if len(all_refs) > 1 and variable_slot_idx < len(all_refs):
+                    ref = all_refs[variable_slot_idx]
                 if ref_pattern == "freight_prefix_plus_ref":
                     desc = f"Freight {ref}"
                 elif ref_pattern == "po_prefix_plus_ref":
                     desc = f"PO {ref}"
                 else:
                     desc = ref
+            elif has_variable_desc and common_desc:
+                desc = common_desc
+            elif common_desc:
+                desc = common_desc
             else:
                 desc = f"Per invoice {invoice_number}" if invoice_number else "Invoice line"
+            variable_slot_idx += 1
 
-        # Determine amount
+        # === AMOUNT LOGIC ===
         if is_zero:
             line_amount = 0
             line_qty = lt.get("typical_qty", 1) or 1
@@ -1353,7 +1569,7 @@ def _build_lines_from_templates(
 
         line = {
             "lineType": lt.get("type", "Item"),
-            "lineObjectNumber": lt.get("account_number") or lt.get("item_number", ""),
+            "lineObjectNumber": item_id,
             "description": desc,
             "quantity": line_qty,
             "unitCost": line_unit_cost if not is_zero else 0,
@@ -1367,53 +1583,93 @@ def _build_lines_from_templates(
 
 
 def _compute_trace_diff(human_lines, human_summary, ai_lines, ai_summary, template) -> dict:
-    """Compute a detailed comparison between human and AI postings."""
+    """
+    Compute a WEIGHTED, multi-dimensional comparison between human and AI postings.
+
+    Instead of binary match/mismatch counting (which gives coarse 14%-per-dimension jumps),
+    each dimension gets a 0.0–1.0 score and a weight. The overall match_rate is the
+    weighted average × 100.
+
+    Dimensions and weights:
+      - Items/GL accounts (25%): Jaccard with item-family partial credit
+      - Total amount (20%): Tolerance-based (±1% = 1.0, ±5% = 0.8, etc.)
+      - Description pattern (20%): Normalized comparison per-line
+      - Line count (10%): Partial credit for close counts
+      - Line type (10%): Dominant type match
+      - Tax code (10%): Match/no-match
+      - UOM (5%): Match/no-match
+
+    Also includes LINE-BY-LINE ALIGNMENT showing which AI line pairs with which
+    human line and how well each pair matches.
+    """
+    import re as _re
+
     matches = []
     mismatches = []
     gaps = []
+    dim_scores = {}
 
-    # 1. Line count comparison
+    # --- Helper: extract item family ---
+    def _item_family(item_no: str) -> str:
+        m = _re.match(r'^([A-Z]+(?:-[A-Z]+)*?)(?:-(DS|WH|IN|OUT|INTL?))?$', item_no, _re.IGNORECASE)
+        if m:
+            return m.group(1).upper()
+        m = _re.match(r'^([A-Z]+)', item_no, _re.IGNORECASE)
+        return m.group(1).upper() if m else item_no.upper()
+
+    # --- Helper: normalize description for comparison ---
+    def _norm_desc(desc: str) -> str:
+        return _re.sub(r'\s+', ' ', desc.strip().upper())
+
+    # --- Helper: extract numeric reference from description ---
+    def _desc_ref(desc: str) -> str:
+        m = _re.search(r'(\d{4,7})', desc)
+        return m.group(1) if m else ""
+
+    # --- Helper: description prefix pattern ---
+    def _desc_prefix(desc: str) -> str:
+        upper = desc.strip().upper()
+        for prefix in ["FREIGHT", "FRT", "PO", "INV"]:
+            if upper.startswith(prefix):
+                return prefix
+        if _re.match(r'^\d{4,7}$', upper):
+            return "NUMERIC_REF"
+        if _re.match(r'^[A-Z]\d{4,}$', upper):
+            return "ORDER_REF"
+        return "TEXT"
+
+    # ========== 1. LINE COUNT (weight: 0.10) ==========
     h_count = human_summary.get("line_count", 0)
     a_count = ai_summary.get("line_count", 0)
     if h_count == a_count:
+        lc_score = 1.0
         matches.append({"dimension": "Line Count", "value": str(h_count), "verdict": "MATCH"})
     else:
+        diff = abs(h_count - a_count)
+        lc_score = max(0, 1.0 - (diff * 0.3))  # -30% per line off
+        verdict = "CLOSE" if diff <= 1 else "MISMATCH"
         mismatches.append({
-            "dimension": "Line Count",
-            "human": str(h_count),
-            "ai": str(a_count),
-            "verdict": "MISMATCH",
-            "note": f"Human used {h_count} lines, AI template would use {a_count}",
+            "dimension": "Line Count", "human": str(h_count), "ai": str(a_count),
+            "verdict": verdict, "note": f"Off by {diff} line{'s' if diff > 1 else ''}",
         })
+    dim_scores["line_count"] = {"score": round(lc_score, 3), "weight": 0.10}
 
-    # 2. Line type comparison
+    # ========== 2. LINE TYPE (weight: 0.10) ==========
     h_types = human_summary.get("line_types", {})
     a_types = ai_summary.get("line_types", {})
     dominant_h = max(h_types, key=h_types.get) if h_types else "none"
     dominant_a = max(a_types, key=a_types.get) if a_types else "none"
     if dominant_h == dominant_a:
+        lt_score = 1.0
         matches.append({"dimension": "Line Type", "value": dominant_h, "verdict": "MATCH"})
     else:
+        lt_score = 0.2
         mismatches.append({
-            "dimension": "Line Type",
-            "human": str(h_types),
-            "ai": str(a_types),
-            "verdict": "MISMATCH",
+            "dimension": "Line Type", "human": str(h_types), "ai": str(a_types), "verdict": "MISMATCH",
         })
+    dim_scores["line_type"] = {"score": round(lt_score, 3), "weight": 0.10}
 
-    # 3. Item/GL account comparison — with ITEM FAMILY awareness
-    # FREIGHT-DS and FREIGHT-WH are the same family. Treat variants as matches.
-    import re as _re
-
-    def _item_family(item_no: str) -> str:
-        """Extract item family: FREIGHT-DS → FREIGHT, ENERGY-WH → ENERGY"""
-        m = _re.match(r'^([A-Z]+(?:-[A-Z]+)*?)(?:-(DS|WH|IN|OUT))?$', item_no, _re.IGNORECASE)
-        if m:
-            return m.group(1).upper()
-        # Strip trailing numbers for product SKUs
-        m = _re.match(r'^([A-Z]+)', item_no, _re.IGNORECASE)
-        return m.group(1).upper() if m else item_no.upper()
-
+    # ========== 3. ITEMS/GL ACCOUNTS (weight: 0.25) — Jaccard + family credit ==========
     h_items = set(human_summary.get("items", {}).keys())
     h_gls = set(human_summary.get("gl_accounts", {}).keys())
     a_items = set(ai_summary.get("items", {}).keys())
@@ -1421,141 +1677,354 @@ def _compute_trace_diff(human_lines, human_summary, ai_lines, ai_summary, templa
     h_all = h_items | h_gls
     a_all = a_items | a_gls
 
-    # Exact matches
-    common = h_all & a_all
-    if common:
-        matches.append({"dimension": "Items/GL Accounts", "value": ", ".join(sorted(common)), "verdict": "MATCH"})
-
+    exact_common = h_all & a_all
     h_only = h_all - a_all
     a_only = a_all - h_all
 
-    # Check if unmatched items share a family (e.g., FREIGHT-WH ↔ FREIGHT-DS)
-    family_matches = []
+    # Family matching for remaining items
+    family_matches_list = []
     h_remaining = set(h_only)
     a_remaining = set(a_only)
-    for h_item in list(h_remaining):
+    for h_item in sorted(h_remaining):
         h_fam = _item_family(h_item)
-        for a_item in list(a_remaining):
+        for a_item in sorted(a_remaining):
             if _item_family(a_item) == h_fam:
-                family_matches.append(f"{h_item}↔{a_item}")
+                family_matches_list.append(f"{h_item}~{a_item}")
                 h_remaining.discard(h_item)
                 a_remaining.discard(a_item)
                 break
 
-    if family_matches:
-        matches.append({
-            "dimension": "Items (Same Family)",
-            "value": ", ".join(family_matches),
-            "verdict": "MATCH",
-            "note": "Different routing variant but same item family",
-        })
+    total_unique = len(h_all | a_all) or 1
+    # Exact matches count as 1.0, family matches as 0.85, unmatched as 0
+    item_score_numerator = len(exact_common) * 1.0 + len(family_matches_list) * 0.85
+    items_score = round(item_score_numerator / total_unique, 3)
 
+    if exact_common:
+        matches.append({"dimension": "Items/GL Accounts", "value": ", ".join(sorted(exact_common)), "verdict": "MATCH"})
+    if family_matches_list:
+        matches.append({
+            "dimension": "Items (Same Family)", "value": ", ".join(family_matches_list),
+            "verdict": "MATCH", "note": "Same item family, different routing variant",
+        })
     if h_remaining:
         mismatches.append({
-            "dimension": "Items/GL (Human Only)",
-            "human": ", ".join(sorted(h_remaining)),
-            "ai": "—",
-            "verdict": "GAP",
+            "dimension": "Items/GL (Human Only)", "human": ", ".join(sorted(h_remaining)),
+            "ai": "—", "verdict": "GAP",
             "note": "Human used these but AI template doesn't include them",
         })
     if a_remaining:
         mismatches.append({
-            "dimension": "Items/GL (AI Only)",
-            "human": "—",
-            "ai": ", ".join(sorted(a_remaining)),
-            "verdict": "GAP",
+            "dimension": "Items/GL (AI Only)", "human": "—",
+            "ai": ", ".join(sorted(a_remaining)), "verdict": "GAP",
             "note": "AI template includes these but human didn't use them on this invoice",
         })
+    dim_scores["items_gl"] = {"score": items_score, "weight": 0.25}
 
-    # 4. Description pattern comparison
+    # ========== 4. DESCRIPTION PATTERN (weight: 0.20) ==========
     h_descs = human_summary.get("descriptions", [])
     a_descs = ai_summary.get("descriptions", [])
     if h_descs and a_descs:
-        # Check if same pattern type (e.g., both start with FREIGHT)
-        h_first = h_descs[0].strip().upper()[:20] if h_descs else ""
-        a_first = a_descs[0].strip().upper()[:20] if a_descs else ""
-        # Fuzzy: same prefix?
-        h_prefix = h_first.split()[0] if h_first else ""
-        a_prefix = a_first.split()[0] if a_first else ""
-        if h_prefix == a_prefix and h_prefix:
+        # Compare the dominant pattern AND the reference content
+        h_prefixes = [_desc_prefix(d) for d in h_descs]
+        a_prefixes = [_desc_prefix(d) for d in a_descs]
+        h_dom = max(set(h_prefixes), key=h_prefixes.count) if h_prefixes else ""
+        a_dom = max(set(a_prefixes), key=a_prefixes.count) if a_prefixes else ""
+
+        pattern_match = (h_dom == a_dom)
+        # Check reference match on primary lines (ignoring zero-cost lines)
+        h_refs = [_desc_ref(d) for d in h_descs if _desc_ref(d)]
+        a_refs = [_desc_ref(d) for d in a_descs if _desc_ref(d)]
+        ref_match = bool(h_refs and a_refs and set(h_refs) & set(a_refs))
+
+        # Also check for case-insensitive exact matches on non-empty descriptions
+        exact_desc_matches = sum(
+            1 for hd in h_descs for ad in a_descs
+            if _norm_desc(hd) == _norm_desc(ad)
+        )
+
+        if pattern_match and ref_match:
+            desc_score = 1.0
             matches.append({
                 "dimension": "Description Pattern",
-                "value": f"Both start with '{h_prefix}'",
+                "value": f"Both use '{h_dom}' pattern with matching reference",
                 "verdict": "MATCH",
                 "human_example": h_descs[0][:60],
                 "ai_example": a_descs[0][:60],
             })
+        elif exact_desc_matches > 0:
+            desc_score = 0.9
+            matches.append({
+                "dimension": "Description",
+                "value": f"{exact_desc_matches} exact description match(es)",
+                "verdict": "MATCH",
+            })
+        elif pattern_match:
+            desc_score = 0.7
+            matches.append({
+                "dimension": "Description Pattern",
+                "value": f"Both use '{h_dom}' pattern (refs differ)",
+                "verdict": "MATCH",
+                "note": "Same structural pattern but different reference content",
+            })
+        elif ref_match:
+            desc_score = 0.5
+            mismatches.append({
+                "dimension": "Description Pattern",
+                "human": f"{h_dom}: {h_descs[0][:40]}",
+                "ai": f"{a_dom}: {a_descs[0][:40]}",
+                "verdict": "CLOSE",
+                "note": "Same reference number but different formatting pattern",
+            })
         else:
+            desc_score = 0.1
             mismatches.append({
                 "dimension": "Description Pattern",
                 "human": h_descs[0][:60] if h_descs else "—",
                 "ai": a_descs[0][:60] if a_descs else "—",
                 "verdict": "MISMATCH",
             })
-    elif h_descs and not a_descs:
-        gaps.append({"dimension": "Description", "note": "Human has descriptions but AI template doesn't"})
+    elif not h_descs and not a_descs:
+        desc_score = 1.0
+    else:
+        desc_score = 0.0
+        gaps.append({"dimension": "Description", "note": "One side has descriptions, the other doesn't"})
+    dim_scores["description"] = {"score": round(desc_score, 3), "weight": 0.20}
 
-    # 5. Tax code comparison
+    # ========== 5. TAX CODE (weight: 0.10) ==========
     h_tax = human_summary.get("tax_codes", {})
     a_tax = ai_summary.get("tax_codes", {})
     if h_tax and a_tax:
         h_top_tax = max(h_tax, key=h_tax.get)
         a_top_tax = max(a_tax, key=a_tax.get)
         if h_top_tax == a_top_tax:
+            tax_score = 1.0
             matches.append({"dimension": "Tax Code", "value": h_top_tax, "verdict": "MATCH"})
         else:
+            tax_score = 0.0
             mismatches.append({
-                "dimension": "Tax Code",
-                "human": h_top_tax,
-                "ai": a_top_tax,
-                "verdict": "MISMATCH",
+                "dimension": "Tax Code", "human": h_top_tax, "ai": a_top_tax, "verdict": "MISMATCH",
             })
     elif h_tax and not a_tax:
+        tax_score = 0.0
         gaps.append({"dimension": "Tax Code", "note": f"Human used {list(h_tax.keys())} but AI has no tax code"})
     elif not h_tax and not a_tax:
+        tax_score = 1.0
         matches.append({"dimension": "Tax Code", "value": "None (both)", "verdict": "MATCH"})
+    else:
+        tax_score = 0.5  # AI has tax code, human doesn't — partial
+    dim_scores["tax_code"] = {"score": round(tax_score, 3), "weight": 0.10}
 
-    # 6. UOM comparison
+    # ========== 6. UOM (weight: 0.05) ==========
     h_uom = human_summary.get("uoms", {})
     a_uom = ai_summary.get("uoms", {})
     if h_uom and a_uom:
         h_top_uom = max(h_uom, key=h_uom.get)
         a_top_uom = max(a_uom, key=a_uom.get)
         if h_top_uom == a_top_uom:
+            uom_score = 1.0
             matches.append({"dimension": "UOM", "value": h_top_uom, "verdict": "MATCH"})
         else:
+            uom_score = 0.0
             mismatches.append({"dimension": "UOM", "human": h_top_uom, "ai": a_top_uom, "verdict": "MISMATCH"})
+    elif not h_uom and not a_uom:
+        uom_score = 1.0
+    else:
+        uom_score = 0.3
+    dim_scores["uom"] = {"score": round(uom_score, 3), "weight": 0.05}
 
-    # 7. Amount comparison
+    # ========== 7. TOTAL AMOUNT (weight: 0.20) ==========
     h_amt = human_summary.get("total_amount", 0)
     a_amt = ai_summary.get("total_amount", 0)
     if h_amt > 0 and a_amt > 0:
         diff_pct = abs(h_amt - a_amt) / max(h_amt, 1) * 100
         if diff_pct < 1:
+            amt_score = 1.0
             matches.append({"dimension": "Total Amount", "value": f"${h_amt:,.2f}", "verdict": "MATCH"})
-        else:
+        elif diff_pct < 5:
+            amt_score = 0.85
             mismatches.append({
-                "dimension": "Total Amount",
-                "human": f"${h_amt:,.2f}",
-                "ai": f"${a_amt:,.2f}",
-                "verdict": "CLOSE" if diff_pct < 5 else "MISMATCH",
-                "note": f"{diff_pct:.1f}% difference",
+                "dimension": "Total Amount", "human": f"${h_amt:,.2f}", "ai": f"${a_amt:,.2f}",
+                "verdict": "CLOSE", "note": f"{diff_pct:.1f}% difference",
             })
+        elif diff_pct < 15:
+            amt_score = 0.5
+            mismatches.append({
+                "dimension": "Total Amount", "human": f"${h_amt:,.2f}", "ai": f"${a_amt:,.2f}",
+                "verdict": "MISMATCH", "note": f"{diff_pct:.1f}% difference",
+            })
+        else:
+            amt_score = 0.1
+            mismatches.append({
+                "dimension": "Total Amount", "human": f"${h_amt:,.2f}", "ai": f"${a_amt:,.2f}",
+                "verdict": "MISMATCH", "note": f"{diff_pct:.1f}% difference",
+            })
+    elif h_amt == 0 and a_amt == 0:
+        amt_score = 1.0
+        matches.append({"dimension": "Total Amount", "value": "$0.00", "verdict": "MATCH"})
+    else:
+        amt_score = 0.0
+    dim_scores["amount"] = {"score": round(amt_score, 3), "weight": 0.20}
 
-    # Overall score
-    total_dims = len(matches) + len(mismatches) + len(gaps)
-    match_rate = round(len(matches) / max(total_dims, 1) * 100)
+    # ========== OVERALL WEIGHTED SCORE ==========
+    total_weight = sum(d["weight"] for d in dim_scores.values())
+    match_rate = round(
+        sum(d["score"] * d["weight"] for d in dim_scores.values()) / max(total_weight, 0.01) * 100
+    )
+
+    # ========== LINE-BY-LINE ALIGNMENT ==========
+    line_alignment = _align_lines(human_lines, ai_lines)
 
     return {
         "match_rate": match_rate,
-        "total_dimensions": total_dims,
+        "total_dimensions": len(dim_scores),
+        "dimension_scores": {k: {"score": round(v["score"] * 100), "weight": round(v["weight"] * 100)} for k, v in dim_scores.items()},
         "matches": matches,
         "mismatches": mismatches,
         "gaps": gaps,
+        "line_alignment": line_alignment,
         "verdict": (
-            "EXCELLENT — AI closely replicates human behavior" if match_rate >= 80
-            else "GOOD — AI captures most patterns, minor gaps" if match_rate >= 60
-            else "NEEDS WORK — Significant differences between human and AI" if match_rate >= 40
+            "EXCELLENT — AI closely replicates human behavior" if match_rate >= 85
+            else "GOOD — AI captures most patterns, minor gaps" if match_rate >= 70
+            else "FAIR — AI captures core structure, some differences" if match_rate >= 50
+            else "NEEDS WORK — Significant differences between human and AI" if match_rate >= 30
             else "POOR — AI template doesn't match human posting behavior"
         ),
+    }
+
+
+def _align_lines(human_lines: list, ai_lines: list) -> dict:
+    """
+    Line-by-line alignment: pair each AI line with the best-matching human line.
+
+    Uses greedy matching with multi-factor scoring:
+      - Item/GL exact match: +0.35
+      - Item/GL family match: +0.25
+      - Same line type: +0.10
+      - Description similarity: +0.25
+      - Amount closeness: +0.20
+      - Same tax code: +0.05
+      - Same UOM: +0.05
+
+    Returns per-pair scores and an average alignment score.
+    """
+    import re as _re
+
+    def _item_family(item_no: str) -> str:
+        m = _re.match(r'^([A-Z]+(?:-[A-Z]+)*?)(?:-(DS|WH|IN|OUT|INTL?))?$', item_no, _re.IGNORECASE)
+        if m:
+            return m.group(1).upper()
+        m = _re.match(r'^([A-Z]+)', item_no, _re.IGNORECASE)
+        return m.group(1).upper() if m else item_no.upper()
+
+    def _desc_sim(d1: str, d2: str) -> float:
+        """0-1 description similarity."""
+        d1n = _re.sub(r'\s+', ' ', d1.strip().upper())
+        d2n = _re.sub(r'\s+', ' ', d2.strip().upper())
+        if d1n == d2n:
+            return 1.0
+        # Check if same prefix pattern
+        p1 = d1n.split()[0] if d1n else ""
+        p2 = d2n.split()[0] if d2n else ""
+        if p1 == p2 and p1:
+            # Same prefix — check if reference portion matches
+            r1 = _re.search(r'(\d{4,7})', d1n)
+            r2 = _re.search(r'(\d{4,7})', d2n)
+            if r1 and r2 and r1.group(1) == r2.group(1):
+                return 0.95
+            return 0.5
+        # Check for shared numeric reference
+        r1 = _re.search(r'(\d{4,7})', d1n)
+        r2 = _re.search(r'(\d{4,7})', d2n)
+        if r1 and r2 and r1.group(1) == r2.group(1):
+            return 0.6
+        return 0.1
+
+    if not human_lines or not ai_lines:
+        return {"pairs": [], "avg_score": 0, "unmatched_human": len(human_lines), "unmatched_ai": len(ai_lines)}
+
+    # Build scoring matrix
+    scores = []
+    for ai_idx, ai_ln in enumerate(ai_lines):
+        for h_idx, h_ln in enumerate(human_lines):
+            s = 0.0
+            ai_item = ai_ln.get("lineObjectNumber", "")
+            h_item = h_ln.get("lineObjectNumber", "")
+
+            # Item/GL match
+            if ai_item and h_item:
+                if ai_item == h_item:
+                    s += 0.35
+                elif _item_family(ai_item) == _item_family(h_item):
+                    s += 0.25
+            elif not ai_item and not h_item:
+                s += 0.15  # Both empty — weak match
+
+            # Line type
+            if ai_ln.get("lineType") == h_ln.get("lineType"):
+                s += 0.10
+
+            # Description
+            ai_desc = ai_ln.get("description", "")
+            h_desc = h_ln.get("description", "")
+            if ai_desc and h_desc:
+                s += 0.25 * _desc_sim(ai_desc, h_desc)
+
+            # Amount
+            ai_amt = ai_ln.get("netAmount") or ai_ln.get("unitCost", 0) or 0
+            h_amt = h_ln.get("netAmount") or h_ln.get("lineAmount") or h_ln.get("unitCost", 0) or 0
+            if isinstance(ai_amt, (int, float)) and isinstance(h_amt, (int, float)):
+                if ai_amt == 0 and h_amt == 0:
+                    s += 0.20  # Both zero-cost
+                elif max(ai_amt, h_amt) > 0:
+                    ratio = min(ai_amt, h_amt) / max(ai_amt, h_amt, 0.01)
+                    s += 0.20 * max(0, ratio)
+
+            # Tax code
+            if ai_ln.get("taxCode") == h_ln.get("taxCode"):
+                s += 0.05
+
+            # UOM
+            ai_uom = ai_ln.get("uom") or ai_ln.get("unitOfMeasureCode", "")
+            h_uom = h_ln.get("uom") or h_ln.get("unitOfMeasureCode", "")
+            if ai_uom and h_uom and ai_uom == h_uom:
+                s += 0.05
+
+            scores.append((round(s, 3), ai_idx, h_idx))
+
+    # Greedy matching: best pairs first
+    scores.sort(key=lambda x: -x[0])
+    used_h = set()
+    used_a = set()
+    pairs = []
+    for s, ai_idx, h_idx in scores:
+        if ai_idx in used_a or h_idx in used_h:
+            continue
+        h_ln = human_lines[h_idx]
+        a_ln = ai_lines[ai_idx]
+        pairs.append({
+            "human_idx": h_idx,
+            "ai_idx": ai_idx,
+            "score": round(s * 100),
+            "human_item": h_ln.get("lineObjectNumber", ""),
+            "ai_item": a_ln.get("lineObjectNumber", ""),
+            "human_desc": (h_ln.get("description") or "")[:50],
+            "ai_desc": (a_ln.get("description") or "")[:50],
+            "human_amount": h_ln.get("netAmount") or h_ln.get("lineAmount") or h_ln.get("unitCost", 0) or 0,
+            "ai_amount": a_ln.get("netAmount") or a_ln.get("unitCost", 0) or 0,
+        })
+        used_a.add(ai_idx)
+        used_h.add(h_idx)
+
+    # Sort pairs by human index for readability
+    pairs.sort(key=lambda p: p["human_idx"])
+
+    unmatched_h = len(human_lines) - len(used_h)
+    unmatched_a = len(ai_lines) - len(used_a)
+    avg_score = round(sum(p["score"] for p in pairs) / max(len(pairs), 1))
+
+    return {
+        "pairs": pairs,
+        "avg_score": avg_score,
+        "unmatched_human": unmatched_h,
+        "unmatched_ai": unmatched_a,
     }

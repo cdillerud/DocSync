@@ -70,7 +70,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://invoice-autopilot-12.preview.emergentagent.com"
+    "api_url": "https://invoice-trace.preview.emergentagent.com"
   },
   "seed_data_used": "Backend tests create unique workspace TEST_Manual_Movement_XXXXXX with warn_only policy. Each test creates unique items with uuid suffix (TEST_ADJ_POS_*, TEST_CORR_*, TEST_WO_*, etc.). Workspace deactivated on teardown.",
   "retest_needed": false,

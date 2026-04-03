@@ -1395,31 +1395,68 @@ def _compute_trace_diff(human_lines, human_summary, ai_lines, ai_summary, templa
             "verdict": "MISMATCH",
         })
 
-    # 3. Item/GL account comparison
+    # 3. Item/GL account comparison — with ITEM FAMILY awareness
+    # FREIGHT-DS and FREIGHT-WH are the same family. Treat variants as matches.
+    import re as _re
+
+    def _item_family(item_no: str) -> str:
+        """Extract item family: FREIGHT-DS → FREIGHT, ENERGY-WH → ENERGY"""
+        m = _re.match(r'^([A-Z]+(?:-[A-Z]+)*?)(?:-(DS|WH|IN|OUT))?$', item_no, _re.IGNORECASE)
+        if m:
+            return m.group(1).upper()
+        # Strip trailing numbers for product SKUs
+        m = _re.match(r'^([A-Z]+)', item_no, _re.IGNORECASE)
+        return m.group(1).upper() if m else item_no.upper()
+
     h_items = set(human_summary.get("items", {}).keys())
     h_gls = set(human_summary.get("gl_accounts", {}).keys())
     a_items = set(ai_summary.get("items", {}).keys())
     a_gls = set(ai_summary.get("gl_accounts", {}).keys())
     h_all = h_items | h_gls
     a_all = a_items | a_gls
+
+    # Exact matches
     common = h_all & a_all
     if common:
         matches.append({"dimension": "Items/GL Accounts", "value": ", ".join(sorted(common)), "verdict": "MATCH"})
+
     h_only = h_all - a_all
     a_only = a_all - h_all
-    if h_only:
+
+    # Check if unmatched items share a family (e.g., FREIGHT-WH ↔ FREIGHT-DS)
+    family_matches = []
+    h_remaining = set(h_only)
+    a_remaining = set(a_only)
+    for h_item in list(h_remaining):
+        h_fam = _item_family(h_item)
+        for a_item in list(a_remaining):
+            if _item_family(a_item) == h_fam:
+                family_matches.append(f"{h_item}↔{a_item}")
+                h_remaining.discard(h_item)
+                a_remaining.discard(a_item)
+                break
+
+    if family_matches:
+        matches.append({
+            "dimension": "Items (Same Family)",
+            "value": ", ".join(family_matches),
+            "verdict": "MATCH",
+            "note": "Different routing variant but same item family",
+        })
+
+    if h_remaining:
         mismatches.append({
             "dimension": "Items/GL (Human Only)",
-            "human": ", ".join(sorted(h_only)),
+            "human": ", ".join(sorted(h_remaining)),
             "ai": "—",
             "verdict": "GAP",
             "note": "Human used these but AI template doesn't include them",
         })
-    if a_only:
+    if a_remaining:
         mismatches.append({
             "dimension": "Items/GL (AI Only)",
             "human": "—",
-            "ai": ", ".join(sorted(a_only)),
+            "ai": ", ".join(sorted(a_remaining)),
             "verdict": "GAP",
             "note": "AI template includes these but human didn't use them on this invoice",
         })

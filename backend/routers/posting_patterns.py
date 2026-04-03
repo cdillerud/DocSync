@@ -113,8 +113,8 @@ async def get_vendor_posting_profile(vendor_no: str):
 
 
 @router.post("/analyze/{vendor_no}")
-async def analyze_single_vendor(vendor_no: str, limit: int = Query(default=100, le=500)):
-    """Analyze posting patterns for a single vendor from BC production data."""
+async def analyze_single_vendor(vendor_no: str, limit: int = Query(default=0, le=10000, description="0 = fetch ALL invoices (no cap)")):
+    """Analyze posting patterns for a single vendor from BC production data. Default: all invoices."""
     db = get_db()
     bc = get_bc_service()
 
@@ -250,7 +250,7 @@ async def _run_top_analysis(top_n: int, force: bool = False):
 @router.post("/analyze-top")
 async def analyze_top_vendors(
     background_tasks: BackgroundTasks,
-    top_n: int = Query(default=20, le=100),
+    top_n: int = Query(default=50, le=500, description="Number of top vendors to analyze (0 = all)"),
     force: bool = Query(default=False, description="Force re-analysis even if recent data exists"),
 ):
     """

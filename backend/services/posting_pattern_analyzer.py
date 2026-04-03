@@ -9,6 +9,7 @@ Collections:
   - vendor_posting_profiles: Learned posting patterns per vendor
   - posting_pattern_analysis: Raw analysis results from BC queries
 """
+import asyncio
 import logging
 import os
 import re
@@ -21,19 +22,19 @@ logger = logging.getLogger(__name__)
 
 # Minimum invoices needed to build a reliable posting profile
 MIN_INVOICES_FOR_PROFILE = 3
-# Max invoices to analyze per vendor (recent history)
-MAX_INVOICES_PER_VENDOR = 200
-# Max invoices to fetch lines for (balance between depth and BC API load)
-MAX_LINE_SAMPLE = 75
+# Page size for BC API pagination
+BC_PAGE_SIZE = 500
+# Sleep between line fetches to avoid BC API throttling (seconds)
+LINE_FETCH_DELAY = 0.1
 
 
 async def analyze_vendor_posting_patterns(
-    db, bc_service, vendor_no: str, limit: int = MAX_INVOICES_PER_VENDOR
+    db, bc_service, vendor_no: str, limit: int = 0
 ) -> Dict[str, Any]:
     """
     Analyze how humans post invoices for a specific vendor in BC.
-    Returns a rich posting profile with GL patterns, line item templates,
-    amount distributions, and field mapping patterns.
+    Paginates through ALL posted invoices and ALL line items.
+    No artificial caps — if there are 5 years and 2,000 invoices, we eat them all.
     """
     result = {
         "vendor_no": vendor_no,
@@ -42,13 +43,31 @@ async def analyze_vendor_posting_patterns(
         "lines_analyzed": 0,
     }
 
-    # 1. Get posted invoices for this vendor
-    pi_result = await bc_service.get_posted_purchase_invoices(vendor_id=vendor_no, limit=limit)
-    invoices = pi_result.get("invoices", [])
+    # 1. Paginate through ALL posted invoices for this vendor
+    invoices = []
+    skip = 0
+    while True:
+        page_size = min(BC_PAGE_SIZE, limit - len(invoices)) if limit > 0 else BC_PAGE_SIZE
+        if page_size <= 0:
+            break
+        pi_result = await bc_service.get_posted_purchase_invoices(
+            vendor_id=vendor_no, limit=page_size, skip=skip
+        )
+        page = pi_result.get("invoices", [])
+        if not page:
+            break
+        invoices.extend(page)
+        logger.info("[PostingPatterns] %s: fetched page %d (%d invoices so far)",
+                     vendor_no, skip // BC_PAGE_SIZE + 1, len(invoices))
+        if len(page) < page_size:
+            break  # Last page
+        skip += len(page)
+        if limit > 0 and len(invoices) >= limit:
+            break
 
     if not invoices:
         result["status"] = "no_invoices"
-        result["error"] = pi_result.get("error")
+        result["error"] = pi_result.get("error") if 'pi_result' in dir() else None
         return result
 
     result["invoices_analyzed"] = len(invoices)
@@ -104,9 +123,7 @@ async def analyze_vendor_posting_patterns(
     result["vendor_invoice_number_rate"] = round(has_vendor_invoice_no / max(len(invoices), 1), 3)
     result["vendor_names_seen"] = list(vendor_names_seen)
 
-    # 3. Analyze line items — sample up to MAX_LINE_SAMPLE invoices
-    sample_size = min(len(invoices), MAX_LINE_SAMPLE)
-    sample_invoices = invoices[:sample_size]
+    # 3. Analyze line items from ALL invoices — no sampling, no caps
     all_lines = []
     line_type_counts = defaultdict(int)
     gl_account_counts = defaultdict(int)
@@ -124,7 +141,7 @@ async def analyze_vendor_posting_patterns(
     # Track Charge-type lines separately
     charge_item_counts = defaultdict(int)
 
-    for inv in sample_invoices:
+    for idx, inv in enumerate(invoices):
         inv_id = inv.get("id")
         if not inv_id:
             continue
@@ -174,6 +191,12 @@ async def analyze_vendor_posting_patterns(
             per_invoice_line_types.append(tuple(sorted(inv_line_types)))
         except Exception as e:
             logger.debug("Failed to get lines for PI %s: %s", inv_id, str(e))
+
+        # Throttle to avoid BC API rate limits + log progress every 50 invoices
+        if idx > 0 and idx % 50 == 0:
+            logger.info("[PostingPatterns] %s: analyzed lines for %d/%d invoices (%d lines so far)",
+                         vendor_no, idx, len(invoices), len(all_lines))
+        await asyncio.sleep(LINE_FETCH_DELAY)
 
     result["lines_analyzed"] = len(all_lines)
     result["invoices_with_lines_analyzed"] = len(lines_per_invoice)

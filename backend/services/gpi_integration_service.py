@@ -628,7 +628,7 @@ async def create_purchase_invoice(
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     payload = {
         "vendorNumber": vendor_no,
-        "vendorInvoiceNo": vendor_invoice_no or "",
+        "vendorInvoiceNumber": vendor_invoice_no or "",
         "invoiceDate": document_date or today,
         "postingDate": posting_date or today,
     }

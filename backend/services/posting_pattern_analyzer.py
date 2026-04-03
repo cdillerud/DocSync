@@ -200,6 +200,15 @@ async def analyze_vendor_posting_patterns(
     per_invoice_line_types = []
     # Track Charge-type lines separately
     charge_item_counts = defaultdict(int)
+    # Per-item metadata: descriptions, quantities, costs, UOMs
+    item_metadata = defaultdict(lambda: {
+        "descriptions": defaultdict(int), "quantities": [], "unit_costs": [],
+        "uoms": defaultdict(int), "tax_codes": defaultdict(int),
+        "line_type": None, "appearances": 0,
+    })
+    # Comment line tracking
+    comment_descriptions = defaultdict(int)
+    comment_count_per_invoice = []
 
     # Track statuses seen for data-source auditing
     statuses_seen = defaultdict(int)
@@ -220,6 +229,7 @@ async def analyze_vendor_posting_patterns(
             lines_per_invoice.append(len(lines))
             inv_items = []
             inv_line_types = []
+            inv_comment_count = 0
             for line in lines:
                 all_lines.append(line)
                 line_type = line.get("lineType", "unknown")
@@ -235,6 +245,32 @@ async def analyze_vendor_posting_patterns(
                         inv_items.append(obj_no)
                     elif line_type == "Charge":
                         charge_item_counts[obj_no] += 1
+                # Track per-item metadata for template enrichment
+                if obj_no and line_type in ("Item", "Account", "Charge"):
+                    meta = item_metadata[obj_no]
+                    meta["appearances"] += 1
+                    meta["line_type"] = line_type
+                    desc = line.get("description", "")
+                    if desc:
+                        meta["descriptions"][desc.strip()] += 1
+                    qty = line.get("quantity", 0)
+                    if isinstance(qty, (int, float)):
+                        meta["quantities"].append(qty)
+                    uc = line.get("unitCost", 0)
+                    if isinstance(uc, (int, float)):
+                        meta["unit_costs"].append(uc)
+                    line_uom = line.get("unitOfMeasureCode", "")
+                    if line_uom:
+                        meta["uoms"][line_uom] += 1
+                    line_tc = line.get("taxCode", "")
+                    if line_tc:
+                        meta["tax_codes"][line_tc] += 1
+                # Track Comment lines
+                if line_type == "Comment":
+                    inv_comment_count += 1
+                    cdesc = line.get("description", "").strip()
+                    if cdesc:
+                        comment_descriptions[cdesc] += 1
                 desc = line.get("description", "")
                 desc2 = line.get("description2", "")
                 if desc:
@@ -259,6 +295,7 @@ async def analyze_vendor_posting_patterns(
                     line_amounts.append(float(line_amt))
             per_invoice_items.append(tuple(sorted(inv_items)))
             per_invoice_line_types.append(tuple(sorted(inv_line_types)))
+            comment_count_per_invoice.append(inv_comment_count)
         except Exception as e:
             logger.debug("Failed to get lines for PI %s: %s", inv_id, str(e))
 
@@ -295,6 +332,39 @@ async def analyze_vendor_posting_patterns(
         } if line_amounts else {},
         "reference_in_description": dict(ref_pattern_counts),
         "description2_values": dict(sorted(description2_patterns.items(), key=lambda x: -x[1])[:10]),
+    }
+
+    # Build per-item metadata summary for template enrichment
+    item_meta_summary = {}
+    for item_no, meta in item_metadata.items():
+        descs = meta["descriptions"]
+        qtys = meta["quantities"]
+        costs = meta["unit_costs"]
+        top_desc = max(descs, key=descs.get) if descs else ""
+        top_uom = max(meta["uoms"], key=meta["uoms"].get) if meta["uoms"] else ""
+        top_tc = max(meta["tax_codes"], key=meta["tax_codes"].get) if meta["tax_codes"] else ""
+        is_zero_cost = all(c == 0 for c in costs) if costs else True
+        typical_qty = round(statistics.median(qtys), 2) if qtys else 0
+        typical_cost = round(statistics.median(costs), 2) if costs else 0
+        item_meta_summary[item_no] = {
+            "common_description": top_desc,
+            "typical_qty": typical_qty,
+            "typical_unit_cost": typical_cost,
+            "is_zero_cost": is_zero_cost,
+            "uom": top_uom,
+            "tax_code": top_tc,
+            "line_type": meta["line_type"],
+            "appearances": meta["appearances"],
+            "unique_descriptions": len(descs),
+        }
+    result["line_patterns"]["item_metadata"] = item_meta_summary
+
+    # Comment line patterns
+    typical_comments = round(statistics.median(comment_count_per_invoice), 0) if comment_count_per_invoice else 0
+    result["line_patterns"]["comment_patterns"] = {
+        "total_comments": sum(comment_count_per_invoice),
+        "typical_per_invoice": int(typical_comments),
+        "top_descriptions": dict(sorted(comment_descriptions.items(), key=lambda x: -x[1])[:10]),
     }
 
     # 4. Consistency scoring — how predictable is this vendor?
@@ -571,6 +641,7 @@ def _build_posting_template(analysis: Dict) -> Dict[str, Any]:
     gl_accounts = analysis.get("line_patterns", {}).get("top_gl_accounts", {})
     items = analysis.get("line_patterns", {}).get("top_items", {})
     charge_items = analysis.get("line_patterns", {}).get("charge_items", {})
+    item_meta = analysis.get("line_patterns", {}).get("item_metadata", {})
     total_lines = sum(line_types.values()) or 1
 
     # Add ALL GL account templates (sorted by usage)
@@ -578,11 +649,19 @@ def _build_posting_template(analysis: Dict) -> Dict[str, Any]:
         rate = round(count / total_lines, 3)
         if rate < 0.02:
             continue  # Skip noise (< 2% usage)
+        meta = item_meta.get(gl, {})
         template["line_templates"].append({
             "type": "Account",
             "account_number": gl,
             "usage_rate": rate,
             "rank": "primary" if rate >= 0.5 else "secondary" if rate >= 0.1 else "rare",
+            "common_description": meta.get("common_description", ""),
+            "typical_qty": meta.get("typical_qty", 1),
+            "typical_unit_cost": meta.get("typical_unit_cost", 0),
+            "is_zero_cost": meta.get("is_zero_cost", False),
+            "uom": meta.get("uom", ""),
+            "tax_code": meta.get("tax_code", ""),
+            "unique_descriptions": meta.get("unique_descriptions", 0),
         })
 
     # Add ALL Item templates (sorted by usage)
@@ -590,11 +669,19 @@ def _build_posting_template(analysis: Dict) -> Dict[str, Any]:
         rate = round(count / total_lines, 3)
         if rate < 0.02:
             continue
+        meta = item_meta.get(item, {})
         template["line_templates"].append({
             "type": "Item",
             "item_number": item,
             "usage_rate": rate,
             "rank": "primary" if rate >= 0.5 else "secondary" if rate >= 0.1 else "rare",
+            "common_description": meta.get("common_description", ""),
+            "typical_qty": meta.get("typical_qty", 1),
+            "typical_unit_cost": meta.get("typical_unit_cost", 0),
+            "is_zero_cost": meta.get("is_zero_cost", False),
+            "uom": meta.get("uom", ""),
+            "tax_code": meta.get("tax_code", ""),
+            "unique_descriptions": meta.get("unique_descriptions", 0),
         })
 
     # Add Charge-type templates
@@ -602,12 +689,28 @@ def _build_posting_template(analysis: Dict) -> Dict[str, Any]:
         rate = round(count / total_lines, 3)
         if rate < 0.02:
             continue
+        meta = item_meta.get(charge, {})
         template["line_templates"].append({
             "type": "Charge",
             "item_number": charge,
             "usage_rate": rate,
             "rank": "secondary",
+            "common_description": meta.get("common_description", ""),
+            "typical_qty": meta.get("typical_qty", 1),
+            "typical_unit_cost": meta.get("typical_unit_cost", 0),
+            "is_zero_cost": meta.get("is_zero_cost", False),
+            "uom": meta.get("uom", ""),
+            "tax_code": meta.get("tax_code", ""),
         })
+
+    # Add Comment line template if vendor commonly uses comments
+    comment_patterns = analysis.get("line_patterns", {}).get("comment_patterns", {})
+    typical_comments = comment_patterns.get("typical_per_invoice", 0)
+    if typical_comments > 0:
+        template["comment_lines"] = {
+            "typical_count": typical_comments,
+            "top_descriptions": list(comment_patterns.get("top_descriptions", {}).keys())[:5],
+        }
 
     # UOM
     uom = analysis.get("line_patterns", {}).get("uom_distribution", {})

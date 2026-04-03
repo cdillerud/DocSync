@@ -1140,11 +1140,14 @@ def _extract_reference_from_human_lines(human_lines: list) -> dict:
 def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
     """
     Simulate what the AI would generate using the posting template.
-    
+
     Key rules:
-    - Respect typical_line_count — only emit that many lines
-    - Only use primary-ranked items (secondary/rare are context-dependent)
+    - Respect typical_line_count — emit that many lines
+    - Single-line vendors: primary items only (simple freight pattern)
+    - Multi-line vendors: emit ALL structural items with proper descriptions,
+      quantities, and amounts from the learned metadata
     - Use the BOL/reference number (not invoice number) for freight patterns
+    - Add Comment line placeholders where the template shows them
     """
     if not template or not template.get("line_templates"):
         # No template — fallback single line
@@ -1176,51 +1179,129 @@ def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
     ref_pattern = extracted_fields.get("detected_pattern", "") or ref_handling.get("pattern", "")
     line_tax = template.get("line_tax_code", {})
     typical_count = int(template.get("typical_line_count", 1) or 1)
+    all_templates = template.get("line_templates", [])
 
-    # Only include primary items, sorted by usage rate descending
-    # Respect typical_line_count — don't add more lines than humans normally use
-    eligible = [
-        lt for lt in template.get("line_templates", [])
-        if lt.get("rank") == "primary"
-    ]
-    # If no primary items, fall back to the highest usage_rate item
-    if not eligible:
-        all_templates = sorted(
-            template.get("line_templates", []),
-            key=lambda x: x.get("usage_rate", 0),
-            reverse=True,
+    # --- Single-line vendors: primary only, simple pattern ---
+    if typical_count <= 1:
+        eligible = [lt for lt in all_templates if lt.get("rank") == "primary"]
+        if not eligible:
+            eligible = sorted(all_templates, key=lambda x: x.get("usage_rate", 0), reverse=True)[:1]
+        eligible = eligible[:1]
+        return _build_lines_from_templates(
+            eligible, total_amount, ref_pattern, reference_number,
+            invoice_number, line_tax, template, single_line=True,
         )
-        eligible = all_templates[:1]
 
-    # Limit to typical_line_count
+    # --- Multi-line vendors: emit ALL structural items ---
+    # Include secondary + rare, sorted by usage_rate desc, capped at typical_count
+    eligible = sorted(all_templates, key=lambda x: x.get("usage_rate", 0), reverse=True)
     eligible = eligible[:typical_count]
 
+    lines = _build_lines_from_templates(
+        eligible, total_amount, ref_pattern, reference_number,
+        invoice_number, line_tax, template, single_line=False,
+    )
+
+    # Add Comment line placeholders if the vendor typically uses them
+    comment_info = template.get("comment_lines", {})
+    typical_comments = comment_info.get("typical_count", 0)
+    if typical_comments > 0 and len(lines) < typical_count:
+        top_descs = comment_info.get("top_descriptions", [])
+        for i in range(min(typical_comments, typical_count - len(lines))):
+            lines.append({
+                "lineType": "Comment",
+                "lineObjectNumber": "",
+                "description": top_descs[i] if i < len(top_descs) else "[Comment]",
+                "quantity": 0,
+                "unitCost": 0,
+                "netAmount": 0,
+                "taxCode": "",
+                "uom": "",
+            })
+
+    return lines
+
+
+def _build_lines_from_templates(
+    templates, total_amount, ref_pattern, reference_number,
+    invoice_number, line_tax, full_template, single_line=False,
+):
+    """Build simulated lines from template entries with proper metadata."""
     lines = []
-    for lt in eligible:
+    # Identify which template gets the money (highest usage non-zero-cost item)
+    value_carriers = [
+        t for t in templates
+        if not t.get("is_zero_cost", False)
+    ]
+    # If all are zero-cost, the first one carries the value
+    if not value_carriers:
+        value_carriers = templates[:1]
+
+    # Distribute amount: primary value carrier gets the bulk
+    remaining_amount = total_amount
+    for lt in templates:
+        is_value_carrier = lt in value_carriers
+        is_zero = lt.get("is_zero_cost", False)
+
+        # Use the metadata-enriched description if available
+        common_desc = lt.get("common_description", "")
+        has_variable_desc = lt.get("unique_descriptions", 0) > 10  # Many unique = variable product
+
+        # Determine description
+        if has_variable_desc and not is_zero:
+            # Variable product SKU — use a reference-based description
+            ref = reference_number or invoice_number
+            if ref_pattern == "freight_prefix_plus_ref" and ref:
+                desc = f"Freight {ref}"
+            elif ref_pattern == "bol_in_description" and ref:
+                desc = ref
+            elif ref_pattern == "po_prefix_plus_ref" and ref:
+                desc = f"PO {ref}"
+            elif common_desc:
+                desc = common_desc
+            else:
+                desc = f"Per invoice {invoice_number}" if invoice_number else "Invoice line"
+        elif common_desc:
+            desc = common_desc
+        else:
+            ref = reference_number or invoice_number
+            if ref_pattern == "freight_prefix_plus_ref" and ref:
+                desc = f"Freight {ref}"
+            elif ref_pattern == "bol_in_description" and ref:
+                desc = ref
+            elif ref_pattern == "po_prefix_plus_ref" and ref:
+                desc = f"PO {ref}"
+            else:
+                desc = f"Per invoice {invoice_number}" if invoice_number else "Invoice line"
+
+        # Determine amount
+        if is_zero:
+            line_amount = 0
+            line_qty = lt.get("typical_qty", 1) or 1
+            line_unit_cost = 0
+        elif is_value_carrier and len(value_carriers) == 1:
+            line_amount = remaining_amount
+            line_qty = lt.get("typical_qty", 1) or 1
+            line_unit_cost = round(line_amount / max(line_qty, 1), 5) if line_qty else line_amount
+        else:
+            # Secondary value carrier — use typical cost
+            typical_cost = lt.get("typical_unit_cost", 0) or 0
+            line_qty = lt.get("typical_qty", 1) or 1
+            line_unit_cost = typical_cost
+            line_amount = round(line_qty * typical_cost, 2)
+            if is_value_carrier:
+                remaining_amount -= line_amount
+
         line = {
             "lineType": lt.get("type", "Item"),
             "lineObjectNumber": lt.get("account_number") or lt.get("item_number", ""),
-            "quantity": 1,
-            "unitCost": total_amount if len(eligible) == 1 or lt == eligible[0] else 0,
-            "netAmount": total_amount if len(eligible) == 1 or lt == eligible[0] else 0,
-            "taxCode": line_tax.get("code", ""),
-            "uom": template.get("uom", ""),
+            "description": desc,
+            "quantity": line_qty,
+            "unitCost": line_unit_cost if not is_zero else 0,
+            "netAmount": line_amount,
+            "taxCode": lt.get("tax_code", "") or line_tax.get("code", ""),
+            "uom": lt.get("uom", "") or full_template.get("uom", ""),
         }
-
-        # Build description based on reference pattern
-        # Use the BOL/reference (from human lines or PO field), NOT the invoice number
-        ref = reference_number or invoice_number
-        if ref_pattern == "freight_prefix_plus_ref" and ref:
-            line["description"] = f"Freight {ref}"
-        elif ref_pattern == "bol_in_description" and ref:
-            line["description"] = ref
-        elif ref_pattern == "po_prefix_plus_ref" and ref:
-            line["description"] = f"PO {ref}"
-        elif ref_pattern == "order_number_ref" and ref:
-            line["description"] = ref
-        else:
-            line["description"] = f"Per invoice {invoice_number}" if invoice_number else "Invoice line"
-
         lines.append(line)
 
     return lines

@@ -502,6 +502,8 @@ async def posting_learning_proof(vendor_no: str):
                 "description2_usage": template.get("description2_usage", {}),
             },
         },
+        "variability_profile": template.get("variability_profile", {}),
+        "item_families": consistency.get("item_families_seen", {}),
         "verdict": (
             f"LEARNED ({template.get('confidence', '?').upper()} confidence, "
             f"{consistency.get('overall', 0)*100:.0f}% consistent)"

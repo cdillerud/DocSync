@@ -205,6 +205,8 @@ async def analyze_vendor_posting_patterns(
         "descriptions": defaultdict(int), "quantities": [], "unit_costs": [],
         "uoms": defaultdict(int), "tax_codes": defaultdict(int),
         "line_type": None, "appearances": 0,
+        "invoices_present_on": set(),  # Track which invoices this item appears on
+        "amount_as_pct_of_total": [],  # Item amount / invoice total — for identifying value carriers
     })
     # Comment line tracking
     comment_descriptions = defaultdict(int)
@@ -250,6 +252,7 @@ async def analyze_vendor_posting_patterns(
                     meta = item_metadata[obj_no]
                     meta["appearances"] += 1
                     meta["line_type"] = line_type
+                    meta["invoices_present_on"].add(idx)  # Track per-invoice presence
                     desc = line.get("description", "")
                     if desc:
                         meta["descriptions"][desc.strip()] += 1
@@ -259,6 +262,11 @@ async def analyze_vendor_posting_patterns(
                     uc = line.get("unitCost", 0)
                     if isinstance(uc, (int, float)):
                         meta["unit_costs"].append(uc)
+                    # Track what % of invoice total this line represents
+                    inv_total = inv.get("totalAmountExcludingTax") or inv.get("totalAmountIncludingTax", 0) or 1
+                    line_net = line.get("netAmount") or line.get("lineAmount") or 0
+                    if isinstance(line_net, (int, float)) and isinstance(inv_total, (int, float)) and inv_total > 0:
+                        meta["amount_as_pct_of_total"].append(round(line_net / inv_total, 4))
                     line_uom = line.get("unitOfMeasureCode", "")
                     if line_uom:
                         meta["uoms"][line_uom] += 1
@@ -336,16 +344,58 @@ async def analyze_vendor_posting_patterns(
 
     # Build per-item metadata summary for template enrichment
     item_meta_summary = {}
+    total_invoices = len(lines_per_invoice) or 1
     for item_no, meta in item_metadata.items():
         descs = meta["descriptions"]
         qtys = meta["quantities"]
         costs = meta["unit_costs"]
+        pct_of_totals = meta["amount_as_pct_of_total"]
         top_desc = max(descs, key=descs.get) if descs else ""
         top_uom = max(meta["uoms"], key=meta["uoms"].get) if meta["uoms"] else ""
         top_tc = max(meta["tax_codes"], key=meta["tax_codes"].get) if meta["tax_codes"] else ""
         is_zero_cost = all(c == 0 for c in costs) if costs else True
         typical_qty = round(statistics.median(qtys), 2) if qtys else 0
         typical_cost = round(statistics.median(costs), 2) if costs else 0
+        unique_descs = len(descs)
+        invoices_present = len(meta["invoices_present_on"])
+        invoice_presence_rate = round(invoices_present / total_invoices, 3)
+
+        # Amount variability (coefficient of variation)
+        if costs and len(costs) > 1:
+            cost_mean = statistics.mean(costs)
+            cost_stdev = statistics.stdev(costs)
+            amount_cv = round(cost_stdev / max(cost_mean, 0.01), 3)
+        else:
+            amount_cv = 0
+
+        # Typical % of invoice total this item represents
+        typical_pct_of_total = round(statistics.median(pct_of_totals), 4) if pct_of_totals else 0
+
+        # Structural classification:
+        # "structural_constant" — appears on >70% of invoices with consistent description
+        # "variable_product"   — appears frequently but with many unique SKUs/descriptions
+        # "surcharge"          — non-zero cost but small % of total (<10%)
+        # "structural_zero"    — always present, always $0 (packaging/tracking)
+        # "optional"           — appears on <50% of invoices
+        if invoice_presence_rate >= 0.70:
+            if is_zero_cost:
+                slot_type = "structural_zero"
+            elif unique_descs > 10 and typical_pct_of_total > 0.3:
+                slot_type = "variable_product"
+            elif typical_pct_of_total < 0.10 and not is_zero_cost:
+                slot_type = "surcharge"
+            elif unique_descs <= 3:
+                slot_type = "structural_constant"
+            else:
+                slot_type = "structural_variable"
+        elif invoice_presence_rate >= 0.30:
+            if unique_descs > 5 and typical_pct_of_total > 0.3:
+                slot_type = "variable_product"
+            else:
+                slot_type = "frequent"
+        else:
+            slot_type = "optional"
+
         item_meta_summary[item_no] = {
             "common_description": top_desc,
             "typical_qty": typical_qty,
@@ -355,7 +405,11 @@ async def analyze_vendor_posting_patterns(
             "tax_code": top_tc,
             "line_type": meta["line_type"],
             "appearances": meta["appearances"],
-            "unique_descriptions": len(descs),
+            "unique_descriptions": unique_descs,
+            "invoice_presence_rate": invoice_presence_rate,
+            "amount_cv": amount_cv,
+            "typical_pct_of_total": typical_pct_of_total,
+            "slot_type": slot_type,
         }
     result["line_patterns"]["item_metadata"] = item_meta_summary
 
@@ -655,6 +709,7 @@ def _build_posting_template(analysis: Dict) -> Dict[str, Any]:
             "account_number": gl,
             "usage_rate": rate,
             "rank": "primary" if rate >= 0.5 else "secondary" if rate >= 0.1 else "rare",
+            "slot_type": meta.get("slot_type", "unknown"),
             "common_description": meta.get("common_description", ""),
             "typical_qty": meta.get("typical_qty", 1),
             "typical_unit_cost": meta.get("typical_unit_cost", 0),
@@ -662,6 +717,9 @@ def _build_posting_template(analysis: Dict) -> Dict[str, Any]:
             "uom": meta.get("uom", ""),
             "tax_code": meta.get("tax_code", ""),
             "unique_descriptions": meta.get("unique_descriptions", 0),
+            "invoice_presence_rate": meta.get("invoice_presence_rate", 0),
+            "amount_cv": meta.get("amount_cv", 0),
+            "typical_pct_of_total": meta.get("typical_pct_of_total", 0),
         })
 
     # Add ALL Item templates (sorted by usage)
@@ -681,6 +739,7 @@ def _build_posting_template(analysis: Dict) -> Dict[str, Any]:
             "item_number": item,
             "usage_rate": rate,
             "rank": "primary" if rate >= 0.5 else "secondary" if rate >= 0.1 else "rare",
+            "slot_type": meta.get("slot_type", "unknown"),
             "common_description": meta.get("common_description", ""),
             "typical_qty": meta.get("typical_qty", 1),
             "typical_unit_cost": meta.get("typical_unit_cost", 0),
@@ -688,6 +747,9 @@ def _build_posting_template(analysis: Dict) -> Dict[str, Any]:
             "uom": meta.get("uom", ""),
             "tax_code": meta.get("tax_code", ""),
             "unique_descriptions": meta.get("unique_descriptions", 0),
+            "invoice_presence_rate": meta.get("invoice_presence_rate", 0),
+            "amount_cv": meta.get("amount_cv", 0),
+            "typical_pct_of_total": meta.get("typical_pct_of_total", 0),
             "per_invoice_rate": round(per_invoice_rate, 3),
         })
 
@@ -718,6 +780,49 @@ def _build_posting_template(analysis: Dict) -> Dict[str, Any]:
             "typical_count": typical_comments,
             "top_descriptions": list(comment_patterns.get("top_descriptions", {}).keys())[:5],
         }
+
+    # Build variability profile — the AI's understanding of invoice structure
+    # This answers: "What's always the same? What changes? What's the skeleton?"
+    slot_type_groups = defaultdict(list)
+    for lt in template["line_templates"]:
+        st = lt.get("slot_type", "unknown")
+        item_id = lt.get("item_number") or lt.get("account_number", "")
+        slot_type_groups[st].append({
+            "item": item_id,
+            "description": lt.get("common_description", ""),
+            "presence_rate": lt.get("invoice_presence_rate", 0),
+            "pct_of_total": lt.get("typical_pct_of_total", 0),
+            "amount_cv": lt.get("amount_cv", 0),
+        })
+
+    structural_items = len(slot_type_groups.get("structural_constant", [])) + \
+                       len(slot_type_groups.get("structural_zero", []))
+    variable_items = len(slot_type_groups.get("variable_product", []))
+    surcharge_items = len(slot_type_groups.get("surcharge", []))
+
+    template["variability_profile"] = {
+        "structural_constant_items": [s["item"] for s in slot_type_groups.get("structural_constant", [])],
+        "structural_zero_items": [s["item"] for s in slot_type_groups.get("structural_zero", [])],
+        "variable_product_slots": [s["item"] for s in slot_type_groups.get("variable_product", [])],
+        "surcharge_items": [s["item"] for s in slot_type_groups.get("surcharge", [])],
+        "optional_items": [s["item"] for s in slot_type_groups.get("optional", [])],
+        "frequent_items": [s["item"] for s in slot_type_groups.get("frequent", [])],
+        "structural_variable_items": [s["item"] for s in slot_type_groups.get("structural_variable", [])],
+        "comment_slots": typical_comments,
+        "summary": (
+            f"{structural_items} fixed structural items, "
+            f"{variable_items} variable product slot(s), "
+            f"{surcharge_items} surcharge(s), "
+            f"{typical_comments} comment lines"
+        ),
+        "automation_assessment": (
+            "FULLY AUTOMATABLE — all items are predictable" if variable_items == 0 and structural_items > 0
+            else f"SEMI-AUTOMATABLE — {structural_items} fixed items can be pre-filled, "
+                 f"{variable_items} product slot(s) need document data"
+            if structural_items > 0
+            else "MANUAL — too much variability for automation"
+        ),
+    }
 
     # UOM
     uom = analysis.get("line_patterns", {}).get("uom_distribution", {})

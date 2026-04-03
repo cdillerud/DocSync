@@ -88,6 +88,15 @@
 - **Endpoints**: `/api/posting-patterns/status`, `/analyze/{vendor_no}`, `/analyze-top`, `/learning-proof/{vendor_no}`
 - **Result**: System learns from thousands of historical BC postings per vendor
 
+### Expanded BC Data Ingestion (Complete - Apr 2026)
+- **Removed status filter**: `get_posted_purchase_invoices()` no longer filters on `Paid`/`Open` — ingests ALL statuses (Draft, Open, Paid, Corrective, etc.)
+- **Dual-source ingestion**: Added `get_historical_posted_purchase_invoices()` to also query the separate BC `postedPurchaseInvoices` endpoint (historical completed invoices)
+- **Deduplication**: Analyzer uses `seen_ids` set to prevent double-counting invoices from both sources
+- **Data source auditing**: Results now include `data_sources` (counts per endpoint) and `status_distribution` (counts per invoice status)
+- **Graceful error handling**: BC API failures return proper JSON with error messages instead of 500 crashes
+- **Vendor discovery expanded**: Background `analyze-top` scans both endpoints for vendor discovery
+- **Impact**: Maximum possible learning dataset — every invoice ever touched in BC feeds the AI
+
 ### BC Auto-Post Phase 2: Template-Driven Draft Creation (Complete - Apr 2026)
 - **Posting Intelligence Dashboard**: New `/posting-intelligence` page with full-stack vendor profile view
 - **Auto-Post Settings**: Admin-configurable toggle, confidence threshold (high/medium/low), min invoices analyzed

@@ -643,7 +643,13 @@ async def create_purchase_invoice(
     }
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
         resp = await client.post(url, json=payload, headers=headers)
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            try:
+                err_body = resp.json()
+                err_msg = err_body.get("error", {}).get("message", resp.text[:500])
+            except Exception:
+                err_msg = resp.text[:500]
+            raise ValueError(f"BC API {resp.status_code}: {err_msg}")
         result = resp.json()
 
     return {

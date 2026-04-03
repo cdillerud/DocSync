@@ -665,11 +665,17 @@ def _build_posting_template(analysis: Dict) -> Dict[str, Any]:
         })
 
     # Add ALL Item templates (sorted by usage)
+    # Use per-invoice appearance rate, not just per-line rate, to avoid
+    # filtering out structural items like Z-POP that appear on many invoices
+    # but are a small % of total lines
+    inv_count = analysis.get("invoices_analyzed", 0) or 1
     for item, count in sorted(items.items(), key=lambda x: -x[1]):
         rate = round(count / total_lines, 3)
-        if rate < 0.02:
-            continue
         meta = item_meta.get(item, {})
+        per_invoice_rate = meta.get("appearances", count) / inv_count
+        # Include if >2% of lines OR appears on >10% of invoices
+        if rate < 0.02 and per_invoice_rate < 0.10:
+            continue
         template["line_templates"].append({
             "type": "Item",
             "item_number": item,
@@ -682,6 +688,7 @@ def _build_posting_template(analysis: Dict) -> Dict[str, Any]:
             "uom": meta.get("uom", ""),
             "tax_code": meta.get("tax_code", ""),
             "unique_descriptions": meta.get("unique_descriptions", 0),
+            "per_invoice_rate": round(per_invoice_rate, 3),
         })
 
     # Add Charge-type templates

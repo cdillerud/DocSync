@@ -1228,28 +1228,42 @@ def _build_lines_from_templates(
 ):
     """Build simulated lines from template entries with proper metadata."""
     lines = []
-    # Identify which template gets the money (highest usage non-zero-cost item)
-    value_carriers = [
-        t for t in templates
-        if not t.get("is_zero_cost", False)
-    ]
-    # If all are zero-cost, the first one carries the value
-    if not value_carriers:
-        value_carriers = templates[:1]
 
-    # Distribute amount: primary value carrier gets the bulk
-    remaining_amount = total_amount
+    # Separate value-carrying items from zero-cost structural items
+    value_items = [t for t in templates if not t.get("is_zero_cost", False)]
+
+    # Calculate known surcharge amounts (small-value items like ENERGY-DS)
+    # The PRIMARY value carrier is the one with the highest typical cost
+    if len(value_items) > 1:
+        value_items_sorted = sorted(value_items, key=lambda x: x.get("typical_unit_cost", 0) * max(x.get("typical_qty", 1), 1), reverse=True)
+        primary_value = value_items_sorted[0]
+        surcharge_total = sum(
+            (v.get("typical_unit_cost", 0) or 0) * max(v.get("typical_qty", 1), 1)
+            for v in value_items_sorted[1:]
+        )
+    elif value_items:
+        primary_value = value_items[0]
+        surcharge_total = 0
+    else:
+        primary_value = None
+        surcharge_total = 0
+
+    # Primary product line gets: total_amount - surcharges
+    primary_amount = max(total_amount - surcharge_total, 0)
+
     for lt in templates:
-        is_value_carrier = lt in value_carriers
         is_zero = lt.get("is_zero_cost", False)
+        is_primary = (lt is primary_value) if primary_value else (lt == templates[0])
 
         # Use the metadata-enriched description if available
         common_desc = lt.get("common_description", "")
-        has_variable_desc = lt.get("unique_descriptions", 0) > 10  # Many unique = variable product
+        has_variable_desc = lt.get("unique_descriptions", 0) > 10
 
         # Determine description
-        if has_variable_desc and not is_zero:
-            # Variable product SKU — use a reference-based description
+        if has_variable_desc and is_primary:
+            # Variable product SKU — this is the slot that changes per order
+            # In trace mode, the human's actual product will differ; in auto-post,
+            # this comes from the incoming document
             ref = reference_number or invoice_number
             if ref_pattern == "freight_prefix_plus_ref" and ref:
                 desc = f"Freight {ref}"
@@ -1258,9 +1272,9 @@ def _build_lines_from_templates(
             elif ref_pattern == "po_prefix_plus_ref" and ref:
                 desc = f"PO {ref}"
             elif common_desc:
-                desc = common_desc
+                desc = f"[VARIABLE] {common_desc}"
             else:
-                desc = f"Per invoice {invoice_number}" if invoice_number else "Invoice line"
+                desc = f"Per invoice {invoice_number}" if invoice_number else "[VARIABLE PRODUCT]"
         elif common_desc:
             desc = common_desc
         else:
@@ -1279,18 +1293,17 @@ def _build_lines_from_templates(
             line_amount = 0
             line_qty = lt.get("typical_qty", 1) or 1
             line_unit_cost = 0
-        elif is_value_carrier and len(value_carriers) == 1:
-            line_amount = remaining_amount
+        elif is_primary:
+            # Primary value carrier gets total minus surcharges
+            line_amount = round(primary_amount, 2)
             line_qty = lt.get("typical_qty", 1) or 1
             line_unit_cost = round(line_amount / max(line_qty, 1), 5) if line_qty else line_amount
         else:
-            # Secondary value carrier — use typical cost
+            # Surcharge / secondary value item — use typical cost
             typical_cost = lt.get("typical_unit_cost", 0) or 0
             line_qty = lt.get("typical_qty", 1) or 1
             line_unit_cost = typical_cost
             line_amount = round(line_qty * typical_cost, 2)
-            if is_value_carrier:
-                remaining_amount -= line_amount
 
         line = {
             "lineType": lt.get("type", "Item"),

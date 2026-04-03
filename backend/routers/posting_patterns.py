@@ -195,19 +195,20 @@ async def _run_top_analysis(top_n: int, force: bool = False):
                 break
             for inv in page:
                 vno = inv.get("vendorNumber", "")
-                if vno and vno not in discovered_vendors:
-                    discovered_vendors[vno] = {
-                        "vendor_no": vno,
-                        "vendor_name": inv.get("vendorName", ""),
-                    }
+                if vno:
+                    if vno not in discovered_vendors:
+                        discovered_vendors[vno] = {
+                            "vendor_no": vno,
+                            "vendor_name": inv.get("vendorName", ""),
+                            "invoice_count": 0,
+                        }
+                    discovered_vendors[vno]["invoice_count"] = discovered_vendors[vno].get("invoice_count", 0) + 1
             logger.info("[PostingPatterns] Discovery (purchaseInvoices): scanned %d invoices, found %d unique vendors so far",
                          skip + len(page), len(discovered_vendors))
             if len(page) < page_size:
                 break
             skip += len(page)
-            # Safety: if top_n is set and we've found enough vendors, stop discovering
-            if top_n > 0 and len(discovered_vendors) >= top_n * 2:
-                break
+            # Don't stop early — scan ALL invoices to get accurate counts
 
         # Source 2: historical postedPurchaseInvoices
         skip = 0
@@ -219,31 +220,35 @@ async def _run_top_analysis(top_n: int, force: bool = False):
                 break
             for inv in page:
                 vno = inv.get("vendorNumber", "")
-                if vno and vno not in discovered_vendors:
-                    discovered_vendors[vno] = {
-                        "vendor_no": vno,
-                        "vendor_name": inv.get("vendorName", ""),
-                    }
+                if vno:
+                    if vno not in discovered_vendors:
+                        discovered_vendors[vno] = {
+                            "vendor_no": vno,
+                            "vendor_name": inv.get("vendorName", ""),
+                            "invoice_count": 0,
+                        }
+                    discovered_vendors[vno]["invoice_count"] = discovered_vendors[vno].get("invoice_count", 0) + 1
             logger.info("[PostingPatterns] Discovery (historical %s): scanned %d invoices, found %d unique vendors total",
                          source, skip + len(page), len(discovered_vendors))
             if len(page) < page_size:
                 break
             skip += len(page)
-            if top_n > 0 and len(discovered_vendors) >= top_n * 2:
-                break
 
         # Also include vendors from Hub profiles that might not have BC invoices yet
         hub_vendors = await db.vendor_invoice_profiles.find(
             {"bc_invoice_count": {"$gte": 1}},
-            {"_id": 0, "vendor_no": 1, "vendor_name": 1}
+            {"_id": 0, "vendor_no": 1, "vendor_name": 1, "bc_invoice_count": 1}
         ).to_list(500)
         for v in hub_vendors:
             vno = v.get("vendor_no", "")
             if vno and vno not in discovered_vendors:
-                discovered_vendors[vno] = v
+                discovered_vendors[vno] = {
+                    **v,
+                    "invoice_count": v.get("bc_invoice_count", 0),
+                }
 
-        # Sort by name and limit to top_n
-        all_vendors = sorted(discovered_vendors.values(), key=lambda x: x.get("vendor_name", ""))
+        # Sort by invoice count DESC (highest volume vendors first) and limit to top_n
+        all_vendors = sorted(discovered_vendors.values(), key=lambda x: x.get("invoice_count", 0), reverse=True)
         if top_n > 0:
             all_vendors = all_vendors[:top_n]
 

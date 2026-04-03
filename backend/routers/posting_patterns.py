@@ -784,6 +784,34 @@ async def create_draft_from_template(doc_id: str, force: bool = Query(False)):
         return {"success": False, "error": str(e)}
 
 
+@router.post("/auto-draft-queue")
+async def run_auto_draft_queue(limit: int = Query(50, le=200)):
+    """
+    Process the ReadyForPost queue through the confidence gate.
+    Automatically creates DRAFT Purchase Invoices for qualifying documents
+    (high-confidence vendor templates, min invoices met, vendor not blocked).
+
+    Safety: Only creates DRAFT PIs. Never posts to the ledger.
+    """
+    db = get_db()
+    from services.ap_auto_post_service import process_auto_draft_queue
+    result = await process_auto_draft_queue(db, limit=limit)
+    return result
+
+
+@router.get("/auto-draft-eligibility/{doc_id}")
+async def check_document_draft_eligibility(doc_id: str):
+    """Check if a specific document qualifies for auto-draft PI creation."""
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        return {"error": "Document not found", "eligible": False}
+
+    from services.ap_auto_post_service import check_auto_draft_eligibility
+    eligibility = await check_auto_draft_eligibility(doc, db)
+    return eligibility
+
+
 @router.get("/vendor-summary")
 async def get_vendor_posting_summary(limit: int = Query(50, le=200)):
     """
@@ -1358,7 +1386,21 @@ def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
 
     # --- Single-line vendors: primary only, simple pattern ---
     # BUT: in trace mode, if the human used more lines, go multi-line instead
-    if typical_count <= 1 and trace_human_count <= 1:
+    # ALSO: if the vendor has high-presence surcharges, bump to multi-line
+    has_high_presence_surcharges = any(
+        lt.get("slot_type") == "surcharge" and lt.get("invoice_presence_rate", 0) >= 0.50
+        for lt in all_templates
+    )
+    effective_typical = typical_count
+    if has_high_presence_surcharges and typical_count <= 1:
+        # Surcharges with ≥50% presence should always be emitted alongside the primary
+        surcharge_count = sum(
+            1 for lt in all_templates
+            if lt.get("slot_type") == "surcharge" and lt.get("invoice_presence_rate", 0) >= 0.50
+        )
+        effective_typical = max(typical_count, 1 + surcharge_count)
+
+    if effective_typical <= 1 and trace_human_count <= 1:
         eligible = [lt for lt in all_templates if lt.get("rank") == "primary"]
         if not eligible:
             eligible = sorted(all_templates, key=lambda x: x.get("usage_rate", 0), reverse=True)[:1]
@@ -1443,15 +1485,15 @@ def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
                 selected.append(non_zero_others[0])
 
     # Add zero-cost optional items (like Z-POP) as structural fillers
-    if len(selected) < max(typical_count, trace_human_count):
+    if len(selected) < max(effective_typical, trace_human_count):
         zero_others = [o for o in other if o.get("is_zero_cost", False) and o not in selected]
         for zo in zero_others:
-            if len(selected) >= max(typical_count, trace_human_count):
+            if len(selected) >= max(effective_typical, trace_human_count):
                 break
             selected.append(zo)
 
     # Cap at target count
-    target_count = max(typical_count, trace_human_count - comment_slots_needed) if trace_human_count > 0 else typical_count
+    target_count = max(effective_typical, trace_human_count - comment_slots_needed) if trace_human_count > 0 else effective_typical
     selected = selected[:target_count]
 
     lines = _build_lines_from_templates(
@@ -1467,7 +1509,7 @@ def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
     trace_comment_count = comment_slots_needed if trace_human_count > 0 else 0
     target_comments = max(typical_comments, trace_comment_count)
     if target_comments > 0:
-        target_total = max(typical_count, trace_human_count)
+        target_total = max(effective_typical, trace_human_count)
         room = target_total - len(lines)
         top_descs = comment_info.get("top_descriptions", [])
         for i in range(min(target_comments, room)):

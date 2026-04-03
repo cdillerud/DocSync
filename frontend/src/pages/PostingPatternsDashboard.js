@@ -10,7 +10,7 @@ import {
 import { ScrollArea } from '../components/ui/scroll-area';
 import {
   Brain, RefreshCw, FileText, CheckCircle2, AlertTriangle, ChevronRight,
-  Settings2, Play, Eye, Loader2, ArrowUpDown, Shield
+  Settings2, Play, Eye, Loader2, ArrowUpDown, Shield, Zap
 } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -315,6 +315,8 @@ export default function PostingPatternsDashboard() {
   const [previewData, setPreviewData] = useState(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [autoDrafting, setAutoDrafting] = useState(false);
+  const [autoDraftResult, setAutoDraftResult] = useState(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -346,6 +348,22 @@ export default function PostingPatternsDashboard() {
       console.error(err);
     }
     setAnalyzing(false);
+  };
+
+  const handleRunAutoDraftQueue = async () => {
+    setAutoDrafting(true);
+    setAutoDraftResult(null);
+    try {
+      const res = await fetch(`${API}/api/posting-patterns/auto-draft-queue?limit=50`, { method: 'POST' });
+      if (res.ok) {
+        const result = await res.json();
+        setAutoDraftResult(result);
+        fetchData();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+    setAutoDrafting(false);
   };
 
   const handlePreview = async (docId) => {
@@ -408,6 +426,23 @@ export default function PostingPatternsDashboard() {
           <Button variant="outline" size="sm" onClick={fetchData} data-testid="refresh-btn">
             <RefreshCw className="w-4 h-4 mr-1" />Refresh
           </Button>
+          {settings.auto_post_enabled && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleRunAutoDraftQueue}
+              disabled={autoDrafting}
+              className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400"
+              data-testid="auto-draft-queue-btn"
+            >
+              {autoDrafting ? (
+                <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+              ) : (
+                <Zap className="w-4 h-4 mr-1" />
+              )}
+              Auto-Draft Queue
+            </Button>
+          )}
           <Button size="sm" onClick={handleAnalyzeTop} disabled={analyzing || analysisStatus?.running} data-testid="analyze-top-btn">
             {analyzing || analysisStatus?.running ? (
               <Loader2 className="w-4 h-4 mr-1 animate-spin" />
@@ -432,6 +467,35 @@ export default function PostingPatternsDashboard() {
           icon={RefreshCw}
         />
       </div>
+
+      {/* Auto-Draft Result Banner */}
+      {autoDraftResult && (
+        <div className="p-3 rounded-lg border bg-card" data-testid="auto-draft-result">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Zap className="w-4 h-4 text-emerald-500" />
+              <span className="text-sm font-medium">
+                Auto-Draft: {autoDraftResult.drafted} drafted, {autoDraftResult.skipped} skipped, {autoDraftResult.errors} errors
+                {autoDraftResult.processed === 0 && ' (no documents in queue)'}
+              </span>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => setAutoDraftResult(null)} className="text-xs h-6">
+              Dismiss
+            </Button>
+          </div>
+          {autoDraftResult.details?.length > 0 && autoDraftResult.drafted > 0 && (
+            <div className="mt-2 space-y-1">
+              {autoDraftResult.details.filter(d => d.drafted).map((d, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                  <span className="font-mono">{d.vendor_no}</span>
+                  <span>{d.reason}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Vendor Profiles (2/3 width) */}

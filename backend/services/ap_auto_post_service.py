@@ -11,14 +11,23 @@ Dead simple rules:
   ANY fail → NEEDS_REVIEW
 
 After human review + "Mark Ready" → AUTO-POST
+
+Phase 2 — Confidence-Gated Auto-Draft:
+  When a document reaches ReadyForPost and the vendor has a
+  HIGH-confidence posting template (learned from BC history),
+  automatically create a DRAFT Purchase Invoice in BC.
 """
 
 import logging
+import os
 import uuid
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Tuple
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+# Confidence level ordering
+CONFIDENCE_LEVELS = {"low": 1, "medium": 2, "high": 3}
 
 
 def check_ap_ready_to_post(doc: dict, vendor_profile: dict = None, source: str = "auto") -> Tuple[bool, str, list]:
@@ -197,7 +206,20 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
         # Auto-confirm: Record successful automation as positive feedback
         await _record_success_feedback(db, doc_id, "ReadyForPost", source)
 
-        return {"success": True, "posted": False, "reason": "BC writes disabled", "status": "ReadyForPost"}
+        # Phase 2: Try auto-drafting if confidence gate passes
+        auto_draft_result = None
+        try:
+            auto_draft_result = await attempt_auto_draft_pi(doc_id, db, source="pipeline_auto_draft")
+            if auto_draft_result.get("drafted"):
+                logger.info("[AP Auto-Post] Auto-drafted PI %s for %s",
+                            auto_draft_result.get("bc_record_no", "?"), doc_id[:8])
+        except Exception as ad_err:
+            logger.debug("[AP Auto-Post] Auto-draft check failed (non-blocking): %s", ad_err)
+
+        return {
+            "success": True, "posted": False, "reason": "BC writes disabled", "status": "ReadyForPost",
+            "auto_draft": auto_draft_result,
+        }
 
     # Actually post to BC
     try:
@@ -389,3 +411,245 @@ async def _record_success_feedback(db, doc_id: str, outcome: str, source: str):
         logger.info("[AP Auto-Post] Recorded success feedback for %s (%s)", doc_id[:8], outcome)
     except Exception as e:
         logger.debug("[AP Auto-Post] Success feedback recording failed (non-blocking): %s", e)
+
+
+
+# =============================================================================
+# Phase 2: Confidence-Gated Auto-Draft PI Creation
+# =============================================================================
+
+async def _load_auto_post_settings(db) -> dict:
+    """Load auto-post settings from DB."""
+    settings = await db.auto_post_settings.find_one({"_id": "global"}) or {}
+    return {
+        "auto_post_enabled": settings.get("auto_post_enabled", False),
+        "min_confidence": settings.get("min_confidence", "high"),
+        "min_invoices_analyzed": settings.get("min_invoices_analyzed", 10),
+        "require_po_match": settings.get("require_po_match", True),
+        "allowed_vendors": settings.get("allowed_vendors", []),
+        "blocked_vendors": settings.get("blocked_vendors", []),
+    }
+
+
+def _confidence_meets_threshold(confidence: str, min_confidence: str) -> bool:
+    """Check if a confidence level meets or exceeds the minimum threshold."""
+    return CONFIDENCE_LEVELS.get(confidence, 0) >= CONFIDENCE_LEVELS.get(min_confidence, 3)
+
+
+async def check_auto_draft_eligibility(doc: dict, db) -> Dict:
+    """
+    Check if a ReadyForPost document qualifies for automatic draft PI creation.
+
+    Returns:
+        {
+            "eligible": bool,
+            "reason": str,
+            "vendor_no": str,
+            "template_confidence": str,
+            "invoices_analyzed": int,
+        }
+    """
+    doc_id = doc.get("id", "")
+    vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
+
+    # Gate 1: Must have a vendor number
+    if not vendor_no:
+        return {"eligible": False, "reason": "No vendor number resolved", "vendor_no": "", "template_confidence": "none", "invoices_analyzed": 0}
+
+    # Gate 2: Must not already have a draft PI
+    if doc.get("bc_purchase_invoice"):
+        existing_no = doc["bc_purchase_invoice"].get("bc_record_no", "?")
+        return {"eligible": False, "reason": f"Draft PI already exists: {existing_no}", "vendor_no": vendor_no, "template_confidence": "n/a", "invoices_analyzed": 0}
+
+    # Gate 3: Load settings
+    settings = await _load_auto_post_settings(db)
+    if not settings["auto_post_enabled"]:
+        return {"eligible": False, "reason": "Auto-post is disabled in settings", "vendor_no": vendor_no, "template_confidence": "n/a", "invoices_analyzed": 0}
+
+    # Gate 4: Vendor not blocked
+    if vendor_no in settings.get("blocked_vendors", []):
+        return {"eligible": False, "reason": f"Vendor {vendor_no} is in blocked list", "vendor_no": vendor_no, "template_confidence": "n/a", "invoices_analyzed": 0}
+
+    # Gate 5: If allowed_vendors is set, vendor must be in it
+    allowed = settings.get("allowed_vendors", [])
+    if allowed and vendor_no not in allowed:
+        return {"eligible": False, "reason": f"Vendor {vendor_no} not in allowed list", "vendor_no": vendor_no, "template_confidence": "n/a", "invoices_analyzed": 0}
+
+    # Gate 6: Load posting profile
+    profile = await db.posting_pattern_analysis.find_one(
+        {"vendor_no": vendor_no, "status": "analyzed"},
+        {"_id": 0, "posting_template": 1, "invoices_analyzed": 1}
+    )
+    if not profile:
+        return {"eligible": False, "reason": f"No posting profile for vendor {vendor_no}", "vendor_no": vendor_no, "template_confidence": "none", "invoices_analyzed": 0}
+
+    template = profile.get("posting_template", {})
+    confidence = template.get("confidence", "low")
+    invoices_analyzed = profile.get("invoices_analyzed", 0)
+
+    # Gate 7: Confidence threshold
+    if not _confidence_meets_threshold(confidence, settings["min_confidence"]):
+        return {"eligible": False, "reason": f"Template confidence '{confidence}' below threshold '{settings['min_confidence']}'", "vendor_no": vendor_no, "template_confidence": confidence, "invoices_analyzed": invoices_analyzed}
+
+    # Gate 8: Minimum invoices analyzed
+    if invoices_analyzed < settings["min_invoices_analyzed"]:
+        return {"eligible": False, "reason": f"Only {invoices_analyzed} invoices analyzed (need {settings['min_invoices_analyzed']})", "vendor_no": vendor_no, "template_confidence": confidence, "invoices_analyzed": invoices_analyzed}
+
+    return {
+        "eligible": True,
+        "reason": f"All gates passed: {confidence} confidence, {invoices_analyzed} invoices analyzed",
+        "vendor_no": vendor_no,
+        "template_confidence": confidence,
+        "invoices_analyzed": invoices_analyzed,
+    }
+
+
+async def attempt_auto_draft_pi(doc_id: str, db, source: str = "confidence_gate") -> Dict:
+    """
+    Attempt to automatically create a DRAFT Purchase Invoice for a ReadyForPost document.
+
+    This is the Phase 2 confidence gate:
+    1. Check eligibility (settings, vendor profile, confidence threshold)
+    2. If eligible, create a DRAFT PI using the learned posting template
+    3. Record the result as an event
+
+    SAFETY: Only creates DRAFT Purchase Invoices. Never posts to the ledger.
+
+    Returns: {success, drafted, reason, bc_record_no, eligibility}
+    """
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        return {"success": False, "drafted": False, "reason": "Document not found"}
+
+    # Check eligibility
+    eligibility = await check_auto_draft_eligibility(doc, db)
+
+    if not eligibility["eligible"]:
+        logger.debug("[Auto-Draft] Skipped %s: %s", doc_id[:8], eligibility["reason"])
+        return {
+            "success": True,
+            "drafted": False,
+            "reason": eligibility["reason"],
+            "eligibility": eligibility,
+        }
+
+    # Eligible — create the draft PI
+    logger.info("[Auto-Draft] Creating draft PI for %s (vendor=%s, confidence=%s)",
+                doc_id[:8], eligibility["vendor_no"], eligibility["template_confidence"])
+
+    try:
+        from routers.gpi_integration import create_purchase_invoice_from_document
+        result = await create_purchase_invoice_from_document(doc_id)
+
+        if result.get("success") or result.get("already_exists"):
+            bc_record_no = result.get("bc_record_no", "")
+            now = datetime.now(timezone.utc).isoformat()
+
+            # Tag the document as auto-drafted
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    "auto_draft_created": True,
+                    "auto_draft_source": source,
+                    "auto_draft_at": now,
+                    "auto_draft_confidence": eligibility["template_confidence"],
+                    "auto_draft_bc_record_no": bc_record_no,
+                }}
+            )
+
+            # Record event
+            await _write_event(db, doc_id, "auto_draft.pi.created", {
+                "bc_record_no": bc_record_no,
+                "vendor_no": eligibility["vendor_no"],
+                "confidence": eligibility["template_confidence"],
+                "invoices_analyzed": eligibility["invoices_analyzed"],
+                "source": source,
+            })
+
+            logger.info("[Auto-Draft] SUCCESS: Draft PI %s for %s", bc_record_no, doc_id[:8])
+            return {
+                "success": True,
+                "drafted": True,
+                "reason": f"Draft PI {bc_record_no} created automatically",
+                "bc_record_no": bc_record_no,
+                "already_exists": result.get("already_exists", False),
+                "eligibility": eligibility,
+            }
+        else:
+            error_msg = result.get("error_message") or result.get("error") or "Unknown error"
+            logger.warning("[Auto-Draft] BC creation failed for %s: %s", doc_id[:8], error_msg)
+            return {
+                "success": True,
+                "drafted": False,
+                "reason": f"BC draft creation failed: {error_msg}",
+                "eligibility": eligibility,
+            }
+
+    except Exception as e:
+        logger.error("[Auto-Draft] Exception for %s: %s", doc_id[:8], str(e))
+        return {
+            "success": False,
+            "drafted": False,
+            "reason": f"Error: {str(e)}",
+            "eligibility": eligibility,
+        }
+
+
+async def process_auto_draft_queue(db, limit: int = 50) -> Dict:
+    """
+    Process all ReadyForPost documents through the confidence gate.
+    Creates draft PIs for qualifying documents.
+
+    Returns summary: {processed, drafted, skipped, errors, details}
+    """
+    settings = await _load_auto_post_settings(db)
+    if not settings["auto_post_enabled"]:
+        return {
+            "processed": 0, "drafted": 0, "skipped": 0, "errors": 0,
+            "reason": "Auto-post is disabled",
+            "details": [],
+        }
+
+    # Find ReadyForPost documents without existing drafts
+    docs = await db.hub_documents.find(
+        {
+            "$or": [
+                {"status": "ReadyForPost"},
+                {"workflow_status": "ready_for_post"},
+            ],
+            "bc_purchase_invoice": {"$exists": False},
+        },
+        {"_id": 0, "id": 1, "bc_vendor_number": 1, "vendor_no": 1}
+    ).limit(limit).to_list(limit)
+
+    results = {"processed": 0, "drafted": 0, "skipped": 0, "errors": 0, "details": []}
+
+    for doc_stub in docs:
+        doc_id = doc_stub.get("id", "")
+        if not doc_id:
+            continue
+
+        results["processed"] += 1
+        try:
+            result = await attempt_auto_draft_pi(doc_id, db, source="batch_queue")
+            if result.get("drafted"):
+                results["drafted"] += 1
+            else:
+                results["skipped"] += 1
+            results["details"].append({
+                "doc_id": doc_id[:8],
+                "vendor_no": doc_stub.get("bc_vendor_number") or doc_stub.get("vendor_no", ""),
+                "drafted": result.get("drafted", False),
+                "reason": result.get("reason", ""),
+                "bc_record_no": result.get("bc_record_no", ""),
+            })
+        except Exception as e:
+            results["errors"] += 1
+            results["details"].append({
+                "doc_id": doc_id[:8],
+                "error": str(e),
+            })
+
+    logger.info("[Auto-Draft Queue] Processed %d: drafted=%d, skipped=%d, errors=%d",
+                results["processed"], results["drafted"], results["skipped"], results["errors"])
+    return results

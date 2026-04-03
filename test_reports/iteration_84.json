@@ -66,7 +66,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://ap-inbox-refine.preview.emergentagent.com"
+    "api_url": "https://invoice-autopilot-12.preview.emergentagent.com"
   },
   "seed_data_used": {
     "drop_ship_so": "SO-TEST-DROP-001 (existing drop-ship with PO draft PO-DS-20260314201055-FD1734, vendor shipment VSH-8821, invoices, operational_status=complete)",

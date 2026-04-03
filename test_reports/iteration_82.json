@@ -65,7 +65,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://ap-inbox-refine.preview.emergentagent.com"
+    "api_url": "https://invoice-autopilot-12.preview.emergentagent.com"
   },
   "seed_data_used": "SO-TEST (Hormel Foods) - fully released and invoiced (operational_status=complete, INV-30482). SO-TEST-001 has 25 remaining committed on TEST-COMMIT-7CC683 (operational_status=partially_shipped). SO-107040 has 193 remaining on SPAM-12OZ (operational_status=partially_shipped). SO-TEST invoice-log has 3 entries including INV-TEST-82-SUCCESS created during testing.",
   "retest_needed": false,

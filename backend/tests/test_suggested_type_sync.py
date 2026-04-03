@@ -28,7 +28,7 @@ import sys
 # Add backend to path for direct imports
 sys.path.insert(0, '/app/backend')
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://ap-inbox-refine.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://invoice-autopilot-12.preview.emergentagent.com').rstrip('/')
 
 
 class TestHealthEndpoint:

@@ -817,6 +817,149 @@ async def check_document_draft_eligibility(doc_id: str):
     return eligibility
 
 
+@router.get("/compare-draft/{draft_no}")
+async def compare_draft_vs_production(
+    draft_no: str,
+    vendor_no: str = Query("", description="Vendor number (auto-detected from draft if blank)"),
+    prod_count: int = Query(3, le=10, description="Number of production PIs to compare against"),
+):
+    """
+    Compare an auto-drafted PI (in Sandbox) against actual posted PIs (in Production)
+    for the same vendor. Shows header and line-by-line comparison.
+    """
+    import httpx
+    import os
+
+    bc = get_bc_service()
+    db = get_db()
+
+    BC_API_BASE = "https://api.businesscentral.dynamics.com/v2.0"
+    BC_TENANT_ID = os.environ.get("TENANT_ID", "")
+    BC_WRITE_ENV = os.environ.get("BC_WRITE_ENVIRONMENT") or os.environ.get("BC_SANDBOX_ENVIRONMENT", "Sandbox_11_3_2025")
+    BC_READ_ENV = os.environ.get("BC_READ_ENVIRONMENT") or os.environ.get("BC_ENVIRONMENT", "Production")
+
+    if not BC_TENANT_ID:
+        return {"error": "BC credentials not configured"}
+
+    # Step 1: Fetch the draft PI header from Sandbox by number
+    from services.gpi_integration_service import _get_token, _resolve_company_id, REQUEST_TIMEOUT
+    token = await _get_token()
+    company_id = await _resolve_company_id()
+
+    sandbox_url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENV}/api/v2.0/companies({company_id})/purchaseInvoices"
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        resp = await client.get(sandbox_url, headers={
+            "Authorization": f"Bearer {token}", "Accept": "application/json"
+        }, params={"$filter": f"number eq '{draft_no}'"})
+        if resp.status_code != 200:
+            return {"error": f"Failed to fetch draft PI {draft_no}: {resp.status_code}", "detail": resp.text[:300]}
+        drafts = resp.json().get("value", [])
+        if not drafts:
+            return {"error": f"Draft PI {draft_no} not found in Sandbox"}
+        draft = drafts[0]
+
+    draft_vendor = vendor_no or draft.get("vendorNumber", "")
+    draft_system_id = draft.get("id", "")
+
+    # Step 2: Fetch draft PI lines from Sandbox
+    draft_lines = []
+    if draft_system_id:
+        lines_url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENV}/api/v2.0/companies({company_id})/purchaseInvoices({draft_system_id})/purchaseInvoiceLines"
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+            resp = await client.get(lines_url, headers={
+                "Authorization": f"Bearer {token}", "Accept": "application/json"
+            })
+            if resp.status_code == 200:
+                draft_lines = resp.json().get("value", [])
+
+    # Step 3: Fetch production PIs for the same vendor
+    prod_pis = []
+    if draft_vendor:
+        result = await bc.get_posted_purchase_invoices(vendor_id=draft_vendor, limit=prod_count)
+        prod_invoices = result.get("invoices", [])
+
+        # Also check historical posted
+        if len(prod_invoices) < prod_count:
+            hist = await bc.get_historical_posted_purchase_invoices(vendor_id=draft_vendor, limit=prod_count)
+            prod_invoices.extend(hist.get("invoices", [])[:prod_count - len(prod_invoices)])
+
+        # Fetch lines for each production PI
+        for pi in prod_invoices[:prod_count]:
+            pi_id = pi.get("id", "")
+            pi_lines = []
+            if pi_id:
+                try:
+                    pi_lines = await bc.get_purchase_invoice_lines(pi_id)
+                except Exception:
+                    pass
+            prod_pis.append({
+                "number": pi.get("number", ""),
+                "vendor_invoice_no": pi.get("vendorInvoiceNumber", ""),
+                "invoice_date": pi.get("invoiceDate", ""),
+                "status": pi.get("status", ""),
+                "total_excl_tax": pi.get("totalAmountExcludingTax", 0),
+                "total_incl_tax": pi.get("totalAmountIncludingTax", 0),
+                "line_count": len(pi_lines),
+                "lines": [
+                    {
+                        "line_no": l.get("sequence", l.get("lineNo", idx)),
+                        "type": l.get("lineObjectNumber", l.get("lineType", "")),
+                        "account_no": l.get("accountId", l.get("lineObjectNumber", "")),
+                        "description": l.get("description", ""),
+                        "quantity": l.get("quantity", 0),
+                        "unit_cost": l.get("unitCost", l.get("directUnitCost", 0)),
+                        "amount": l.get("totalAmount", l.get("lineAmount", l.get("amount", 0))),
+                    }
+                    for idx, l in enumerate(pi_lines)
+                ],
+            })
+
+    # Step 4: Build comparison summary
+    draft_summary = {
+        "number": draft.get("number", ""),
+        "vendor_no": draft_vendor,
+        "vendor_name": draft.get("vendorName", ""),
+        "vendor_invoice_no": draft.get("vendorInvoiceNumber", ""),
+        "invoice_date": draft.get("invoiceDate", ""),
+        "posting_date": draft.get("postingDate", ""),
+        "status": draft.get("status", "Draft"),
+        "total_excl_tax": draft.get("totalAmountExcludingTax", 0),
+        "total_incl_tax": draft.get("totalAmountIncludingTax", 0),
+        "line_count": len(draft_lines),
+        "lines": [
+            {
+                "line_no": l.get("sequence", l.get("lineNo", idx)),
+                "type": l.get("lineObjectNumber", l.get("lineType", "")),
+                "account_no": l.get("accountId", l.get("lineObjectNumber", "")),
+                "description": l.get("description", ""),
+                "quantity": l.get("quantity", 0),
+                "unit_cost": l.get("unitCost", l.get("directUnitCost", 0)),
+                "amount": l.get("totalAmount", l.get("lineAmount", l.get("amount", 0))),
+            }
+            for idx, l in enumerate(draft_lines)
+        ],
+    }
+
+    # Score: how similar is the draft to production patterns?
+    match_notes = []
+    if prod_pis:
+        avg_prod_lines = sum(p["line_count"] for p in prod_pis) / len(prod_pis)
+        if draft_summary["line_count"] == 0 and avg_prod_lines > 0:
+            match_notes.append(f"Draft has 0 lines but production averages {avg_prod_lines:.0f} lines — lines may not have been added yet")
+        elif abs(draft_summary["line_count"] - avg_prod_lines) <= 1:
+            match_notes.append(f"Line count matches production (draft={draft_summary['line_count']}, prod avg={avg_prod_lines:.0f})")
+        else:
+            match_notes.append(f"Line count differs (draft={draft_summary['line_count']}, prod avg={avg_prod_lines:.0f})")
+
+    return {
+        "draft": draft_summary,
+        "production_samples": prod_pis,
+        "production_count": len(prod_pis),
+        "vendor_no": draft_vendor,
+        "match_notes": match_notes,
+    }
+
+
 @router.get("/vendor-summary")
 async def get_vendor_posting_summary(limit: int = Query(50, le=200)):
     """

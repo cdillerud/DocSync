@@ -116,8 +116,18 @@
 - **Create Draft PI**: One-click draft creation using learned posting templates
 - **Vendor Summary**: Aggregated view of all analyzed vendors with auto-post eligibility status
 - **Template-Enhanced Lines**: `_build_pi_lines_with_mapping` now uses posting templates for reference patterns (BOL/freight)
-- **Endpoints**: `/settings` (GET/PUT), `/ready-queue`, `/vendor-summary`, `/draft-preview/{doc_id}`, `/create-draft/{doc_id}`
-- **Frontend**: `PostingPatternsDashboard.js` with stats, vendor profiles, ready queue, settings panel, confidence breakdown
+- **Confidence-Gated Auto-Draft**: `ap_auto_post_service.py` now auto-creates DRAFT PIs for ReadyForPost documents when:
+  - Auto-post is enabled in settings
+  - Vendor has a posting profile meeting the min confidence threshold
+  - Vendor has enough invoices analyzed
+  - Vendor is not in blocked list
+  - No duplicate draft exists
+- **Batch Auto-Draft Queue**: `POST /auto-draft-queue` processes all ReadyForPost docs through the confidence gate
+- **Eligibility Check**: `GET /auto-draft-eligibility/{doc_id}` checks if a specific doc qualifies
+- **Pipeline Integration**: When a document reaches ReadyForPost via `attempt_ap_auto_post`, the confidence gate automatically fires
+- **FRACHT Surcharge Fix**: `_simulate_template_lines` now detects surcharges with ≥50% presence rate and bumps to multi-line mode, fixing production accuracy for vendors like FRACHT (TARIFF-DS now included)
+- **Endpoints**: `/settings` (GET/PUT), `/ready-queue`, `/vendor-summary`, `/draft-preview/{doc_id}`, `/create-draft/{doc_id}`, `/auto-draft-queue`, `/auto-draft-eligibility/{doc_id}`
+- **Frontend**: `PostingPatternsDashboard.js` with stats, vendor profiles, ready queue, settings panel, confidence breakdown, Auto-Draft Queue button with result banner
 
 ### Posting Pattern Analyzer Tightening (Complete - Apr 2026)
 - **Line sample: 20 → 75**: Analyzes lines from up to 75 invoices (was 20), ensuring vendors with 1-line invoices reach sufficient line counts for high confidence
@@ -138,10 +148,12 @@
 - New `/api/knowledge-seed/close-all-gaps` and `/learning-proof/{vendor_id}` endpoints
 
 ## Backlog
-- P0: Deploy to production and run `POST /api/posting-patterns/analyze-top?top_n=20` to build profiles for top 20 vendors
+- P0: Deploy to production and run `POST /api/posting-patterns/analyze-top?top_n=20` to build profiles, then `POST /api/posting-patterns/auto-draft-queue` to auto-draft qualifying invoices
 - P1: Phase 3 — BC Draft Review + Post flow (reviewer approves draft PI in BC, one-click post)
+- P1: Review Queue UI — Frontend tab to review/approve auto-drafted PIs with correction feedback loop
 - P1: Rep Overrides management UI
 - P1: Teams Adaptive Card integration
+- P1: FRACHT template tuning — verify TARIFF-DS surcharge fix achieves ≥90% production accuracy on real BC data
 - P2: Stable vendor threshold tuning (lower from 100% to 85%)
 - P2: Auto-delete on max retries (Square9 alignment)
 - P2: Vendor Inventory Dashboard

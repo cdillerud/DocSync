@@ -30,7 +30,7 @@ def get_bc_service():
 
 @router.get("/status")
 async def get_posting_pattern_status():
-    """Get overall posting pattern analysis status."""
+    """Get overall posting pattern analysis status with totals."""
     db = get_db()
 
     total_profiles = await db.posting_pattern_analysis.count_documents({"status": "analyzed"})
@@ -47,16 +47,36 @@ async def get_posting_pattern_status():
         "posting_template.confidence": "low"
     })
 
+    # Aggregate totals across all vendors
+    totals_pipeline = [
+        {"$match": {"status": "analyzed"}},
+        {"$group": {
+            "_id": None,
+            "total_invoices": {"$sum": "$invoices_analyzed"},
+            "total_lines": {"$sum": "$lines_analyzed"},
+            "total_learning_events": {"$sum": {"$ifNull": ["$continuous_learning_count", 0]}},
+        }},
+    ]
+    totals = {"total_invoices": 0, "total_lines": 0, "total_learning_events": 0}
+    async for row in db.posting_pattern_analysis.aggregate(totals_pipeline):
+        totals = {
+            "total_invoices": row.get("total_invoices", 0),
+            "total_lines": row.get("total_lines", 0),
+            "total_learning_events": row.get("total_learning_events", 0),
+        }
+
     # Get top 10 vendors by invoice count
     top_vendors = await db.posting_pattern_analysis.find(
         {"status": "analyzed"},
         {"_id": 0, "vendor_no": 1, "vendor_names_seen": 1,
          "invoices_analyzed": 1, "lines_analyzed": 1,
-         "posting_template.confidence": 1, "amount_stats.mean": 1}
+         "posting_template.confidence": 1, "posting_template.consistency_score": 1,
+         "amount_stats.mean": 1, "continuous_learning_count": 1, "last_learned_at": 1}
     ).sort("invoices_analyzed", -1).limit(10).to_list(10)
 
     return {
         "total_profiles": total_profiles,
+        "totals": totals,
         "confidence_distribution": {
             "high": high_conf,
             "medium": medium_conf,
@@ -69,7 +89,10 @@ async def get_posting_pattern_status():
                 "invoices_analyzed": v.get("invoices_analyzed", 0),
                 "lines_analyzed": v.get("lines_analyzed", 0),
                 "confidence": v.get("posting_template", {}).get("confidence", "?"),
+                "consistency": v.get("posting_template", {}).get("consistency_score", 0),
                 "avg_amount": v.get("amount_stats", {}).get("mean", 0),
+                "continuous_learns": v.get("continuous_learning_count", 0),
+                "last_learned": v.get("last_learned_at", ""),
             }
             for v in top_vendors
         ],

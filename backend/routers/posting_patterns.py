@@ -961,6 +961,7 @@ async def trace_invoice_comparison(
         "reference_number": human_ref_info.get("ref", ""),
         "detected_pattern": human_ref_info.get("pattern", ""),
         "per_line_refs": human_ref_info.get("per_line_refs", []),
+        "trace_human_line_count": len(human_lines),
     }
     ai_lines = _simulate_template_lines(template, ef)
     ai_summary = _build_line_summary(ai_lines)
@@ -1119,6 +1120,7 @@ async def batch_trace_invoices(
             "reference_number": human_ref_info.get("ref", ""),
             "detected_pattern": human_ref_info.get("pattern", ""),
             "per_line_refs": human_ref_info.get("per_line_refs", []),
+            "trace_human_line_count": len(human_lines),
         }
         ai_lines = _simulate_template_lines(template, ef)
         ai_summary = _build_line_summary(ai_lines)
@@ -1344,9 +1346,11 @@ def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
     all_templates = template.get("line_templates", [])
 
     per_line_refs = extracted_fields.get("per_line_refs", None)
+    trace_human_count = extracted_fields.get("trace_human_line_count", 0)
 
     # --- Single-line vendors: primary only, simple pattern ---
-    if typical_count <= 1:
+    # BUT: in trace mode, if the human used more lines, go multi-line instead
+    if typical_count <= 1 and trace_human_count <= 1:
         eligible = [lt for lt in all_templates if lt.get("rank") == "primary"]
         if not eligible:
             eligible = sorted(all_templates, key=lambda x: x.get("usage_rate", 0), reverse=True)[:1]
@@ -1401,20 +1405,6 @@ def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
         if non_zero_others:
             selected.append(non_zero_others[0])
 
-    # GENERAL FALLBACK: Fill remaining slots from `other` items (frequent/optional)
-    # sorted by presence rate. This catches items like TARIFF-DS that aren't
-    # classified as product_candidates or surcharges but still appear regularly.
-    if len(selected) < typical_count:
-        remaining_others = sorted(
-            [o for o in other if o not in selected],
-            key=lambda x: x.get("invoice_presence_rate", 0),
-            reverse=True,
-        )
-        for ro in remaining_others:
-            if len(selected) >= typical_count:
-                break
-            selected.append(ro)
-
     # Add zero-cost optional items (like Z-POP) as structural fillers
     if len(selected) < typical_count:
         zero_others = [o for o in other if o.get("is_zero_cost", False) and o not in selected]
@@ -1425,6 +1415,25 @@ def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
 
     # Cap at typical_count
     selected = selected[:typical_count]
+
+    # --- TRACE MODE: Adaptive line count ---
+    # When comparing against a specific human invoice, if the human used MORE lines
+    # than typical_count, try to fill extra slots from unused template items.
+    # This handles vendors like FRACHT where some invoices have 2 lines (freight + tariff)
+    # but the median line count is 1.
+    trace_human_count = extracted_fields.get("trace_human_line_count", 0)
+    if trace_human_count > len(selected):
+        # Find template items not yet selected, sorted by presence rate
+        selected_ids = {(lt.get("item_number") or lt.get("account_number", "")) for lt in selected}
+        unused = [
+            lt for lt in all_templates
+            if (lt.get("item_number") or lt.get("account_number", "")) not in selected_ids
+        ]
+        unused.sort(key=lambda x: x.get("invoice_presence_rate", 0), reverse=True)
+        for ut in unused:
+            if len(selected) >= trace_human_count:
+                break
+            selected.append(ut)
 
     lines = _build_lines_from_templates(
         selected, total_amount, ref_pattern, reference_number,

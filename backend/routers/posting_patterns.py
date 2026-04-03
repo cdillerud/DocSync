@@ -868,3 +868,448 @@ def _confidence_at_or_above(min_level: str) -> list:
         return levels[idx:]
     except ValueError:
         return ["high"]
+
+
+# =============================================================================
+# Invoice Trace: Human vs AI Side-by-Side Comparison
+# =============================================================================
+
+@router.get("/trace/{vendor_no}")
+async def trace_invoice_comparison(
+    vendor_no: str,
+    invoice_index: int = Query(0, ge=0, description="Which invoice to trace (0 = most recent)"),
+):
+    """
+    Trace a REAL posted invoice for a vendor from BC Production and compare
+    how the human actually posted it vs what our AI template would generate.
+    Returns a side-by-side diff with matches, mismatches, and gaps.
+    """
+    db = get_db()
+    bc = get_bc_service()
+    import re
+
+    # 1. Load our learned posting template for this vendor
+    profile = await db.posting_pattern_analysis.find_one(
+        {"vendor_no": vendor_no, "status": "analyzed"},
+        {"_id": 0}
+    )
+
+    template = profile.get("posting_template", {}) if profile else {}
+
+    # 2. Fetch real invoices from BC for this vendor
+    try:
+        pi_result = await bc.get_posted_purchase_invoices(
+            vendor_id=vendor_no, limit=invoice_index + 5, skip=0
+        )
+    except Exception as e:
+        return {"error": f"Failed to fetch invoices from BC: {str(e)}", "vendor_no": vendor_no}
+
+    invoices = pi_result.get("invoices", [])
+
+    # Also try historical endpoint
+    if not invoices or len(invoices) <= invoice_index:
+        try:
+            hist_result = await bc.get_historical_posted_purchase_invoices(
+                vendor_id=vendor_no, limit=invoice_index + 5, skip=0
+            )
+            hist_invoices = hist_result.get("invoices", [])
+            seen = {inv.get("id") for inv in invoices}
+            for inv in hist_invoices:
+                if inv.get("id") not in seen:
+                    invoices.append(inv)
+        except Exception:
+            pass
+
+    if not invoices:
+        return {
+            "error": "No invoices found for this vendor in BC",
+            "vendor_no": vendor_no,
+            "has_profile": bool(profile),
+        }
+
+    if invoice_index >= len(invoices):
+        return {
+            "error": f"Only {len(invoices)} invoices available. Max index: {len(invoices) - 1}",
+            "vendor_no": vendor_no,
+            "total_available": len(invoices),
+        }
+
+    # 3. Get the target invoice and its lines
+    invoice = invoices[invoice_index]
+    inv_id = invoice.get("id", "")
+
+    try:
+        human_lines = await bc.get_purchase_invoice_lines(inv_id)
+    except Exception as e:
+        human_lines = []
+        logger.warning("Failed to get lines for traced invoice %s: %s", inv_id, str(e))
+
+    # 4. Build the "human posted" summary
+    human_summary = _build_line_summary(human_lines)
+
+    # 5. Build what our AI template WOULD generate
+    ef = {
+        "invoice_number": invoice.get("vendorInvoiceNumber", ""),
+        "amount": invoice.get("totalAmountExcludingTax") or invoice.get("totalAmountIncludingTax", 0),
+        "invoice_date": invoice.get("invoiceDate", ""),
+    }
+    ai_lines = _simulate_template_lines(template, ef)
+    ai_summary = _build_line_summary(ai_lines)
+
+    # 6. Compute the diff
+    comparison = _compute_trace_diff(human_lines, human_summary, ai_lines, ai_summary, template)
+
+    return {
+        "vendor_no": vendor_no,
+        "vendor_name": invoice.get("vendorName", ""),
+        "invoice_index": invoice_index,
+        "total_invoices_available": len(invoices),
+        "invoice": {
+            "id": inv_id,
+            "number": invoice.get("number", ""),
+            "vendor_invoice_number": invoice.get("vendorInvoiceNumber", ""),
+            "invoice_date": invoice.get("invoiceDate", ""),
+            "due_date": invoice.get("dueDate", ""),
+            "status": invoice.get("status", ""),
+            "total_excl_tax": invoice.get("totalAmountExcludingTax", 0),
+            "total_incl_tax": invoice.get("totalAmountIncludingTax", 0),
+            "total_tax": invoice.get("totalTaxAmount", 0),
+            "currency": invoice.get("currencyCode", "USD"),
+        },
+        "human_posted": {
+            "line_count": len(human_lines),
+            "lines": [
+                {
+                    "line_type": ln.get("lineType", ""),
+                    "item_or_account": ln.get("lineObjectNumber", ""),
+                    "description": ln.get("description", ""),
+                    "description2": ln.get("description2", ""),
+                    "quantity": ln.get("quantity", 0),
+                    "unit_cost": ln.get("unitCost", 0),
+                    "net_amount": ln.get("netAmount") or ln.get("lineAmount", 0),
+                    "tax_code": ln.get("taxCode", ""),
+                    "uom": ln.get("unitOfMeasureCode", ""),
+                }
+                for ln in human_lines
+            ],
+            "summary": human_summary,
+        },
+        "ai_would_post": {
+            "line_count": len(ai_lines),
+            "lines": [
+                {
+                    "line_type": ln.get("lineType", ""),
+                    "item_or_account": ln.get("lineObjectNumber", ""),
+                    "description": ln.get("description", ""),
+                    "quantity": ln.get("quantity", 0),
+                    "unit_cost": ln.get("unitCost", 0),
+                    "net_amount": ln.get("netAmount", 0),
+                    "tax_code": ln.get("taxCode", ""),
+                    "uom": ln.get("uom", ""),
+                }
+                for ln in ai_lines
+            ],
+            "summary": ai_summary,
+            "template_confidence": template.get("confidence", "none"),
+            "template_consistency": template.get("consistency_score", 0),
+        },
+        "comparison": comparison,
+        "has_profile": bool(profile),
+        "profile_invoices_studied": profile.get("invoices_analyzed", 0) if profile else 0,
+    }
+
+
+@router.get("/trace/{vendor_no}/list")
+async def list_traceable_invoices(vendor_no: str, limit: int = Query(20, le=100)):
+    """List available invoices for tracing for a vendor."""
+    bc = get_bc_service()
+
+    try:
+        pi_result = await bc.get_posted_purchase_invoices(vendor_id=vendor_no, limit=limit)
+    except Exception as e:
+        return {"error": str(e), "vendor_no": vendor_no, "invoices": []}
+
+    invoices = pi_result.get("invoices", [])
+    return {
+        "vendor_no": vendor_no,
+        "count": len(invoices),
+        "invoices": [
+            {
+                "index": i,
+                "number": inv.get("number", ""),
+                "vendor_invoice_number": inv.get("vendorInvoiceNumber", ""),
+                "invoice_date": inv.get("invoiceDate", ""),
+                "status": inv.get("status", ""),
+                "total": inv.get("totalAmountExcludingTax") or inv.get("totalAmountIncludingTax", 0),
+            }
+            for i, inv in enumerate(invoices)
+        ],
+    }
+
+
+def _build_line_summary(lines: list) -> dict:
+    """Summarize invoice lines into comparable dimensions."""
+    if not lines:
+        return {"line_count": 0, "line_types": {}, "items": {}, "gl_accounts": {},
+                "descriptions": [], "tax_codes": {}, "uoms": {}, "total_amount": 0}
+
+    from collections import Counter
+    line_types = Counter()
+    items = Counter()
+    gl_accounts = Counter()
+    descriptions = []
+    tax_codes = Counter()
+    uoms = Counter()
+    total_amount = 0
+
+    for ln in lines:
+        lt = ln.get("lineType", "unknown")
+        line_types[lt] += 1
+        obj = ln.get("lineObjectNumber") or ln.get("item_or_account", "")
+        if obj:
+            if lt == "Item":
+                items[obj] += 1
+            elif lt == "Account":
+                gl_accounts[obj] += 1
+        desc = ln.get("description", "")
+        if desc:
+            descriptions.append(desc)
+        tc = ln.get("taxCode", "")
+        if tc:
+            tax_codes[tc] += 1
+        uom = ln.get("unitOfMeasureCode") or ln.get("uom", "")
+        if uom:
+            uoms[uom] += 1
+        amt = ln.get("netAmount") or ln.get("lineAmount") or ln.get("unitCost", 0) or 0
+        try:
+            total_amount += float(amt)
+        except (ValueError, TypeError):
+            pass
+
+    return {
+        "line_count": len(lines),
+        "line_types": dict(line_types),
+        "items": dict(items),
+        "gl_accounts": dict(gl_accounts),
+        "descriptions": descriptions,
+        "tax_codes": dict(tax_codes),
+        "uoms": dict(uoms),
+        "total_amount": round(total_amount, 2),
+    }
+
+
+def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
+    """Simulate what the AI would generate using the posting template."""
+    if not template or not template.get("line_templates"):
+        # No template — fallback single line
+        try:
+            amount = float(str(extracted_fields.get("amount", 0)).replace("$", "").replace(",", "").strip())
+        except (ValueError, TypeError):
+            amount = 0
+        return [{
+            "lineType": "Account",
+            "lineObjectNumber": "",
+            "description": f"Per invoice {extracted_fields.get('invoice_number', '')}",
+            "quantity": 1,
+            "unitCost": amount,
+            "netAmount": amount,
+            "taxCode": "",
+            "uom": template.get("uom", ""),
+        }]
+
+    lines = []
+    invoice_number = extracted_fields.get("invoice_number", "")
+    try:
+        total_amount = float(str(extracted_fields.get("amount", 0)).replace("$", "").replace(",", "").strip())
+    except (ValueError, TypeError):
+        total_amount = 0
+
+    ref_handling = template.get("reference_handling", {})
+    ref_pattern = ref_handling.get("pattern", "")
+    line_tax = template.get("line_tax_code", {})
+
+    for lt in template.get("line_templates", []):
+        if lt.get("rank") == "rare":
+            continue  # Skip rare items in simulation
+
+        line = {
+            "lineType": lt.get("type", "Item"),
+            "lineObjectNumber": lt.get("account_number") or lt.get("item_number", ""),
+            "quantity": 1,
+            "unitCost": total_amount if lt.get("rank") == "primary" else 0,
+            "netAmount": total_amount if lt.get("rank") == "primary" else 0,
+            "taxCode": line_tax.get("code", ""),
+            "uom": template.get("uom", ""),
+        }
+
+        # Build description based on reference pattern
+        if ref_pattern == "freight_prefix_plus_ref" and invoice_number:
+            line["description"] = f"FREIGHT {invoice_number}"
+        elif ref_pattern == "bol_in_description" and invoice_number:
+            line["description"] = invoice_number
+        elif ref_pattern == "po_prefix_plus_ref" and invoice_number:
+            line["description"] = f"PO {invoice_number}"
+        else:
+            line["description"] = f"Per invoice {invoice_number}" if invoice_number else "Invoice line"
+
+        lines.append(line)
+
+    return lines
+
+
+def _compute_trace_diff(human_lines, human_summary, ai_lines, ai_summary, template) -> dict:
+    """Compute a detailed comparison between human and AI postings."""
+    matches = []
+    mismatches = []
+    gaps = []
+
+    # 1. Line count comparison
+    h_count = human_summary.get("line_count", 0)
+    a_count = ai_summary.get("line_count", 0)
+    if h_count == a_count:
+        matches.append({"dimension": "Line Count", "value": str(h_count), "verdict": "MATCH"})
+    else:
+        mismatches.append({
+            "dimension": "Line Count",
+            "human": str(h_count),
+            "ai": str(a_count),
+            "verdict": "MISMATCH",
+            "note": f"Human used {h_count} lines, AI template would use {a_count}",
+        })
+
+    # 2. Line type comparison
+    h_types = human_summary.get("line_types", {})
+    a_types = ai_summary.get("line_types", {})
+    dominant_h = max(h_types, key=h_types.get) if h_types else "none"
+    dominant_a = max(a_types, key=a_types.get) if a_types else "none"
+    if dominant_h == dominant_a:
+        matches.append({"dimension": "Line Type", "value": dominant_h, "verdict": "MATCH"})
+    else:
+        mismatches.append({
+            "dimension": "Line Type",
+            "human": str(h_types),
+            "ai": str(a_types),
+            "verdict": "MISMATCH",
+        })
+
+    # 3. Item/GL account comparison
+    h_items = set(human_summary.get("items", {}).keys())
+    h_gls = set(human_summary.get("gl_accounts", {}).keys())
+    a_items = set(ai_summary.get("items", {}).keys())
+    a_gls = set(ai_summary.get("gl_accounts", {}).keys())
+    h_all = h_items | h_gls
+    a_all = a_items | a_gls
+    common = h_all & a_all
+    if common:
+        matches.append({"dimension": "Items/GL Accounts", "value": ", ".join(sorted(common)), "verdict": "MATCH"})
+    h_only = h_all - a_all
+    a_only = a_all - h_all
+    if h_only:
+        mismatches.append({
+            "dimension": "Items/GL (Human Only)",
+            "human": ", ".join(sorted(h_only)),
+            "ai": "—",
+            "verdict": "GAP",
+            "note": "Human used these but AI template doesn't include them",
+        })
+    if a_only:
+        mismatches.append({
+            "dimension": "Items/GL (AI Only)",
+            "human": "—",
+            "ai": ", ".join(sorted(a_only)),
+            "verdict": "GAP",
+            "note": "AI template includes these but human didn't use them on this invoice",
+        })
+
+    # 4. Description pattern comparison
+    h_descs = human_summary.get("descriptions", [])
+    a_descs = ai_summary.get("descriptions", [])
+    if h_descs and a_descs:
+        # Check if same pattern type (e.g., both start with FREIGHT)
+        h_first = h_descs[0].strip().upper()[:20] if h_descs else ""
+        a_first = a_descs[0].strip().upper()[:20] if a_descs else ""
+        # Fuzzy: same prefix?
+        h_prefix = h_first.split()[0] if h_first else ""
+        a_prefix = a_first.split()[0] if a_first else ""
+        if h_prefix == a_prefix and h_prefix:
+            matches.append({
+                "dimension": "Description Pattern",
+                "value": f"Both start with '{h_prefix}'",
+                "verdict": "MATCH",
+                "human_example": h_descs[0][:60],
+                "ai_example": a_descs[0][:60],
+            })
+        else:
+            mismatches.append({
+                "dimension": "Description Pattern",
+                "human": h_descs[0][:60] if h_descs else "—",
+                "ai": a_descs[0][:60] if a_descs else "—",
+                "verdict": "MISMATCH",
+            })
+    elif h_descs and not a_descs:
+        gaps.append({"dimension": "Description", "note": "Human has descriptions but AI template doesn't"})
+
+    # 5. Tax code comparison
+    h_tax = human_summary.get("tax_codes", {})
+    a_tax = ai_summary.get("tax_codes", {})
+    if h_tax and a_tax:
+        h_top_tax = max(h_tax, key=h_tax.get)
+        a_top_tax = max(a_tax, key=a_tax.get)
+        if h_top_tax == a_top_tax:
+            matches.append({"dimension": "Tax Code", "value": h_top_tax, "verdict": "MATCH"})
+        else:
+            mismatches.append({
+                "dimension": "Tax Code",
+                "human": h_top_tax,
+                "ai": a_top_tax,
+                "verdict": "MISMATCH",
+            })
+    elif h_tax and not a_tax:
+        gaps.append({"dimension": "Tax Code", "note": f"Human used {list(h_tax.keys())} but AI has no tax code"})
+    elif not h_tax and not a_tax:
+        matches.append({"dimension": "Tax Code", "value": "None (both)", "verdict": "MATCH"})
+
+    # 6. UOM comparison
+    h_uom = human_summary.get("uoms", {})
+    a_uom = ai_summary.get("uoms", {})
+    if h_uom and a_uom:
+        h_top_uom = max(h_uom, key=h_uom.get)
+        a_top_uom = max(a_uom, key=a_uom.get)
+        if h_top_uom == a_top_uom:
+            matches.append({"dimension": "UOM", "value": h_top_uom, "verdict": "MATCH"})
+        else:
+            mismatches.append({"dimension": "UOM", "human": h_top_uom, "ai": a_top_uom, "verdict": "MISMATCH"})
+
+    # 7. Amount comparison
+    h_amt = human_summary.get("total_amount", 0)
+    a_amt = ai_summary.get("total_amount", 0)
+    if h_amt > 0 and a_amt > 0:
+        diff_pct = abs(h_amt - a_amt) / max(h_amt, 1) * 100
+        if diff_pct < 1:
+            matches.append({"dimension": "Total Amount", "value": f"${h_amt:,.2f}", "verdict": "MATCH"})
+        else:
+            mismatches.append({
+                "dimension": "Total Amount",
+                "human": f"${h_amt:,.2f}",
+                "ai": f"${a_amt:,.2f}",
+                "verdict": "CLOSE" if diff_pct < 5 else "MISMATCH",
+                "note": f"{diff_pct:.1f}% difference",
+            })
+
+    # Overall score
+    total_dims = len(matches) + len(mismatches) + len(gaps)
+    match_rate = round(len(matches) / max(total_dims, 1) * 100)
+
+    return {
+        "match_rate": match_rate,
+        "total_dimensions": total_dims,
+        "matches": matches,
+        "mismatches": mismatches,
+        "gaps": gaps,
+        "verdict": (
+            "EXCELLENT — AI closely replicates human behavior" if match_rate >= 80
+            else "GOOD — AI captures most patterns, minor gaps" if match_rate >= 60
+            else "NEEDS WORK — Significant differences between human and AI" if match_rate >= 40
+            else "POOR — AI template doesn't match human posting behavior"
+        ),
+    }

@@ -23,6 +23,7 @@ const navItems = [
   { to: '/', icon: Files, label: 'Inbox', exact: true },
   { to: '/sales-inventory', icon: ShoppingCart, label: 'Sales' },
   { to: '/posting-intelligence', icon: Brain, label: 'Posting AI' },
+  { to: '/invoice-trace', icon: ArrowLeftRight, label: 'Trace' },
   { to: '/insights', icon: TrendingUp, label: 'Insights' },
   { to: '/config', icon: Settings, label: 'Settings' },
 ];
@@ -75,6 +76,7 @@ export default function Layout() {
     if (path === '/sales-inventory') return 'Sales';
     if (path === '/insights') return 'Insights';
     if (path === '/posting-intelligence') return 'Posting Intelligence';
+    if (path === '/invoice-trace') return 'Invoice Trace';
     if (path === '/config') return 'Settings';
     if (path.startsWith('/documents/')) return 'Document Detail';
     if (path.startsWith('/review/')) return 'Sales Order Review';

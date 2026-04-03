@@ -97,6 +97,14 @@
 - **Vendor discovery expanded**: Background `analyze-top` scans both endpoints for vendor discovery
 - **Impact**: Maximum possible learning dataset — every invoice ever touched in BC feeds the AI
 
+### Invoice Trace Comparison (Complete - Apr 2026)
+- **New page**: `/invoice-trace` — side-by-side comparison of human BC postings vs AI template output
+- **Trace endpoint**: `GET /api/posting-patterns/trace/{vendor_no}?invoice_index=N` fetches a real invoice from BC, gets its lines, simulates what the AI template would generate, and computes a multi-dimensional diff
+- **Match rate scoring**: Compares across 7 dimensions (line count, line type, items/GL accounts, description pattern, tax code, UOM, total amount)
+- **Invoice navigator**: Browse through vendor's invoices with prev/next controls
+- **Traceable invoice list**: `GET /api/posting-patterns/trace/{vendor_no}/list` lists available invoices for browsing
+- **Frontend**: Full comparison UI with match/mismatch/gap badges, side-by-side line panels, and verdict interpretation
+
 ### BC Auto-Post Phase 2: Template-Driven Draft Creation (Complete - Apr 2026)
 - **Posting Intelligence Dashboard**: New `/posting-intelligence` page with full-stack vendor profile view
 - **Auto-Post Settings**: Admin-configurable toggle, confidence threshold (high/medium/low), min invoices analyzed

@@ -164,29 +164,76 @@ async def debug_invoice_lines(vendor_no: str):
 
 
 async def _run_top_analysis(top_n: int, force: bool = False):
-    """Background task: analyze top vendors."""
+    """
+    Background task: discover ALL vendors from BC posted invoices and analyze each.
+    No longer limited to Hub-only vendors — goes straight to BC for the complete picture.
+    """
     global _analysis_status
-    _analysis_status = {"running": True, "last_result": None, "progress": "starting"}
+    _analysis_status = {"running": True, "last_result": None, "progress": "discovering vendors from BC..."}
     try:
         db = get_db()
         bc = get_bc_service()
-        from services.posting_pattern_analyzer import (
-            analyze_vendor_posting_patterns,
-            MIN_INVOICES_FOR_PROFILE,
-        )
-        cursor = db.vendor_invoice_profiles.find(
-            {"bc_invoice_count": {"$gte": MIN_INVOICES_FOR_PROFILE}},
-            {"_id": 0, "vendor_no": 1, "vendor_name": 1, "bc_invoice_count": 1}
-        ).sort("bc_invoice_count", -1).limit(top_n)
-        vendors = await cursor.to_list(top_n)
+        from services.posting_pattern_analyzer import analyze_vendor_posting_patterns
 
-        results = {"vendors_queued": len(vendors), "analyzed": 0, "errors": 0, "skipped": 0, "vendor_details": [], "error_details": [], "force": force}
+        # Step 1: Discover ALL unique vendors from BC posted purchase invoices
+        # Paginate through ALL posted invoices and extract vendor numbers
+        _analysis_status["progress"] = "Discovering vendors from BC posted invoices..."
+        discovered_vendors = {}
+        skip = 0
+        page_size = 500
 
-        for i, v in enumerate(vendors):
+        while True:
+            pi_result = await bc.get_posted_purchase_invoices(limit=page_size, skip=skip)
+            page = pi_result.get("invoices", [])
+            if not page:
+                break
+            for inv in page:
+                vno = inv.get("vendorNumber", "")
+                if vno and vno not in discovered_vendors:
+                    discovered_vendors[vno] = {
+                        "vendor_no": vno,
+                        "vendor_name": inv.get("vendorName", ""),
+                    }
+            logger.info("[PostingPatterns] Discovery: scanned %d invoices, found %d unique vendors so far",
+                         skip + len(page), len(discovered_vendors))
+            if len(page) < page_size:
+                break
+            skip += len(page)
+            # Safety: if top_n is set and we've found enough vendors, stop discovering
+            if top_n > 0 and len(discovered_vendors) >= top_n * 2:
+                break
+
+        # Also include vendors from Hub profiles that might not have BC invoices yet
+        hub_vendors = await db.vendor_invoice_profiles.find(
+            {"bc_invoice_count": {"$gte": 1}},
+            {"_id": 0, "vendor_no": 1, "vendor_name": 1}
+        ).to_list(500)
+        for v in hub_vendors:
+            vno = v.get("vendor_no", "")
+            if vno and vno not in discovered_vendors:
+                discovered_vendors[vno] = v
+
+        # Sort by name and limit to top_n
+        all_vendors = sorted(discovered_vendors.values(), key=lambda x: x.get("vendor_name", ""))
+        if top_n > 0:
+            all_vendors = all_vendors[:top_n]
+
+        _analysis_status["progress"] = f"Found {len(all_vendors)} vendors. Starting analysis..."
+        logger.info("[PostingPatterns] Discovered %d total vendors (%d from BC, %d from Hub). Analyzing %d.",
+                     len(discovered_vendors), len(discovered_vendors) - len(hub_vendors), len(hub_vendors), len(all_vendors))
+
+        results = {
+            "vendors_discovered": len(discovered_vendors),
+            "vendors_queued": len(all_vendors),
+            "analyzed": 0, "errors": 0, "skipped": 0,
+            "vendor_details": [], "error_details": [], "force": force,
+        }
+
+        for i, v in enumerate(all_vendors):
             vendor_no = v.get("vendor_no", "")
             if not vendor_no:
                 continue
-            _analysis_status["progress"] = f"Analyzing {vendor_no} ({i+1}/{len(vendors)})"
+            _analysis_status["progress"] = f"Analyzing {vendor_no} ({i+1}/{len(all_vendors)})"
 
             # Check if recent analysis exists (skip if < 7 days old, unless force=True)
             if not force:
@@ -239,8 +286,8 @@ async def _run_top_analysis(top_n: int, force: bool = False):
             await asyncio.sleep(0.5)
 
         _analysis_status = {"running": False, "last_result": results, "progress": "complete"}
-        logger.info("[PostingPatterns] Background analysis complete: analyzed=%d, errors=%d, skipped=%d",
-                     results["analyzed"], results["errors"], results["skipped"])
+        logger.info("[PostingPatterns] Background analysis complete: discovered=%d, analyzed=%d, errors=%d, skipped=%d",
+                     results["vendors_discovered"], results["analyzed"], results["errors"], results["skipped"])
 
     except Exception as e:
         _analysis_status = {"running": False, "last_result": {"error": str(e)}, "progress": "failed"}

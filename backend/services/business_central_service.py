@@ -506,8 +506,9 @@ class BusinessCentralService:
         self, vendor_id: str = None, limit: int = 100, skip: int = 0
     ) -> Dict[str, Any]:
         """
-        Query BC Production for posted (completed) purchase invoices.
-        These represent how humans actually post invoices — the ground truth.
+        Query BC Production for ALL purchase invoices — no status filter.
+        Every invoice (Draft, Open, Paid, Corrective, etc.) is part of the
+        learning dataset. "Why exclude ANYTHING that can help the AI?"
         """
         if self.use_mock:
             return {"invoices": [], "total": 0, "mock": True}
@@ -521,20 +522,20 @@ class BusinessCentralService:
                        "invoiceDate,dueDate,currencyCode,totalAmountExcludingTax,"
                        "totalAmountIncludingTax,totalTaxAmount,status,"
                        "buyFromAddressLine1,buyFromCity,buyFromState,buyFromPostCode",
-            "$filter": "status eq 'Paid' or status eq 'Open'",
             "$orderby": "invoiceDate desc",
             "$top": str(limit),
             "$skip": str(skip),
         }
+        # No status filter — ingest ALL statuses for maximum learning data
         if vendor_id:
-            params["$filter"] = f"vendorNumber eq '{vendor_id}' and ({params['$filter']})"
+            params["$filter"] = f"vendorNumber eq '{vendor_id}'"
 
         async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
             resp = await client.get(url, headers={"Authorization": f"Bearer {token}"}, params=params)
 
             if resp.status_code != 200:
-                # Try simpler query without status filter (some BC setups differ)
-                logger.warning("Posted PI query failed (%s), trying without status filter", resp.status_code)
+                # Fallback: try with minimal fields if BC rejects the query
+                logger.warning("PI query failed (%s), trying with minimal fields", resp.status_code)
                 params = {
                     "$select": "id,number,vendorNumber,vendorName,vendorInvoiceNumber,"
                                "invoiceDate,dueDate,currencyCode,totalAmountExcludingTax,"
@@ -547,12 +548,105 @@ class BusinessCentralService:
                     params["$filter"] = f"vendorNumber eq '{vendor_id}'"
                 resp = await client.get(url, headers={"Authorization": f"Bearer {token}"}, params=params)
                 if resp.status_code != 200:
-                    logger.error("Posted PI query failed: %s - %s", resp.status_code, resp.text[:300])
+                    logger.error("PI query failed: %s - %s", resp.status_code, resp.text[:300])
                     return {"invoices": [], "total": 0, "error": resp.text[:300]}
 
             data = resp.json()
             invoices = data.get("value", [])
             return {"invoices": invoices, "total": len(invoices), "mock": False}
+
+    async def get_historical_posted_purchase_invoices(
+        self, vendor_id: str = None, limit: int = 100, skip: int = 0
+    ) -> Dict[str, Any]:
+        """
+        Query BC for POSTED (completed/historical) purchase invoices from the
+        separate postedPurchaseInvoices entity. In BC, once a Purchase Invoice
+        is 'Posted', it moves from purchaseInvoices to this separate table.
+        This captures years of historical data that no longer appears in the
+        standard purchaseInvoices endpoint.
+        """
+        if self.use_mock:
+            return {"invoices": [], "total": 0, "mock": True}
+
+        token = await get_bc_token(environment=BC_READ_ENVIRONMENT)
+        company_id = await self._get_company_id(environment=BC_READ_ENVIRONMENT)
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Try multiple endpoint names — BC versions vary
+        endpoints = [
+            f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})/postedPurchaseInvoices",
+            f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseCreditMemos",
+        ]
+
+        params = {
+            "$select": "id,number,vendorNumber,vendorName,vendorInvoiceNumber,"
+                       "invoiceDate,dueDate,currencyCode,totalAmountExcludingTax,"
+                       "totalAmountIncludingTax,status",
+            "$orderby": "invoiceDate desc",
+            "$top": str(limit),
+            "$skip": str(skip),
+        }
+        if vendor_id:
+            params["$filter"] = f"vendorNumber eq '{vendor_id}'"
+
+        async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+            for url in endpoints:
+                try:
+                    resp = await client.get(url, headers=headers, params=params)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        invoices = data.get("value", [])
+                        entity_name = url.split("/")[-1]
+                        logger.info("Historical PI query via %s: got %d invoices (skip=%d)",
+                                    entity_name, len(invoices), skip)
+                        return {"invoices": invoices, "total": len(invoices), "mock": False,
+                                "source": entity_name}
+                    elif resp.status_code == 404:
+                        logger.debug("Endpoint %s not available (404), trying next", url.split("/")[-1])
+                        continue
+                    else:
+                        logger.debug("Endpoint %s returned %s, trying next", url.split("/")[-1], resp.status_code)
+                        continue
+                except Exception as e:
+                    logger.debug("Endpoint %s failed: %s, trying next", url.split("/")[-1], str(e))
+                    continue
+
+        logger.info("No historical posted PI endpoints available — standard purchaseInvoices will be sole data source")
+        return {"invoices": [], "total": 0, "mock": False, "source": "none_available"}
+
+    async def get_historical_invoice_lines(self, invoice_id: str, source: str = "postedPurchaseInvoices") -> List[Dict[str, Any]]:
+        """
+        Get line items for a historical posted purchase invoice.
+        Tries the posted-specific line endpoints.
+        """
+        if self.use_mock:
+            return []
+
+        token = await get_bc_token(environment=BC_READ_ENVIRONMENT)
+        company_id = await self._get_company_id(environment=BC_READ_ENVIRONMENT)
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Try sub-entity navigation for the posted invoice
+        endpoints = [
+            f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/"
+            f"companies({company_id})/{source}({invoice_id})/postedPurchaseInvoiceLines",
+            f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/"
+            f"companies({company_id})/{source}({invoice_id})/purchaseInvoiceLines",
+        ]
+
+        async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+            for url in endpoints:
+                try:
+                    resp = await client.get(url, headers=headers)
+                    if resp.status_code == 200:
+                        lines = resp.json().get("value", [])
+                        if lines:
+                            return lines
+                except Exception:
+                    continue
+
+        # Fallback to standard line fetch
+        return await self.get_purchase_invoice_lines(invoice_id)
 
     async def get_purchase_invoice_lines(self, invoice_id: str) -> List[Dict[str, Any]]:
         """

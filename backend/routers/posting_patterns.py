@@ -55,14 +55,19 @@ async def get_posting_pattern_status():
             "total_invoices": {"$sum": "$invoices_analyzed"},
             "total_lines": {"$sum": "$lines_analyzed"},
             "total_learning_events": {"$sum": {"$ifNull": ["$continuous_learning_count", 0]}},
+            "total_historical": {"$sum": {"$ifNull": ["$data_sources.historical_posted", 0]}},
+            "total_current": {"$sum": {"$ifNull": ["$data_sources.purchase_invoices", 0]}},
         }},
     ]
-    totals = {"total_invoices": 0, "total_lines": 0, "total_learning_events": 0}
+    totals = {"total_invoices": 0, "total_lines": 0, "total_learning_events": 0,
+              "total_historical": 0, "total_current": 0}
     async for row in db.posting_pattern_analysis.aggregate(totals_pipeline):
         totals = {
             "total_invoices": row.get("total_invoices", 0),
             "total_lines": row.get("total_lines", 0),
             "total_learning_events": row.get("total_learning_events", 0),
+            "total_historical": row.get("total_historical", 0),
+            "total_current": row.get("total_current", 0),
         }
 
     # Get top 10 vendors by invoice count
@@ -175,13 +180,14 @@ async def _run_top_analysis(top_n: int, force: bool = False):
         bc = get_bc_service()
         from services.posting_pattern_analyzer import analyze_vendor_posting_patterns
 
-        # Step 1: Discover ALL unique vendors from BC posted purchase invoices
-        # Paginate through ALL posted invoices and extract vendor numbers
-        _analysis_status["progress"] = "Discovering vendors from BC posted invoices..."
+        # Step 1: Discover ALL unique vendors from BC purchase invoices (ALL statuses)
+        # AND from historical posted purchase invoices
+        _analysis_status["progress"] = "Discovering vendors from ALL BC invoice sources..."
         discovered_vendors = {}
         skip = 0
         page_size = 500
 
+        # Source 1: purchaseInvoices (all statuses — no filter)
         while True:
             pi_result = await bc.get_posted_purchase_invoices(limit=page_size, skip=skip)
             page = pi_result.get("invoices", [])
@@ -194,12 +200,35 @@ async def _run_top_analysis(top_n: int, force: bool = False):
                         "vendor_no": vno,
                         "vendor_name": inv.get("vendorName", ""),
                     }
-            logger.info("[PostingPatterns] Discovery: scanned %d invoices, found %d unique vendors so far",
+            logger.info("[PostingPatterns] Discovery (purchaseInvoices): scanned %d invoices, found %d unique vendors so far",
                          skip + len(page), len(discovered_vendors))
             if len(page) < page_size:
                 break
             skip += len(page)
             # Safety: if top_n is set and we've found enough vendors, stop discovering
+            if top_n > 0 and len(discovered_vendors) >= top_n * 2:
+                break
+
+        # Source 2: historical postedPurchaseInvoices
+        skip = 0
+        while True:
+            hist_result = await bc.get_historical_posted_purchase_invoices(limit=page_size, skip=skip)
+            page = hist_result.get("invoices", [])
+            source = hist_result.get("source", "none_available")
+            if not page or source == "none_available":
+                break
+            for inv in page:
+                vno = inv.get("vendorNumber", "")
+                if vno and vno not in discovered_vendors:
+                    discovered_vendors[vno] = {
+                        "vendor_no": vno,
+                        "vendor_name": inv.get("vendorName", ""),
+                    }
+            logger.info("[PostingPatterns] Discovery (historical %s): scanned %d invoices, found %d unique vendors total",
+                         source, skip + len(page), len(discovered_vendors))
+            if len(page) < page_size:
+                break
+            skip += len(page)
             if top_n > 0 and len(discovered_vendors) >= top_n * 2:
                 break
 
@@ -413,6 +442,8 @@ async def posting_learning_proof(vendor_no: str):
         "invoices_studied": profile.get("invoices_analyzed", 0),
         "invoices_with_lines_studied": profile.get("invoices_with_lines_analyzed", 0),
         "lines_studied": profile.get("lines_analyzed", 0),
+        "data_sources": profile.get("data_sources", {}),
+        "status_distribution": profile.get("status_distribution", {}),
         "what_the_system_learned": {
             "typical_invoice_amount": f"${amount.get('mean', 0):,.2f} (range ${amount.get('min', 0):,.2f}-${amount.get('max', 0):,.2f})",
             "typical_line_count": lines.get("lines_per_invoice", {}).get("median", "?"),

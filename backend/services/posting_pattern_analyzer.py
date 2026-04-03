@@ -33,8 +33,9 @@ async def analyze_vendor_posting_patterns(
 ) -> Dict[str, Any]:
     """
     Analyze how humans post invoices for a specific vendor in BC.
-    Paginates through ALL posted invoices and ALL line items.
-    No artificial caps — if there are 5 years and 2,000 invoices, we eat them all.
+    Pulls from ALL sources: purchaseInvoices (all statuses) AND
+    postedPurchaseInvoices (historical). No artificial caps — if there
+    are 5 years and 2,000 invoices, we eat them all.
     """
     result = {
         "vendor_no": vendor_no,
@@ -43,21 +44,33 @@ async def analyze_vendor_posting_patterns(
         "lines_analyzed": 0,
     }
 
-    # 1. Paginate through ALL posted invoices for this vendor
+    # 1a. Paginate through ALL purchase invoices (all statuses) for this vendor
     invoices = []
+    seen_ids = set()
     skip = 0
+    pi_error = None
     while True:
         page_size = min(BC_PAGE_SIZE, limit - len(invoices)) if limit > 0 else BC_PAGE_SIZE
         if page_size <= 0:
             break
-        pi_result = await bc_service.get_posted_purchase_invoices(
-            vendor_id=vendor_no, limit=page_size, skip=skip
-        )
+        try:
+            pi_result = await bc_service.get_posted_purchase_invoices(
+                vendor_id=vendor_no, limit=page_size, skip=skip
+            )
+        except Exception as e:
+            logger.warning("[PostingPatterns] %s: BC purchaseInvoices fetch failed: %s", vendor_no, str(e))
+            pi_error = str(e)
+            break
         page = pi_result.get("invoices", [])
         if not page:
             break
-        invoices.extend(page)
-        logger.info("[PostingPatterns] %s: fetched page %d (%d invoices so far)",
+        for inv in page:
+            inv_id = inv.get("id", "")
+            if inv_id and inv_id not in seen_ids:
+                seen_ids.add(inv_id)
+                inv["_source"] = "purchaseInvoices"
+                invoices.append(inv)
+        logger.info("[PostingPatterns] %s: fetched page %d from purchaseInvoices (%d invoices so far)",
                      vendor_no, skip // BC_PAGE_SIZE + 1, len(invoices))
         if len(page) < page_size:
             break  # Last page
@@ -65,10 +78,57 @@ async def analyze_vendor_posting_patterns(
         if limit > 0 and len(invoices) >= limit:
             break
 
+    # 1b. Also paginate through historical posted purchase invoices
+    historical_count = 0
+    skip = 0
+    historical_source = None
+    while True:
+        remaining = (limit - len(invoices)) if limit > 0 else BC_PAGE_SIZE
+        if remaining <= 0:
+            break
+        page_size = min(BC_PAGE_SIZE, remaining)
+        try:
+            hist_result = await bc_service.get_historical_posted_purchase_invoices(
+                vendor_id=vendor_no, limit=page_size, skip=skip
+            )
+        except Exception as e:
+            logger.warning("[PostingPatterns] %s: historical PI fetch failed: %s", vendor_no, str(e))
+            break
+        page = hist_result.get("invoices", [])
+        if historical_source is None:
+            historical_source = hist_result.get("source", "none_available")
+        if not page:
+            break
+        for inv in page:
+            inv_id = inv.get("id", "")
+            if inv_id and inv_id not in seen_ids:
+                seen_ids.add(inv_id)
+                inv["_source"] = hist_result.get("source", "postedPurchaseInvoices")
+                invoices.append(inv)
+                historical_count += 1
+        logger.info("[PostingPatterns] %s: fetched page %d from historical PIs (+%d new, %d total)",
+                     vendor_no, skip // BC_PAGE_SIZE + 1, historical_count, len(invoices))
+        if len(page) < page_size:
+            break
+        skip += len(page)
+        if limit > 0 and len(invoices) >= limit:
+            break
+
+    if historical_count > 0:
+        logger.info("[PostingPatterns] %s: merged %d historical invoices (source: %s). Total dataset: %d",
+                     vendor_no, historical_count, historical_source, len(invoices))
+
     if not invoices:
         result["status"] = "no_invoices"
-        result["error"] = pi_result.get("error") if 'pi_result' in dir() else None
+        result["error"] = pi_error or (pi_result.get("error") if 'pi_result' in dir() else None)
         return result
+
+    result["data_sources"] = {
+        "purchase_invoices": len(invoices) - historical_count,
+        "historical_posted": historical_count,
+        "historical_source": historical_source or "not_queried",
+        "total": len(invoices),
+    }
 
     result["invoices_analyzed"] = len(invoices)
 
@@ -141,12 +201,22 @@ async def analyze_vendor_posting_patterns(
     # Track Charge-type lines separately
     charge_item_counts = defaultdict(int)
 
+    # Track statuses seen for data-source auditing
+    statuses_seen = defaultdict(int)
+
     for idx, inv in enumerate(invoices):
         inv_id = inv.get("id")
         if not inv_id:
             continue
+        inv_status = inv.get("status", "unknown")
+        statuses_seen[inv_status] += 1
         try:
-            lines = await bc_service.get_purchase_invoice_lines(inv_id)
+            # Use appropriate line-fetch method based on data source
+            inv_source = inv.get("_source", "purchaseInvoices")
+            if inv_source and inv_source != "purchaseInvoices" and inv_source != "none_available":
+                lines = await bc_service.get_historical_invoice_lines(inv_id, source=inv_source)
+            else:
+                lines = await bc_service.get_purchase_invoice_lines(inv_id)
             lines_per_invoice.append(len(lines))
             inv_items = []
             inv_line_types = []
@@ -233,6 +303,9 @@ async def analyze_vendor_posting_patterns(
         item_counts, gl_account_counts, total_lines,
         ref_pattern_counts, uom_counts, tax_code_counts, line_amounts,
     )
+
+    # 4b. Status distribution — what statuses are in the learning dataset?
+    result["status_distribution"] = dict(statuses_seen)
 
     # 5. Build the posting template (what the auto-post should do)
     result["posting_template"] = _build_posting_template(result)

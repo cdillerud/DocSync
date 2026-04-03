@@ -948,10 +948,15 @@ async def trace_invoice_comparison(
     human_summary = _build_line_summary(human_lines)
 
     # 5. Build what our AI template WOULD generate
+    # Extract the BOL/reference from what the human actually typed in descriptions
+    # (the BOL is NOT the invoice number — it's embedded in the line descriptions)
+    human_ref = _extract_reference_from_human_lines(human_lines)
+
     ef = {
         "invoice_number": invoice.get("vendorInvoiceNumber", ""),
         "amount": invoice.get("totalAmountExcludingTax") or invoice.get("totalAmountIncludingTax", 0),
         "invoice_date": invoice.get("invoiceDate", ""),
+        "reference_number": human_ref,  # BOL/PO extracted from human's actual descriptions
     }
     ai_lines = _simulate_template_lines(template, ef)
     ai_summary = _build_line_summary(ai_lines)
@@ -1098,8 +1103,45 @@ def _build_line_summary(lines: list) -> dict:
     }
 
 
+def _extract_reference_from_human_lines(human_lines: list) -> str:
+    """
+    Extract the BOL/reference number from human-posted line descriptions.
+    The reference is what the human actually typed — NOT the invoice number.
+    Examples: "Freight 49785" → "49785", "46133" → "46133", "W110700" → "W110700"
+    """
+    import re
+    for line in human_lines:
+        desc = (line.get("description") or "").strip()
+        if not desc:
+            continue
+        # "FREIGHT 49785" → extract "49785"
+        m = re.match(r'^(?:FREIGHT|FRT)\s+(.+)', desc, re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+        # "PO 12345" → extract "12345"
+        m = re.match(r'^PO[#\s]+(.+)', desc, re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+        # Pure number like "46133" or alphanumeric like "W110700"
+        m = re.match(r'^([A-Z]?\d{4,7})$', desc.strip(), re.IGNORECASE)
+        if m:
+            return m.group(1)
+        # Any embedded reference number
+        m = re.search(r'(\d{4,7})', desc)
+        if m:
+            return m.group(1)
+    return ""
+
+
 def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
-    """Simulate what the AI would generate using the posting template."""
+    """
+    Simulate what the AI would generate using the posting template.
+    
+    Key rules:
+    - Respect typical_line_count — only emit that many lines
+    - Only use primary-ranked items (secondary/rare are context-dependent)
+    - Use the BOL/reference number (not invoice number) for freight patterns
+    """
     if not template or not template.get("line_templates"):
         # No template — fallback single line
         try:
@@ -1117,8 +1159,8 @@ def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
             "uom": template.get("uom", ""),
         }]
 
-    lines = []
     invoice_number = extracted_fields.get("invoice_number", "")
+    reference_number = extracted_fields.get("reference_number", "") or invoice_number
     try:
         total_amount = float(str(extracted_fields.get("amount", 0)).replace("$", "").replace(",", "").strip())
     except (ValueError, TypeError):
@@ -1127,28 +1169,49 @@ def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
     ref_handling = template.get("reference_handling", {})
     ref_pattern = ref_handling.get("pattern", "")
     line_tax = template.get("line_tax_code", {})
+    typical_count = int(template.get("typical_line_count", 1) or 1)
 
-    for lt in template.get("line_templates", []):
-        if lt.get("rank") == "rare":
-            continue  # Skip rare items in simulation
+    # Only include primary items, sorted by usage rate descending
+    # Respect typical_line_count — don't add more lines than humans normally use
+    eligible = [
+        lt for lt in template.get("line_templates", [])
+        if lt.get("rank") == "primary"
+    ]
+    # If no primary items, fall back to the highest usage_rate item
+    if not eligible:
+        all_templates = sorted(
+            template.get("line_templates", []),
+            key=lambda x: x.get("usage_rate", 0),
+            reverse=True,
+        )
+        eligible = all_templates[:1]
 
+    # Limit to typical_line_count
+    eligible = eligible[:typical_count]
+
+    lines = []
+    for lt in eligible:
         line = {
             "lineType": lt.get("type", "Item"),
             "lineObjectNumber": lt.get("account_number") or lt.get("item_number", ""),
             "quantity": 1,
-            "unitCost": total_amount if lt.get("rank") == "primary" else 0,
-            "netAmount": total_amount if lt.get("rank") == "primary" else 0,
+            "unitCost": total_amount if len(eligible) == 1 or lt == eligible[0] else 0,
+            "netAmount": total_amount if len(eligible) == 1 or lt == eligible[0] else 0,
             "taxCode": line_tax.get("code", ""),
             "uom": template.get("uom", ""),
         }
 
         # Build description based on reference pattern
-        if ref_pattern == "freight_prefix_plus_ref" and invoice_number:
-            line["description"] = f"FREIGHT {invoice_number}"
-        elif ref_pattern == "bol_in_description" and invoice_number:
-            line["description"] = invoice_number
-        elif ref_pattern == "po_prefix_plus_ref" and invoice_number:
-            line["description"] = f"PO {invoice_number}"
+        # Use the BOL/reference (from human lines or PO field), NOT the invoice number
+        ref = reference_number or invoice_number
+        if ref_pattern == "freight_prefix_plus_ref" and ref:
+            line["description"] = f"Freight {ref}"
+        elif ref_pattern == "bol_in_description" and ref:
+            line["description"] = ref
+        elif ref_pattern == "po_prefix_plus_ref" and ref:
+            line["description"] = f"PO {ref}"
+        elif ref_pattern == "order_number_ref" and ref:
+            line["description"] = ref
         else:
             line["description"] = f"Per invoice {invoice_number}" if invoice_number else "Invoice line"
 

@@ -1194,13 +1194,51 @@ def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
             invoice_number, line_tax, template, single_line=True,
         )
 
-    # --- Multi-line vendors: emit ALL structural items ---
-    # Include secondary + rare, sorted by usage_rate desc, capped at typical_count
-    eligible = sorted(all_templates, key=lambda x: x.get("usage_rate", 0), reverse=True)
-    eligible = eligible[:typical_count]
+    # --- Multi-line vendors: emit structural skeleton + 1 product slot ---
+    # Categorize template items by their structural role
+    structural = []  # Always present, always the same (zero-cost or constant)
+    surcharges = []  # Always present, small variable cost
+    product_candidates = []  # Variable product lines (SKU changes per order)
+    other = []  # Everything else
+
+    for lt in all_templates:
+        st = lt.get("slot_type", "unknown")
+        if st in ("structural_zero", "structural_constant"):
+            structural.append(lt)
+        elif st == "surcharge":
+            surcharges.append(lt)
+        elif st in ("variable_product", "structural_variable"):
+            product_candidates.append(lt)
+        else:
+            other.append(lt)
+
+    # Build the line list:
+    # 1. All structural items (packaging, tracking — always present)
+    # 2. All surcharges (energy, freight surcharges)
+    # 3. Exactly 1 variable product slot (the most common product as placeholder)
+    # 4. Fill remaining with other frequent items or comments
+    selected = []
+    selected.extend(structural)
+    selected.extend(surcharges)
+
+    # Add exactly 1 product slot — pick the highest usage rate
+    if product_candidates:
+        selected.append(product_candidates[0])
+    elif other:
+        # No explicit variable_product — use the highest-usage optional item
+        # but only add 1 product slot
+        non_zero_others = [o for o in other if not o.get("is_zero_cost", False)]
+        zero_others = [o for o in other if o.get("is_zero_cost", False)]
+        if non_zero_others:
+            selected.append(non_zero_others[0])
+        # Add zero-cost others (like Z-POP) as structural
+        selected.extend(zero_others)
+
+    # Cap at typical_count
+    selected = selected[:typical_count]
 
     lines = _build_lines_from_templates(
-        eligible, total_amount, ref_pattern, reference_number,
+        selected, total_amount, ref_pattern, reference_number,
         invoice_number, line_tax, template, single_line=False,
     )
 

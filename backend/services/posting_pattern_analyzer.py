@@ -353,7 +353,7 @@ async def analyze_vendor_posting_patterns(
         top_desc = max(descs, key=descs.get) if descs else ""
         top_uom = max(meta["uoms"], key=meta["uoms"].get) if meta["uoms"] else ""
         top_tc = max(meta["tax_codes"], key=meta["tax_codes"].get) if meta["tax_codes"] else ""
-        is_zero_cost = all(c == 0 for c in costs) if costs else True
+        is_zero_cost = sum(1 for c in costs if c == 0) >= len(costs) * 0.90 if costs else True
         typical_qty = round(statistics.median(qtys), 2) if qtys else 0
         typical_cost = round(statistics.median(costs), 2) if costs else 0
         unique_descs = len(descs)

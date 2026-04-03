@@ -224,7 +224,7 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
     # Actually post to BC
     try:
         from routers.gpi_integration import create_purchase_invoice_from_document
-        result = await create_purchase_invoice_from_document(doc_id)
+        result = await create_purchase_invoice_from_document(doc_id, vendor_no_override="", force=False)
 
         if result.get("success"):
             now = datetime.now(timezone.utc).isoformat()
@@ -539,7 +539,7 @@ async def attempt_auto_draft_pi(doc_id: str, db, source: str = "confidence_gate"
 
     try:
         from routers.gpi_integration import create_purchase_invoice_from_document
-        result = await create_purchase_invoice_from_document(doc_id)
+        result = await create_purchase_invoice_from_document(doc_id, vendor_no_override="", force=False)
 
         if result.get("success") or result.get("already_exists"):
             bc_record_no = result.get("bc_record_no", "")

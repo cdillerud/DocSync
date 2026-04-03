@@ -782,7 +782,7 @@ async def create_draft_from_template(doc_id: str, force: bool = Query(False)):
     # Delegate to existing create_purchase_invoice_from_document
     try:
         from routers.gpi_integration import create_purchase_invoice_from_document
-        result = await create_purchase_invoice_from_document(doc_id, force=force)
+        result = await create_purchase_invoice_from_document(doc_id, vendor_no_override="", force=force)
         return result
     except Exception as e:
         logger.error("Failed to create draft PI for %s: %s", doc_id, str(e))

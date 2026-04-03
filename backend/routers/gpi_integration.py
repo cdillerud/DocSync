@@ -210,6 +210,39 @@ async def _build_pi_lines_with_mapping(doc: dict, db, vendor_no: str = "") -> li
         # Use profile-driven line builder (learns from BC)
         bc_lines = build_smart_pi_lines(doc, profile, po_reference=po_ref)
 
+        # Phase 2 enhancement: If a posting template exists, override line types
+        # and item codes with the template's learned values (more accurate than basic profile)
+        if posting_template and posting_template.get("confidence") in ("high", "medium"):
+            line_templates = posting_template.get("line_templates", [])
+            # Find the primary item from the template
+            primary_templates = [lt for lt in line_templates if lt.get("rank") == "primary"]
+            if not primary_templates:
+                primary_templates = sorted(line_templates, key=lambda x: x.get("usage_rate", 0), reverse=True)[:1]
+
+            if primary_templates:
+                primary = primary_templates[0]
+                template_item_no = primary.get("item_number") or primary.get("account_number", "")
+                template_line_type = primary.get("type", "")
+                template_desc_pattern = primary.get("common_description", "")
+
+                if template_item_no and template_line_type:
+                    for line in bc_lines:
+                        # Override the line type and item/account code with the template's learned values
+                        line["lineType"] = template_line_type
+                        line["lineObjectNumber"] = template_item_no
+                        line["source"] = "posting_template"
+
+                        # Also fix description to match production pattern
+                        if template_desc_pattern and po_ref:
+                            # If production uses "Freight {ref}" pattern
+                            if "freight" in template_desc_pattern.lower() or template_desc_pattern.upper().startswith("FREIGHT"):
+                                line["description"] = f"Freight {po_ref}"
+
+                    logger.info(
+                        "[PI Lines] Template override for %s: %s/%s (confidence=%s)",
+                        vendor_no, template_line_type, template_item_no, posting_template.get("confidence"),
+                    )
+
         # Enhance lines with posting template reference patterns if available
         if posting_template and posting_template.get("reference_handling"):
             ref_handling = posting_template["reference_handling"]
@@ -219,7 +252,7 @@ async def _build_pi_lines_with_mapping(doc: dict, db, vendor_no: str = "") -> li
                 # If the template says descriptions should include BOL/ref and we have a PO ref
                 if po_ref and ref_pattern in ("freight_prefix_plus_ref", "bol_in_description"):
                     if ref_pattern == "freight_prefix_plus_ref" and not desc.upper().startswith("FREIGHT"):
-                        line["description"] = f"FREIGHT {po_ref}"
+                        line["description"] = f"Freight {po_ref}"
                     elif ref_pattern == "bol_in_description" and po_ref not in desc:
                         line["description"] = po_ref
 

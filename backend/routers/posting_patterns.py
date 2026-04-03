@@ -950,13 +950,14 @@ async def trace_invoice_comparison(
     # 5. Build what our AI template WOULD generate
     # Extract the BOL/reference from what the human actually typed in descriptions
     # (the BOL is NOT the invoice number — it's embedded in the line descriptions)
-    human_ref = _extract_reference_from_human_lines(human_lines)
+    human_ref_info = _extract_reference_from_human_lines(human_lines)
 
     ef = {
         "invoice_number": invoice.get("vendorInvoiceNumber", ""),
         "amount": invoice.get("totalAmountExcludingTax") or invoice.get("totalAmountIncludingTax", 0),
         "invoice_date": invoice.get("invoiceDate", ""),
-        "reference_number": human_ref,  # BOL/PO extracted from human's actual descriptions
+        "reference_number": human_ref_info.get("ref", ""),
+        "detected_pattern": human_ref_info.get("pattern", ""),
     }
     ai_lines = _simulate_template_lines(template, ef)
     ai_summary = _build_line_summary(ai_lines)
@@ -1103,34 +1104,37 @@ def _build_line_summary(lines: list) -> dict:
     }
 
 
-def _extract_reference_from_human_lines(human_lines: list) -> str:
+def _extract_reference_from_human_lines(human_lines: list) -> dict:
     """
-    Extract the BOL/reference number from human-posted line descriptions.
-    The reference is what the human actually typed — NOT the invoice number.
-    Examples: "Freight 49785" → "49785", "46133" → "46133", "W110700" → "W110700"
+    Extract the BOL/reference number AND the pattern from human-posted line descriptions.
+    Returns both the reference and which pattern the human used on THIS invoice.
     """
     import re
     for line in human_lines:
         desc = (line.get("description") or "").strip()
         if not desc:
             continue
-        # "FREIGHT 49785" → extract "49785"
-        m = re.match(r'^(?:FREIGHT|FRT)\s+(.+)', desc, re.IGNORECASE)
+        # "FREIGHT 49785" → pattern=freight_prefix_plus_ref, ref="49785"
+        m = re.match(r'^(?:FREIGHT|FRT|Freight)\s+(.+)', desc, re.IGNORECASE)
         if m:
-            return m.group(1).strip()
-        # "PO 12345" → extract "12345"
+            return {"ref": m.group(1).strip(), "pattern": "freight_prefix_plus_ref"}
+        # "PO 12345" → pattern=po_prefix_plus_ref, ref="12345"
         m = re.match(r'^PO[#\s]+(.+)', desc, re.IGNORECASE)
         if m:
-            return m.group(1).strip()
-        # Pure number like "46133" or alphanumeric like "W110700"
-        m = re.match(r'^([A-Z]?\d{4,7})$', desc.strip(), re.IGNORECASE)
+            return {"ref": m.group(1).strip(), "pattern": "po_prefix_plus_ref"}
+        # "W110700" → pattern=order_number_ref
+        m = re.match(r'^([A-Z]\d{4,})$', desc.strip(), re.IGNORECASE)
         if m:
-            return m.group(1)
-        # Any embedded reference number
+            return {"ref": m.group(1), "pattern": "order_number_ref"}
+        # Pure number "46133" → pattern=bol_in_description
+        m = re.match(r'^(\d{4,7})$', desc.strip())
+        if m:
+            return {"ref": m.group(1), "pattern": "bol_in_description"}
+        # Embedded reference
         m = re.search(r'(\d{4,7})', desc)
         if m:
-            return m.group(1)
-    return ""
+            return {"ref": m.group(1), "pattern": "embedded_ref"}
+    return {"ref": "", "pattern": ""}
 
 
 def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
@@ -1167,7 +1171,9 @@ def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
         total_amount = 0
 
     ref_handling = template.get("reference_handling", {})
-    ref_pattern = ref_handling.get("pattern", "")
+    # Use the pattern detected from the human's actual line if available (trace mode),
+    # otherwise fall back to the template's dominant pattern
+    ref_pattern = extracted_fields.get("detected_pattern", "") or ref_handling.get("pattern", "")
     line_tax = template.get("line_tax_code", {})
     typical_count = int(template.get("typical_line_count", 1) or 1)
 

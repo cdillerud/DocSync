@@ -2095,6 +2095,7 @@ async def create_purchase_invoice_from_document(
 
     # Step 2: Add line items using vendor profile-driven mapping
     line_results = None
+    bc_lines = []
     if result.get("success") and result.get("bc_system_id"):
         bc_lines = await _build_pi_lines_with_mapping(doc, db, vendor_no=vendor_no)
 
@@ -2184,6 +2185,20 @@ async def create_purchase_invoice_from_document(
             )
     except Exception as evt_err:
         logger.warning("Failed to emit BC purchase invoice event: %s", evt_err)
+
+    # --- Continuous Learning: teach posting patterns from every successful PI ---
+    if result.get("success"):
+        try:
+            from services.posting_pattern_analyzer import learn_from_posting
+            await learn_from_posting(
+                db=db,
+                vendor_no=vendor_no,
+                doc=doc,
+                pi_lines=bc_lines,
+                pi_result=result,
+            )
+        except Exception as learn_err:
+            logger.debug("[PostingPatterns] Learning from posting failed (non-blocking): %s", learn_err)
 
     return {
         "success": result.get("success", False),

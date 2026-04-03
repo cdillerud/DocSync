@@ -652,3 +652,149 @@ async def get_posting_profile_for_vendor(db, vendor_no: str) -> Optional[Dict[st
         {"_id": 0}
     )
     return profile
+
+
+async def learn_from_posting(db, vendor_no: str, doc: Dict, pi_lines: List[Dict], pi_result: Dict):
+    """
+    Incremental learning: update a vendor's posting profile after a
+    successful purchase invoice creation. Called automatically on every
+    successful BC posting — the system gets smarter with every invoice.
+
+    This updates the raw dimensional data without re-querying all of BC.
+    If no profile exists yet, it seeds a minimal one.
+    """
+    if not vendor_no:
+        return
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Extract structural features from what was just posted
+    line_types = defaultdict(int)
+    items_used = []
+    gl_accounts_used = []
+    uoms_used = []
+    tax_codes_used = []
+    ref_patterns_found = defaultdict(int)
+
+    for line in (pi_lines or []):
+        lt = line.get("lineType") or line.get("type", "Item")
+        line_types[lt] += 1
+        obj = line.get("lineObjectNumber") or line.get("item_number") or line.get("account_number", "")
+        if obj:
+            if lt == "Item":
+                items_used.append(obj)
+            elif lt == "Account":
+                gl_accounts_used.append(obj)
+        uom = line.get("unitOfMeasureCode") or line.get("uom", "")
+        if uom:
+            uoms_used.append(uom)
+        tax = line.get("taxCode") or line.get("tax_code", "")
+        if tax:
+            tax_codes_used.append(tax)
+        desc = line.get("description", "")
+        if desc:
+            _classify_description_ref(desc, ref_patterns_found)
+
+    amount = 0
+    ef = doc.get("extracted_fields") or {}
+    nf = doc.get("normalized_fields") or {}
+    try:
+        raw = ef.get("amount") or nf.get("amount") or 0
+        amount = float(str(raw).replace("$", "").replace(",", "").strip())
+    except (ValueError, TypeError):
+        pass
+
+    # Build the incremental learning record
+    learning_event = {
+        "vendor_no": vendor_no,
+        "doc_id": doc.get("id", ""),
+        "posted_at": now,
+        "line_count": len(pi_lines or []),
+        "line_types": dict(line_types),
+        "items_used": items_used,
+        "gl_accounts_used": gl_accounts_used,
+        "uoms": uoms_used,
+        "tax_codes": tax_codes_used,
+        "ref_patterns": dict(ref_patterns_found),
+        "amount": amount,
+        "item_families": [_extract_item_family(i) for i in items_used],
+    }
+
+    # Store the learning event for audit trail
+    await db.posting_learning_events.insert_one(learning_event)
+
+    # Update the aggregate profile incrementally
+    existing = await db.posting_pattern_analysis.find_one(
+        {"vendor_no": vendor_no, "status": "analyzed"}, {"_id": 0}
+    )
+
+    if existing:
+        # Increment counters
+        inc_ops = {
+            "invoices_analyzed": 1,
+            "lines_analyzed": len(pi_lines or []),
+            "continuous_learning_count": 1,
+        }
+        for lt_name, lt_count in line_types.items():
+            inc_ops[f"line_patterns.line_types.{lt_name}"] = lt_count
+        for item in items_used:
+            inc_ops[f"line_patterns.top_items.{item}"] = 1
+        for gl in gl_accounts_used:
+            inc_ops[f"line_patterns.top_gl_accounts.{gl}"] = 1
+        for uom in uoms_used:
+            inc_ops[f"line_patterns.uom_distribution.{uom}"] = 1
+        for tc in tax_codes_used:
+            inc_ops[f"line_patterns.tax_code_distribution.{tc}"] = 1
+        for rp, rpc in ref_patterns_found.items():
+            inc_ops[f"line_patterns.reference_in_description.{rp}"] = rpc
+
+        await db.posting_pattern_analysis.update_one(
+            {"vendor_no": vendor_no, "status": "analyzed"},
+            {
+                "$inc": inc_ops,
+                "$set": {
+                    "last_learned_from": doc.get("id", ""),
+                    "last_learned_at": now,
+                },
+            }
+        )
+        logger.info(
+            "[PostingPatterns] Incremental learn for %s: +%d lines, items=%s",
+            vendor_no, len(pi_lines or []), items_used,
+        )
+    else:
+        # No profile yet — seed a minimal one from this single posting
+        # (Full analysis will replace this next time analyze is run)
+        logger.info(
+            "[PostingPatterns] Seeding new profile for %s from first posting (%d lines)",
+            vendor_no, len(pi_lines or []),
+        )
+        seed = {
+            "vendor_no": vendor_no,
+            "analyzed_at": now,
+            "invoices_analyzed": 1,
+            "lines_analyzed": len(pi_lines or []),
+            "invoices_with_lines_analyzed": 1,
+            "line_patterns": {
+                "line_types": dict(line_types),
+                "top_items": {i: 1 for i in items_used},
+                "top_gl_accounts": {g: 1 for g in gl_accounts_used},
+                "uom_distribution": {u: 1 for u in uoms_used},
+                "tax_code_distribution": {t: 1 for t in tax_codes_used},
+                "reference_in_description": dict(ref_patterns_found),
+                "lines_per_invoice": {"mean": len(pi_lines or []), "median": len(pi_lines or []), "min": len(pi_lines or []), "max": len(pi_lines or [])},
+            },
+            "amount_stats": {"count": 1, "mean": amount, "median": amount, "min": amount, "max": amount, "stdev": 0},
+            "posting_template": {"confidence": "low", "typical_line_count": len(pi_lines or [])},
+            "consistency": {"overall": 0, "line_count": 0, "item_family": 0},
+            "continuous_learning_count": 1,
+            "last_learned_from": doc.get("id", ""),
+            "last_learned_at": now,
+            "status": "analyzed",
+            "vendor_names_seen": [doc.get("vendor_canonical", vendor_no)],
+        }
+        await db.posting_pattern_analysis.update_one(
+            {"vendor_no": vendor_no},
+            {"$set": seed},
+            upsert=True,
+        )

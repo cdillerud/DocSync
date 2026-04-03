@@ -258,6 +258,44 @@ async def get_analysis_status():
     return _analysis_status
 
 
+
+@router.get("/learning-activity")
+async def get_learning_activity(vendor_no: str = Query("", description="Filter by vendor"), limit: int = Query(20, le=100)):
+    """
+    Show recent continuous learning events — proof that the system
+    learns from every single successful BC posting.
+    """
+    db = get_db()
+    query = {}
+    if vendor_no:
+        query["vendor_no"] = vendor_no
+
+    events = await db.posting_learning_events.find(
+        query,
+        {"_id": 0, "vendor_no": 1, "doc_id": 1, "posted_at": 1,
+         "line_count": 1, "items_used": 1, "item_families": 1,
+         "ref_patterns": 1, "amount": 1}
+    ).sort("posted_at", -1).limit(limit).to_list(limit)
+
+    # Count total learning events per vendor
+    pipeline = [
+        {"$group": {"_id": "$vendor_no", "count": {"$sum": 1}, "last": {"$max": "$posted_at"}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 20},
+    ]
+    vendor_counts = {}
+    async for row in db.posting_learning_events.aggregate(pipeline):
+        if row.get("_id"):
+            vendor_counts[row["_id"]] = {"events": row["count"], "last_learned": row.get("last", "")}
+
+    return {
+        "total_learning_events": await db.posting_learning_events.count_documents({}),
+        "recent_events": events,
+        "vendors_learning": vendor_counts,
+        "description": "Every successful BC posting teaches the system. These events show exactly what was learned.",
+    }
+
+
 @router.get("/learning-proof/{vendor_no}")
 async def posting_learning_proof(vendor_no: str):
     """

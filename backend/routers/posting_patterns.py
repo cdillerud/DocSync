@@ -880,6 +880,7 @@ def _confidence_at_or_above(min_level: str) -> list:
 async def trace_invoice_comparison(
     vendor_no: str,
     invoice_index: int = Query(0, ge=0, description="Which invoice to trace (0 = most recent)"),
+    mode: str = Query("trace", description="'trace' = AI can see human's items (optimistic). 'production' = AI uses only template (realistic)."),
 ):
     """
     Trace a REAL posted invoice for a vendor from BC Production and compare
@@ -960,9 +961,12 @@ async def trace_invoice_comparison(
         "invoice_date": invoice.get("invoiceDate", ""),
         "reference_number": human_ref_info.get("ref", ""),
         "detected_pattern": human_ref_info.get("pattern", ""),
-        "per_line_refs": human_ref_info.get("per_line_refs", []),
-        "trace_human_line_count": len(human_lines),
     }
+    if mode == "trace":
+        # Trace mode: AI can see human's structure (optimistic comparison)
+        ef["per_line_refs"] = human_ref_info.get("per_line_refs", [])
+        ef["trace_human_line_count"] = len(human_lines)
+    # else: production mode — AI uses only template, no peeking
     ai_lines = _simulate_template_lines(template, ef)
     ai_summary = _build_line_summary(ai_lines)
 
@@ -972,6 +976,7 @@ async def trace_invoice_comparison(
     return {
         "vendor_no": vendor_no,
         "vendor_name": invoice.get("vendorName", ""),
+        "mode": mode,
         "invoice_index": invoice_index,
         "total_invoices_available": len(invoices),
         "invoice": {
@@ -1061,6 +1066,7 @@ async def list_traceable_invoices(vendor_no: str, limit: int = Query(20, le=100)
 async def batch_trace_invoices(
     vendor_no: str,
     count: int = Query(5, ge=1, le=20, description="Number of invoices to trace"),
+    mode: str = Query("trace", description="'trace' = optimistic (AI sees human items). 'production' = realistic (template only)."),
 ):
     """
     Run the trace comparison across multiple invoices for a vendor and return
@@ -1119,9 +1125,10 @@ async def batch_trace_invoices(
             "invoice_date": invoice.get("invoiceDate", ""),
             "reference_number": human_ref_info.get("ref", ""),
             "detected_pattern": human_ref_info.get("pattern", ""),
-            "per_line_refs": human_ref_info.get("per_line_refs", []),
-            "trace_human_line_count": len(human_lines),
         }
+        if mode == "trace":
+            ef["per_line_refs"] = human_ref_info.get("per_line_refs", [])
+            ef["trace_human_line_count"] = len(human_lines)
         ai_lines = _simulate_template_lines(template, ef)
         ai_summary = _build_line_summary(ai_lines)
         comparison = _compute_trace_diff(human_lines, human_summary, ai_lines, ai_summary, template)
@@ -1158,6 +1165,7 @@ async def batch_trace_invoices(
     return {
         "vendor_no": vendor_no,
         "vendor_name": (invoices[0].get("vendorName", "") if invoices else ""),
+        "mode": mode,
         "invoices_traced": len(valid),
         "invoices_skipped": len(results) - len(valid),
         "avg_match_rate": avg_match,

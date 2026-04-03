@@ -618,7 +618,7 @@ async def create_purchase_invoice(
     idempotency_key: str = "",
     transaction_id: str = "",
 ) -> Dict[str, Any]:
-    """Create a Purchase Invoice in BC WRITE environment (Sandbox) via GPI custom API."""
+    """Create a Purchase Invoice in BC WRITE environment (Sandbox) via standard BC API."""
     _check_write_protection("create_purchase_invoice")
     if not idempotency_key:
         idempotency_key = _generate_idempotency_key("PI", source_doc_id)
@@ -627,23 +627,31 @@ async def create_purchase_invoice(
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     payload = {
-        "idempotencyKey": idempotency_key,
-        "sourceSystem": SOURCE_SYSTEM,
-        "sourceDocumentId": source_doc_id or "",
-        "transactionId": transaction_id,
-        "vendorNo": vendor_no,
+        "vendorNumber": vendor_no,
         "vendorInvoiceNo": vendor_invoice_no or "",
-        "documentDate": document_date or today,
+        "invoiceDate": document_date or today,
         "postingDate": posting_date or today,
     }
 
-    result = await _api_request("POST", "purchaseInvoiceRequests", payload, environment=BC_WRITE_ENVIRONMENT)
+    token = await _get_token()
+    company_id = await _resolve_company_id()
+    url = f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/{BC_STANDARD_API}/companies({company_id})/purchaseInvoices"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        resp = await client.post(url, json=payload, headers=headers)
+        resp.raise_for_status()
+        result = resp.json()
+
     return {
-        "success": result.get("resultSuccess", False),
-        "bc_record_no": result.get("resultRecordNo", ""),
-        "bc_system_id": result.get("resultSystemId", ""),
-        "status": result.get("resultStatus", ""),
-        "error_message": result.get("errorMessage", ""),
+        "success": True,
+        "bc_record_no": result.get("number", ""),
+        "bc_system_id": result.get("id", ""),
+        "status": result.get("status", "Draft"),
+        "error_message": "",
         "idempotency_key": idempotency_key,
         "transaction_id": transaction_id,
     }

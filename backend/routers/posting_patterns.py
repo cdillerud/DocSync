@@ -1401,9 +1401,23 @@ def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
         if non_zero_others:
             selected.append(non_zero_others[0])
 
+    # GENERAL FALLBACK: Fill remaining slots from `other` items (frequent/optional)
+    # sorted by presence rate. This catches items like TARIFF-DS that aren't
+    # classified as product_candidates or surcharges but still appear regularly.
+    if len(selected) < typical_count:
+        remaining_others = sorted(
+            [o for o in other if o not in selected],
+            key=lambda x: x.get("invoice_presence_rate", 0),
+            reverse=True,
+        )
+        for ro in remaining_others:
+            if len(selected) >= typical_count:
+                break
+            selected.append(ro)
+
     # Add zero-cost optional items (like Z-POP) as structural fillers
     if len(selected) < typical_count:
-        zero_others = [o for o in other if o.get("is_zero_cost", False)]
+        zero_others = [o for o in other if o.get("is_zero_cost", False) and o not in selected]
         for zo in zero_others:
             if len(selected) >= typical_count:
                 break

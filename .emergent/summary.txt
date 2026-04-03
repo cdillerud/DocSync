@@ -1,47 +1,46 @@
 <analysis>**original_problem_statement**: 
-The user requested continuous refinement of the Sales/AP Modules and the Document Inbox. In earlier sessions, the user wanted to ensure the AI is *actually* learning from corrections and historical BC data. Furthermore, the user provided Square9 Workflow diagrams for alignment comparison and requested to work backwards from BC to teach the LLM how humans currently post invoices to Business Central (BC), leading to full auto-posting automation.
+The user requested continuous refinement of the Sales/AP Modules and the Document Inbox. Following earlier requests to ensure the AI learns from historical Business Central (BC) data, the user requested an Invoice Trace feature to side-by-side compare how human users historically posted an invoice in BC versus how the AI's auto-post template would generate it. The focus of this session was completing the Trace tool tuning to achieve >90% accuracy and moving into **Phase 2: BC Auto-Posting (Wire Templates to actual Draft Purchase Invoice Creation)**.
 
 PRODUCT REQUIREMENTS:
-1. Reprocess Comparison Tool Enhancements (Completed)
-2. File Recovery Fallback (Completed)
-3. Delta Scoring Fix (Completed)
-4. Post-LLM Refinement (Completed)
-5. Feedback Loop & Learning Pipeline Gaps Fix (Completed)
-6. Manual PO Override (Completed)
-7. Square9 Workflow Alignment & BC Auto-Posting: Analyze human posting patterns in BC (GL accounts, items, descriptions) to automate invoice creation.
+1. Expand BC data fetch to include all invoice statuses (Completed)
+2. Invoice Trace Comparison Tool (Completed)
+3. Variability-Aware Structural Classification (Completed)
+4. Phase 2: Square9 Workflow Alignment & BC Auto-Posting: Wire templates to Draft PI Creation for high-confidence vendors. (IN PROGRESS)
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
 **what currently exists?** 
-A robust Document Hub with a fully functional AP/Sales pipeline. The Feedback and Learning loop is 100% operational. A powerful BC Posting Pattern Analyzer mines BC for historical human posting patterns to build robust s for vendors. A new full-stack Posting Intelligence Dashboard UI allows users to view vendor consistency scores, readiness, and auto-post settings. A continuous learning hook has been wired so that every successful Business Central purchase invoice creation incrementally updates the vendor's posting profile.
+A robust Document Hub with a fully functional AP pipeline and a BC Posting Pattern Analyzer. The  comparison tool is now highly accurate, featuring weighted dimension scores and line-by-line alignments. It supports both single and batch invoice tracing via  with two modes:  (optimistic, peeks at human items) and  (realistic, uses pure template logic). Top vendors (REGANIN, OWENS, PEPPER, FEDEX, CELTICI) are currently achieving 93-100% match rates in pure production mode.
 
 **Last working item**: 
-    - Last item agent was working: Expanding the BC dataset ingestion. The agent had successfully removed hard limits on the analyzer (allowing it to parse thousands of lines and hundreds of vendors), but the user requested to further expand this by including *all* invoice statuses in the learning dataset (not just posted purchase invoices). The agent was inspecting  to figure out how to fetch non-posted/other status invoices to maximize the AI's learning data.
+    - Last item agent was working: Gathering context and planning for **Phase 2 (Auto-Draft Purchase Invoices)**. The agent explained the auto-drafting architecture (Confidence Gate, Duplicate Guard, Review Queue) to the user, got explicit approval (Please proceed as presented), and began reviewing  and .
     - Status: IN PROGRESS
-    - Agent Testing Done: N (For this specific data expansion; previous analyzer tightening was tested).
-    - Which testing method agent to use? testing_agent_v3_fork (Backend testing to ensure the expanded query works without breaking the analyzer).
+    - Agent Testing Done: N
+    - Which testing method agent to use? backend testing agent
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:  
-  Issue 1: Expand BC data fetch to include all invoice statuses (P0)
-     - Attempted fixes: Agent was reviewing  in  to see if status filters can be removed or if additional endpoints need to be queried (e.g., standard Purchase Invoices vs Posted Purchase Invoices).
-     - Next debug checklist: Modify  and  to ingest invoices regardless of status. Verify with the user exactly which BC data points/endpoints they want included if standard purchase invoices are separate from posted ones.
-     - Why fix this issue and what will be achieved with the fix? The user explicitly asked why exclude ANYTHING that can help the AI make decisions??. More data means higher confidence and better consistency templates.
-     - Status: IN PROGRESS
+  Issue 1: FRACHT template production accuracy is 80% (P1)
+     - Attempted fixes: Added adaptive trace-mode counts, which works for trace mode (95%) but in production mode it falls back to , missing the TARIFF-DS line on 2-line invoices.
+     - Next debug checklist: Increase  to 2 for FRACHT, or ensure TARIFF-DS is correctly classified as a co-occurring surcharge in .
+     - Why fix this issue and what will be achieved with the fix? Allows FRACHT to surpass the 90% confidence threshold and be included in the auto-draft queue.
+     - Status: NOT STARTED
      - Is recurring issue? N
      - Should Test frontend/backend/both after fix? backend
      - Blocked on other issue: None
 
 **In progress Task List**:
-  Task 1: Phase 2 of BC Auto-Posting (Wire Templates to PI Creation) (P1)
-     - Where to resume: Once the posting templates and consistency scoring are fully finalized and the dataset is expanded, utilize these templates in  and the  flow in  to physically create Draft Purchase Invoices in BC for HIGH confidence vendors.
-     - What will be achieved with this? End-to-end Square9 alignment where AP invoices can be autonomously posted to BC without human intervention for stable vendors.
-     - Status: NOT STARTED (Backend endpoints and UI prep completed, but trigger logic is pending).
-     - Should Test frontend/backend/both after fix? both
-     - Blocked on something: Issue 1 (Expanding BC data fetch).
+  Task 1: Phase 2 of BC Auto-Posting (Wire Templates to PI Creation) (P0)
+     - Where to resume: Implement the Auto-Draft Service inside . Utilize  for high-confidence templates (≥90% production match rate). Wire this simulated data to the  API in  to create DRAFT Purchase Invoices. 
+     - What will be achieved with this? AP invoices will be autonomously posted as DRAFT Purchase Invoices in BC for stable vendors, reducing human work from 5-10 minutes of data entry to 30 seconds of review.
+     - Status: IN PROGRESS
+     - Should Test frontend/backend/both after fix? backend
+     - Blocked on something: None
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
+    - P1: Build Review Queue UI (Frontend tab for users to review/approve auto-drafted PIs).
+    - P1: Build Feedback Loop (When a human edits an auto-drafted PI, the correction feeds back into the template).
     - P1: Build Rep Overrides management UI (Admin screen to map customers to reps without using DB scripts).
     - P1: Teams Adaptive Card integration (webhook handler for Approve -> BC Sales Order).
     
@@ -55,91 +54,84 @@ A robust Document Hub with a fully functional AP/Sales pipeline. The Feedback an
     - P3: Investigate 205  batch failures.
 
 **Completed work in this session**
-- Created  frontend UI () showing vendor posting profiles, confidence levels, and ready-to-post queues (DONE)
-- Added auto-post settings endpoints and dashboard controls (DONE)
-- Implemented 8-Dimension Consistency Scoring in analyzer (measuring format consistency like item choices, reference patterns, tax, and line counts instead of just dollar amounts) (DONE)
-- Implemented Item Family grouping (e.g., treating FREIGHT-DS and FREIGHT-WH as the same structural family to avoid penalizing routing variants) (DONE)
-- Removed hard caps on historical data parsing; analyzer now pulls all available BC history and automatically discovers hundreds of vendors directly from BC (DONE)
-- Wired Continuous Learning: Added a hook in  that incrementally updates a vendor's pattern profile every time a draft PI is successfully created. (DONE)
+- Implemented Weighted Dimension Scoring for Invoice Trace (DONE)
+- Implemented Line-by-Line alignment mapping display in frontend  (DONE)
+- Created Batch Trace Endpoint  (DONE)
+- Fixed product candidate selection to accurately map multi-line items (DONE)
+- Added  and  flags to endpoints to gauge true automation readiness (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-   - None.
+   - Issue 1: FRACHT template missing TARIFF-DS in production simulation (Detailed in Pending Issues).
 
 **Known issue recurrence from previous fork**
   - Issue recurrence in previous fork: Universal Key Budget Exceeded
   - Recurrence count: 1
-  - Status: RESOLVED (User handles via top-ups, no code fix needed).
+  - Status: RESOLVED
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
-- **Item Family Scoring:** The analyzer groups similar items (e.g., FREIGHT-DS, FREIGHT-WH) into a single family when calculating consistency. This prevents expected business variants from dragging down a vendor's predictability score.
-- **8-Dimension Consistency:** Scoring is based heavily on *structural* format (line count, item dominance, reference pattern format, tax code uniformity) rather than dollar amount variance.
-- **Continuous Learning Hook:** Whenever  succeeds, it immediately fires  to incrementally update the vendor's posting patterns in real-time.
+- **Trace vs Production Mode:**  mode peeks at human invoice lines to find perfect template item mapping.  mode strictly uses the template probabilistic logic (simulating real-world, blind auto-posting).
+- **Auto-Draft Workflow (Phase 2):** Takes OCR extracted data + Vendor Template -> predicts lines -> pushes to BC as a *DRAFT* PI. 
 
 **key DB schema**
-  - : Stores posting templates, 8-dimension consistency scores, and learning counters for vendors.
+  - : Stores  and template lines with .
 
 **changes in tech stack**
   - None.
 
 **All files of reference** 
--  (Rewritten logic for extracting posting DNA from BC, consistency scoring, and item families).
--  (Added , , and  endpoints, and modified endpoints to accept  flag and unbounded limits).
--  (Created - full stack dashboard).
--  (Updated to call continuous learning hook).
--  (Currently modifying to pull more invoice statuses).
--  &  (Updated navigation).
+-  (Updated with weighted scoring, batch endpoints, and mode switches).
+-  (Updated to display alignment pairs and dimension scores).
+-  (Agent was reviewing this to start Phase 2 logic).
+-  (Agent was reviewing this to wire the Draft PI creation).
 
 **Areas that need refactoring**: 
 -  routing extraction is still pending.
 
 **key api endpoints**
--  (Runs background task to analyze vendors. Now accepts  to fetch ALL vendors).
--  (Shows background progress and summary of all analyzed vendors).
--  (Shows 8-dimension breakdown).
+-  (Single trace)
+-  (Batch trace)
 
 **Critical Info for New Agent** 
-- **Production Server Testing:** The user tests via curl commands on their production server (). 
-- **BC Credentials in Preview:** The preview environment has NO REAL BC CREDENTIALS. Endpoints fetching from BC will return empty lists or  counts locally. The code logic is completely correct; real data lives on the user's Prod server. Ensure all BC endpoints gracefully handle empty datasets or missing credentials without crashing.
-- **Background Tasks for BC:** Querying hundreds of historical invoices takes minutes. Heavy tasks MUST remain pushed to  background workers.
+- **Production Testing:** The user tests heavily via  commands directly on their live production server. 
+- **Mock Environment:** The preview environment lacks real BC credentials. Endpoints fail gracefully ( or specific mock JSON). **Do not attempt to fix BC authentication in preview.**
+- **Phase 2 Safety Rails:** Phase 2 logic must ONLY create **DRAFT** Purchase Invoices. It must *never* auto-post to the ledger. Apply this logic only to vendors with a historical production match rate of ≥ 90% (REGANIN, OWENS, PEPPER, FEDEX, CELTICI).
 
 **documents and test reports created in this job** 
-  -  (Dashboard and Settings Endpoints)
-  -  (Tightened Analyzer Logic)
-  -  (Updated)
+- None in this specific fork session. Refer to  for historical guidelines.
 
 **Last 10 User Messages and any pending HUMAN messages** 
-- **User**: I think what we really want to nail down is the consistency of the format of the data entered into BC for each vendor, less so worrying about the value varaibility of things like the freight cost. make sense??
-- **Agent**: (Agreed, implemented item family concept and reweighted consistency to focus on structural format).
-- **User**: [Uploaded curl showing massive improvement for TUMALOC, but still only ~16 Hub-specific vendors were analyzed]
-- **User**: is this wired to learn from each and every new document it ingests???
-- **Agent**: (Added continuous learning hook inside  upon successful PI creation).
-- **User**: How many total PIs have we analyzed and learned from?
-- **Agent**: (Added aggregate status endpoint, showed 807 invoices).
-- **User**: Why are we limiting the number we analyze and learn from??? there should be years of vendoes and examples to draw into the LLM
-- **Agent**: (Removed Hub profile caps. Paginated through ALL BC purchase invoices to discover hundreds of vendors directly. Showed 10k+ lines analyzed).
-- **User**: Keep tightening...I want this to be able to be defendable in a few weeks.
-- **User (PENDING)**: I tihknk posted and any other statuses need to be considered...they are part of the data set. ewhy exclude ANYTHING that can help the AI make decisions??
+- **User**: Continue tuning. Make it better. Proceed.
+- **Agent**: (Refactored trace diffing to weighted scores and line alignments, added batch endpoint).
+- **User**: [Ran curl batch trace for multiple vendors, output showed OWENS regressing to 71%].
+- **Agent**: (Fixed fallback logic, added trace mode vs production mode to fix regression while providing realistic metrics).
+- **User**: [Ran both trace and production traces. Production showed 5 top vendors at 93-100%, and FRACHT at 80%].
+- **Agent**: (Advised that 5 vendors are ready for Phase 2 Auto-drafting, FRACHT needs separate tuning).
+- **User**: explain the next phase more explicitly...please.
+- **Agent**: (Detailed the Phase 2 Auto-Draft Service, Confidence Gate, Duplicate Guard, and Review queue).
+- **User**: Please proceed as presented.
+- **Agent**: (Began exploring  and  to prepare implementation).
+- *Pending Human Messages*: None. You are clear to immediately begin Phase 2 implementation.
 
 **Project Health Check:**
 Broken: None
-Mocked: 
+Mocked:  (placeholder BC credentials return simulated API structures upon failure).
 
 **3rd Party Integrations** 
   • OpenAI / Gemini — uses Emergent LLM Key
-  • Dynamics 365 BC — requires User API Key (Credentials live on user's Prod server)
+  • Dynamics 365 BC — requires User API Key
   • MS Graph (Email/SharePoint) — requires User API Key
 
 **Testing status**
-  - Testing agent used after significant changes: YES (Iterations 171, 172)
+  - Testing agent used after significant changes: NO (User was actively verifying via direct  commands on their prod server).
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: None this session.
-  - Known regressions: None
+  - Test files created: None
+  - Known regressions: None pending.
 
 **Credentials to test flow:**
 - Read  for UI logins ( / ).
 
 **What agent forgot to execute**
-The agent did not yet implement the user's final request to include *other* invoice statuses (like Open, Unpaid, or standard non-posted Purchase Invoices) in the dataset. The agent was actively reading  to identify how to broaden the data fetch to include these statuses before finishing. Pick up from here.</analysis>
+N/A - the agent was right in the middle of exploring files to begin the exact task the user approved. Proceed immediately with Task 1 (Phase 2).</analysis>

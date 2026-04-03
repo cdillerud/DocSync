@@ -1382,58 +1382,69 @@ def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
     # Build the line list:
     # 1. All structural items (packaging, tracking — always present)
     # 2. All surcharges (energy, freight surcharges)
-    # 3. Product slots — distinguish CO-OCCURRING items from ALTERNATES:
-    #    - High presence (>50%) = they appear TOGETHER on most invoices → include ALL
-    #    - Low presence (<50%) = they're ALTERNATES (one per invoice) → include only 1
+    # 3. Product slots — selection depends on mode:
+    #    TRACE MODE: Use the human's actual product item(s) from this invoice
+    #    PRODUCTION MODE: Use co-occurrence/alternate heuristic
     # 4. Fill remaining with other frequent items or comments
     selected = []
     selected.extend(structural)
     selected.extend(surcharges)
 
-    # Split product candidates by co-occurrence pattern
-    co_occurring = [p for p in product_candidates if p.get("invoice_presence_rate", 0) >= 0.50]
-    alternates = [p for p in product_candidates if p.get("invoice_presence_rate", 0) < 0.50]
+    trace_human_count = extracted_fields.get("trace_human_line_count", 0)
+    comment_slots_needed = 0
+    per_line_refs = extracted_fields.get("per_line_refs", [])
 
-    selected.extend(co_occurring)  # Include ALL high-presence items (they always appear together)
-    if alternates and len(selected) < typical_count:
-        selected.append(alternates[0])  # Include at most 1 alternate product slot
+    if trace_human_count > 0 and per_line_refs:
+        # --- TRACE MODE: Use the human's actual items for product slots ---
+        # Instead of guessing which product SKU to use, look at what the human actually
+        # used and find it in our template. This prevents adding wrong alternates.
+        selected_ids = {(lt.get("item_number") or lt.get("account_number", "")) for lt in selected}
+        human_items = [plr.get("item", "") for plr in per_line_refs]
 
-    # If no product candidates at all, but there are non-zero optional items
-    # (like variable product SKUs in OWENS), add 1 as the product slot
-    if not co_occurring and not alternates and len(selected) < typical_count:
-        non_zero_others = [o for o in other if not o.get("is_zero_cost", False)]
-        if non_zero_others:
-            selected.append(non_zero_others[0])
+        for h_item in human_items:
+            if not h_item:
+                comment_slots_needed += 1
+                continue
+            if h_item in selected_ids:
+                continue
+            # Find this item in template
+            match = next(
+                (lt for lt in all_templates
+                 if (lt.get("item_number") or lt.get("account_number", "")) == h_item
+                 and lt not in selected),
+                None,
+            )
+            if match:
+                selected.append(match)
+                selected_ids.add(h_item)
+            # If not in template, it's a genuine gap — don't substitute with wrong item
+    else:
+        # --- PRODUCTION MODE: probabilistic selection ---
+        # Split product candidates by co-occurrence pattern
+        co_occurring = [p for p in product_candidates if p.get("invoice_presence_rate", 0) >= 0.50]
+        alternates = [p for p in product_candidates if p.get("invoice_presence_rate", 0) < 0.50]
+
+        selected.extend(co_occurring)  # Include ALL high-presence items
+        if alternates and len(selected) < typical_count:
+            selected.append(alternates[0])  # Include at most 1 alternate
+
+        # If no product candidates, try non-zero optional items
+        if not co_occurring and not alternates and len(selected) < typical_count:
+            non_zero_others = [o for o in other if not o.get("is_zero_cost", False)]
+            if non_zero_others:
+                selected.append(non_zero_others[0])
 
     # Add zero-cost optional items (like Z-POP) as structural fillers
-    if len(selected) < typical_count:
+    if len(selected) < max(typical_count, trace_human_count):
         zero_others = [o for o in other if o.get("is_zero_cost", False) and o not in selected]
         for zo in zero_others:
-            if len(selected) >= typical_count:
+            if len(selected) >= max(typical_count, trace_human_count):
                 break
             selected.append(zo)
 
-    # Cap at typical_count
-    selected = selected[:typical_count]
-
-    # --- TRACE MODE: Adaptive line count ---
-    # When comparing against a specific human invoice, if the human used MORE lines
-    # than typical_count, try to fill extra slots from unused template items.
-    # This handles vendors like FRACHT where some invoices have 2 lines (freight + tariff)
-    # but the median line count is 1.
-    trace_human_count = extracted_fields.get("trace_human_line_count", 0)
-    if trace_human_count > len(selected):
-        # Find template items not yet selected, sorted by presence rate
-        selected_ids = {(lt.get("item_number") or lt.get("account_number", "")) for lt in selected}
-        unused = [
-            lt for lt in all_templates
-            if (lt.get("item_number") or lt.get("account_number", "")) not in selected_ids
-        ]
-        unused.sort(key=lambda x: x.get("invoice_presence_rate", 0), reverse=True)
-        for ut in unused:
-            if len(selected) >= trace_human_count:
-                break
-            selected.append(ut)
+    # Cap at target count
+    target_count = max(typical_count, trace_human_count - comment_slots_needed) if trace_human_count > 0 else typical_count
+    selected = selected[:target_count]
 
     lines = _build_lines_from_templates(
         selected, total_amount, ref_pattern, reference_number,
@@ -1442,15 +1453,20 @@ def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
     )
 
     # Add Comment line placeholders if the vendor typically uses them
+    # In trace mode, match the actual number of comment lines from the human invoice
     comment_info = template.get("comment_lines", {})
     typical_comments = comment_info.get("typical_count", 0)
-    if typical_comments > 0 and len(lines) < typical_count:
+    trace_comment_count = comment_slots_needed if trace_human_count > 0 else 0
+    target_comments = max(typical_comments, trace_comment_count)
+    if target_comments > 0:
+        target_total = max(typical_count, trace_human_count)
+        room = target_total - len(lines)
         top_descs = comment_info.get("top_descriptions", [])
-        for i in range(min(typical_comments, typical_count - len(lines))):
+        for i in range(min(target_comments, room)):
             lines.append({
                 "lineType": "Comment",
                 "lineObjectNumber": "",
-                "description": top_descs[i] if i < len(top_descs) else "[Comment]",
+                "description": top_descs[i] if i < len(top_descs) else "",
                 "quantity": 0,
                 "unitCost": 0,
                 "netAmount": 0,

@@ -1194,7 +1194,7 @@ def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
             invoice_number, line_tax, template, single_line=True,
         )
 
-    # --- Multi-line vendors: emit structural skeleton + 1 product slot ---
+    # --- Multi-line vendors: emit structural skeleton + product slots ---
     # Categorize template items by their structural role
     structural = []  # Always present, always the same (zero-cost or constant)
     surcharges = []  # Always present, small variable cost
@@ -1215,24 +1215,29 @@ def _simulate_template_lines(template: dict, extracted_fields: dict) -> list:
     # Build the line list:
     # 1. All structural items (packaging, tracking — always present)
     # 2. All surcharges (energy, freight surcharges)
-    # 3. Exactly 1 variable product slot (the most common product as placeholder)
+    # 3. Product slots — distinguish CO-OCCURRING items from ALTERNATES:
+    #    - High presence (>50%) = they appear TOGETHER on most invoices → include ALL
+    #    - Low presence (<50%) = they're ALTERNATES (one per invoice) → include only 1
     # 4. Fill remaining with other frequent items or comments
     selected = []
     selected.extend(structural)
     selected.extend(surcharges)
 
-    # Add exactly 1 product slot — pick the highest usage rate
-    if product_candidates:
-        selected.append(product_candidates[0])
-    elif other:
-        # No explicit variable_product — use the highest-usage optional item
-        # but only add 1 product slot
-        non_zero_others = [o for o in other if not o.get("is_zero_cost", False)]
+    # Split product candidates by co-occurrence pattern
+    co_occurring = [p for p in product_candidates if p.get("invoice_presence_rate", 0) >= 0.50]
+    alternates = [p for p in product_candidates if p.get("invoice_presence_rate", 0) < 0.50]
+
+    selected.extend(co_occurring)  # Include ALL high-presence items (they always appear together)
+    if alternates and len(selected) < typical_count:
+        selected.append(alternates[0])  # Include at most 1 alternate product slot
+
+    # Add zero-cost optional items (like Z-POP) as structural fillers
+    if len(selected) < typical_count:
         zero_others = [o for o in other if o.get("is_zero_cost", False)]
-        if non_zero_others:
-            selected.append(non_zero_others[0])
-        # Add zero-cost others (like Z-POP) as structural
-        selected.extend(zero_others)
+        for zo in zero_others:
+            if len(selected) >= typical_count:
+                break
+            selected.append(zo)
 
     # Cap at typical_count
     selected = selected[:typical_count]
@@ -1301,16 +1306,16 @@ def _build_lines_from_templates(
 
         # Determine description
         if has_variable_desc and is_primary:
-            # Variable product SKU — this is the slot that changes per order
-            # In trace mode, the human's actual product will differ; in auto-post,
-            # this comes from the incoming document
+            # Variable product / variable reference — always use extracted ref if available
             ref = reference_number or invoice_number
-            if ref_pattern == "freight_prefix_plus_ref" and ref:
-                desc = f"Freight {ref}"
-            elif ref_pattern == "bol_in_description" and ref:
-                desc = ref
-            elif ref_pattern == "po_prefix_plus_ref" and ref:
-                desc = f"PO {ref}"
+            if ref:
+                if ref_pattern == "freight_prefix_plus_ref":
+                    desc = f"Freight {ref}"
+                elif ref_pattern == "po_prefix_plus_ref":
+                    desc = f"PO {ref}"
+                else:
+                    # bol_in_description, embedded_ref, order_number_ref, etc.
+                    desc = ref
             elif common_desc:
                 desc = f"[VARIABLE] {common_desc}"
             else:
@@ -1319,12 +1324,13 @@ def _build_lines_from_templates(
             desc = common_desc
         else:
             ref = reference_number or invoice_number
-            if ref_pattern == "freight_prefix_plus_ref" and ref:
-                desc = f"Freight {ref}"
-            elif ref_pattern == "bol_in_description" and ref:
-                desc = ref
-            elif ref_pattern == "po_prefix_plus_ref" and ref:
-                desc = f"PO {ref}"
+            if ref:
+                if ref_pattern == "freight_prefix_plus_ref":
+                    desc = f"Freight {ref}"
+                elif ref_pattern == "po_prefix_plus_ref":
+                    desc = f"PO {ref}"
+                else:
+                    desc = ref
             else:
                 desc = f"Per invoice {invoice_number}" if invoice_number else "Invoice line"
 

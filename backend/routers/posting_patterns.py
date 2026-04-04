@@ -831,6 +831,7 @@ async def sync_item_to_sandbox(
 
     # Step 1: Check if item already exists in Sandbox
     sandbox_url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENV}/api/v2.0/companies({company_id})/items"
+    existing_item_id = None
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
         resp = await client.get(sandbox_url, headers={
             "Authorization": f"Bearer {token}", "Accept": "application/json"
@@ -838,7 +839,21 @@ async def sync_item_to_sandbox(
         if resp.status_code == 200:
             existing = resp.json().get("value", [])
             if existing:
-                return {"status": "already_exists", "item": item_number, "id": existing[0].get("id", "")}
+                existing_item_id = existing[0].get("id", "")
+                if not description:
+                    # Item exists but may need updating — delete and re-create with full props
+                    etag = existing[0].get("@odata.etag", "")
+                    del_url = f"{sandbox_url}({existing_item_id})"
+                    del_headers = {
+                        "Authorization": f"Bearer {token}",
+                        "If-Match": etag or "*",
+                    }
+                    del_resp = await client.delete(del_url, headers=del_headers)
+                    if del_resp.status_code in (200, 204):
+                        logger.info("Deleted incomplete item %s from Sandbox for re-sync", item_number)
+                    else:
+                        return {"status": "already_exists", "item": item_number, "id": existing_item_id,
+                                "note": "Item exists. Pass description param to skip re-create."}
 
     # Step 2: Look up item in Production for its properties
     prod_item = None
@@ -862,12 +877,22 @@ async def sync_item_to_sandbox(
     item_desc = description or (prod_item.get("displayName", "") if prod_item else item_number)
     item_type = (prod_item.get("type", "Service") if prod_item else "Service")
 
-    # Step 3: Create the item in Sandbox
+    # Step 3: Create the item in Sandbox with all relevant properties from Production
     create_payload = {
         "number": item_number,
         "displayName": item_desc,
         "type": item_type,
     }
+    # Copy posting group fields from Production item if available
+    if prod_item:
+        for field in ("generalProductPostingGroupId", "generalProductPostingGroupCode",
+                       "inventoryPostingGroupId", "inventoryPostingGroupCode",
+                       "itemCategoryCode", "unitOfMeasureCode", "unitOfMeasureId",
+                       "taxGroupCode", "taxGroupId", "baseUnitOfMeasureCode",
+                       "genProdPostingGroupCode"):
+            val = prod_item.get(field)
+            if val and val != "00000000-0000-0000-0000-000000000000":
+                create_payload[field] = val
 
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
         resp = await client.post(sandbox_url, headers={

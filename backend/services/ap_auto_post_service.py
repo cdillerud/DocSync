@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 CONFIDENCE_LEVELS = {"low": 1, "medium": 2, "high": 3}
 
 
-def check_ap_ready_to_post(doc: dict, vendor_profile: dict = None, source: str = "auto") -> Tuple[bool, str, list]:
+def check_ap_ready_to_post(doc: dict, vendor_profile: dict = None, source: str = "auto", posting_profile: dict = None) -> Tuple[bool, str, list]:
     """Check if an AP invoice passes the 4 conditions for auto-posting.
     
     Args:
@@ -85,15 +85,25 @@ def check_ap_ready_to_post(doc: dict, vendor_profile: dict = None, source: str =
     #   a) Human reviewer already overrode it (manual_po_override flag)
     #   b) Human is clicking "Mark Ready" right now (source=mark_ready)
     #   c) Vendor profile says PO is never expected (freight carriers etc.)
+    #   d) Vendor has a high-confidence posting template (we KNOW how to post this vendor)
     vp = vendor_profile or {}
     po_expected = vp.get("po_expected", True)
     
+    # Check posting template confidence
+    pp = posting_profile or {}
+    pp_template = pp.get("posting_template", {})
+    pp_confidence = pp_template.get("confidence", "low")
+    pp_has_high_confidence = pp_confidence in ("high", "medium") and pp.get("invoices_analyzed", 0) >= 10
+
     if has_manual_override:
         logger.info("[AP Auto-Post] PO check SKIPPED — manual override set by reviewer")
     elif is_human_action:
         logger.info("[AP Auto-Post] PO check SKIPPED — human review action (%s)", source)
     elif not po_expected:
         logger.info("[AP Auto-Post] PO check SKIPPED for vendor %s — BC history shows PO never expected", vendor_no)
+    elif pp_has_high_confidence:
+        logger.info("[AP Auto-Post] PO check SKIPPED for vendor %s — posting template confidence=%s (%d invoices learned)",
+                     vendor_no, pp_confidence, pp.get("invoices_analyzed", 0))
     else:
         po_passed = False
         for check in val.get("checks", []):
@@ -145,7 +155,7 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
         except Exception as pp_err:
             logger.debug("[AP Auto-Post] No posting profile for %s: %s", vendor_no, pp_err)
 
-    ready, reason, failures = check_ap_ready_to_post(doc, vendor_profile=vendor_profile, source=source)
+    ready, reason, failures = check_ap_ready_to_post(doc, vendor_profile=vendor_profile, source=source, posting_profile=posting_profile)
 
     if not ready:
         # Set to NeedsReview

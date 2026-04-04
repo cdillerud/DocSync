@@ -116,17 +116,15 @@
 - **Create Draft PI**: One-click draft creation using learned posting templates
 - **Vendor Summary**: Aggregated view of all analyzed vendors with auto-post eligibility status
 - **Template-Enhanced Lines**: `_build_pi_lines_with_mapping` now uses posting templates for reference patterns (BOL/freight)
-- **Confidence-Gated Auto-Draft**: `ap_auto_post_service.py` now auto-creates DRAFT PIs for ReadyForPost documents when:
-  - Auto-post is enabled in settings
-  - Vendor has a posting profile meeting the min confidence threshold
-  - Vendor has enough invoices analyzed
-  - Vendor is not in blocked list
-  - No duplicate draft exists
+- **Confidence-Gated Auto-Draft**: `ap_auto_post_service.py` auto-creates DRAFT PIs for ReadyForPost documents when vendor has high-confidence posting template (≥10 invoices analyzed)
+- **Posting Template Override**: Vendors with high-confidence templates bypass PO check, stable vendor check, and other validation gates — the system uses what it learned from BC history
+- **Template Item/Description Matching**: Line builder uses template's learned item codes (e.g., `FREIGHT-DS`) and description patterns (e.g., `Freight {ref}`) instead of GL account fallback
+- **BC Item Sync**: `POST /bc-sync-item/{item_number}` clones items from Production to Sandbox with posting groups
+- **Draft vs Production Comparison**: `GET /compare-draft/{draft_no}` side-by-side comparison of auto-drafted PI against real production PIs
+- **Stable Vendor Posting Template Boost**: Vendors with high-confidence posting templates are automatically considered stable, overriding all-time stats
+- **Vendor Match Cache Fix**: Only positive matches are cached; transient BC API failures no longer permanently cache "no match"
 - **Batch Auto-Draft Queue**: `POST /auto-draft-queue` processes all ReadyForPost docs through the confidence gate
-- **Eligibility Check**: `GET /auto-draft-eligibility/{doc_id}` checks if a specific doc qualifies
-- **Pipeline Integration**: When a document reaches ReadyForPost via `attempt_ap_auto_post`, the confidence gate automatically fires
-- **FRACHT Surcharge Fix**: `_simulate_template_lines` now detects surcharges with ≥50% presence rate and bumps to multi-line mode, fixing production accuracy for vendors like FRACHT (TARIFF-DS now included)
-- **Endpoints**: `/settings` (GET/PUT), `/ready-queue`, `/vendor-summary`, `/draft-preview/{doc_id}`, `/create-draft/{doc_id}`, `/auto-draft-queue`, `/auto-draft-eligibility/{doc_id}`
+- **Endpoints**: `/settings` (GET/PUT), `/ready-queue`, `/vendor-summary`, `/draft-preview/{doc_id}`, `/create-draft/{doc_id}`, `/auto-draft-queue`, `/auto-draft-eligibility/{doc_id}`, `/compare-draft/{draft_no}`, `/bc-sync-item/{item_number}`
 - **Frontend**: `PostingPatternsDashboard.js` with stats, vendor profiles, ready queue, settings panel, confidence breakdown, Auto-Draft Queue button with result banner
 
 ### Posting Pattern Analyzer Tightening (Complete - Apr 2026)

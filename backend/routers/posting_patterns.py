@@ -3423,6 +3423,15 @@ async def get_po_gap_breakdown():
     }
 
 
+@router.get("/po-format-intelligence")
+async def get_po_format_intelligence():
+    """Get PO format learning summary — which transformations work per vendor."""
+    from deps import get_db
+    from services.po_format_learning_service import get_po_format_summary
+    db = get_db()
+    return await get_po_format_summary(db)
+
+
 # =============================================================================
 # On-Demand Intelligence Backfill
 # =============================================================================
@@ -3596,6 +3605,17 @@ async def _batch_revalidate_po_gaps(db, limit: int = 200) -> dict:
             try:
                 # Expand PO candidates with enhanced intelligence
                 expanded = await enhance_po_candidates(db, vendor_no, original_candidates)
+
+                # Also apply PO format learning transformations
+                try:
+                    from services.po_format_learning_service import get_smart_po_candidates
+                    for base_po in original_candidates[:3]:
+                        smart = await get_smart_po_candidates(db, vendor_no, base_po)
+                        for s in smart:
+                            if s not in expanded:
+                                expanded.append(s)
+                except Exception:
+                    pass
 
                 # Deduplicate against already-tried POs
                 already_tried = set()

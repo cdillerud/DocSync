@@ -656,6 +656,28 @@ async def _validate_bc_match_inner(
                 except Exception as gc_po_err:
                     logger.debug("[GapCloser:PO] PO expansion failed: %s", gc_po_err)
 
+                # === PO FORMAT LEARNING: Apply learned vendor-specific transformations ===
+                try:
+                    from services.po_format_learning_service import get_smart_po_candidates
+                    vendor_no_for_fmt = (
+                        validation_results.get("bc_record_info", {}).get("number", "")
+                        or extracted_fields.get("_vendor_canonical", "")
+                    )
+                    if vendor_no_for_fmt:
+                        for base_po in list(po_candidates_to_check)[:3]:  # Top 3 candidates
+                            smart = await get_smart_po_candidates(db, vendor_no_for_fmt, base_po)
+                            smart_new = [s for s in smart if s not in seen and s not in _exclude_from_po]
+                            for sn in smart_new:
+                                seen.add(sn)
+                                po_candidates_to_check.append(sn)
+                            if smart_new:
+                                logger.info(
+                                    "[PO-Format] Smart candidates for %s via '%s': +%d",
+                                    vendor_no_for_fmt, base_po[:20], len(smart_new),
+                                )
+                except Exception as fmt_err:
+                    logger.debug("[PO-Format] Smart candidate generation failed: %s", fmt_err)
+
                 if po_mode == "PO_REQUIRED":
                     if not po_candidates_to_check:
                         validation_results["all_passed"] = False
@@ -668,6 +690,7 @@ async def _validate_bc_match_inner(
                     else:
                         po_found = False
                         tried = []
+                        matching_candidate = ""
                         for candidate_po in po_candidates_to_check:
                             test_result = {"checks": [], "warnings": []}
                             await _validate_po(c, token, _api_url, company_id, candidate_po, test_result, required=True)
@@ -676,7 +699,27 @@ async def _validate_bc_match_inner(
                             if check.get("passed"):
                                 validation_results["checks"].append(check)
                                 po_found = True
+                                matching_candidate = candidate_po
                                 break
+                        # PO FORMAT LEARNING: Record outcome
+                        try:
+                            from services.po_format_learning_service import record_po_match
+                            _vendor_for_learn = (
+                                validation_results.get("bc_record_info", {}).get("number", "")
+                                or extracted_fields.get("_vendor_canonical", "")
+                            )
+                            _original_po = po_candidates_to_check[0] if po_candidates_to_check else ""
+                            if _vendor_for_learn and _original_po:
+                                # Determine which transformation was used
+                                _transform = "original" if matching_candidate == _original_po else "expanded"
+                                await record_po_match(
+                                    db, _vendor_for_learn, _original_po,
+                                    matched=po_found,
+                                    matched_bc_po=matching_candidate if po_found else "",
+                                    transformation_used=_transform if po_found else "",
+                                )
+                        except Exception as _learn_err:
+                            logger.debug("[PO-Format] Learn recording failed: %s", _learn_err)
                         if not po_found:
                             # Report primary failure with list of all sources tried
                             await _validate_po(c, token, _api_url, company_id, po_candidates_to_check[0], validation_results, required=True)
@@ -690,6 +733,7 @@ async def _validate_bc_match_inner(
                     if po_candidates_to_check:
                         po_found = False
                         tried = []
+                        matching_candidate = ""
                         for candidate_po in po_candidates_to_check:
                             test_result = {"checks": [], "warnings": []}
                             await _validate_po(c, token, _api_url, company_id, candidate_po, test_result, required=False)
@@ -698,7 +742,26 @@ async def _validate_bc_match_inner(
                             if check.get("passed"):
                                 validation_results["checks"].append(check)
                                 po_found = True
+                                matching_candidate = candidate_po
                                 break
+                        # PO FORMAT LEARNING: Record outcome
+                        try:
+                            from services.po_format_learning_service import record_po_match
+                            _vendor_for_learn = (
+                                validation_results.get("bc_record_info", {}).get("number", "")
+                                or extracted_fields.get("_vendor_canonical", "")
+                            )
+                            _original_po = po_candidates_to_check[0] if po_candidates_to_check else ""
+                            if _vendor_for_learn and _original_po:
+                                _transform = "original" if matching_candidate == _original_po else "expanded"
+                                await record_po_match(
+                                    db, _vendor_for_learn, _original_po,
+                                    matched=po_found,
+                                    matched_bc_po=matching_candidate if po_found else "",
+                                    transformation_used=_transform if po_found else "",
+                                )
+                        except Exception as _learn_err:
+                            logger.debug("[PO-Format] Learn recording failed: %s", _learn_err)
                         if not po_found:
                             # PO WAS extracted but NOT found in BC — this MUST block validation
                             # for AP invoices. The document needs manual review.

@@ -1710,6 +1710,13 @@ async def file_and_clear_document(doc_id: str):
         upsert=True,
     )
 
+    # === PER-DOCUMENT LEARNING: File & clear is a positive signal ===
+    try:
+        from services.per_document_learning_service import learn_from_document
+        await learn_from_document(db, doc_id, trigger="auto_file")
+    except Exception:
+        pass
+
     return {
         "success": True,
         "doc_id": doc_id,
@@ -1785,6 +1792,13 @@ async def bulk_file_and_clear(doc_ids: list = Body(None)):
                     confirmation_source="bulk_file_and_clear",
                     doc_context=_build_doc_context(doc),
                 )
+            except Exception:
+                pass
+
+            # === PER-DOCUMENT LEARNING: Bulk file is a positive signal ===
+            try:
+                from services.per_document_learning_service import learn_from_document
+                await learn_from_document(db, doc_id, trigger="auto_file")
             except Exception:
                 pass
 

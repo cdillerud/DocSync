@@ -251,6 +251,198 @@ function ReEvaluateSection({ onComplete }) {
   );
 }
 
+function LearningPulseSection() {
+  const [pulse, setPulse] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [backfilling, setBackfilling] = useState(false);
+
+  const fetchPulse = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/posting-patterns/learning-pulse`);
+      if (res.ok) setPulse(await res.json());
+    } catch (err) {
+      console.error(err);
+    }
+    setLoading(false);
+  };
+
+  const handleBackfill = async () => {
+    setBackfilling(true);
+    try {
+      const res = await fetch(`${API}/api/posting-patterns/learning-pulse/backfill?limit=1000`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        toast.success(`Backfill: ${data.processed || 0} documents learned from`);
+        fetchPulse();
+      } else {
+        toast.error('Backfill failed');
+      }
+    } catch {
+      toast.error('Backfill error');
+    }
+    setBackfilling(false);
+  };
+
+  useEffect(() => { fetchPulse(); }, []);
+
+  const bandLabels = { '0_50': '0-50%', '50_70': '50-70%', '70_85': '70-85%', '85_95': '85-95%', '95_100': '95-100%' };
+  const bandColors = { '0_50': 'bg-red-500', '50_70': 'bg-orange-500', '70_85': 'bg-yellow-500', '85_95': 'bg-blue-500', '95_100': 'bg-emerald-500' };
+
+  return (
+    <Card data-testid="learning-pulse-section">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-amber-500" />
+            Per-Document Intelligence Pulse
+          </CardTitle>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={fetchPulse} disabled={loading} data-testid="refresh-pulse-btn">
+              <RefreshCw className={`w-3 h-3 mr-1 ${loading ? 'animate-spin' : ''}`} />Refresh
+            </Button>
+            <Button variant="secondary" size="sm" onClick={handleBackfill} disabled={backfilling} data-testid="backfill-btn">
+              {backfilling ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Database className="w-3 h-3 mr-1" />}
+              Backfill History
+            </Button>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Every document makes the AI smarter. This shows real-time learning across all 6 dimensions.
+        </p>
+      </CardHeader>
+      <CardContent>
+        {loading && !pulse ? (
+          <div className="flex justify-center py-6"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
+        ) : !pulse ? (
+          <p className="text-sm text-muted-foreground text-center py-4">No learning pulse data yet. Click "Backfill History" to process existing documents.</p>
+        ) : (
+          <div className="space-y-5">
+            {/* Total learned + outcome breakdown */}
+            <div className="flex items-center gap-4 flex-wrap">
+              <div className="text-center">
+                <p className="text-3xl font-bold text-violet-500">{(pulse.total_documents_learned_from || 0).toLocaleString()}</p>
+                <p className="text-xs text-muted-foreground">Documents Learned From</p>
+              </div>
+              {pulse.outcomes && Object.entries(pulse.outcomes).map(([outcome, count]) => (
+                <div key={outcome} className="text-center px-3 py-1.5 rounded bg-muted/50">
+                  <p className="text-lg font-semibold">{count.toLocaleString()}</p>
+                  <p className="text-[10px] text-muted-foreground">{outcome.replace(/_/g, ' ')}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Confidence Calibration */}
+            {pulse.confidence_calibration && Object.keys(pulse.confidence_calibration).length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
+                  <TrendingUp className="w-3 h-3" /> Confidence Calibration — Is the AI's confidence justified?
+                </p>
+                <div className="grid grid-cols-5 gap-2">
+                  {Object.entries(bandLabels).map(([band, label]) => {
+                    const d = pulse.confidence_calibration[band] || {};
+                    const accuracy = d.accuracy || 0;
+                    return (
+                      <div key={band} className="text-center p-2 rounded bg-muted/50" data-testid={`calibration-band-${band}`}>
+                        <div className={`h-1.5 rounded-full mb-1.5 ${bandColors[band]}`} style={{ opacity: accuracy || 0.2 }} />
+                        <p className="text-xs font-medium">{label}</p>
+                        <p className="text-lg font-bold">{(accuracy * 100).toFixed(0)}%</p>
+                        <p className="text-[10px] text-muted-foreground">{d.total || 0} docs</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Top Vendors + Validation Gap Hotspots */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Top Vendors by Learning Volume */}
+              {pulse.top_vendors?.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
+                    <Activity className="w-3 h-3" /> Top Vendors by Learning
+                  </p>
+                  <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
+                    {pulse.top_vendors.map((v, i) => (
+                      <div key={i} className="flex items-center gap-2 p-2 rounded bg-muted/50 text-xs">
+                        <span className="font-mono font-medium w-20 truncate">{v.vendor_no}</span>
+                        <span className="text-muted-foreground truncate flex-1">{v.vendor_name}</span>
+                        <span className="font-medium">{v.total_documents} docs</span>
+                        <Badge variant={v.auto_validation_rate >= 0.8 ? 'default' : v.auto_validation_rate >= 0.5 ? 'secondary' : 'destructive'}
+                               className={v.auto_validation_rate >= 0.8 ? 'bg-emerald-600 text-[10px]' : 'text-[10px]'}>
+                          {((v.auto_validation_rate || 0) * 100).toFixed(0)}% auto
+                        </Badge>
+                        {v.confidence_to_validation_gap > 0.15 && (
+                          <Badge variant="outline" className="text-[10px] text-amber-500 border-amber-500/30">
+                            gap {(v.confidence_to_validation_gap * 100).toFixed(0)}%
+                          </Badge>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Validation Gap Hotspots */}
+              {pulse.validation_gap_hotspots?.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" /> Validation Gap Hotspots
+                  </p>
+                  <div className="space-y-1.5">
+                    {pulse.validation_gap_hotspots.map((g, i) => (
+                      <div key={i} className="flex items-center justify-between p-2 rounded bg-muted/50 text-xs">
+                        <span className="font-medium">{g.check.replace(/_/g, ' ')}</span>
+                        <Badge variant="destructive" className="text-[10px]">{g.count} failures</Badge>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Why high-confidence docs fail validation — the AI uses this to improve
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Recent Learning Feed */}
+            {pulse.recent_learning?.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
+                  <Brain className="w-3 h-3" /> Live Learning Feed
+                </p>
+                <div className="max-h-[150px] overflow-y-auto space-y-1">
+                  {pulse.recent_learning.map((r, i) => (
+                    <div key={i} className="flex items-center gap-2 text-xs px-2 py-1 rounded bg-muted/30">
+                      <Badge variant="outline" className="text-[10px] shrink-0">
+                        {r.trigger}
+                      </Badge>
+                      <span className="font-mono text-muted-foreground truncate">{(r.doc_id || '').substring(0, 12)}</span>
+                      <Badge variant={
+                        r.outcome === 'auto_validated' || r.outcome === 'auto_filed' || r.outcome === 'approved' || r.outcome === 'posted_to_bc'
+                          ? 'default' : r.outcome === 'needs_review' ? 'secondary' : 'destructive'
+                      } className={
+                        r.outcome === 'auto_validated' || r.outcome === 'auto_filed' || r.outcome === 'approved' || r.outcome === 'posted_to_bc'
+                          ? 'bg-emerald-600 text-[10px]' : 'text-[10px]'
+                      }>
+                        {r.outcome?.replace(/_/g, ' ')}
+                      </Badge>
+                      {r.vendor_no && <span className="font-mono text-muted-foreground">{r.vendor_no}</span>}
+                      <span className="text-muted-foreground ml-auto">
+                        {r.ai_confidence ? `${(r.ai_confidence * 100).toFixed(0)}%` : ''}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function LearningDashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -518,6 +710,9 @@ export default function LearningDashboard() {
 
       {/* Learning Engines Section */}
       <LearningEnginesSection onComplete={fetchData} />
+
+      {/* Per-Document Intelligence Pulse */}
+      <LearningPulseSection />
 
       {/* Batch Re-evaluate Section */}
       <ReEvaluateSection onComplete={fetchData} />

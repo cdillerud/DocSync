@@ -2919,3 +2919,87 @@ def _align_lines(human_lines: list, ai_lines: list) -> dict:
         "unmatched_human": unmatched_h,
         "unmatched_ai": unmatched_a,
     }
+
+
+
+# =============================================================================
+# Per-Document Intelligence — Real-time AI Learning Pulse
+# =============================================================================
+
+@router.get("/learning-pulse")
+async def get_learning_pulse():
+    """
+    Real-time pulse of how the AI is learning from every document.
+    Shows outcomes, confidence calibration, top vendors, and validation gaps.
+    """
+    from deps import get_db
+    from services.per_document_learning_service import get_learning_pulse as _get_pulse
+    db = get_db()
+    return await _get_pulse(db)
+
+
+@router.get("/learning-pulse/vendor/{vendor_no}")
+async def get_vendor_learning_profile(vendor_no: str):
+    """
+    Complete per-document learning profile for a specific vendor.
+    Shows intelligence, field accuracy, confidence calibration, gaps.
+    """
+    from deps import get_db
+    from services.per_document_learning_service import get_vendor_learning_profile as _get_profile
+    db = get_db()
+    profile = await _get_profile(db, vendor_no)
+    if not profile:
+        return {"vendor_no": vendor_no, "message": "No learning data yet"}
+    return profile
+
+
+@router.get("/learning-pulse/confidence-calibration")
+async def get_confidence_calibration():
+    """
+    How well-calibrated is the AI's confidence?
+    Shows accuracy per confidence band — globally, per vendor, per doc type.
+    """
+    from deps import get_db
+    from services.per_document_learning_service import get_confidence_calibration_report
+    db = get_db()
+    return await get_confidence_calibration_report(db)
+
+
+@router.post("/learning-pulse/backfill")
+async def backfill_per_document_learning(
+    limit: int = Query(500, description="Max documents to process"),
+    background_tasks: BackgroundTasks = None,
+):
+    """
+    Backfill per-document learning for existing documents.
+    Runs through recent documents and extracts learning signals.
+    """
+    from deps import get_db
+    from services.per_document_learning_service import learn_from_document
+    db = get_db()
+
+    async def _backfill():
+        docs = await db.hub_documents.find(
+            {"status": {"$exists": True}},
+            {"_id": 0, "id": 1}
+        ).sort("updated_utc", -1).limit(limit).to_list(limit)
+
+        processed = 0
+        errors = 0
+        for doc in docs:
+            try:
+                await learn_from_document(db, doc["id"], trigger="backfill")
+                processed += 1
+            except Exception as e:
+                errors += 1
+                logger.warning("[Backfill] Error for %s: %s", doc.get("id", "")[:8], e)
+
+        logger.info("[Backfill] Per-document learning backfill: %d processed, %d errors", processed, errors)
+        return {"processed": processed, "errors": errors}
+
+    if background_tasks:
+        background_tasks.add_task(_backfill)
+        return {"message": f"Backfill started for up to {limit} documents", "async": True}
+    else:
+        result = await _backfill()
+        return result

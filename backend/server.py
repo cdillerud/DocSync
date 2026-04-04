@@ -1863,6 +1863,13 @@ async def on_document_ingested(doc_id: str, source: str = "unknown"):
         logger.info("[Workflow:%s] Complete: %s → %s (decision: %s, score: %.2f)", 
                     run_id, old_status, new_status, decision, validation_results.get("match_score", 0.0))
 
+        # === PER-DOCUMENT LEARNING: Learn from EVERY ingested document ===
+        try:
+            from services.per_document_learning_service import learn_from_document
+            await learn_from_document(db, doc_id, trigger="ingestion")
+        except Exception as pdl_err:
+            logger.debug("[PerDocLearn] Ingestion learning for %s: %s", doc_id[:8], pdl_err)
+
         # Auto-file check: if this doc type + vendor pattern has been filed enough times, auto-clear it
         # SAFETY: Must still pass PO validation checks — never auto-file if PO is missing from BC
         if new_status == "NeedsReview":
@@ -1936,6 +1943,12 @@ async def on_document_ingested(doc_id: str, source: str = "unknown"):
                                     confirmation_source="auto_clear",
                                     doc_context=_build_doc_context(doc),
                                 )
+                            except Exception:
+                                pass
+                            # === PER-DOCUMENT LEARNING: Auto-file is a strong positive signal ===
+                            try:
+                                from services.per_document_learning_service import learn_from_document
+                                await learn_from_document(db, doc_id, trigger="auto_file")
                             except Exception:
                                 pass
             except Exception as af_err:
@@ -3227,6 +3240,13 @@ async def _internal_intake_document(
                     except Exception as cf_err:
                         logger.debug("[Auto-Clear] Classification confirmation failed for %s: %s", doc_id, cf_err)
 
+                    # === PER-DOCUMENT LEARNING: Auto-clear is a positive signal ===
+                    try:
+                        from services.per_document_learning_service import learn_from_document
+                        await learn_from_document(db, doc_id, trigger="auto_file")
+                    except Exception:
+                        pass
+
                     # AUTO-FILE shipping documents (non-AP only)
                     try:
                         doc_type = (doc_for_eval.get("document_type") or 
@@ -3939,6 +3959,14 @@ async def classify_document(doc_id: str):
     }})
     
     updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+
+    # === PER-DOCUMENT LEARNING: Learn from classification/reclassification ===
+    try:
+        from services.per_document_learning_service import learn_from_document
+        await learn_from_document(db, doc_id, trigger="classification")
+    except Exception as pdl_err:
+        logger.debug("[PerDocLearn] Classification learning for %s: %s", doc_id[:8], pdl_err)
+
     return {
         "document": updated_doc,
         "classification": classification,
@@ -4075,6 +4103,14 @@ async def resolve_and_link_document(doc_id: str, resolve: ResolveRequest):
     await db.hub_workflow_runs.insert_one(workflow)
     
     updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+
+    # === PER-DOCUMENT LEARNING: Learn from resolve/link outcome ===
+    try:
+        from services.per_document_learning_service import learn_from_document
+        await learn_from_document(db, doc_id, trigger="link")
+    except Exception as pdl_err:
+        logger.debug("[PerDocLearn] Link learning for %s: %s", doc_id[:8], pdl_err)
+
     return {
         "success": link_success,
         "document": updated_doc,
@@ -5812,6 +5848,13 @@ async def update_document_fields(doc_id: str, request: UpdateFieldsRequest):
     except Exception as e:
         logger.warning("[ExtractionLearning] Failed to record correction for %s: %s", doc_id[:8], e)
 
+    # === PER-DOCUMENT LEARNING: Learn from field corrections ===
+    try:
+        from services.per_document_learning_service import learn_from_document
+        await learn_from_document(db, doc_id, trigger="field_edit")
+    except Exception as pdl_err:
+        logger.debug("[PerDocLearn] Field edit learning for %s: %s", doc_id[:8], pdl_err)
+
     doc.pop("_id", None)
     
     return {
@@ -5982,6 +6025,13 @@ async def approve_document(doc_id: str, request: ApprovalActionRequest):
     await db.hub_documents.update_one({"id": doc_id}, {"$set": doc})
     doc.pop("_id", None)
     
+    # === PER-DOCUMENT LEARNING: Approval is a strong positive signal ===
+    try:
+        from services.per_document_learning_service import learn_from_document
+        await learn_from_document(db, doc_id, trigger="approval")
+    except Exception as pdl_err:
+        logger.debug("[PerDocLearn] Approval learning for %s: %s", doc_id[:8], pdl_err)
+
     return {
         "document": doc,
         "workflow_transition": history_entry.to_dict(),
@@ -6041,6 +6091,13 @@ async def reject_document(doc_id: str, request: ApprovalActionRequest):
     await db.hub_documents.update_one({"id": doc_id}, {"$set": doc})
     doc.pop("_id", None)
     
+    # === PER-DOCUMENT LEARNING: Rejection is a strong negative signal ===
+    try:
+        from services.per_document_learning_service import learn_from_document
+        await learn_from_document(db, doc_id, trigger="rejection")
+    except Exception as pdl_err:
+        logger.debug("[PerDocLearn] Rejection learning for %s: %s", doc_id[:8], pdl_err)
+
     return {
         "document": doc,
         "workflow_transition": history_entry.to_dict(),

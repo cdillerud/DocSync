@@ -440,13 +440,18 @@ async def _run_document_routing(doc_id: str, ctx: Dict) -> StageResult:
 
 
 async def _run_learning_capture(doc_id: str, ctx: Dict) -> StageResult:
-    """Stage 10: Update aggregated automation metrics."""
-    from services.learning_loop_service import update_automation_metrics
+    """Stage 10: Per-document learning — extract intelligence from every outcome."""
+    from services.per_document_learning_service import learn_from_document
+    from deps import get_db
 
-    result = await update_automation_metrics()
+    db = get_db()
+    result = await learn_from_document(db, doc_id, trigger="pipeline")
     ctx["learning"] = result
     summary = {
-        "metrics_updated": True,
+        "outcome": result.get("outcome", "unknown"),
+        "dimensions_ok": sum(1 for v in result.get("dimensions", {}).values() if v == "ok"),
+        "dimensions_total": len(result.get("dimensions", {})),
+        "learned": result.get("learned", True),
     }
     return StageResult(stage="learning_capture", status="ok", output=summary)
 

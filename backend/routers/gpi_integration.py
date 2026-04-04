@@ -2256,6 +2256,13 @@ async def create_purchase_invoice_from_document(
         except Exception as learn_err:
             logger.debug("[PostingPatterns] Learning from posting failed (non-blocking): %s", learn_err)
 
+        # === PER-DOCUMENT LEARNING: BC posting is the strongest positive signal ===
+        try:
+            from services.per_document_learning_service import learn_from_document
+            await learn_from_document(db, doc_id, trigger="bc_post")
+        except Exception:
+            pass
+
     return {
         "success": result.get("success", False),
         "already_exists": result.get("status") == "already_exists",

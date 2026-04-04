@@ -578,6 +578,15 @@ async def learn_from_document(db, doc_id: str, trigger: str = "ingestion"):
         results["deep_learning"] = {"error": str(e)}
         logger.debug("[PerDocLearn] Deep learning for %s: %s", doc_id[:8], e)
 
+    # === ADVANCED LEARNING: Run all 7 intelligence engines ===
+    try:
+        from services.advanced_learning_engine import run_advanced_learning
+        adv_results = await run_advanced_learning(db, doc_id, trigger)
+        results["advanced_learning"] = adv_results
+    except Exception as e:
+        results["advanced_learning"] = {"error": str(e)}
+        logger.debug("[PerDocLearn] Advanced learning for %s: %s", doc_id[:8], e)
+
     return results
 
 

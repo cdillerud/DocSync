@@ -3104,3 +3104,110 @@ async def predict_document_readiness(doc_id: str):
     from services.deep_learning_engine import predict_and_store
     db = get_db()
     return await predict_and_store(db, doc_id)
+
+
+# =============================================================================
+# Advanced Learning Engine — 7 Intelligence Layer APIs
+# =============================================================================
+
+@router.get("/advanced-learning/summary")
+async def get_advanced_learning_summary():
+    """Complete summary of all 7 advanced learning engines."""
+    from deps import get_db
+    from services.advanced_learning_engine import get_advanced_learning_summary as _get_summary
+    db = get_db()
+    return await _get_summary(db)
+
+
+@router.get("/advanced-learning/line-items/{vendor_no}")
+async def get_line_item_suggestions(vendor_no: str):
+    """Get learned line item patterns/GL suggestions for a vendor."""
+    from deps import get_db
+    from services.advanced_learning_engine import get_line_item_suggestions as _get_suggestions
+    db = get_db()
+    suggestions = await _get_suggestions(db, vendor_no)
+    return {"vendor_no": vendor_no, "suggestions": suggestions}
+
+
+@router.get("/advanced-learning/predict-next/{vendor_no}")
+async def predict_next_document(vendor_no: str):
+    """Predict what document type will arrive next from a vendor."""
+    from deps import get_db
+    from services.advanced_learning_engine import predict_next_document as _predict
+    db = get_db()
+    return await _predict(db, vendor_no)
+
+
+@router.get("/advanced-learning/amount-check/{vendor_no}")
+async def check_amount_anomaly(vendor_no: str, amount: float = Query(...)):
+    """Check if an invoice amount is anomalous for a vendor."""
+    from deps import get_db
+    from services.advanced_learning_engine import check_amount_anomaly as _check
+    db = get_db()
+    return await _check(db, vendor_no, amount)
+
+
+@router.get("/advanced-learning/correction-replays")
+async def get_correction_replays():
+    """Get history of correction replays."""
+    from deps import get_db
+    from services.advanced_learning_engine import get_replay_history
+    db = get_db()
+    return await get_replay_history(db)
+
+
+@router.get("/advanced-learning/field-predictions/{doc_id}")
+async def get_field_predictions(doc_id: str):
+    """Use learned correlations to predict doc type from field values."""
+    from deps import get_db
+    from services.advanced_learning_engine import get_field_predictions as _predict
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        return {"error": "Document not found"}
+    predictions = await _predict(db, doc)
+    return {"doc_id": doc_id, "predictions": predictions}
+
+
+@router.get("/advanced-learning/volume-prediction")
+async def get_volume_prediction():
+    """Predict tomorrow's inbox volume."""
+    from deps import get_db
+    from services.advanced_learning_engine import predict_volume
+    db = get_db()
+    return await predict_volume(db)
+
+
+@router.post("/advanced-learning/backfill")
+async def backfill_advanced_learning(
+    limit: int = Query(500),
+    background_tasks: BackgroundTasks = None,
+):
+    """Backfill all 7 advanced learning engines from existing documents."""
+    from deps import get_db
+    from services.advanced_learning_engine import run_advanced_learning
+    db = get_db()
+
+    async def _backfill():
+        docs = await db.hub_documents.find(
+            {"status": {"$exists": True}},
+            {"_id": 0, "id": 1}
+        ).sort("updated_utc", -1).limit(limit).to_list(limit)
+
+        processed = 0
+        for doc in docs:
+            try:
+                await run_advanced_learning(db, doc["id"], trigger="backfill")
+                processed += 1
+            except Exception:
+                pass
+
+        logger.info("[AdvancedBackfill] %d documents processed", processed)
+        return {"processed": processed}
+
+    if background_tasks:
+        background_tasks.add_task(_backfill)
+        return {"message": f"Advanced learning backfill started for up to {limit} documents", "async": True}
+    result = await _backfill()
+    return result
+

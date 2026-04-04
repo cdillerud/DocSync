@@ -5865,6 +5865,24 @@ async def update_document_fields(doc_id: str, request: UpdateFieldsRequest):
     except Exception as pdl_err:
         logger.debug("[PerDocLearn] Field edit learning for %s: %s", doc_id[:8], pdl_err)
 
+    # === CORRECTION REPLAY: Propagate this correction to similar documents ===
+    try:
+        from services.advanced_learning_engine import replay_correction
+        vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or doc.get("matched_vendor_no") or ""
+        pre_update = doc.get("_pre_update_extracted_fields") or {}
+        current = doc.get("extracted_fields") or {}
+        if vendor_no and pre_update:
+            for fname in current:
+                old_val = pre_update.get(fname)
+                new_val = current.get(fname)
+                if old_val and new_val and str(old_val) != str(new_val):
+                    replay = await replay_correction(db, vendor_no, fname, str(old_val), str(new_val), doc_id)
+                    if replay.get("replayed", 0) > 0:
+                        logger.info("[CorrectionReplay] Replayed %s correction to %d docs for vendor %s",
+                                    fname, replay["replayed"], vendor_no)
+    except Exception as replay_err:
+        logger.debug("[CorrectionReplay] Replay for %s: %s", doc_id[:8], replay_err)
+
     doc.pop("_id", None)
     
     return {

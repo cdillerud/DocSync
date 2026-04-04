@@ -1,0 +1,65 @@
+{
+  "summary": "Iteration 184: Tested 7 Advanced Learning Engines - All backend APIs (29 tests) and frontend components passed successfully",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "LearningDashboard",
+        "issues": ["Console warning: HTML hydration error - <tr> cannot be child of <span> in Recent Learning Events table. This is a React rendering issue but doesn't affect functionality."]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_advanced_learning_engines.py",
+    "/app/test_reports/pytest/advanced_learning_engines_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Minor: HTML hydration warning in LearningDashboard.js around line 1129-1131 - <span> wrapper around <tr> elements in tbody causes React hydration error. Consider removing the span wrapper or using React.Fragment."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_advanced_learning_engines.py"
+  ],
+  "success_rate": {
+    "backend": "100% (29/29 tests passed)",
+    "frontend": "100% (All 7 KPI cards, Advanced Learning Section, Weekly Volume Pattern, Learned Rules, Backfill button working)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "None - used existing backfilled data from previous iterations",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All 7 Advanced Learning Engines are working correctly. Backend endpoints tested: /api/posting-patterns/advanced-learning/summary (returns all 7 engine summaries), /line-items/ANCH (returns suggestions), /predict-next/ANCH (predicts next doc), /amount-check/ANCH (checks anomalies), /correction-replays (returns history), /volume-prediction (predicts tomorrow), /backfill (backfills data). Frontend: Advanced Learning Section renders on /ai-learning with all 7 KPI cards, Weekly Volume Pattern chart, Learned Rules section, and working Backfill All 7 button.",
+  "tested_features": {
+    "backend_endpoints": [
+      "GET /api/posting-patterns/advanced-learning/summary - PASS (returns all 7 engine summaries)",
+      "GET /api/posting-patterns/advanced-learning/line-items/ANCH - PASS (returns line item suggestions)",
+      "GET /api/posting-patterns/advanced-learning/predict-next/ANCH - PASS (predicts next doc type)",
+      "GET /api/posting-patterns/advanced-learning/amount-check/ANCH?amount=9500 - PASS (checks normal amount)",
+      "GET /api/posting-patterns/advanced-learning/amount-check/ANCH?amount=999999 - PASS (detects anomaly)",
+      "GET /api/posting-patterns/advanced-learning/correction-replays - PASS (returns replay history)",
+      "GET /api/posting-patterns/advanced-learning/volume-prediction - PASS (predicts tomorrow's volume)",
+      "POST /api/posting-patterns/advanced-learning/backfill?limit=50 - PASS (backfills advanced learning)"
+    ],
+    "frontend_components": [
+      "Advanced Learning Section (data-testid='advanced-learning-section') - PASS",
+      "7 KPI cards (lines, flow, amounts, replays, correlations, temporal, errors) - PASS (7/7)",
+      "Weekly Volume Pattern chart (data-testid='adv-temporal') - PASS",
+      "Learned Rules section (data-testid='adv-correlations') - PASS",
+      "Backfill All 7 button (data-testid='backfill-advanced-btn') - PASS (clickable, shows toast)"
+    ]
+  },
+  "data_verification": {
+    "line_item_intelligence": "1 pattern tracked for ANCH vendor",
+    "document_flow": "3 flow events",
+    "amount_patterns": "1 vendor tracked (ANCH: $9,500 avg)",
+    "correction_replay": "0 corrections replayed",
+    "field_correlations": "7 rules learned (has_date=False→Sales_Order 84%, amount_range=large→Sales_Order 82%, etc.)",
+    "temporal_intelligence": "64 events on Wednesday (peak day)",
+    "error_patterns": "19 errors learned"
+  }
+}

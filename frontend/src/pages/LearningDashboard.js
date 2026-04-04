@@ -252,6 +252,217 @@ function ReEvaluateSection({ onComplete }) {
   );
 }
 
+function AdvancedLearningSection() {
+  const [summary, setSummary] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [backfilling, setBackfilling] = useState(false);
+
+  const fetchSummary = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/posting-patterns/advanced-learning/summary`);
+      if (res.ok) setSummary(await res.json());
+    } catch (err) { console.error(err); }
+    setLoading(false);
+  };
+
+  const handleBackfill = async () => {
+    setBackfilling(true);
+    try {
+      const res = await fetch(`${API}/api/posting-patterns/advanced-learning/backfill?limit=1000`, { method: 'POST' });
+      if (res.ok) {
+        toast.success('Advanced learning backfill started');
+        setTimeout(fetchSummary, 5000);
+      }
+    } catch { toast.error('Backfill failed'); }
+    setBackfilling(false);
+  };
+
+  useEffect(() => { fetchSummary(); }, []);
+
+  const li = summary?.line_item_intelligence;
+  const df = summary?.document_flow;
+  const ap = summary?.amount_patterns;
+  const cr = summary?.correction_replay;
+  const fc = summary?.field_correlations;
+  const ti = summary?.temporal_intelligence;
+  const ep = summary?.error_patterns;
+  const vp = ti?.volume_prediction;
+  const dow = ti?.by_day_of_week || {};
+  const maxDow = Math.max(...Object.values(dow), 1);
+
+  return (
+    <Card data-testid="advanced-learning-section">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2">
+            <GitBranch className="w-4 h-4 text-rose-500" />
+            Advanced Intelligence — 7 Engines
+          </CardTitle>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={fetchSummary} disabled={loading} data-testid="refresh-advanced-btn">
+              <RefreshCw className={`w-3 h-3 mr-1 ${loading ? 'animate-spin' : ''}`} />Refresh
+            </Button>
+            <Button variant="secondary" size="sm" onClick={handleBackfill} disabled={backfilling} data-testid="backfill-advanced-btn">
+              {backfilling ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Database className="w-3 h-3 mr-1" />}
+              Backfill All 7
+            </Button>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Line items, document flow, amount anomalies, correction replay, field correlations, temporal patterns, error recognition.
+        </p>
+      </CardHeader>
+      <CardContent>
+        {loading && !summary ? (
+          <div className="flex justify-center py-6"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
+        ) : !summary ? (
+          <p className="text-sm text-muted-foreground text-center py-4">No data yet. Click "Backfill All 7" to process existing documents.</p>
+        ) : (
+          <div className="space-y-5">
+            {/* 7 Engine KPIs */}
+            <div className="grid grid-cols-7 gap-2">
+              <div className="text-center p-2 rounded bg-muted/50" data-testid="adv-kpi-lines">
+                <p className="text-lg font-bold text-cyan-500">{li?.unique_patterns || 0}</p>
+                <p className="text-[10px] text-muted-foreground">Line Patterns</p>
+              </div>
+              <div className="text-center p-2 rounded bg-muted/50" data-testid="adv-kpi-flow">
+                <p className="text-lg font-bold text-blue-500">{df?.total_flow_events || 0}</p>
+                <p className="text-[10px] text-muted-foreground">Flow Events</p>
+              </div>
+              <div className="text-center p-2 rounded bg-muted/50" data-testid="adv-kpi-amounts">
+                <p className="text-lg font-bold text-emerald-500">{ap?.vendors_tracked || 0}</p>
+                <p className="text-[10px] text-muted-foreground">Amount Profiles</p>
+              </div>
+              <div className="text-center p-2 rounded bg-muted/50" data-testid="adv-kpi-replays">
+                <p className="text-lg font-bold text-amber-500">{cr?.total_replayed_docs || 0}</p>
+                <p className="text-[10px] text-muted-foreground">Corrections Replayed</p>
+              </div>
+              <div className="text-center p-2 rounded bg-muted/50" data-testid="adv-kpi-correlations">
+                <p className="text-lg font-bold text-violet-500">{fc?.total_correlations || 0}</p>
+                <p className="text-[10px] text-muted-foreground">Field Rules</p>
+              </div>
+              <div className="text-center p-2 rounded bg-muted/50" data-testid="adv-kpi-temporal">
+                <p className="text-lg font-bold text-rose-500">{vp?.predicted_volume || '--'}</p>
+                <p className="text-[10px] text-muted-foreground">Tomorrow's Vol</p>
+              </div>
+              <div className="text-center p-2 rounded bg-muted/50" data-testid="adv-kpi-errors">
+                <p className="text-lg font-bold text-red-500">{ep?.total_errors || 0}</p>
+                <p className="text-[10px] text-muted-foreground">Errors Learned</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              {/* Line Item Intelligence */}
+              {li?.top_vendors?.length > 0 && (
+                <div data-testid="adv-line-items">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Line Item Patterns</p>
+                  <div className="space-y-1">
+                    {li.top_vendors.map((v, i) => (
+                      <div key={i} className="flex items-center justify-between p-1.5 rounded bg-muted/50 text-xs">
+                        <span className="font-mono">{v.vendor_no}</span>
+                        <span>{v.unique_line_types} types</span>
+                        <span className="text-muted-foreground">{v.total_invoices_with_lines} inv</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Amount Patterns */}
+              {ap?.top_vendors?.length > 0 && (
+                <div data-testid="adv-amounts">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Amount Intelligence</p>
+                  <div className="space-y-1">
+                    {ap.top_vendors.map((v, i) => (
+                      <div key={i} className="flex items-center gap-2 p-1.5 rounded bg-muted/50 text-xs">
+                        <span className="font-mono w-16 truncate">{v.vendor_no}</span>
+                        <span className="flex-1 text-right">
+                          ${(v.avg_amount || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                        </span>
+                        <span className="text-muted-foreground">
+                          ${(v.min_amount || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}-${(v.max_amount || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                        </span>
+                        {v.latest_is_anomaly && (
+                          <Badge variant="destructive" className="text-[10px]">ANOMALY</Badge>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Field Correlation Rules */}
+              {fc?.strong_rules?.length > 0 && (
+                <div data-testid="adv-correlations">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Learned Rules</p>
+                  <div className="space-y-1">
+                    {fc.strong_rules.map((r, i) => (
+                      <div key={i} className="p-1.5 rounded bg-muted/50 text-xs">
+                        <div className="flex items-center gap-1">
+                          <span className="font-mono text-violet-400">{r.rule}</span>
+                          <ArrowRight className="w-3 h-3 text-muted-foreground" />
+                          <span className="font-medium">{r.predicts}</span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <Badge variant="outline" className="text-[10px]">{(r.confidence * 100).toFixed(0)}%</Badge>
+                          <span className="text-muted-foreground text-[10px]">{r.samples} samples</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Temporal Intelligence — Day of Week Pattern */}
+            {Object.keys(dow).length > 0 && (
+              <div data-testid="adv-temporal">
+                <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
+                  <BarChart3 className="w-3 h-3" /> Weekly Volume Pattern
+                  {vp?.peak_day && (
+                    <span className="text-[10px] ml-2">Peak: <strong>{vp.peak_day}</strong> | Quiet: <strong>{vp.quiet_day}</strong></span>
+                  )}
+                </p>
+                <div className="flex items-end gap-1.5 h-20">
+                  {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(day => {
+                    const val = dow[day] || 0;
+                    const height = Math.max(val / maxDow * 100, 4);
+                    const isPeak = day === vp?.peak_day;
+                    return (
+                      <div key={day} className="flex-1 flex flex-col items-center gap-0.5">
+                        <span className="text-[10px] font-medium">{val}</span>
+                        <div className={`w-full rounded-t ${isPeak ? 'bg-rose-500' : 'bg-blue-500/60'}`}
+                             style={{ height: `${height}%` }} />
+                        <span className="text-[9px] text-muted-foreground">{day.slice(0, 3)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Error Patterns */}
+            {ep?.total_errors > 0 && (
+              <div data-testid="adv-errors">
+                <p className="text-xs font-medium text-muted-foreground mb-2">Error Pattern Recognition</p>
+                <div className="flex gap-2 flex-wrap">
+                  {Object.entries(ep.categories || {}).map(([cat, count]) => (
+                    <div key={cat} className="text-center px-3 py-1.5 rounded bg-muted/50">
+                      <p className="text-sm font-bold">{count}</p>
+                      <p className="text-[10px] text-muted-foreground">{cat.replace(/_/g, ' ')}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 const maturityColors = {
   mastered: 'bg-emerald-500 text-white',
   proficient: 'bg-blue-500 text-white',
@@ -976,6 +1187,9 @@ export default function LearningDashboard() {
 
       {/* Deep Learning Engine */}
       <DeepLearningSection />
+
+      {/* Advanced Intelligence — 7 Engines */}
+      <AdvancedLearningSection />
 
       {/* Batch Re-evaluate Section */}
       <ReEvaluateSection onComplete={fetchData} />

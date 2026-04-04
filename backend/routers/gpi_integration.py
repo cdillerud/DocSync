@@ -232,10 +232,15 @@ async def _build_pi_lines_with_mapping(doc: dict, db, vendor_no: str = "") -> li
                         line["lineObjectNumber"] = template_item_no
                         line["source"] = "posting_template"
 
-                        # Also fix description to match production pattern
-                        if template_desc_pattern and po_ref:
-                            # If production uses "Freight {ref}" pattern
-                            if "freight" in template_desc_pattern.lower() or template_desc_pattern.upper().startswith("FREIGHT"):
+                        # Fix description to match production pattern
+                        desc = line.get("description", "")
+                        # If the item is a freight-type item, always use "Freight {ref}" format
+                        if "freight" in template_item_no.lower():
+                            ref = po_ref or desc
+                            if ref and not ref.upper().startswith("FREIGHT"):
+                                line["description"] = f"Freight {ref}"
+                        elif template_desc_pattern and po_ref:
+                            if "freight" in template_desc_pattern.lower():
                                 line["description"] = f"Freight {po_ref}"
 
                     logger.info(

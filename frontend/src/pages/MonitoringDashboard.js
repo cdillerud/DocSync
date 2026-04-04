@@ -1,0 +1,314 @@
+import { useState, useEffect, useCallback } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Badge } from '../components/ui/badge';
+import { Progress } from '../components/ui/progress';
+import { RefreshCw, Activity, Shield, Users, AlertTriangle, TrendingUp } from 'lucide-react';
+
+const API = process.env.REACT_APP_BACKEND_URL;
+
+function MetricCard({ icon: Icon, title, value, subtitle, status, detail, testId }) {
+  const statusColors = {
+    good: 'border-l-emerald-500 bg-emerald-500/5',
+    warning: 'border-l-amber-500 bg-amber-500/5',
+    critical: 'border-l-red-500 bg-red-500/5',
+    neutral: 'border-l-slate-500 bg-slate-500/5',
+  };
+  const badgeColors = {
+    good: 'bg-emerald-600 text-white',
+    warning: 'bg-amber-600 text-white',
+    critical: 'bg-red-600 text-white',
+    neutral: 'bg-slate-600 text-white',
+  };
+  const labels = { good: 'Healthy', warning: 'Watch', critical: 'Action Needed', neutral: 'Building' };
+
+  return (
+    <Card className={`border-l-4 ${statusColors[status]}`} data-testid={testId}>
+      <CardContent className="p-5">
+        <div className="flex items-start justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Icon className="w-4 h-4 text-muted-foreground" />
+            <span className="text-sm font-medium text-muted-foreground">{title}</span>
+          </div>
+          <Badge className={`text-[10px] ${badgeColors[status]}`}>{labels[status]}</Badge>
+        </div>
+        <p className="text-3xl font-bold tracking-tight mb-1" data-testid={`${testId}-value`}>{value}</p>
+        <p className="text-sm text-muted-foreground mb-2">{subtitle}</p>
+        {detail && <p className="text-xs text-muted-foreground/70 leading-relaxed">{detail}</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
+export default function MonitoringDashboard() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [lastRefresh, setLastRefresh] = useState(null);
+
+  const fetchAll = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [pulseRes, gapRes, deepRes, escRes, dupRes] = await Promise.all([
+        fetch(`${API}/api/posting-patterns/learning-pulse`).then(r => r.ok ? r.json() : {}),
+        fetch(`${API}/api/posting-patterns/gap-closer/status`).then(r => r.ok ? r.json() : {}),
+        fetch(`${API}/api/posting-patterns/deep-learning/summary`).then(r => r.ok ? r.json() : {}),
+        fetch(`${API}/api/posting-patterns/escalation-intelligence`).then(r => r.ok ? r.json() : {}),
+        fetch(`${API}/api/posting-patterns/duplicate-intelligence`).then(r => r.ok ? r.json() : {}),
+      ]);
+      setData({ pulse: pulseRes, gap: gapRes, deep: deepRes, escalation: escRes, duplicate: dupRes });
+      setLastRefresh(new Date());
+    } catch (e) {
+      console.error('[Monitor] fetch failed', e);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // Compute the 5 metrics
+  const metrics = computeMetrics(data);
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-6" data-testid="monitoring-dashboard">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">System Monitor</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            The 5 numbers that matter. Everything else is noise.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {lastRefresh && (
+            <span className="text-xs text-muted-foreground">
+              {lastRefresh.toLocaleTimeString()}
+            </span>
+          )}
+          <button
+            onClick={fetchAll}
+            disabled={loading}
+            className="p-2 rounded-md hover:bg-accent transition-colors"
+            data-testid="refresh-monitor-btn"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+      </div>
+
+      {/* Overall Health Bar */}
+      <Card data-testid="health-summary">
+        <CardContent className="p-5">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium">Automation Health</span>
+            <span className="text-2xl font-bold" data-testid="health-score">
+              {metrics.healthScore}%
+            </span>
+          </div>
+          <Progress value={metrics.healthScore} className="h-2" />
+          <p className="text-xs text-muted-foreground mt-2">{metrics.healthSummary}</p>
+        </CardContent>
+      </Card>
+
+      {/* The 5 Metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <MetricCard
+          icon={Shield}
+          title="1. AI Confidence Accuracy"
+          value={metrics.confidenceAccuracy}
+          subtitle={metrics.confidenceSubtitle}
+          status={metrics.confidenceStatus}
+          detail={metrics.confidenceDetail}
+          testId="metric-confidence"
+        />
+        <MetricCard
+          icon={Users}
+          title="2. Vendor Maturity"
+          value={metrics.vendorMaturity}
+          subtitle={metrics.vendorMaturitySubtitle}
+          status={metrics.vendorMaturityStatus}
+          detail={metrics.vendorMaturityDetail}
+          testId="metric-vendor-maturity"
+        />
+        <MetricCard
+          icon={Activity}
+          title="3. Auto-File Rate"
+          value={metrics.autoFileRate}
+          subtitle={metrics.autoFileSubtitle}
+          status={metrics.autoFileStatus}
+          detail={metrics.autoFileDetail}
+          testId="metric-auto-file"
+        />
+        <MetricCard
+          icon={AlertTriangle}
+          title="4. Validation Gaps"
+          value={metrics.gapCount}
+          subtitle={metrics.gapSubtitle}
+          status={metrics.gapStatus}
+          detail={metrics.gapDetail}
+          testId="metric-gaps"
+        />
+        <MetricCard
+          icon={TrendingUp}
+          title="5. Escalation Patterns"
+          value={metrics.escalationCount}
+          subtitle={metrics.escalationSubtitle}
+          status={metrics.escalationStatus}
+          detail={metrics.escalationDetail}
+          testId="metric-escalation"
+        />
+      </div>
+
+      {/* Quick context */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium text-muted-foreground">What moves these numbers?</CardTitle>
+        </CardHeader>
+        <CardContent className="text-xs text-muted-foreground space-y-2 pb-4">
+          <p><strong>Volume is the #1 lever.</strong> Every document that flows through the system trains 20 learning dimensions. The jump from 50 to 500 documents is transformational.</p>
+          <p><strong>Confidence accuracy</strong> self-corrects as the AI sees more vendor-specific patterns. If stuck below 50% after 200+ docs, check extraction prompt quality.</p>
+          <p><strong>Vendor maturity</strong> progresses automatically: Learning → Developing → Stable → Autonomous. Each vendor needs ~50 documents to mature.</p>
+          <p><strong>Validation gaps</strong> marked "bc_connection" mean BC API is unreachable — that's infrastructure, not AI. Everything else the AI handles.</p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function computeMetrics(data) {
+  const empty = {
+    healthScore: 0, healthSummary: 'Loading...',
+    confidenceAccuracy: '--', confidenceSubtitle: '', confidenceStatus: 'neutral', confidenceDetail: '',
+    vendorMaturity: '--', vendorMaturitySubtitle: '', vendorMaturityStatus: 'neutral', vendorMaturityDetail: '',
+    autoFileRate: '--', autoFileSubtitle: '', autoFileStatus: 'neutral', autoFileDetail: '',
+    gapCount: '--', gapSubtitle: '', gapStatus: 'neutral', gapDetail: '',
+    escalationCount: '--', escalationSubtitle: '', escalationStatus: 'neutral', escalationDetail: '',
+  };
+  if (!data) return empty;
+
+  const { pulse, gap, deep, escalation, duplicate } = data;
+  const m = { ...empty };
+
+  // 1. Confidence Accuracy (95-100% band)
+  const cal = pulse?.confidence_calibration || {};
+  const topBand = cal['95_100'] || {};
+  const confTotal = topBand.total || 0;
+  const confAcc = topBand.accuracy;
+  if (confTotal > 0 && confAcc != null) {
+    const pct = Math.round(confAcc * 100);
+    m.confidenceAccuracy = `${pct}%`;
+    m.confidenceSubtitle = `Based on ${confTotal} high-confidence documents`;
+    m.confidenceStatus = pct >= 80 ? 'good' : pct >= 50 ? 'warning' : 'critical';
+    m.confidenceDetail = pct < 50
+      ? `The AI says it's 95%+ confident but is only right ${pct}% of the time. Gap Closer 1 is protecting you by routing these to review. Needs more training data.`
+      : pct < 80
+        ? `Improving — accuracy will climb as more documents train the model.`
+        : `Strong accuracy. The AI's confidence matches reality.`;
+  } else {
+    m.confidenceAccuracy = 'No data';
+    m.confidenceSubtitle = 'Feed documents to start calibrating';
+    m.confidenceStatus = 'neutral';
+  }
+
+  // 2. Vendor Maturity
+  const levels = deep?.vendor_maturity?.levels || {};
+  const autonomous = levels.autonomous || 0;
+  const stable = levels.stable || 0;
+  const developing = levels.developing || 0;
+  const learning = levels.learning || 0;
+  const totalVendors = autonomous + stable + developing + learning;
+  const matureCount = autonomous + stable;
+  if (totalVendors > 0) {
+    m.vendorMaturity = `${matureCount}/${totalVendors}`;
+    m.vendorMaturitySubtitle = `${matureCount} mature vendor${matureCount !== 1 ? 's' : ''} (Stable or Autonomous)`;
+    m.vendorMaturityStatus = matureCount >= totalVendors * 0.5 ? 'good' : matureCount > 0 ? 'warning' : 'critical';
+    const parts = [];
+    if (autonomous) parts.push(`${autonomous} Autonomous`);
+    if (stable) parts.push(`${stable} Stable`);
+    if (developing) parts.push(`${developing} Developing`);
+    if (learning) parts.push(`${learning} Learning`);
+    m.vendorMaturityDetail = parts.join(' · ') + '. Each vendor needs ~50 docs to mature.';
+  } else {
+    m.vendorMaturity = '0 vendors';
+    m.vendorMaturitySubtitle = 'No vendor data yet';
+    m.vendorMaturityStatus = 'neutral';
+    m.vendorMaturityDetail = 'Vendors are tracked automatically as documents flow in.';
+  }
+
+  // 3. Auto-File Rate
+  const outcomes = pulse?.outcomes || {};
+  const autoFiled = outcomes.auto_filed || 0;
+  const totalLearned = pulse?.total_documents_learned_from || 0;
+  if (totalLearned > 0) {
+    const rate = Math.round((autoFiled / totalLearned) * 100);
+    m.autoFileRate = `${rate}%`;
+    m.autoFileSubtitle = `${autoFiled} auto-filed out of ${totalLearned} documents`;
+    m.autoFileStatus = rate >= 60 ? 'good' : rate >= 30 ? 'warning' : 'critical';
+    m.autoFileDetail = rate < 30
+      ? `Most documents still need human review. This will improve dramatically as vendor maturity and confidence accuracy climb.`
+      : rate < 60
+        ? `Good progress. As vendors mature, expect this to climb to 60-80%.`
+        : `Strong automation. The system is handling most documents without human intervention.`;
+  } else {
+    m.autoFileRate = 'No data';
+    m.autoFileSubtitle = 'Waiting for documents to process';
+    m.autoFileStatus = 'neutral';
+  }
+
+  // 4. Validation Gaps
+  const gaps = gap?.total_validation_gaps || {};
+  const totalGaps = Object.values(gaps).reduce((a, b) => a + b, 0);
+  const topGap = Object.entries(gaps).sort((a, b) => b[1] - a[1])[0];
+  m.gapCount = `${totalGaps}`;
+  m.gapSubtitle = totalGaps === 0 ? 'No open validation gaps' : `${totalGaps} gap${totalGaps !== 1 ? 's' : ''} detected`;
+  m.gapStatus = totalGaps === 0 ? 'good' : totalGaps <= 5 ? 'warning' : 'critical';
+  if (topGap) {
+    const label = topGap[0].replace(/_/g, ' ');
+    m.gapDetail = `Biggest gap: "${label}" (${topGap[1]}). ${topGap[0] === 'bc_connection' ? 'This is a BC API connectivity issue — check your BC credentials and token.' : 'The AI gap closers are working to resolve this automatically.'}`;
+  }
+
+  // Also add duplicate intel context
+  const dupBlocked = duplicate?.currently_blocked_by_duplicate || 0;
+  if (dupBlocked > 0) {
+    m.gapDetail += ` Also: ${dupBlocked} document${dupBlocked !== 1 ? 's' : ''} blocked by duplicate flag.`;
+  }
+
+  // 5. Escalation Patterns
+  const escTotal = escalation?.total_combinations_tracked || 0;
+  const escAlways = escalation?.always_escalate || 0;
+  const escAuto = escalation?.fully_automated || 0;
+  if (escTotal > 0) {
+    m.escalationCount = `${escAlways} escalated`;
+    m.escalationSubtitle = `${escTotal} vendor+type combos tracked, ${escAuto} fully automated`;
+    m.escalationStatus = escAlways === 0 ? 'good' : escAlways <= 3 ? 'warning' : 'critical';
+    m.escalationDetail = escAlways > 0
+      ? `${escAlways} vendor+document type combination${escAlways !== 1 ? 's' : ''} consistently fail automation and are pre-routed to review. These may need process-level fixes (e.g., vendor sends non-standard formats).`
+      : 'No patterns requiring permanent escalation detected yet.';
+  } else {
+    m.escalationCount = 'No data';
+    m.escalationSubtitle = 'Tracking starts as documents are processed';
+    m.escalationStatus = 'neutral';
+    m.escalationDetail = 'The system will automatically identify vendor+type combos that consistently fail.';
+  }
+
+  // Health Score — weighted average
+  let score = 0;
+  let weights = 0;
+  if (confTotal > 0) { score += (confAcc || 0) * 30; weights += 30; }
+  if (totalVendors > 0) { score += (matureCount / totalVendors) * 20; weights += 20; }
+  if (totalLearned > 0) { score += (autoFiled / totalLearned) * 30; weights += 30; }
+  if (totalGaps >= 0) { score += Math.max(0, 1 - totalGaps / 20) * 10; weights += 10; }
+  if (escTotal > 0) { score += Math.max(0, 1 - escAlways / Math.max(escTotal, 1)) * 10; weights += 10; }
+
+  m.healthScore = weights > 0 ? Math.round((score / weights) * 100) : 0;
+
+  if (weights === 0) {
+    m.healthSummary = 'No production data yet. Feed documents to start building intelligence.';
+  } else if (m.healthScore >= 70) {
+    m.healthSummary = 'System is performing well. Monitor vendor maturity for continued improvement.';
+  } else if (m.healthScore >= 40) {
+    m.healthSummary = 'System is learning. More document volume will improve all metrics.';
+  } else {
+    m.healthSummary = 'Early stage — confidence accuracy and vendor maturity need more training data.';
+  }
+
+  return m;
+}

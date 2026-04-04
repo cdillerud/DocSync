@@ -38,35 +38,30 @@
 ### BC Auto-Post Phase 2: Template-Driven Draft Creation (Complete - Apr 2026)
 - Auto-Post Settings, Ready Queue, Draft PI Preview, Create Draft PI
 - Confidence-Gated Auto-Draft, Posting Template Override
-- Template Item/Description Matching, BC Item Sync
-- Draft vs Production Comparison, Batch Auto-Draft Queue
 
 ### AI Learning Dashboard (Complete - Apr 2026)
-- **Page**: `/ai-learning` — Proof of what the system has learned
-- **Endpoint**: `GET /api/posting-patterns/learning-dashboard`
+- `/ai-learning` — Proof of AI learning with 7 data sections
 
 ### Draft Review Queue (Complete - Apr 2026)
-- **Page**: `/review-queue` — Review, approve, or correct auto-drafted PIs
-- **Endpoints**: review-queue (GET), approve, correct
-- **Features**: Summary cards, expandable items, Correction Dialog
+- `/review-queue` — Review, approve, correct auto-drafted PIs with feedback loop
 
 ### Feedback Loop — BC Draft Sync & Template Adjustment (Complete - Apr 2026)
-- **Original Draft Line Storage**: Lines stored on doc at creation for future comparison
-- **BC Sync**: `POST /review-queue/{doc_id}/sync-from-bc` and `POST /review-queue/sync-all`
-- **Feedback Details**: `GET /review-queue/{doc_id}/feedback`
-- **Diff Engine**: Detects item, description, amount, quantity, tax, structural changes
-- **Template Adjustment**: Boosts corrected items (+3), records penalties, adjusts line counts
-- **Service**: `/app/backend/services/draft_feedback_service.py`
-- **Frontend**: "Sync All from BC" button, per-item "Sync BC", FeedbackDiffPanel
+- Original draft line storage, BC sync, diff engine, template adjustment
+- Service: `/app/backend/services/draft_feedback_service.py`
 
 ### Auto BC Sync Scheduling & Review Badge (Complete - Apr 2026)
-- **Background Scheduler**: `_draft_feedback_sync_scheduler` in `server.py` — runs `process_feedback_batch` every 2 hours, auto-detects human edits on drafts in BC
-- **Badge Count Endpoint**: `GET /api/posting-patterns/review-queue/badge-count` — lightweight query for nav badge
-- **Nav Badge**: Amber pill badge on "Review Queue" sidebar nav item, polls every 60s, only shows when count > 0
-- **Scope**: Counts auto-drafted docs needing attention (pending + BC-edited, excludes approved/corrected/synced)
+- Background scheduler every 2h, nav badge with 60s polling
+
+### Readiness Signal Contradiction Fix (Complete - Apr 2026)
+- **Bug 1 Fixed**: `duplicate_risk` now checks BC validation `duplicate_check` first. If BC confirmed "No duplicate found", the stale `possible_duplicate` flag from ingestion is overridden. Only falls back to raw flags if no BC duplicate check was run.
+- **Bug 2 Fixed**: `po_resolved` for AP_Invoices now checks BC validation `po_check`. If BC says PO was not found, overrides the field-presence-only "resolved" to False.
+- **Automation Intelligence Fixed**: `_duplicate_risk_score()` also respects BC validation duplicate check, returning 0.0 when BC passed.
+- **Self-Learning**: `evaluate_and_persist()` detects when re-evaluation corrects contradictions (e.g., duplicate_risk True→False, po_resolved True→False) and records `readiness_contradiction_fix` learning events in both `posting_learning_events` and `classification_corrections` collections.
+- **Impact on user's document (0305567)**: Status changes from Blocked (46%) → Needs Review (52%), duplicate_risk removed from blocking, po_resolved correctly set to False with warning.
+- **Files changed**: `document_readiness_service.py` (compute_signals + evaluate_and_persist), `automation_intelligence_service.py` (_duplicate_risk_score)
 
 ## Backlog
-- P0: Deploy to production and run analyze-top + auto-draft-queue
+- P0: Deploy to production — re-evaluate document 0305567 via POST /api/readiness/evaluate/{id}
 - P1: Rep Overrides management UI — Admin screen to map customers to reps
 - P1: Teams Adaptive Card integration — webhook handler for "Approve" -> BC Sales Order
 - P1: FRACHT template tuning — verify TARIFF-DS surcharge fix achieves >=90% accuracy

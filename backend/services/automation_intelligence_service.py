@@ -133,6 +133,12 @@ def _policy_pass_score(doc: dict) -> float:
 
 def _duplicate_risk_score(doc: dict) -> float:
     """0.0–1.0 — higher means MORE risk (used as penalty)."""
+    # Check BC validation duplicate check first — it's authoritative
+    bc_val = doc.get("bc_validation") or {}
+    for chk in (bc_val.get("checks") or []):
+        if chk.get("check_name") == "duplicate_check":
+            return 1.0 if not chk.get("passed") else 0.0
+    # Fallback to raw flags only if BC validation didn't run a duplicate check
     if doc.get("is_duplicate"):
         return 1.0
     if doc.get("possible_duplicate"):

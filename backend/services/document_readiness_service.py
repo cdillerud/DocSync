@@ -87,9 +87,32 @@ def compute_signals(doc: Dict[str, Any]) -> Dict[str, bool]:
         # For shipping docs: require actual BC resolution, not just field presence
         po_resolved = po_resolved_bc
     else:
+        # For non-shipping docs (e.g. AP_Invoice): start with field presence...
         po_resolved = po_extracted
+        # ...but if BC validation explicitly failed the PO check, override to False
+        bc_val = doc.get("bc_validation") or {}
+        bc_checks = bc_val.get("checks") or []
+        for chk in bc_checks:
+            if chk.get("check_name") == "po_check" and chk.get("passed") is False:
+                po_resolved = False
+                break
 
-    duplicate_risk = bool(doc.get("possible_duplicate") or doc.get("is_duplicate"))
+    # Duplicate risk — check the actual BC validation duplicate check first.
+    # The `possible_duplicate` flag is set during ingestion and can be stale
+    # if a later BC validation explicitly confirmed "No duplicate found".
+    duplicate_risk = False
+    bc_val = doc.get("bc_validation") or {}
+    bc_checks = bc_val.get("checks") or []
+    bc_dup_check_ran = False
+    for chk in bc_checks:
+        if chk.get("check_name") == "duplicate_check":
+            bc_dup_check_ran = True
+            if not chk.get("passed"):
+                duplicate_risk = True
+            break
+    # Only fall back to raw flags if BC validation didn't run a duplicate check
+    if not bc_dup_check_ran:
+        duplicate_risk = bool(doc.get("possible_duplicate") or doc.get("is_duplicate"))
 
     graph_linked = bool(
         doc.get("bc_document_id")
@@ -340,7 +363,8 @@ def _compute_confidence(signals: Dict[str, bool], ai_conf: float, n_blocking: in
 
 async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
     """Evaluate readiness for a document and persist the result.
-    Also computes automation confidence and decision explanation."""
+    Also computes automation confidence and decision explanation.
+    Detects signal contradictions that were corrected and records learning events."""
     from deps import get_db
     db = get_db()
 
@@ -348,7 +372,14 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
     if not doc:
         raise ValueError(f"Document not found: {doc_id}")
 
+    # Capture old readiness before re-evaluation
+    old_readiness = doc.get("readiness") or {}
+    old_signals = old_readiness.get("signals") or {}
+    old_blocking = old_readiness.get("blocking_reasons") or []
+
     readiness = evaluate_readiness(doc)
+    new_signals = readiness.get("signals") or {}
+    new_blocking = readiness.get("blocking_reasons") or []
 
     # Compute automation intelligence alongside readiness
     from services.automation_intelligence_service import (
@@ -369,6 +400,78 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
             "updated_utc": readiness["last_evaluated_at"],
         }},
     )
+
+    # --- Learning: detect contradictions that were corrected ---
+    corrections = []
+    now = readiness["last_evaluated_at"]
+    vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
+
+    # Duplicate risk flipped from True to False (BC check overrode stale flag)
+    if old_signals.get("duplicate_risk") and not new_signals.get("duplicate_risk"):
+        corrections.append({
+            "signal": "duplicate_risk",
+            "old_value": True,
+            "new_value": False,
+            "reason": "BC validation duplicate check passed — cleared stale possible_duplicate flag",
+        })
+
+    # PO resolved flipped from True to False (BC check overrode field-only resolution)
+    if old_signals.get("po_resolved") and not new_signals.get("po_resolved"):
+        corrections.append({
+            "signal": "po_resolved",
+            "old_value": True,
+            "new_value": False,
+            "reason": "BC validation PO check failed — PO was extracted but not found in BC",
+        })
+
+    # PO resolved flipped from False to True
+    if not old_signals.get("po_resolved") and new_signals.get("po_resolved"):
+        corrections.append({
+            "signal": "po_resolved",
+            "old_value": False,
+            "new_value": True,
+            "reason": "PO now resolved after BC re-validation",
+        })
+
+    # Blocking reasons removed
+    removed_blockers = set(old_blocking) - set(new_blocking)
+    for blocker in removed_blockers:
+        corrections.append({
+            "signal": f"blocker_{blocker}",
+            "old_value": True,
+            "new_value": False,
+            "reason": f"Blocking reason '{blocker}' no longer applies after re-evaluation",
+        })
+
+    if corrections:
+        await db.posting_learning_events.insert_one({
+            "vendor_no": vendor_no,
+            "doc_id": doc_id,
+            "event_type": "readiness_contradiction_fix",
+            "posted_at": now,
+            "feedback": "self_correction",
+            "corrections": corrections,
+            "old_status": old_readiness.get("status", ""),
+            "new_status": readiness.get("status", ""),
+            "old_confidence": old_readiness.get("confidence", 0),
+            "new_confidence": readiness.get("confidence", 0),
+        })
+        for c in corrections:
+            await db.classification_corrections.insert_one({
+                "doc_id": doc_id,
+                "vendor_id": vendor_no,
+                "correction_type": f"readiness_{c['signal']}",
+                "original_type": str(c["old_value"]),
+                "corrected_type": str(c["new_value"]),
+                "source": "readiness_self_correction",
+                "confirmed_at": now,
+                "applied": True,
+            })
+        logger.info(
+            "[Readiness] doc=%s self-corrected %d signal contradictions: %s",
+            doc_id[:8], len(corrections),
+            ", ".join(c["signal"] for c in corrections),
+        )
 
     logger.info(
         "[Readiness] doc=%s status=%s confidence=%.2f auto_conf=%.2f action=%s blockers=%d warnings=%d",

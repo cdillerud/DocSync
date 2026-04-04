@@ -16,48 +16,46 @@ Enterprise document processing hub for AP/Sales workflows with Dynamics 365 BC i
 ### Phase 4 — Continuous Learning
 - Learning Dashboard, Review Queue, Feedback Loop, Batch Re-evaluation, 4 Continuous Learning Engines
 
-### Phase 5 — Per-Document Intelligence Engine
-8 learning dimensions on every document.
-
-### Phase 6 — Deep Learning Engine
-5 advanced layers: Extraction Pattern Learning, Document Similarity, Confidence Self-Correction, Vendor Maturity Scoring, Predictive Readiness.
-
-### Phase 7 — Advanced Intelligence Engine
-7 engines: Line Item Intelligence, Document Flow Sequencing, Amount Pattern Learning, Correction Replay, Field Correlation Learning, Temporal Intelligence, Error Pattern Recognition.
-
-### Phase 8 — Vendor Intelligence Integration
-All deep learning data wired into Vendor Intelligence page.
+### Phase 5-8 — Deep Intelligence
+- Per-Document Intelligence (8 dimensions), Deep Learning (5 layers), Advanced Intelligence (7 engines), Vendor Intelligence Integration
 
 ### Phase 9 — Validation Gap Closers (7 active)
-1. Confidence Miscalibration routing
-2. PO Validation Enhancement (fuzzy + vendor patterns)
-3. Customer Match Enhancement (historical suggestions)
-4. Sales Order Match Enhancement (flow + fuzzy)
-5. **Duplicate Intelligence** — Learns false-positive rates per vendor, auto-clears unreliable flags
-6. **Amount Anomaly Detection** — Per-vendor z-score detection, high-severity forced to review
-7. **Auto-Escalation Intelligence** — Pre-routes failing vendor+doc_type combos to review
+1. Confidence Miscalibration, 2. PO Validation, 3. Customer Match, 4. Sales Order Match, 5. Duplicate Intelligence, 6. Amount Anomaly, 7. Auto-Escalation
 
 ### Phase 10 — Enhanced LLM Prompt Intelligence
-Amount intelligence context + Field correlation predictions injected into AI extraction prompts.
+Amount intelligence + Field correlation predictions injected into AI prompts.
 
 ### Phase 11 — Executive Monitoring Dashboard (Apr 4, 2026)
-Clean `/monitor` page showing the 5 KPIs that matter:
-1. AI Confidence Accuracy (95-100% band accuracy)
-2. Vendor Maturity (Stable+Autonomous / total)
-3. Auto-File Rate (% of docs processed without human touch)
-4. Validation Gaps (open gaps by type)
-5. Escalation Patterns (always-escalate combos)
-Plus: Automation Health Score (weighted composite), contextual explanations for each metric.
+Clean `/monitor` page with 5 KPIs, Automation Health Score, and "Run Intelligence Backfill" button.
+
+### Phase 12 — Production-Targeted Fixes (Apr 4, 2026)
+Based on real production data (1037 docs, 9 vendors, 51% health):
+
+1. **PO Validation Enhancement** — Added reverse vendor PO lookup (historical match), substring/contains matching, dash variant handling, suffix digit matching, bigram similarity scoring. Targets the 452 PO validation gaps (55% of all gaps).
+
+2. **Duplicate Intelligence Auto-Clearing** — Background scheduler runs every 2h: batch-clears false-positive duplicate flags, backfills duplicate outcomes from completed docs, backfills escalation outcomes. Targets the 84 docs stuck on duplicate flags.
+
+3. **Vendor Maturity Threshold Fix** — Changed labels from mastered/proficient to autonomous/stable (matching dashboard expectations). Lowered thresholds: 85→80 (autonomous), 70→65 (stable), 50→45 (developing), 25→20 (learning). Vendors with 50+ docs and decent accuracy can now graduate to "stable."
+
+4. **Intelligence Backfill System** — On-demand POST `/api/posting-patterns/intelligence/backfill` endpoint + UI button. Runs all 4 operations: escalation tracking, duplicate outcome tracking, vendor maturity recompute, duplicate batch-clear.
 
 ## Key Routes
 - `/` — Inbox
-- `/monitor` — Executive Monitoring Dashboard
+- `/monitor` — Executive Monitoring Dashboard (5 KPIs + backfill)
 - `/sales-inventory` — Sales
 - `/posting-intelligence` — Posting AI
 - `/invoice-trace` — Trace
 - `/ai-learning` — AI Learning Dashboard (detailed 20 dimensions)
 - `/review-queue` — Review Queue
 - `/config` — Settings
+
+## Background Schedulers
+- BC Catalog Sync (24h)
+- BC Shipment Sync (1h)
+- Knowledge Seed (6h)
+- Draft Feedback + Continuous Learning (2h)
+- Deep Learning: Self-Correction + Vendor Maturity (4h)
+- Intelligence Maintenance: Dup Clear + Escalation Backfill + Dup Backfill (2h)
 
 ## Upcoming Tasks
 - P1: Rep Overrides management UI

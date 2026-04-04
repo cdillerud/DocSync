@@ -1786,6 +1786,24 @@ async def auto_create_pi_from_document(doc_id: str, db) -> dict:
 
         # Step 3: Create GPI Document Link
         link_result = None
+
+        # Store original draft lines for feedback loop comparison
+        original_draft_lines = []
+        if bc_lines:
+            for idx, line in enumerate(bc_lines):
+                original_draft_lines.append({
+                    "line_no": idx,
+                    "type": line.get("lineType", ""),
+                    "item_or_account": line.get("lineObjectNumber", ""),
+                    "lineObjectNumber": line.get("lineObjectNumber", ""),
+                    "description": line.get("description", ""),
+                    "quantity": line.get("quantity", 0),
+                    "unit_cost": line.get("unitCost", line.get("directUnitCost", 0)),
+                    "amount": line.get("amount", line.get("lineAmount", 0)),
+                    "tax_code": line.get("taxCode", ""),
+                    "uom": line.get("unitOfMeasureCode", ""),
+                })
+
         if result.get("bc_system_id"):
             try:
                 link_result = await create_gpi_document_link(
@@ -1823,7 +1841,7 @@ async def auto_create_pi_from_document(doc_id: str, db) -> dict:
         }
         await db.hub_documents.update_one(
             {"id": doc_id},
-            {"$set": {"bc_purchase_invoice": bc_purchase_invoice, "updated_utc": now}}
+            {"$set": {"bc_purchase_invoice": bc_purchase_invoice, "original_draft_lines": original_draft_lines, "updated_utc": now}}
         )
 
         # Emit event

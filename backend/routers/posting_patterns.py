@@ -362,6 +362,74 @@ async def correct_draft(
     }
 
 
+# =============================================================================
+# Feedback Loop — BC Draft Sync & Template Adjustment
+# =============================================================================
+
+@router.post("/review-queue/{doc_id}/sync-from-bc")
+async def sync_draft_from_bc_endpoint(doc_id: str):
+    """
+    Fetch the current state of an auto-drafted PI from BC.
+    Compares original draft lines with what's currently in BC (after human edits).
+    If changes are detected, feeds them back into the posting template.
+    """
+    db = get_db()
+    from services.draft_feedback_service import sync_draft_from_bc
+    result = await sync_draft_from_bc(doc_id, db)
+    return result
+
+
+@router.post("/review-queue/sync-all")
+async def sync_all_drafts(limit: int = Query(50, le=200)):
+    """
+    Batch sync all auto-drafted PIs from BC.
+    Detects human edits and feeds corrections back into posting templates.
+    """
+    db = get_db()
+    from services.draft_feedback_service import process_feedback_batch
+    result = await process_feedback_batch(db, limit=limit)
+    return result
+
+
+@router.get("/review-queue/{doc_id}/feedback")
+async def get_draft_feedback(doc_id: str):
+    """
+    Get the feedback details for a specific auto-drafted document.
+    Shows what changed between the original draft and BC current state.
+    """
+    db = get_db()
+    doc = await db.hub_documents.find_one(
+        {"id": doc_id},
+        {
+            "_id": 0, "id": 1,
+            "original_draft_lines": 1,
+            "draft_bc_current_lines": 1,
+            "draft_bc_sync": 1,
+            "draft_bc_corrections": 1,
+            "auto_draft_bc_record_no": 1,
+            "auto_draft_confidence": 1,
+            "bc_vendor_number": 1, "vendor_no": 1,
+        }
+    )
+    if not doc:
+        return {"success": False, "error": "Document not found"}
+
+    sync = doc.get("draft_bc_sync") or {}
+    return {
+        "success": True,
+        "doc_id": doc_id,
+        "bc_record_no": doc.get("auto_draft_bc_record_no", ""),
+        "vendor_no": doc.get("bc_vendor_number") or doc.get("vendor_no", ""),
+        "confidence": doc.get("auto_draft_confidence", ""),
+        "last_synced": sync.get("synced_at", ""),
+        "bc_status": sync.get("bc_status", ""),
+        "changes_detected": sync.get("changes_detected", False),
+        "changes_summary": sync.get("changes_summary", ""),
+        "original_lines": doc.get("original_draft_lines") or [],
+        "current_lines": doc.get("draft_bc_current_lines") or [],
+        "corrections": doc.get("draft_bc_corrections") or [],
+    }
+
 
 # Track background analysis status
 _analysis_status = {"running": False, "last_result": None, "progress": "idle"}

@@ -3,7 +3,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
-import { Textarea } from '../components/ui/textarea';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
 } from '../components/ui/dialog';
@@ -11,8 +10,9 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from '../components/ui/select';
 import {
-  ClipboardCheck, CheckCircle2, AlertTriangle, RefreshCw, Loader2,
-  FileText, Eye, Pencil, ChevronDown, ChevronUp, ExternalLink
+  ClipboardCheck, CheckCircle2, RefreshCw, Loader2,
+  FileText, Pencil, ChevronDown, ChevronUp, ArrowRight,
+  RotateCcw, GitCompare, Zap
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -23,10 +23,11 @@ function StatusBadge({ status }) {
     pending: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
     approved: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
     corrected: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+    bc_edited: 'bg-violet-500/15 text-violet-400 border-violet-500/30',
   };
   return (
     <Badge variant="outline" className={styles[status] || ''} data-testid={`status-${status}`}>
-      {status}
+      {status === 'bc_edited' ? 'BC Edited' : status}
     </Badge>
   );
 }
@@ -135,10 +136,62 @@ function CorrectionDialog({ open, onClose, onSubmit, docId }) {
   );
 }
 
+function FeedbackDiffPanel({ corrections }) {
+  if (!corrections || corrections.length === 0) return null;
+
+  const typeLabels = {
+    item_change: 'Item/GL Changed',
+    description_change: 'Description Changed',
+    amount_change: 'Amount Changed',
+    quantity_change: 'Quantity Changed',
+    tax_change: 'Tax Code Changed',
+    line_addition: 'Line Added',
+    line_deletion: 'Line Removed',
+    structural: 'Structural Change',
+  };
+
+  const typeColors = {
+    item_change: 'text-violet-400 border-violet-500/30',
+    description_change: 'text-blue-400 border-blue-500/30',
+    amount_change: 'text-amber-400 border-amber-500/30',
+    quantity_change: 'text-amber-400 border-amber-500/30',
+    tax_change: 'text-teal-400 border-teal-500/30',
+    line_addition: 'text-emerald-400 border-emerald-500/30',
+    line_deletion: 'text-rose-400 border-rose-500/30',
+    structural: 'text-orange-400 border-orange-500/30',
+  };
+
+  return (
+    <div className="col-span-full mt-2" data-testid="feedback-diff-panel">
+      <div className="flex items-center gap-2 mb-2">
+        <GitCompare className="w-3.5 h-3.5 text-violet-400" />
+        <span className="text-xs font-medium text-violet-400">BC Feedback — {corrections.length} change(s) detected</span>
+      </div>
+      <div className="space-y-1">
+        {corrections.map((c, i) => (
+          <div key={i} className="flex items-center gap-2 bg-muted/50 rounded px-2 py-1 text-xs">
+            <Badge variant="outline" className={`text-xs ${typeColors[c.type] || ''}`}>
+              {typeLabels[c.type] || c.type}
+            </Badge>
+            {c.line_index !== undefined && (
+              <span className="text-muted-foreground">Line {c.line_index + 1}:</span>
+            )}
+            <span className="text-rose-400 line-through">{String(c.original)}</span>
+            <ArrowRight className="w-3 h-3 text-muted-foreground" />
+            <span className="text-emerald-400">{String(c.corrected)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ReviewItem({ item, onRefresh }) {
   const [expanded, setExpanded] = useState(false);
   const [approving, setApproving] = useState(false);
   const [correcting, setCorrecting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [feedback, setFeedback] = useState(null);
 
   const handleApprove = async () => {
     setApproving(true);
@@ -155,6 +208,47 @@ function ReviewItem({ item, onRefresh }) {
       toast.error('Network error');
     }
     setApproving(false);
+  };
+
+  const handleSyncFromBC = async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch(`${API}/api/posting-patterns/review-queue/${item.id}/sync-from-bc`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        if (data.changes_detected) {
+          toast.success(`Changes detected: ${data.summary}`);
+          setFeedback(data);
+        } else {
+          toast.info('No changes — draft matches BC');
+        }
+        onRefresh();
+      } else {
+        toast.error(data.error || 'Failed to sync from BC');
+      }
+    } catch {
+      toast.error('Network error');
+    }
+    setSyncing(false);
+  };
+
+  const loadFeedback = async () => {
+    try {
+      const res = await fetch(`${API}/api/posting-patterns/review-queue/${item.id}/feedback`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) setFeedback(data);
+      }
+    } catch { /* ignore */ }
+  };
+
+  // Load feedback when expanding if corrections exist
+  const handleExpand = () => {
+    const next = !expanded;
+    setExpanded(next);
+    if (next && !feedback && (item.review_status === 'bc_edited' || item.review_status === 'corrected')) {
+      loadFeedback();
+    }
   };
 
   return (
@@ -189,6 +283,14 @@ function ReviewItem({ item, onRefresh }) {
             <ConfidenceBadge confidence={item.confidence} />
             <StatusBadge status={item.review_status} />
 
+            {/* Sync from BC button — available for pending and bc_edited drafts */}
+            {(item.review_status === 'pending' || item.review_status === 'bc_edited') && (
+              <Button size="sm" variant="outline" onClick={handleSyncFromBC} disabled={syncing} data-testid={`sync-bc-btn-${item.id}`}>
+                {syncing ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RotateCcw className="w-3 h-3 mr-1" />}
+                Sync BC
+              </Button>
+            )}
+
             {item.review_status === 'pending' && (
               <>
                 <Button size="sm" variant="outline" onClick={() => setCorrecting(true)} data-testid={`correct-btn-${item.id}`}>
@@ -201,7 +303,7 @@ function ReviewItem({ item, onRefresh }) {
               </>
             )}
 
-            <Button size="icon" variant="ghost" onClick={() => setExpanded(!expanded)} data-testid={`expand-btn-${item.id}`}>
+            <Button size="icon" variant="ghost" onClick={handleExpand} data-testid={`expand-btn-${item.id}`}>
               {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
             </Button>
           </div>
@@ -231,20 +333,25 @@ function ReviewItem({ item, onRefresh }) {
                 <p className="font-medium">{new Date(item.reviewed_at).toLocaleString()} by {item.reviewed_by}</p>
               </div>
             )}
+            {/* Manual corrections from Review Queue */}
             {item.corrections && item.corrections.length > 0 && (
               <div className="col-span-full">
-                <span className="text-muted-foreground">Corrections Applied</span>
+                <span className="text-muted-foreground">Manual Corrections</span>
                 <div className="mt-1 space-y-1">
                   {item.corrections.map((c, i) => (
                     <div key={i} className="flex items-center gap-2 bg-muted/50 rounded px-2 py-1">
                       <Badge variant="outline" className="text-xs">{c.field}</Badge>
                       <span className="text-rose-400 line-through">{c.original}</span>
-                      <span>&rarr;</span>
+                      <ArrowRight className="w-3 h-3 text-muted-foreground" />
                       <span className="text-emerald-400">{c.corrected}</span>
                     </div>
                   ))}
                 </div>
               </div>
+            )}
+            {/* BC Feedback diff panel */}
+            {feedback && feedback.corrections && feedback.corrections.length > 0 && (
+              <FeedbackDiffPanel corrections={feedback.corrections} />
             )}
           </div>
         )}
@@ -264,6 +371,7 @@ export default function ReviewQueuePage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('pending');
+  const [batchSyncing, setBatchSyncing] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -278,6 +386,21 @@ export default function ReviewQueuePage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  const handleBatchSync = async () => {
+    setBatchSyncing(true);
+    try {
+      const res = await fetch(`${API}/api/posting-patterns/review-queue/sync-all`, { method: 'POST' });
+      const result = await res.json();
+      toast.success(
+        `Synced ${result.processed} drafts: ${result.changes_found} with changes, ${result.no_changes} unchanged, ${result.errors} errors`
+      );
+      fetchData();
+    } catch {
+      toast.error('Batch sync failed');
+    }
+    setBatchSyncing(false);
+  };
+
   return (
     <div className="p-4 space-y-5 max-w-[1400px] mx-auto" data-testid="review-queue-page">
       {/* Header */}
@@ -288,12 +411,18 @@ export default function ReviewQueuePage() {
             Draft Review Queue
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Review, approve, or correct auto-drafted Purchase Invoices
+            Review, approve, or correct auto-drafted Purchase Invoices — corrections feed back into AI templates
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={fetchData} disabled={loading} data-testid="refresh-review-btn">
-          <RefreshCw className={`w-4 h-4 mr-1 ${loading ? 'animate-spin' : ''}`} />Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={handleBatchSync} disabled={batchSyncing} data-testid="batch-sync-btn">
+            {batchSyncing ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Zap className="w-4 h-4 mr-1" />}
+            Sync All from BC
+          </Button>
+          <Button variant="outline" size="sm" onClick={fetchData} disabled={loading} data-testid="refresh-review-btn">
+            <RefreshCw className={`w-4 h-4 mr-1 ${loading ? 'animate-spin' : ''}`} />Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Summary Cards */}

@@ -21,82 +21,65 @@
 ### Knowledge Intelligence (Complete)
 - Phase 1: 962 vendor aliases, 122 domain mappings, 603 vendor profiles from BC/Spiro
 - Phase 2: Context-rich LLM calls with real BC invoice examples + vendor profiles
-- Auto-confirm on success for positive reinforcement
-- Auto-seed scheduler: startup + every 6h + post-BC-sync
+- Auto-confirm on success, Auto-seed scheduler
 
 ### Post-LLM Refinement Pipeline (Complete - Feb 2026)
 - Vendor Name Normalization, Doc Type Refinement, PO Number Validation
 - Confidence Calibration, Feedback Loop Amplification
-- Pipeline Integration at Stage 3c
 
 ### Feedback Loop Fix (Complete - Feb 2026)
 - All event handlers mark events as `applied=True`
-- Approval reinforcement, Replay endpoint
-- Application rate: 0% -> 100%
+- Approval reinforcement, Replay endpoint, 100% application rate
 
 ### LLM Learning Pipeline Gap Fixes (Complete - Apr 2026)
 - Classification corrections feed into unified feedback loop
 - VEP profiles seeded from BC cache (13 -> 469 profiles)
-- Same-type correction noise filtered, unlearnable events force-marked
 
 ### Comparison Delta Scoring (Complete - Feb 2026)
-- BC-match fields excluded, normalization
-
 ### Intelligent Multi-Page Document Splitting (Complete)
-- Boundary detection, smart grouping, Split Preview UI
-
 ### Bulk Reprocess & Comparison (Complete)
-- Compare, Apply Improvements, Full Pipeline Reprocess
-
 ### Manual PO Override (Complete - Feb 2026)
-- Override endpoint, UI button, auto-post skip
-
 ### Derived State Vendor/PO Fix (Complete - Apr 2026)
-- 5 fixes for stale vendor blocks and contradictory states
 
 ### BC Posting Pattern Analyzer (Complete - Apr 2026)
-- `posting_pattern_analyzer.py` queries BC for human posting behavior
 - Vendor-specific posting templates with confidence levels
-- Endpoints: `/status`, `/analyze/{vendor_no}`, `/analyze-top`, `/learning-proof/{vendor_no}`
+- Consistency scoring, full item distribution, charge line tracking
 
 ### Expanded BC Data Ingestion (Complete - Apr 2026)
-- ALL invoice statuses ingested, dual-source, deduplication, graceful errors
+- ALL invoice statuses ingested, dual-source, deduplication
 
 ### Invoice Trace Comparison (Enhanced - Apr 2026)
 - Side-by-side human vs AI comparison at `/invoice-trace`
-- Weighted dimension scoring, line-by-line alignment, batch trace
 
 ### BC Auto-Post Phase 2: Template-Driven Draft Creation (Complete - Apr 2026)
 - Auto-Post Settings, Ready Queue, Draft PI Preview, Create Draft PI
 - Confidence-Gated Auto-Draft, Posting Template Override
 - Template Item/Description Matching, BC Item Sync
 - Draft vs Production Comparison, Batch Auto-Draft Queue
-- Frontend: `PostingPatternsDashboard.js`
-
-### Posting Pattern Analyzer Tightening (Complete - Apr 2026)
-- Line sample: 20 -> 75, consistency scoring, full item distribution
-- Line-level tax codes, richer reference patterns, charge line tracking
 
 ### AI Learning Dashboard (Complete - Apr 2026)
-- **New page**: `/ai-learning` — Proof of what the system has learned
+- **Page**: `/ai-learning` — Proof of what the system has learned
 - **Endpoint**: `GET /api/posting-patterns/learning-dashboard`
-- **Sections**: Learning Events summary, Vendor Templates, Corrections Learned, Label Corrections, Auto-Drafted PIs
-- **Cards**: Posting Template Confidence breakdown, Learned Label Corrections (PO->SHIPMENT, BOL->PO), Vendor Learning Activity, Auto-Drafted PIs by Vendor, Recent Learning Events table, Recent Classification Corrections
-- **Frontend**: `LearningDashboard.js` with StatCard components and refresh
+- **Sections**: Learning Events, Vendor Templates, Corrections, Label Corrections, Auto-Drafted PIs, Template Confidence, Vendor Activity, Recent Events
 
 ### Draft Review Queue (Complete - Apr 2026)
-- **New page**: `/review-queue` — Review, approve, or correct auto-drafted Purchase Invoices
-- **Endpoints**: 
-  - `GET /api/posting-patterns/review-queue` — List auto-drafted PIs with filter (pending/approved/corrected/all)
-  - `POST /api/posting-patterns/review-queue/{doc_id}/approve` — Approve draft, creates positive feedback event
-  - `POST /api/posting-patterns/review-queue/{doc_id}/correct` — Submit corrections with feedback loop
-- **Features**: Summary cards (pending/approved/corrected/total), expandable item details, Correction Dialog with field selectors, approve/correct actions
-- **Feedback Loop**: Approved drafts create `draft_approved` learning events. Corrections create `draft_corrected` events and `classification_corrections` entries for continuous learning
-- **Frontend**: `ReviewQueuePage.js` with StatusBadge, ConfidenceBadge, CorrectionDialog, ReviewItem components
+- **Page**: `/review-queue` — Review, approve, or correct auto-drafted PIs
+- **Endpoints**: GET/POST review-queue, approve, correct
+- **Features**: Summary cards, expandable items, Correction Dialog, approve/correct actions
+
+### Feedback Loop — BC Draft Sync & Template Adjustment (Complete - Apr 2026)
+- **Original Draft Line Storage**: When a Draft PI is created, the original lines are stored on the document (`original_draft_lines`) for future comparison
+- **BC Sync**: `POST /api/posting-patterns/review-queue/{doc_id}/sync-from-bc` fetches current state of a draft PI from BC, compares with stored originals, detects human edits
+- **Batch Sync**: `POST /api/posting-patterns/review-queue/sync-all` scans all pending auto-drafted PIs
+- **Feedback Details**: `GET /api/posting-patterns/review-queue/{doc_id}/feedback` returns full diff with original vs current lines
+- **Line Diff Engine**: `_compute_line_diff()` detects item changes, description changes, amount changes, quantity changes, tax changes, line additions/deletions
+- **Template Adjustment**: `_adjust_template_from_feedback()` boosts corrected item weights (+3), records penalties on original items, adjusts line counts, updates tax codes
+- **Learning Events**: Each sync that detects changes records `draft_bc_feedback` events in `posting_learning_events` and individual `classification_corrections`
+- **Frontend**: "Sync All from BC" batch button, per-item "Sync BC" button, `FeedbackDiffPanel` component showing color-coded changes by type (item, description, amount, etc.)
+- **Service**: `/app/backend/services/draft_feedback_service.py` — standalone service with `sync_draft_from_bc`, `process_feedback_batch`, diff engine, template adjustment
 
 ## Backlog
-- P0: Deploy to production and run `POST /api/posting-patterns/analyze-top?top_n=20` to build profiles, then `POST /api/posting-patterns/auto-draft-queue` to auto-draft qualifying invoices
-- P1: Build Feedback Loop — When human edits an auto-drafted PI in BC, correction feeds back into template
+- P0: Deploy to production and run analyze-top + auto-draft-queue
 - P1: Rep Overrides management UI — Admin screen to map customers to reps
 - P1: Teams Adaptive Card integration — webhook handler for "Approve" -> BC Sales Order
 - P1: FRACHT template tuning — verify TARIFF-DS surcharge fix achieves >=90% accuracy

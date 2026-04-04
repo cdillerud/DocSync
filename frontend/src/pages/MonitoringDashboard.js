@@ -43,6 +43,8 @@ export default function MonitoringDashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState(null);
+  const [backfillRunning, setBackfillRunning] = useState(false);
+  const [backfillResult, setBackfillResult] = useState(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -61,6 +63,23 @@ export default function MonitoringDashboard() {
     }
     setLoading(false);
   }, []);
+
+  const runBackfill = async () => {
+    setBackfillRunning(true);
+    setBackfillResult(null);
+    try {
+      const res = await fetch(`${API}/api/posting-patterns/intelligence/backfill`, { method: 'POST' });
+      if (res.ok) {
+        const result = await res.json();
+        setBackfillResult(result);
+        // Refresh data after backfill
+        await fetchAll();
+      }
+    } catch (e) {
+      console.error('[Monitor] backfill failed', e);
+    }
+    setBackfillRunning(false);
+  };
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
@@ -83,6 +102,14 @@ export default function MonitoringDashboard() {
               {lastRefresh.toLocaleTimeString()}
             </span>
           )}
+          <button
+            onClick={runBackfill}
+            disabled={backfillRunning}
+            className="px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+            data-testid="backfill-btn"
+          >
+            {backfillRunning ? 'Running...' : 'Run Intelligence Backfill'}
+          </button>
           <button
             onClick={fetchAll}
             disabled={loading}
@@ -107,6 +134,36 @@ export default function MonitoringDashboard() {
           <p className="text-xs text-muted-foreground mt-2">{metrics.healthSummary}</p>
         </CardContent>
       </Card>
+
+      {/* Backfill Result */}
+      {backfillResult && (
+        <Card className="border-emerald-500/30 bg-emerald-500/5" data-testid="backfill-result">
+          <CardContent className="p-4">
+            <p className="text-sm font-medium mb-2">Intelligence Backfill Complete</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+              <div>
+                <p className="text-muted-foreground">Escalation Tracked</p>
+                <p className="font-bold">{backfillResult.escalation_backfill?.tracked || 0} docs</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Dup False Positives</p>
+                <p className="font-bold">{backfillResult.duplicate_backfill?.tracked || 0} docs</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Vendor Maturity</p>
+                <p className="font-bold">{backfillResult.vendor_maturity?.computed || 0} vendors</p>
+                {backfillResult.vendor_maturity?.levels && (
+                  <p className="text-muted-foreground">{Object.entries(backfillResult.vendor_maturity.levels).map(([k,v]) => `${v} ${k}`).join(', ')}</p>
+                )}
+              </div>
+              <div>
+                <p className="text-muted-foreground">Dups Cleared</p>
+                <p className="font-bold">{backfillResult.duplicate_clear?.cleared || 0} docs</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* The 5 Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

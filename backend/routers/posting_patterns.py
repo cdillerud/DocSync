@@ -3378,3 +3378,105 @@ async def get_escalation_intelligence():
     db = get_db()
     return await get_escalation_summary(db)
 
+
+# =============================================================================
+# On-Demand Intelligence Backfill
+# =============================================================================
+
+@router.post("/intelligence/backfill")
+async def run_intelligence_backfill():
+    """
+    On-demand: Run all intelligence backfills immediately.
+    - Duplicate outcome backfill (completed docs with dup flag → false positive)
+    - Escalation outcome backfill (all completed/posted docs → success/failure tracking)
+    - Vendor maturity recompute
+    - Duplicate batch-clear
+    """
+    from deps import get_db
+    db = get_db()
+    results = {}
+
+    # 1. Escalation backfill
+    try:
+        from services.escalation_intelligence_service import record_automation_outcome
+        recent_docs = await db.hub_documents.find(
+            {
+                "status": {"$in": ["Completed", "Posted", "Auto-Draft", "Linked", "Filed", "Needs Review", "Review", "Rejected"]},
+                "escalation_tracked": {"$ne": True},
+            },
+            {"_id": 0, "id": 1, "bc_vendor_number": 1, "vendor_no": 1, "matched_vendor_no": 1,
+             "document_type": 1, "suggested_job_type": 1, "status": 1}
+        ).limit(500).to_list(500)
+
+        tracked = 0
+        for d in recent_docs:
+            vendor = d.get("bc_vendor_number") or d.get("vendor_no") or d.get("matched_vendor_no") or ""
+            doc_type = d.get("document_type") or d.get("suggested_job_type") or ""
+            status = d.get("status", "")
+            doc_id = d.get("id", "")
+            if not vendor or not doc_type:
+                continue
+            if status in ("Completed", "Posted", "Auto-Draft", "Linked", "Filed"):
+                outcome = "success"
+            elif status in ("Rejected",):
+                outcome = "failure"
+            else:
+                outcome = "review"
+            await record_automation_outcome(db, vendor, doc_type, outcome, doc_id)
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": {"escalation_tracked": True}})
+            tracked += 1
+        results["escalation_backfill"] = {"tracked": tracked, "found": len(recent_docs)}
+    except Exception as e:
+        results["escalation_backfill"] = {"error": str(e)}
+
+    # 2. Duplicate outcome backfill
+    try:
+        from services.duplicate_intelligence_service import record_duplicate_outcome
+        dup_docs = await db.hub_documents.find(
+            {
+                "possible_duplicate": True,
+                "status": {"$in": ["Completed", "Posted", "Auto-Draft", "Linked", "Filed"]},
+                "duplicate_outcome_tracked": {"$ne": True},
+            },
+            {"_id": 0, "id": 1, "bc_vendor_number": 1, "vendor_no": 1, "matched_vendor_no": 1}
+        ).limit(500).to_list(500)
+
+        dup_tracked = 0
+        for d in dup_docs:
+            vendor = d.get("bc_vendor_number") or d.get("vendor_no") or d.get("matched_vendor_no") or ""
+            doc_id = d.get("id", "")
+            if not vendor:
+                continue
+            await record_duplicate_outcome(
+                db, doc_id=doc_id, vendor_no=vendor,
+                was_flagged_duplicate=True,
+                actual_outcome="false_positive",
+                resolution_source="backfill_completed",
+            )
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": {"duplicate_outcome_tracked": True}})
+            dup_tracked += 1
+        results["duplicate_backfill"] = {"tracked": dup_tracked, "found": len(dup_docs)}
+    except Exception as e:
+        results["duplicate_backfill"] = {"error": str(e)}
+
+    # 3. Vendor maturity recompute
+    try:
+        from services.deep_learning_engine import compute_all_vendor_maturity
+        maturity = await compute_all_vendor_maturity(db)
+        results["vendor_maturity"] = {
+            "computed": maturity.get("computed", 0),
+            "levels": maturity.get("levels", {}),
+        }
+    except Exception as e:
+        results["vendor_maturity"] = {"error": str(e)}
+
+    # 4. Duplicate batch-clear
+    try:
+        from services.duplicate_intelligence_service import batch_auto_clear_safe_duplicates
+        clear = await batch_auto_clear_safe_duplicates(db, limit=200)
+        results["duplicate_clear"] = clear
+    except Exception as e:
+        results["duplicate_clear"] = {"error": str(e)}
+
+    return results
+

@@ -105,6 +105,8 @@ async def find_po_with_intelligence(db, vendor_no: str, po_candidates: List[str]
     2. Fuzzy/partial PO matching (strip prefixes, try variations)
     3. Historical PO cross-reference (from line item intelligence)
     4. Document flow cross-reference (linked BOL → PO)
+    5. Reverse vendor PO lookup — search previously matched POs for this vendor
+    6. Substring/contains matching — try partial number matching
     """
     if not po_candidates:
         return {"found": False, "strategy": "none"}
@@ -126,7 +128,7 @@ async def find_po_with_intelligence(db, vendor_no: str, po_candidates: List[str]
             seen.add(stripped)
 
         # Variation: strip common prefixes (PO-, PO#, SO-, etc.)
-        for prefix in ["PO-", "PO#", "PO ", "SO-", "SO#", "SO ", "P-", "#"]:
+        for prefix in ["PO-", "PO#", "PO ", "SO-", "SO#", "SO ", "P-", "#", "INV-", "INV#", "INV "]:
             if po_clean.upper().startswith(prefix):
                 remainder = po_clean[len(prefix):].strip()
                 if remainder and remainder not in seen:
@@ -146,6 +148,34 @@ async def find_po_with_intelligence(db, vendor_no: str, po_candidates: List[str]
         if numeric and len(numeric) >= 4 and numeric not in seen:
             expanded.append(numeric)
             seen.add(numeric)
+
+        # Variation: case-insensitive uppercase
+        upper = po_clean.upper()
+        if upper not in seen:
+            expanded.append(upper)
+            seen.add(upper)
+
+        # Variation: try dash and no-dash variants
+        if "-" in po_clean:
+            no_dash = po_clean.replace("-", "")
+            if no_dash not in seen:
+                expanded.append(no_dash)
+                seen.add(no_dash)
+        elif len(po_clean) > 4:
+            # Try inserting dash at common positions (e.g., PO1234 -> PO-1234)
+            for i in [2, 3]:
+                dashed = po_clean[:i] + "-" + po_clean[i:]
+                if dashed not in seen:
+                    expanded.append(dashed)
+                    seen.add(dashed)
+
+        # Variation: last N digits (for long PO numbers that may have extra prefixes)
+        if len(po_clean) >= 6:
+            for suffix_len in [6, 5, 4]:
+                suffix = po_clean[-suffix_len:]
+                if suffix not in seen and suffix.isdigit():
+                    expanded.append(suffix)
+                    seen.add(suffix)
 
     # Strategy 3: Check document flow for related PO numbers
     if vendor_no:
@@ -168,12 +198,68 @@ async def find_po_with_intelligence(db, vendor_no: str, po_candidates: List[str]
                             expanded.append(str(ref_val).strip())
                             seen.add(str(ref_val).strip())
 
+    # Strategy 5: Reverse vendor PO lookup — find POs from previously matched docs
+    if vendor_no:
+        try:
+            historical_pos = await db.hub_documents.find(
+                {
+                    "$or": [
+                        {"bc_vendor_number": vendor_no},
+                        {"vendor_no": vendor_no},
+                        {"matched_vendor_no": vendor_no},
+                    ],
+                    "validation_results.po_match": True,
+                    "extracted_fields.po_number": {"$exists": True, "$nin": [None, ""]},
+                },
+                {"_id": 0, "extracted_fields.po_number": 1}
+            ).limit(50).to_list(50)
+
+            known_pos = set()
+            for d in historical_pos:
+                po_val = (d.get("extracted_fields") or {}).get("po_number", "")
+                if po_val:
+                    known_pos.add(str(po_val).strip())
+
+            # For each candidate, check if it's a substring of a known PO or vice versa
+            for candidate in list(po_candidates):
+                c_clean = str(candidate).strip().upper()
+                c_numeric = re.sub(r'[^0-9]', '', c_clean)
+                for known in known_pos:
+                    k_upper = known.upper()
+                    k_numeric = re.sub(r'[^0-9]', '', k_upper)
+                    # Substring match: candidate is part of known PO or known PO contains candidate
+                    if len(c_numeric) >= 4 and (c_numeric in k_numeric or k_numeric in c_numeric):
+                        if known not in seen:
+                            expanded.append(known)
+                            seen.add(known)
+                    # Fuzzy: Levenshtein-like — if only 1-2 chars different
+                    elif len(c_clean) >= 4 and len(k_upper) >= 4:
+                        if _simple_similarity(c_clean, k_upper) >= 0.8:
+                            if known not in seen:
+                                expanded.append(known)
+                                seen.add(known)
+        except Exception as e:
+            logger.debug("[PO-Intel] Reverse vendor PO lookup failed: %s", e)
+
     return {
         "original_candidates": po_candidates,
         "expanded_candidates": expanded,
         "expansion_count": len(expanded) - len(po_candidates),
         "vendor_no": vendor_no,
     }
+
+
+def _simple_similarity(a: str, b: str) -> float:
+    """Quick character-level similarity (Jaccard on character bigrams)."""
+    if not a or not b:
+        return 0.0
+    bigrams_a = set(a[i:i+2] for i in range(len(a)-1))
+    bigrams_b = set(b[i:i+2] for i in range(len(b)-1))
+    if not bigrams_a or not bigrams_b:
+        return 0.0
+    intersection = bigrams_a & bigrams_b
+    union = bigrams_a | bigrams_b
+    return len(intersection) / len(union)
 
 
 async def find_customer_from_vendor_history(db, vendor_no: str, doc_type: str) -> Optional[Dict]:

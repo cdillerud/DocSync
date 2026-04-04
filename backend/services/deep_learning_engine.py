@@ -476,10 +476,12 @@ async def compute_vendor_maturity(db, vendor_no: str) -> Dict:
     failures = intel.get("failure_count", 0)
 
     # DIMENSION 1: Volume (0-100) — more docs = more mature
-    if total >= 100:
+    if total >= 200:
         volume_score = 100
+    elif total >= 100:
+        volume_score = 90
     elif total >= 50:
-        volume_score = 80
+        volume_score = 75
     elif total >= 20:
         volume_score = 60
     elif total >= 10:
@@ -557,13 +559,13 @@ async def compute_vendor_maturity(db, vendor_no: str) -> Dict:
     composite = round(sum(d["score"] * d["weight"] for d in dimensions.values()))
 
     # Maturity level
-    if composite >= 85:
-        level = "mastered"
-    elif composite >= 70:
-        level = "proficient"
-    elif composite >= 50:
+    if composite >= 80:
+        level = "autonomous"
+    elif composite >= 65:
+        level = "stable"
+    elif composite >= 45:
         level = "developing"
-    elif composite >= 25:
+    elif composite >= 20:
         level = "learning"
     else:
         level = "novice"

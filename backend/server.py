@@ -7521,6 +7521,102 @@ async def startup():
     asyncio.create_task(_deep_learning_scheduler())
     logger.info("Deep Learning scheduler started (self-correction + vendor maturity, interval: 4h)")
 
+    # === Intelligence Maintenance: Duplicate Clearing + Escalation Backfill (every 2 hours) ===
+    async def _intelligence_maintenance_scheduler():
+        await asyncio.sleep(180)  # Initial delay: 3 minutes
+        while True:
+            # 1. Auto-clear safe duplicate flags
+            try:
+                from services.duplicate_intelligence_service import batch_auto_clear_safe_duplicates
+                logger.info("[IntelMaint] Running duplicate intelligence batch-clear...")
+                dup_result = await batch_auto_clear_safe_duplicates(db, limit=200)
+                logger.info("[IntelMaint] Duplicate clear: %d cleared, %d safe vendors",
+                            dup_result.get("cleared", 0), dup_result.get("safe_vendors", 0))
+            except Exception as e:
+                logger.warning("[IntelMaint] Duplicate clear failed: %s", e)
+
+            # 2. Backfill escalation intelligence from recent outcomes
+            try:
+                from services.escalation_intelligence_service import record_automation_outcome
+                # Find recently completed/posted docs that haven't been tracked
+                recent_docs = await db.hub_documents.find(
+                    {
+                        "status": {"$in": ["Completed", "Posted", "Auto-Draft", "Linked", "Filed", "Needs Review", "Review", "Rejected"]},
+                        "escalation_tracked": {"$ne": True},
+                    },
+                    {"_id": 0, "id": 1, "bc_vendor_number": 1, "vendor_no": 1, "matched_vendor_no": 1,
+                     "document_type": 1, "suggested_job_type": 1, "status": 1}
+                ).limit(200).to_list(200)
+
+                tracked = 0
+                for d in recent_docs:
+                    vendor = d.get("bc_vendor_number") or d.get("vendor_no") or d.get("matched_vendor_no") or ""
+                    doc_type = d.get("document_type") or d.get("suggested_job_type") or ""
+                    status = d.get("status", "")
+                    doc_id = d.get("id", "")
+                    if not vendor or not doc_type:
+                        continue
+
+                    if status in ("Completed", "Posted", "Auto-Draft", "Linked", "Filed"):
+                        outcome = "success"
+                    elif status in ("Rejected",):
+                        outcome = "failure"
+                    else:
+                        outcome = "review"
+
+                    await record_automation_outcome(db, vendor, doc_type, outcome, doc_id)
+                    await db.hub_documents.update_one(
+                        {"id": doc_id},
+                        {"$set": {"escalation_tracked": True}}
+                    )
+                    tracked += 1
+
+                if tracked > 0:
+                    logger.info("[IntelMaint] Escalation backfill: tracked %d documents", tracked)
+            except Exception as e:
+                logger.warning("[IntelMaint] Escalation backfill failed: %s", e)
+
+            # 3. Backfill duplicate intelligence from resolved documents
+            try:
+                from services.duplicate_intelligence_service import record_duplicate_outcome
+                dup_docs = await db.hub_documents.find(
+                    {
+                        "possible_duplicate": True,
+                        "status": {"$in": ["Completed", "Posted", "Auto-Draft", "Linked", "Filed"]},
+                        "duplicate_outcome_tracked": {"$ne": True},
+                    },
+                    {"_id": 0, "id": 1, "bc_vendor_number": 1, "vendor_no": 1, "matched_vendor_no": 1}
+                ).limit(200).to_list(200)
+
+                dup_tracked = 0
+                for d in dup_docs:
+                    vendor = d.get("bc_vendor_number") or d.get("vendor_no") or d.get("matched_vendor_no") or ""
+                    doc_id = d.get("id", "")
+                    if not vendor:
+                        continue
+
+                    # If doc was completed despite being flagged duplicate → false positive
+                    await record_duplicate_outcome(
+                        db, doc_id=doc_id, vendor_no=vendor,
+                        was_flagged_duplicate=True,
+                        actual_outcome="false_positive",
+                        resolution_source="backfill_completed",
+                    )
+                    await db.hub_documents.update_one(
+                        {"id": doc_id},
+                        {"$set": {"duplicate_outcome_tracked": True}}
+                    )
+                    dup_tracked += 1
+
+                if dup_tracked > 0:
+                    logger.info("[IntelMaint] Duplicate backfill: tracked %d false positives", dup_tracked)
+            except Exception as e:
+                logger.warning("[IntelMaint] Duplicate backfill failed: %s", e)
+
+            await asyncio.sleep(2 * 3600)  # Every 2 hours
+    asyncio.create_task(_intelligence_maintenance_scheduler())
+    logger.info("Intelligence Maintenance scheduler started (dup clear + escalation + dup backfill, interval: 2h)")
+
 async def shutdown_db_client():
     global _email_polling_task, _sales_polling_task, _dynamic_mailbox_polling_task, _pilot_summary_task
     # Cancel dynamic mailbox polling worker

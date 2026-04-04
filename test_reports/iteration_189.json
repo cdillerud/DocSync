@@ -1,0 +1,85 @@
+{
+  "summary": "Iteration 189: Tested 4 targeted fixes based on production data. All 15 backend tests passed. Frontend /monitor page shows backfill button and result card working correctly. Vendor maturity labels correctly updated to autonomous/stable/developing/learning/novice.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_intelligence_backfill_iteration189.py",
+    "/app/test_reports/pytest/intelligence_backfill_iteration189_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "POST /api/posting-patterns/intelligence/backfill endpoint correctly returns escalation_backfill, duplicate_backfill, vendor_maturity, duplicate_clear results",
+    "Vendor maturity labels correctly changed from mastered/proficient to autonomous/stable/developing/learning/novice",
+    "Maturity thresholds adjusted: 85→80 (autonomous), 70→65 (stable), 50→45 (developing), 25→20 (learning)",
+    "Intelligence Maintenance scheduler running every 2h for duplicate clearing + escalation backfill + duplicate outcome backfill",
+    "Frontend backfill button (data-testid='backfill-btn') works and shows result card with all 4 metrics"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_intelligence_backfill_iteration189.py"
+  ],
+  "success_rate": {
+    "backend": "100% (15/15 tests passed)",
+    "frontend": "100% (All features working)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "None - used existing data",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 189 tested 4 production-data-driven fixes: (1) Enhanced PO matching with reverse vendor lookup, substring matching, bigram similarity. (2) Background scheduler for duplicate intelligence clearing + escalation/duplicate backfill every 2h. (3) Fixed vendor maturity labels (autonomous/stable instead of mastered/proficient). (4) On-demand backfill API + UI button. All working correctly.",
+  "tested_features": {
+    "backend_endpoints": [
+      "POST /api/posting-patterns/intelligence/backfill - PASS (returns escalation_backfill, duplicate_backfill, vendor_maturity, duplicate_clear)",
+      "GET /api/posting-patterns/gap-closer/status - PASS (returns all 7 gaps + total_validation_gaps)",
+      "GET /api/posting-patterns/duplicate-intelligence - PASS (returns valid summary)",
+      "GET /api/posting-patterns/escalation-intelligence - PASS (returns valid summary)",
+      "GET /api/posting-patterns/deep-learning/summary - PASS (vendor_maturity uses new labels)",
+      "GET /api/posting-patterns/learning-pulse - PASS (regression)"
+    ],
+    "frontend_components": [
+      "Monitor page (/monitor) - PASS",
+      "Run Intelligence Backfill button (data-testid='backfill-btn') - PASS",
+      "Backfill result card (data-testid='backfill-result') - PASS",
+      "All 5 metric cards - PASS",
+      "Health summary - PASS"
+    ],
+    "regression_tests": [
+      "/ai-learning page loads correctly - PASS",
+      "All 7 gap-related content visible - PASS"
+    ],
+    "scheduler_verification": [
+      "Intelligence Maintenance scheduler started (dup clear + escalation + dup backfill, interval: 2h) - VERIFIED in logs"
+    ]
+  },
+  "data_verification": {
+    "backfill_result": {
+      "escalation_tracked": "0 docs",
+      "dup_false_positives": "0 docs",
+      "vendor_maturity": "2 vendors (1 developing, 1 learning)",
+      "dups_cleared": "0 docs"
+    },
+    "vendor_maturity_labels": {
+      "new_labels": ["autonomous", "stable", "developing", "learning", "novice"],
+      "old_labels_removed": ["mastered", "proficient"],
+      "verified": true
+    },
+    "gap_closer_status": {
+      "all_7_gaps_present": true,
+      "gaps": [
+        "gap_1_confidence_calibration",
+        "gap_2_po_matching",
+        "gap_3_customer_matching",
+        "gap_4_sales_order_matching",
+        "gap_5_duplicate_intelligence",
+        "gap_6_amount_anomaly",
+        "gap_7_escalation_intelligence"
+      ]
+    }
+  }
+}

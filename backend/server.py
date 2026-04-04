@@ -5775,6 +5775,7 @@ async def update_document_fields(doc_id: str, request: UpdateFieldsRequest):
         event = WorkflowEvent.ON_DATA_CORRECTED.value
     
     # Apply updates and advance workflow
+    doc["_pre_update_extracted_fields"] = {k: v for k, v in (doc.get("extracted_fields") or {}).items()}
     doc.update(update_data)
     _, history_entry, success = WorkflowEngine.advance_workflow(
         doc,
@@ -5791,7 +5792,26 @@ async def update_document_fields(doc_id: str, request: UpdateFieldsRequest):
         {"id": doc_id},
         {"$set": doc}
     )
-    
+
+    # --- Extraction Learning (Feature D) ---
+    # Record field corrections so the AI learns vendor-specific extraction patterns
+    vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or doc.get("vendor_canonical") or ""
+    old_ef = doc.pop("_pre_update_extracted_fields", {})
+    try:
+        from services.continuous_learning_service import learn_from_field_correction
+        if request.invoice_number is not None and old_ef.get("invoice_number", "") != request.invoice_number:
+            await learn_from_field_correction(db, doc_id, vendor_no, "invoice_number", old_ef.get("invoice_number", ""), request.invoice_number)
+        if request.amount is not None and str(old_ef.get("amount", "")) != str(request.amount):
+            await learn_from_field_correction(db, doc_id, vendor_no, "amount", str(old_ef.get("amount", "")), str(request.amount))
+        if request.po_number is not None and old_ef.get("po_number", "") != request.po_number:
+            await learn_from_field_correction(db, doc_id, vendor_no, "po_number", old_ef.get("po_number", ""), request.po_number)
+        if request.vendor_name is not None and old_ef.get("vendor", "") != request.vendor_name:
+            await learn_from_field_correction(db, doc_id, vendor_no, "vendor", old_ef.get("vendor", ""), request.vendor_name)
+        if request.due_date is not None and old_ef.get("due_date", "") != request.due_date:
+            await learn_from_field_correction(db, doc_id, vendor_no, "due_date", old_ef.get("due_date", ""), request.due_date)
+    except Exception as e:
+        logger.warning("[ExtractionLearning] Failed to record correction for %s: %s", doc_id[:8], e)
+
     doc.pop("_id", None)
     
     return {
@@ -7362,7 +7382,7 @@ async def startup():
 
     # Start Draft Feedback Sync scheduler (every 2h)
     async def _draft_feedback_sync_scheduler():
-        """Background worker: sync auto-drafted PIs from BC and detect human edits."""
+        """Background worker: sync auto-drafted PIs from BC, detect human edits, run all learning engines."""
         await asyncio.sleep(300)  # 5 min delay — let all services start
         while True:
             try:
@@ -7376,9 +7396,26 @@ async def startup():
                 )
             except Exception as e:
                 logger.warning("[DraftFeedback] Scheduled sync failed: %s", e)
+
+            # Run all continuous learning engines
+            try:
+                from services.continuous_learning_service import run_all_learning_engines
+                logger.info("[ContinuousLearning] Starting scheduled learning engines")
+                learn_result = await run_all_learning_engines(db)
+                posted = learn_result.get("posted_draft_detection", {})
+                cross = learn_result.get("cross_vendor_learning", {})
+                promo = learn_result.get("confidence_auto_promotion", {})
+                logger.info(
+                    "[ContinuousLearning] Complete: posted_found=%s, cross_vendor=%s, promoted=%s, demoted=%s",
+                    posted.get("posted_found", 0), cross.get("propagated_to_vendors", 0),
+                    len(promo.get("promoted", [])), len(promo.get("demoted", [])),
+                )
+            except Exception as e:
+                logger.warning("[ContinuousLearning] Scheduled learning failed: %s", e)
+
             await asyncio.sleep(2 * 3600)  # Every 2 hours
     asyncio.create_task(_draft_feedback_sync_scheduler())
-    logger.info("Draft Feedback Sync scheduler started (interval: 2h)")
+    logger.info("Draft Feedback Sync + Continuous Learning scheduler started (interval: 2h)")
 
 async def shutdown_db_client():
     global _email_polling_task, _sales_polling_task, _dynamic_mailbox_polling_task, _pilot_summary_task

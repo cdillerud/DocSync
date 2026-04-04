@@ -28,6 +28,101 @@ function StatCard({ title, value, icon: Icon, subtitle, color = "text-emerald-50
   );
 }
 
+function LearningEnginesSection({ onComplete }) {
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const handleRun = async () => {
+    setRunning(true);
+    setResult(null);
+    try {
+      const res = await fetch(`${API}/api/posting-patterns/learning/run-all`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        setResult(data);
+        toast.success('All learning engines completed');
+        if (onComplete) onComplete();
+      } else {
+        toast.error('Learning engines failed');
+      }
+    } catch {
+      toast.error('Network error');
+    }
+    setRunning(false);
+  };
+
+  const posted = result?.posted_draft_detection || {};
+  const cross = result?.cross_vendor_learning || {};
+  const promo = result?.confidence_auto_promotion || {};
+
+  return (
+    <Card data-testid="learning-engines-section">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Zap className="w-4 h-4 text-amber-500" />
+          Continuous Learning Engines
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-sm text-muted-foreground mb-3">
+          Runs automatically every 2h. Detects posted drafts in BC, propagates corrections across similar vendors,
+          and auto-promotes vendor confidence based on approval ratio.
+        </p>
+        <Button onClick={handleRun} disabled={running} data-testid="run-engines-btn">
+          {running ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Zap className="w-4 h-4 mr-2" />}
+          {running ? 'Running Engines...' : 'Run All Learning Engines'}
+        </Button>
+
+        {result && (
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3" data-testid="engines-results">
+            {/* A: Posted Draft Detection */}
+            <div className="bg-muted/50 rounded p-3">
+              <p className="text-xs font-medium text-emerald-400 mb-2">A. Posted Draft Detection</p>
+              <div className="space-y-1 text-xs">
+                <div className="flex justify-between"><span className="text-muted-foreground">Checked</span><span>{posted.checked || 0}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Posted Found</span><span className="text-emerald-400">{posted.posted_found || 0}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Changes Learned</span><span className="text-violet-400">{posted.changes_learned || 0}</span></div>
+              </div>
+            </div>
+
+            {/* B: Cross-Vendor Learning */}
+            <div className="bg-muted/50 rounded p-3">
+              <p className="text-xs font-medium text-blue-400 mb-2">B. Cross-Vendor Propagation</p>
+              <div className="space-y-1 text-xs">
+                <div className="flex justify-between"><span className="text-muted-foreground">Corrections Checked</span><span>{cross.corrections_checked || 0}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Vendors Propagated To</span><span className="text-blue-400">{cross.propagated_to_vendors || 0}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Adjustments Applied</span><span className="text-violet-400">{cross.propagations_applied || 0}</span></div>
+              </div>
+            </div>
+
+            {/* C: Confidence Auto-Promotion */}
+            <div className="bg-muted/50 rounded p-3">
+              <p className="text-xs font-medium text-amber-400 mb-2">C. Confidence Promotion</p>
+              <div className="space-y-1 text-xs">
+                <div className="flex justify-between"><span className="text-muted-foreground">Promoted</span><span className="text-emerald-400">{promo.promoted?.length || 0}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Demoted</span><span className="text-rose-400">{promo.demoted?.length || 0}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Unchanged</span><span>{promo.unchanged || 0}</span></div>
+              </div>
+              {promo.promoted?.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {promo.promoted.map((p, i) => (
+                    <div key={i} className="flex items-center gap-1 text-xs">
+                      <span className="font-mono">{p.vendor}</span>
+                      <Badge variant="outline" className="text-xs text-rose-400">{p.from}</Badge>
+                      <ArrowRight className="w-3 h-3" />
+                      <Badge variant="outline" className="text-xs text-emerald-400">{p.to}</Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function ReEvaluateSection({ onComplete }) {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
@@ -420,6 +515,9 @@ export default function LearningDashboard() {
           </CardContent>
         </Card>
       )}
+
+      {/* Learning Engines Section */}
+      <LearningEnginesSection onComplete={fetchData} />
 
       {/* Batch Re-evaluate Section */}
       <ReEvaluateSection onComplete={fetchData} />

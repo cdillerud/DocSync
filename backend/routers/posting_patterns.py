@@ -446,6 +446,59 @@ async def get_draft_feedback(doc_id: str):
     }
 
 
+
+# =============================================================================
+# Continuous Learning Engines — On-Demand Trigger & Status
+# =============================================================================
+
+@router.post("/learning/run-all")
+async def run_all_learning_engines_endpoint():
+    """
+    Trigger all continuous learning engines on-demand:
+    A. Detect posted drafts in BC and learn from final versions
+    B. Propagate corrections across similar vendors
+    C. Auto-promote/demote vendor confidence based on approval ratio
+    """
+    db = get_db()
+    from services.continuous_learning_service import run_all_learning_engines
+    result = await run_all_learning_engines(db)
+    return result
+
+
+@router.post("/learning/detect-posted")
+async def detect_posted_drafts_endpoint(limit: int = Query(100, le=500)):
+    """Detect auto-drafted PIs that have been posted in BC and learn from them."""
+    db = get_db()
+    from services.continuous_learning_service import detect_posted_drafts
+    return await detect_posted_drafts(db, limit=limit)
+
+
+@router.post("/learning/cross-vendor")
+async def cross_vendor_learning_endpoint(limit: int = Query(20, le=100)):
+    """Propagate corrections from one vendor to similar vendors."""
+    db = get_db()
+    from services.continuous_learning_service import propagate_cross_vendor_learning
+    return await propagate_cross_vendor_learning(db, limit=limit)
+
+
+@router.post("/learning/auto-promote")
+async def auto_promote_confidence_endpoint():
+    """Auto-promote/demote vendor confidence based on approval ratio."""
+    db = get_db()
+    from services.continuous_learning_service import auto_promote_confidence
+    return await auto_promote_confidence(db)
+
+
+@router.get("/learning/extraction-profile/{vendor_no}")
+async def get_extraction_profile(vendor_no: str):
+    """Get the extraction learning profile for a vendor — shows which fields tend to be wrong."""
+    db = get_db()
+    from services.continuous_learning_service import get_vendor_extraction_profile
+    profile = await get_vendor_extraction_profile(db, vendor_no)
+    return profile or {"vendor_no": vendor_no, "total_corrections": 0, "field_corrections": {}}
+
+
+
 # Track background analysis status
 _analysis_status = {"running": False, "last_result": None, "progress": "idle"}
 

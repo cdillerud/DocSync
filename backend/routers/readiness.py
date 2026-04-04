@@ -50,3 +50,14 @@ async def batch_evaluate_readiness(limit: int = Query(200, ge=1, le=1000)):
     """Evaluate readiness for all documents that don't have it yet."""
     from services.document_readiness_service import batch_evaluate
     return await batch_evaluate(limit=limit)
+
+
+@router.post("/reevaluate-all")
+async def reevaluate_all_readiness(limit: int = Query(500, ge=1, le=2000)):
+    """
+    Re-evaluate ALL documents — finds and fixes signal contradictions.
+    Every correction feeds into the learning pipeline.
+    Returns: status transitions, signal corrections, per-vendor breakdown.
+    """
+    from services.document_readiness_service import batch_reevaluate_all
+    return await batch_reevaluate_all(limit=limit)

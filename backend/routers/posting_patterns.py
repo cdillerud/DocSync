@@ -130,12 +130,12 @@ async def get_learning_dashboard():
             "total_auto_drafted": total_auto_drafted,
         },
         "posting_template_confidence": [
-            {"confidence": p["_id"], "vendor_count": p["count"], "avg_invoices_analyzed": round(p["avg_invoices"], 1)}
+            {"confidence": p["_id"], "vendor_count": p["count"], "avg_invoices_analyzed": round(p.get("avg_invoices") or 0, 1)}
             for p in profiles_by_confidence
         ],
         "vendor_learning_activity": [
             {"vendor_no": v["_id"], "learning_events": v["events"], "last_learned": v["last_learned"],
-             "total_amount_learned": round(v["total_amount"], 2), "avg_lines_per_invoice": round(v["avg_lines"], 1)}
+             "total_amount_learned": round(v.get("total_amount") or 0, 2), "avg_lines_per_invoice": round(v.get("avg_lines") or 0, 1)}
             for v in vendor_learning
         ],
         "label_correction_patterns": [

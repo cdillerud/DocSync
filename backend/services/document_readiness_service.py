@@ -485,42 +485,122 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
 
 async def batch_evaluate(limit: int = 200) -> Dict[str, int]:
     """Evaluate readiness for documents that don't have it yet.
-    Also computes automation confidence and decision explanation."""
+    Uses evaluate_and_persist for full learning integration."""
     from deps import get_db
-    from services.automation_intelligence_service import (
-        compute_automation_confidence,
-        build_decision_explanation,
-    )
     db = get_db()
 
     cursor = db.hub_documents.find(
         {"$or": [{"readiness": {"$exists": False}}, {"readiness": None}]},
-        {"_id": 0},
+        {"_id": 0, "id": 1},
     ).limit(limit)
     docs = await cursor.to_list(limit)
 
     counts = {STATUS_READY_AUTO_DRAFT: 0, STATUS_READY_AUTO_LINK: 0,
-              STATUS_NEEDS_REVIEW: 0, STATUS_BLOCKED: 0, STATUS_AMBIGUOUS: 0, "errors": 0}
+              STATUS_NEEDS_REVIEW: 0, STATUS_BLOCKED: 0, STATUS_AMBIGUOUS: 0,
+              "errors": 0, "corrections": 0}
     for d in docs:
         try:
-            r = evaluate_readiness(d)
-            d["readiness"] = r
-            auto_conf = compute_automation_confidence(d)
-            explanation = build_decision_explanation(d)
-            await db.hub_documents.update_one(
-                {"id": d["id"]},
-                {"$set": {
-                    "readiness": r,
-                    "automation_confidence": auto_conf,
-                    "decision_explanation": explanation,
-                    "updated_utc": r["last_evaluated_at"],
-                }},
-            )
+            r = await evaluate_and_persist(d["id"])
             counts[r["status"]] = counts.get(r["status"], 0) + 1
         except Exception:
             counts["errors"] += 1
 
     return {"total": len(docs), **counts}
+
+
+async def batch_reevaluate_all(limit: int = 500) -> Dict[str, Any]:
+    """
+    Re-evaluate ALL documents (not just new ones).
+    Detects and corrects signal contradictions across the entire dataset.
+    Every correction feeds into the learning pipeline via evaluate_and_persist().
+
+    Returns a detailed summary: status transitions, corrections found, per-vendor breakdown.
+    """
+    from deps import get_db
+    db = get_db()
+
+    # Get all non-duplicate documents
+    cursor = db.hub_documents.find(
+        {"is_duplicate": {"$ne": True}},
+        {"_id": 0, "id": 1, "readiness": 1, "bc_vendor_number": 1, "vendor_no": 1},
+    ).limit(limit)
+    docs = await cursor.to_list(limit)
+
+    results = {
+        "total_processed": 0,
+        "total_corrections": 0,
+        "status_transitions": [],
+        "vendor_corrections": {},
+        "by_status": {},
+        "errors": 0,
+        "error_details": [],
+    }
+
+    for d in docs:
+        doc_id = d.get("id", "")
+        if not doc_id:
+            continue
+        results["total_processed"] += 1
+
+        old_readiness = d.get("readiness") or {}
+        old_status = old_readiness.get("status", "none")
+        old_signals = old_readiness.get("signals") or {}
+        vendor_no = d.get("bc_vendor_number") or d.get("vendor_no") or ""
+
+        try:
+            new_readiness = await evaluate_and_persist(doc_id)
+            new_status = new_readiness.get("status", "unknown")
+
+            # Count by status
+            results["by_status"][new_status] = results["by_status"].get(new_status, 0) + 1
+
+            # Detect status transition
+            if old_status != new_status:
+                results["status_transitions"].append({
+                    "doc_id": doc_id[:8],
+                    "vendor_no": vendor_no,
+                    "from": old_status,
+                    "to": new_status,
+                    "old_confidence": old_readiness.get("confidence", 0),
+                    "new_confidence": new_readiness.get("confidence", 0),
+                })
+
+            # Detect signal corrections
+            new_signals = new_readiness.get("signals") or {}
+            changed_signals = []
+            for key in set(list(old_signals.keys()) + list(new_signals.keys())):
+                old_val = old_signals.get(key)
+                new_val = new_signals.get(key)
+                if old_val != new_val:
+                    changed_signals.append({"signal": key, "old": old_val, "new": new_val})
+
+            if changed_signals:
+                results["total_corrections"] += len(changed_signals)
+                if vendor_no:
+                    vc = results["vendor_corrections"].get(vendor_no, {"count": 0, "signals": []})
+                    vc["count"] += len(changed_signals)
+                    for cs in changed_signals:
+                        vc["signals"].append(cs["signal"])
+                    results["vendor_corrections"][vendor_no] = vc
+
+        except Exception as e:
+            results["errors"] += 1
+            results["error_details"].append({"doc_id": doc_id[:8], "error": str(e)})
+
+    # Convert vendor_corrections to sorted list
+    vendor_list = [
+        {"vendor_no": k, "correction_count": v["count"], "signals": list(set(v["signals"]))}
+        for k, v in results["vendor_corrections"].items()
+    ]
+    vendor_list.sort(key=lambda x: x["correction_count"], reverse=True)
+    results["vendor_corrections"] = vendor_list[:20]
+
+    logger.info(
+        "[Readiness] Batch re-evaluate: processed=%d, corrections=%d, transitions=%d, errors=%d",
+        results["total_processed"], results["total_corrections"],
+        len(results["status_transitions"]), results["errors"],
+    )
+    return results
 
 
 # ---------------------------------------------------------------------------

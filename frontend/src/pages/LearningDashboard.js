@@ -4,8 +4,10 @@ import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import {
   Brain, RefreshCw, TrendingUp, CheckCircle2, AlertTriangle,
-  Zap, BookOpen, ArrowRight, Activity, Database, Loader2
+  Zap, BookOpen, ArrowRight, Activity, Database, Loader2,
+  RotateCcw, Sparkles
 } from 'lucide-react';
+import { toast } from 'sonner';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -21,6 +23,134 @@ function StatCard({ title, value, icon: Icon, subtitle, color = "text-emerald-50
           </div>
           <Icon className={`w-8 h-8 ${color} opacity-70`} />
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ReEvaluateSection({ onComplete }) {
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const handleRun = async () => {
+    setRunning(true);
+    setResult(null);
+    try {
+      const res = await fetch(`${API}/api/readiness/reevaluate-all`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        setResult(data);
+        toast.success(
+          `Re-evaluated ${data.total_processed} docs — ${data.total_corrections} corrections applied`
+        );
+        if (onComplete) onComplete();
+      } else {
+        toast.error('Re-evaluation failed');
+      }
+    } catch {
+      toast.error('Network error');
+    }
+    setRunning(false);
+  };
+
+  return (
+    <Card data-testid="reevaluate-section">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-violet-500" />
+          Batch Re-evaluate & Learn
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-sm text-muted-foreground mb-3">
+          Re-run readiness evaluation across all documents. Detects and corrects signal contradictions
+          (stale duplicate flags, premature PO resolved, etc.) — every correction feeds into the learning pipeline.
+        </p>
+        <Button onClick={handleRun} disabled={running} data-testid="reevaluate-all-btn">
+          {running ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RotateCcw className="w-4 h-4 mr-2" />}
+          {running ? 'Re-evaluating...' : 'Re-evaluate All Documents'}
+        </Button>
+
+        {result && (
+          <div className="mt-4 space-y-3" data-testid="reevaluate-results">
+            {/* Summary Stats */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              <div className="bg-muted/50 rounded p-2 text-center">
+                <p className="text-lg font-bold">{result.total_processed}</p>
+                <p className="text-xs text-muted-foreground">Processed</p>
+              </div>
+              <div className="bg-muted/50 rounded p-2 text-center">
+                <p className="text-lg font-bold text-violet-400">{result.total_corrections}</p>
+                <p className="text-xs text-muted-foreground">Corrections Learned</p>
+              </div>
+              <div className="bg-muted/50 rounded p-2 text-center">
+                <p className="text-lg font-bold text-amber-400">{result.status_transitions?.length || 0}</p>
+                <p className="text-xs text-muted-foreground">Status Changes</p>
+              </div>
+              <div className="bg-muted/50 rounded p-2 text-center">
+                <p className="text-lg font-bold text-rose-400">{result.errors}</p>
+                <p className="text-xs text-muted-foreground">Errors</p>
+              </div>
+            </div>
+
+            {/* Status Distribution */}
+            {result.by_status && Object.keys(result.by_status).length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-1">Status Distribution</p>
+                <div className="flex flex-wrap gap-1">
+                  {Object.entries(result.by_status).map(([status, count]) => (
+                    <Badge key={status} variant="outline" className="text-xs">
+                      {status}: {count}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Status Transitions */}
+            {result.status_transitions?.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-1">
+                  Status Transitions ({result.status_transitions.length})
+                </p>
+                <div className="max-h-[200px] overflow-y-auto space-y-1">
+                  {result.status_transitions.map((t, i) => (
+                    <div key={i} className="flex items-center gap-2 text-xs bg-muted/50 rounded px-2 py-1">
+                      <span className="font-mono">{t.doc_id}</span>
+                      {t.vendor_no && <span className="text-muted-foreground">{t.vendor_no}</span>}
+                      <Badge variant="outline" className="text-rose-400 border-rose-500/30">{t.from}</Badge>
+                      <ArrowRight className="w-3 h-3 text-muted-foreground" />
+                      <Badge variant="outline" className="text-emerald-400 border-emerald-500/30">{t.to}</Badge>
+                      <span className="text-muted-foreground ml-auto">
+                        {(t.old_confidence * 100).toFixed(0)}% → {(t.new_confidence * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Vendor Corrections */}
+            {result.vendor_corrections?.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-1">
+                  Vendors with Corrections ({result.vendor_corrections.length})
+                </p>
+                <div className="max-h-[150px] overflow-y-auto space-y-1">
+                  {result.vendor_corrections.map((v, i) => (
+                    <div key={i} className="flex items-center gap-2 text-xs bg-muted/50 rounded px-2 py-1">
+                      <span className="font-mono font-medium">{v.vendor_no}</span>
+                      <Badge variant="secondary">{v.correction_count} corrections</Badge>
+                      {v.signals.map((s, j) => (
+                        <Badge key={j} variant="outline" className="text-xs text-violet-400 border-violet-500/30">{s}</Badge>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -290,6 +420,9 @@ export default function LearningDashboard() {
           </CardContent>
         </Card>
       )}
+
+      {/* Batch Re-evaluate Section */}
+      <ReEvaluateSection onComplete={fetchData} />
     </div>
   );
 }

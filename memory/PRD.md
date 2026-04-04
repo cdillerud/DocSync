@@ -21,35 +21,19 @@
 ### Knowledge Intelligence (Complete)
 - Phase 1: 962 vendor aliases, 122 domain mappings, 603 vendor profiles from BC/Spiro
 - Phase 2: Context-rich LLM calls with real BC invoice examples + vendor profiles
-- Auto-confirm on success, Auto-seed scheduler
 
 ### Post-LLM Refinement Pipeline (Complete - Feb 2026)
-- Vendor Name Normalization, Doc Type Refinement, PO Number Validation
-- Confidence Calibration, Feedback Loop Amplification
-
 ### Feedback Loop Fix (Complete - Feb 2026)
-- All event handlers mark events as `applied=True`
-- Approval reinforcement, Replay endpoint, 100% application rate
-
 ### LLM Learning Pipeline Gap Fixes (Complete - Apr 2026)
-- Classification corrections feed into unified feedback loop
-- VEP profiles seeded from BC cache (13 -> 469 profiles)
-
 ### Comparison Delta Scoring (Complete - Feb 2026)
 ### Intelligent Multi-Page Document Splitting (Complete)
 ### Bulk Reprocess & Comparison (Complete)
 ### Manual PO Override (Complete - Feb 2026)
 ### Derived State Vendor/PO Fix (Complete - Apr 2026)
-
 ### BC Posting Pattern Analyzer (Complete - Apr 2026)
-- Vendor-specific posting templates with confidence levels
-- Consistency scoring, full item distribution, charge line tracking
-
 ### Expanded BC Data Ingestion (Complete - Apr 2026)
-- ALL invoice statuses ingested, dual-source, deduplication
-
 ### Invoice Trace Comparison (Enhanced - Apr 2026)
-- Side-by-side human vs AI comparison at `/invoice-trace`
+### Posting Pattern Analyzer Tightening (Complete - Apr 2026)
 
 ### BC Auto-Post Phase 2: Template-Driven Draft Creation (Complete - Apr 2026)
 - Auto-Post Settings, Ready Queue, Draft PI Preview, Create Draft PI
@@ -60,23 +44,26 @@
 ### AI Learning Dashboard (Complete - Apr 2026)
 - **Page**: `/ai-learning` — Proof of what the system has learned
 - **Endpoint**: `GET /api/posting-patterns/learning-dashboard`
-- **Sections**: Learning Events, Vendor Templates, Corrections, Label Corrections, Auto-Drafted PIs, Template Confidence, Vendor Activity, Recent Events
 
 ### Draft Review Queue (Complete - Apr 2026)
 - **Page**: `/review-queue` — Review, approve, or correct auto-drafted PIs
-- **Endpoints**: GET/POST review-queue, approve, correct
-- **Features**: Summary cards, expandable items, Correction Dialog, approve/correct actions
+- **Endpoints**: review-queue (GET), approve, correct
+- **Features**: Summary cards, expandable items, Correction Dialog
 
 ### Feedback Loop — BC Draft Sync & Template Adjustment (Complete - Apr 2026)
-- **Original Draft Line Storage**: When a Draft PI is created, the original lines are stored on the document (`original_draft_lines`) for future comparison
-- **BC Sync**: `POST /api/posting-patterns/review-queue/{doc_id}/sync-from-bc` fetches current state of a draft PI from BC, compares with stored originals, detects human edits
-- **Batch Sync**: `POST /api/posting-patterns/review-queue/sync-all` scans all pending auto-drafted PIs
-- **Feedback Details**: `GET /api/posting-patterns/review-queue/{doc_id}/feedback` returns full diff with original vs current lines
-- **Line Diff Engine**: `_compute_line_diff()` detects item changes, description changes, amount changes, quantity changes, tax changes, line additions/deletions
-- **Template Adjustment**: `_adjust_template_from_feedback()` boosts corrected item weights (+3), records penalties on original items, adjusts line counts, updates tax codes
-- **Learning Events**: Each sync that detects changes records `draft_bc_feedback` events in `posting_learning_events` and individual `classification_corrections`
-- **Frontend**: "Sync All from BC" batch button, per-item "Sync BC" button, `FeedbackDiffPanel` component showing color-coded changes by type (item, description, amount, etc.)
-- **Service**: `/app/backend/services/draft_feedback_service.py` — standalone service with `sync_draft_from_bc`, `process_feedback_batch`, diff engine, template adjustment
+- **Original Draft Line Storage**: Lines stored on doc at creation for future comparison
+- **BC Sync**: `POST /review-queue/{doc_id}/sync-from-bc` and `POST /review-queue/sync-all`
+- **Feedback Details**: `GET /review-queue/{doc_id}/feedback`
+- **Diff Engine**: Detects item, description, amount, quantity, tax, structural changes
+- **Template Adjustment**: Boosts corrected items (+3), records penalties, adjusts line counts
+- **Service**: `/app/backend/services/draft_feedback_service.py`
+- **Frontend**: "Sync All from BC" button, per-item "Sync BC", FeedbackDiffPanel
+
+### Auto BC Sync Scheduling & Review Badge (Complete - Apr 2026)
+- **Background Scheduler**: `_draft_feedback_sync_scheduler` in `server.py` — runs `process_feedback_batch` every 2 hours, auto-detects human edits on drafts in BC
+- **Badge Count Endpoint**: `GET /api/posting-patterns/review-queue/badge-count` — lightweight query for nav badge
+- **Nav Badge**: Amber pill badge on "Review Queue" sidebar nav item, polls every 60s, only shows when count > 0
+- **Scope**: Counts auto-drafted docs needing attention (pending + BC-edited, excludes approved/corrected/synced)
 
 ## Backlog
 - P0: Deploy to production and run analyze-top + auto-draft-queue

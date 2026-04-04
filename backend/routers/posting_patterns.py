@@ -3211,3 +3211,90 @@ async def backfill_advanced_learning(
     result = await _backfill()
     return result
 
+
+
+# =============================================================================
+# Gap Closer Intelligence APIs
+# =============================================================================
+
+@router.get("/gap-closer/status")
+async def get_gap_closer_status():
+    """
+    Status of all 4 gap closers — how much intelligence is available
+    to close each validation gap.
+    """
+    from deps import get_db
+    from services.gap_closer_service import get_confidence_band_accuracy
+    db = get_db()
+
+    # GAP 1: Confidence band calibration
+    bands = {}
+    for conf, band_name in [(0.25, "0-50%"), (0.60, "50-70%"), (0.77, "70-85%"), (0.90, "85-95%"), (0.97, "95-100%")]:
+        result = await get_confidence_band_accuracy(db, conf)
+        bands[band_name] = {
+            "accuracy": result.get("accuracy"),
+            "samples": result.get("total_samples", 0),
+            "triggers_review": result.get("should_review", False),
+            "reason": result.get("reason", ""),
+        }
+
+    # GAP 2: PO intelligence (count vendors with extraction patterns)
+    po_vendors = await db.extraction_patterns.count_documents({"field_presence.po_number": {"$exists": True}})
+    po_flow_events = await db.document_flow_sequences.count_documents(
+        {"doc_type": {"$in": ["Purchase_Order", "PO"]}}
+    )
+
+    # GAP 3: Customer intelligence
+    cust_pipeline = [
+        {"$match": {"validation_results.checks": {"$elemMatch": {"check_name": "customer_match", "passed": True}}}},
+        {"$count": "total"},
+    ]
+    cust_history = await db.hub_documents.aggregate(cust_pipeline).to_list(1)
+    customer_history_count = cust_history[0]["total"] if cust_history else 0
+
+    # GAP 4: Sales order flow intelligence
+    so_flow_count = await db.document_flow_sequences.count_documents(
+        {"doc_type": {"$in": ["Sales_Order", "Shipping_Document", "BOL"]}}
+    )
+    so_matched = await db.hub_documents.count_documents(
+        {"validation_results.matched_sales_order": {"$exists": True}}
+    )
+
+    # Validation gap counts (from validation_gap_log)
+    gap_pipeline = [
+        {"$unwind": "$failure_checks"},
+        {"$group": {"_id": "$failure_checks", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    gap_counts = {r["_id"]: r["count"]
+                  for r in await db.validation_gap_log.aggregate(gap_pipeline).to_list(20)}
+
+    return {
+        "gap_1_confidence_calibration": {
+            "status": "active",
+            "bands": bands,
+            "action": "Auto-routes unreliable confidence bands to human review",
+        },
+        "gap_2_po_matching": {
+            "status": "active",
+            "vendors_with_po_patterns": po_vendors,
+            "po_flow_events": po_flow_events,
+            "gap_count": gap_counts.get("po_validation", 0) + gap_counts.get("po_match", 0),
+            "action": "Expands PO candidates with fuzzy matching + vendor patterns + document flow",
+        },
+        "gap_3_customer_matching": {
+            "status": "active",
+            "historical_matches": customer_history_count,
+            "gap_count": gap_counts.get("customer_match", 0),
+            "action": "Suggests customers from vendor history when direct match fails",
+        },
+        "gap_4_sales_order_matching": {
+            "status": "active",
+            "flow_events": so_flow_count,
+            "historical_so_matches": so_matched,
+            "gap_count": gap_counts.get("sales_order_match", 0),
+            "action": "Cross-references document flow to find SO matches via fuzzy + historical lookup",
+        },
+        "total_validation_gaps": gap_counts,
+    }
+

@@ -252,6 +252,160 @@ function ReEvaluateSection({ onComplete }) {
   );
 }
 
+function GapCloserSection() {
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const fetchStatus = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/posting-patterns/gap-closer/status`);
+      if (res.ok) setStatus(await res.json());
+    } catch (err) { console.error(err); }
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchStatus(); }, []);
+
+  const gapColors = (triggers) => triggers ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-muted';
+
+  return (
+    <Card data-testid="gap-closer-section">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Target className="w-4 h-4 text-emerald-500" />
+            Validation Gap Closers
+          </CardTitle>
+          <Button variant="outline" size="sm" onClick={fetchStatus} disabled={loading} data-testid="refresh-gaps-btn">
+            <RefreshCw className={`w-3 h-3 mr-1 ${loading ? 'animate-spin' : ''}`} />Refresh
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Using learned intelligence to close the 4 biggest validation gaps. Active on every document.
+        </p>
+      </CardHeader>
+      <CardContent>
+        {loading && !status ? (
+          <div className="flex justify-center py-6"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
+        ) : !status ? (
+          <p className="text-sm text-muted-foreground text-center py-4">No gap data yet.</p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* GAP 1: Confidence Calibration */}
+            <div className={`p-3 rounded border ${gapColors(true)}`} data-testid="gap-1-confidence">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-medium flex items-center gap-1">
+                  <Shield className="w-3 h-3 text-emerald-500" /> Gap 1: Confidence Miscalibration
+                </p>
+                <Badge className="bg-emerald-600 text-white text-[10px]">ACTIVE</Badge>
+              </div>
+              <p className="text-[10px] text-muted-foreground mb-2">
+                Routes unreliable confidence bands to human review automatically.
+              </p>
+              {status.gap_1_confidence_calibration?.bands && (
+                <div className="space-y-1">
+                  {Object.entries(status.gap_1_confidence_calibration.bands).map(([band, info]) => (
+                    <div key={band} className="flex items-center justify-between text-[10px]">
+                      <span className="font-mono">{band}</span>
+                      <span>{info.samples} samples</span>
+                      <span className={info.accuracy !== null ?
+                        (info.accuracy >= 0.8 ? 'text-emerald-400' : info.accuracy >= 0.65 ? 'text-amber-400' : 'text-red-400 font-bold')
+                        : 'text-muted-foreground'}>
+                        {info.accuracy !== null ? `${(info.accuracy * 100).toFixed(0)}%` : '--'}
+                      </span>
+                      {info.triggers_review && (
+                        <Badge variant="destructive" className="text-[8px]">→ REVIEW</Badge>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* GAP 2: PO Matching */}
+            <div className={`p-3 rounded border ${gapColors(true)}`} data-testid="gap-2-po">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-medium flex items-center gap-1">
+                  <Zap className="w-3 h-3 text-cyan-500" /> Gap 2: PO Validation
+                </p>
+                <Badge className="bg-emerald-600 text-white text-[10px]">ACTIVE</Badge>
+              </div>
+              <p className="text-[10px] text-muted-foreground mb-2">
+                Fuzzy PO matching + vendor patterns + document flow cross-reference.
+              </p>
+              <div className="grid grid-cols-3 gap-2 text-center text-[10px]">
+                <div>
+                  <p className="font-bold">{status.gap_2_po_matching?.vendors_with_po_patterns || 0}</p>
+                  <p className="text-muted-foreground">PO Patterns</p>
+                </div>
+                <div>
+                  <p className="font-bold">{status.gap_2_po_matching?.po_flow_events || 0}</p>
+                  <p className="text-muted-foreground">Flow Events</p>
+                </div>
+                <div>
+                  <p className="font-bold text-red-400">{status.gap_2_po_matching?.gap_count || 0}</p>
+                  <p className="text-muted-foreground">Open Gap</p>
+                </div>
+              </div>
+            </div>
+
+            {/* GAP 3: Customer Match */}
+            <div className={`p-3 rounded border ${gapColors(true)}`} data-testid="gap-3-customer">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-medium flex items-center gap-1">
+                  <Activity className="w-3 h-3 text-amber-500" /> Gap 3: Customer Match
+                </p>
+                <Badge className="bg-emerald-600 text-white text-[10px]">ACTIVE</Badge>
+              </div>
+              <p className="text-[10px] text-muted-foreground mb-2">
+                Suggests customers from vendor history when direct match fails.
+              </p>
+              <div className="grid grid-cols-2 gap-2 text-center text-[10px]">
+                <div>
+                  <p className="font-bold">{status.gap_3_customer_matching?.historical_matches || 0}</p>
+                  <p className="text-muted-foreground">Historical Matches</p>
+                </div>
+                <div>
+                  <p className="font-bold text-red-400">{status.gap_3_customer_matching?.gap_count || 0}</p>
+                  <p className="text-muted-foreground">Open Gap</p>
+                </div>
+              </div>
+            </div>
+
+            {/* GAP 4: Sales Order Match */}
+            <div className={`p-3 rounded border ${gapColors(true)}`} data-testid="gap-4-sales-order">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-medium flex items-center gap-1">
+                  <GitBranch className="w-3 h-3 text-violet-500" /> Gap 4: Sales Order Match
+                </p>
+                <Badge className="bg-emerald-600 text-white text-[10px]">ACTIVE</Badge>
+              </div>
+              <p className="text-[10px] text-muted-foreground mb-2">
+                Cross-references document flow + fuzzy matching to find orders.
+              </p>
+              <div className="grid grid-cols-3 gap-2 text-center text-[10px]">
+                <div>
+                  <p className="font-bold">{status.gap_4_sales_order_matching?.flow_events || 0}</p>
+                  <p className="text-muted-foreground">Flow Events</p>
+                </div>
+                <div>
+                  <p className="font-bold">{status.gap_4_sales_order_matching?.historical_so_matches || 0}</p>
+                  <p className="text-muted-foreground">SO Matches</p>
+                </div>
+                <div>
+                  <p className="font-bold text-red-400">{status.gap_4_sales_order_matching?.gap_count || 0}</p>
+                  <p className="text-muted-foreground">Open Gap</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function AdvancedLearningSection() {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1190,6 +1344,9 @@ export default function LearningDashboard() {
 
       {/* Advanced Intelligence — 7 Engines */}
       <AdvancedLearningSection />
+
+      {/* Gap Closer Status */}
+      <GapCloserSection />
 
       {/* Batch Re-evaluate Section */}
       <ReEvaluateSection onComplete={fetchData} />

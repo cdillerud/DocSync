@@ -381,6 +381,22 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
     new_signals = readiness.get("signals") or {}
     new_blocking = readiness.get("blocking_reasons") or []
 
+    # === GAP CLOSER 1: Confidence Band Awareness ===
+    # If this doc's confidence band has low historical accuracy, route to review
+    try:
+        from services.gap_closer_service import get_confidence_band_accuracy, apply_confidence_awareness
+        ai_confidence = doc.get("ai_confidence") or 0.0
+        if ai_confidence > 0:
+            band_check = await get_confidence_band_accuracy(db, ai_confidence)
+            if band_check.get("should_review"):
+                readiness = apply_confidence_awareness(readiness, band_check)
+                logger.info(
+                    "[GapCloser:ConfBand] doc=%s conf=%.2f band=%s accuracy=%.2f → routed to review",
+                    doc_id[:8], ai_confidence, band_check["band"], band_check.get("accuracy", 0),
+                )
+    except Exception as gc_err:
+        logger.debug("[GapCloser:ConfBand] Skipped for %s: %s", doc_id[:8], gc_err)
+
     # Compute automation intelligence alongside readiness
     from services.automation_intelligence_service import (
         compute_automation_confidence,

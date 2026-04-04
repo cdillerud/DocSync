@@ -637,6 +637,25 @@ async def _validate_bc_match_inner(
                             continue
                         po_candidates_to_check.append(candidate_clean)
 
+                # === GAP CLOSER 2: Expand PO candidates with intelligence ===
+                try:
+                    from services.gap_closer_service import enhance_po_candidates
+                    vendor_no_for_po = (
+                        validation_results.get("bc_record_info", {}).get("number", "")
+                        or extracted_fields.get("_vendor_canonical", "")
+                    )
+                    if vendor_no_for_po and po_candidates_to_check:
+                        expanded = await enhance_po_candidates(db, vendor_no_for_po, po_candidates_to_check)
+                        new_additions = [p for p in expanded if p not in seen and p not in _exclude_from_po]
+                        if new_additions:
+                            po_candidates_to_check.extend(new_additions)
+                            logger.info(
+                                "[GapCloser:PO] Expanded PO candidates for %s: +%d → %s",
+                                vendor_no_for_po, len(new_additions), new_additions[:5],
+                            )
+                except Exception as gc_po_err:
+                    logger.debug("[GapCloser:PO] PO expansion failed: %s", gc_po_err)
+
                 if po_mode == "PO_REQUIRED":
                     if not po_candidates_to_check:
                         validation_results["all_passed"] = False
@@ -824,6 +843,24 @@ async def _validate_bc_match_inner(
                     normalized_fields.get("customer")
                     or extracted_fields.get("customer", "")
                 )
+
+                # === GAP CLOSER 3: Customer suggestion from vendor history ===
+                if not customer_name:
+                    try:
+                        from services.gap_closer_service import get_customer_suggestion
+                        vendor_no_for_cust = (
+                            validation_results.get("bc_record_info", {}).get("number", "")
+                            or extracted_fields.get("_vendor_canonical", "")
+                        )
+                        if vendor_no_for_cust:
+                            suggested = await get_customer_suggestion(db, vendor_no_for_cust, job_type)
+                            if suggested:
+                                customer_name = suggested
+                                logger.info("[GapCloser:Customer] Suggested customer '%s' from vendor %s history",
+                                            suggested, vendor_no_for_cust)
+                    except Exception as gc_cust_err:
+                        logger.debug("[GapCloser:Customer] Customer suggestion failed: %s", gc_cust_err)
+
                 if customer_name:
                     customer_result = await _match_customer_in_bc(
                         customer_name, match_strategies, match_threshold,
@@ -884,6 +921,27 @@ async def _validate_bc_match_inner(
                         token, company_id, _api_url,
                     )
                     validation_results["customer_candidates"] = customer_result.get("customer_candidates", [])
+                elif not customer_name:
+                    # === GAP CLOSER 3b: Customer from vendor history for shipping docs ===
+                    try:
+                        from services.gap_closer_service import get_customer_suggestion
+                        vendor_no_for_ship = (
+                            extracted_fields.get("_vendor_canonical", "")
+                            or (validation_results.get("shipper_match") or {}).get("name", "")
+                        )
+                        if vendor_no_for_ship:
+                            suggested = await get_customer_suggestion(db, vendor_no_for_ship, job_type)
+                            if suggested:
+                                customer_name = suggested
+                                logger.info("[GapCloser:ShipCust] Suggested customer '%s' for shipping doc from vendor %s",
+                                            suggested, vendor_no_for_ship)
+                                customer_result = await _match_customer_in_bc(
+                                    customer_name, match_strategies, match_threshold,
+                                    token, company_id, _api_url,
+                                )
+                                validation_results["customer_candidates"] = customer_result.get("customer_candidates", [])
+                    except Exception:
+                        pass
 
                     if customer_result["matched"]:
                         validation_results["match_method"] = customer_result["match_method"]
@@ -984,19 +1042,49 @@ async def _validate_bc_match_inner(
                                 order_number_str, matched_order.get("customerName"),
                             )
                         else:
-                            # Order number present but not found in BC — warning only.
-                            # Many BOLs reference internal numbers that don't map to BC SOs.
-                            validation_results["warnings"].append({
-                                "check_name": "sales_order_not_found",
-                                "details": f"No Sales Order found matching '{order_number_str}' in BC",
-                            })
-                            validation_results["checks"].append({
-                                "check_name": "sales_order_match",
-                                "passed": False,
-                                "details": f"Sales Order '{order_number_str}' not found in BC",
-                                "required": False,
-                            })
-                            logger.warning("[BC Validation] Shipping doc - Sales Order %s NOT FOUND", order_number_str)
+                            # === GAP CLOSER 4: Cross-reference from document flow ===
+                            flow_match = None
+                            try:
+                                from services.gap_closer_service import find_sales_order_from_flow
+                                vendor_no_for_so = (
+                                    extracted_fields.get("_vendor_canonical", "")
+                                    or (validation_results.get("shipper_match") or {}).get("name", "")
+                                )
+                                flow_match = await find_sales_order_from_flow(db, vendor_no_for_so, order_number_str)
+                            except Exception as gc_so_err:
+                                logger.debug("[GapCloser:SO] Flow match failed: %s", gc_so_err)
+
+                            if flow_match and flow_match.get("found"):
+                                validation_results["checks"].append({
+                                    "check_name": "sales_order_match",
+                                    "passed": True,
+                                    "details": (
+                                        f"Found Sales Order #{flow_match['number']} via document flow history "
+                                        f"for {flow_match.get('customer_name', '')} "
+                                        f"(source: {flow_match.get('source', 'flow')})"
+                                    ),
+                                    "required": False,
+                                    "order_number": flow_match.get("number"),
+                                    "customer_name": flow_match.get("customer_name"),
+                                    "match_source": "intelligence_flow",
+                                })
+                                logger.info(
+                                    "[GapCloser:SO] Flow-matched SO %s → %s for order ref %s",
+                                    flow_match["number"], flow_match.get("customer_name"), order_number_str,
+                                )
+                            else:
+                                # Order number present but not found in BC — warning only.
+                                validation_results["warnings"].append({
+                                    "check_name": "sales_order_not_found",
+                                    "details": f"No Sales Order found matching '{order_number_str}' in BC",
+                                })
+                                validation_results["checks"].append({
+                                    "check_name": "sales_order_match",
+                                    "passed": False,
+                                    "details": f"Sales Order '{order_number_str}' not found in BC",
+                                    "required": False,
+                                })
+                                logger.warning("[BC Validation] Shipping doc - Sales Order %s NOT FOUND", order_number_str)
                     else:
                         logger.warning("[BC Validation] Sales Order lookup failed: HTTP %d", resp.status_code)
                         validation_results["warnings"].append({

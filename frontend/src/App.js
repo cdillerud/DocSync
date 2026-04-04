@@ -23,6 +23,7 @@ import SalesOrderReviewPage from "@/pages/SalesOrderReviewPage";
 import PostingPatternsDashboard from "@/pages/PostingPatternsDashboard";
 import InvoiceTracePage from "@/pages/InvoiceTracePage";
 import LearningDashboard from "@/pages/LearningDashboard";
+import ReviewQueuePage from "@/pages/ReviewQueuePage";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -49,6 +50,7 @@ function AppRoutes() {
         <Route path="posting-intelligence" element={<PostingPatternsDashboard />} />
         <Route path="invoice-trace" element={<InvoiceTracePage />} />
         <Route path="ai-learning" element={<LearningDashboard />} />
+        <Route path="review-queue" element={<ReviewQueuePage />} />
         <Route path="intake-benchmark" element={<BakeOffPage />} />
         {/* Redirects */}
         <Route path="queue" element={<Navigate to="/" replace />} />

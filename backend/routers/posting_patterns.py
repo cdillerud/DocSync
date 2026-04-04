@@ -154,6 +154,215 @@ async def get_learning_dashboard():
     }
 
 
+
+# =============================================================================
+# Review Queue — Review / Approve / Correct Auto-Drafted PIs
+# =============================================================================
+
+@router.get("/review-queue")
+async def get_review_queue(
+    status_filter: str = Query("pending", description="Filter: pending, approved, corrected, all"),
+    vendor_no: str = Query("", description="Filter by vendor"),
+    limit: int = Query(50, le=200),
+):
+    """
+    List auto-drafted Purchase Invoices that need human review.
+    Shows documents where auto_draft_created=True with their review status.
+    """
+    db = get_db()
+
+    match_filter = {"auto_draft_created": True}
+    if vendor_no:
+        match_filter["$or"] = [
+            {"bc_vendor_number": vendor_no},
+            {"vendor_no": vendor_no},
+        ]
+
+    # Status filter
+    if status_filter == "pending":
+        match_filter["draft_review_status"] = {"$nin": ["approved", "corrected"]}
+    elif status_filter in ("approved", "corrected"):
+        match_filter["draft_review_status"] = status_filter
+
+    docs = await db.hub_documents.find(
+        match_filter,
+        {
+            "_id": 0, "id": 1, "filename": 1, "file_name": 1,
+            "doc_type": 1, "document_type": 1,
+            "bc_vendor_number": 1, "vendor_no": 1, "vendor_canonical": 1,
+            "extracted_fields.invoice_number": 1, "extracted_fields.amount": 1,
+            "extracted_fields.invoice_date": 1,
+            "normalized_fields.invoice_number": 1, "normalized_fields.amount": 1,
+            "auto_draft_created": 1, "auto_draft_at": 1,
+            "auto_draft_confidence": 1, "auto_draft_bc_record_no": 1,
+            "auto_draft_source": 1,
+            "draft_review_status": 1, "draft_reviewed_at": 1, "draft_reviewed_by": 1,
+            "draft_corrections": 1,
+            "bc_purchase_invoice": 1,
+            "status": 1, "workflow_status": 1, "created_utc": 1,
+        }
+    ).sort("auto_draft_at", -1).limit(limit).to_list(limit)
+
+    items = []
+    for doc in docs:
+        ef = doc.get("extracted_fields") or {}
+        nf = doc.get("normalized_fields") or {}
+        v_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
+
+        items.append({
+            "id": doc.get("id", ""),
+            "filename": doc.get("filename") or doc.get("file_name", ""),
+            "vendor_no": v_no,
+            "vendor_name": doc.get("vendor_canonical", ""),
+            "invoice_number": ef.get("invoice_number") or nf.get("invoice_number", ""),
+            "amount": ef.get("amount") or nf.get("amount", ""),
+            "invoice_date": ef.get("invoice_date") or nf.get("invoice_date", ""),
+            "confidence": doc.get("auto_draft_confidence", ""),
+            "bc_record_no": doc.get("auto_draft_bc_record_no", ""),
+            "draft_source": doc.get("auto_draft_source", ""),
+            "drafted_at": doc.get("auto_draft_at", ""),
+            "review_status": doc.get("draft_review_status", "pending"),
+            "reviewed_at": doc.get("draft_reviewed_at", ""),
+            "reviewed_by": doc.get("draft_reviewed_by", ""),
+            "corrections": doc.get("draft_corrections") or [],
+        })
+
+    # Summary counts
+    total_pending = await db.hub_documents.count_documents({
+        "auto_draft_created": True,
+        "draft_review_status": {"$nin": ["approved", "corrected"]},
+    })
+    total_approved = await db.hub_documents.count_documents({
+        "auto_draft_created": True,
+        "draft_review_status": "approved",
+    })
+    total_corrected = await db.hub_documents.count_documents({
+        "auto_draft_created": True,
+        "draft_review_status": "corrected",
+    })
+
+    return {
+        "count": len(items),
+        "items": items,
+        "summary": {
+            "pending": total_pending,
+            "approved": total_approved,
+            "corrected": total_corrected,
+            "total": total_pending + total_approved + total_corrected,
+        },
+    }
+
+
+@router.post("/review-queue/{doc_id}/approve")
+async def approve_draft(doc_id: str, reviewer: str = Query("admin")):
+    """
+    Approve an auto-drafted PI. Marks it as human-verified.
+    Creates a positive feedback event so the system learns that this template worked.
+    """
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1, "auto_draft_created": 1, "bc_vendor_number": 1, "vendor_no": 1, "auto_draft_confidence": 1, "auto_draft_bc_record_no": 1})
+    if not doc:
+        return {"success": False, "error": "Document not found"}
+    if not doc.get("auto_draft_created"):
+        return {"success": False, "error": "Document has no auto-draft to approve"}
+
+    now = datetime.now(timezone.utc).isoformat()
+    v_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
+
+    # Mark as approved
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "draft_review_status": "approved",
+            "draft_reviewed_at": now,
+            "draft_reviewed_by": reviewer,
+        }}
+    )
+
+    # Create positive feedback event — template produced correct result
+    await db.posting_learning_events.insert_one({
+        "vendor_no": v_no,
+        "doc_id": doc_id,
+        "event_type": "draft_approved",
+        "confidence": doc.get("auto_draft_confidence", ""),
+        "bc_record_no": doc.get("auto_draft_bc_record_no", ""),
+        "reviewer": reviewer,
+        "posted_at": now,
+        "feedback": "positive",
+    })
+
+    logger.info("[Review Queue] Approved draft for %s (vendor=%s) by %s", doc_id[:8], v_no, reviewer)
+    return {"success": True, "message": f"Draft approved for {doc_id[:8]}", "review_status": "approved"}
+
+
+@router.post("/review-queue/{doc_id}/correct")
+async def correct_draft(
+    doc_id: str,
+    corrections: list = Body(..., description="List of corrections: [{field, original, corrected, note}]"),
+    reviewer: str = Query("admin"),
+):
+    """
+    Submit corrections for an auto-drafted PI. Records what the human changed
+    so the system can learn from mistakes and improve future templates.
+    """
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1, "auto_draft_created": 1, "bc_vendor_number": 1, "vendor_no": 1, "auto_draft_confidence": 1, "auto_draft_bc_record_no": 1})
+    if not doc:
+        return {"success": False, "error": "Document not found"}
+    if not doc.get("auto_draft_created"):
+        return {"success": False, "error": "Document has no auto-draft to correct"}
+
+    now = datetime.now(timezone.utc).isoformat()
+    v_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
+
+    # Mark as corrected with correction details
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "draft_review_status": "corrected",
+            "draft_reviewed_at": now,
+            "draft_reviewed_by": reviewer,
+            "draft_corrections": corrections,
+        }}
+    )
+
+    # Create correction feedback event — template needs adjustment
+    await db.posting_learning_events.insert_one({
+        "vendor_no": v_no,
+        "doc_id": doc_id,
+        "event_type": "draft_corrected",
+        "confidence": doc.get("auto_draft_confidence", ""),
+        "bc_record_no": doc.get("auto_draft_bc_record_no", ""),
+        "corrections": corrections,
+        "reviewer": reviewer,
+        "posted_at": now,
+        "feedback": "corrective",
+    })
+
+    # Also record as classification corrections for the learning dashboard
+    for c in corrections:
+        await db.classification_corrections.insert_one({
+            "doc_id": doc_id,
+            "vendor_id": v_no,
+            "correction_type": f"draft_{c.get('field', 'unknown')}",
+            "original_type": c.get("original", ""),
+            "corrected_type": c.get("corrected", ""),
+            "source": "review_queue",
+            "confirmed_at": now,
+            "applied": True,
+        })
+
+    logger.info("[Review Queue] Corrected draft for %s (vendor=%s): %d corrections by %s",
+                doc_id[:8], v_no, len(corrections), reviewer)
+    return {
+        "success": True,
+        "message": f"Corrections recorded for {doc_id[:8]} — {len(corrections)} fields corrected",
+        "review_status": "corrected",
+        "corrections_count": len(corrections),
+    }
+
+
+
 # Track background analysis status
 _analysis_status = {"running": False, "last_result": None, "progress": "idle"}
 

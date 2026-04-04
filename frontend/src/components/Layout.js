@@ -11,7 +11,7 @@ import {
 import { ScrollArea } from '../components/ui/scroll-area';
 import { Badge } from '../components/ui/badge';
 import {
-  LayoutDashboard, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, ShoppingCart, ClipboardList, Brain, FolderTree, ArrowLeftRight, Sparkles, Tag, Wrench, Bug, FlaskConical, TrendingUp
+  LayoutDashboard, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, ShoppingCart, ClipboardList, Brain, FolderTree, ArrowLeftRight, Sparkles, Tag, Wrench, Bug, FlaskConical, TrendingUp, ClipboardCheck
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { APP_VERSION, CHANGELOG } from '../lib/version';
@@ -25,6 +25,7 @@ const navItems = [
   { to: '/posting-intelligence', icon: Brain, label: 'Posting AI' },
   { to: '/invoice-trace', icon: ArrowLeftRight, label: 'Trace' },
   { to: '/ai-learning', icon: TrendingUp, label: 'AI Learning' },
+  { to: '/review-queue', icon: ClipboardCheck, label: 'Review Queue' },
   { to: '/insights', icon: TrendingUp, label: 'Insights' },
   { to: '/config', icon: Settings, label: 'Settings' },
 ];
@@ -79,6 +80,7 @@ export default function Layout() {
     if (path === '/posting-intelligence') return 'Posting Intelligence';
     if (path === '/invoice-trace') return 'Invoice Trace';
     if (path === '/ai-learning') return 'AI Learning Intelligence';
+    if (path === '/review-queue') return 'Draft Review Queue';
     if (path === '/config') return 'Settings';
     if (path.startsWith('/documents/')) return 'Document Detail';
     if (path.startsWith('/review/')) return 'Sales Order Review';

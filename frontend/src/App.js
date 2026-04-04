@@ -22,6 +22,7 @@ import BakeOffPage from "@/pages/BakeOffPage";
 import SalesOrderReviewPage from "@/pages/SalesOrderReviewPage";
 import PostingPatternsDashboard from "@/pages/PostingPatternsDashboard";
 import InvoiceTracePage from "@/pages/InvoiceTracePage";
+import LearningDashboard from "@/pages/LearningDashboard";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -47,6 +48,7 @@ function AppRoutes() {
         <Route path="integrations" element={<IntegrationsHubPage />} />
         <Route path="posting-intelligence" element={<PostingPatternsDashboard />} />
         <Route path="invoice-trace" element={<InvoiceTracePage />} />
+        <Route path="ai-learning" element={<LearningDashboard />} />
         <Route path="intake-benchmark" element={<BakeOffPage />} />
         {/* Redirects */}
         <Route path="queue" element={<Navigate to="/" replace />} />

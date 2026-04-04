@@ -10,7 +10,7 @@ sys.path.insert(0, '/app/backend')
 
 
 # Test configuration
-API_BASE_URL = "https://confidence-gate.preview.emergentagent.com"
+API_BASE_URL = "https://ap-learning-dash.preview.emergentagent.com"
 
 
 @pytest.fixture

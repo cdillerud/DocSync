@@ -25,7 +25,7 @@ import sys
 # Add backend to path for direct imports
 sys.path.insert(0, '/app/backend')
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://confidence-gate.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://ap-learning-dash.preview.emergentagent.com').rstrip('/')
 
 
 class TestOverridePOEndpoint:

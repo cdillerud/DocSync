@@ -14,6 +14,146 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/posting-patterns", tags=["posting-patterns"])
 
+
+# =============================================================================
+# Learning Intelligence API — Proof of AI Learning
+# =============================================================================
+
+@router.get("/learning-dashboard")
+async def get_learning_dashboard():
+    """
+    Comprehensive view of what the AI has learned.
+    Aggregates data from all learning subsystems:
+    - Posting pattern learning events
+    - Classification corrections & feedback
+    - Label correction patterns (e.g., BOL→PO)
+    - Vendor extraction profiles
+    - Stable vendor evaluations
+    """
+    db = get_db()
+
+    # 1. Posting Learning Events — proof of continuous template learning
+    total_learning_events = await db.posting_learning_events.count_documents({})
+    recent_learning = await db.posting_learning_events.find(
+        {}, {"_id": 0, "vendor_no": 1, "posted_at": 1, "line_count": 1, "items_used": 1, "amount": 1}
+    ).sort("posted_at", -1).limit(20).to_list(20)
+
+    # Learning events by vendor
+    vendor_learning_pipeline = [
+        {"$group": {
+            "_id": "$vendor_no",
+            "events": {"$sum": 1},
+            "last_learned": {"$max": "$posted_at"},
+            "total_amount": {"$sum": "$amount"},
+            "avg_lines": {"$avg": "$line_count"},
+        }},
+        {"$sort": {"events": -1}},
+        {"$limit": 20},
+    ]
+    vendor_learning = await db.posting_learning_events.aggregate(vendor_learning_pipeline).to_list(20)
+
+    # 2. Classification Corrections — proof of classification learning
+    total_corrections = await db.classification_corrections.count_documents({})
+    correction_types = await db.classification_corrections.aggregate([
+        {"$group": {"_id": "$correction_type", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]).to_list(20)
+
+    recent_corrections = await db.classification_corrections.find(
+        {}, {"_id": 0, "vendor_id": 1, "correction_type": 1, "original_type": 1,
+             "corrected_type": 1, "confirmed_at": 1, "source": 1}
+    ).sort("confirmed_at", -1).limit(10).to_list(10)
+
+    # 3. Classification Feedback — few-shot examples for LLM
+    total_feedback = await db.classification_feedback.count_documents({})
+
+    # 4. Label Corrections — proof of reference intelligence learning (BOL→PO etc.)
+    total_label_corrections = await db.reference_label_corrections.count_documents({})
+    label_correction_patterns = await db.reference_label_corrections.aggregate([
+        {"$group": {
+            "_id": {"predicted": "$predicted_label", "correct": "$correct_label"},
+            "count": {"$sum": 1},
+            "vendors": {"$addToSet": "$vendor_name"},
+            "last_seen": {"$max": "$created_at"},
+        }},
+        {"$sort": {"count": -1}},
+        {"$limit": 10},
+    ]).to_list(10)
+
+    # 5. Posting Template Profiles — how many vendors have learned templates
+    total_profiles = await db.posting_pattern_analysis.count_documents({"status": "analyzed"})
+    profiles_by_confidence = await db.posting_pattern_analysis.aggregate([
+        {"$match": {"status": "analyzed"}},
+        {"$group": {
+            "_id": "$posting_template.confidence",
+            "count": {"$sum": 1},
+            "avg_invoices": {"$avg": "$invoices_analyzed"},
+        }},
+        {"$sort": {"count": -1}},
+    ]).to_list(5)
+
+    # Vendors with continuous learning (template updated after initial analysis)
+    continuously_learning = await db.posting_pattern_analysis.count_documents({
+        "status": "analyzed",
+        "continuous_learning_count": {"$gte": 1},
+    })
+
+    # 6. Vendor Extraction Profiles — learned extraction biases
+    total_extraction_profiles = await db.vendor_extraction_profiles.count_documents({})
+
+    # 7. Vendor Intelligence Profiles — overall vendor knowledge
+    total_vendor_profiles = await db.vendor_intelligence_profiles.count_documents({})
+
+    # 8. Auto-draft success tracking
+    total_auto_drafted = await db.hub_documents.count_documents({"auto_draft_created": True})
+    auto_draft_by_vendor = await db.hub_documents.aggregate([
+        {"$match": {"auto_draft_created": True}},
+        {"$group": {
+            "_id": "$bc_vendor_number",
+            "drafts_created": {"$sum": 1},
+            "last_draft": {"$max": "$auto_draft_at"},
+        }},
+        {"$sort": {"drafts_created": -1}},
+        {"$limit": 10},
+    ]).to_list(10)
+
+    return {
+        "summary": {
+            "total_learning_events": total_learning_events,
+            "total_corrections": total_corrections,
+            "total_feedback_examples": total_feedback,
+            "total_label_corrections": total_label_corrections,
+            "total_posting_profiles": total_profiles,
+            "continuously_learning_vendors": continuously_learning,
+            "total_extraction_profiles": total_extraction_profiles,
+            "total_vendor_profiles": total_vendor_profiles,
+            "total_auto_drafted": total_auto_drafted,
+        },
+        "posting_template_confidence": [
+            {"confidence": p["_id"], "vendor_count": p["count"], "avg_invoices_analyzed": round(p["avg_invoices"], 1)}
+            for p in profiles_by_confidence
+        ],
+        "vendor_learning_activity": [
+            {"vendor_no": v["_id"], "learning_events": v["events"], "last_learned": v["last_learned"],
+             "total_amount_learned": round(v["total_amount"], 2), "avg_lines_per_invoice": round(v["avg_lines"], 1)}
+            for v in vendor_learning
+        ],
+        "label_correction_patterns": [
+            {"from_label": p["_id"]["predicted"], "to_label": p["_id"]["correct"],
+             "corrections": p["count"], "vendors_affected": len(p.get("vendors", [])),
+             "last_seen": p.get("last_seen")}
+            for p in label_correction_patterns
+        ],
+        "correction_types": [{"type": c["_id"], "count": c["count"]} for c in correction_types],
+        "recent_learning_events": recent_learning,
+        "recent_corrections": recent_corrections,
+        "auto_draft_by_vendor": [
+            {"vendor_no": d["_id"], "drafts_created": d["drafts_created"], "last_draft": d["last_draft"]}
+            for d in auto_draft_by_vendor
+        ],
+    }
+
+
 # Track background analysis status
 _analysis_status = {"running": False, "last_result": None, "progress": "idle"}
 

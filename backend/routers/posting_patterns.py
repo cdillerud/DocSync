@@ -903,13 +903,66 @@ async def sync_item_to_sandbox(
 
         if resp.status_code in (200, 201):
             created = resp.json()
+            created_id = created.get("id", "")
+
+            # Step 4: Copy posting groups from a known working item in Sandbox (e.g. FREIGHT)
+            # The standard create may not accept posting group fields directly
+            if created_id:
+                # Find a reference item that works (FREIGHT or any existing item)
+                ref_item_code = os.environ.get("BC_DEFAULT_ITEM_CODE", "FREIGHT")
+                ref_resp = await client.get(sandbox_url, headers={
+                    "Authorization": f"Bearer {token}", "Accept": "application/json"
+                }, params={"$filter": f"number eq '{ref_item_code}'"})
+                ref_posting_group = None
+                ref_etag = None
+                if ref_resp.status_code == 200:
+                    ref_items = ref_resp.json().get("value", [])
+                    if ref_items:
+                        ref_posting_group = ref_items[0].get("generalProductPostingGroupCode", "")
+
+                # Also get the etag for the newly created item
+                get_resp = await client.get(f"{sandbox_url}({created_id})", headers={
+                    "Authorization": f"Bearer {token}", "Accept": "application/json"
+                })
+                if get_resp.status_code == 200:
+                    ref_etag = get_resp.json().get("@odata.etag", "")
+
+                # PATCH the posting group onto the new item
+                if ref_posting_group and ref_etag:
+                    patch_resp = await client.patch(
+                        f"{sandbox_url}({created_id})",
+                        headers={
+                            "Authorization": f"Bearer {token}",
+                            "Content-Type": "application/json",
+                            "If-Match": ref_etag,
+                        },
+                        json={"generalProductPostingGroupCode": ref_posting_group}
+                    )
+                    if patch_resp.status_code in (200, 204):
+                        logger.info("Patched %s with generalProductPostingGroupCode=%s", item_number, ref_posting_group)
+                        return {
+                            "status": "created",
+                            "item": item_number,
+                            "id": created_id,
+                            "displayName": created.get("displayName", ""),
+                            "type": created.get("type", ""),
+                            "generalProductPostingGroupCode": ref_posting_group,
+                            "source": "cloned_from_production" if prod_item else "created_new",
+                            "posting_group_patched": True,
+                        }
+                    else:
+                        pg_err = patch_resp.text[:300]
+                        logger.warning("Failed to patch posting group on %s: %s", item_number, pg_err)
+
             return {
                 "status": "created",
                 "item": item_number,
-                "id": created.get("id", ""),
+                "id": created_id,
                 "displayName": created.get("displayName", ""),
                 "type": created.get("type", ""),
                 "source": "cloned_from_production" if prod_item else "created_new",
+                "posting_group_patched": False,
+                "warning": "Posting group may need manual setup",
             }
         else:
             try:

@@ -25,133 +25,81 @@
 - Auto-seed scheduler: startup + every 6h + post-BC-sync
 
 ### Post-LLM Refinement Pipeline (Complete - Feb 2026)
-- Vendor Name Normalization (alias→canonical via alias table)
-- Doc Type Refinement (vendor profile-based correction)
-- PO Number Validation (noise stripping, false positive detection)
-- Confidence Calibration (signal-based adjustments)
-- Feedback Loop Amplification (vendor-specific + recency-weighted few-shot)
-- Pipeline Integration at Stage 3c (between extraction and validation)
+- Vendor Name Normalization, Doc Type Refinement, PO Number Validation
+- Confidence Calibration, Feedback Loop Amplification
+- Pipeline Integration at Stage 3c
 
 ### Feedback Loop Fix (Complete - Feb 2026)
-- **Fixed**: All event handlers now mark events as `applied=True` (was broken — only vendor corrections were being marked)
-- **Added handlers**: `po_correction`, `amount_correction`, `field_edit` (were recorded but never consumed)
-- **Approval reinforcement**: Approvals now create positive classification confirmations and reinforce vendor alias mappings
-- **Replay endpoint**: `POST /api/feedback-loop/replay` retroactively applies all unapplied events
-- **Result**: Application rate went from 0% to 100% (51/51 applied)
-- **UI**: "Replay N Unapplied" button on Feedback Loop Health page
+- All event handlers mark events as `applied=True`
+- Approval reinforcement, Replay endpoint
+- Application rate: 0% -> 100%
 
 ### LLM Learning Pipeline Gap Fixes (Complete - Apr 2026)
-- Classification corrections now feed into unified feedback loop (documents.py + ap_review.py)
-- Sender domain seed queries both `sender` and `sender_email` fields
-- VEP profiles seeded from BC cache — 13 → 469 profiles covering all vendors with BC history
-- Few-shot builder no longer requires text_snippet — uses filename+vendor context
-- Same-type correction noise filtered from prompts and backfilled data
-- Unlearnable feedback events force-marked to prevent infinite replay loops
-- New `/api/knowledge-seed/close-all-gaps` endpoint runs all gap closers at once
-- Knowledge status endpoint expanded with VEP, feedback rate, correction enrichment metrics
+- Classification corrections feed into unified feedback loop
+- VEP profiles seeded from BC cache (13 -> 469 profiles)
+- Same-type correction noise filtered, unlearnable events force-marked
 
 ### Comparison Delta Scoring (Complete - Feb 2026)
-- BC-match fields excluded from improved/regressed scoring
-- Normalization (case, amounts, confidence micro-jitter)
+- BC-match fields excluded, normalization
 
 ### Intelligent Multi-Page Document Splitting (Complete)
-- Boundary detection, smart grouping, auto-split, Split Preview UI
+- Boundary detection, smart grouping, Split Preview UI
 
 ### Bulk Reprocess & Comparison (Complete)
-- Compare (Preview), Apply Improvements, Full Pipeline Reprocess
-- File recovery from MongoDB b64 or SharePoint
+- Compare, Apply Improvements, Full Pipeline Reprocess
 
 ### Manual PO Override (Complete - Feb 2026)
-- `POST /api/ap-review/documents/{doc_id}/override-po` — sets `manual_po_override=True` and re-runs auto-post
-- `mark-ready` endpoint also sets override flag
-- `check_ap_ready_to_post()` skips PO check when override is set or source is mark_ready/manual_override
-- UI: "Override PO Check" button in Document Detail derived state card
+- Override endpoint, UI button, auto-post skip
 
 ### Derived State Vendor/PO Fix (Complete - Apr 2026)
-- **Root cause**: `vendor.match.failed` event added "Vendor not matched" to blocking_issues, but when `bc.validation.failed` fired (PO-only failure), the stale vendor block was never cleared — even when the vendor_match check PASSED
-- **Fix 1**: `bc.validation.failed` handler now checks if vendor is NOT in failed_checks → clears stale vendor blocks
-- **Fix 2**: `automation.decision.completed` NeedsReview now REPLACES blocking_issues with actual auto-post failures
-- **Fix 3**: `validation.completed` warning handler clears vendor blocks when `vendor_resolved=True`
-- **Fix 4**: Post-processing checks individual BC validation checks (not just overall status) to clear vendor blocks
-- **Fix 5**: Post-processing checks `manual_po_override` flag and clears PO blocking issues + updates state_reason
-- **Result**: Documents no longer show contradictory "Vendor not matched" blocking issues when vendor IS matched at 100%
-
-### Derived State Fix (Complete)
-- ReadyForPost documents show correct badges
+- 5 fixes for stale vendor blocks and contradictory states
 
 ### BC Posting Pattern Analyzer (Complete - Apr 2026)
-- **New service**: `posting_pattern_analyzer.py` queries BC for how humans actually post invoices
-- Analyzes: GL accounts, line items, amount distributions, tax patterns, descriptions, PO mapping
-- Builds vendor-specific posting templates with confidence levels (high/medium/low)
-- Templates attached to ReadyForPost documents for reviewer reference
-- Auto-post service loads posting profiles to replicate human posting behavior
-- **Endpoints**: `/api/posting-patterns/status`, `/analyze/{vendor_no}`, `/analyze-top`, `/learning-proof/{vendor_no}`
-- **Result**: System learns from thousands of historical BC postings per vendor
+- `posting_pattern_analyzer.py` queries BC for human posting behavior
+- Vendor-specific posting templates with confidence levels
+- Endpoints: `/status`, `/analyze/{vendor_no}`, `/analyze-top`, `/learning-proof/{vendor_no}`
 
 ### Expanded BC Data Ingestion (Complete - Apr 2026)
-- **Removed status filter**: `get_posted_purchase_invoices()` no longer filters on `Paid`/`Open` — ingests ALL statuses (Draft, Open, Paid, Corrective, etc.)
-- **Dual-source ingestion**: Added `get_historical_posted_purchase_invoices()` to also query the separate BC `postedPurchaseInvoices` endpoint (historical completed invoices)
-- **Deduplication**: Analyzer uses `seen_ids` set to prevent double-counting invoices from both sources
-- **Data source auditing**: Results now include `data_sources` (counts per endpoint) and `status_distribution` (counts per invoice status)
-- **Graceful error handling**: BC API failures return proper JSON with error messages instead of 500 crashes
-- **Vendor discovery expanded**: Background `analyze-top` scans both endpoints for vendor discovery
-- **Impact**: Maximum possible learning dataset — every invoice ever touched in BC feeds the AI
+- ALL invoice statuses ingested, dual-source, deduplication, graceful errors
 
 ### Invoice Trace Comparison (Enhanced - Apr 2026)
-- **New page**: `/invoice-trace` — side-by-side comparison of human BC postings vs AI template output
-- **Trace endpoint**: `GET /api/posting-patterns/trace/{vendor_no}?invoice_index=N` fetches a real invoice from BC, gets its lines, simulates what the AI template would generate, and computes a multi-dimensional diff
-- **Weighted dimension scoring**: Match rate now uses weighted 0-1 scores per dimension instead of binary match/mismatch counting. Dimensions: Items/GL (25%), Amount (20%), Description (20%), Line Count (10%), Line Type (10%), Tax (10%), UOM (5%). Partial credit for family matches, close amounts, pattern matches.
-- **Line-by-line alignment**: Greedy pairing algorithm matches each AI line to the best human line using multi-factor scoring (item match, description similarity, amount closeness, type, tax, UOM). Returns per-pair scores and average alignment.
-- **Enhanced reference extraction**: Extracts ALL references from ALL human lines (not just the first), supports per-line reference mapping for multi-product invoices, distributes references across variable product slots.
-- **Role-aware descriptions**: Zero-cost structural items always use `common_description`, surcharges always use their known name, only primary/variable product lines carry the reference-based description.
-- **Batch trace**: `GET /api/posting-patterns/trace/{vendor_no}/batch?count=N` runs trace across N invoices and returns aggregate avg match rate, per-dimension averages, and per-invoice breakdown.
-- **Invoice navigator**: Browse through vendor's invoices with prev/next controls
-- **Frontend**: Dimension score breakdown bars, line-by-line alignment panel with per-pair scoring, match/mismatch/gap badges
+- Side-by-side human vs AI comparison at `/invoice-trace`
+- Weighted dimension scoring, line-by-line alignment, batch trace
 
 ### BC Auto-Post Phase 2: Template-Driven Draft Creation (Complete - Apr 2026)
-- **Posting Intelligence Dashboard**: New `/posting-intelligence` page with full-stack vendor profile view
-- **Auto-Post Settings**: Admin-configurable toggle, confidence threshold (high/medium/low), min invoices analyzed
-- **Ready Queue**: Shows all ReadyForPost documents with their posting template confidence and draft status
-- **Draft PI Preview**: Preview exactly what a Draft Purchase Invoice would look like before creating it in BC
-- **Create Draft PI**: One-click draft creation using learned posting templates
-- **Vendor Summary**: Aggregated view of all analyzed vendors with auto-post eligibility status
-- **Template-Enhanced Lines**: `_build_pi_lines_with_mapping` now uses posting templates for reference patterns (BOL/freight)
-- **Confidence-Gated Auto-Draft**: `ap_auto_post_service.py` auto-creates DRAFT PIs for ReadyForPost documents when vendor has high-confidence posting template (≥10 invoices analyzed)
-- **Posting Template Override**: Vendors with high-confidence templates bypass PO check, stable vendor check, and other validation gates — the system uses what it learned from BC history
-- **Template Item/Description Matching**: Line builder uses template's learned item codes (e.g., `FREIGHT-DS`) and description patterns (e.g., `Freight {ref}`) instead of GL account fallback
-- **BC Item Sync**: `POST /bc-sync-item/{item_number}` clones items from Production to Sandbox with posting groups
-- **Draft vs Production Comparison**: `GET /compare-draft/{draft_no}` side-by-side comparison of auto-drafted PI against real production PIs
-- **Stable Vendor Posting Template Boost**: Vendors with high-confidence posting templates are automatically considered stable, overriding all-time stats
-- **Vendor Match Cache Fix**: Only positive matches are cached; transient BC API failures no longer permanently cache "no match"
-- **Batch Auto-Draft Queue**: `POST /auto-draft-queue` processes all ReadyForPost docs through the confidence gate
-- **Endpoints**: `/settings` (GET/PUT), `/ready-queue`, `/vendor-summary`, `/draft-preview/{doc_id}`, `/create-draft/{doc_id}`, `/auto-draft-queue`, `/auto-draft-eligibility/{doc_id}`, `/compare-draft/{draft_no}`, `/bc-sync-item/{item_number}`
-- **Frontend**: `PostingPatternsDashboard.js` with stats, vendor profiles, ready queue, settings panel, confidence breakdown, Auto-Draft Queue button with result banner
+- Auto-Post Settings, Ready Queue, Draft PI Preview, Create Draft PI
+- Confidence-Gated Auto-Draft, Posting Template Override
+- Template Item/Description Matching, BC Item Sync
+- Draft vs Production Comparison, Batch Auto-Draft Queue
+- Frontend: `PostingPatternsDashboard.js`
 
 ### Posting Pattern Analyzer Tightening (Complete - Apr 2026)
-- **Line sample: 20 → 75**: Analyzes lines from up to 75 invoices (was 20), ensuring vendors with 1-line invoices reach sufficient line counts for high confidence
-- **Consistency scoring**: 4-dimension weighted score (line_count 25%, item_choice 35%, line_type 15%, item_dominance 25%) measuring how predictable a vendor's posting behavior is
-- **Confidence: consistency-weighted**: 30 invoices + 25 lines + 80% consistency = HIGH (previously required 50 inv + 50 lines with no consistency check)
-- **Full item distribution**: Template now includes ALL items/GL accounts/Charge lines with usage rates and rank (primary/secondary/rare), not just the top one
-- **Line-level tax codes**: Tracked separately from invoice-level tax (catches TAXABLE-coded lines on $0-tax invoices)
-- **Richer reference patterns**: 7 pattern types (freight_prefix, bol, order_number, po_prefix, invoice_ref, embedded_ref, descriptive_text), each with count and rate
-- **Charge line tracking**: Charge-type lines (fuel surcharges, etc.) now captured in templates
-- **Learning proof enriched**: Shows consistency breakdown, per-item usage rates, pattern interpretation
+- Line sample: 20 -> 75, consistency scoring, full item distribution
+- Line-level tax codes, richer reference patterns, charge line tracking
 
-### LLM Learning Pipeline Gap Fixes (Complete - Apr 2026)
-- Classification corrections now feed into unified feedback loop
-- VEP profiles seeded from BC cache — 13 → 469 profiles
-- Few-shot builder works without text_snippet
-- Same-type correction noise filtered, 2,288 junk entries purged on production
-- Feedback events: 100% application rate (was 0% on production)
-- New `/api/knowledge-seed/close-all-gaps` and `/learning-proof/{vendor_id}` endpoints
+### AI Learning Dashboard (Complete - Apr 2026)
+- **New page**: `/ai-learning` — Proof of what the system has learned
+- **Endpoint**: `GET /api/posting-patterns/learning-dashboard`
+- **Sections**: Learning Events summary, Vendor Templates, Corrections Learned, Label Corrections, Auto-Drafted PIs
+- **Cards**: Posting Template Confidence breakdown, Learned Label Corrections (PO->SHIPMENT, BOL->PO), Vendor Learning Activity, Auto-Drafted PIs by Vendor, Recent Learning Events table, Recent Classification Corrections
+- **Frontend**: `LearningDashboard.js` with StatCard components and refresh
+
+### Draft Review Queue (Complete - Apr 2026)
+- **New page**: `/review-queue` — Review, approve, or correct auto-drafted Purchase Invoices
+- **Endpoints**: 
+  - `GET /api/posting-patterns/review-queue` — List auto-drafted PIs with filter (pending/approved/corrected/all)
+  - `POST /api/posting-patterns/review-queue/{doc_id}/approve` — Approve draft, creates positive feedback event
+  - `POST /api/posting-patterns/review-queue/{doc_id}/correct` — Submit corrections with feedback loop
+- **Features**: Summary cards (pending/approved/corrected/total), expandable item details, Correction Dialog with field selectors, approve/correct actions
+- **Feedback Loop**: Approved drafts create `draft_approved` learning events. Corrections create `draft_corrected` events and `classification_corrections` entries for continuous learning
+- **Frontend**: `ReviewQueuePage.js` with StatusBadge, ConfidenceBadge, CorrectionDialog, ReviewItem components
 
 ## Backlog
 - P0: Deploy to production and run `POST /api/posting-patterns/analyze-top?top_n=20` to build profiles, then `POST /api/posting-patterns/auto-draft-queue` to auto-draft qualifying invoices
-- P1: Phase 3 — BC Draft Review + Post flow (reviewer approves draft PI in BC, one-click post)
-- P1: Review Queue UI — Frontend tab to review/approve auto-drafted PIs with correction feedback loop
-- P1: Rep Overrides management UI
-- P1: Teams Adaptive Card integration
-- P1: FRACHT template tuning — verify TARIFF-DS surcharge fix achieves ≥90% production accuracy on real BC data
+- P1: Build Feedback Loop — When human edits an auto-drafted PI in BC, correction feeds back into template
+- P1: Rep Overrides management UI — Admin screen to map customers to reps
+- P1: Teams Adaptive Card integration — webhook handler for "Approve" -> BC Sales Order
+- P1: FRACHT template tuning — verify TARIFF-DS surcharge fix achieves >=90% accuracy
 - P2: Stable vendor threshold tuning (lower from 100% to 85%)
 - P2: Auto-delete on max retries (Square9 alignment)
 - P2: Vendor Inventory Dashboard

@@ -804,6 +804,97 @@ async def run_auto_draft_queue(limit: int = Query(50, le=200)):
     return result
 
 
+@router.post("/bc-sync-item/{item_number}")
+async def sync_item_to_sandbox(
+    item_number: str,
+    description: str = Query("", description="Item description (auto-detected from Production if blank)"),
+):
+    """
+    Look up an item in BC Production and create it in the Sandbox if missing.
+    Ensures template-driven items (like FREIGHT-DS) exist in both environments.
+    """
+    import httpx
+    import os
+
+    BC_API_BASE = "https://api.businesscentral.dynamics.com/v2.0"
+    BC_TENANT_ID = os.environ.get("TENANT_ID", "")
+    BC_READ_ENV = os.environ.get("BC_READ_ENVIRONMENT") or os.environ.get("BC_ENVIRONMENT", "Production")
+    BC_WRITE_ENV = os.environ.get("BC_WRITE_ENVIRONMENT") or os.environ.get("BC_SANDBOX_ENVIRONMENT", "Sandbox_11_3_2025")
+
+    if not BC_TENANT_ID:
+        return {"error": "BC credentials not configured"}
+
+    from services.gpi_integration_service import _get_token, _resolve_company_id, REQUEST_TIMEOUT
+
+    token = await _get_token()
+    company_id = await _resolve_company_id()
+
+    # Step 1: Check if item already exists in Sandbox
+    sandbox_url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENV}/api/v2.0/companies({company_id})/items"
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        resp = await client.get(sandbox_url, headers={
+            "Authorization": f"Bearer {token}", "Accept": "application/json"
+        }, params={"$filter": f"number eq '{item_number}'"})
+        if resp.status_code == 200:
+            existing = resp.json().get("value", [])
+            if existing:
+                return {"status": "already_exists", "item": item_number, "id": existing[0].get("id", "")}
+
+    # Step 2: Look up item in Production for its properties
+    prod_item = None
+    try:
+        bc = get_bc_service()
+        from services.business_central_service import BC_API_BASE as _base, BC_TENANT_ID as _tid, get_bc_token
+        prod_token = await get_bc_token(environment=BC_READ_ENV)
+        prod_cid = await bc._get_company_id(environment=BC_READ_ENV)
+        prod_url = f"{_base}/{_tid}/{BC_READ_ENV}/api/v2.0/companies({prod_cid})/items"
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+            resp = await client.get(prod_url, headers={
+                "Authorization": f"Bearer {prod_token}", "Accept": "application/json"
+            }, params={"$filter": f"number eq '{item_number}'"})
+            if resp.status_code == 200:
+                items = resp.json().get("value", [])
+                if items:
+                    prod_item = items[0]
+    except Exception as e:
+        logger.warning("Could not look up item in Production: %s", e)
+
+    item_desc = description or (prod_item.get("displayName", "") if prod_item else item_number)
+    item_type = (prod_item.get("type", "Service") if prod_item else "Service")
+
+    # Step 3: Create the item in Sandbox
+    create_payload = {
+        "number": item_number,
+        "displayName": item_desc,
+        "type": item_type,
+    }
+
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        resp = await client.post(sandbox_url, headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }, json=create_payload)
+
+        if resp.status_code in (200, 201):
+            created = resp.json()
+            return {
+                "status": "created",
+                "item": item_number,
+                "id": created.get("id", ""),
+                "displayName": created.get("displayName", ""),
+                "type": created.get("type", ""),
+                "source": "cloned_from_production" if prod_item else "created_new",
+            }
+        else:
+            try:
+                err = resp.json().get("error", {}).get("message", resp.text[:300])
+            except Exception:
+                err = resp.text[:300]
+            return {"status": "error", "item": item_number, "error": err}
+
+
+
 @router.get("/auto-draft-eligibility/{doc_id}")
 async def check_document_draft_eligibility(doc_id: str):
     """Check if a specific document qualifies for auto-draft PI creation."""

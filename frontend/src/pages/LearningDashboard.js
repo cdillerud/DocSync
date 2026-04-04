@@ -6,7 +6,7 @@ import {
   Brain, RefreshCw, TrendingUp, CheckCircle2, AlertTriangle,
   Zap, BookOpen, ArrowRight, Activity, Database, Loader2,
   RotateCcw, Sparkles, Shield, Fingerprint, Target, Gauge,
-  Eye, Search, BarChart3, GitBranch
+  Eye, Search, BarChart3, GitBranch, Copy
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -282,7 +282,7 @@ function GapCloserSection() {
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          Using learned intelligence to close the 4 biggest validation gaps. Active on every document.
+          Using learned intelligence to close the 7 biggest validation gaps. Active on every document.
         </p>
       </CardHeader>
       <CardContent>
@@ -396,6 +396,91 @@ function GapCloserSection() {
                 <div>
                   <p className="font-bold text-red-400">{status.gap_4_sales_order_matching?.gap_count || 0}</p>
                   <p className="text-muted-foreground">Open Gap</p>
+                </div>
+              </div>
+            </div>
+
+            {/* GAP 5: Duplicate Intelligence */}
+            <div className={`p-3 rounded border ${gapColors(!!status.gap_5_duplicate_intelligence?.vendors_with_intel)}`} data-testid="gap-5-duplicate">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-medium flex items-center gap-1">
+                  <Copy className="w-3 h-3 text-rose-500" /> Gap 5: Duplicate Intelligence
+                </p>
+                <Badge className="bg-emerald-600 text-white text-[10px]">ACTIVE</Badge>
+              </div>
+              <p className="text-[10px] text-muted-foreground mb-2">
+                Learns from false-positive duplicate flags. Auto-clears unreliable vendor duplicates.
+              </p>
+              <div className="grid grid-cols-2 gap-2 text-center text-[10px]">
+                <div>
+                  <p className="font-bold">{status.gap_5_duplicate_intelligence?.vendors_with_intel || 0}</p>
+                  <p className="text-muted-foreground">Vendors Tracked</p>
+                </div>
+                <div>
+                  <p className="font-bold">
+                    {status.gap_5_duplicate_intelligence?.global_false_positive_rate != null
+                      ? `${(status.gap_5_duplicate_intelligence.global_false_positive_rate * 100).toFixed(0)}%`
+                      : '--'}
+                  </p>
+                  <p className="text-muted-foreground">Global FP Rate</p>
+                </div>
+                <div>
+                  <p className="font-bold text-emerald-400">{status.gap_5_duplicate_intelligence?.safe_to_clear_vendors || 0}</p>
+                  <p className="text-muted-foreground">Safe to Clear</p>
+                </div>
+                <div>
+                  <p className="font-bold text-red-400">{status.gap_5_duplicate_intelligence?.currently_blocked || 0}</p>
+                  <p className="text-muted-foreground">Blocked</p>
+                </div>
+              </div>
+            </div>
+
+            {/* GAP 6: Amount Anomaly */}
+            <div className={`p-3 rounded border ${gapColors(!!status.gap_6_amount_anomaly?.vendors_with_patterns)}`} data-testid="gap-6-amount">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-medium flex items-center gap-1">
+                  <TrendingUp className="w-3 h-3 text-orange-500" /> Gap 6: Amount Anomaly
+                </p>
+                <Badge className="bg-emerald-600 text-white text-[10px]">ACTIVE</Badge>
+              </div>
+              <p className="text-[10px] text-muted-foreground mb-2">
+                Detects unusual amounts per vendor. High-severity anomalies forced to review.
+              </p>
+              <div className="grid grid-cols-2 gap-2 text-center text-[10px]">
+                <div>
+                  <p className="font-bold">{status.gap_6_amount_anomaly?.vendors_with_patterns || 0}</p>
+                  <p className="text-muted-foreground">Vendors Tracked</p>
+                </div>
+                <div>
+                  <p className="font-bold text-amber-400">{status.gap_6_amount_anomaly?.active_anomalies || 0}</p>
+                  <p className="text-muted-foreground">Active Anomalies</p>
+                </div>
+              </div>
+            </div>
+
+            {/* GAP 7: Escalation Intelligence */}
+            <div className={`p-3 rounded border ${gapColors(!!status.gap_7_escalation_intelligence?.combinations_tracked)}`} data-testid="gap-7-escalation">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-medium flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3 text-yellow-500" /> Gap 7: Auto-Escalation
+                </p>
+                <Badge className="bg-emerald-600 text-white text-[10px]">ACTIVE</Badge>
+              </div>
+              <p className="text-[10px] text-muted-foreground mb-2">
+                Pre-routes vendor+doc_type combos with consistent failures to manual review.
+              </p>
+              <div className="grid grid-cols-3 gap-2 text-center text-[10px]">
+                <div>
+                  <p className="font-bold">{status.gap_7_escalation_intelligence?.combinations_tracked || 0}</p>
+                  <p className="text-muted-foreground">Tracked</p>
+                </div>
+                <div>
+                  <p className="font-bold text-red-400">{status.gap_7_escalation_intelligence?.always_escalate || 0}</p>
+                  <p className="text-muted-foreground">Escalated</p>
+                </div>
+                <div>
+                  <p className="font-bold text-emerald-400">{status.gap_7_escalation_intelligence?.fully_automated || 0}</p>
+                  <p className="text-muted-foreground">Automated</p>
                 </div>
               </div>
             </div>
@@ -933,7 +1018,7 @@ function LearningPulseSection() {
           </div>
         </div>
         <p className="text-xs text-muted-foreground">
-          Every document makes the AI smarter. This shows real-time learning across all 6 dimensions.
+          Every document makes the AI smarter. This shows real-time learning across all 8 dimensions (6 core + 2 intelligence layers).
         </p>
       </CardHeader>
       <CardContent>

@@ -10,7 +10,7 @@ sys.path.insert(0, '/app/backend')
 
 
 # Test configuration
-API_BASE_URL = "https://continuous-learn-2.preview.emergentagent.com"
+API_BASE_URL = "https://readiness-intel-1.preview.emergentagent.com"
 
 
 @pytest.fixture

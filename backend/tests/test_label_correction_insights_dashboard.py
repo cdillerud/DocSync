@@ -17,7 +17,7 @@ import os
 # Use environment URL for testing
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 if not BASE_URL:
-    BASE_URL = "https://continuous-learn-2.preview.emergentagent.com"
+    BASE_URL = "https://readiness-intel-1.preview.emergentagent.com"
 
 # Test vendor known from iteration_32.json
 TEST_VENDOR = "Cargo Modules LLC"

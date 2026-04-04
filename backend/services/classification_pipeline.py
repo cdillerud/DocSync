@@ -483,6 +483,41 @@ async def stage_classify_llm(
         except Exception as e:
             logger.debug("[CLASSIFY:LLM] Deep learning hint injection failed: %s", e)
 
+        # 5. Amount Intelligence — learned typical amounts for validation
+        try:
+            from services.vendor_context_builder import build_amount_intelligence_context
+            from deps import get_db
+            amt_db = get_db()
+            amt_vendor = vendor_id or vendor_name
+            if amt_vendor:
+                amt_context = await build_amount_intelligence_context(amt_db, amt_vendor)
+                if amt_context:
+                    dynamic_prompt += "\n\n" + amt_context
+                    logger.info("[CLASSIFY:LLM] Injected amount intelligence for %s", amt_vendor)
+        except Exception as e:
+            logger.debug("[CLASSIFY:LLM] Amount intelligence injection failed: %s", e)
+
+        # 6. Field Correlation Predictions — learned field→doc_type rules
+        try:
+            from services.advanced_learning_engine import get_field_predictions
+            from deps import get_db
+            corr_db = get_db()
+            # Build a minimal doc dict for predictions
+            pred_doc = {"extracted_fields": doc.get("extracted_fields") or {}}
+            predictions = await get_field_predictions(corr_db, pred_doc)
+            if predictions:
+                corr_text = "\n\n## FIELD CORRELATION PREDICTIONS (learned rules):\n"
+                for pred in predictions[:3]:
+                    corr_text += (
+                        f"- When '{pred['feature']}' is present → likely {pred['predicts']} "
+                        f"({pred['confidence']:.0%} confidence, {pred['samples']} samples)\n"
+                    )
+                corr_text += "Consider these patterns when classifying this document.\n"
+                dynamic_prompt += corr_text
+                logger.info("[CLASSIFY:LLM] Injected %d field correlation predictions", len(predictions))
+        except Exception as e:
+            logger.debug("[CLASSIFY:LLM] Field correlation injection failed: %s", e)
+
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=f"classify-{uuid.uuid4()}",

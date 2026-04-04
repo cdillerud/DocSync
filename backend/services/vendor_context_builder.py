@@ -55,6 +55,45 @@ async def build_extraction_context(db, vendor_no: str = "", vendor_name: str = "
     return header + "\n" + "\n\n".join(parts)
 
 
+async def build_amount_intelligence_context(db, vendor_no: str) -> str:
+    """
+    Build amount intelligence context for the LLM.
+    Tells the AI what typical invoice amounts look like for this vendor,
+    so it can validate extracted amounts and flag anomalies.
+    """
+    if not vendor_no:
+        return ""
+
+    record = await db.amount_patterns.find_one(
+        {"vendor_no": vendor_no}, {"_id": 0}
+    )
+    if not record or record.get("count", 0) < 3:
+        return ""
+
+    avg = record.get("avg_amount", 0)
+    stddev = record.get("stddev", 0)
+    min_amt = record.get("min_amount", 0)
+    max_amt = record.get("max_amount", 0)
+    count = record.get("count", 0)
+
+    parts = [
+        f"AMOUNT INTELLIGENCE for vendor '{vendor_no}' (from {count} historical invoices):",
+        f"  - Typical amount: ${avg:,.2f} (std dev: ${stddev:,.2f})",
+        f"  - Range seen: ${min_amt:,.2f} – ${max_amt:,.2f}",
+    ]
+
+    if stddev > 0:
+        low = max(0, avg - 2 * stddev)
+        high = avg + 2 * stddev
+        parts.append(f"  - Expected range (95%): ${low:,.2f} – ${high:,.2f}")
+        parts.append(
+            "  - If the extracted amount falls outside this range, double-check "
+            "the extraction — it may be reading a subtotal or wrong field."
+        )
+
+    return "\n".join(parts)
+
+
 async def build_classification_context(db, vendor_no: str = "", vendor_name: str = "",
                                         sender_email: str = "", sender_domain: str = "") -> str:
     """

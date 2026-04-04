@@ -397,6 +397,98 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
     except Exception as gc_err:
         logger.debug("[GapCloser:ConfBand] Skipped for %s: %s", doc_id[:8], gc_err)
 
+    # === GAP CLOSER 5: Duplicate Intelligence ===
+    # If this doc is blocked by duplicate_risk but the vendor's duplicate
+    # detection is known to be unreliable, auto-clear the flag.
+    try:
+        if readiness.get("signals", {}).get("duplicate_risk") and "duplicate_risk" in readiness.get("blocking_reasons", []):
+            from services.duplicate_intelligence_service import evaluate_duplicate_flag
+            dup_eval = await evaluate_duplicate_flag(db, doc)
+            if dup_eval.get("should_auto_clear"):
+                readiness["blocking_reasons"] = [
+                    r for r in readiness["blocking_reasons"] if r != "duplicate_risk"
+                ]
+                readiness["signals"]["duplicate_risk"] = False
+                readiness["warning_reasons"] = readiness.get("warning_reasons", []) + ["duplicate_intelligence_cleared"]
+                readiness["explanations"] = readiness.get("explanations", []) + [
+                    f"INTELLIGENCE: {dup_eval['reason']}"
+                ]
+                # Recalculate status if no more blockers
+                if not readiness["blocking_reasons"]:
+                    if readiness["signals"].get("vendor_resolved") and readiness["signals"].get("required_fields_complete"):
+                        readiness["status"] = STATUS_READY_AUTO_DRAFT
+                        readiness["recommended_action"] = ACTION_AUTO_DRAFT
+                    else:
+                        readiness["status"] = STATUS_NEEDS_REVIEW
+                        readiness["recommended_action"] = ACTION_REVIEW
+                logger.info(
+                    "[GapCloser:DupIntel] doc=%s — duplicate flag auto-cleared (vendor FPR: %s)",
+                    doc_id[:8], dup_eval.get("vendor_intel", {}).get("false_positive_rate", "?"),
+                )
+    except Exception as gc_err:
+        logger.debug("[GapCloser:DupIntel] Skipped for %s: %s", doc_id[:8], gc_err)
+
+    # === GAP CLOSER 6: Amount Anomaly Detection ===
+    # If the document's amount is anomalous for this vendor, add a warning
+    try:
+        vendor_no_for_anomaly = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
+        if vendor_no_for_anomaly:
+            extracted_for_anomaly = doc.get("extracted_fields") or {}
+            amount_val = 0.0
+            for af in ["amount", "invoice_amount", "total_amount"]:
+                val = extracted_for_anomaly.get(af)
+                if val:
+                    try:
+                        amount_val = float(str(val).replace("$", "").replace(",", "").strip())
+                        break
+                    except (ValueError, TypeError):
+                        pass
+            if amount_val > 0:
+                from services.advanced_learning_engine import check_amount_anomaly
+                anomaly_check = await check_amount_anomaly(db, vendor_no_for_anomaly, amount_val)
+                if anomaly_check.get("is_anomaly"):
+                    severity = anomaly_check.get("severity", "medium")
+                    readiness["warning_reasons"] = readiness.get("warning_reasons", []) + ["amount_anomaly"]
+                    readiness["explanations"] = readiness.get("explanations", []) + [
+                        f"INTELLIGENCE: Amount ${amount_val:,.2f} is anomalous for vendor {vendor_no_for_anomaly} "
+                        f"(typical: ${anomaly_check.get('avg_amount', 0):,.2f} ± ${anomaly_check.get('stddev', 0):,.2f}, "
+                        f"z-score: {anomaly_check.get('z_score', 0)}, severity: {severity})"
+                    ]
+                    # High-severity anomalies should force review
+                    if severity == "high" and readiness["status"] in (STATUS_READY_AUTO_DRAFT, STATUS_READY_AUTO_LINK):
+                        readiness["status"] = STATUS_NEEDS_REVIEW
+                        readiness["recommended_action"] = ACTION_REVIEW
+                    logger.info(
+                        "[GapCloser:AmountAnomaly] doc=%s vendor=%s amount=%.2f z=%.1f severity=%s",
+                        doc_id[:8], vendor_no_for_anomaly, amount_val,
+                        anomaly_check.get("z_score", 0), severity,
+                    )
+    except Exception as gc_err:
+        logger.debug("[GapCloser:AmountAnomaly] Skipped for %s: %s", doc_id[:8], gc_err)
+
+    # === GAP CLOSER 7: Auto-Escalation Intelligence ===
+    # If this vendor + doc_type consistently fails automation, pre-route to review
+    try:
+        vendor_no_for_esc = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
+        doc_type_for_esc = doc.get("document_type") or doc.get("suggested_job_type") or ""
+        if vendor_no_for_esc and doc_type_for_esc:
+            from services.escalation_intelligence_service import should_pre_escalate
+            esc_check = await should_pre_escalate(db, vendor_no_for_esc, doc_type_for_esc)
+            if esc_check.get("should_escalate"):
+                if readiness["status"] in (STATUS_READY_AUTO_DRAFT, STATUS_READY_AUTO_LINK):
+                    readiness["status"] = STATUS_NEEDS_REVIEW
+                    readiness["recommended_action"] = ACTION_REVIEW
+                readiness["warning_reasons"] = readiness.get("warning_reasons", []) + ["auto_escalation"]
+                readiness["explanations"] = readiness.get("explanations", []) + [
+                    f"INTELLIGENCE: {esc_check['reason']}"
+                ]
+                logger.info(
+                    "[GapCloser:Escalation] doc=%s — pre-escalated (success rate: %s)",
+                    doc_id[:8], esc_check.get("success_rate", "?"),
+                )
+    except Exception as gc_err:
+        logger.debug("[GapCloser:Escalation] Skipped for %s: %s", doc_id[:8], gc_err)
+
     # Compute automation intelligence alongside readiness
     from services.automation_intelligence_service import (
         compute_automation_confidence,

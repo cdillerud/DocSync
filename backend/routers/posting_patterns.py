@@ -3269,6 +3269,48 @@ async def get_gap_closer_status():
     gap_counts = {r["_id"]: r["count"]
                   for r in await db.validation_gap_log.aggregate(gap_pipeline).to_list(20)}
 
+    # GAP 5: Duplicate Intelligence
+    try:
+        from services.duplicate_intelligence_service import get_duplicate_intelligence_summary
+        dup_summary = await get_duplicate_intelligence_summary(db)
+        dup_intel_summary = {
+            "status": "active",
+            "vendors_with_intel": dup_summary.get("vendors_with_intel", 0),
+            "global_false_positive_rate": dup_summary.get("global_false_positive_rate", 0),
+            "safe_to_clear_vendors": dup_summary.get("safe_to_clear_vendors", 0),
+            "currently_blocked": dup_summary.get("currently_blocked_by_duplicate", 0),
+            "action": "Learns from false-positive duplicate flags and auto-clears unreliable vendor duplicates",
+        }
+    except Exception:
+        dup_intel_summary = {"status": "initializing"}
+
+    # GAP 6: Amount Anomaly Detection
+    try:
+        amount_vendors = await db.amount_patterns.count_documents({"count": {"$gte": 3}})
+        active_anomalies = await db.amount_patterns.count_documents({"latest_is_anomaly": True})
+        amount_anomaly_summary = {
+            "status": "active",
+            "vendors_with_patterns": amount_vendors,
+            "active_anomalies": active_anomalies,
+            "action": "Detects unusual amounts per vendor and routes high-severity anomalies to review",
+        }
+    except Exception:
+        amount_anomaly_summary = {"status": "initializing"}
+
+    # GAP 7: Auto-Escalation Intelligence
+    try:
+        from services.escalation_intelligence_service import get_escalation_summary
+        esc_summary = await get_escalation_summary(db)
+        escalation_summary = {
+            "status": "active",
+            "combinations_tracked": esc_summary.get("total_combinations_tracked", 0),
+            "always_escalate": esc_summary.get("always_escalate", 0),
+            "fully_automated": esc_summary.get("fully_automated", 0),
+            "action": "Pre-routes vendor+doc_type combos with consistent failures to manual review",
+        }
+    except Exception:
+        escalation_summary = {"status": "initializing"}
+
     return {
         "gap_1_confidence_calibration": {
             "status": "active",
@@ -3295,6 +3337,44 @@ async def get_gap_closer_status():
             "gap_count": gap_counts.get("sales_order_match", 0),
             "action": "Cross-references document flow to find SO matches via fuzzy + historical lookup",
         },
+        "gap_5_duplicate_intelligence": dup_intel_summary,
+        "gap_6_amount_anomaly": amount_anomaly_summary,
+        "gap_7_escalation_intelligence": escalation_summary,
         "total_validation_gaps": gap_counts,
     }
+
+
+# =============================================================================
+# Duplicate Intelligence API
+# =============================================================================
+
+@router.get("/duplicate-intelligence")
+async def get_duplicate_intelligence():
+    """Get duplicate intelligence summary — false-positive learning."""
+    from deps import get_db
+    from services.duplicate_intelligence_service import get_duplicate_intelligence_summary
+    db = get_db()
+    return await get_duplicate_intelligence_summary(db)
+
+
+@router.post("/duplicate-intelligence/batch-clear")
+async def batch_clear_safe_duplicates(limit: int = Query(100)):
+    """Auto-clear duplicate flags for vendors with unreliable duplicate detection."""
+    from deps import get_db
+    from services.duplicate_intelligence_service import batch_auto_clear_safe_duplicates
+    db = get_db()
+    return await batch_auto_clear_safe_duplicates(db, limit=limit)
+
+
+# =============================================================================
+# Escalation Intelligence API
+# =============================================================================
+
+@router.get("/escalation-intelligence")
+async def get_escalation_intelligence():
+    """Get escalation intelligence summary — which vendor+doc_type combos always fail."""
+    from deps import get_db
+    from services.escalation_intelligence_service import get_escalation_summary
+    db = get_db()
+    return await get_escalation_summary(db)
 

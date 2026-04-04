@@ -587,6 +587,56 @@ async def learn_from_document(db, doc_id: str, trigger: str = "ingestion"):
         results["advanced_learning"] = {"error": str(e)}
         logger.debug("[PerDocLearn] Advanced learning for %s: %s", doc_id[:8], e)
 
+    # === DUPLICATE INTELLIGENCE: Learn from duplicate flag outcomes ===
+    try:
+        was_flagged = bool(doc.get("possible_duplicate") or doc.get("is_duplicate"))
+        if was_flagged:
+            vendor = _get_vendor_info(doc)
+            from services.duplicate_intelligence_service import record_duplicate_outcome
+            if outcome in (OUTCOME_APPROVED, OUTCOME_POSTED_BC, OUTCOME_LINKED, OUTCOME_AUTO_FILED):
+                # Document succeeded despite duplicate flag — false positive
+                await record_duplicate_outcome(
+                    db, doc_id, vendor["vendor_no"],
+                    was_flagged_duplicate=True,
+                    actual_outcome="false_positive",
+                    resolution_source=f"outcome_{outcome}",
+                )
+                results["dimensions"]["duplicate_intel"] = "false_positive"
+            elif outcome == OUTCOME_REJECTED:
+                # Document rejected — could be confirmed duplicate
+                await record_duplicate_outcome(
+                    db, doc_id, vendor["vendor_no"],
+                    was_flagged_duplicate=True,
+                    actual_outcome="confirmed_duplicate",
+                    resolution_source=f"outcome_{outcome}",
+                )
+                results["dimensions"]["duplicate_intel"] = "confirmed"
+        else:
+            results["dimensions"]["duplicate_intel"] = "not_flagged"
+    except Exception as e:
+        results["dimensions"]["duplicate_intel"] = f"error: {e}"
+        logger.debug("[PerDocLearn] Duplicate intelligence for %s: %s", doc_id[:8], e)
+
+    # === ESCALATION INTELLIGENCE: Learn which vendor+doc_type combos fail ===
+    try:
+        vendor = _get_vendor_info(doc)
+        doc_type = doc.get("document_type") or doc.get("suggested_job_type") or ""
+        if vendor["vendor_no"] and doc_type:
+            from services.escalation_intelligence_service import record_automation_outcome
+            if outcome in (OUTCOME_AUTO_VALIDATED, OUTCOME_AUTO_FILED, OUTCOME_POSTED_BC, OUTCOME_LINKED):
+                esc_outcome = "success"
+            elif outcome in (OUTCOME_BLOCKED, OUTCOME_REJECTED):
+                esc_outcome = "failure"
+            elif outcome == OUTCOME_FIELD_CORRECTED:
+                esc_outcome = "correction"
+            else:
+                esc_outcome = "review"
+            await record_automation_outcome(db, vendor["vendor_no"], doc_type, esc_outcome, doc_id)
+            results["dimensions"]["escalation_intel"] = esc_outcome
+    except Exception as e:
+        results["dimensions"]["escalation_intel"] = f"error: {e}"
+        logger.debug("[PerDocLearn] Escalation intelligence for %s: %s", doc_id[:8], e)
+
     return results
 
 

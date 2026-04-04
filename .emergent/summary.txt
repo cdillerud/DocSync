@@ -1,46 +1,41 @@
 <analysis>**original_problem_statement**: 
-The user requested continuous refinement of the Sales/AP Modules and the Document Inbox. Following earlier requests to ensure the AI learns from historical Business Central (BC) data, the user requested an Invoice Trace feature to side-by-side compare how human users historically posted an invoice in BC versus how the AI's auto-post template would generate it. The focus of this session was completing the Trace tool tuning to achieve >90% accuracy and moving into **Phase 2: BC Auto-Posting (Wire Templates to actual Draft Purchase Invoice Creation)**.
+The user requested continuous refinement of the Sales/AP Modules and the Document Inbox. Over the course of the session, the user aggressively pushed for maximum AI autonomy and continuous learning, commanding the system to learn from every single document, go deeper into intelligence, learn everything, and fill the gaps revealed by production data. 
 
 PRODUCT REQUIREMENTS:
-1. Expand BC data fetch to include all invoice statuses (Completed)
-2. Invoice Trace Comparison Tool (Completed)
-3. Variability-Aware Structural Classification (Completed)
-4. Phase 2: Square9 Workflow Alignment & BC Auto-Posting: Wire templates to Draft PI Creation for high-confidence vendors. (IN PROGRESS)
+1. Per-Document Intelligence Engine (Fires on every document across all paths).
+2. Deep Learning Engines (5 dimensions: Extraction Patterns, Doc Fingerprints, Decision Accuracy, Vendor Maturity, Predictive Readiness).
+3. Advanced Intelligence Engines (7 dimensions: Line item patterns, amount intelligence, flow sequences, learned rules, temporal patterns, error recognition).
+4. Vendor Intelligence Settings Integration (Merge deep learning into vendor profiles).
+5. Validation Gap Closers (Auto-route miscalibrated confidence bands, fuzzy PO matching, historical customer matching, Sales Order cross-referencing).
+6. Continuous identification and implementation of further AI improvements (Current focus:  reduction/learning).
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
 **what currently exists?** 
-A robust Document Hub with a fully functional AP pipeline and a BC Posting Pattern Analyzer. The  comparison tool is now highly accurate, featuring weighted dimension scores and line-by-line alignments. It supports both single and batch invoice tracing via  with two modes:  (optimistic, peeks at human items) and  (realistic, uses pure template logic). Top vendors (REGANIN, OWENS, PEPPER, FEDEX, CELTICI) are currently achieving 93-100% match rates in pure production mode.
+An incredibly advanced, completely autonomous Document Hub processing AP/Sales workflows. The system features 18 distinct continuous learning dimensions that adjust dynamic extraction prompts, modify validation rules, and route documents based on real-time historical accuracy (e.g., auto-routing 85-95% confidence documents to manual review because the AI mathematically proved it is overconfident in that specific band). It has a massive Learning Dashboard and Vendor Intelligence profiles. 
 
 **Last working item**: 
-    - Last item agent was working: Gathering context and planning for **Phase 2 (Auto-Draft Purchase Invoices)**. The agent explained the auto-drafting architecture (Confidence Gate, Duplicate Guard, Review Queue) to the user, got explicit approval (Please proceed as presented), and began reviewing  and .
+    - Last item agent was working: Investigating further AI improvements based on the user's open-ended command: Where else can we find improvements in the AI - of it. The agent began analyzing , specifically looking into how  and  flags are computed, likely aiming to build an AI learning mechanism to eliminate false-positive duplicate flags.
     - Status: IN PROGRESS
     - Agent Testing Done: N
-    - Which testing method agent to use? backend testing agent
+    - Which testing method agent to use? testing_agent_v3_fork
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:  
-  Issue 1: FRACHT template production accuracy is 80% (P1)
-     - Attempted fixes: Added adaptive trace-mode counts, which works for trace mode (95%) but in production mode it falls back to , missing the TARIFF-DS line on 2-line invoices.
-     - Next debug checklist: Increase  to 2 for FRACHT, or ensure TARIFF-DS is correctly classified as a co-occurring surcharge in .
-     - Why fix this issue and what will be achieved with the fix? Allows FRACHT to surpass the 90% confidence threshold and be included in the auto-draft queue.
-     - Status: NOT STARTED
+  Issue 1: Find and implement further AI improvements (Currently investigating  reduction/self-learning in ).
+     - Attempted fixes: Agent ran a few  and  commands on  but has not written code yet.
+     - Next debug checklist: Review  (lines ~100-430) and  to see where  originates and how the AI can learn to safely clear false positives.
+     - Why fix this issue and what will be achieved with the fix? Answers the user's command to improve ALL of it by targeting remaining workflow blockers.
+     - Status: IN PROGRESS
      - Is recurring issue? N
-     - Should Test frontend/backend/both after fix? backend
+     - Should Test frontend/backend/both after fix? both
      - Blocked on other issue: None
 
 **In progress Task List**:
-  Task 1: Phase 2 of BC Auto-Posting (Wire Templates to PI Creation) (P0)
-     - Where to resume: Implement the Auto-Draft Service inside . Utilize  for high-confidence templates (≥90% production match rate). Wire this simulated data to the  API in  to create DRAFT Purchase Invoices. 
-     - What will be achieved with this? AP invoices will be autonomously posted as DRAFT Purchase Invoices in BC for stable vendors, reducing human work from 5-10 minutes of data entry to 30 seconds of review.
-     - Status: IN PROGRESS
-     - Should Test frontend/backend/both after fix? backend
-     - Blocked on something: None
+  None
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - P1: Build Review Queue UI (Frontend tab for users to review/approve auto-drafted PIs).
-    - P1: Build Feedback Loop (When a human edits an auto-drafted PI, the correction feeds back into the template).
     - P1: Build Rep Overrides management UI (Admin screen to map customers to reps without using DB scripts).
     - P1: Teams Adaptive Card integration (webhook handler for Approve -> BC Sales Order).
     
@@ -50,88 +45,96 @@ A robust Document Hub with a fully functional AP pipeline and a BC Posting Patte
     - P2: Vendor Inventory Dashboard.
     - P2: Product/BOM (Bill of Materials) module.
     - P2: Production-ready email service and Entra ID SSO.
-    - P3: Continue  extraction.
-    - P3: Investigate 205  batch failures.
+    - P3: Continue  extraction (refactoring).
+    - P3: Investigate  batch failures.
 
 **Completed work in this session**
-- Implemented Weighted Dimension Scoring for Invoice Trace (DONE)
-- Implemented Line-by-Line alignment mapping display in frontend  (DONE)
-- Created Batch Trace Endpoint  (DONE)
-- Fixed product candidate selection to accurately map multi-line items (DONE)
-- Added  and  flags to endpoints to gauge true automation readiness (DONE)
+- Built Per-Document Intelligence Engine wired into all  paths (DONE)
+- Built 5 Deep Learning Engines (Extraction, Fingerprints, Accuracy, Maturity, Readiness) (DONE)
+- Built 7 Advanced Learning Engines (Line patterns, Flow, Amounts, Field Rules, Temporal, Errors) (DONE)
+- Wired Deep Learning panels and Maturity scores into  (DONE)
+- Built 4 Validation Gap Closers (Confidence miscalibration handling, PO fuzzy matching, Historical Customer matching, Sales Order cross-referencing) (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-   - Issue 1: FRACHT template missing TARIFF-DS in production simulation (Detailed in Pending Issues).
+None.
 
 **Known issue recurrence from previous fork**
-  - Issue recurrence in previous fork: Universal Key Budget Exceeded
-  - Recurrence count: 1
-  - Status: RESOLVED
+  - Issue recurrence in previous fork: Deployment Context Ignored. 
+  - Recurrence count: 2
+  - Status: RESOLVED (The app runs on an Azure VM via Docker. All code changes made in the pod MUST be pushed via Save to Github before the user can deploy them. Remind the user to click Save to Github when features are ready to be tested).
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
-- **Trace vs Production Mode:**  mode peeks at human invoice lines to find perfect template item mapping.  mode strictly uses the template probabilistic logic (simulating real-world, blind auto-posting).
-- **Auto-Draft Workflow (Phase 2):** Takes OCR extracted data + Vendor Template -> predicts lines -> pushes to BC as a *DRAFT* PI. 
+- **Docker Production Env**: The app runs via Docker Compose on an Azure VM. Always instruct the user to Save to Github before they test in their environment.
+- **Aggressive Continuous Learning**: The system actively changes its own rules. For example, if it detects its 85-95% confidence band has a 50% error rate, it automatically begins flagging 85-95% docs for human review. It also injects discovered field correlation rules into the dynamic AI extraction prompt.
 
 **key DB schema**
-  - : Stores  and template lines with .
+  - Newly created/populated: , , , , .
 
 **changes in tech stack**
-  - None.
+  - No new stack, but 4 new heavy analytical background services added.
 
 **All files of reference** 
--  (Updated with weighted scoring, batch endpoints, and mode switches).
--  (Updated to display alignment pairs and dimension scores).
--  (Agent was reviewing this to start Phase 2 logic).
--  (Agent was reviewing this to wire the Draft PI creation).
+-  
+-  
+-  
+-  
+-  (Hooks everywhere)
+-  
+- 
+-  (Currently being investigated)
 
 **Areas that need refactoring**: 
--  routing extraction is still pending.
+-  is over 7,500 lines. Routing and orchestration logic need separation (P3 task).
 
 **key api endpoints**
--  (Single trace)
--  (Batch trace)
+- 
+- 
+- 
+- 
+- 
 
 **Critical Info for New Agent** 
-- **Production Testing:** The user tests heavily via  commands directly on their live production server. 
-- **Mock Environment:** The preview environment lacks real BC credentials. Endpoints fail gracefully ( or specific mock JSON). **Do not attempt to fix BC authentication in preview.**
-- **Phase 2 Safety Rails:** Phase 2 logic must ONLY create **DRAFT** Purchase Invoices. It must *never* auto-post to the ledger. Apply this logic only to vendors with a historical production match rate of ≥ 90% (REGANIN, OWENS, PEPPER, FEDEX, CELTICI).
+- **DEPLOYMENT WORKFLOW**: When you complete a feature, instruct the user to click the **Save to Github** button in the chat UI, then run  on their Azure VM.
+- **User Intent**: The user is highly engaged with making the AI totally autonomous. They want you to actively find and eliminate any remaining manual interventions or validation failures. 
 
 **documents and test reports created in this job** 
-- None in this specific fork session. Refer to  for historical guidelines.
+-  through 
+- 
 
 **Last 10 User Messages and any pending HUMAN messages** 
-- **User**: Continue tuning. Make it better. Proceed.
-- **Agent**: (Refactored trace diffing to weighted scores and line alignments, added batch endpoint).
-- **User**: [Ran curl batch trace for multiple vendors, output showed OWENS regressing to 71%].
-- **Agent**: (Fixed fallback logic, added trace mode vs production mode to fix regression while providing realistic metrics).
-- **User**: [Ran both trace and production traces. Production showed 5 top vendors at 93-100%, and FRACHT at 80%].
-- **Agent**: (Advised that 5 vendors are ready for Phase 2 Auto-drafting, FRACHT needs separate tuning).
-- **User**: explain the next phase more explicitly...please.
-- **Agent**: (Detailed the Phase 2 Auto-Draft Service, Confidence Gate, Duplicate Guard, and Review queue).
-- **User**: Please proceed as presented.
-- **Agent**: (Began exploring  and  to prepare implementation).
-- *Pending Human Messages*: None. You are clear to immediately begin Phase 2 implementation.
+- **User**: Where else canwe find improvements in the AI
+- **Agent**: (Called ask_human to confirm if user wanted to do this or switch to P1 tasks)
+- **User**: ALL of it
+- **Agent**: Ran bash and grep on  specifically looking at . (Session ended here).
+- *Pending Human Messages*: None. You should continue the agent's line of thought—improving the AI's handling of  and any other document readiness blockers, then present the plan to the user.
 
 **Project Health Check:**
 Broken: None
-Mocked:  (placeholder BC credentials return simulated API structures upon failure).
+Mocked:  (Production Azure VM context).
 
 **3rd Party Integrations** 
-  • OpenAI / Gemini — uses Emergent LLM Key
   • Dynamics 365 BC — requires User API Key
+  • OpenAI / Gemini — uses Emergent LLM Key
   • MS Graph (Email/SharePoint) — requires User API Key
 
 **Testing status**
-  - Testing agent used after significant changes: NO (User was actively verifying via direct  commands on their prod server).
+  - Testing agent used after significant changes: YES (iterations 182 to 186)
   - Troubleshoot agent used after agent stuck in loop: NO
   - Test files created: None
-  - Known regressions: None pending.
+  - Known regressions: None
 
 **Credentials to test flow:**
-- Read  for UI logins ( / ).
+-  ( / ).
 
 **What agent forgot to execute**
-N/A - the agent was right in the middle of exploring files to begin the exact task the user approved. Proceed immediately with Task 1 (Phase 2).</analysis>
+The agent did not finish implementing the final open-ended request (Where else can we find improvements - of it). It started inspecting  in the readiness service but did not write the solution.
+
+**Debugging checklist for current issue**
+    Issue: Implement further AI improvements/learning to handle remaining blockers (e.g., ).
+    Backend files to check: 
+    -  (Lines ~100-200 and ~350-450)
+    -  (To see where  is flagged on ingestion)
+    -  (Good place to integrate the new intelligence)</analysis>

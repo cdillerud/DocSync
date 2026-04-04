@@ -53,7 +53,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://continuous-learn-2.preview.emergentagent.com"
+    "api_url": "https://readiness-intel-1.preview.emergentagent.com"
   },
   "seed_data_used": "Hormel (warn_only policy): SPAM-12OZ, SPAM-LITE, DINTY-15OZ across GPI-MAIN/GPI-WEST with movements (opening_balance, receipt, order_commitment). Karlin (block_commitment policy): COFFEE-LB. Incoming supply: 300 SPAM-12OZ expected.",
   "retest_needed": false,

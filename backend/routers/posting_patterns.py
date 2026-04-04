@@ -3478,5 +3478,170 @@ async def run_intelligence_backfill():
     except Exception as e:
         results["duplicate_clear"] = {"error": str(e)}
 
+    # 5. PO Gap Re-validation — re-run PO matching on documents with po_validation failures
+    try:
+        results["po_revalidation"] = await _batch_revalidate_po_gaps(db, limit=200)
+    except Exception as e:
+        results["po_revalidation"] = {"error": str(e)}
+
     return results
+
+
+async def _batch_revalidate_po_gaps(db, limit: int = 200) -> dict:
+    """
+    Re-run PO matching on documents with po_validation gaps.
+    Uses the enhanced PO intelligence (reverse vendor lookup, substring matching,
+    bigram similarity) to find matches that the original pass missed.
+    """
+    import httpx
+    import logging
+    logger = logging.getLogger("po_revalidation")
+
+    # Find docs with failed po_validation checks that aren't already completed
+    po_gap_docs = await db.hub_documents.find(
+        {
+            "validation_results.checks": {
+                "$elemMatch": {"check_name": "po_validation", "passed": False}
+            },
+            "status": {"$nin": ["Completed", "Posted", "Deleted", "Archived"]},
+        },
+        {
+            "_id": 0, "id": 1, "bc_vendor_number": 1, "vendor_no": 1, "matched_vendor_no": 1,
+            "extracted_fields": 1, "validation_results": 1,
+        }
+    ).limit(limit).to_list(limit)
+
+    if not po_gap_docs:
+        return {"found": 0, "resolved": 0, "message": "No PO validation gaps found"}
+
+    # Get BC adapter for token + API URL
+    try:
+        from services.bc_access import get_bc_adapter
+        adapter = get_bc_adapter()
+        token = await adapter.get_token()
+        if not token:
+            return {"found": len(po_gap_docs), "resolved": 0, "error": "Cannot get BC token"}
+        company_id = await adapter.get_company_id(token)
+        if not company_id:
+            return {"found": len(po_gap_docs), "resolved": 0, "error": "Cannot get BC company ID"}
+    except Exception as e:
+        return {"found": len(po_gap_docs), "resolved": 0, "error": f"BC access failed: {e}"}
+
+    from services.gap_closer_service import enhance_po_candidates
+
+    resolved = 0
+    errors = 0
+
+    async with httpx.AsyncClient(timeout=15.0) as c:
+        for doc in po_gap_docs:
+            doc_id = doc.get("id", "")
+            vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or doc.get("matched_vendor_no") or ""
+            extracted = doc.get("extracted_fields") or {}
+            validation = doc.get("validation_results") or {}
+
+            # Gather all PO candidates from the document
+            original_candidates = []
+            for field in ["po_number", "order_number", "reference_number", "purchase_order"]:
+                val = extracted.get(field, "")
+                if val and str(val).strip():
+                    original_candidates.append(str(val).strip())
+
+            if not original_candidates and not vendor_no:
+                continue
+
+            try:
+                # Expand PO candidates with enhanced intelligence
+                expanded = await enhance_po_candidates(db, vendor_no, original_candidates)
+
+                # Deduplicate against already-tried POs
+                already_tried = set()
+                for check in validation.get("checks", []):
+                    if check.get("check_name") == "po_validation":
+                        details = check.get("details", "")
+                        if "'" in details:
+                            parts = details.split("'")
+                            if len(parts) >= 2:
+                                already_tried.add(parts[1])
+
+                new_candidates = [p for p in expanded if p not in already_tried]
+                if not new_candidates:
+                    continue
+
+                # Try each new candidate against BC
+                matched_po = None
+                for candidate in new_candidates:
+                    try:
+                        resp = await c.get(
+                            adapter.api_url("purchaseOrders", company_id),
+                            headers={"Authorization": f"Bearer {token}"},
+                            params={"$filter": f"number eq '{candidate.replace(chr(39), chr(39)+chr(39))}'"},
+                        )
+                        if resp.status_code == 200:
+                            pos = resp.json().get("value", [])
+                            if pos:
+                                matched_po = candidate
+                                break
+                    except Exception:
+                        continue
+
+                if matched_po:
+                    # Update the document — replace the failed PO check with success
+                    new_checks = [
+                        ch for ch in validation.get("checks", [])
+                        if ch.get("check_name") != "po_validation"
+                    ]
+                    new_checks.append({
+                        "check_name": "po_validation",
+                        "passed": True,
+                        "details": f"Found PO: {matched_po} (re-validated via enhanced intelligence)",
+                        "required": True,
+                    })
+
+                    all_passed = all(ch.get("passed", True) for ch in new_checks)
+
+                    update_set = {
+                        "validation_results.checks": new_checks,
+                        "validation_results.all_passed": all_passed,
+                        "validation_results.po_match": True,
+                        "validation_results.matched_po": matched_po,
+                        "po_revalidated_at": _now(),
+                        "po_revalidated_via": "intelligence_backfill",
+                        "extracted_fields.po_number": matched_po,
+                    }
+
+                    await db.hub_documents.update_one(
+                        {"id": doc_id},
+                        {"$set": update_set}
+                    )
+
+                    # Remove from validation gap log
+                    await db.validation_gap_log.delete_many({"doc_id": doc_id, "failure_checks": "po_validation"})
+
+                    resolved += 1
+                    logger.info(
+                        "[PO-Reval] doc=%s vendor=%s — RESOLVED with PO '%s'",
+                        doc_id[:8], vendor_no, matched_po,
+                    )
+            except Exception as e:
+                errors += 1
+                logger.debug("[PO-Reval] Error for %s: %s", doc_id[:8], e)
+
+    logger.info("[PO-Reval] Batch complete: %d found, %d resolved, %d errors", len(po_gap_docs), resolved, errors)
+    return {
+        "found": len(po_gap_docs),
+        "resolved": resolved,
+        "errors": errors,
+    }
+
+    logger.info("[PO-Reval] Batch complete: %d found, %d resolved, %d errors", len(po_gap_docs), resolved, errors)
+    return {
+        "found": len(po_gap_docs),
+        "resolved": resolved,
+        "errors": errors,
+    }
+
+
+def _now():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
 

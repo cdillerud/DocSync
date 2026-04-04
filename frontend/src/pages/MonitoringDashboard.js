@@ -140,7 +140,7 @@ export default function MonitoringDashboard() {
         <Card className="border-emerald-500/30 bg-emerald-500/5" data-testid="backfill-result">
           <CardContent className="p-4">
             <p className="text-sm font-medium mb-2">Intelligence Backfill Complete</p>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
               <div>
                 <p className="text-muted-foreground">Escalation Tracked</p>
                 <p className="font-bold">{backfillResult.escalation_backfill?.tracked || 0} docs</p>
@@ -159,6 +159,10 @@ export default function MonitoringDashboard() {
               <div>
                 <p className="text-muted-foreground">Dups Cleared</p>
                 <p className="font-bold">{backfillResult.duplicate_clear?.cleared || 0} docs</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">PO Gaps Resolved</p>
+                <p className="font-bold text-emerald-400">{backfillResult.po_revalidation?.resolved || 0} / {backfillResult.po_revalidation?.found || 0}</p>
               </div>
             </div>
           </CardContent>

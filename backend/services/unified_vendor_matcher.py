@@ -164,8 +164,9 @@ class UnifiedVendorMatcher:
                 result["best_match"].get("name", "") if result["best_match"] else vendor_name
             )
         
-        # Cache result
-        self._cache[cache_key] = result
+        # Cache result — only cache positive matches to avoid persisting transient failures
+        if result["matched"]:
+            self._cache[cache_key] = result
         
         # Store successful match for future lookups
         if result["matched"]:

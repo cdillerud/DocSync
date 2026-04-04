@@ -133,6 +133,49 @@ class StableVendorService:
         checks = []
         score_components = []
 
+        # Check 0: Posting template confidence override
+        # If a vendor has a high-confidence posting template from the BC Posting Pattern Analyzer,
+        # they are proven stable for auto-drafting (93-100% production match rate).
+        # This overrides low all-time stats from historical failures.
+        vendor_no = profile.get("vendor_no") or profile.get("bc_vendor_no") or ""
+        posting_template_boost = False
+        if vendor_no and self.db:
+            try:
+                posting_analysis = await self.db.posting_pattern_analysis.find_one(
+                    {"vendor_no": vendor_no, "status": "analyzed"},
+                    {"_id": 0, "posting_template.confidence": 1, "invoices_analyzed": 1}
+                )
+                if posting_analysis:
+                    pt_confidence = posting_analysis.get("posting_template", {}).get("confidence", "low")
+                    pt_invoices = posting_analysis.get("invoices_analyzed", 0)
+                    if pt_confidence == "high" and pt_invoices >= 10:
+                        posting_template_boost = True
+                        reasons.append(f"Posting template override: {pt_confidence} confidence, {pt_invoices} BC invoices analyzed")
+                        score_components.append(0.85)
+                        checks.append({
+                            "check": "posting_template_confidence",
+                            "passed": True,
+                            "value": pt_confidence,
+                            "threshold": "high",
+                            "detail": f"{pt_invoices} invoices analyzed",
+                        })
+            except Exception as e:
+                logger.debug("Posting template lookup failed for %s: %s", vendor_no, e)
+
+        if posting_template_boost:
+            return {
+                "stable_vendor_flag": True,
+                "stable_vendor_score": round(sum(score_components), 4),
+                "stable_vendor_last_evaluated": datetime.now(timezone.utc).isoformat(),
+                "vendor_id": vendor_id,
+                "vendor_name": profile.get("vendor_name", vendor_id),
+                "vendor_no": vendor_no,
+                "invoice_count": profile.get("invoice_count", 0),
+                "checks": checks,
+                "reasons": reasons,
+                "posting_template_override": True,
+            }
+
         # Check 1: Document volume
         doc_count = profile.get("invoice_count", 0)
         min_docs = cfg["min_documents_processed"]

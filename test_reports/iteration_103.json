@@ -67,7 +67,7 @@
   },
   "test_credentials": {
     "auth": "admin / admin",
-    "api_url": "https://ap-learning-dash.preview.emergentagent.com"
+    "api_url": "https://continuous-learn-2.preview.emergentagent.com"
   },
   "seed_data_created": {},
   "retest_needed": false,

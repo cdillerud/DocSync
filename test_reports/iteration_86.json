@@ -62,7 +62,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://ap-learning-dash.preview.emergentagent.com"
+    "api_url": "https://continuous-learn-2.preview.emergentagent.com"
   },
   "seed_data_used": {
     "existing_so": "SO-TEST-DROP-001 (drop-ship SO with approved approval)",

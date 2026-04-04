@@ -74,7 +74,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://ap-learning-dash.preview.emergentagent.com"
+    "api_url": "https://continuous-learn-2.preview.emergentagent.com"
   },
   "seed_data_used": "Used existing Hormel Foods workspace (customer_id: 366bfcce-4d68-4daf-b9f4-cb05a35de8c8). Draft PO-DRAFT-20260314163256-689B67 (already had vendor V10045/Acme Bottle Supply). Draft PO-DRAFT-20260314170144-8ED5A8 used for BC export testing. Test vendor UI-TEST-V001/UI Test Vendor Inc assigned during frontend testing.",
   "retest_needed": false,

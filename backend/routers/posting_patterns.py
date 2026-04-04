@@ -3003,3 +3003,104 @@ async def backfill_per_document_learning(
     else:
         result = await _backfill()
         return result
+
+
+
+# =============================================================================
+# Deep Learning Engine — Advanced Intelligence APIs
+# =============================================================================
+
+@router.get("/deep-learning/summary")
+async def get_deep_learning_summary():
+    """Complete summary of all 5 deep learning engines."""
+    from deps import get_db
+    from services.deep_learning_engine import get_deep_learning_summary as _get_summary
+    db = get_db()
+    return await _get_summary(db)
+
+
+@router.get("/deep-learning/extraction-patterns/{vendor_no}")
+async def get_extraction_patterns(vendor_no: str):
+    """Get learned extraction patterns for a specific vendor."""
+    from deps import get_db
+    db = get_db()
+    pattern = await db.extraction_patterns.find_one(
+        {"vendor_no": vendor_no}, {"_id": 0}
+    )
+    if not pattern:
+        return {"vendor_no": vendor_no, "message": "No extraction patterns learned yet"}
+    return pattern
+
+
+@router.get("/deep-learning/extraction-hints/{vendor_no}")
+async def get_extraction_hints(vendor_no: str):
+    """Get extraction hints for the AI pipeline based on learned patterns."""
+    from deps import get_db
+    from services.deep_learning_engine import get_extraction_hints_for_vendor
+    db = get_db()
+    return await get_extraction_hints_for_vendor(db, vendor_no)
+
+
+@router.post("/deep-learning/find-similar/{doc_id}")
+async def find_similar_documents(doc_id: str):
+    """Find documents most similar to a given document."""
+    from deps import get_db
+    from services.deep_learning_engine import find_similar_documents as _find_similar
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        return {"error": "Document not found"}
+    results = await _find_similar(db, doc)
+    return {"doc_id": doc_id, "similar_documents": results}
+
+
+@router.post("/deep-learning/self-correction/run")
+async def run_self_correction(
+    sample_size: int = Query(50, description="Number of documents to audit"),
+):
+    """Run a self-correction audit — spot-check auto-filed decisions."""
+    from deps import get_db
+    from services.deep_learning_engine import run_self_correction_audit
+    db = get_db()
+    return await run_self_correction_audit(db, sample_size)
+
+
+@router.get("/deep-learning/self-correction/history")
+async def get_self_correction_history():
+    """Get history of self-correction audits."""
+    from deps import get_db
+    from services.deep_learning_engine import get_self_correction_history as _get_history
+    db = get_db()
+    return await _get_history(db)
+
+
+@router.get("/deep-learning/vendor-maturity/{vendor_no}")
+async def get_vendor_maturity(vendor_no: str):
+    """Get multi-dimensional maturity score for a vendor."""
+    from deps import get_db
+    from services.deep_learning_engine import compute_vendor_maturity
+    db = get_db()
+    return await compute_vendor_maturity(db, vendor_no)
+
+
+@router.post("/deep-learning/vendor-maturity/compute-all")
+async def compute_all_maturity(background_tasks: BackgroundTasks):
+    """Compute maturity scores for all vendors."""
+    from deps import get_db
+    from services.deep_learning_engine import compute_all_vendor_maturity
+    db = get_db()
+
+    async def _compute():
+        return await compute_all_vendor_maturity(db)
+
+    background_tasks.add_task(_compute)
+    return {"message": "Computing maturity scores for all vendors", "async": True}
+
+
+@router.post("/deep-learning/predict-readiness/{doc_id}")
+async def predict_document_readiness(doc_id: str):
+    """Predict whether a document will need human review."""
+    from deps import get_db
+    from services.deep_learning_engine import predict_and_store
+    db = get_db()
+    return await predict_and_store(db, doc_id)

@@ -569,6 +569,15 @@ async def learn_from_document(db, doc_id: str, trigger: str = "ingestion"):
         {k: "ok" if v == "ok" else "err" for k, v in results["dimensions"].items()},
     )
 
+    # === DEEP LEARNING: Run all 5 advanced engines ===
+    try:
+        from services.deep_learning_engine import run_deep_learning
+        deep_results = await run_deep_learning(db, doc_id, trigger)
+        results["deep_learning"] = deep_results
+    except Exception as e:
+        results["deep_learning"] = {"error": str(e)}
+        logger.debug("[PerDocLearn] Deep learning for %s: %s", doc_id[:8], e)
+
     return results
 
 

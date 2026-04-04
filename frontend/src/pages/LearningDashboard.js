@@ -5,7 +5,8 @@ import { Badge } from '../components/ui/badge';
 import {
   Brain, RefreshCw, TrendingUp, CheckCircle2, AlertTriangle,
   Zap, BookOpen, ArrowRight, Activity, Database, Loader2,
-  RotateCcw, Sparkles
+  RotateCcw, Sparkles, Shield, Fingerprint, Target, Gauge,
+  Eye, Search, BarChart3, GitBranch
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -239,6 +240,265 @@ function ReEvaluateSection({ onComplete }) {
                       {v.signals.map((s, j) => (
                         <Badge key={j} variant="outline" className="text-xs text-violet-400 border-violet-500/30">{s}</Badge>
                       ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+const maturityColors = {
+  mastered: 'bg-emerald-500 text-white',
+  proficient: 'bg-blue-500 text-white',
+  developing: 'bg-amber-500 text-white',
+  learning: 'bg-orange-500 text-white',
+  novice: 'bg-red-500/80 text-white',
+  unknown: 'bg-muted text-muted-foreground',
+};
+
+const maturityIcons = {
+  mastered: '5',
+  proficient: '4',
+  developing: '3',
+  learning: '2',
+  novice: '1',
+};
+
+function DeepLearningSection() {
+  const [summary, setSummary] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [selfCorrecting, setSelfCorrecting] = useState(false);
+  const [computingMaturity, setComputingMaturity] = useState(false);
+  const [auditResult, setAuditResult] = useState(null);
+
+  const fetchSummary = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/posting-patterns/deep-learning/summary`);
+      if (res.ok) setSummary(await res.json());
+    } catch (err) { console.error(err); }
+    setLoading(false);
+  };
+
+  const runSelfCorrection = async () => {
+    setSelfCorrecting(true);
+    try {
+      const res = await fetch(`${API}/api/posting-patterns/deep-learning/self-correction/run?sample_size=100`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        setAuditResult(data);
+        toast.success(`Self-correction: ${data.audited} audited, ${data.drifts} drifts found (${(data.drift_rate * 100).toFixed(1)}%)`);
+        fetchSummary();
+      }
+    } catch { toast.error('Self-correction failed'); }
+    setSelfCorrecting(false);
+  };
+
+  const computeMaturity = async () => {
+    setComputingMaturity(true);
+    try {
+      const res = await fetch(`${API}/api/posting-patterns/deep-learning/vendor-maturity/compute-all`, { method: 'POST' });
+      if (res.ok) {
+        toast.success('Vendor maturity computation started');
+        setTimeout(fetchSummary, 3000);
+      }
+    } catch { toast.error('Maturity computation failed'); }
+    setComputingMaturity(false);
+  };
+
+  useEffect(() => { fetchSummary(); }, []);
+
+  const ep = summary?.extraction_patterns;
+  const sc = summary?.self_correction;
+  const vm = summary?.vendor_maturity;
+  const pr = summary?.predictive_readiness;
+  const ds = summary?.document_similarity;
+
+  return (
+    <Card data-testid="deep-learning-section">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Brain className="w-4 h-4 text-violet-500" />
+            Deep Learning Engine
+          </CardTitle>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={fetchSummary} disabled={loading} data-testid="refresh-deep-btn">
+              <RefreshCw className={`w-3 h-3 mr-1 ${loading ? 'animate-spin' : ''}`} />Refresh
+            </Button>
+            <Button variant="secondary" size="sm" onClick={runSelfCorrection} disabled={selfCorrecting} data-testid="self-correction-btn">
+              {selfCorrecting ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Shield className="w-3 h-3 mr-1" />}
+              Self-Correct
+            </Button>
+            <Button variant="secondary" size="sm" onClick={computeMaturity} disabled={computingMaturity} data-testid="compute-maturity-btn">
+              {computingMaturity ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Gauge className="w-3 h-3 mr-1" />}
+              Score Vendors
+            </Button>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          5 advanced intelligence layers: extraction patterns, document similarity, self-correction, vendor maturity, predictive readiness.
+        </p>
+      </CardHeader>
+      <CardContent>
+        {loading && !summary ? (
+          <div className="flex justify-center py-6"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
+        ) : !summary ? (
+          <p className="text-sm text-muted-foreground text-center py-4">No deep learning data yet. Process documents to start learning.</p>
+        ) : (
+          <div className="space-y-5">
+            {/* 5 Engine KPIs */}
+            <div className="grid grid-cols-5 gap-3">
+              <div className="text-center p-3 rounded bg-muted/50" data-testid="deep-kpi-patterns">
+                <Fingerprint className="w-4 h-4 mx-auto mb-1 text-cyan-500" />
+                <p className="text-xl font-bold">{ep?.vendors_tracked || 0}</p>
+                <p className="text-[10px] text-muted-foreground">Extraction Patterns</p>
+              </div>
+              <div className="text-center p-3 rounded bg-muted/50" data-testid="deep-kpi-fingerprints">
+                <Search className="w-4 h-4 mx-auto mb-1 text-amber-500" />
+                <p className="text-xl font-bold">{ds?.fingerprints_stored || 0}</p>
+                <p className="text-[10px] text-muted-foreground">Doc Fingerprints</p>
+              </div>
+              <div className="text-center p-3 rounded bg-muted/50" data-testid="deep-kpi-audits">
+                <Shield className="w-4 h-4 mx-auto mb-1 text-emerald-500" />
+                <p className="text-xl font-bold">{sc?.latest_audit ? `${((1 - sc.latest_audit.drift_rate) * 100).toFixed(0)}%` : '--'}</p>
+                <p className="text-[10px] text-muted-foreground">Decision Accuracy</p>
+              </div>
+              <div className="text-center p-3 rounded bg-muted/50" data-testid="deep-kpi-maturity">
+                <Gauge className="w-4 h-4 mx-auto mb-1 text-violet-500" />
+                <p className="text-xl font-bold">{Object.values(vm?.levels || {}).reduce((a, b) => a + b, 0)}</p>
+                <p className="text-[10px] text-muted-foreground">Vendors Scored</p>
+              </div>
+              <div className="text-center p-3 rounded bg-muted/50" data-testid="deep-kpi-predictions">
+                <Eye className="w-4 h-4 mx-auto mb-1 text-rose-500" />
+                <p className="text-xl font-bold">{pr?.predictions_made || 0}</p>
+                <p className="text-[10px] text-muted-foreground">Predictions Made</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Extraction Patterns — Top Vendors */}
+              {ep?.top_vendors?.length > 0 && (
+                <div data-testid="deep-extraction-patterns">
+                  <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
+                    <Fingerprint className="w-3 h-3" /> Extraction Pattern Mastery
+                  </p>
+                  <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
+                    {ep.top_vendors.map((v, i) => (
+                      <div key={i} className="flex items-center gap-2 p-2 rounded bg-muted/50 text-xs">
+                        <span className="font-mono font-medium w-20 truncate">{v.vendor_no}</span>
+                        <span className="text-muted-foreground truncate flex-1">{v.vendor_name}</span>
+                        <span className="font-medium">{v.documents} docs</span>
+                        <div className="flex items-center gap-1">
+                          <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
+                            <div className="h-full bg-cyan-500 rounded-full"
+                                 style={{ width: `${v.total_fields > 0 ? (v.reliable_fields / v.total_fields) * 100 : 0}%` }} />
+                          </div>
+                          <span className="text-[10px] text-muted-foreground">{v.reliable_fields}/{v.total_fields}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Vendor Maturity Levels */}
+              {vm?.levels && Object.keys(vm.levels).length > 0 && (
+                <div data-testid="deep-vendor-maturity">
+                  <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
+                    <Gauge className="w-3 h-3" /> Vendor Maturity Distribution
+                  </p>
+                  <div className="flex gap-2 mb-3">
+                    {['mastered', 'proficient', 'developing', 'learning', 'novice'].map(level => (
+                      <div key={level} className="text-center flex-1">
+                        <div className={`rounded px-2 py-1.5 ${maturityColors[level]}`}>
+                          <p className="text-lg font-bold">{vm.levels[level] || 0}</p>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground mt-1 capitalize">{level}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {vm.top_vendors?.length > 0 && (
+                    <div className="space-y-1 max-h-[120px] overflow-y-auto">
+                      {vm.top_vendors.slice(0, 6).map((v, i) => (
+                        <div key={i} className="flex items-center gap-2 text-xs px-2 py-1 rounded bg-muted/30">
+                          <Badge className={`text-[10px] ${maturityColors[v.level]}`}>{v.level}</Badge>
+                          <span className="font-mono">{v.vendor_no}</span>
+                          <span className="text-muted-foreground truncate flex-1">{v.vendor_name}</span>
+                          <span className="font-medium">{v.score}/100</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Self-Correction Results */}
+            {(auditResult || sc?.latest_audit) && (
+              <div data-testid="deep-self-correction">
+                <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
+                  <Shield className="w-3 h-3" /> Self-Correction Audit
+                </p>
+                {(() => {
+                  const a = auditResult || sc?.latest_audit || {};
+                  const driftRate = a.drift_rate || 0;
+                  return (
+                    <div className="p-3 rounded bg-muted/50">
+                      <div className="flex items-center gap-4 mb-2">
+                        <div>
+                          <p className="text-2xl font-bold text-emerald-500">{a.audited || a.confirmations || 0}</p>
+                          <p className="text-[10px] text-muted-foreground">Docs Audited</p>
+                        </div>
+                        <div>
+                          <p className={`text-2xl font-bold ${driftRate > 0.1 ? 'text-amber-500' : 'text-emerald-500'}`}>
+                            {(a.drifts || a.drift_count || 0)}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground">Drifts Found</p>
+                        </div>
+                        <div>
+                          <p className={`text-2xl font-bold ${driftRate > 0.1 ? 'text-amber-500' : 'text-emerald-500'}`}>
+                            {((1 - driftRate) * 100).toFixed(1)}%
+                          </p>
+                          <p className="text-[10px] text-muted-foreground">Decision Accuracy</p>
+                        </div>
+                        <p className="text-xs text-muted-foreground ml-auto">
+                          {a.run_at ? `Last run: ${new Date(a.run_at).toLocaleString()}` : ''}
+                        </p>
+                      </div>
+                      {a.drift_details?.length > 0 && (
+                        <div className="space-y-1 max-h-[100px] overflow-y-auto">
+                          {a.drift_details.slice(0, 5).map((d, i) => (
+                            <div key={i} className="flex items-center gap-2 text-xs px-2 py-1 rounded bg-background/50">
+                              <Badge variant="destructive" className="text-[10px]">drift</Badge>
+                              <span className="font-mono">{(d.doc_id || '').substring(0, 12)}</span>
+                              <span className="text-muted-foreground truncate">{d.drift_reason}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* Predictive Readiness */}
+            {pr && pr.predictions_made > 0 && (
+              <div data-testid="deep-predictions">
+                <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
+                  <Eye className="w-3 h-3" /> Predictive Readiness Breakdown
+                </p>
+                <div className="flex gap-3">
+                  {Object.entries(pr.breakdown || {}).map(([rec, count]) => (
+                    <div key={rec} className="text-center px-4 py-2 rounded bg-muted/50">
+                      <p className="text-lg font-bold">{count}</p>
+                      <p className="text-[10px] text-muted-foreground">{rec.replace(/_/g, ' ')}</p>
                     </div>
                   ))}
                 </div>
@@ -713,6 +973,9 @@ export default function LearningDashboard() {
 
       {/* Per-Document Intelligence Pulse */}
       <LearningPulseSection />
+
+      {/* Deep Learning Engine */}
+      <DeepLearningSection />
 
       {/* Batch Re-evaluate Section */}
       <ReEvaluateSection onComplete={fetchData} />

@@ -1870,6 +1870,16 @@ async def on_document_ingested(doc_id: str, source: str = "unknown"):
         except Exception as pdl_err:
             logger.debug("[PerDocLearn] Ingestion learning for %s: %s", doc_id[:8], pdl_err)
 
+        # === PREDICTIVE READINESS: Predict if this doc will need human review ===
+        try:
+            from services.deep_learning_engine import predict_and_store
+            prediction = await predict_and_store(db, doc_id)
+            pred_rec = prediction.get("recommendation", "unknown")
+            logger.info("[PredictiveReadiness] doc=%s recommendation=%s prob=%.2f",
+                        doc_id[:8], pred_rec, prediction.get("review_probability", 0))
+        except Exception as pred_err:
+            logger.debug("[PredictiveReadiness] Prediction for %s: %s", doc_id[:8], pred_err)
+
         # Auto-file check: if this doc type + vendor pattern has been filed enough times, auto-clear it
         # SAFETY: Must still pass PO validation checks — never auto-file if PO is missing from BC
         if new_status == "NeedsReview":
@@ -7473,6 +7483,25 @@ async def startup():
             await asyncio.sleep(2 * 3600)  # Every 2 hours
     asyncio.create_task(_draft_feedback_sync_scheduler())
     logger.info("Draft Feedback Sync + Continuous Learning scheduler started (interval: 2h)")
+
+    # === Deep Learning: Self-Correction + Vendor Maturity (every 4 hours) ===
+    async def _deep_learning_scheduler():
+        await asyncio.sleep(300)  # Initial delay: 5 minutes
+        while True:
+            try:
+                logger.info("[DeepLearning] Running scheduled self-correction audit + vendor maturity...")
+                from services.deep_learning_engine import run_self_correction_audit, compute_all_vendor_maturity
+                audit = await run_self_correction_audit(db, sample_size=100)
+                logger.info("[DeepLearning] Self-correction: %d audited, %d drifts (%.1f%%)",
+                            audit.get("audited", 0), audit.get("drifts", 0), audit.get("drift_rate", 0) * 100)
+                maturity = await compute_all_vendor_maturity(db)
+                logger.info("[DeepLearning] Vendor maturity: %d vendors scored, levels=%s",
+                            maturity.get("computed", 0), maturity.get("levels", {}))
+            except Exception as e:
+                logger.warning("[DeepLearning] Scheduled deep learning failed: %s", e)
+            await asyncio.sleep(4 * 3600)  # Every 4 hours
+    asyncio.create_task(_deep_learning_scheduler())
+    logger.info("Deep Learning scheduler started (self-correction + vendor maturity, interval: 4h)")
 
 async def shutdown_db_client():
     global _email_polling_task, _sales_polling_task, _dynamic_mailbox_polling_task, _pilot_summary_task

@@ -457,6 +457,32 @@ async def stage_classify_llm(
         except Exception as e:
             logger.debug("[CLASSIFY:LLM] Classification context injection failed: %s", e)
 
+        # 4. Deep Learning: Extraction pattern hints — learned field expectations per vendor
+        try:
+            from services.deep_learning_engine import get_extraction_hints_for_vendor
+            from deps import get_db
+            hint_db = get_db()
+            hint_vendor = vendor_id or vendor_name
+            if hint_vendor:
+                hints = await get_extraction_hints_for_vendor(hint_db, hint_vendor)
+                if hints.get("reliable_fields") or hints.get("expected_fields"):
+                    hint_text = "\n\n## LEARNED EXTRACTION PATTERNS (from previous documents):\n"
+                    if hints.get("reliable_fields"):
+                        hint_text += f"Fields ALWAYS present for this vendor: {', '.join(hints['reliable_fields'])}\n"
+                    if hints.get("expected_fields"):
+                        hint_text += f"Fields SOMETIMES present: {', '.join(hints['expected_fields'])}\n"
+                    if hints.get("line_item_expectations"):
+                        le = hints["line_item_expectations"]
+                        hint_text += f"Typical line items: ~{le.get('typical_count', 'unknown')} items"
+                        if le.get("usually_has_amounts"):
+                            hint_text += " (with amounts)"
+                        hint_text += "\n"
+                    hint_text += "Use these patterns to guide your extraction — look for these fields specifically.\n"
+                    dynamic_prompt += hint_text
+                    logger.info("[CLASSIFY:LLM] Injected deep learning extraction hints for %s", hint_vendor)
+        except Exception as e:
+            logger.debug("[CLASSIFY:LLM] Deep learning hint injection failed: %s", e)
+
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=f"classify-{uuid.uuid4()}",

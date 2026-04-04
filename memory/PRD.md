@@ -1,73 +1,71 @@
 # GPI Document Hub — Product Requirements
 
-## Core Philosophy
-**Learn -> Apply -> Improve -> Learn.** Every document processed, every correction, every interaction makes the system smarter.
+## Original Problem Statement
+Enterprise document processing hub for AP/Sales workflows with Dynamics 365 BC integration. AI-powered classification, validation, routing, and continuous learning.
 
-## Architecture
-- **Backend**: FastAPI (Python) on port 8001
-- **Frontend**: React on port 3000
-- **Database**: MongoDB (gpi_document_hub)
-- **Integrations**: Gemini (Emergent LLM Key), Dynamics 365 BC, MS Graph (Email/SharePoint)
+## Core Architecture
+- **Frontend**: React + Tailwind + Shadcn/UI
+- **Backend**: FastAPI + MongoDB + Background Schedulers
+- **Integrations**: Dynamics 365 BC, OpenAI/Gemini (Emergent LLM Key), MS Graph
 
-## What's Implemented
+## What's Been Implemented
 
-### Core Features (Complete)
-- Document ingestion, AI extraction, classification, vendor matching, auto-post
-- Intake Benchmark, SharePoint preview, Email polling, Event emission
+### Phase 1 — Document Ingestion & Classification
+- Multi-source ingestion (SharePoint, upload, email)
+- AI classification pipeline with feedback loop
+- Vendor matching and PO validation
 
-### AP Auto-Post Pipeline (Complete)
-### Knowledge Intelligence (Complete)
-### Post-LLM Refinement Pipeline (Complete - Feb 2026)
-### Feedback Loop Fix (Complete - Feb 2026)
-### LLM Learning Pipeline Gap Fixes (Complete - Apr 2026)
-### Comparison Delta Scoring (Complete - Feb 2026)
-### Intelligent Multi-Page Document Splitting (Complete)
-### Bulk Reprocess & Comparison (Complete)
-### Manual PO Override (Complete - Feb 2026)
-### Derived State Vendor/PO Fix (Complete - Apr 2026)
-### BC Posting Pattern Analyzer (Complete - Apr 2026)
-### Expanded BC Data Ingestion (Complete - Apr 2026)
-### Invoice Trace Comparison (Enhanced - Apr 2026)
-### Posting Pattern Analyzer Tightening (Complete - Apr 2026)
+### Phase 2 — AP Module
+- Purchase Invoice auto-drafting to BC sandbox
+- Posting pattern analysis and templates
+- Review Queue for auto-drafted PIs
 
-### BC Auto-Post Phase 2: Template-Driven Draft Creation (Complete - Apr 2026)
-- Auto-Post Settings, Ready Queue, Draft PI Preview, Create Draft PI
-- Confidence-Gated Auto-Draft, Posting Template Override
+### Phase 3 — Sales Module
+- Sales order processing
+- Customer matching
+- Rep assignment logic
 
-### AI Learning Dashboard (Complete - Apr 2026)
-- `/ai-learning` — Proof of AI learning with stats, template confidence, label corrections, vendor activity, auto-drafts, recent events
+### Phase 4 — Continuous Learning (Complete)
+- Learning Dashboard UI with proof of AI learning
+- Review Queue UI for draft PIs
+- Feedback Loop: BC edits sync back into AI templates
+- Readiness Signal Contradiction fixes with self-learning
+- Batch Re-evaluation Engine
+- 4 Continuous Learning Engines (Draft Detection, Cross-Vendor Propagation, Confidence Auto-Promotion, Extraction Feedback Loop)
 
-### Draft Review Queue (Complete - Apr 2026)
-- `/review-queue` — Review, approve, correct auto-drafted PIs with feedback loop
+### Phase 5 — Per-Document Intelligence Engine (Complete — Apr 4, 2026)
+**Every document now makes the AI smarter.** 6 learning dimensions:
+1. **Outcome Recording** — Full lifecycle tracking per document
+2. **Real-Time Vendor Intelligence** — Per-vendor accuracy, auto-validation rate, correction rate, confidence gap
+3. **Confidence Calibration** — AI confidence vs actual outcome by band (0-50%, 50-70%, 70-85%, 85-95%, 95-100%)
+4. **Positive Reinforcement** — Successes reinforce classification, vendor aliases, extraction patterns, posting templates
+5. **Validation Gap Analysis** — WHY high-confidence docs fail (per vendor, per check)
+6. **Extraction Accuracy Tracking** — Per-field, per-vendor accuracy
 
-### Feedback Loop — BC Draft Sync & Template Adjustment (Complete - Apr 2026)
-- Original draft line storage, BC sync, diff engine, template adjustment
-- Auto-scheduled every 2h via background task
-- Nav badge with 60s polling
+**Wired into every document path:**
+- Ingestion, Classification, Auto-file, File & Clear, Bulk File
+- Approval, Rejection, BC Posting, Field Edits, Manual Linking, Pipeline
 
-### Readiness Signal Contradiction Fix (Complete - Apr 2026)
-- **Bug 1**: `duplicate_risk` now checks BC validation `duplicate_check` first — stale `possible_duplicate` flags from ingestion are overridden when BC confirmed "No duplicate found"
-- **Bug 2**: `po_resolved` for AP_Invoices now checks BC validation `po_check` — field-presence-only "resolved" overridden to False when BC says PO not found
-- **Automation Intelligence**: `_duplicate_risk_score()` also respects BC validation
-- **Self-Learning**: `evaluate_and_persist()` detects contradictions and records `readiness_contradiction_fix` learning events
+**New Collections:** document_outcomes, vendor_realtime_intelligence, confidence_calibration, validation_gap_log, field_accuracy_tracking
 
-### Batch Re-evaluate & Learn (Complete - Apr 2026)
-- **Service**: `batch_reevaluate_all()` re-evaluates ALL non-duplicate documents using learning-aware `evaluate_and_persist()`
-- **Endpoint**: `POST /api/readiness/reevaluate-all?limit=500`
-- **Returns**: total_processed, total_corrections, status_transitions (from→to with confidence delta), vendor_corrections (per-vendor breakdown), by_status distribution, errors
-- **Frontend**: "Batch Re-evaluate & Learn" section on AI Learning page with button and rich results visualization (stats grid, status transitions list, vendor corrections list with signal badges)
-- **Learning**: Every signal correction automatically feeds into `posting_learning_events` and `classification_corrections` — these appear on the Learning Dashboard
-- **Bug Fix**: Fixed NoneType `round()` error in `/learning-dashboard` endpoint when aggregation returns None values
+**New Endpoints:**
+- GET /api/posting-patterns/learning-pulse
+- GET /api/posting-patterns/learning-pulse/vendor/{vendor_no}
+- GET /api/posting-patterns/learning-pulse/confidence-calibration
+- POST /api/posting-patterns/learning-pulse/backfill
 
-## Backlog
-- P0: Deploy to production — re-evaluate document 0305567 via POST /api/readiness/evaluate/{id}, then batch re-evaluate all docs
-- P1: Rep Overrides management UI — Admin screen to map customers to reps
-- P1: Teams Adaptive Card integration — webhook handler for "Approve" -> BC Sales Order
-- P1: FRACHT template tuning — verify TARIFF-DS surcharge fix achieves >=90% accuracy
-- P2: Stable vendor threshold tuning (lower from 100% to 85%)
-- P2: Auto-delete on max retries (Square9 alignment)
+## Upcoming Tasks
+- P1: Rep Overrides management UI
+- P1: Teams Adaptive Card integration (webhook → BC Sales Order)
+
+## Future / Backlog
+- P2: Auto-delete on max retries
+- P2: Expand stable vendor criteria (90% vs 100%)
 - P2: Vendor Inventory Dashboard
 - P2: Product/BOM module
-- P2: Production-ready email / Entra ID SSO
-- P3: server.py extraction, auto_clear_service cleanup
+- P2: Production-ready email service & Entra ID SSO
+- P3: server.py routing extraction/refactor
 - P3: Investigate 205 no_bc_match batch failures
+
+## Deployment
+Docker Compose on Azure VM. Use "Save to Github" → `git pull && docker compose up -d --build`.

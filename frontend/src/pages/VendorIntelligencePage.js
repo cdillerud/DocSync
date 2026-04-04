@@ -199,6 +199,203 @@ function VendorExtractionProfileSection({ vendorId }) {
   );
 }
 
+function VendorDeepLearningSection({ vendorNo }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!vendorNo) return;
+    setLoading(true);
+    Promise.all([
+      api(`/posting-patterns/deep-learning/vendor-maturity/${encodeURIComponent(vendorNo)}`).catch(() => null),
+      api(`/posting-patterns/deep-learning/extraction-patterns/${encodeURIComponent(vendorNo)}`).catch(() => null),
+      api(`/posting-patterns/advanced-learning/line-items/${encodeURIComponent(vendorNo)}`).catch(() => null),
+      api(`/posting-patterns/advanced-learning/amount-check/${encodeURIComponent(vendorNo)}?amount=0`).catch(() => null),
+      api(`/posting-patterns/advanced-learning/predict-next/${encodeURIComponent(vendorNo)}`).catch(() => null),
+      api(`/posting-patterns/learning-pulse/vendor/${encodeURIComponent(vendorNo)}`).catch(() => null),
+    ]).then(([maturity, patterns, lineItems, amountCheck, nextPred, pulse]) => {
+      setData({ maturity, patterns, lineItems, amountCheck, nextPred, pulse });
+    }).finally(() => setLoading(false));
+  }, [vendorNo]);
+
+  if (loading) return <div className="text-xs text-muted-foreground py-2"><Loader2 className="w-3 h-3 animate-spin inline mr-1" />Loading deep learning...</div>;
+  if (!data) return null;
+
+  const m = data.maturity;
+  const maturityColors = {
+    mastered: 'bg-emerald-500', proficient: 'bg-blue-500', developing: 'bg-amber-500',
+    learning: 'bg-orange-500', novice: 'bg-red-500/80', unknown: 'bg-muted',
+  };
+
+  return (
+    <div className="space-y-3" data-testid="vendor-deep-learning">
+      {/* Maturity Score */}
+      {m && m.composite_score > 0 && (
+        <Card className="border border-border">
+          <CardHeader className="pb-2 pt-3 px-3">
+            <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <Target className="w-3 h-3" /> Maturity Score
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-3 pb-3">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="text-2xl font-bold">{m.composite_score}</div>
+              <Badge className={`${maturityColors[m.maturity_level] || 'bg-muted'} text-white text-[10px]`}>
+                {m.maturity_level}
+              </Badge>
+            </div>
+            {m.dimensions && (
+              <div className="space-y-1.5">
+                {Object.entries(m.dimensions).map(([dim, info]) => (
+                  <div key={dim} className="space-y-0.5">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="text-muted-foreground capitalize">{dim.replace(/_/g, ' ')}</span>
+                      <span className="font-mono">{info.score}/100</span>
+                    </div>
+                    <div className="h-1 rounded-full bg-muted overflow-hidden">
+                      <div className="h-full bg-violet-500 rounded-full" style={{ width: `${info.score}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Extraction Patterns */}
+      {data.patterns && data.patterns.field_reliability && (
+        <Card className="border border-border">
+          <CardHeader className="pb-2 pt-3 px-3">
+            <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <Zap className="w-3 h-3" /> Learned Extraction Patterns
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-3 pb-3">
+            <p className="text-[10px] text-muted-foreground mb-1.5">{data.patterns.total_documents || 0} documents analyzed</p>
+            <div className="flex flex-wrap gap-1">
+              {Object.entries(data.patterns.field_reliability).map(([field, reliability]) => (
+                <Badge key={field} variant="outline"
+                  className={`text-[10px] font-mono ${reliability >= 0.8 ? 'border-emerald-500/50 text-emerald-400' : reliability >= 0.5 ? 'border-amber-500/50 text-amber-400' : ''}`}>
+                  {field} <span className="ml-1">{Math.round(reliability * 100)}%</span>
+                </Badge>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Line Item Intelligence */}
+      {data.lineItems?.suggestions?.length > 0 && (
+        <Card className="border border-border">
+          <CardHeader className="pb-2 pt-3 px-3">
+            <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <FileText className="w-3 h-3" /> Line Item Patterns
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-3 pb-3 space-y-1">
+            {data.lineItems.suggestions.slice(0, 5).map((s, i) => (
+              <div key={i} className="flex items-center gap-2 text-[10px] p-1 rounded bg-muted/30">
+                <span className="font-medium truncate flex-1">{s.description}</span>
+                <span className="font-mono text-muted-foreground">{s.seen_count}x</span>
+                {s.suggested_gl && <Badge variant="outline" className="text-[10px]">GL: {s.suggested_gl}</Badge>}
+                <span className="text-emerald-400 font-mono">${s.avg_amount?.toLocaleString()}</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Amount Intelligence */}
+      {data.amountCheck && !data.amountCheck.reason && (
+        <Card className="border border-border">
+          <CardHeader className="pb-2 pt-3 px-3">
+            <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <TrendingUp className="w-3 h-3" /> Amount Intelligence
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-3 pb-3">
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div>
+                <p className="text-sm font-bold">${(data.amountCheck.avg_amount || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+                <p className="text-[10px] text-muted-foreground">Average</p>
+              </div>
+              <div>
+                <p className="text-sm font-bold">${(data.amountCheck.min_seen || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+                <p className="text-[10px] text-muted-foreground">Min</p>
+              </div>
+              <div>
+                <p className="text-sm font-bold">${(data.amountCheck.max_seen || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+                <p className="text-[10px] text-muted-foreground">Max</p>
+              </div>
+            </div>
+            {data.amountCheck.typical_range && (
+              <p className="text-[10px] text-muted-foreground mt-1 text-center">
+                Normal range: ${data.amountCheck.typical_range[0]?.toLocaleString()} – ${data.amountCheck.typical_range[1]?.toLocaleString()}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Next Document Prediction */}
+      {data.nextPred && data.nextPred.predicted_next && (
+        <Card className="border border-border">
+          <CardHeader className="pb-2 pt-3 px-3">
+            <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <Activity className="w-3 h-3" /> Document Flow Prediction
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-3 pb-3">
+            <div className="flex items-center gap-2 text-xs">
+              <Badge variant="outline" className="text-[10px]">{data.nextPred.last_type}</Badge>
+              <ArrowRight className="w-3 h-3 text-muted-foreground" />
+              <Badge className="bg-violet-500 text-white text-[10px]">{data.nextPred.predicted_next}</Badge>
+              <span className="text-muted-foreground">({Math.round((data.nextPred.confidence || 0) * 100)}% confident)</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Per-Document Learning Stats */}
+      {data.pulse?.intelligence && (
+        <Card className="border border-border">
+          <CardHeader className="pb-2 pt-3 px-3">
+            <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <Brain className="w-3 h-3" /> Real-Time Learning
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-3 pb-3">
+            <div className="grid grid-cols-4 gap-2 text-center text-[10px]">
+              <div>
+                <p className="text-sm font-bold">{data.pulse.intelligence.total_documents || 0}</p>
+                <p className="text-muted-foreground">Total</p>
+              </div>
+              <div>
+                <p className="text-sm font-bold text-emerald-400">{data.pulse.intelligence.success_count || 0}</p>
+                <p className="text-muted-foreground">Success</p>
+              </div>
+              <div>
+                <p className="text-sm font-bold">{((data.pulse.intelligence.auto_validation_rate || 0) * 100).toFixed(0)}%</p>
+                <p className="text-muted-foreground">Auto Rate</p>
+              </div>
+              <div>
+                <p className="text-sm font-bold">{((data.pulse.intelligence.avg_confidence || 0) * 100).toFixed(0)}%</p>
+                <p className="text-muted-foreground">Avg Conf</p>
+              </div>
+            </div>
+            {data.pulse.intelligence.confidence_to_validation_gap > 0.05 && (
+              <p className="text-[10px] text-amber-400 text-center mt-1">
+                Confidence gap: {((data.pulse.intelligence.confidence_to_validation_gap || 0) * 100).toFixed(0)}%
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 function VendorDetailPanel({ profile, onClose }) {
   if (!profile) return null;
   const DIcon = DOMAIN_ICONS[profile.typical_reference_domain] || Activity;
@@ -300,6 +497,9 @@ function VendorDetailPanel({ profile, onClose }) {
         {/* Vendor Extraction Profile (Part 6) */}
         <VendorExtractionProfileSection vendorId={profile.vendor_no || profile.vendor_name} />
 
+        {/* Deep Learning Intelligence (Phase 5-7) */}
+        <VendorDeepLearningSection vendorNo={profile.vendor_no || profile.vendor_name} />
+
         {/* Timeline */}
         <div className="text-[10px] text-muted-foreground space-y-1">
           <div className="flex justify-between"><span>First seen:</span><span>{profile.first_document_seen ? new Date(profile.first_document_seen).toLocaleDateString() : '-'}</span></div>
@@ -321,6 +521,7 @@ export default function VendorIntelligencePage() {
   const [rebuilding, setRebuilding] = useState(false);
   const [selectedVendor, setSelectedVendor] = useState(null);
   const [sortBy, setSortBy] = useState('invoice_count');
+  const [maturityMap, setMaturityMap] = useState({});
   const limit = 20;
 
   const fetchData = useCallback(async () => {
@@ -333,6 +534,17 @@ export default function VendorIntelligencePage() {
       setStats(s);
       setProfiles(p.profiles || []);
       setTotal(p.total || 0);
+
+      // Fetch maturity for visible vendors
+      const vendorNos = (p.profiles || []).map(v => v.vendor_no).filter(Boolean);
+      const matMap = {};
+      await Promise.all(vendorNos.map(async (vno) => {
+        try {
+          const m = await api(`/posting-patterns/deep-learning/vendor-maturity/${encodeURIComponent(vno)}`);
+          if (m && m.composite_score > 0) matMap[vno] = m;
+        } catch {}
+      }));
+      setMaturityMap(matMap);
     } catch {
       toast.error('Failed to load vendor intelligence data');
     } finally {
@@ -423,14 +635,15 @@ export default function VendorIntelligencePage() {
                   <div className="flex items-center gap-1">Resolution <ArrowUpDown className="w-3 h-3" /></div>
                 </TableHead>
                 <TableHead className="text-xs">Stable</TableHead>
+                <TableHead className="text-xs">Maturity</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading && (
-                <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground text-xs"><Loader2 className="w-4 h-4 animate-spin mx-auto" /></TableCell></TableRow>
+                <TableRow><TableCell colSpan={9} className="text-center py-8 text-muted-foreground text-xs"><Loader2 className="w-4 h-4 animate-spin mx-auto" /></TableCell></TableRow>
               )}
               {!loading && filtered.length === 0 && (
-                <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground text-xs">
+                <TableRow><TableCell colSpan={9} className="text-center py-8 text-muted-foreground text-xs">
                   {total === 0 ? 'No vendor profiles yet. Click "Rebuild Profiles" to generate from historical data.' : 'No vendors match your search.'}
                 </TableCell></TableRow>
               )}
@@ -470,6 +683,24 @@ export default function VendorIntelligencePage() {
                       ) : (
                         <span className="text-[10px] text-muted-foreground">-</span>
                       )}
+                    </TableCell>
+                    <TableCell>
+                      {(() => {
+                        const mat = maturityMap[p.vendor_no];
+                        if (!mat) return <span className="text-[10px] text-muted-foreground">-</span>;
+                        const colors = {
+                          mastered: 'bg-emerald-500 text-white', proficient: 'bg-blue-500 text-white',
+                          developing: 'bg-amber-500 text-white', learning: 'bg-orange-500 text-white',
+                          novice: 'bg-red-500/80 text-white',
+                        };
+                        return (
+                          <div className="flex items-center gap-1">
+                            <Badge className={`text-[10px] ${colors[mat.maturity_level] || 'bg-muted'}`}>
+                              {mat.composite_score}
+                            </Badge>
+                          </div>
+                        );
+                      })()}
                     </TableCell>
                   </TableRow>
                 );

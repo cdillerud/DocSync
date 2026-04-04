@@ -7360,6 +7360,26 @@ async def startup():
     
     logger.info("GPI Document Hub started. Demo mode: %s, Loaded %d vendor aliases", DEMO_MODE, len(aliases))
 
+    # Start Draft Feedback Sync scheduler (every 2h)
+    async def _draft_feedback_sync_scheduler():
+        """Background worker: sync auto-drafted PIs from BC and detect human edits."""
+        await asyncio.sleep(300)  # 5 min delay — let all services start
+        while True:
+            try:
+                from services.draft_feedback_service import process_feedback_batch
+                logger.info("[DraftFeedback] Starting scheduled BC draft sync")
+                result = await process_feedback_batch(db, limit=100)
+                logger.info(
+                    "[DraftFeedback] Sync complete: processed=%d, changes=%d, no_changes=%d, errors=%d",
+                    result.get("processed", 0), result.get("changes_found", 0),
+                    result.get("no_changes", 0), result.get("errors", 0),
+                )
+            except Exception as e:
+                logger.warning("[DraftFeedback] Scheduled sync failed: %s", e)
+            await asyncio.sleep(2 * 3600)  # Every 2 hours
+    asyncio.create_task(_draft_feedback_sync_scheduler())
+    logger.info("Draft Feedback Sync scheduler started (interval: 2h)")
+
 async def shutdown_db_client():
     global _email_polling_task, _sales_polling_task, _dynamic_mailbox_polling_task, _pilot_summary_task
     # Cancel dynamic mailbox polling worker

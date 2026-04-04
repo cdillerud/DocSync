@@ -36,6 +36,23 @@ export default function Layout() {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [bcStatus, setBcStatus] = useState({ loading: true, connected: false, demoMode: false, readEnv: '', writeEnv: '' });
+  const [reviewBadge, setReviewBadge] = useState(0);
+
+  // Fetch review queue badge count
+  useEffect(() => {
+    const fetchBadge = async () => {
+      try {
+        const res = await fetch(`${API}/api/posting-patterns/review-queue/badge-count`);
+        if (res.ok) {
+          const data = await res.json();
+          setReviewBadge(data.count || 0);
+        }
+      } catch { /* ignore */ }
+    };
+    fetchBadge();
+    const interval = setInterval(fetchBadge, 60000); // Poll every 60s
+    return () => clearInterval(interval);
+  }, []);
 
   // Fetch BC status on mount
   useEffect(() => {
@@ -130,6 +147,11 @@ export default function Layout() {
             >
               <Icon className="w-4 h-4 shrink-0" />
               {label}
+              {label === 'Review Queue' && reviewBadge > 0 && (
+                <span className="ml-auto bg-amber-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1" data-testid="review-badge">
+                  {reviewBadge}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>

@@ -155,6 +155,21 @@ async def get_learning_dashboard():
 
 
 
+@router.get("/review-queue/badge-count")
+async def get_review_queue_badge_count():
+    """
+    Lightweight endpoint for the nav badge — returns count of drafts needing attention.
+    Includes pending reviews + BC-edited drafts (feedback detected changes).
+    """
+    db = get_db()
+    count = await db.hub_documents.count_documents({
+        "auto_draft_created": True,
+        "draft_review_status": {"$nin": ["approved", "corrected", "feedback_synced"]},
+    })
+    return {"count": count}
+
+
+
 # =============================================================================
 # Review Queue — Review / Approve / Correct Auto-Drafted PIs
 # =============================================================================

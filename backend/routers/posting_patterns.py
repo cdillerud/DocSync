@@ -3379,6 +3379,50 @@ async def get_escalation_intelligence():
     return await get_escalation_summary(db)
 
 
+@router.get("/po-gap-breakdown")
+async def get_po_gap_breakdown():
+    """Break down PO validation gaps by vendor — which vendors have the most PO failures."""
+    from deps import get_db
+    db = get_db()
+
+    pipeline = [
+        {"$match": {
+            "validation_results.checks": {
+                "$elemMatch": {"check_name": "po_validation", "passed": False}
+            },
+            "status": {"$nin": ["Completed", "Posted", "Deleted", "Archived"]},
+        }},
+        {"$group": {
+            "_id": {
+                "vendor": {"$ifNull": ["$bc_vendor_number", {"$ifNull": ["$vendor_no", "unknown"]}]},
+                "vendor_name": {"$ifNull": ["$vendor_name", ""]},
+            },
+            "count": {"$sum": 1},
+            "sample_pos": {"$addToSet": "$extracted_fields.po_number"},
+        }},
+        {"$sort": {"count": -1}},
+        {"$limit": 20},
+    ]
+
+    results = await db.hub_documents.aggregate(pipeline).to_list(20)
+    vendors = []
+    for r in results:
+        vendor_info = r.get("_id", {})
+        sample_pos = [p for p in (r.get("sample_pos") or []) if p][:5]
+        vendors.append({
+            "vendor_no": vendor_info.get("vendor", "unknown"),
+            "vendor_name": vendor_info.get("vendor_name", ""),
+            "gap_count": r.get("count", 0),
+            "sample_po_numbers": sample_pos,
+        })
+
+    total_po_gaps = sum(v["gap_count"] for v in vendors)
+    return {
+        "total_po_gaps": total_po_gaps,
+        "by_vendor": vendors,
+    }
+
+
 # =============================================================================
 # On-Demand Intelligence Backfill
 # =============================================================================

@@ -56,7 +56,8 @@ export default function MonitoringDashboard() {
         fetch(`${API}/api/posting-patterns/escalation-intelligence`).then(r => r.ok ? r.json() : {}),
         fetch(`${API}/api/posting-patterns/duplicate-intelligence`).then(r => r.ok ? r.json() : {}),
       ]);
-      setData({ pulse: pulseRes, gap: gapRes, deep: deepRes, escalation: escRes, duplicate: dupRes });
+      const poGapRes = await fetch(`${API}/api/posting-patterns/po-gap-breakdown`).then(r => r.ok ? r.json() : {});
+      setData({ pulse: pulseRes, gap: gapRes, deep: deepRes, escalation: escRes, duplicate: dupRes, poGaps: poGapRes });
       setLastRefresh(new Date());
     } catch (e) {
       console.error('[Monitor] fetch failed', e);
@@ -217,6 +218,88 @@ export default function MonitoringDashboard() {
           testId="metric-escalation"
         />
       </div>
+
+      {/* Escalation Detail — show which combos always fail */}
+      {data?.escalation?.top_escalated?.length > 0 && (
+        <Card className="border-red-500/20" data-testid="escalation-detail">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-red-400">Vendor+Type Combos That Always Fail Automation</CardTitle>
+          </CardHeader>
+          <CardContent className="pb-4">
+            <div className="space-y-2">
+              {data.escalation.top_escalated.map((e, i) => (
+                <div key={i} className="flex items-center justify-between p-2 rounded bg-red-500/5 border border-red-500/10 text-xs">
+                  <div>
+                    <span className="font-mono font-medium">{e.vendor_no || '?'}</span>
+                    <span className="text-muted-foreground mx-2">+</span>
+                    <span className="font-medium">{e.doc_type || '?'}</span>
+                  </div>
+                  <div className="flex items-center gap-4 text-muted-foreground">
+                    <span>Success: <strong className="text-red-400">{e.success_rate != null ? `${Math.round(e.success_rate * 100)}%` : '?'}</strong></span>
+                    <span>{e.total_attempts || 0} attempts</span>
+                    <span>{e.failure_count || 0} failures</span>
+                    <span>{e.review_count || 0} reviews</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-2">These combos are pre-routed to manual review. They may need process-level fixes (non-standard formats, missing data from vendor, etc.)</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* PO Validation Gap Breakdown */}
+      {data?.gap?.total_validation_gaps && Object.keys(data.gap.total_validation_gaps).length > 0 && (
+        <Card className="border-amber-500/20" data-testid="gap-breakdown">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-amber-400">Validation Gap Breakdown</CardTitle>
+          </CardHeader>
+          <CardContent className="pb-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {Object.entries(data.gap.total_validation_gaps)
+                .sort(([,a], [,b]) => b - a)
+                .map(([gap, count]) => (
+                  <div key={gap} className="p-2 rounded bg-accent/50 text-xs">
+                    <p className="font-medium">{gap.replace(/_/g, ' ')}</p>
+                    <p className="text-lg font-bold">{count}</p>
+                  </div>
+                ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* PO Gap by Vendor — which vendors are responsible */}
+      {data?.poGaps?.by_vendor?.length > 0 && (
+        <Card className="border-orange-500/20" data-testid="po-gap-vendors">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-orange-400">PO Validation Gaps by Vendor ({data.poGaps.total_po_gaps} total)</CardTitle>
+          </CardHeader>
+          <CardContent className="pb-4">
+            <div className="space-y-1.5">
+              {data.poGaps.by_vendor.map((v, i) => (
+                <div key={i} className="flex items-center justify-between p-2 rounded bg-accent/30 text-xs">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-mono font-medium shrink-0">{v.vendor_no}</span>
+                    {v.vendor_name && <span className="text-muted-foreground truncate">{v.vendor_name}</span>}
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="font-bold text-orange-400">{v.gap_count} gaps</span>
+                    {v.sample_po_numbers?.length > 0 && (
+                      <span className="text-muted-foreground text-[10px]">
+                        POs: {v.sample_po_numbers.slice(0, 3).join(', ')}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-2">
+              If a vendor consistently has PO gaps, check: (1) Are POs created in BC before invoices arrive? (2) Does this vendor use non-PO purchases? (3) Is the PO number format different than BC's?
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Quick context */}
       <Card>

@@ -10,59 +10,53 @@ Enterprise document processing hub for AP/Sales workflows with Dynamics 365 BC i
 
 ## What's Been Implemented
 
-### Phase 1 — Document Ingestion & Classification
-- Multi-source ingestion (SharePoint, upload, email)
-- AI classification pipeline with feedback loop
-- Vendor matching and PO validation
+### Phase 1-3 — Core Platform
+- Document Ingestion & Classification (multi-source, AI pipeline, feedback loop)
+- AP Module (PI auto-drafting, posting patterns, Review Queue)
+- Sales Module (sales orders, customer matching, rep assignment)
 
-### Phase 2 — AP Module
-- Purchase Invoice auto-drafting to BC sandbox
-- Posting pattern analysis and templates
-- Review Queue for auto-drafted PIs
-
-### Phase 3 — Sales Module
-- Sales order processing, customer matching, rep assignment
-
-### Phase 4 — Continuous Learning (Complete)
-- Learning Dashboard UI, Review Queue, Feedback Loop
+### Phase 4 — Continuous Learning
+- Learning Dashboard, Review Queue, Feedback Loop
 - Batch Re-evaluation Engine
 - 4 Continuous Learning Engines (Draft Detection, Cross-Vendor Propagation, Auto-Promotion, Extraction Feedback)
 
-### Phase 5 — Per-Document Intelligence Engine (Complete — Apr 4, 2026)
-Every document makes the AI smarter via 6 learning dimensions:
-1. Outcome Recording — Full lifecycle tracking
-2. Real-Time Vendor Intelligence — Per-vendor accuracy, auto-validation rate
-3. Confidence Calibration — AI confidence vs actual outcome by band
-4. Positive Reinforcement — Successes reinforce patterns
-5. Validation Gap Analysis — WHY high-confidence docs fail
-6. Extraction Accuracy — Per-field, per-vendor accuracy tracking
+### Phase 5 — Per-Document Intelligence Engine (Apr 4, 2026)
+6 learning dimensions fired on EVERY document: Outcome Recording, Vendor Intelligence, Confidence Calibration, Positive Reinforcement, Validation Gap Analysis, Extraction Accuracy.
 
-Collections: document_outcomes, vendor_realtime_intelligence, confidence_calibration, validation_gap_log, field_accuracy_tracking
+### Phase 6 — Deep Learning Engine (Apr 4, 2026)
+5 advanced layers: Extraction Pattern Learning, Document Similarity Engine, Confidence Self-Correction, Vendor Maturity Scoring, Predictive Readiness.
 
-### Phase 6 — Deep Learning Engine (Complete — Apr 4, 2026)
-5 advanced intelligence layers:
-1. **Extraction Pattern Learning** — Per-vendor, per-field patterns. Remembers which fields appear for each vendor and injects hints into AI prompts.
-2. **Document Similarity Engine** — Fingerprints every document. Matches unknown documents to mastered templates via weighted feature vectors.
-3. **Confidence Self-Correction** — Periodically samples auto-filed docs and re-evaluates them. Detects decision drift where today's smarter system would decide differently.
-4. **Vendor Maturity Scoring** — Multi-dimensional 0-100 score across 6 dimensions (volume, accuracy, consistency, recency, field_coverage, error_rate). Levels: novice → learning → developing → proficient → mastered.
-5. **Predictive Readiness** — Before validation completes, predicts whether a document will need human review based on vendor history, AI confidence, field completeness, doc type patterns, and extraction pattern match.
+### Phase 7 — Advanced Intelligence Engine (Apr 4, 2026)
+7 engines that learn EVERYTHING from every document:
 
-Collections: extraction_patterns, document_fingerprints, self_correction_audits, vendor_maturity_scores, readiness_predictions
+1. **Line Item Intelligence** — Memorizes line patterns per vendor (descriptions, GL accounts, amounts). Auto-suggests GL mappings for future invoices.
+2. **Document Flow Sequencing** — Tracks document arrival order per vendor (BOL → PO → Invoice). Predicts what doc type arrives next.
+3. **Amount Pattern Learning** — Learns typical amount ranges per vendor. Detects anomalous amounts using z-score (>2σ flagged). TUMALOC: $295-$1,825, ANCH: ~$9,500.
+4. **Correction Replay Engine** — When a human corrects a field, replays that correction across ALL similar vendor documents still in the pipeline.
+5. **Field Correlation Learning** — Discovers field→field prediction rules. E.g., `po_prefix=613` → Sales_Order (100% confidence, 7 samples).
+6. **Temporal Intelligence** — Learns day-of-week and hour-of-day patterns. Predicts tomorrow's inbox volume. Shows peak/quiet days.
+7. **Error Pattern Recognition** — Categorizes failures (scan_quality, empty_document, api_failure, missing_data, format_error, layout_change). Learns from every error.
+
+Collections: line_item_intelligence, document_flow_sequences, amount_patterns, correction_replays, field_correlations, temporal_intelligence, error_patterns
 
 Endpoints:
-- GET /api/posting-patterns/deep-learning/summary
-- GET /api/posting-patterns/deep-learning/extraction-patterns/{vendor_no}
-- GET /api/posting-patterns/deep-learning/extraction-hints/{vendor_no}
-- POST /api/posting-patterns/deep-learning/find-similar/{doc_id}
-- POST /api/posting-patterns/deep-learning/self-correction/run
-- GET /api/posting-patterns/deep-learning/self-correction/history
-- GET /api/posting-patterns/deep-learning/vendor-maturity/{vendor_no}
-- POST /api/posting-patterns/deep-learning/vendor-maturity/compute-all
-- POST /api/posting-patterns/deep-learning/predict-readiness/{doc_id}
+- GET /api/posting-patterns/advanced-learning/summary
+- GET /api/posting-patterns/advanced-learning/line-items/{vendor_no}
+- GET /api/posting-patterns/advanced-learning/predict-next/{vendor_no}
+- GET /api/posting-patterns/advanced-learning/amount-check/{vendor_no}?amount=X
+- GET /api/posting-patterns/advanced-learning/correction-replays
+- GET /api/posting-patterns/advanced-learning/volume-prediction
+- POST /api/posting-patterns/advanced-learning/backfill
 
-Background Schedulers:
-- Self-correction + vendor maturity: every 4 hours
-- Predictive readiness: fires on every document ingestion
+## Total Learning Dimensions: 18
+Across 3 learning layers (Phase 5 + 6 + 7), every document now trains the AI across 18 distinct intelligence dimensions.
+
+## Background Schedulers
+- BC Sync: periodic
+- Continuous Learning Engines: every 2h
+- Self-Correction + Vendor Maturity: every 4h
+- Predictive Readiness: fires on every document ingestion
+- All 7 advanced engines: fire on every document event
 
 ## Upcoming Tasks
 - P1: Rep Overrides management UI

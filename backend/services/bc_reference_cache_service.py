@@ -8,7 +8,8 @@ Cache is READ-ONLY - never writes to BC.
 
 Cached entities:
 - purchaseOrders
-- purchaseInvoices (posted)
+- purchaseInvoices (draft, with orderNo for PO learning)
+- postedPurchaseInvoices (posted PIs with orderNo — feeds vendor PO learning)
 - salesOrders
 - salesInvoices (posted)
 - salesShipments (posted)
@@ -70,11 +71,11 @@ ENTITY_CONFIGS = {
         }
     },
     "purchaseInvoices": {
-        "entity_type": "posted_purchase_invoice",
+        "entity_type": "draft_purchase_invoice",
         "domain": "purchase",
         "number_field": "number",
         "external_ref_field": "vendorInvoiceNumber",
-        "select_fields": "id,number,vendorInvoiceNumber,vendorName,vendorNumber,postingDate,totalAmountIncludingTax,status,lastModifiedDateTime",
+        "select_fields": "id,number,vendorInvoiceNumber,vendorName,vendorNumber,postingDate,totalAmountIncludingTax,status,orderNo,lastModifiedDateTime",
         "extract_fields": lambda r: {
             "bc_record_id": r.get("id"),
             "bc_document_no": r.get("number", ""),
@@ -86,6 +87,28 @@ ENTITY_CONFIGS = {
             "bc_posting_date": r.get("postingDate"),
             "bc_status": r.get("status", ""),
             "bc_amount": r.get("totalAmountIncludingTax"),
+            "bc_order_number": r.get("orderNo", ""),
+            "bc_last_modified": r.get("lastModifiedDateTime"),
+        }
+    },
+    "postedPurchaseInvoices": {
+        "entity_type": "posted_purchase_invoice",
+        "domain": "purchase",
+        "number_field": "number",
+        "external_ref_field": "vendorInvoiceNumber",
+        "select_fields": "id,number,vendorInvoiceNumber,vendorName,vendorNumber,postingDate,totalAmountIncludingTax,orderNo,lastModifiedDateTime",
+        "extract_fields": lambda r: {
+            "bc_record_id": r.get("id"),
+            "bc_document_no": r.get("number", ""),
+            "bc_external_document_no": r.get("vendorInvoiceNumber", ""),
+            "bc_vendor_no": r.get("vendorNumber", ""),
+            "bc_vendor_name": r.get("vendorName", ""),
+            "bc_customer_no": None,
+            "bc_customer_name": None,
+            "bc_posting_date": r.get("postingDate"),
+            "bc_status": "posted",
+            "bc_amount": r.get("totalAmountIncludingTax"),
+            "bc_order_number": r.get("orderNo", ""),
             "bc_last_modified": r.get("lastModifiedDateTime"),
         }
     },
@@ -230,6 +253,7 @@ class BCReferenceCacheService:
         await self.collection.create_index("bc_vendor_no")
         await self.collection.create_index("bc_customer_no")
         await self.collection.create_index("bc_record_id", unique=True, sparse=True)
+        await self.collection.create_index("bc_order_number", sparse=True)
         await self.collection.create_index([
             ("normalized_document_no", 1),
             ("bc_entity_type", 1),

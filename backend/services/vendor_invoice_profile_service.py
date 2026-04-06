@@ -168,7 +168,7 @@ async def _learn_from_reference_cache(db, vendor_no: str) -> Optional[Dict]:
     """
     try:
         pipeline = [
-            {"$match": {"bc_vendor_no": vendor_no, "bc_entity_type": "posted_purchase_invoice"}},
+            {"$match": {"bc_vendor_no": vendor_no, "bc_entity_type": {"$in": ["posted_purchase_invoice", "draft_purchase_invoice"]}}},
             {"$group": {
                 "_id": None,
                 "count": {"$sum": 1},

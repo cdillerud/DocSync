@@ -455,6 +455,16 @@ async def _validate_bc_match_inner(
 
         db = get_db()
 
+        # === VENDOR PROFILE LEARNING: Override po_mode based on what we've learned ===
+        # If the vendor profile has learned from BC history that this vendor
+        # never uses POs, switch to PO_SKIP mode to avoid false validation failures.
+        _learned_po_override = None
+        try:
+            # We'll check this AFTER vendor matching succeeds (need vendor_no first)
+            pass
+        except Exception:
+            pass
+
         async with httpx.AsyncClient(timeout=30.0) as c:
 
             # ============================================================
@@ -601,6 +611,40 @@ async def _validate_bc_match_inner(
                             validation_results["all_passed"] = False
 
                 # ---- PO validation ----
+                # VENDOR PROFILE LEARNING: Check if this vendor's BC history shows POs are not expected
+                _effective_po_mode = po_mode
+                try:
+                    _matched_vendor_no = (
+                        validation_results.get("bc_record_info", {}).get("number", "")
+                        or extracted_fields.get("_vendor_canonical", "")
+                    )
+                    if _matched_vendor_no:
+                        from services.vendor_invoice_profile_service import get_or_build_vendor_profile
+                        _vp = await get_or_build_vendor_profile(db, _matched_vendor_no)
+                        if _vp and not _vp.get("po_expected", True):
+                            _effective_po_mode = "PO_SKIP"
+                            logger.info(
+                                "[PO-Learn] Vendor %s: po_expected=False (BC history: %d invoices, %.1f%% have POs) — skipping PO validation",
+                                _matched_vendor_no, _vp.get("bc_cache", 0), _vp.get("po_rate", 0) * 100 if _vp.get("po_rate") else 0,
+                            )
+                        # Also check PO format learning — if this vendor has a VERY low match rate,
+                        # downgrade PO to non-required
+                        if _effective_po_mode != "PO_SKIP":
+                            _po_intel = await db.po_format_intelligence.find_one(
+                                {"vendor_no": _matched_vendor_no}, {"_id": 0}
+                            )
+                            if _po_intel and _po_intel.get("total_po_attempts", 0) >= 10:
+                                _match_rate = _po_intel.get("match_rate", 1.0)
+                                if _match_rate < 0.10:
+                                    # Less than 10% of PO attempts match — this vendor likely doesn't use standard POs
+                                    _effective_po_mode = "PO_IF_PRESENT"
+                                    logger.info(
+                                        "[PO-Learn] Vendor %s: PO match rate %.1f%% over %d attempts — downgrading to PO_IF_PRESENT",
+                                        _matched_vendor_no, _match_rate * 100, _po_intel["total_po_attempts"],
+                                    )
+                except Exception as _vp_err:
+                    logger.debug("[PO-Learn] Vendor profile check failed: %s", _vp_err)
+
                 po_number = (
                     normalized_fields.get("po_number")
                     or extracted_fields.get("po_number", "")
@@ -628,14 +672,20 @@ async def _validate_bc_match_inner(
                 seen = set()
                 for candidate in [po_number, po_resolution_number] + all_candidates:
                     candidate_clean = str(candidate).strip() if candidate else ""
-                    candidate_stripped = candidate_clean.lstrip("0") or "0"
-                    if candidate_clean and candidate_clean not in seen:
-                        seen.add(candidate_clean)
-                        # Skip if this is the invoice number itself
-                        if candidate_clean in _exclude_from_po or candidate_stripped in _exclude_from_po:
-                            logger.info("[PO-Filter] Excluding '%s' from PO candidates (matches invoice number)", candidate_clean)
-                            continue
-                        po_candidates_to_check.append(candidate_clean)
+                    # Split multi-PO fields (e.g., "W117076/W117185/W117077")
+                    sub_candidates = [candidate_clean]
+                    if "/" in candidate_clean:
+                        sub_candidates = [s.strip() for s in candidate_clean.split("/") if s.strip()]
+                    elif ";" in candidate_clean:
+                        sub_candidates = [s.strip() for s in candidate_clean.split(";") if s.strip()]
+                    for sub in sub_candidates:
+                        sub_stripped = sub.lstrip("0") or "0"
+                        if sub and sub not in seen:
+                            seen.add(sub)
+                            if sub in _exclude_from_po or sub_stripped in _exclude_from_po:
+                                logger.info("[PO-Filter] Excluding '%s' from PO candidates (matches invoice number)", sub)
+                                continue
+                            po_candidates_to_check.append(sub)
 
                 # === GAP CLOSER 2: Expand PO candidates with intelligence ===
                 try:
@@ -678,7 +728,15 @@ async def _validate_bc_match_inner(
                 except Exception as fmt_err:
                     logger.debug("[PO-Format] Smart candidate generation failed: %s", fmt_err)
 
-                if po_mode == "PO_REQUIRED":
+                if _effective_po_mode == "PO_SKIP":
+                    # Vendor profile learned PO is not expected — skip PO validation entirely
+                    validation_results["checks"].append({
+                        "check_name": "po_validation",
+                        "passed": True,
+                        "details": f"PO validation skipped — vendor learned to not require POs",
+                        "required": False,
+                    })
+                elif _effective_po_mode == "PO_REQUIRED":
                     if not po_candidates_to_check:
                         validation_results["all_passed"] = False
                         validation_results["checks"].append({
@@ -729,7 +787,7 @@ async def _validate_bc_match_inner(
                                     "details": f"Tried {len(tried)} PO candidates from all sources: {', '.join(tried[:5])} — none found in BC",
                                 })
 
-                elif po_mode == "PO_IF_PRESENT":
+                elif _effective_po_mode == "PO_IF_PRESENT":
                     if po_candidates_to_check:
                         po_found = False
                         tried = []

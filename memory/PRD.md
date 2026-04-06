@@ -10,50 +10,41 @@ Enterprise document processing hub for AP/Sales workflows with Dynamics 365 BC i
 
 ## What's Been Implemented
 
-### Phases 1-8 — Core Platform + Intelligence Foundation
-- Document Ingestion, Classification, AP/Sales Modules, Continuous Learning (4 engines), Per-Document Intelligence (8 dims), Deep Learning (5 layers), Advanced Intelligence (7 engines), Vendor Intelligence Integration
-
-### Phase 9 — Validation Gap Closers (7 active)
-1. Confidence Miscalibration, 2. PO Validation, 3. Customer Match, 4. Sales Order Match, 5. Duplicate Intelligence, 6. Amount Anomaly, 7. Auto-Escalation
-
-### Phase 10 — Enhanced LLM Prompt Intelligence
-Amount intelligence + Field correlation predictions injected into AI prompts.
-
-### Phase 11 — Executive Monitoring Dashboard
-`/monitor` page with 5 KPIs, Automation Health Score, Escalation Detail, Validation Gap Breakdown, PO Gap by Vendor, Backfill button.
-
-### Phase 12 — Production-Targeted Fixes
-PO matching enhancement, duplicate auto-clearing, vendor maturity fix, intelligence backfill system, PO gap re-validation.
+### Phases 1-12 — See previous PRD versions for full history
 
 ### Phase 13 — PO Format Learning Engine (Apr 4, 2026)
-**Root cause**: The learning system tracked field reliability but never learned PO number FORMAT TRANSFORMATIONS per vendor. Tumaloc sends PO-778245-GPI, 3456, MAR26-FTL-3 — the system needs to learn which transformations turn these into matchable BC POs.
+15+ PO transformations, records outcomes, applies learned vendor-specific transformations.
 
-**Built**:
-- `po_format_learning_service.py` — 15+ built-in transformations (strip_vendor_suffix, strip_prefix_po, numeric_only, middle_segment, prefix_W, etc.)
-- **Learning loop**: Every PO validation attempt records (vendor, extracted_po, matched_bc_po, transformation_used) → builds per-vendor transformation priority
-- **Smart candidates**: `get_smart_po_candidates()` applies learned transformations in priority order (most successful first) before BC validation
-- **Format pattern detection**: Analyzes successful BC PO formats (common prefixes, avg length) and failed patterns (date-like references, short numbers)
-- Wired into `bc_validation_service.py` — smart candidates injected into both PO_REQUIRED and PO_IF_PRESENT flows
-- Wired into batch re-validation in backfill endpoint
-- API: `GET /api/posting-patterns/po-format-intelligence`
+### Phase 14 — Vendor Profile PO Learning Integration (Apr 6, 2026)
+**Root cause found**: `bc_validation_service.py` always ran PO validation regardless of what the vendor profile had learned. The vendor profile service (`po_expected=False`) was disconnected from the actual validation pipeline.
 
-**Learning dimensions**: Now 21 total (20 + PO format learning)
+**Fixes**:
+1. **Vendor profile PO learning wired into validation** — Before PO validation, checks vendor profile. If `po_expected=False` (learned from BC history: <5% of vendor's posted PIs have POs), switches to `PO_SKIP` mode.
+2. **PO format learning fallback** — If vendor has 10+ PO attempts with <10% match rate, downgrades PO validation from "required" to "if_present".
+3. **Multi-PO field parsing** — Splits PO fields containing `/` or `;` separators (e.g., CARGOMO's `W117076/W117185/W117077` → tries each PO separately).
+4. **Monitor dashboard shows**: Escalation detail, Validation gap breakdown, PO gap by vendor.
 
-## Background Schedulers
-- BC Catalog Sync (24h), BC Shipment Sync (1h), Knowledge Seed (6h)
-- Draft Feedback + Continuous Learning (2h)
-- Deep Learning: Self-Correction + Vendor Maturity (4h)
-- Intelligence Maintenance: Dup Clear + Escalation/Dup Backfill (2h)
+**Impact**: For vendors like TUMALOC (freight/transport) where BC history shows no POs, the system now LEARNS to skip PO validation. This should eliminate ~200+ false validation gaps.
+
+## Learning Dimensions: 21 total
+## Active Gap Closers: 7
+## LLM Prompt Injections: 6
+## Background Schedulers: 7
+
+## Production Stats (Latest)
+- 1535 docs ingested (30-day), 1198 AP docs
+- 81% AI confidence accuracy, 93.3% vendor resolve, 71% auto-file
+- 17 PIs posted to BC (1.4% — bottleneck: PO validation gaps + vendor profile disconnection)
+- Key gap: 670 PO validation failures (TUMALOC = 63%)
 
 ## Upcoming Tasks
 - P1: Rep Overrides management UI
 - P1: Teams Adaptive Card integration
 
 ## Future / Backlog
-- P2: Auto-delete on max retries, Expand stable vendor criteria
-- P2: Vendor Inventory Dashboard, BOM module
+- P2: Auto-delete on max retries, Vendor Inventory Dashboard, BOM module
 - P2: Production-ready email service, Entra ID SSO
-- P3: server.py refactor (7500+ lines), no_bc_match investigation
+- P3: server.py refactor, no_bc_match investigation
 
 ## Deployment
 Docker Compose on Azure VM. "Save to Github" → `git pull && docker compose up -d --build`.

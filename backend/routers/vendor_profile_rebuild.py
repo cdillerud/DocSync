@@ -53,7 +53,7 @@ def _pick_best_display_name(names: list) -> str:
 
 @router.post("/rebuild/dry-run")
 async def rebuild_dry_run():
-    """Preview vendor profile rebuild from document data."""
+    """Preview vendor profile rebuild with consolidation report."""
     db = get_db()
     start = time.time()
 
@@ -63,10 +63,23 @@ async def rebuild_dry_run():
         {}, {"_id": 0, "vendor_name": 1, "vendor_no": 1}
     ).to_list(5000)
 
+    # Find profiles that would be merged (multiple name variants)
+    consolidation_report = []
+    for key, data in sorted(groups.items(), key=lambda x: len(x[1]["name_variants"]), reverse=True):
+        if len(data["name_variants"]) > 1:
+            consolidation_report.append({
+                "canonical": data["display_name"],
+                "vendor_no": data.get("vendor_no", ""),
+                "total_docs": data["doc_count"],
+                "variants": data["name_variants"],
+                "variant_count": len(data["name_variants"]),
+            })
+
     return {
         "current_profiles": len(current_profiles),
         "new_profiles": len(groups),
         "would_merge": len(current_profiles) - len(groups) if len(current_profiles) > len(groups) else 0,
+        "consolidation_report": consolidation_report[:30],
         "top_vendors": [
             {
                 "name": data["display_name"],
@@ -93,20 +106,24 @@ async def rebuild_run():
 
     groups, vendor_no_map = await _aggregate_vendor_data(db)
 
-    # Preserve manual overrides from existing profiles
+    # Preserve manual overrides from existing profiles (match by vendor_no or normalized name)
     existing = {}
     async for p in db.vendor_intelligence_profiles.find({}, {"_id": 0}):
+        vno = (p.get("vendor_no") or "").strip()
         norm = _normalize_vendor_name(p.get("vendor_name", ""))
+        override_data = {
+            "manual_override_status": p.get("manual_override_status"),
+            "manual_override_reason": p.get("manual_override_reason"),
+            "manual_override_by": p.get("manual_override_by"),
+            "manual_override_at": p.get("manual_override_at"),
+            "manual_override_note": p.get("manual_override_note"),
+            "manual_override_expires_at": p.get("manual_override_expires_at"),
+            "stable_vendor_last_evaluated": p.get("stable_vendor_last_evaluated"),
+        }
+        if vno:
+            existing[vno] = override_data
         if norm and norm not in existing:
-            existing[norm] = {
-                "manual_override_status": p.get("manual_override_status"),
-                "manual_override_reason": p.get("manual_override_reason"),
-                "manual_override_by": p.get("manual_override_by"),
-                "manual_override_at": p.get("manual_override_at"),
-                "manual_override_note": p.get("manual_override_note"),
-                "manual_override_expires_at": p.get("manual_override_expires_at"),
-                "stable_vendor_last_evaluated": p.get("stable_vendor_last_evaluated"),
-            }
+            existing[norm] = override_data
 
     # Drop and rebuild
     await db.vendor_intelligence_profiles.delete_many({})
@@ -146,10 +163,9 @@ async def rebuild_run():
             + (1 - data.get("correction_rate", 0)) * 0.10  # low corrections
         , 4)
 
-        # Restore manual overrides
-        overrides = existing.get(norm_name, {})
-
+        # Restore manual overrides (try vendor_no first, then normalized name)
         vendor_no = data.get("vendor_no", "") or data["display_name"]
+        overrides = existing.get(vendor_no, existing.get(norm_name, {}))
 
         profile = {
             "vendor_no": vendor_no,
@@ -193,17 +209,38 @@ async def rebuild_run():
 
     stable_count = await db.vendor_intelligence_profiles.count_documents({"stable_vendor_flag": True})
 
+    # Build consolidation report
+    consolidation_report = []
+    for key, data in sorted(groups.items(), key=lambda x: len(x[1]["name_variants"]), reverse=True):
+        if len(data["name_variants"]) > 1:
+            consolidation_report.append({
+                "canonical": data["display_name"],
+                "vendor_no": data.get("vendor_no", ""),
+                "total_docs": data["doc_count"],
+                "variants": data["name_variants"],
+                "variant_count": len(data["name_variants"]),
+            })
+
     return {
         "status": "completed",
         "profiles_created": created,
         "stable_vendors": stable_count,
+        "consolidation_report": consolidation_report[:30],
+        "merged_count": len(consolidation_report),
         "duration_ms": duration_ms,
         "timestamp": now,
     }
 
 
 async def _aggregate_vendor_data(db):
-    """Aggregate document data grouped by normalized vendor name."""
+    """
+    Aggregate document data grouped by CONSOLIDATED vendor identity.
+
+    Three-pass consolidation:
+      1. Group by bc_vendor_number (if available from doc or vendor_aliases)
+      2. Group remaining by normalized vendor name
+      3. Merge name-groups into bc_vendor_number groups via alias lookup
+    """
     groups = defaultdict(lambda: {
         "doc_count": 0,
         "auto_cleared_count": 0,
@@ -217,8 +254,110 @@ async def _aggregate_vendor_data(db):
         "correction_rate": 0,
     })
     vendor_no_map = {}
+    merge_log = []
 
-    # Get all non-duplicate documents with any vendor reference
+    # Pre-load alias map: raw vendor name → bc_vendor_no
+    alias_map = {}  # normalized_name → vendor_no
+    try:
+        aliases = await db.vendor_aliases.find(
+            {}, {"_id": 0, "alias_string": 1, "normalized_alias": 1, "vendor_no": 1, "vendor_name": 1}
+        ).to_list(5000)
+        for a in aliases:
+            alias_str = (a.get("alias_string") or "").strip()
+            norm_alias = (a.get("normalized_alias") or _normalize_vendor_name(alias_str)).strip()
+            vno = (a.get("vendor_no") or "").strip()
+            if norm_alias and vno:
+                alias_map[norm_alias] = vno
+            if alias_str:
+                alias_map[_normalize_vendor_name(alias_str)] = vno
+    except Exception:
+        pass
+
+    # Also build a map from BC reference cache: vendor name → vendor_no
+    bc_vendor_name_to_no = {}
+    try:
+        bc_vendors = await db.bc_reference_cache.find(
+            {"bc_entity_type": "vendor"},
+            {"_id": 0, "bc_vendor_name": 1, "bc_vendor_no": 1}
+        ).limit(2000).to_list(2000)
+        for v in bc_vendors:
+            name = (v.get("bc_vendor_name") or "").strip()
+            vno = (v.get("bc_vendor_no") or "").strip()
+            if name and vno:
+                bc_vendor_name_to_no[_normalize_vendor_name(name)] = vno
+                bc_vendor_name_to_no[name.lower()] = vno
+    except Exception:
+        pass
+
+    def _resolve_vendor_no(raw_name, doc):
+        """Determine the BC vendor number for a document, using multiple sources."""
+        # 1. Direct from document fields
+        vno = (doc.get("bc_vendor_number") or "").strip()
+        if vno:
+            return vno
+
+        # 2. From unified_vendor_match
+        uvm = doc.get("unified_vendor_match") or doc.get("validation_results", {}).get("unified_vendor_match", {})
+        if uvm:
+            vno = (uvm.get("bc_vendor_no") or "").strip()
+            if vno:
+                return vno
+
+        # 3. From vendor_resolution
+        vr = doc.get("vendor_resolution") or {}
+        vno = (vr.get("vendor_no") or "").strip()
+        if vno:
+            return vno
+
+        # 4. From alias map
+        norm = _normalize_vendor_name(raw_name)
+        if norm in alias_map:
+            return alias_map[norm]
+
+        # 5. From BC vendor cache (exact name match)
+        if norm in bc_vendor_name_to_no:
+            return bc_vendor_name_to_no[norm]
+        if raw_name.lower() in bc_vendor_name_to_no:
+            return bc_vendor_name_to_no[raw_name.lower()]
+
+        return ""
+
+    def _accum_doc(g, doc, raw_name):
+        """Accumulate document stats into a group."""
+        g["doc_count"] += 1
+
+        if raw_name not in g["name_variants"]:
+            g["name_variants"].append(raw_name)
+        g["display_name"] = _pick_best_display_name(g["name_variants"])
+
+        status = (doc.get("status") or "").lower()
+        workflow_status = (doc.get("workflow_status") or "").lower()
+        if (doc.get("auto_cleared")
+            or status in ("completed", "posted", "linkedtobc", "storedinsp", "archived")
+            or workflow_status in ("completed", "processed", "exported", "validation_passed")):
+            g["auto_cleared_count"] += 1
+
+        val_state = (doc.get("validation_state") or "").lower()
+        val_results = doc.get("validation_results") or {}
+        if (val_state == "pass"
+            or val_results.get("all_passed")
+            or status in ("validationpassed", "validated", "storedinsp", "readytolink", "linkedtobc", "completed", "posted")):
+            g["validation_passed_count"] += 1
+
+        match_method = doc.get("vendor_match_method") or ""
+        has_vendor = bool(doc.get("vendor_canonical")) or match_method not in ("", "none", None)
+        if has_vendor:
+            g["vendor_resolved_count"] += 1
+
+        ref_intel = doc.get("reference_intelligence") or {}
+        if ref_intel.get("match_outcome", "") in ("exact_match", "likely_match"):
+            g["ref_resolved_count"] += 1
+
+        dt = doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type")
+        if dt:
+            g["doc_types"].add(dt)
+
+    # Pass 1: Process all documents
     cursor = db.hub_documents.find(
         {
             "is_duplicate": {"$ne": True},
@@ -226,12 +365,13 @@ async def _aggregate_vendor_data(db):
                 {"vendor_canonical": {"$exists": True, "$ne": None}},
                 {"vendor_raw": {"$exists": True, "$ne": None}},
                 {"matched_vendor_name": {"$exists": True, "$ne": None}},
+                {"bc_vendor_number": {"$exists": True, "$ne": ""}},
             ],
         },
         {
             "_id": 0, "id": 1,
             "vendor_canonical": 1, "vendor_raw": 1, "matched_vendor_name": 1,
-            "vendor_normalized": 1,
+            "vendor_normalized": 1, "bc_vendor_number": 1,
             "auto_cleared": 1, "status": 1, "workflow_status": 1,
             "vendor_match_method": 1, "vendor_resolution": 1,
             "validation_results": 1, "validation_state": 1,
@@ -242,7 +382,6 @@ async def _aggregate_vendor_data(db):
     )
 
     async for doc in cursor:
-        # Pick the best vendor name
         raw_name = (
             doc.get("vendor_canonical")
             or doc.get("matched_vendor_name")
@@ -252,59 +391,68 @@ async def _aggregate_vendor_data(db):
         if not raw_name or raw_name.lower() in ("unknown", "none", "n/a", ""):
             continue
 
-        norm = _normalize_vendor_name(raw_name)
-        if not norm:
-            continue
+        # Determine the best grouping key: BC vendor number preferred
+        vendor_no = _resolve_vendor_no(raw_name, doc)
 
-        g = groups[norm]
-        g["doc_count"] += 1
+        if vendor_no:
+            # Group by BC vendor number (canonical)
+            group_key = f"bc:{vendor_no}"
+            g = groups[group_key]
+            g["vendor_no"] = vendor_no
+            _accum_doc(g, doc, raw_name)
+        else:
+            # Fallback: group by normalized name
+            norm = _normalize_vendor_name(raw_name)
+            if not norm:
+                continue
+            group_key = f"name:{norm}"
+            g = groups[group_key]
+            _accum_doc(g, doc, raw_name)
 
-        # Track name variants
-        if raw_name not in g["name_variants"]:
-            g["name_variants"].append(raw_name)
-        g["display_name"] = _pick_best_display_name(g["name_variants"])
+    # Pass 2: Try to merge name-grouped profiles into bc-grouped via aliases
+    name_groups = {k: v for k, v in groups.items() if k.startswith("name:")}
+    for name_key, data in list(name_groups.items()):
+        norm = name_key[5:]  # strip "name:" prefix
+        # Check if any name variant has an alias
+        target_vno = alias_map.get(norm) or bc_vendor_name_to_no.get(norm) or ""
+        if not target_vno:
+            for variant in data["name_variants"]:
+                vn_norm = _normalize_vendor_name(variant)
+                target_vno = alias_map.get(vn_norm) or bc_vendor_name_to_no.get(vn_norm) or ""
+                if target_vno:
+                    break
 
-        # Track vendor_no from BC match
-        uvm = doc.get("unified_vendor_match") or {}
-        vno = uvm.get("bc_vendor_no", "")
-        vr = doc.get("vendor_resolution") or {}
-        if not vno:
-            vno = vr.get("vendor_no", "")
-        if vno and not g["vendor_no"]:
-            g["vendor_no"] = vno
+        if target_vno:
+            bc_key = f"bc:{target_vno}"
+            if bc_key in groups:
+                # Merge into existing bc group
+                target = groups[bc_key]
+                target["doc_count"] += data["doc_count"]
+                target["auto_cleared_count"] += data["auto_cleared_count"]
+                target["validation_passed_count"] += data["validation_passed_count"]
+                target["vendor_resolved_count"] += data["vendor_resolved_count"]
+                target["ref_resolved_count"] += data["ref_resolved_count"]
+                for v in data["name_variants"]:
+                    if v not in target["name_variants"]:
+                        target["name_variants"].append(v)
+                target["display_name"] = _pick_best_display_name(target["name_variants"])
+                target["doc_types"].update(data["doc_types"])
+                merge_log.append(f"Merged '{data['display_name']}' ({data['doc_count']} docs) → {target_vno}")
+            else:
+                # Promote name group to bc group
+                data["vendor_no"] = target_vno
+                groups[bc_key] = data
+                merge_log.append(f"Promoted '{data['display_name']}' ({data['doc_count']} docs) → {target_vno}")
+            del groups[name_key]
 
-        # Automation success: doc was processed end-to-end successfully
-        # Includes auto-cleared, manually approved, or any terminal success status
-        status = (doc.get("status") or "").lower()
-        workflow_status = (doc.get("workflow_status") or "").lower()
-        if (doc.get("auto_cleared")
-            or status in ("completed", "posted", "linkedtobc", "storedinsp", "archived")
-            or workflow_status in ("completed", "processed", "exported", "validation_passed")):
-            g["auto_cleared_count"] += 1
+    # Clean up keys — remove prefixes for output
+    clean_groups = {}
+    for key, data in groups.items():
+        clean_key = key.split(":", 1)[1] if ":" in key else key
+        clean_groups[clean_key] = data
 
-        # Validation passed
-        val_state = (doc.get("validation_state") or "").lower()
-        val_results = doc.get("validation_results") or {}
-        if (val_state == "pass"
-            or val_results.get("all_passed")
-            or status in ("validationpassed", "validated", "storedinsp", "readytolink", "linkedtobc", "completed", "posted")):
-            g["validation_passed_count"] += 1
+    if merge_log:
+        logger.info("[VendorConsolidation] Merged %d profile groups:\n  %s",
+                     len(merge_log), "\n  ".join(merge_log))
 
-        # Vendor resolved (has BC match)
-        match_method = doc.get("vendor_match_method") or ""
-        has_vendor = bool(doc.get("vendor_canonical")) or match_method not in ("", "none", None)
-        if has_vendor:
-            g["vendor_resolved_count"] += 1
-
-        # Reference intelligence resolved
-        ref_intel = doc.get("reference_intelligence") or {}
-        ref_outcome = ref_intel.get("match_outcome", "")
-        if ref_outcome in ("exact_match", "likely_match"):
-            g["ref_resolved_count"] += 1
-
-        # Doc type
-        dt = doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type")
-        if dt:
-            g["doc_types"].add(dt)
-
-    return dict(groups), vendor_no_map
+    return clean_groups, vendor_no_map

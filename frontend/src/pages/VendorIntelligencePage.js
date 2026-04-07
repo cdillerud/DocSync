@@ -10,7 +10,7 @@ import {
   Brain, Users, TrendingUp, Shield, Search, RefreshCw, Loader2,
   ChevronRight, ChevronLeft, ArrowUpDown, Activity, Target,
   Truck, Package, FileText, CheckCircle2, AlertTriangle, ArrowRight,
-  ToggleLeft, ToggleRight, RotateCcw, Zap
+  ToggleLeft, ToggleRight, RotateCcw, Zap, Eye, GitMerge
 } from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -522,6 +522,8 @@ export default function VendorIntelligencePage() {
   const [selectedVendor, setSelectedVendor] = useState(null);
   const [sortBy, setSortBy] = useState('invoice_count');
   const [maturityMap, setMaturityMap] = useState({});
+  const [consolidationPreview, setConsolidationPreview] = useState(null);
+  const [showConsolidation, setShowConsolidation] = useState(false);
   const limit = 20;
 
   const fetchData = useCallback(async () => {
@@ -557,13 +559,23 @@ export default function VendorIntelligencePage() {
   const handleRebuild = async () => {
     try {
       setRebuilding(true);
-      await apiPost('/vendor-intelligence/rebuild');
-      toast.success('Vendor profile rebuild started');
-      setTimeout(fetchData, 5000);
+      await apiPost('/vendor-profiles/rebuild/run');
+      toast.success('Vendor profiles rebuilt with consolidation');
+      setTimeout(fetchData, 3000);
     } catch {
       toast.error('Rebuild failed');
     } finally {
       setRebuilding(false);
+    }
+  };
+
+  const handleConsolidationPreview = async () => {
+    try {
+      const data = await apiPost('/vendor-profiles/rebuild/dry-run');
+      setConsolidationPreview(data);
+      setShowConsolidation(true);
+    } catch {
+      toast.error('Failed to load consolidation preview');
     }
   };
 
@@ -586,12 +598,83 @@ export default function VendorIntelligencePage() {
           <Button variant="outline" size="sm" onClick={fetchData} className="h-8 text-xs gap-1" data-testid="refresh-vendor-intel">
             <RefreshCw className="w-3 h-3" /> Refresh
           </Button>
-          <Button variant="outline" size="sm" onClick={handleRebuild} disabled={rebuilding} className="h-8 text-xs gap-1" data-testid="rebuild-vendor-profiles">
+          <Button variant="outline" size="sm" onClick={handleConsolidationPreview} className="h-8 text-xs gap-1" data-testid="consolidation-preview">
+            <Eye className="w-3 h-3" /> Preview Consolidation
+          </Button>
+          <Button variant="default" size="sm" onClick={handleRebuild} disabled={rebuilding} className="h-8 text-xs gap-1" data-testid="rebuild-vendor-profiles">
             {rebuilding ? <Loader2 className="w-3 h-3 animate-spin" /> : <Brain className="w-3 h-3" />}
             Rebuild Profiles
           </Button>
         </div>
       </div>
+
+      {/* Consolidation Preview */}
+      {showConsolidation && consolidationPreview && (
+        <Card className="border border-amber-500/30 bg-amber-950/10">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="text-sm font-semibold flex items-center gap-2">
+                  <GitMerge className="w-4 h-4 text-amber-400" />
+                  Vendor Profile Consolidation Preview
+                </h3>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {consolidationPreview.current_profiles} current profiles → {consolidationPreview.new_profiles} consolidated
+                  {consolidationPreview.would_merge > 0 && (
+                    <span className="text-amber-400 font-medium ml-1">
+                      ({consolidationPreview.would_merge} profiles will merge)
+                    </span>
+                  )}
+                </p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setShowConsolidation(false)} className="h-6 text-xs">
+                Close
+              </Button>
+            </div>
+
+            {consolidationPreview.consolidation_report?.length > 0 ? (
+              <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                {consolidationPreview.consolidation_report.map((merge, i) => (
+                  <div key={i} className="p-2 rounded bg-background/50 border border-border/50">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-medium">{merge.canonical} <span className="text-muted-foreground">({merge.vendor_no || 'no BC match'})</span></p>
+                        <p className="text-[10px] text-muted-foreground">{merge.total_docs} docs from {merge.variant_count} name variants</p>
+                      </div>
+                      <Badge variant="outline" className="text-[10px] text-amber-400 border-amber-500/30">{merge.variant_count} variants</Badge>
+                    </div>
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {merge.variants.map((v, j) => (
+                        <span key={j} className="text-[10px] px-1.5 py-0.5 rounded bg-accent/40 text-muted-foreground">{v}</span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">No duplicate profiles to merge. All vendors are already consolidated.</p>
+            )}
+
+            {consolidationPreview.top_vendors?.length > 0 && (
+              <div className="mt-3">
+                <p className="text-[11px] font-medium text-muted-foreground mb-2">Top vendors after consolidation:</p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {consolidationPreview.top_vendors.slice(0, 8).map((v, i) => (
+                    <div key={i} className="p-2 rounded bg-background/50 border border-border/30 text-center">
+                      <p className="text-[11px] font-medium truncate">{v.name}</p>
+                      <p className="text-lg font-bold">{v.docs}</p>
+                      <p className="text-[10px] text-muted-foreground">{Math.round(v.auto_rate * 100)}% auto</p>
+                      {v.variants?.length > 1 && (
+                        <p className="text-[9px] text-amber-400">{v.variants.length} names merged</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stats Cards */}
       {stats && (

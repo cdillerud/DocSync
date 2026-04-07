@@ -114,6 +114,7 @@ class VendorIntelligenceService:
         """
         Update vendor profile based on a processed document.
         Called after resolution/validation completes.
+        Uses bc_vendor_number as primary key for consolidation.
         """
         vendor_name = (
             doc.get("vendor_raw")
@@ -124,10 +125,15 @@ class VendorIntelligenceService:
         if not vendor_name:
             return
 
-        vendor_no = ""
-        uvm = doc.get("unified_vendor_match") or {}
-        if uvm:
-            vendor_no = uvm.get("bc_vendor_no", "")
+        # Primary key: BC vendor number (consolidates all name variants)
+        vendor_no = (doc.get("bc_vendor_number") or "").strip()
+        if not vendor_no:
+            uvm = doc.get("unified_vendor_match") or {}
+            if uvm:
+                vendor_no = (uvm.get("bc_vendor_no") or "").strip()
+        if not vendor_no:
+            vr = doc.get("vendor_resolution") or {}
+            vendor_no = (vr.get("vendor_no") or "").strip()
 
         vendor_key = vendor_no or vendor_name
 

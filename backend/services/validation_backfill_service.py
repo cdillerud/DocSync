@@ -671,40 +671,58 @@ async def batch_revalidate_vendor_gaps(db, limit: int = 500) -> dict:
                     candidate_resolved += 1
 
         # Strategy 5: Deep fuzzy match against ALL BC vendors (SequenceMatcher)
-        # Auto-accept at 90%+, auto-create alias for future matches
+        # Auto-accept at 90%+, or 70%+ with substring match (e.g., "XPO" in "XPO Logistics")
         if not matched_vendor and vendor_name:
             from difflib import SequenceMatcher
             vn_lower = vendor_name.strip().lower()
+            vn_clean = re.sub(r'[^a-z0-9\s]', '', vn_lower).strip()
             best_fuzzy_score = 0
             best_fuzzy_match = None
+            is_substring = False
 
-            for cache_name, cache_info in bc_vendor_cache.items():
-                seq_score = SequenceMatcher(None, vn_lower, cache_name).ratio()
-                if seq_score > best_fuzzy_score:
-                    best_fuzzy_score = seq_score
-                    best_fuzzy_match = cache_info
-
-            # Also check vendor profiles
+            all_bc_vendors = dict(bc_vendor_cache)
+            # Also load from profiles
             try:
                 profiles = await db.vendor_invoice_profiles.find(
                     {}, {"_id": 0, "vendor_no": 1, "vendor_name": 1}
                 ).to_list(500)
                 for p in profiles:
                     pname = (p.get("vendor_name") or "").strip().lower()
-                    if pname:
-                        seq_score = SequenceMatcher(None, vn_lower, pname).ratio()
-                        if seq_score > best_fuzzy_score:
-                            best_fuzzy_score = seq_score
-                            best_fuzzy_match = {
-                                "vendor_number": p["vendor_no"],
-                                "name": p.get("vendor_name", p["vendor_no"]),
-                            }
+                    if pname and pname not in all_bc_vendors:
+                        all_bc_vendors[pname] = {
+                            "vendor_number": p["vendor_no"],
+                            "name": p.get("vendor_name", p["vendor_no"]),
+                        }
             except Exception:
                 pass
 
-            if best_fuzzy_match and best_fuzzy_score >= 0.90:
+            for bc_name_lower, bc_info in all_bc_vendors.items():
+                bc_clean = re.sub(r'[^a-z0-9\s]', '', bc_name_lower).strip()
+                seq_score = SequenceMatcher(None, vn_lower, bc_name_lower).ratio()
+
+                # Check substring: vendor name inside BC name or vice versa
+                substr = False
+                if len(vn_clean) >= 3 and (vn_clean in bc_clean or bc_clean in vn_clean):
+                    substr = True
+                # Also check if main words match
+                vn_main = [w for w in vn_clean.split() if len(w) >= 3 and w not in ("inc", "llc", "ltd", "corp", "the")]
+                bc_main = [w for w in bc_clean.split() if len(w) >= 3 and w not in ("inc", "llc", "ltd", "corp", "the")]
+                if vn_main and bc_main and vn_main[0] == bc_main[0]:
+                    substr = True
+
+                effective_score = seq_score
+                if substr:
+                    effective_score = max(seq_score, 0.85)  # Boost substring matches
+
+                if effective_score > best_fuzzy_score:
+                    best_fuzzy_score = effective_score
+                    best_fuzzy_match = bc_info
+                    is_substring = substr
+
+            threshold = 0.75 if is_substring else 0.90
+            if best_fuzzy_match and best_fuzzy_score >= threshold:
                 matched_vendor = best_fuzzy_match
-                match_source = f"auto_accept@{best_fuzzy_score:.0%}"
+                match_source = f"auto_accept@{best_fuzzy_score:.0%}{'(substr)' if is_substring else ''}"
                 auto_accepted += 1
 
                 # Auto-create alias for future matches

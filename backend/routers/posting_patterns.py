@@ -3263,7 +3263,7 @@ async def get_gap_closer_status():
 
     # Validation gap counts — count directly from hub_documents for accuracy
     # Split into blocking (required=true or unset) and advisory (required=false) gaps
-    gap_check_names = ["po_validation", "customer_match", "sales_order_match", "vendor_match", "duplicate_check"]
+    gap_check_names = ["po_validation", "customer_match", "sales_order_match", "vendor_match", "duplicate_check", "extraction_quality_gate"]
     gap_counts = {}
     advisory_counts = {}
     for check_name in gap_check_names:
@@ -3329,6 +3329,19 @@ async def get_gap_closer_status():
     except Exception:
         escalation_summary = {"status": "initializing"}
 
+    # GAP 8: Extraction Quality Gate — count docs resolved vs remaining
+    extraction_gate_resolved = await db.hub_documents.count_documents({"extraction_gap_resolved_via": {"$exists": True}})
+    extraction_gate_downgraded = await db.hub_documents.count_documents({"extraction_gate_downgraded": True})
+    extraction_gate_blocking = gap_counts.get("extraction_quality_gate", 0)
+
+    # GAP 9: Enhanced Vendor Match stats
+    enhanced_vendor_resolved = await db.hub_documents.count_documents({"vendor_enhanced_match_via": {"$exists": True}})
+    vendor_alias_count = await db.vendor_aliases.count_documents({})
+
+    # GAP 10: Enhanced PO Revalidation stats
+    po_enhanced_resolved = await db.hub_documents.count_documents({"po_enhanced_resolved_via": {"$exists": True}})
+    po_downgraded = await db.hub_documents.count_documents({"po_gate_downgraded": True})
+
     return {
         "gap_1_confidence_calibration": {
             "status": "active",
@@ -3358,6 +3371,27 @@ async def get_gap_closer_status():
         "gap_5_duplicate_intelligence": dup_intel_summary,
         "gap_6_amount_anomaly": amount_anomaly_summary,
         "gap_7_escalation_intelligence": escalation_summary,
+        "gap_8_extraction_quality": {
+            "status": "active",
+            "blocking_count": extraction_gate_blocking,
+            "resolved_by_filename": extraction_gate_resolved,
+            "downgraded_to_advisory": extraction_gate_downgraded,
+            "action": "Filename parsing, batch context inheritance, smart advisory downgrade for empty docs",
+        },
+        "gap_9_enhanced_vendor_match": {
+            "status": "active",
+            "blocking_count": gap_counts.get("vendor_match", 0),
+            "enhanced_resolved": enhanced_vendor_resolved,
+            "total_aliases": vendor_alias_count,
+            "action": "Cross-doc inference, email domain mapping, aggressive first-word matching",
+        },
+        "gap_10_enhanced_po": {
+            "status": "active",
+            "blocking_count": gap_counts.get("po_validation", 0),
+            "enhanced_resolved": po_enhanced_resolved,
+            "downgraded_to_advisory": po_downgraded,
+            "action": "Profile relaxation (< 30% PO rate), broader ref matching, doc-type downgrade",
+        },
         "total_validation_gaps": gap_counts,
         "advisory_validation_gaps": advisory_counts,
     }
@@ -3632,7 +3666,28 @@ async def run_intelligence_backfill():
     except Exception as e:
         results["duplicate_revalidation"] = {"error": str(e)}
 
-    # 11. Gap Log Cleanup — remove stale entries for resolved/archived docs
+    # 11. Extraction Quality Gate Re-validation — filename parsing, batch context, smart downgrade
+    try:
+        from services.validation_backfill_service import batch_revalidate_extraction_gaps
+        results["extraction_revalidation"] = await batch_revalidate_extraction_gaps(db, limit=500)
+    except Exception as e:
+        results["extraction_revalidation"] = {"error": str(e)}
+
+    # 12. Enhanced Vendor Match — cross-doc inference, email domain, aggressive matching
+    try:
+        from services.validation_backfill_service import enhanced_vendor_match_backfill
+        results["vendor_enhanced_match"] = await enhanced_vendor_match_backfill(db, limit=500)
+    except Exception as e:
+        results["vendor_enhanced_match"] = {"error": str(e)}
+
+    # 13. Enhanced PO Revalidation — profile relaxation, broader ref matching, doc type downgrade
+    try:
+        from services.validation_backfill_service import enhanced_po_revalidation
+        results["po_enhanced_revalidation"] = await enhanced_po_revalidation(db, limit=500)
+    except Exception as e:
+        results["po_enhanced_revalidation"] = {"error": str(e)}
+
+    # 14. Gap Log Cleanup — remove stale entries for resolved/archived docs
     try:
         stale_cleaned = 0
         gap_log_entries = await db.validation_gap_log.find(

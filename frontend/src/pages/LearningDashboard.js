@@ -6,7 +6,7 @@ import {
   Brain, RefreshCw, TrendingUp, CheckCircle2, AlertTriangle,
   Zap, BookOpen, ArrowRight, Activity, Database, Loader2,
   RotateCcw, Sparkles, Shield, Fingerprint, Target, Gauge,
-  Eye, Search, BarChart3, GitBranch, Copy
+  Eye, Search, BarChart3, GitBranch, Copy, FileText, Users
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -282,7 +282,7 @@ function GapCloserSection() {
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          Using learned intelligence to close the 7 biggest validation gaps. Active on every document.
+          Using learned intelligence to close the 10 biggest validation gaps. Active on every document.
         </p>
       </CardHeader>
       <CardContent>
@@ -481,6 +481,87 @@ function GapCloserSection() {
                 <div>
                   <p className="font-bold text-emerald-400">{status.gap_7_escalation_intelligence?.fully_automated || 0}</p>
                   <p className="text-muted-foreground">Automated</p>
+                </div>
+              </div>
+            </div>
+
+            {/* GAP 8: Extraction Quality Gate */}
+            <div className={`p-3 rounded border ${gapColors(true)}`} data-testid="gap-8-extraction">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-medium flex items-center gap-1">
+                  <FileText className="w-3 h-3 text-sky-500" /> Gap 8: Extraction Quality
+                </p>
+                <Badge className="bg-emerald-600 text-white text-[10px]">ACTIVE</Badge>
+              </div>
+              <p className="text-[10px] text-muted-foreground mb-2">
+                Filename parsing + batch context inheritance. Downgrades empty docs to advisory.
+              </p>
+              <div className="grid grid-cols-3 gap-2 text-center text-[10px]">
+                <div>
+                  <p className="font-bold text-red-400">{status.gap_8_extraction_quality?.blocking_count || 0}</p>
+                  <p className="text-muted-foreground">Blocking</p>
+                </div>
+                <div>
+                  <p className="font-bold text-emerald-400">{status.gap_8_extraction_quality?.resolved_by_filename || 0}</p>
+                  <p className="text-muted-foreground">Resolved</p>
+                </div>
+                <div>
+                  <p className="font-bold text-amber-400">{status.gap_8_extraction_quality?.downgraded_to_advisory || 0}</p>
+                  <p className="text-muted-foreground">Advisory</p>
+                </div>
+              </div>
+            </div>
+
+            {/* GAP 9: Enhanced Vendor Match */}
+            <div className={`p-3 rounded border ${gapColors(true)}`} data-testid="gap-9-vendor-enhanced">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-medium flex items-center gap-1">
+                  <Users className="w-3 h-3 text-indigo-500" /> Gap 9: Enhanced Vendor Match
+                </p>
+                <Badge className="bg-emerald-600 text-white text-[10px]">ACTIVE</Badge>
+              </div>
+              <p className="text-[10px] text-muted-foreground mb-2">
+                Cross-doc inference, email domain mapping, aggressive first-word matching.
+              </p>
+              <div className="grid grid-cols-3 gap-2 text-center text-[10px]">
+                <div>
+                  <p className="font-bold text-red-400">{status.gap_9_enhanced_vendor_match?.blocking_count || 0}</p>
+                  <p className="text-muted-foreground">Open Gap</p>
+                </div>
+                <div>
+                  <p className="font-bold text-emerald-400">{status.gap_9_enhanced_vendor_match?.enhanced_resolved || 0}</p>
+                  <p className="text-muted-foreground">AI Resolved</p>
+                </div>
+                <div>
+                  <p className="font-bold">{status.gap_9_enhanced_vendor_match?.total_aliases || 0}</p>
+                  <p className="text-muted-foreground">Aliases</p>
+                </div>
+              </div>
+            </div>
+
+            {/* GAP 10: Enhanced PO Revalidation */}
+            <div className={`p-3 rounded border ${gapColors(true)}`} data-testid="gap-10-po-enhanced">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-medium flex items-center gap-1">
+                  <Zap className="w-3 h-3 text-teal-500" /> Gap 10: Enhanced PO
+                </p>
+                <Badge className="bg-emerald-600 text-white text-[10px]">ACTIVE</Badge>
+              </div>
+              <p className="text-[10px] text-muted-foreground mb-2">
+                Profile relaxation (&lt;30% PO rate), broader ref matching, doc-type downgrade.
+              </p>
+              <div className="grid grid-cols-3 gap-2 text-center text-[10px]">
+                <div>
+                  <p className="font-bold text-red-400">{status.gap_10_enhanced_po?.blocking_count || 0}</p>
+                  <p className="text-muted-foreground">Open Gap</p>
+                </div>
+                <div>
+                  <p className="font-bold text-emerald-400">{status.gap_10_enhanced_po?.enhanced_resolved || 0}</p>
+                  <p className="text-muted-foreground">AI Resolved</p>
+                </div>
+                <div>
+                  <p className="font-bold text-amber-400">{status.gap_10_enhanced_po?.downgraded_to_advisory || 0}</p>
+                  <p className="text-muted-foreground">Advisory</p>
                 </div>
               </div>
             </div>

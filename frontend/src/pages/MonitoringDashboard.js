@@ -164,14 +164,19 @@ export default function MonitoringDashboard() {
               <div>
                 <p className="text-muted-foreground">PO Gaps Resolved</p>
                 <p className="font-bold text-emerald-400">{backfillResult.po_revalidation?.resolved || 0} / {backfillResult.po_revalidation?.found || 0}</p>
+                {(backfillResult.po_revalidation?.skipped_by_profile > 0 || backfillResult.po_revalidation?.bc_matched > 0) && (
+                  <p className="text-muted-foreground">
+                    {backfillResult.po_revalidation?.skipped_by_profile || 0} via profile, {backfillResult.po_revalidation?.bc_matched || 0} via BC
+                  </p>
+                )}
               </div>
             </div>
-            {/* Vendor PO Diagnostic */}
-            {backfillResult.vendor_po_diagnostic && Array.isArray(backfillResult.vendor_po_diagnostic) && backfillResult.vendor_po_diagnostic.length > 0 && (
+            {/* Vendor Profile Refresh Results */}
+            {backfillResult.vendor_profile_refresh?.profiles && Array.isArray(backfillResult.vendor_profile_refresh.profiles) && backfillResult.vendor_profile_refresh.profiles.length > 0 && (
               <div className="mt-3 pt-3 border-t border-border/50">
-                <p className="text-xs font-medium mb-2">Vendor PO Learning Status (top gap vendors)</p>
+                <p className="text-xs font-medium mb-2">Vendor PO Learning Status ({backfillResult.vendor_profile_refresh.refreshed || 0} profiles refreshed)</p>
                 <div className="space-y-1">
-                  {backfillResult.vendor_po_diagnostic.map((v, i) => (
+                  {backfillResult.vendor_profile_refresh.profiles.map((v, i) => (
                     <div key={i} className="flex items-center justify-between text-[10px] p-1.5 rounded bg-accent/30">
                       <span className="font-mono">{v.vendor_no}</span>
                       <div className="flex items-center gap-3">
@@ -179,7 +184,7 @@ export default function MonitoringDashboard() {
                         <span>BC cache: {v.bc_cache_invoices ?? '?'} PIs</span>
                         <span>w/ PO: {v.bc_cache_with_po ?? '?'}</span>
                         <span className={v.po_expected === false ? 'text-emerald-400 font-bold' : 'text-muted-foreground'}>
-                          {v.po_expected === false ? 'PO SKIP (learned)' : v.bc_cache_invoices === 0 ? 'No BC data' : 'PO required'}
+                          {v.po_expected === false ? 'PO SKIP (learned)' : v.bc_cache_invoices === 0 ? 'No BC data yet' : 'PO required'}
                         </span>
                       </div>
                     </div>

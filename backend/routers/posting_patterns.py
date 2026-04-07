@@ -3531,16 +3531,10 @@ async def run_intelligence_backfill():
     except Exception as e:
         results["duplicate_clear"] = {"error": str(e)}
 
-    # 5. PO Gap Re-validation — re-run PO matching on documents with po_validation failures
+    # 5. Force-refresh vendor profiles for top PO gap vendors BEFORE re-validation.
+    # This ensures profiles reflect the latest BC cache data (e.g., after a cache sync).
     try:
-        results["po_revalidation"] = await _batch_revalidate_po_gaps(db, limit=200)
-    except Exception as e:
-        results["po_revalidation"] = {"error": str(e)}
-
-    # 6. Vendor PO Profile Diagnostic — show what the system learned about PO expectations
-    try:
-        from services.vendor_invoice_profile_service import get_or_build_profile
-        # Get the top PO gap vendors and check their profiles
+        from services.vendor_invoice_profile_service import build_vendor_profile
         po_gap_vendors = await db.hub_documents.aggregate([
             {"$match": {
                 "validation_results.checks": {"$elemMatch": {"check_name": "po_validation", "passed": False}},
@@ -3551,17 +3545,19 @@ async def run_intelligence_backfill():
                 "gap_count": {"$sum": 1},
             }},
             {"$sort": {"gap_count": -1}},
-            {"$limit": 10},
-        ]).to_list(10)
+            {"$limit": 15},
+        ]).to_list(15)
 
+        refreshed = 0
         vendor_po_profiles = []
         for vg in po_gap_vendors:
             vendor_no = vg["_id"]
             if vendor_no == "unknown":
                 vendor_po_profiles.append({"vendor_no": "unknown", "gaps": vg["gap_count"], "profile": "no vendor match"})
                 continue
-            profile = await get_or_build_profile(db, vendor_no)
-            # Check bc_reference_cache for this vendor's posted PIs
+            # Force rebuild from latest cache data
+            profile = await build_vendor_profile(db, vendor_no, force_refresh=True)
+            refreshed += 1
             cache_count = await db.bc_reference_cache.count_documents({
                 "bc_vendor_no": vendor_no,
                 "bc_entity_type": {"$in": ["posted_purchase_invoice", "draft_purchase_invoice"]},
@@ -3578,11 +3574,16 @@ async def run_intelligence_backfill():
                 "bc_cache_invoices": cache_count,
                 "bc_cache_with_po": cache_with_po,
                 "po_rate": round(cache_with_po / max(cache_count, 1), 3) if cache_count else None,
-                "profile_source": profile.get("_source", "computed") if profile else "none",
             })
-        results["vendor_po_diagnostic"] = vendor_po_profiles
+        results["vendor_profile_refresh"] = {"refreshed": refreshed, "profiles": vendor_po_profiles}
     except Exception as e:
-        results["vendor_po_diagnostic"] = {"error": str(e)}
+        results["vendor_profile_refresh"] = {"error": str(e)}
+
+    # 6. PO Gap Re-validation — now uses freshly refreshed vendor profiles
+    try:
+        results["po_revalidation"] = await _batch_revalidate_po_gaps(db, limit=200)
+    except Exception as e:
+        results["po_revalidation"] = {"error": str(e)}
 
     return results
 
@@ -3590,8 +3591,10 @@ async def run_intelligence_backfill():
 async def _batch_revalidate_po_gaps(db, limit: int = 200) -> dict:
     """
     Re-run PO matching on documents with po_validation gaps.
-    Uses the enhanced PO intelligence (reverse vendor lookup, substring matching,
-    bigram similarity) to find matches that the original pass missed.
+    
+    TWO-PASS approach:
+      Pass 1: Check vendor profile — if po_expected=False, resolve as PO_SKIP
+      Pass 2: For remaining docs, use enhanced PO intelligence to find matching POs
     """
     import httpx
     import logging
@@ -3612,142 +3615,227 @@ async def _batch_revalidate_po_gaps(db, limit: int = 200) -> dict:
     ).limit(limit).to_list(limit)
 
     if not po_gap_docs:
-        return {"found": 0, "resolved": 0, "message": "No PO validation gaps found"}
+        return {"found": 0, "resolved": 0, "skipped_by_profile": 0, "message": "No PO validation gaps found"}
 
-    # Get BC adapter for token + API URL
-    try:
-        from services.bc_access import get_bc_adapter
-        adapter = get_bc_adapter()
-        token = await adapter.get_token()
-        if not token:
-            return {"found": len(po_gap_docs), "resolved": 0, "error": "Cannot get BC token"}
-        company_id = await adapter.get_company_id(token)
-        if not company_id:
-            return {"found": len(po_gap_docs), "resolved": 0, "error": "Cannot get BC company ID"}
-    except Exception as e:
-        return {"found": len(po_gap_docs), "resolved": 0, "error": f"BC access failed: {e}"}
+    # ── PASS 1: Vendor profile check (po_expected=False → auto-resolve) ──
+    from services.vendor_invoice_profile_service import get_or_build_profile
 
-    from services.gap_closer_service import enhance_po_candidates
+    # Pre-load vendor profiles for all unique vendors in the gap docs
+    vendor_nos = set()
+    for doc in po_gap_docs:
+        vn = doc.get("bc_vendor_number") or doc.get("vendor_no") or doc.get("matched_vendor_no") or ""
+        if vn:
+            vendor_nos.add(vn)
+
+    vendor_profiles = {}
+    for vn in vendor_nos:
+        try:
+            profile = await get_or_build_profile(db, vn)
+            vendor_profiles[vn] = profile
+        except Exception as e:
+            logger.debug("[PO-Reval] Profile load error for %s: %s", vn, e)
 
     resolved = 0
+    skipped_by_profile = 0
     errors = 0
+    remaining_docs = []
 
-    async with httpx.AsyncClient(timeout=15.0) as c:
-        for doc in po_gap_docs:
-            doc_id = doc.get("id", "")
-            vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or doc.get("matched_vendor_no") or ""
-            extracted = doc.get("extracted_fields") or {}
-            validation = doc.get("validation_results") or {}
+    for doc in po_gap_docs:
+        doc_id = doc.get("id", "")
+        vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or doc.get("matched_vendor_no") or ""
+        validation = doc.get("validation_results") or {}
 
-            # Gather all PO candidates from the document
-            original_candidates = []
-            for field in ["po_number", "order_number", "reference_number", "purchase_order"]:
-                val = extracted.get(field, "")
-                if val and str(val).strip():
-                    original_candidates.append(str(val).strip())
+        if not vendor_no:
+            remaining_docs.append(doc)
+            continue
 
-            if not original_candidates and not vendor_no:
-                continue
+        profile = vendor_profiles.get(vendor_no)
+        po_expected = profile.get("po_expected", True) if profile else True
 
-            try:
-                # Expand PO candidates with enhanced intelligence
-                expanded = await enhance_po_candidates(db, vendor_no, original_candidates)
+        # Also check PO format learning — very low match rate means POs aren't standard for this vendor
+        po_intel = await db.po_format_intelligence.find_one(
+            {"vendor_no": vendor_no}, {"_id": 0}
+        )
+        low_match_rate = False
+        if po_intel and po_intel.get("total_po_attempts", 0) >= 10:
+            if po_intel.get("match_rate", 1.0) < 0.10:
+                low_match_rate = True
 
-                # Also apply PO format learning transformations
-                try:
-                    from services.po_format_learning_service import get_smart_po_candidates
-                    for base_po in original_candidates[:3]:
-                        smart = await get_smart_po_candidates(db, vendor_no, base_po)
-                        for s in smart:
-                            if s not in expanded:
-                                expanded.append(s)
-                except Exception:
-                    pass
+        if not po_expected or low_match_rate:
+            # Vendor doesn't use POs — resolve the gap by skipping PO validation
+            reason = "vendor profile: po_expected=False" if not po_expected else f"PO match rate {po_intel.get('match_rate', 0):.1%} < 10%"
+            new_checks = [
+                ch for ch in validation.get("checks", [])
+                if ch.get("check_name") != "po_validation"
+            ]
+            new_checks.append({
+                "check_name": "po_validation",
+                "passed": True,
+                "details": f"PO validation skipped — vendor learned to not require POs ({reason})",
+                "required": False,
+            })
 
-                # Deduplicate against already-tried POs
-                already_tried = set()
-                for check in validation.get("checks", []):
-                    if check.get("check_name") == "po_validation":
-                        details = check.get("details", "")
-                        if "'" in details:
-                            parts = details.split("'")
-                            if len(parts) >= 2:
-                                already_tried.add(parts[1])
+            all_passed = all(ch.get("passed", True) for ch in new_checks)
 
-                new_candidates = [p for p in expanded if p not in already_tried]
-                if not new_candidates:
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    "validation_results.checks": new_checks,
+                    "validation_results.all_passed": all_passed,
+                    "po_revalidated_at": _now(),
+                    "po_revalidated_via": "vendor_profile_learning",
+                }}
+            )
+            await db.validation_gap_log.delete_many({"doc_id": doc_id, "failure_checks": "po_validation"})
+
+            resolved += 1
+            skipped_by_profile += 1
+            logger.info(
+                "[PO-Reval] doc=%s vendor=%s — RESOLVED via profile (%s)",
+                doc_id[:8], vendor_no, reason,
+            )
+        else:
+            remaining_docs.append(doc)
+
+    # ── PASS 2: BC PO matching for remaining docs ──
+    bc_resolved = 0
+    if remaining_docs:
+        try:
+            from services.bc_access import get_bc_adapter
+            adapter = get_bc_adapter()
+            token = await adapter.get_token()
+            if not token:
+                return {
+                    "found": len(po_gap_docs), "resolved": resolved,
+                    "skipped_by_profile": skipped_by_profile,
+                    "error": "Cannot get BC token for pass 2",
+                }
+            company_id = await adapter.get_company_id(token)
+            if not company_id:
+                return {
+                    "found": len(po_gap_docs), "resolved": resolved,
+                    "skipped_by_profile": skipped_by_profile,
+                    "error": "Cannot get BC company ID for pass 2",
+                }
+        except Exception as e:
+            return {
+                "found": len(po_gap_docs), "resolved": resolved,
+                "skipped_by_profile": skipped_by_profile,
+                "error": f"BC access failed for pass 2: {e}",
+            }
+
+        from services.gap_closer_service import enhance_po_candidates
+
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            for doc in remaining_docs:
+                doc_id = doc.get("id", "")
+                vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or doc.get("matched_vendor_no") or ""
+                extracted = doc.get("extracted_fields") or {}
+                validation = doc.get("validation_results") or {}
+
+                # Gather all PO candidates from the document
+                original_candidates = []
+                for field in ["po_number", "order_number", "reference_number", "purchase_order"]:
+                    val = extracted.get(field, "")
+                    if val and str(val).strip():
+                        original_candidates.append(str(val).strip())
+
+                if not original_candidates and not vendor_no:
                     continue
 
-                # Try each new candidate against BC
-                matched_po = None
-                for candidate in new_candidates:
+                try:
+                    # Expand PO candidates with enhanced intelligence
+                    expanded = await enhance_po_candidates(db, vendor_no, original_candidates)
+
+                    # Also apply PO format learning transformations
                     try:
-                        resp = await c.get(
-                            adapter.api_url("purchaseOrders", company_id),
-                            headers={"Authorization": f"Bearer {token}"},
-                            params={"$filter": f"number eq '{candidate.replace(chr(39), chr(39)+chr(39))}'"},
-                        )
-                        if resp.status_code == 200:
-                            pos = resp.json().get("value", [])
-                            if pos:
-                                matched_po = candidate
-                                break
+                        from services.po_format_learning_service import get_smart_po_candidates
+                        for base_po in original_candidates[:3]:
+                            smart = await get_smart_po_candidates(db, vendor_no, base_po)
+                            for s in smart:
+                                if s not in expanded:
+                                    expanded.append(s)
                     except Exception:
+                        pass
+
+                    # Deduplicate against already-tried POs
+                    already_tried = set()
+                    for check in validation.get("checks", []):
+                        if check.get("check_name") == "po_validation":
+                            details = check.get("details", "")
+                            if "'" in details:
+                                parts = details.split("'")
+                                if len(parts) >= 2:
+                                    already_tried.add(parts[1])
+
+                    new_candidates = [p for p in expanded if p not in already_tried]
+                    if not new_candidates:
                         continue
 
-                if matched_po:
-                    # Update the document — replace the failed PO check with success
-                    new_checks = [
-                        ch for ch in validation.get("checks", [])
-                        if ch.get("check_name") != "po_validation"
-                    ]
-                    new_checks.append({
-                        "check_name": "po_validation",
-                        "passed": True,
-                        "details": f"Found PO: {matched_po} (re-validated via enhanced intelligence)",
-                        "required": True,
-                    })
+                    # Try each new candidate against BC
+                    matched_po = None
+                    for candidate in new_candidates:
+                        try:
+                            resp = await c.get(
+                                adapter.api_url("purchaseOrders", company_id),
+                                headers={"Authorization": f"Bearer {token}"},
+                                params={"$filter": f"number eq '{candidate.replace(chr(39), chr(39)+chr(39))}'"},
+                            )
+                            if resp.status_code == 200:
+                                pos = resp.json().get("value", [])
+                                if pos:
+                                    matched_po = candidate
+                                    break
+                        except Exception:
+                            continue
 
-                    all_passed = all(ch.get("passed", True) for ch in new_checks)
+                    if matched_po:
+                        new_checks = [
+                            ch for ch in validation.get("checks", [])
+                            if ch.get("check_name") != "po_validation"
+                        ]
+                        new_checks.append({
+                            "check_name": "po_validation",
+                            "passed": True,
+                            "details": f"Found PO: {matched_po} (re-validated via enhanced intelligence)",
+                            "required": True,
+                        })
 
-                    update_set = {
-                        "validation_results.checks": new_checks,
-                        "validation_results.all_passed": all_passed,
-                        "validation_results.po_match": True,
-                        "validation_results.matched_po": matched_po,
-                        "po_revalidated_at": _now(),
-                        "po_revalidated_via": "intelligence_backfill",
-                        "extracted_fields.po_number": matched_po,
-                    }
+                        all_passed = all(ch.get("passed", True) for ch in new_checks)
 
-                    await db.hub_documents.update_one(
-                        {"id": doc_id},
-                        {"$set": update_set}
-                    )
+                        await db.hub_documents.update_one(
+                            {"id": doc_id},
+                            {"$set": {
+                                "validation_results.checks": new_checks,
+                                "validation_results.all_passed": all_passed,
+                                "validation_results.po_match": True,
+                                "validation_results.matched_po": matched_po,
+                                "po_revalidated_at": _now(),
+                                "po_revalidated_via": "intelligence_backfill",
+                                "extracted_fields.po_number": matched_po,
+                            }}
+                        )
+                        await db.validation_gap_log.delete_many({"doc_id": doc_id, "failure_checks": "po_validation"})
 
-                    # Remove from validation gap log
-                    await db.validation_gap_log.delete_many({"doc_id": doc_id, "failure_checks": "po_validation"})
+                        resolved += 1
+                        bc_resolved += 1
+                        logger.info(
+                            "[PO-Reval] doc=%s vendor=%s — RESOLVED with PO '%s'",
+                            doc_id[:8], vendor_no, matched_po,
+                        )
+                except Exception as e:
+                    errors += 1
+                    logger.debug("[PO-Reval] Error for %s: %s", doc_id[:8], e)
 
-                    resolved += 1
-                    logger.info(
-                        "[PO-Reval] doc=%s vendor=%s — RESOLVED with PO '%s'",
-                        doc_id[:8], vendor_no, matched_po,
-                    )
-            except Exception as e:
-                errors += 1
-                logger.debug("[PO-Reval] Error for %s: %s", doc_id[:8], e)
-
-    logger.info("[PO-Reval] Batch complete: %d found, %d resolved, %d errors", len(po_gap_docs), resolved, errors)
+    logger.info(
+        "[PO-Reval] Batch complete: %d found, %d resolved (%d via profile, %d via BC match), %d errors",
+        len(po_gap_docs), resolved, skipped_by_profile, bc_resolved, errors,
+    )
     return {
         "found": len(po_gap_docs),
         "resolved": resolved,
-        "errors": errors,
-    }
-
-    logger.info("[PO-Reval] Batch complete: %d found, %d resolved, %d errors", len(po_gap_docs), resolved, errors)
-    return {
-        "found": len(po_gap_docs),
-        "resolved": resolved,
+        "skipped_by_profile": skipped_by_profile,
+        "bc_matched": bc_resolved,
         "errors": errors,
     }
 

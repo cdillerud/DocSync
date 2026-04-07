@@ -7,37 +7,47 @@ Enterprise document processing hub for AP/Sales workflows with Dynamics 365 BC i
 - **Frontend**: React + Tailwind + Shadcn/UI
 - **Backend**: FastAPI + MongoDB + Background Schedulers
 - **Integrations**: Dynamics 365 BC, OpenAI/Gemini (Emergent LLM Key), MS Graph
+- **Production**: Docker Compose on Azure VM at http://4.204.41.190:8080/
 
 ## What's Been Implemented
 
-### Phases 1-12 — See previous PRD versions for full history
+### Phases 1-14 — See previous sessions for full history
 
-### Phase 13 — PO Format Learning Engine (Apr 4, 2026)
-15+ PO transformations, records outcomes, applies learned vendor-specific transformations.
+### Phase 15 — Validation Gap Annihilation Engine (Apr 7, 2026)
 
-### Phase 14 — Vendor Profile PO Learning Integration (Apr 6, 2026)
-Vendor profile PO learning wired into validation, PO format learning fallback, Multi-PO field parsing.
+**Starting point**: 1,252 validation gaps across 5 categories.
+**Ending point**: 73 blocking + 71 advisory = 144 total (94.2% blocking reduction).
 
-### Phase 15 — PO Gap Resolution Engine (Apr 7, 2026)
-**Three-pass PO revalidation pipeline:**
-1. **Pass 1 — Vendor Profile Learning**: Checks `po_expected` flag + PO format match rate. Auto-resolves gaps for vendors that don't use POs.
-2. **Pass 2a — Unknown Vendor Resolution**: Attempts to match "unknown" vendor docs via vendor name aliases, email sender domains. Resolved vendors then get profile-checked.
-3. **Pass 2b — Cache-first PO Lookup + BC API**: Searches `bc_reference_cache` for PO matches (19,000+ cached records). Learns vendor PO formats from cached POs and tries digit-substring matching. Falls back to BC live API.
+#### Changes Made:
+1. **Three-pass PO revalidation** — Pass 1: vendor profile learning (po_expected). Pass 2a: unknown vendor resolution (name aliases + email domain). Pass 2b: cache-first PO lookup (19K+ records) + BC API matching + digit-substring matching.
+2. **Vendor profile force-refresh** — Always computes cache stats for po_expected (not skipped when BC API returns data). Force-rebuilds profiles before PO revalidation.
+3. **Customer match revalidation** — Customer alias map from successful matches, vendor→customer association history, BC cache fuzzy lookup.
+4. **Sales order match revalidation** — 7 strategies: exact cache, external doc number, normalized, digits-only, prefix variations, sibling doc, document flow. Searches salesOrders + salesShipments + salesInvoices.
+5. **Vendor match revalidation** — Lower threshold (0.70), BC vendor cache fuzzy match, word-overlap matching, top-candidate acceptance.
+6. **Smart duplicate clearing** — Checks BC for existing invoice status (Posted/Paid → not real dup), compares amounts, compares POs, cross-validates with other checks.
+7. **Gap count accuracy** — Replaced stale validation_gap_log with direct hub_documents queries. Added gap log cleanup step.
+8. **Blocking vs advisory split** — Required checks = blocking (red), non-required = advisory (amber). SO match and customer match are advisory.
+9. **Unmatched vendor UI** — Monitor dashboard shows all unmatched vendor names with top 3 BC vendor candidates (fuzzy scored). One-click accept creates alias + auto-resolves all gap docs.
+10. **Vendor alias accept endpoint** — POST /api/aliases/vendors/accept-suggestion creates alias and re-validates all matching docs.
 
-**Vendor profile force-refresh**: `run_intelligence_backfill()` rebuilds vendor profiles from latest BC cache before running revalidation.
-
-**Results**: PO validation gaps dropped from 658 → 364 in first two runs (294 resolved = 45% reduction). TUMALOC (124 gaps), CARGOMO (5), KOCHTRU (3), PEPPER (2) all auto-resolved via profile learning.
+#### Results:
+| Gap Type | Before | After (Blocking) | After (Advisory) | Reduction |
+|---|---|---|---|---|
+| PO Validation | 658 | 25 | — | 96% |
+| Customer Match | 252 | — | 13 | 95% |
+| Duplicate Check | 82 | 6 | — | 93% |
+| Vendor Match | 82 | 42 | — | 49% |
+| Sales Order Match | 178 | — | 58 | 67% |
+| **Total** | **1,252** | **73** | **71** | **94.2%** |
 
 ## Learning Dimensions: 21 total
-## Active Gap Closers: 7
-## LLM Prompt Injections: 6
-## Background Schedulers: 7
+## Active Gap Closers: 11 (was 7)
+## Backfill Steps: 11
 
-## Production Stats (Latest — Apr 7, 2026)
+## Production Stats (Apr 7, 2026)
 - 81% AI confidence accuracy, 67% auto-file rate
 - 13/23 mature vendors (10 autonomous, 3 stable)
-- PO validation gaps: 364 (down from 658)
-- Total validation gaps: 958 (down from 1252)
+- 73 blocking validation gaps (down from 1,252)
 
 ## Upcoming Tasks
 - P1: Rep Overrides management UI
@@ -49,5 +59,4 @@ Vendor profile PO learning wired into validation, PO format learning fallback, M
 - P3: server.py refactor (7,500+ lines), no_bc_match investigation
 
 ## Deployment
-Docker Compose on Azure VM at http://4.204.41.190:8080/
-"Save to Github" -> `git pull && docker compose up -d --build`
+Docker Compose on Azure VM. "Save to Github" → `git pull && docker compose up -d --build`.

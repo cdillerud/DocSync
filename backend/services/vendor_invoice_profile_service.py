@@ -366,14 +366,15 @@ async def build_vendor_profile(
     # ── FALLBACK: Learn from BC reference cache when API returns 0 ──
     # The cache has posted purchase invoices synced from BC.
     # This covers cases where API calls fail (creds, timeout) but cache has rich data.
-    cache_stats = None
-    if not bc_invoices:
-        cache_stats = await _learn_from_reference_cache(db, vendor_no)
-        if cache_stats and cache_stats.get("count", 0) > 0:
-            logger.info(
-                "[VendorProfile] BC API returned 0 invoices for %s but cache has %d — using cache data",
-                vendor_no, cache_stats["count"],
-            )
+    # ALWAYS compute cache stats — the cache often has more data than the API
+    # (e.g., 19,035 posted PIs vs 30 from API). Cache stats are authoritative
+    # for po_expected determination.
+    cache_stats = await _learn_from_reference_cache(db, vendor_no)
+    if not bc_invoices and cache_stats and cache_stats.get("count", 0) > 0:
+        logger.info(
+            "[VendorProfile] BC API returned 0 invoices for %s but cache has %d — using cache data",
+            vendor_no, cache_stats["count"],
+        )
 
     # Analyze BC invoice patterns
     line_patterns = _analyze_line_patterns(bc_invoices) if bc_invoices else {}

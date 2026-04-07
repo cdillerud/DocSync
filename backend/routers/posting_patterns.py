@@ -3611,6 +3611,7 @@ async def _batch_revalidate_po_gaps(db, limit: int = 200) -> dict:
         },
         {
             "_id": 0, "id": 1, "bc_vendor_number": 1, "vendor_no": 1, "matched_vendor_no": 1,
+            "vendor_name": 1, "matched_vendor_name": 1,
             "extracted_fields": 1, "validation_results": 1,
         }
     ).limit(limit).to_list(limit)
@@ -3627,6 +3628,42 @@ async def _batch_revalidate_po_gaps(db, limit: int = 200) -> dict:
         vn = doc.get("bc_vendor_number") or doc.get("vendor_no") or doc.get("matched_vendor_no") or ""
         if vn:
             vendor_nos.add(vn)
+
+    # Also collect vendor names for docs without vendor_no — these need reverse lookup
+    vendor_name_to_no = {}
+    for doc in po_gap_docs:
+        vn = doc.get("bc_vendor_number") or doc.get("vendor_no") or doc.get("matched_vendor_no") or ""
+        if not vn:
+            name = doc.get("vendor_name") or doc.get("matched_vendor_name") or ""
+            if name and name not in vendor_name_to_no:
+                vendor_name_to_no[name] = None
+
+    # Reverse lookup: vendor display name → vendor_no via bc_reference_cache or vendor_invoice_profiles
+    for vname in list(vendor_name_to_no.keys()):
+        try:
+            # Check profiles for matching vendor_name
+            prof = await db.vendor_invoice_profiles.find_one(
+                {"$or": [
+                    {"vendor_name": {"$regex": re.escape(vname), "$options": "i"}},
+                    {"vendor_no": vname.upper()},
+                    {"vendor_no": vname},
+                ]},
+                {"_id": 0, "vendor_no": 1}
+            )
+            if prof and prof.get("vendor_no"):
+                vendor_name_to_no[vname] = prof["vendor_no"]
+                vendor_nos.add(prof["vendor_no"])
+                continue
+            # Check BC vendors list
+            cache_match = await db.bc_reference_cache.find_one(
+                {"bc_vendor_name": {"$regex": re.escape(vname), "$options": "i"}, "bc_entity_type": "vendor"},
+                {"_id": 0, "bc_vendor_no": 1}
+            )
+            if cache_match and cache_match.get("bc_vendor_no"):
+                vendor_name_to_no[vname] = cache_match["bc_vendor_no"]
+                vendor_nos.add(cache_match["bc_vendor_no"])
+        except Exception:
+            pass
 
     vendor_profiles = {}
     for vn in vendor_nos:
@@ -3645,6 +3682,19 @@ async def _batch_revalidate_po_gaps(db, limit: int = 200) -> dict:
         doc_id = doc.get("id", "")
         vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or doc.get("matched_vendor_no") or ""
         validation = doc.get("validation_results") or {}
+
+        # If no vendor_no, try reverse lookup from vendor_name
+        if not vendor_no:
+            vname = doc.get("vendor_name") or doc.get("matched_vendor_name") or ""
+            resolved_vn = vendor_name_to_no.get(vname)
+            if resolved_vn:
+                vendor_no = resolved_vn
+                # Also update the document with the resolved vendor
+                await db.hub_documents.update_one(
+                    {"id": doc_id},
+                    {"$set": {"bc_vendor_number": vendor_no, "vendor_resolved_via": "po_backfill_name_lookup"}}
+                )
+                logger.info("[PO-Reval] doc=%s resolved vendor from name '%s' → %s", doc_id[:8], vname, vendor_no)
 
         if not vendor_no:
             remaining_docs.append(doc)

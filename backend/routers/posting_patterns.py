@@ -3612,7 +3612,14 @@ async def run_intelligence_backfill():
     except Exception as e:
         results["vendor_revalidation"] = {"error": str(e)}
 
-    # 10. Gap Log Cleanup — remove stale entries for resolved/archived docs
+    # 10. Duplicate Check Re-validation — smart duplicate clearing
+    try:
+        from services.validation_backfill_service import batch_revalidate_duplicate_gaps
+        results["duplicate_revalidation"] = await batch_revalidate_duplicate_gaps(db, limit=200)
+    except Exception as e:
+        results["duplicate_revalidation"] = {"error": str(e)}
+
+    # 11. Gap Log Cleanup — remove stale entries for resolved/archived docs
     try:
         stale_cleaned = 0
         gap_log_entries = await db.validation_gap_log.find(

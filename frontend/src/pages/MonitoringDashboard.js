@@ -178,7 +178,7 @@ export default function MonitoringDashboard() {
             {(backfillResult.customer_revalidation || backfillResult.so_revalidation || backfillResult.vendor_revalidation) && (
               <div className="mt-3 pt-3 border-t border-border/50">
                 <p className="text-xs font-medium mb-2">Gap Closer Results</p>
-                <div className="grid grid-cols-3 gap-3 text-xs">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
                   {backfillResult.customer_revalidation && (
                     <div className="p-2 rounded bg-accent/30">
                       <p className="text-muted-foreground">Customer Match</p>
@@ -216,6 +216,19 @@ export default function MonitoringDashboard() {
                         <p className="text-[10px] text-muted-foreground">
                           {backfillResult.vendor_revalidation.alias_resolved > 0 ? `${backfillResult.vendor_revalidation.alias_resolved} alias` : ''}
                           {backfillResult.vendor_revalidation.domain_resolved > 0 ? `${backfillResult.vendor_revalidation.alias_resolved > 0 ? ', ' : ''}${backfillResult.vendor_revalidation.domain_resolved} email-domain` : ''}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {backfillResult.duplicate_revalidation && (
+                    <div className="p-2 rounded bg-accent/30">
+                      <p className="text-muted-foreground">Duplicate Check</p>
+                      <p className="font-bold text-emerald-400">{backfillResult.duplicate_revalidation.resolved || 0} / {backfillResult.duplicate_revalidation.found || 0}</p>
+                      {backfillResult.duplicate_revalidation.resolved > 0 && (
+                        <p className="text-[10px] text-muted-foreground">
+                          {backfillResult.duplicate_revalidation.posted_resolved > 0 ? `${backfillResult.duplicate_revalidation.posted_resolved} posted/gone` : ''}
+                          {backfillResult.duplicate_revalidation.amount_resolved > 0 ? `${backfillResult.duplicate_revalidation.posted_resolved > 0 ? ', ' : ''}${backfillResult.duplicate_revalidation.amount_resolved} diff-amount` : ''}
+                          {backfillResult.duplicate_revalidation.other_validated_resolved > 0 ? `${(backfillResult.duplicate_revalidation.posted_resolved > 0 || backfillResult.duplicate_revalidation.amount_resolved > 0) ? ', ' : ''}${backfillResult.duplicate_revalidation.other_validated_resolved} validated` : ''}
                         </p>
                       )}
                     </div>

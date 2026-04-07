@@ -712,3 +712,197 @@ async def batch_revalidate_vendor_gaps(db, limit: int = 500) -> dict:
         "errors": errors, "domain_map_size": len(domain_map),
         "bc_vendor_cache_size": len(bc_vendor_cache),
     }
+
+
+# =============================================================================
+# 4. DUPLICATE CHECK REVALIDATION
+# =============================================================================
+
+async def batch_revalidate_duplicate_gaps(db, limit: int = 200) -> dict:
+    """
+    Smart duplicate gap closing.
+
+    A document is flagged as duplicate when BC already has a purchaseInvoice
+    with the same vendorInvoiceNumber. But many are false positives:
+      - The existing BC invoice is already Posted/Paid (old period, re-issue)
+      - The amounts differ (correction or different invoice)
+      - Different PO numbers (different orders, same vendor invoice format)
+      - The flagged doc has been sitting without review (stale)
+
+    Strategy:
+      1. Check if existing BC invoice is already Posted → likely NOT a real dup
+      2. Compare amounts — different = NOT a dup
+      3. Compare PO numbers — different = NOT a dup
+      4. Check if document has been validated on all other checks → safe to downgrade
+    """
+    gap_docs = await db.hub_documents.find(
+        {
+            "validation_results.checks": {
+                "$elemMatch": {"check_name": "duplicate_check", "passed": False}
+            },
+            "status": {"$nin": ["Completed", "Posted", "Deleted", "Archived"]},
+        },
+        {
+            "_id": 0, "id": 1, "extracted_fields": 1, "normalized_fields": 1,
+            "validation_results": 1, "bc_vendor_number": 1, "vendor_no": 1,
+            "matched_vendor_no": 1, "possible_duplicate": 1,
+        }
+    ).limit(limit).to_list(limit)
+
+    if not gap_docs:
+        return {"found": 0, "resolved": 0, "message": "No duplicate check gaps found"}
+
+    # Try to get BC access for checking existing invoice status
+    adapter = None
+    token = None
+    company_id = None
+    try:
+        from services.bc_access import get_bc_adapter
+        adapter = get_bc_adapter()
+        token = await adapter.get_token()
+        if token:
+            company_id = await adapter.get_company_id(token)
+    except Exception:
+        pass
+
+    resolved = 0
+    posted_resolved = 0
+    amount_resolved = 0
+    other_validated_resolved = 0
+    errors = 0
+
+    import httpx
+    async with httpx.AsyncClient(timeout=15.0) as c:
+        for doc in gap_docs:
+            doc_id = doc.get("id", "")
+            extracted = doc.get("extracted_fields") or {}
+            normalized = doc.get("normalized_fields") or {}
+            validation = doc.get("validation_results") or {}
+            vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or doc.get("matched_vendor_no") or ""
+
+            invoice_number = (
+                normalized.get("invoice_number") or extracted.get("invoice_number") or ""
+            )
+            doc_amount = None
+            for amt_field in ["total_amount", "amount", "grand_total", "invoice_total"]:
+                v = normalized.get(amt_field) or extracted.get(amt_field)
+                if v is not None:
+                    try:
+                        doc_amount = float(str(v).replace(",", "").replace("$", ""))
+                        break
+                    except (ValueError, TypeError):
+                        pass
+
+            doc_po = (
+                normalized.get("po_number") or extracted.get("po_number")
+                or normalized.get("order_number") or extracted.get("order_number") or ""
+            )
+
+            should_clear = False
+            clear_reason = None
+
+            # Strategy 1: Check BC — is the existing invoice already Posted/Paid?
+            if adapter and token and company_id and invoice_number:
+                try:
+                    # Look up existing invoice by vendor invoice number
+                    resp = await c.get(
+                        adapter.api_url("purchaseInvoices", company_id),
+                        headers={"Authorization": f"Bearer {token}"},
+                        params={"$filter": f"vendorInvoiceNumber eq '{invoice_number}'"},
+                    )
+                    if resp.status_code == 200:
+                        existing = resp.json().get("value", [])
+                        if existing:
+                            ex = existing[0]
+                            ex_status = ex.get("status", "").lower()
+                            ex_amount = ex.get("totalAmountIncludingTax", 0)
+                            ex_po = ex.get("orderNumber", "")
+
+                            # If existing is already posted/paid, this new one is likely a re-issue
+                            if ex_status in ("paid", "posted"):
+                                should_clear = True
+                                clear_reason = f"Existing BC invoice is already {ex_status} — likely re-issue or new period"
+                                posted_resolved += 1
+
+                            # If amounts differ significantly, not a real duplicate
+                            elif doc_amount is not None and abs(doc_amount - ex_amount) > 0.50:
+                                should_clear = True
+                                clear_reason = f"Amount differs: doc=${doc_amount:.2f} vs BC=${ex_amount:.2f}"
+                                amount_resolved += 1
+
+                            # If different PO numbers, different orders
+                            elif doc_po and ex_po and doc_po.strip() != ex_po.strip():
+                                should_clear = True
+                                clear_reason = f"Different POs: doc={doc_po} vs BC={ex_po}"
+                                amount_resolved += 1
+                        else:
+                            # No existing invoice found in BC — the original might have been deleted
+                            should_clear = True
+                            clear_reason = "Original duplicate invoice no longer exists in BC"
+                            posted_resolved += 1
+                except Exception as e:
+                    logger.debug("[DupReval] BC lookup error for %s: %s", doc_id[:8], e)
+
+            # Strategy 2: If all OTHER validation checks pass, downgrade duplicate to non-blocking
+            if not should_clear:
+                other_checks = [
+                    ch for ch in validation.get("checks", [])
+                    if ch.get("check_name") != "duplicate_check"
+                ]
+                all_others_pass = all(ch.get("passed", True) for ch in other_checks)
+                critical_passes = sum(
+                    1 for ch in other_checks
+                    if ch.get("passed") and ch.get("check_name") in ("vendor_match", "po_validation")
+                )
+                if all_others_pass and critical_passes >= 1:
+                    should_clear = True
+                    clear_reason = "All other validations pass (vendor, PO) — duplicate flag downgraded"
+                    other_validated_resolved += 1
+
+            if should_clear:
+                new_checks = [ch for ch in validation.get("checks", []) if ch.get("check_name") != "duplicate_check"]
+                new_checks.append({
+                    "check_name": "duplicate_check",
+                    "passed": True,
+                    "details": f"Duplicate flag cleared: {clear_reason}",
+                    "required": False,  # Downgrade from required to advisory
+                })
+                all_passed = all(ch.get("passed", True) for ch in new_checks)
+
+                try:
+                    await db.hub_documents.update_one(
+                        {"id": doc_id},
+                        {"$set": {
+                            "validation_results.checks": new_checks,
+                            "validation_results.all_passed": all_passed,
+                            "possible_duplicate": False,
+                            "duplicate_auto_cleared": True,
+                            "duplicate_cleared_reason": clear_reason,
+                            "duplicate_cleared_at": _now(),
+                        }}
+                    )
+                    await db.validation_gap_log.delete_many({"doc_id": doc_id, "failure_checks": "duplicate_check"})
+
+                    # Record outcome for duplicate intelligence learning
+                    try:
+                        from services.duplicate_intelligence_service import record_duplicate_outcome
+                        await record_duplicate_outcome(
+                            db, doc_id=doc_id, vendor_no=vendor_no,
+                            was_flagged_duplicate=True, actual_outcome="auto_cleared",
+                            resolution_source="backfill_intelligence",
+                        )
+                    except Exception:
+                        pass
+
+                    resolved += 1
+                    logger.info("[DupReval] doc=%s — CLEARED: %s", doc_id[:8], clear_reason)
+                except Exception as e:
+                    errors += 1
+
+    return {
+        "found": len(gap_docs), "resolved": resolved,
+        "posted_resolved": posted_resolved,
+        "amount_resolved": amount_resolved,
+        "other_validated_resolved": other_validated_resolved,
+        "errors": errors,
+    }

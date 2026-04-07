@@ -682,15 +682,24 @@ async def get_learning_pulse(db) -> Dict:
     ]
     top_vendors = await db[VENDOR_INTEL_COLLECTION].aggregate(top_vendors_pipeline).to_list(10)
 
-    # Validation gap hot spots
+    # Validation gap hot spots — query hub_documents directly (source of truth)
+    # Only count BLOCKING gaps (required != False) on active documents
     gap_pipeline = [
-        {"$unwind": "$failure_checks"},
-        {"$group": {"_id": "$failure_checks", "count": {"$sum": 1}}},
+        {"$match": {
+            "validation_results.checks": {"$exists": True},
+            "status": {"$nin": ["Completed", "Posted", "Deleted", "Archived"]},
+        }},
+        {"$unwind": "$validation_results.checks"},
+        {"$match": {
+            "validation_results.checks.passed": False,
+            "validation_results.checks.required": {"$ne": False},
+        }},
+        {"$group": {"_id": "$validation_results.checks.check_name", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
         {"$limit": 10},
     ]
     gap_hotspots = [{"check": r["_id"], "count": r["count"]}
-                    for r in await db[VALIDATION_GAP_COLLECTION].aggregate(gap_pipeline).to_list(10)]
+                    for r in await db.hub_documents.aggregate(gap_pipeline).to_list(10)]
 
     # Recent learning events
     recent = await db[COLLECTION].find(
@@ -726,10 +735,29 @@ async def get_vendor_learning_profile(db, vendor_no: str) -> Optional[Dict]:
         {"calibration_id": f"vendor_{vendor_no}"}, {"_id": 0}
     )
 
-    # Get recent validation gaps
-    gaps = await db[VALIDATION_GAP_COLLECTION].find(
-        {"vendor_no": vendor_no}, {"_id": 0}
-    ).sort("recorded_at", -1).limit(10).to_list(10)
+    # Get recent validation gaps — from hub_documents (source of truth)
+    vendor_gap_pipeline = [
+        {"$match": {
+            "$or": [{"bc_vendor_number": vendor_no}, {"vendor_no": vendor_no}],
+            "validation_results.checks": {"$exists": True},
+            "status": {"$nin": ["Completed", "Posted", "Deleted", "Archived"]},
+        }},
+        {"$unwind": "$validation_results.checks"},
+        {"$match": {
+            "validation_results.checks.passed": False,
+            "validation_results.checks.required": {"$ne": False},
+        }},
+        {"$project": {
+            "_id": 0,
+            "doc_id": "$id",
+            "check_name": "$validation_results.checks.check_name",
+            "message": "$validation_results.checks.message",
+            "created_utc": 1,
+        }},
+        {"$sort": {"created_utc": -1}},
+        {"$limit": 10},
+    ]
+    gaps = await db.hub_documents.aggregate(vendor_gap_pipeline).to_list(10)
 
     # Get recent outcomes
     outcomes = await db[COLLECTION].find(

@@ -7,7 +7,7 @@ import requests
 import os
 import uuid
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://monitor-intelligence.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://gap-closer-3.preview.emergentagent.com').rstrip('/')
 
 # Test data - known documents from main agent context (full UUIDs)
 DOC_ID_ELIGIBLE = "44b2e236-c1ab-4e0e-9c23-23f542d68a71"  # Sales_Order type with 2 lines (Widget A, Widget B), no existing SO

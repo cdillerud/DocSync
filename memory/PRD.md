@@ -30,15 +30,15 @@ Enterprise document processing hub for AP/Sales workflows with Dynamics 365 BC i
 9. **Unmatched vendor UI** — Monitor dashboard shows all unmatched vendor names with top 3 BC vendor candidates (fuzzy scored). One-click accept creates alias + auto-resolves all gap docs.
 10. **Vendor alias accept endpoint** — POST /api/aliases/vendors/accept-suggestion creates alias and re-validates all matching docs.
 
-#### Results:
-| Gap Type | Before | After (Blocking) | After (Advisory) | Reduction |
-|---|---|---|---|---|
-| PO Validation | 658 | 25 | — | 96% |
-| Customer Match | 252 | — | 13 | 95% |
-| Duplicate Check | 82 | 6 | — | 93% |
-| Vendor Match | 82 | 42 | — | 49% |
-| Sales Order Match | 178 | — | 58 | 67% |
-| **Total** | **1,252** | **73** | **71** | **94.2%** |
+### Phase 15b — Learning Dashboard Gap Fix (Apr 7, 2026)
+
+**Issue**: AI Learning Intelligence dashboard (`/learning`) was showing stale/inflated validation gap hotspot numbers (e.g., 202 customer match failures instead of 0) because it queried the legacy `validation_gap_log` collection.
+
+**Fix**: Updated `per_document_learning_service.py` to query `hub_documents` directly (source of truth) for both:
+- Global validation gap hotspots (blocking only, `required != False`)
+- Per-vendor validation gaps
+
+Now both the Monitor and Learning dashboards show consistent, accurate gap counts.
 
 ## Learning Dimensions: 21 total
 ## Active Gap Closers: 11 (was 7)

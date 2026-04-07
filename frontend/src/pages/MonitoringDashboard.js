@@ -164,9 +164,12 @@ export default function MonitoringDashboard() {
               <div>
                 <p className="text-muted-foreground">PO Gaps Resolved</p>
                 <p className="font-bold text-emerald-400">{backfillResult.po_revalidation?.resolved || 0} / {backfillResult.po_revalidation?.found || 0}</p>
-                {(backfillResult.po_revalidation?.skipped_by_profile > 0 || backfillResult.po_revalidation?.bc_matched > 0) && (
+                {(backfillResult.po_revalidation?.skipped_by_profile > 0 || backfillResult.po_revalidation?.bc_matched > 0 || backfillResult.po_revalidation?.cache_resolved > 0 || backfillResult.po_revalidation?.unknown_vendor_resolved > 0) && (
                   <p className="text-muted-foreground">
-                    {backfillResult.po_revalidation?.skipped_by_profile || 0} via profile, {backfillResult.po_revalidation?.bc_matched || 0} via BC
+                    {backfillResult.po_revalidation?.skipped_by_profile || 0} profile
+                    {backfillResult.po_revalidation?.cache_resolved > 0 ? `, ${backfillResult.po_revalidation.cache_resolved} cache` : ''}
+                    {backfillResult.po_revalidation?.bc_matched > 0 ? `, ${backfillResult.po_revalidation.bc_matched} BC` : ''}
+                    {backfillResult.po_revalidation?.unknown_vendor_resolved > 0 ? `, ${backfillResult.po_revalidation.unknown_vendor_resolved} vendor-resolved` : ''}
                   </p>
                 )}
               </div>

@@ -6,6 +6,7 @@ Phase 2: Template-driven draft PI creation, auto-post settings, ready document q
 """
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 from fastapi import APIRouter, Query, BackgroundTasks, Body
 from typing import Optional
@@ -3697,8 +3698,92 @@ async def _batch_revalidate_po_gaps(db, limit: int = 200) -> dict:
         else:
             remaining_docs.append(doc)
 
-    # ── PASS 2: BC PO matching for remaining docs ──
+    # ── PASS 2: Cache-first PO lookup + BC API matching for remaining docs ──
     bc_resolved = 0
+    cache_resolved = 0
+    unknown_resolved = 0
+
+    # ── PASS 2a: Try to resolve "unknown" vendor docs first ──
+    still_remaining = []
+    for doc in remaining_docs:
+        doc_id = doc.get("id", "")
+        vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or doc.get("matched_vendor_no") or ""
+        extracted = doc.get("extracted_fields") or {}
+        validation = doc.get("validation_results") or {}
+
+        if vendor_no:
+            still_remaining.append(doc)
+            continue
+
+        # Try to resolve unknown vendor from extracted fields
+        resolved_vendor = None
+        try:
+            vendor_name = extracted.get("vendor") or extracted.get("vendor_name") or ""
+            sender_email = extracted.get("sender_email") or extracted.get("_sender_email") or ""
+            file_name = extracted.get("_file_name") or doc.get("file_name") or ""
+
+            # Try vendor name match via aliases
+            if vendor_name:
+                from services.unified_vendor_matcher import match_vendor_unified
+                match = await match_vendor_unified(db, vendor_name, 0.70)
+                if match.get("matched") and match.get("best_match"):
+                    resolved_vendor = match["best_match"].get("vendor_number") or match.get("bc_vendor_number")
+                    if resolved_vendor:
+                        await db.hub_documents.update_one(
+                            {"id": doc_id},
+                            {"$set": {"bc_vendor_number": resolved_vendor, "vendor_resolved_via": "backfill_rematch"}}
+                        )
+                        logger.info("[PO-Reval] Resolved unknown vendor '%s' → %s", vendor_name, resolved_vendor)
+                        unknown_resolved += 1
+
+            # Try email domain match
+            if not resolved_vendor and sender_email and "@" in sender_email:
+                domain = sender_email.split("@")[1].lower()
+                domain_match = await db.sender_domain_mappings.find_one(
+                    {"domain": domain}, {"_id": 0, "vendor_no": 1}
+                )
+                if domain_match and domain_match.get("vendor_no"):
+                    resolved_vendor = domain_match["vendor_no"]
+                    await db.hub_documents.update_one(
+                        {"id": doc_id},
+                        {"$set": {"bc_vendor_number": resolved_vendor, "vendor_resolved_via": "backfill_email_domain"}}
+                    )
+                    logger.info("[PO-Reval] Resolved unknown vendor via email domain '%s' → %s", domain, resolved_vendor)
+                    unknown_resolved += 1
+        except Exception as e:
+            logger.debug("[PO-Reval] Unknown vendor resolution failed for %s: %s", doc_id[:8], e)
+
+        # If we resolved the vendor, check if PO is expected
+        if resolved_vendor:
+            try:
+                profile = await get_or_build_profile(db, resolved_vendor)
+                if profile and not profile.get("po_expected", True):
+                    new_checks = [ch for ch in validation.get("checks", []) if ch.get("check_name") != "po_validation"]
+                    new_checks.append({
+                        "check_name": "po_validation",
+                        "passed": True,
+                        "details": f"PO validation skipped — resolved vendor {resolved_vendor} learned to not require POs",
+                        "required": False,
+                    })
+                    all_passed = all(ch.get("passed", True) for ch in new_checks)
+                    await db.hub_documents.update_one(
+                        {"id": doc_id},
+                        {"$set": {"validation_results.checks": new_checks, "validation_results.all_passed": all_passed,
+                                  "po_revalidated_at": _now(), "po_revalidated_via": "unknown_vendor_resolution"}}
+                    )
+                    await db.validation_gap_log.delete_many({"doc_id": doc_id, "failure_checks": "po_validation"})
+                    resolved += 1
+                    skipped_by_profile += 1
+                    continue
+            except Exception:
+                pass
+            # Re-add with resolved vendor for pass 2b
+            doc["bc_vendor_number"] = resolved_vendor
+        still_remaining.append(doc)
+
+    remaining_docs = still_remaining
+
+    # ── PASS 2b: Cache-first PO lookup + BC API ──
     if remaining_docs:
         try:
             from services.bc_access import get_bc_adapter
@@ -3707,24 +3792,28 @@ async def _batch_revalidate_po_gaps(db, limit: int = 200) -> dict:
             if not token:
                 return {
                     "found": len(po_gap_docs), "resolved": resolved,
-                    "skipped_by_profile": skipped_by_profile,
+                    "skipped_by_profile": skipped_by_profile, "cache_resolved": cache_resolved,
+                    "unknown_resolved": unknown_resolved,
                     "error": "Cannot get BC token for pass 2",
                 }
             company_id = await adapter.get_company_id(token)
             if not company_id:
                 return {
                     "found": len(po_gap_docs), "resolved": resolved,
-                    "skipped_by_profile": skipped_by_profile,
+                    "skipped_by_profile": skipped_by_profile, "cache_resolved": cache_resolved,
+                    "unknown_resolved": unknown_resolved,
                     "error": "Cannot get BC company ID for pass 2",
                 }
         except Exception as e:
             return {
                 "found": len(po_gap_docs), "resolved": resolved,
-                "skipped_by_profile": skipped_by_profile,
+                "skipped_by_profile": skipped_by_profile, "cache_resolved": cache_resolved,
+                "unknown_resolved": unknown_resolved,
                 "error": f"BC access failed for pass 2: {e}",
             }
 
         from services.gap_closer_service import enhance_po_candidates
+        from services.bc_reference_cache_service import normalize_document_no
 
         async with httpx.AsyncClient(timeout=15.0) as c:
             for doc in remaining_docs:
@@ -3758,6 +3847,33 @@ async def _batch_revalidate_po_gaps(db, limit: int = 200) -> dict:
                     except Exception:
                         pass
 
+                    # ── NEW: Learn vendor's PO format from BC cache and try to transform ──
+                    if vendor_no:
+                        try:
+                            # Get sample POs from cache for this vendor
+                            cached_vendor_pos = await db.bc_reference_cache.find(
+                                {"bc_vendor_no": vendor_no, "bc_entity_type": "purchase_order"},
+                                {"_id": 0, "bc_document_no": 1}
+                            ).limit(20).to_list(20)
+                            cached_po_numbers = [r["bc_document_no"] for r in cached_vendor_pos if r.get("bc_document_no")]
+
+                            if cached_po_numbers:
+                                # For each original candidate, try to find a cached PO that shares digits
+                                for cand in original_candidates[:5]:
+                                    cand_digits = re.sub(r'[^0-9]', '', cand)
+                                    if len(cand_digits) >= 4:
+                                        for cached_po in cached_po_numbers:
+                                            cached_digits = re.sub(r'[^0-9]', '', cached_po)
+                                            # Substring match: candidate digits appear in cached PO
+                                            if cand_digits in cached_digits or cached_digits in cand_digits:
+                                                if cached_po not in expanded:
+                                                    expanded.append(cached_po)
+                                            # Same digits, different format
+                                            elif cand_digits == cached_digits and cached_po not in expanded:
+                                                expanded.append(cached_po)
+                        except Exception:
+                            pass
+
                     # Deduplicate against already-tried POs
                     already_tried = set()
                     for check in validation.get("checks", []):
@@ -3772,22 +3888,46 @@ async def _batch_revalidate_po_gaps(db, limit: int = 200) -> dict:
                     if not new_candidates:
                         continue
 
-                    # Try each new candidate against BC
+                    # ── NEW: Cache-first PO lookup (much faster than BC API) ──
                     matched_po = None
                     for candidate in new_candidates:
                         try:
-                            resp = await c.get(
-                                adapter.api_url("purchaseOrders", company_id),
-                                headers={"Authorization": f"Bearer {token}"},
-                                params={"$filter": f"number eq '{candidate.replace(chr(39), chr(39)+chr(39))}'"},
+                            normalized = normalize_document_no(candidate)
+                            if not normalized:
+                                continue
+                            cache_hit = await db.bc_reference_cache.find_one(
+                                {
+                                    "$or": [
+                                        {"normalized_document_no": normalized, "bc_entity_type": "purchase_order"},
+                                        {"bc_document_no": candidate.strip(), "bc_entity_type": "purchase_order"},
+                                    ]
+                                },
+                                {"_id": 0, "bc_document_no": 1}
                             )
-                            if resp.status_code == 200:
-                                pos = resp.json().get("value", [])
-                                if pos:
-                                    matched_po = candidate
-                                    break
+                            if cache_hit:
+                                matched_po = cache_hit.get("bc_document_no", candidate)
+                                logger.info("[PO-Reval] Cache hit for PO '%s' → %s", candidate, matched_po)
+                                cache_resolved += 1
+                                break
                         except Exception:
                             continue
+
+                    # Fallback: BC API lookup for candidates not in cache
+                    if not matched_po:
+                        for candidate in new_candidates[:10]:
+                            try:
+                                resp = await c.get(
+                                    adapter.api_url("purchaseOrders", company_id),
+                                    headers={"Authorization": f"Bearer {token}"},
+                                    params={"$filter": f"number eq '{candidate.replace(chr(39), chr(39)+chr(39))}'"},
+                                )
+                                if resp.status_code == 200:
+                                    pos = resp.json().get("value", [])
+                                    if pos:
+                                        matched_po = candidate
+                                        break
+                            except Exception:
+                                continue
 
                     if matched_po:
                         new_checks = [
@@ -3828,14 +3968,16 @@ async def _batch_revalidate_po_gaps(db, limit: int = 200) -> dict:
                     logger.debug("[PO-Reval] Error for %s: %s", doc_id[:8], e)
 
     logger.info(
-        "[PO-Reval] Batch complete: %d found, %d resolved (%d via profile, %d via BC match), %d errors",
-        len(po_gap_docs), resolved, skipped_by_profile, bc_resolved, errors,
+        "[PO-Reval] Batch complete: %d found, %d resolved (%d profile, %d cache, %d BC, %d unknown-vendor-resolved), %d errors",
+        len(po_gap_docs), resolved, skipped_by_profile, cache_resolved, bc_resolved - cache_resolved, unknown_resolved, errors,
     )
     return {
         "found": len(po_gap_docs),
         "resolved": resolved,
         "skipped_by_profile": skipped_by_profile,
+        "cache_resolved": cache_resolved,
         "bc_matched": bc_resolved,
+        "unknown_vendor_resolved": unknown_resolved,
         "errors": errors,
     }
 

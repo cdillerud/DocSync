@@ -45,6 +45,8 @@ export default function MonitoringDashboard() {
   const [lastRefresh, setLastRefresh] = useState(null);
   const [backfillRunning, setBackfillRunning] = useState(false);
   const [backfillResult, setBackfillResult] = useState(null);
+  const [unmatchedVendors, setUnmatchedVendors] = useState(null);
+  const [acceptingAlias, setAcceptingAlias] = useState(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -56,8 +58,12 @@ export default function MonitoringDashboard() {
         fetch(`${API}/api/posting-patterns/escalation-intelligence`).then(r => r.ok ? r.json() : {}),
         fetch(`${API}/api/posting-patterns/duplicate-intelligence`).then(r => r.ok ? r.json() : {}),
       ]);
-      const poGapRes = await fetch(`${API}/api/posting-patterns/po-gap-breakdown`).then(r => r.ok ? r.json() : {});
+      const [poGapRes, unmatchedRes] = await Promise.all([
+        fetch(`${API}/api/posting-patterns/po-gap-breakdown`).then(r => r.ok ? r.json() : {}),
+        fetch(`${API}/api/aliases/vendors/unmatched-gaps`).then(r => r.ok ? r.json() : { unmatched_vendors: [] }),
+      ]);
       setData({ pulse: pulseRes, gap: gapRes, deep: deepRes, escalation: escRes, duplicate: dupRes, poGaps: poGapRes });
+      setUnmatchedVendors(unmatchedRes.unmatched_vendors || []);
       setLastRefresh(new Date());
     } catch (e) {
       console.error('[Monitor] fetch failed', e);
@@ -73,13 +79,31 @@ export default function MonitoringDashboard() {
       if (res.ok) {
         const result = await res.json();
         setBackfillResult(result);
-        // Refresh data after backfill
         await fetchAll();
       }
     } catch (e) {
       console.error('[Monitor] backfill failed', e);
     }
     setBackfillRunning(false);
+  };
+
+  const acceptAlias = async (aliasString, vendorNo, vendorName) => {
+    setAcceptingAlias(aliasString);
+    try {
+      const res = await fetch(`${API}/api/aliases/vendors/accept-suggestion`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alias_string: aliasString, vendor_no: vendorNo, vendor_name: vendorName }),
+      });
+      if (res.ok) {
+        const result = await res.json();
+        setUnmatchedVendors(prev => prev.filter(v => v.vendor_name !== aliasString));
+        await fetchAll();
+      }
+    } catch (e) {
+      console.error('[Monitor] accept alias failed', e);
+    }
+    setAcceptingAlias(null);
   };
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
@@ -380,6 +404,48 @@ export default function MonitoringDashboard() {
           </CardContent>
         </Card>
       ) : null}
+
+
+      {/* Unmatched Vendors — one-click alias acceptance */}
+      {unmatchedVendors && unmatchedVendors.length > 0 && (
+        <Card className="border-red-500/20" data-testid="unmatched-vendors">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-red-400">Unmatched Vendors ({unmatchedVendors.length})</CardTitle>
+            <p className="text-xs text-muted-foreground">Click a candidate to create an alias and auto-resolve the gap</p>
+          </CardHeader>
+          <CardContent className="pb-4">
+            <div className="space-y-2">
+              {unmatchedVendors.map((v, i) => (
+                <div key={i} className="flex items-center justify-between p-2 rounded bg-accent/30 text-xs">
+                  <div className="flex-1">
+                    <span className="font-mono font-medium">{v.vendor_name}</span>
+                    <span className="text-muted-foreground ml-2">({v.gap_count} doc{v.gap_count !== 1 ? 's' : ''})</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {v.candidates && v.candidates.length > 0 ? v.candidates.map((c, j) => (
+                      <button
+                        key={j}
+                        onClick={() => acceptAlias(v.vendor_name, c.vendor_no, c.vendor_name)}
+                        disabled={acceptingAlias === v.vendor_name}
+                        className={`px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+                          c.score >= 0.70 ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/30' :
+                          c.score >= 0.50 ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 border border-amber-500/30' :
+                          'bg-zinc-500/20 text-zinc-400 hover:bg-zinc-500/30 border border-zinc-500/30'
+                        }`}
+                        data-testid={`accept-alias-${i}-${j}`}
+                      >
+                        {acceptingAlias === v.vendor_name ? '...' : `${c.vendor_name} (${c.vendor_no}) ${Math.round(c.score * 100)}%`}
+                      </button>
+                    )) : (
+                      <span className="text-muted-foreground text-[10px]">No candidates found</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* PO Gap by Vendor — which vendors are responsible */}
       {data?.poGaps?.by_vendor?.length > 0 && (

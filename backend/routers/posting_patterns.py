@@ -3581,7 +3581,7 @@ async def run_intelligence_backfill():
 
     # 6. PO Gap Re-validation — now uses freshly refreshed vendor profiles
     try:
-        results["po_revalidation"] = await _batch_revalidate_po_gaps(db, limit=200)
+        results["po_revalidation"] = await _batch_revalidate_po_gaps(db, limit=1000)
     except Exception as e:
         results["po_revalidation"] = {"error": str(e)}
 

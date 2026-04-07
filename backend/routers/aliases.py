@@ -180,10 +180,11 @@ async def delete_vendor_alias_by_name(alias: str):
 async def get_unmatched_vendor_gaps():
     """
     Get vendor match gap docs with their closest match candidates.
-    Powers the alias suggestion UI on the Monitor dashboard.
+    Searches BC vendor cache directly with fuzzy matching.
     """
+    from difflib import SequenceMatcher
+
     db = get_db()
-    from services.unified_vendor_matcher import get_unified_vendor_matcher
 
     gap_docs = await db.hub_documents.aggregate([
         {"$match": {
@@ -200,13 +201,42 @@ async def get_unmatched_vendor_gaps():
                 ]},
             },
             "count": {"$sum": 1},
-            "sample_ids": {"$push": "$id"},
         }},
         {"$sort": {"count": -1}},
-        {"$limit": 20},
-    ]).to_list(20)
+        {"$limit": 25},
+    ]).to_list(25)
 
-    matcher = get_unified_vendor_matcher(db)
+    # Load ALL BC vendors from cache + profiles
+    bc_vendors = []
+    try:
+        cached = await db.bc_reference_cache.find(
+            {"bc_entity_type": "vendor"},
+            {"_id": 0, "bc_vendor_no": 1, "bc_vendor_name": 1}
+        ).to_list(1000)
+        for v in cached:
+            if v.get("bc_vendor_no"):
+                bc_vendors.append({
+                    "vendor_no": v["bc_vendor_no"],
+                    "name": v.get("bc_vendor_name", v["bc_vendor_no"]),
+                })
+    except Exception:
+        pass
+
+    # Also load from vendor profiles
+    try:
+        profiles = await db.vendor_invoice_profiles.find(
+            {}, {"_id": 0, "vendor_no": 1, "vendor_name": 1}
+        ).to_list(500)
+        existing_nos = {v["vendor_no"] for v in bc_vendors}
+        for p in profiles:
+            if p.get("vendor_no") and p["vendor_no"] not in existing_nos:
+                bc_vendors.append({
+                    "vendor_no": p["vendor_no"],
+                    "name": p.get("vendor_name", p["vendor_no"]),
+                })
+    except Exception:
+        pass
+
     results = []
 
     for gap in gap_docs:
@@ -214,33 +244,40 @@ async def get_unmatched_vendor_gaps():
         if not vendor_name:
             continue
 
-        # Get top candidates with scores
-        candidates = []
-        try:
-            match_result = await matcher.match_vendor(vendor_name, threshold=0.40)
-            if match_result.get("candidates"):
-                for cand in match_result["candidates"][:3]:
-                    candidates.append({
-                        "vendor_no": cand.get("vendor_id") or cand.get("vendor_number", ""),
-                        "vendor_name": cand.get("display_name") or cand.get("name", ""),
-                        "score": round(cand.get("score", 0), 3),
-                        "source": cand.get("source", ""),
-                    })
-            elif match_result.get("best_match"):
-                bm = match_result["best_match"]
-                candidates.append({
-                    "vendor_no": bm.get("vendor_id") or bm.get("vendor_number", ""),
-                    "vendor_name": bm.get("display_name") or bm.get("name", ""),
-                    "score": round(bm.get("score", 0), 3),
-                    "source": match_result.get("source", ""),
+        vn_lower = vendor_name.strip().lower()
+        vn_words = set(vn_lower.replace(",", "").replace(".", "").replace("llc", "").replace("inc", "").split())
+
+        # Score each BC vendor
+        scored = []
+        for bv in bc_vendors:
+            bc_name = bv.get("name", "").strip().lower()
+            bc_no = bv.get("vendor_no", "").strip().lower()
+
+            # Sequence matcher
+            seq_score = SequenceMatcher(None, vn_lower, bc_name).ratio()
+
+            # Word overlap bonus
+            bc_words = set(bc_name.replace(",", "").replace(".", "").replace("llc", "").replace("inc", "").split())
+            overlap = vn_words & bc_words
+            word_score = len(overlap) / max(len(vn_words), len(bc_words), 1) if vn_words else 0
+
+            # Vendor number match (exact or substring)
+            no_score = 0.9 if vn_lower == bc_no else (0.7 if bc_no in vn_lower or vn_lower in bc_no else 0)
+
+            best = max(seq_score, word_score, no_score)
+            if best >= 0.30:
+                scored.append({
+                    "vendor_no": bv["vendor_no"],
+                    "vendor_name": bv["name"],
+                    "score": round(best, 3),
                 })
-        except Exception:
-            pass
+
+        scored.sort(key=lambda x: x["score"], reverse=True)
 
         results.append({
             "vendor_name": vendor_name,
             "gap_count": gap["count"],
-            "candidates": candidates,
+            "candidates": scored[:3],
         })
 
     return {"unmatched_vendors": results, "total": len(results)}

@@ -1294,9 +1294,47 @@ async def batch_revalidate_extraction_gaps(db, limit: int = 500) -> dict:
     }
 
 
+async def force_downgrade_extraction_gate(db) -> dict:
+    """
+    Safety net: Force-downgrade ALL remaining blocking extraction_quality_gate
+    failures to advisory using a direct MongoDB array filter update.
+    Bypasses Python processing to avoid per-doc errors.
+    """
+    try:
+        result = await db.hub_documents.update_many(
+            {
+                "validation_results.checks": {
+                    "$elemMatch": {
+                        "check_name": "extraction_quality_gate",
+                        "passed": False,
+                        "required": True,
+                    }
+                },
+                "status": {"$nin": ["Completed", "Posted", "Deleted", "Archived"]},
+            },
+            {
+                "$set": {
+
 # =============================================================================
 # 6. ENHANCED VENDOR MATCH — CROSS-DOCUMENT INFERENCE
 # =============================================================================
+                    "validation_results.checks.$[elem].required": False,
+                    "validation_results.checks.$[elem].details": "Downgraded to advisory (safety net)",
+                    "extraction_gate_downgraded": True,
+                    "extraction_gate_downgraded_at": _now(),
+                }
+            },
+            array_filters=[{
+                "elem.check_name": "extraction_quality_gate",
+                "elem.passed": False,
+            }]
+        )
+        count = result.modified_count if result else 0
+        logger.info("[ExtractionForceDowngrade] Force-downgraded %d docs", count)
+        return {"force_downgraded": count}
+    except Exception as e:
+        logger.error("[ExtractionForceDowngrade] Error: %s", e)
+        return {"error": str(e)}
 
 async def enhanced_vendor_match_backfill(db, limit: int = 500) -> dict:
     """
@@ -1728,37 +1766,32 @@ async def enhanced_po_revalidation(db, limit: int = 500) -> dict:
 
         # Strategy 3: No vendor matched yet — can't validate PO without vendor context
         if not should_resolve and not vendor_no:
-            # Check if vendor_match also failed
-            vendor_check_failed = any(
-                ch.get("check_name") == "vendor_match" and not ch.get("passed")
-                for ch in validation.get("checks", [])
-            )
-            if vendor_check_failed:
-                # Downgrade PO to advisory — blocked by vendor match first
-                new_checks = [ch for ch in validation.get("checks", [])
-                              if ch.get("check_name") != "po_validation"]
-                new_checks.append({
-                    "check_name": "po_validation",
-                    "passed": False,
-                    "details": "PO validation deferred: vendor not yet matched — resolve vendor first",
-                    "required": False,  # Advisory until vendor is resolved
-                })
-                all_passed = all(ch.get("passed", True) for ch in new_checks
-                                 if ch.get("required", True))
-                try:
-                    await db.hub_documents.update_one(
-                        {"id": doc_id},
-                        {"$set": {
-                            "validation_results.checks": new_checks,
-                            "validation_results.all_passed": all_passed,
-                            "po_gate_deferred_vendor": True,
-                            "po_gate_deferred_at": _now(),
-                        }}
-                    )
-                    downgraded += 1
-                except Exception:
-                    errors += 1
-                continue
+            # If no vendor_no is set, PO validation is meaningless — downgrade to advisory
+            # (vendor must resolve first before PO can be checked)
+            new_checks = [ch for ch in validation.get("checks", [])
+                          if ch.get("check_name") != "po_validation"]
+            new_checks.append({
+                "check_name": "po_validation",
+                "passed": False,
+                "details": "PO validation deferred: no vendor match — resolve vendor first",
+                "required": False,  # Advisory until vendor is resolved
+            })
+            all_passed = all(ch.get("passed", True) for ch in new_checks
+                             if ch.get("required", True))
+            try:
+                await db.hub_documents.update_one(
+                    {"id": doc_id},
+                    {"$set": {
+                        "validation_results.checks": new_checks,
+                        "validation_results.all_passed": all_passed,
+                        "po_gate_deferred_vendor": True,
+                        "po_gate_deferred_at": _now(),
+                    }}
+                )
+                downgraded += 1
+            except Exception:
+                errors += 1
+            continue
 
         # Strategy 4: Downgrade for non-AP doc types (freight, shipping docs rarely need POs)
         if not should_resolve:

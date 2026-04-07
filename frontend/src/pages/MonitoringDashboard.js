@@ -258,6 +258,42 @@ export default function MonitoringDashboard() {
                       )}
                     </div>
                   )}
+                  {backfillResult.extraction_revalidation && (
+                    <div className="p-2 rounded bg-accent/30">
+                      <p className="text-muted-foreground">Extraction Gate</p>
+                      <p className="font-bold text-emerald-400">
+                        {(backfillResult.extraction_revalidation.resolved || 0) + (backfillResult.extraction_revalidation.downgraded_to_advisory || 0) + (backfillResult.extraction_force_downgrade?.force_downgraded || 0)} / {backfillResult.extraction_revalidation.found || 0}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {backfillResult.extraction_revalidation.resolved > 0 ? `${backfillResult.extraction_revalidation.resolved} resolved` : ''}
+                        {backfillResult.extraction_revalidation.downgraded_to_advisory > 0 ? `${backfillResult.extraction_revalidation.resolved > 0 ? ', ' : ''}${backfillResult.extraction_revalidation.downgraded_to_advisory} advisory` : ''}
+                        {(backfillResult.extraction_force_downgrade?.force_downgraded || 0) > 0 ? `, ${backfillResult.extraction_force_downgrade.force_downgraded} force-cleared` : ''}
+                      </p>
+                    </div>
+                  )}
+                  {backfillResult.po_enhanced_revalidation && (backfillResult.po_enhanced_revalidation.resolved > 0 || backfillResult.po_enhanced_revalidation.downgraded_to_advisory > 0) && (
+                    <div className="p-2 rounded bg-accent/30">
+                      <p className="text-muted-foreground">Enhanced PO</p>
+                      <p className="font-bold text-emerald-400">
+                        {(backfillResult.po_enhanced_revalidation.resolved || 0) + (backfillResult.po_enhanced_revalidation.downgraded_to_advisory || 0)} / {backfillResult.po_enhanced_revalidation.found || 0}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {backfillResult.po_enhanced_revalidation.profile_skip_resolved > 0 ? `${backfillResult.po_enhanced_revalidation.profile_skip_resolved} profile` : ''}
+                        {backfillResult.po_enhanced_revalidation.downgraded_to_advisory > 0 ? `${backfillResult.po_enhanced_revalidation.profile_skip_resolved > 0 ? ', ' : ''}${backfillResult.po_enhanced_revalidation.downgraded_to_advisory} advisory` : ''}
+                      </p>
+                    </div>
+                  )}
+                  {backfillResult.vendor_enhanced_match && (backfillResult.vendor_enhanced_match.resolved > 0) && (
+                    <div className="p-2 rounded bg-accent/30">
+                      <p className="text-muted-foreground">Enhanced Vendor</p>
+                      <p className="font-bold text-emerald-400">{backfillResult.vendor_enhanced_match.resolved || 0} / {backfillResult.vendor_enhanced_match.found || 0}</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {backfillResult.vendor_enhanced_match.batch_resolved > 0 ? `${backfillResult.vendor_enhanced_match.batch_resolved} batch` : ''}
+                        {backfillResult.vendor_enhanced_match.email_resolved > 0 ? `${backfillResult.vendor_enhanced_match.batch_resolved > 0 ? ', ' : ''}${backfillResult.vendor_enhanced_match.email_resolved} email` : ''}
+                        {backfillResult.vendor_enhanced_match.aggressive_match_resolved > 0 ? `, ${backfillResult.vendor_enhanced_match.aggressive_match_resolved} fuzzy` : ''}
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

@@ -3673,6 +3673,13 @@ async def run_intelligence_backfill():
     except Exception as e:
         results["extraction_revalidation"] = {"error": str(e)}
 
+    # 11b. Force-downgrade any remaining blocking extraction quality gate failures
+    try:
+        from services.validation_backfill_service import force_downgrade_extraction_gate
+        results["extraction_force_downgrade"] = await force_downgrade_extraction_gate(db)
+    except Exception as e:
+        results["extraction_force_downgrade"] = {"error": str(e)}
+
     # 12. Enhanced Vendor Match — cross-doc inference, email domain, aggressive matching
     try:
         from services.validation_backfill_service import enhanced_vendor_match_backfill

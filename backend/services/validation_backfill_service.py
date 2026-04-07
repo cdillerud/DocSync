@@ -571,6 +571,7 @@ async def batch_revalidate_vendor_gaps(db, limit: int = 500) -> dict:
     domain_resolved = 0
     candidate_resolved = 0
     cache_resolved = 0
+    auto_accepted = 0
     errors = 0
 
     for doc in gap_docs:
@@ -669,6 +670,71 @@ async def batch_revalidate_vendor_gaps(db, limit: int = 500) -> dict:
                     match_source = f"top_candidate@{top.get('score', 0):.0%}"
                     candidate_resolved += 1
 
+        # Strategy 5: Deep fuzzy match against ALL BC vendors (SequenceMatcher)
+        # Auto-accept at 90%+, auto-create alias for future matches
+        if not matched_vendor and vendor_name:
+            from difflib import SequenceMatcher
+            vn_lower = vendor_name.strip().lower()
+            best_fuzzy_score = 0
+            best_fuzzy_match = None
+
+            for cache_name, cache_info in bc_vendor_cache.items():
+                seq_score = SequenceMatcher(None, vn_lower, cache_name).ratio()
+                if seq_score > best_fuzzy_score:
+                    best_fuzzy_score = seq_score
+                    best_fuzzy_match = cache_info
+
+            # Also check vendor profiles
+            try:
+                profiles = await db.vendor_invoice_profiles.find(
+                    {}, {"_id": 0, "vendor_no": 1, "vendor_name": 1}
+                ).to_list(500)
+                for p in profiles:
+                    pname = (p.get("vendor_name") or "").strip().lower()
+                    if pname:
+                        seq_score = SequenceMatcher(None, vn_lower, pname).ratio()
+                        if seq_score > best_fuzzy_score:
+                            best_fuzzy_score = seq_score
+                            best_fuzzy_match = {
+                                "vendor_number": p["vendor_no"],
+                                "name": p.get("vendor_name", p["vendor_no"]),
+                            }
+            except Exception:
+                pass
+
+            if best_fuzzy_match and best_fuzzy_score >= 0.90:
+                matched_vendor = best_fuzzy_match
+                match_source = f"auto_accept@{best_fuzzy_score:.0%}"
+                auto_accepted += 1
+
+                # Auto-create alias for future matches
+                try:
+                    from services.vendor_name_helpers import normalize_vendor_name
+                    normalized_alias = normalize_vendor_name(vendor_name)
+                    existing_alias = await db.vendor_aliases.find_one({
+                        "$or": [{"alias_string": vendor_name}, {"normalized_alias": normalized_alias}]
+                    })
+                    if not existing_alias:
+                        import uuid
+                        await db.vendor_aliases.insert_one({
+                            "alias_id": str(uuid.uuid4()),
+                            "alias_string": vendor_name,
+                            "normalized_alias": normalized_alias,
+                            "vendor_no": best_fuzzy_match["vendor_number"],
+                            "vendor_name": best_fuzzy_match["name"],
+                            "created_by": "auto_accept_backfill",
+                            "created_at": _now(),
+                            "usage_count": 0,
+                            "confidence": round(best_fuzzy_score, 3),
+                        })
+                        logger.info(
+                            "[VendorReval] Auto-created alias: '%s' → %s (%s) @ %.0f%%",
+                            vendor_name, best_fuzzy_match["name"],
+                            best_fuzzy_match["vendor_number"], best_fuzzy_score * 100,
+                        )
+                except Exception as e:
+                    logger.debug("[VendorReval] Alias creation error: %s", e)
+
         if matched_vendor:
             vn_number = matched_vendor.get("vendor_number") or matched_vendor.get("number") or ""
             vn_name = matched_vendor.get("name") or matched_vendor.get("display_name") or vn_number
@@ -709,6 +775,7 @@ async def batch_revalidate_vendor_gaps(db, limit: int = 500) -> dict:
         "found": len(gap_docs), "resolved": resolved,
         "alias_resolved": alias_resolved, "domain_resolved": domain_resolved,
         "candidate_resolved": candidate_resolved, "cache_resolved": cache_resolved,
+        "auto_accepted": auto_accepted,
         "errors": errors, "domain_map_size": len(domain_map),
         "bc_vendor_cache_size": len(bc_vendor_cache),
     }

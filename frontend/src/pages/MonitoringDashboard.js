@@ -239,7 +239,8 @@ export default function MonitoringDashboard() {
                       {backfillResult.vendor_revalidation.resolved > 0 && (
                         <p className="text-[10px] text-muted-foreground">
                           {backfillResult.vendor_revalidation.alias_resolved > 0 ? `${backfillResult.vendor_revalidation.alias_resolved} alias` : ''}
-                          {backfillResult.vendor_revalidation.domain_resolved > 0 ? `${backfillResult.vendor_revalidation.alias_resolved > 0 ? ', ' : ''}${backfillResult.vendor_revalidation.domain_resolved} email-domain` : ''}
+                          {backfillResult.vendor_revalidation.auto_accepted > 0 ? `${backfillResult.vendor_revalidation.alias_resolved > 0 ? ', ' : ''}${backfillResult.vendor_revalidation.auto_accepted} auto-accepted` : ''}
+                          {backfillResult.vendor_revalidation.domain_resolved > 0 ? `${(backfillResult.vendor_revalidation.alias_resolved > 0 || backfillResult.vendor_revalidation.auto_accepted > 0) ? ', ' : ''}${backfillResult.vendor_revalidation.domain_resolved} email-domain` : ''}
                         </p>
                       )}
                     </div>

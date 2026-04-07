@@ -78,6 +78,21 @@ Enterprise document processing hub for AP/Sales workflows with Dynamics 365 BC i
 - `/app/backend/routers/vendor_profile_rebuild.py` — Hardened `rebuild_run()` with error handling, dedup, and index management
 - `/app/frontend/src/pages/VendorIntelligencePage.js` — Better error handling and success feedback
 
+### Phase 16c — Behavioral Fields in Rebuild (Apr 7, 2026)
+
+**Problem**: After rebuild, Domain column showed "?" and PO/BOL rates were 0% for all vendors because the rebuild didn't compute behavioral metrics.
+
+**Fix**: Enhanced `_accum_doc()` and rebuild profile to track and store:
+- `typical_reference_domain` (purchase/sales/shipping/unknown) from best match entity + doc type
+- `po_reference_count` / `po_reference_frequency` from `po_number_clean`
+- `bol_count` / `bol_presence_rate` from `bol_number`
+- `shipment_reference_count` / `shipment_reference_frequency` from reference candidates
+- `freight_invoice_count`, `shipping_document_count` from doc type
+- `typical_bc_match_types`, `bc_match_type_counts`, `avg_match_score`
+- `match_outcome_counts`, `domain_counts`
+
+Also updated Pass 2 merge logic to combine all behavioral counters when merging name-groups into BC-groups.
+
 ## Active Gap Closers: 10
 ## Backfill Steps: 15
 ## Learning Dimensions: 21

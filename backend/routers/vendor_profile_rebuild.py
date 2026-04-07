@@ -213,6 +213,28 @@ async def rebuild_run():
             except Exception:
                 doc_types_list = []
 
+            # Compute behavioral metrics
+            po_count = data.get("po_count", 0) or 0
+            bol_count = data.get("bol_count", 0) or 0
+            shipment_ref_count = data.get("shipment_ref_count", 0) or 0
+            invoice_ref_count = data.get("invoice_ref_count", 0) or 0
+            freight_count = data.get("freight_count", 0) or 0
+            shipping_doc_count = data.get("shipping_doc_count", 0) or 0
+            domain_counts = data.get("domain_counts", {}) or {}
+            bc_match_type_counts = data.get("bc_match_type_counts", {}) or {}
+            match_scores = data.get("match_scores", []) or []
+            match_outcome_counts = data.get("match_outcome_counts", {}) or {}
+
+            # Determine typical domain
+            typical_domain = max(domain_counts, key=domain_counts.get) if domain_counts else "unknown"
+
+            # Top 3 BC match types
+            sorted_types = sorted(bc_match_type_counts.items(), key=lambda x: x[1], reverse=True)
+            typical_bc_match_types = [t[0] for t in sorted_types[:3]]
+
+            # Average match score
+            avg_match_score = round(sum(match_scores) / len(match_scores), 4) if match_scores else 0
+
             profile = {
                 "vendor_no": vendor_no,
                 "vendor_name": display_name,
@@ -231,6 +253,24 @@ async def rebuild_run():
                 "stable_vendor_score": score,
                 "stable_vendor_last_evaluated": now,
                 "correction_rate": correction_rate,
+                # Behavioral fields
+                "typical_reference_domain": typical_domain,
+                "po_reference_count": po_count,
+                "po_reference_frequency": round(po_count / max(doc_count, 1), 4),
+                "bol_count": bol_count,
+                "bol_presence_rate": round(bol_count / max(doc_count, 1), 4),
+                "shipment_reference_count": shipment_ref_count,
+                "shipment_reference_frequency": round(shipment_ref_count / max(doc_count, 1), 4),
+                "invoice_reference_count": invoice_ref_count,
+                "freight_invoice_count": freight_count,
+                "shipping_document_count": shipping_doc_count,
+                "typical_bc_match_types": typical_bc_match_types,
+                "bc_match_type_counts": bc_match_type_counts,
+                "avg_match_score": avg_match_score,
+                "match_outcome_counts": match_outcome_counts,
+                "domain_counts": domain_counts,
+                "reference_confidence_score": avg_match_score,
+                # Timestamps
                 "created_at": now,
                 "updated_at": now,
                 "manual_override_status": overrides.get("manual_override_status", "none") if overrides else "none",
@@ -312,6 +352,16 @@ async def _aggregate_vendor_data(db):
         "vendor_no": "",
         "doc_types": set(),
         "correction_rate": 0,
+        "po_count": 0,
+        "bol_count": 0,
+        "shipment_ref_count": 0,
+        "invoice_ref_count": 0,
+        "freight_count": 0,
+        "shipping_doc_count": 0,
+        "domain_counts": {},
+        "bc_match_type_counts": {},
+        "match_scores": [],
+        "match_outcome_counts": {},
     })
     vendor_no_map = {}
     merge_log = []
@@ -410,12 +460,63 @@ async def _aggregate_vendor_data(db):
             g["vendor_resolved_count"] += 1
 
         ref_intel = doc.get("reference_intelligence") or {}
-        if ref_intel.get("match_outcome", "") in ("exact_match", "likely_match"):
+        outcome = ref_intel.get("match_outcome", "")
+        if outcome in ("exact_match", "likely_match"):
             g["ref_resolved_count"] += 1
 
         dt = doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type")
         if dt:
             g["doc_types"].add(dt)
+
+        # --- Behavioral tracking ---
+        has_po = bool(doc.get("po_number_clean"))
+        has_bol = bool(doc.get("bol_number"))
+        has_invoice_ref = bool(doc.get("invoice_number_clean"))
+        if has_po:
+            g["po_count"] += 1
+        if has_bol:
+            g["bol_count"] += 1
+        if has_invoice_ref:
+            g["invoice_ref_count"] += 1
+
+        # Shipment reference detection from candidates
+        has_shipment_ref = False
+        candidates = ref_intel.get("reference_candidates") or []
+        for c in candidates:
+            if c.get("predicted_domain") == "shipping" or c.get("detected_label") in ("SHIPMENT", "BOL"):
+                has_shipment_ref = True
+                break
+        if has_shipment_ref:
+            g["shipment_ref_count"] += 1
+
+        # Freight / shipping doc type tracking
+        if dt in ("Freight_Invoice", "Freight Invoice", "Freight"):
+            g["freight_count"] += 1
+        if dt in ("Shipping_Document", "Shipping Document", "BOL", "Bill_of_Lading"):
+            g["shipping_doc_count"] += 1
+
+        # Match type and score from reference intelligence
+        best_match = ref_intel.get("best_match") or {}
+        best_entity = best_match.get("entity_type", "")
+        best_score = best_match.get("match_score", 0)
+        if best_entity:
+            g["bc_match_type_counts"][best_entity] = g["bc_match_type_counts"].get(best_entity, 0) + 1
+        if best_score:
+            g["match_scores"].append(best_score)
+        if outcome:
+            g["match_outcome_counts"][outcome] = g["match_outcome_counts"].get(outcome, 0) + 1
+
+        # Domain detection
+        doc_domain = "unknown"
+        if "purchase" in best_entity:
+            doc_domain = "purchase"
+        elif "sales" in best_entity or "shipment" in best_entity:
+            doc_domain = "sales" if "invoice" in best_entity else "shipping"
+        elif dt in ("Freight_Invoice", "Freight Invoice", "Freight", "Shipping_Document", "BOL"):
+            doc_domain = "shipping"
+        elif has_po:
+            doc_domain = "purchase"
+        g["domain_counts"][doc_domain] = g["domain_counts"].get(doc_domain, 0) + 1
 
     # Pass 1: Process all documents
     cursor = db.hub_documents.find(
@@ -438,6 +539,7 @@ async def _aggregate_vendor_data(db):
             "reference_intelligence": 1,
             "doc_type": 1, "document_type": 1, "suggested_job_type": 1,
             "unified_vendor_match": 1,
+            "po_number_clean": 1, "bol_number": 1, "invoice_number_clean": 1,
         },
     ).batch_size(200)
 
@@ -494,6 +596,19 @@ async def _aggregate_vendor_data(db):
                 target["validation_passed_count"] += data["validation_passed_count"]
                 target["vendor_resolved_count"] += data["vendor_resolved_count"]
                 target["ref_resolved_count"] += data["ref_resolved_count"]
+                target["po_count"] += data.get("po_count", 0)
+                target["bol_count"] += data.get("bol_count", 0)
+                target["shipment_ref_count"] += data.get("shipment_ref_count", 0)
+                target["invoice_ref_count"] += data.get("invoice_ref_count", 0)
+                target["freight_count"] += data.get("freight_count", 0)
+                target["shipping_doc_count"] += data.get("shipping_doc_count", 0)
+                target["match_scores"].extend(data.get("match_scores", []))
+                for k, v in data.get("bc_match_type_counts", {}).items():
+                    target["bc_match_type_counts"][k] = target["bc_match_type_counts"].get(k, 0) + v
+                for k, v in data.get("match_outcome_counts", {}).items():
+                    target["match_outcome_counts"][k] = target["match_outcome_counts"].get(k, 0) + v
+                for k, v in data.get("domain_counts", {}).items():
+                    target["domain_counts"][k] = target["domain_counts"].get(k, 0) + v
                 for v in data["name_variants"]:
                     if v not in target["name_variants"]:
                         target["name_variants"].append(v)

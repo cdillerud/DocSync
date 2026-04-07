@@ -249,9 +249,11 @@ async def batch_revalidate_so_gaps(db, limit: int = 500) -> dict:
     Re-run sales order matching on documents with sales_order_match failures.
 
     Strategy:
-      1. Cache-first SO lookup (bc_reference_cache)
-      2. SO number normalization (add/remove prefixes, strip zeros)
-      3. Cross-document flow intelligence
+      1. Cache-first SO lookup (salesOrders + salesShipments + salesInvoices)
+      2. External document number matching
+      3. SO number normalization (add/remove prefixes, strip zeros, digits only)
+      4. Cross-document flow intelligence
+      5. Previously-matched SO cross-reference from sibling docs
     """
     gap_docs = await db.hub_documents.find(
         {
@@ -270,28 +272,98 @@ async def batch_revalidate_so_gaps(db, limit: int = 500) -> dict:
     if not gap_docs:
         return {"found": 0, "resolved": 0, "message": "No sales order match gaps found"}
 
-    # ── Build SO cache index ──
-    so_cache = {}
-    so_normalized = {}
+    # ── Build comprehensive SO cache index ──
+    so_by_number = {}       # exact doc number lookup
+    so_by_normalized = {}   # normalized number lookup
+    so_by_external = {}     # external doc number lookup
+    so_by_digits = {}       # digits-only lookup
+    so_by_customer = {}     # customer number → SO list
+
     try:
-        cached_sos = await db.bc_reference_cache.find(
-            {"bc_entity_type": {"$in": ["sales_order", "posted_sales_invoice"]}},
+        cached_records = await db.bc_reference_cache.find(
+            {"bc_entity_type": {"$in": [
+                "sales_order", "posted_sales_invoice", "posted_sales_shipment"
+            ]}},
             {"_id": 0, "bc_document_no": 1, "normalized_document_no": 1,
-             "bc_vendor_name": 1, "bc_vendor_no": 1}
-        ).limit(5000).to_list(5000)
-        for so in cached_sos:
-            doc_no = (so.get("bc_document_no") or "").strip()
-            norm_no = (so.get("normalized_document_no") or "").strip()
+             "bc_external_document_no": 1, "bc_customer_no": 1,
+             "bc_customer_name": 1, "bc_entity_type": 1, "bc_order_number": 1}
+        ).limit(10000).to_list(10000)
+
+        for rec in cached_records:
+            doc_no = (rec.get("bc_document_no") or "").strip()
+            norm_no = (rec.get("normalized_document_no") or "").strip()
+            ext_no = (rec.get("bc_external_document_no") or "").strip()
+            order_no = (rec.get("bc_order_number") or "").strip()
+
+            info = {
+                "number": doc_no,
+                "customer_name": rec.get("bc_customer_name", ""),
+                "customer_number": rec.get("bc_customer_no", ""),
+                "entity_type": rec.get("bc_entity_type", ""),
+            }
+
             if doc_no:
-                so_cache[doc_no.lower()] = so
+                so_by_number[doc_no.lower()] = info
             if norm_no:
-                so_normalized[norm_no.lower()] = so
+                so_by_normalized[norm_no.lower()] = info
+            if ext_no:
+                so_by_external[ext_no.lower()] = info
+            if order_no:
+                so_by_number[order_no.lower()] = info
+
+            # Digits-only index
+            digits = re.sub(r'[^0-9]', '', doc_no)
+            if digits and len(digits) >= 4:
+                so_by_digits[digits] = info
+            if ext_no:
+                ext_digits = re.sub(r'[^0-9]', '', ext_no)
+                if ext_digits and len(ext_digits) >= 4:
+                    so_by_digits[ext_digits] = info
+
+            # Customer index
+            cust_no = rec.get("bc_customer_no", "")
+            if cust_no:
+                if cust_no not in so_by_customer:
+                    so_by_customer[cust_no] = []
+                so_by_customer[cust_no].append(info)
+    except Exception as e:
+        logger.debug("[SOReval] Cache build error: %s", e)
+
+    # ── Also build index from previously successful SO matches ──
+    successful_so_map = {}
+    try:
+        successful_so_docs = await db.hub_documents.find(
+            {"validation_results.checks": {
+                "$elemMatch": {"check_name": "sales_order_match", "passed": True}
+            }},
+            {"_id": 0, "extracted_fields.bol_number": 1, "extracted_fields.po_number": 1,
+             "extracted_fields.order_number": 1, "validation_results.checks": 1}
+        ).limit(500).to_list(500)
+
+        for sdoc in successful_so_docs:
+            ext = sdoc.get("extracted_fields") or {}
+            checks = (sdoc.get("validation_results") or {}).get("checks", [])
+            for ch in checks:
+                if ch.get("check_name") == "sales_order_match" and ch.get("passed"):
+                    so_num = ch.get("order_number", "")
+                    cust_name = ch.get("customer_name", "")
+                    if so_num:
+                        # Map any order ref from this doc to the matched SO
+                        for field in ["bol_number", "po_number", "order_number"]:
+                            ref = ext.get(field, "")
+                            if ref and str(ref).strip():
+                                successful_so_map[str(ref).strip().lower()] = {
+                                    "number": so_num,
+                                    "customer_name": cust_name,
+                                    "customer_number": ch.get("customer_number", ""),
+                                }
     except Exception:
         pass
 
     resolved = 0
     cache_resolved = 0
     flow_resolved = 0
+    sibling_resolved = 0
     errors = 0
 
     for doc in gap_docs:
@@ -303,7 +375,8 @@ async def batch_revalidate_so_gaps(db, limit: int = 500) -> dict:
 
         # Get order number candidates
         order_candidates = []
-        for field in ["bol_number", "po_number", "order_number", "so_number", "sales_order"]:
+        for field in ["bol_number", "po_number", "order_number", "so_number", "sales_order",
+                       "reference_number", "shipment_number"]:
             val = normalized.get(field) or extracted.get(field) or ""
             if val and str(val).strip():
                 order_candidates.append(str(val).strip())
@@ -316,28 +389,43 @@ async def batch_revalidate_so_gaps(db, limit: int = 500) -> dict:
 
         for order_num in order_candidates:
             order_lower = order_num.lower()
+            order_digits = re.sub(r'[^0-9]', '', order_num)
 
             # Strategy 1: Exact cache lookup
-            if order_lower in so_cache:
-                matched_so = so_cache[order_lower]
+            if order_lower in so_by_number:
+                matched_so = so_by_number[order_lower]
                 match_source = "cache_exact"
                 cache_resolved += 1
                 break
 
-            # Strategy 2: Normalized cache lookup
+            # Strategy 2: External doc number lookup
+            if order_lower in so_by_external:
+                matched_so = so_by_external[order_lower]
+                match_source = "cache_external_doc"
+                cache_resolved += 1
+                break
+
+            # Strategy 3: Normalized cache lookup
             norm = re.sub(r'[^a-z0-9]', '', order_lower)
-            if norm in so_normalized:
-                matched_so = so_normalized[norm]
+            if norm in so_by_normalized:
+                matched_so = so_by_normalized[norm]
                 match_source = "cache_normalized"
                 cache_resolved += 1
                 break
 
-            # Strategy 3: Variations
+            # Strategy 4: Digits-only match
+            if order_digits and len(order_digits) >= 4 and order_digits in so_by_digits:
+                matched_so = so_by_digits[order_digits]
+                match_source = "cache_digits"
+                cache_resolved += 1
+                break
+
+            # Strategy 5: Variations (add/remove prefixes)
             variations = []
             stripped = order_num.lstrip("0")
             if stripped and stripped != order_num:
                 variations.append(stripped)
-            for prefix in ["SO", "S-", "SO-"]:
+            for prefix in ["SO", "S-", "SO-", "SI-", "PS-"]:
                 if not order_num.upper().startswith(prefix):
                     variations.append(f"{prefix}{order_num}")
                 elif order_num.upper().startswith(prefix):
@@ -345,21 +433,27 @@ async def batch_revalidate_so_gaps(db, limit: int = 500) -> dict:
 
             for var in variations:
                 var_lower = var.lower()
-                if var_lower in so_cache:
-                    matched_so = so_cache[var_lower]
+                if var_lower in so_by_number:
+                    matched_so = so_by_number[var_lower]
                     match_source = "cache_variation"
                     cache_resolved += 1
                     break
-                var_norm = re.sub(r'[^a-z0-9]', '', var_lower)
-                if var_norm in so_normalized:
-                    matched_so = so_normalized[var_norm]
-                    match_source = "cache_normalized_variation"
+                if var_lower in so_by_external:
+                    matched_so = so_by_external[var_lower]
+                    match_source = "cache_external_variation"
                     cache_resolved += 1
                     break
             if matched_so:
                 break
 
-        # Strategy 4: Document flow cross-reference
+            # Strategy 6: Sibling document lookup
+            if order_lower in successful_so_map:
+                matched_so = successful_so_map[order_lower]
+                match_source = "sibling_doc"
+                sibling_resolved += 1
+                break
+
+        # Strategy 7: Document flow cross-reference
         if not matched_so and vendor_no:
             try:
                 from services.gap_closer_service import find_sales_order_from_flow
@@ -367,8 +461,9 @@ async def batch_revalidate_so_gaps(db, limit: int = 500) -> dict:
                     flow_result = await find_sales_order_from_flow(db, vendor_no, order_num)
                     if flow_result and flow_result.get("found"):
                         matched_so = {
-                            "bc_document_no": flow_result.get("number", ""),
-                            "bc_vendor_name": flow_result.get("customer_name", ""),
+                            "number": flow_result.get("number", ""),
+                            "customer_name": flow_result.get("customer_name", ""),
+                            "customer_number": flow_result.get("customer_number", ""),
                         }
                         match_source = "document_flow"
                         flow_resolved += 1
@@ -377,8 +472,8 @@ async def batch_revalidate_so_gaps(db, limit: int = 500) -> dict:
                 pass
 
         if matched_so:
-            so_number = matched_so.get("bc_document_no", "")
-            so_customer = matched_so.get("bc_vendor_name", "")
+            so_number = matched_so.get("number", "")
+            so_customer = matched_so.get("customer_name", "")
             new_checks = [ch for ch in validation.get("checks", []) if ch.get("check_name") != "sales_order_match"]
             new_checks.append({
                 "check_name": "sales_order_match",
@@ -409,7 +504,9 @@ async def batch_revalidate_so_gaps(db, limit: int = 500) -> dict:
     return {
         "found": len(gap_docs), "resolved": resolved,
         "cache_resolved": cache_resolved, "flow_resolved": flow_resolved,
-        "errors": errors, "so_cache_size": len(so_cache),
+        "sibling_resolved": sibling_resolved,
+        "errors": errors,
+        "cache_size": len(so_by_number) + len(so_by_external),
     }
 
 
@@ -423,7 +520,7 @@ async def batch_revalidate_vendor_gaps(db, limit: int = 500) -> dict:
 
     The alias database grows over time as successful matches are auto-learned.
     This re-runs matching for docs that failed when fewer aliases existed.
-    Also uses email domain → vendor mappings.
+    Also uses email domain → vendor mappings and top-candidate acceptance.
     """
     gap_docs = await db.hub_documents.find(
         {
@@ -450,11 +547,30 @@ async def batch_revalidate_vendor_gaps(db, limit: int = 500) -> dict:
     except Exception:
         pass
 
+    # ── Build vendor name cache from BC reference ──
+    bc_vendor_cache = {}
+    try:
+        vendors = await db.bc_reference_cache.find(
+            {"bc_entity_type": "vendor"},
+            {"_id": 0, "bc_vendor_no": 1, "bc_vendor_name": 1, "displayName": 1}
+        ).limit(500).to_list(500)
+        for v in vendors:
+            name = (v.get("bc_vendor_name") or v.get("displayName") or "").strip().lower()
+            if name:
+                bc_vendor_cache[name] = {
+                    "vendor_number": v.get("bc_vendor_no", ""),
+                    "name": v.get("bc_vendor_name") or v.get("displayName", ""),
+                }
+    except Exception:
+        pass
+
     from services.unified_vendor_matcher import match_vendor_unified
 
     resolved = 0
     alias_resolved = 0
     domain_resolved = 0
+    candidate_resolved = 0
+    cache_resolved = 0
     errors = 0
 
     for doc in gap_docs:
@@ -472,7 +588,7 @@ async def batch_revalidate_vendor_gaps(db, limit: int = 500) -> dict:
         matched_vendor = None
         match_source = None
 
-        # Strategy 1: Re-run unified vendor matching (may use new aliases)
+        # Strategy 1: Re-run unified vendor matching with lower threshold (0.70)
         names_to_try = []
         if ref_canonical:
             names_to_try.append(ref_canonical)
@@ -483,7 +599,7 @@ async def batch_revalidate_vendor_gaps(db, limit: int = 500) -> dict:
             if not name:
                 continue
             try:
-                result = await match_vendor_unified(db, name, 0.75)
+                result = await match_vendor_unified(db, name, 0.70)
                 if result.get("matched") and result.get("best_match"):
                     matched_vendor = result["best_match"]
                     match_source = f"re-match:{result.get('source', 'alias')}"
@@ -502,7 +618,6 @@ async def batch_revalidate_vendor_gaps(db, limit: int = 500) -> dict:
                 domain = sender_email.split("@")[1].lower()
                 vendor_no = domain_map.get(domain)
                 if vendor_no:
-                    # Get vendor details from profile or cache
                     prof = await db.vendor_invoice_profiles.find_one(
                         {"vendor_no": vendor_no}, {"_id": 0, "vendor_no": 1, "vendor_name": 1}
                     )
@@ -513,6 +628,46 @@ async def batch_revalidate_vendor_gaps(db, limit: int = 500) -> dict:
                         }
                         match_source = "email_domain"
                         domain_resolved += 1
+
+        # Strategy 3: BC vendor cache fuzzy match
+        if not matched_vendor and vendor_name:
+            vn_lower = vendor_name.strip().lower()
+            # Exact match
+            if vn_lower in bc_vendor_cache:
+                matched_vendor = bc_vendor_cache[vn_lower]
+                match_source = "bc_cache_exact"
+                cache_resolved += 1
+            else:
+                # Word overlap match
+                vn_words = set(re.sub(r'[^a-z0-9\s]', '', vn_lower).split())
+                if len(vn_words) >= 2:
+                    best_overlap = 0
+                    best_match = None
+                    for cache_name, cache_info in bc_vendor_cache.items():
+                        cache_words = set(re.sub(r'[^a-z0-9\s]', '', cache_name).split())
+                        overlap = vn_words & cache_words
+                        # Need at least 2 word overlap and 50% coverage
+                        score = len(overlap) / max(len(vn_words), len(cache_words), 1)
+                        if len(overlap) >= 2 and score > best_overlap and score >= 0.5:
+                            best_overlap = score
+                            best_match = cache_info
+                    if best_match:
+                        matched_vendor = best_match
+                        match_source = "bc_cache_fuzzy"
+                        cache_resolved += 1
+
+        # Strategy 4: Accept top candidate if score >= 0.65
+        if not matched_vendor:
+            candidates = validation.get("vendor_candidates", [])
+            if candidates and len(candidates) > 0:
+                top = candidates[0]
+                if top.get("score", 0) >= 0.65:
+                    matched_vendor = {
+                        "vendor_number": top.get("vendor_id", ""),
+                        "name": top.get("display_name", ""),
+                    }
+                    match_source = f"top_candidate@{top.get('score', 0):.0%}"
+                    candidate_resolved += 1
 
         if matched_vendor:
             vn_number = matched_vendor.get("vendor_number") or matched_vendor.get("number") or ""
@@ -553,5 +708,7 @@ async def batch_revalidate_vendor_gaps(db, limit: int = 500) -> dict:
     return {
         "found": len(gap_docs), "resolved": resolved,
         "alias_resolved": alias_resolved, "domain_resolved": domain_resolved,
+        "candidate_resolved": candidate_resolved, "cache_resolved": cache_resolved,
         "errors": errors, "domain_map_size": len(domain_map),
+        "bc_vendor_cache_size": len(bc_vendor_cache),
     }

@@ -200,7 +200,11 @@ export default function MonitoringDashboard() {
                         <p className="text-[10px] text-muted-foreground">
                           {backfillResult.so_revalidation.cache_resolved > 0 ? `${backfillResult.so_revalidation.cache_resolved} cache` : ''}
                           {backfillResult.so_revalidation.flow_resolved > 0 ? `${backfillResult.so_revalidation.cache_resolved > 0 ? ', ' : ''}${backfillResult.so_revalidation.flow_resolved} flow` : ''}
+                          {backfillResult.so_revalidation.sibling_resolved > 0 ? `${(backfillResult.so_revalidation.cache_resolved > 0 || backfillResult.so_revalidation.flow_resolved > 0) ? ', ' : ''}${backfillResult.so_revalidation.sibling_resolved} sibling` : ''}
                         </p>
+                      )}
+                      {backfillResult.so_revalidation.cache_size !== undefined && (
+                        <p className="text-[10px] text-muted-foreground">SO cache: {backfillResult.so_revalidation.cache_size} records</p>
                       )}
                     </div>
                   )}

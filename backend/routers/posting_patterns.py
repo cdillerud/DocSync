@@ -3261,14 +3261,19 @@ async def get_gap_closer_status():
         {"validation_results.matched_sales_order": {"$exists": True}}
     )
 
-    # Validation gap counts (from validation_gap_log)
-    gap_pipeline = [
-        {"$unwind": "$failure_checks"},
-        {"$group": {"_id": "$failure_checks", "count": {"$sum": 1}}},
-        {"$sort": {"count": -1}},
-    ]
-    gap_counts = {r["_id"]: r["count"]
-                  for r in await db.validation_gap_log.aggregate(gap_pipeline).to_list(20)}
+    # Validation gap counts — count directly from hub_documents for accuracy
+    # (validation_gap_log can become stale when docs are resolved or archived)
+    gap_check_names = ["po_validation", "customer_match", "sales_order_match", "vendor_match", "duplicate_check"]
+    gap_counts = {}
+    for check_name in gap_check_names:
+        count = await db.hub_documents.count_documents({
+            "validation_results.checks": {
+                "$elemMatch": {"check_name": check_name, "passed": False}
+            },
+            "status": {"$nin": ["Completed", "Posted", "Deleted", "Archived"]},
+        })
+        if count > 0:
+            gap_counts[check_name] = count
 
     # GAP 5: Duplicate Intelligence
     try:
@@ -3606,6 +3611,42 @@ async def run_intelligence_backfill():
         results["vendor_revalidation"] = await batch_revalidate_vendor_gaps(db, limit=500)
     except Exception as e:
         results["vendor_revalidation"] = {"error": str(e)}
+
+    # 10. Gap Log Cleanup — remove stale entries for resolved/archived docs
+    try:
+        stale_cleaned = 0
+        gap_log_entries = await db.validation_gap_log.find(
+            {}, {"_id": 0, "doc_id": 1, "failure_checks": 1}
+        ).limit(2000).to_list(2000)
+        for entry in gap_log_entries:
+            doc_id = entry.get("doc_id", "")
+            if not doc_id:
+                continue
+            doc = await db.hub_documents.find_one(
+                {"id": doc_id},
+                {"_id": 0, "status": 1, "validation_results.checks": 1}
+            )
+            if not doc:
+                await db.validation_gap_log.delete_many({"doc_id": doc_id})
+                stale_cleaned += 1
+                continue
+            if doc.get("status") in ("Completed", "Posted", "Deleted", "Archived"):
+                await db.validation_gap_log.delete_many({"doc_id": doc_id})
+                stale_cleaned += 1
+                continue
+            # Check if the specific failure checks are now passing
+            checks = (doc.get("validation_results") or {}).get("checks", [])
+            check_map = {c.get("check_name"): c.get("passed", False) for c in checks}
+            failures = entry.get("failure_checks", "")
+            if isinstance(failures, str):
+                failures = [failures]
+            all_resolved = all(check_map.get(f, False) for f in failures if f)
+            if all_resolved:
+                await db.validation_gap_log.delete_many({"doc_id": doc_id})
+                stale_cleaned += 1
+        results["gap_log_cleanup"] = {"stale_removed": stale_cleaned, "checked": len(gap_log_entries)}
+    except Exception as e:
+        results["gap_log_cleanup"] = {"error": str(e)}
 
     return results
 

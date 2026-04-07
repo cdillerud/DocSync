@@ -3537,6 +3537,53 @@ async def run_intelligence_backfill():
     except Exception as e:
         results["po_revalidation"] = {"error": str(e)}
 
+    # 6. Vendor PO Profile Diagnostic — show what the system learned about PO expectations
+    try:
+        from services.vendor_invoice_profile_service import get_or_build_profile
+        # Get the top PO gap vendors and check their profiles
+        po_gap_vendors = await db.hub_documents.aggregate([
+            {"$match": {
+                "validation_results.checks": {"$elemMatch": {"check_name": "po_validation", "passed": False}},
+                "status": {"$nin": ["Completed", "Posted", "Deleted", "Archived"]},
+            }},
+            {"$group": {
+                "_id": {"$ifNull": ["$bc_vendor_number", {"$ifNull": ["$vendor_no", "unknown"]}]},
+                "gap_count": {"$sum": 1},
+            }},
+            {"$sort": {"gap_count": -1}},
+            {"$limit": 10},
+        ]).to_list(10)
+
+        vendor_po_profiles = []
+        for vg in po_gap_vendors:
+            vendor_no = vg["_id"]
+            if vendor_no == "unknown":
+                vendor_po_profiles.append({"vendor_no": "unknown", "gaps": vg["gap_count"], "profile": "no vendor match"})
+                continue
+            profile = await get_or_build_profile(db, vendor_no)
+            # Check bc_reference_cache for this vendor's posted PIs
+            cache_count = await db.bc_reference_cache.count_documents({
+                "bc_vendor_no": vendor_no,
+                "bc_entity_type": {"$in": ["posted_purchase_invoice", "draft_purchase_invoice"]},
+            })
+            cache_with_po = await db.bc_reference_cache.count_documents({
+                "bc_vendor_no": vendor_no,
+                "bc_entity_type": {"$in": ["posted_purchase_invoice", "draft_purchase_invoice"]},
+                "bc_order_number": {"$exists": True, "$nin": [None, ""]},
+            })
+            vendor_po_profiles.append({
+                "vendor_no": vendor_no,
+                "gaps": vg["gap_count"],
+                "po_expected": profile.get("po_expected", True) if profile else True,
+                "bc_cache_invoices": cache_count,
+                "bc_cache_with_po": cache_with_po,
+                "po_rate": round(cache_with_po / max(cache_count, 1), 3) if cache_count else None,
+                "profile_source": profile.get("_source", "computed") if profile else "none",
+            })
+        results["vendor_po_diagnostic"] = vendor_po_profiles
+    except Exception as e:
+        results["vendor_po_diagnostic"] = {"error": str(e)}
+
     return results
 
 

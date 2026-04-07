@@ -75,7 +75,7 @@ ENTITY_CONFIGS = {
         "domain": "purchase",
         "number_field": "number",
         "external_ref_field": "vendorInvoiceNumber",
-        "select_fields": "id,number,vendorInvoiceNumber,vendorName,vendorNumber,postingDate,totalAmountIncludingTax,status,orderNo,lastModifiedDateTime",
+        "select_fields": "id,number,vendorInvoiceNumber,vendorName,vendorNumber,postingDate,totalAmountIncludingTax,status,orderNumber,lastModifiedDateTime",
         "extract_fields": lambda r: {
             "bc_record_id": r.get("id"),
             "bc_document_no": r.get("number", ""),
@@ -87,7 +87,7 @@ ENTITY_CONFIGS = {
             "bc_posting_date": r.get("postingDate"),
             "bc_status": r.get("status", ""),
             "bc_amount": r.get("totalAmountIncludingTax"),
-            "bc_order_number": r.get("orderNo", ""),
+            "bc_order_number": r.get("orderNumber", ""),
             "bc_last_modified": r.get("lastModifiedDateTime"),
         }
     },
@@ -96,7 +96,7 @@ ENTITY_CONFIGS = {
         "domain": "purchase",
         "number_field": "number",
         "external_ref_field": "vendorInvoiceNumber",
-        "select_fields": "id,number,vendorInvoiceNumber,vendorName,vendorNumber,postingDate,totalAmountIncludingTax,orderNo,lastModifiedDateTime",
+        "select_fields": "id,number,vendorInvoiceNumber,vendorName,vendorNumber,postingDate,totalAmountIncludingTax,orderNumber,lastModifiedDateTime",
         "extract_fields": lambda r: {
             "bc_record_id": r.get("id"),
             "bc_document_no": r.get("number", ""),
@@ -108,7 +108,7 @@ ENTITY_CONFIGS = {
             "bc_posting_date": r.get("postingDate"),
             "bc_status": "posted",
             "bc_amount": r.get("totalAmountIncludingTax"),
-            "bc_order_number": r.get("orderNo", ""),
+            "bc_order_number": r.get("orderNumber", ""),
             "bc_last_modified": r.get("lastModifiedDateTime"),
         }
     },

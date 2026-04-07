@@ -619,8 +619,8 @@ async def _validate_bc_match_inner(
                         or extracted_fields.get("_vendor_canonical", "")
                     )
                     if _matched_vendor_no:
-                        from services.vendor_invoice_profile_service import get_or_build_vendor_profile
-                        _vp = await get_or_build_vendor_profile(db, _matched_vendor_no)
+                        from services.vendor_invoice_profile_service import get_or_build_profile
+                        _vp = await get_or_build_profile(db, _matched_vendor_no)
                         if _vp and not _vp.get("po_expected", True):
                             _effective_po_mode = "PO_SKIP"
                             logger.info(

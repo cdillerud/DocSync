@@ -3262,18 +3262,30 @@ async def get_gap_closer_status():
     )
 
     # Validation gap counts — count directly from hub_documents for accuracy
-    # (validation_gap_log can become stale when docs are resolved or archived)
+    # Split into blocking (required=true or unset) and advisory (required=false) gaps
     gap_check_names = ["po_validation", "customer_match", "sales_order_match", "vendor_match", "duplicate_check"]
     gap_counts = {}
+    advisory_counts = {}
     for check_name in gap_check_names:
-        count = await db.hub_documents.count_documents({
+        # Total failed checks
+        total = await db.hub_documents.count_documents({
             "validation_results.checks": {
                 "$elemMatch": {"check_name": check_name, "passed": False}
             },
             "status": {"$nin": ["Completed", "Posted", "Deleted", "Archived"]},
         })
-        if count > 0:
-            gap_counts[check_name] = count
+        # Advisory: required explicitly set to false
+        advisory = await db.hub_documents.count_documents({
+            "validation_results.checks": {
+                "$elemMatch": {"check_name": check_name, "passed": False, "required": False}
+            },
+            "status": {"$nin": ["Completed", "Posted", "Deleted", "Archived"]},
+        })
+        blocking = total - advisory
+        if blocking > 0:
+            gap_counts[check_name] = blocking
+        if advisory > 0:
+            advisory_counts[check_name] = advisory
 
     # GAP 5: Duplicate Intelligence
     try:
@@ -3347,6 +3359,7 @@ async def get_gap_closer_status():
         "gap_6_amount_anomaly": amount_anomaly_summary,
         "gap_7_escalation_intelligence": escalation_summary,
         "total_validation_gaps": gap_counts,
+        "advisory_validation_gaps": advisory_counts,
     }
 
 

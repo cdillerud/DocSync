@@ -340,25 +340,46 @@ export default function MonitoringDashboard() {
       )}
 
       {/* PO Validation Gap Breakdown */}
-      {data?.gap?.total_validation_gaps && Object.keys(data.gap.total_validation_gaps).length > 0 && (
+      {/* Validation Gap Breakdown */}
+      {(data?.gap?.total_validation_gaps && Object.keys(data.gap.total_validation_gaps).length > 0) || (data?.gap?.advisory_validation_gaps && Object.keys(data.gap.advisory_validation_gaps).length > 0) ? (
         <Card className="border-amber-500/20" data-testid="gap-breakdown">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-amber-400">Validation Gap Breakdown</CardTitle>
           </CardHeader>
           <CardContent className="pb-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {Object.entries(data.gap.total_validation_gaps)
-                .sort(([,a], [,b]) => b - a)
-                .map(([gap, count]) => (
-                  <div key={gap} className="p-2 rounded bg-accent/50 text-xs">
-                    <p className="font-medium">{gap.replace(/_/g, ' ')}</p>
-                    <p className="text-lg font-bold">{count}</p>
-                  </div>
-                ))}
-            </div>
+            {Object.keys(data.gap.total_validation_gaps || {}).length > 0 && (
+              <>
+                <p className="text-xs text-muted-foreground mb-2 font-medium">Blocking (prevents automation)</p>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
+                  {Object.entries(data.gap.total_validation_gaps)
+                    .sort(([,a], [,b]) => b - a)
+                    .map(([gap, count]) => (
+                      <div key={gap} className="p-2 rounded bg-red-500/10 border border-red-500/20 text-xs">
+                        <p className="font-medium">{gap.replace(/_/g, ' ')}</p>
+                        <p className="text-lg font-bold text-red-400">{count}</p>
+                      </div>
+                    ))}
+                </div>
+              </>
+            )}
+            {Object.keys(data.gap.advisory_validation_gaps || {}).length > 0 && (
+              <>
+                <p className="text-xs text-muted-foreground mb-2 font-medium">Advisory (non-blocking)</p>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                  {Object.entries(data.gap.advisory_validation_gaps)
+                    .sort(([,a], [,b]) => b - a)
+                    .map(([gap, count]) => (
+                      <div key={gap} className="p-2 rounded bg-amber-500/5 border border-amber-500/10 text-xs">
+                        <p className="font-medium">{gap.replace(/_/g, ' ')}</p>
+                        <p className="text-lg font-bold text-amber-400">{count}</p>
+                      </div>
+                    ))}
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
-      )}
+      ) : null}
 
       {/* PO Gap by Vendor — which vendors are responsible */}
       {data?.poGaps?.by_vendor?.length > 0 && (
@@ -488,12 +509,16 @@ function computeMetrics(data) {
     m.autoFileStatus = 'neutral';
   }
 
-  // 4. Validation Gaps
+  // 4. Validation Gaps — blocking (required) vs advisory (non-required)
   const gaps = gap?.total_validation_gaps || {};
+  const advisoryGaps = gap?.advisory_validation_gaps || {};
   const totalGaps = Object.values(gaps).reduce((a, b) => a + b, 0);
+  const totalAdvisory = Object.values(advisoryGaps).reduce((a, b) => a + b, 0);
   const topGap = Object.entries(gaps).sort((a, b) => b[1] - a[1])[0];
   m.gapCount = `${totalGaps}`;
-  m.gapSubtitle = totalGaps === 0 ? 'No open validation gaps' : `${totalGaps} gap${totalGaps !== 1 ? 's' : ''} detected`;
+  m.gapSubtitle = totalGaps === 0
+    ? (totalAdvisory > 0 ? `No blocking gaps (${totalAdvisory} advisory)` : 'No open validation gaps')
+    : `${totalGaps} blocking gap${totalGaps !== 1 ? 's' : ''}${totalAdvisory > 0 ? ` + ${totalAdvisory} advisory` : ''}`;
   m.gapStatus = totalGaps === 0 ? 'good' : totalGaps <= 5 ? 'warning' : 'critical';
   if (topGap) {
     const label = topGap[0].replace(/_/g, ' ');

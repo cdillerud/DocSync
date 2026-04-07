@@ -3586,6 +3586,27 @@ async def run_intelligence_backfill():
     except Exception as e:
         results["po_revalidation"] = {"error": str(e)}
 
+    # 7. Customer Match Re-validation — aliases, vendor→customer history, cache
+    try:
+        from services.validation_backfill_service import batch_revalidate_customer_gaps
+        results["customer_revalidation"] = await batch_revalidate_customer_gaps(db, limit=500)
+    except Exception as e:
+        results["customer_revalidation"] = {"error": str(e)}
+
+    # 8. Sales Order Match Re-validation — cache-first SO lookup, normalization
+    try:
+        from services.validation_backfill_service import batch_revalidate_so_gaps
+        results["so_revalidation"] = await batch_revalidate_so_gaps(db, limit=500)
+    except Exception as e:
+        results["so_revalidation"] = {"error": str(e)}
+
+    # 9. Vendor Match Re-validation — re-run with latest aliases + email domain
+    try:
+        from services.validation_backfill_service import batch_revalidate_vendor_gaps
+        results["vendor_revalidation"] = await batch_revalidate_vendor_gaps(db, limit=500)
+    except Exception as e:
+        results["vendor_revalidation"] = {"error": str(e)}
+
     return results
 
 

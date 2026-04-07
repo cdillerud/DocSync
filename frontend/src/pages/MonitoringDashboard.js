@@ -174,6 +174,51 @@ export default function MonitoringDashboard() {
                 )}
               </div>
             </div>
+            {/* New gap revalidation results */}
+            {(backfillResult.customer_revalidation || backfillResult.so_revalidation || backfillResult.vendor_revalidation) && (
+              <div className="mt-3 pt-3 border-t border-border/50">
+                <p className="text-xs font-medium mb-2">Gap Closer Results</p>
+                <div className="grid grid-cols-3 gap-3 text-xs">
+                  {backfillResult.customer_revalidation && (
+                    <div className="p-2 rounded bg-accent/30">
+                      <p className="text-muted-foreground">Customer Match</p>
+                      <p className="font-bold text-emerald-400">{backfillResult.customer_revalidation.resolved || 0} / {backfillResult.customer_revalidation.found || 0}</p>
+                      {backfillResult.customer_revalidation.resolved > 0 && (
+                        <p className="text-[10px] text-muted-foreground">
+                          {backfillResult.customer_revalidation.alias_resolved > 0 ? `${backfillResult.customer_revalidation.alias_resolved} alias` : ''}
+                          {backfillResult.customer_revalidation.vendor_assoc_resolved > 0 ? `${backfillResult.customer_revalidation.alias_resolved > 0 ? ', ' : ''}${backfillResult.customer_revalidation.vendor_assoc_resolved} vendor-assoc` : ''}
+                          {backfillResult.customer_revalidation.cache_resolved > 0 ? `${(backfillResult.customer_revalidation.alias_resolved > 0 || backfillResult.customer_revalidation.vendor_assoc_resolved > 0) ? ', ' : ''}${backfillResult.customer_revalidation.cache_resolved} cache` : ''}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {backfillResult.so_revalidation && (
+                    <div className="p-2 rounded bg-accent/30">
+                      <p className="text-muted-foreground">Sales Order Match</p>
+                      <p className="font-bold text-emerald-400">{backfillResult.so_revalidation.resolved || 0} / {backfillResult.so_revalidation.found || 0}</p>
+                      {backfillResult.so_revalidation.resolved > 0 && (
+                        <p className="text-[10px] text-muted-foreground">
+                          {backfillResult.so_revalidation.cache_resolved > 0 ? `${backfillResult.so_revalidation.cache_resolved} cache` : ''}
+                          {backfillResult.so_revalidation.flow_resolved > 0 ? `${backfillResult.so_revalidation.cache_resolved > 0 ? ', ' : ''}${backfillResult.so_revalidation.flow_resolved} flow` : ''}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {backfillResult.vendor_revalidation && (
+                    <div className="p-2 rounded bg-accent/30">
+                      <p className="text-muted-foreground">Vendor Match</p>
+                      <p className="font-bold text-emerald-400">{backfillResult.vendor_revalidation.resolved || 0} / {backfillResult.vendor_revalidation.found || 0}</p>
+                      {backfillResult.vendor_revalidation.resolved > 0 && (
+                        <p className="text-[10px] text-muted-foreground">
+                          {backfillResult.vendor_revalidation.alias_resolved > 0 ? `${backfillResult.vendor_revalidation.alias_resolved} alias` : ''}
+                          {backfillResult.vendor_revalidation.domain_resolved > 0 ? `${backfillResult.vendor_revalidation.alias_resolved > 0 ? ', ' : ''}${backfillResult.vendor_revalidation.domain_resolved} email-domain` : ''}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
             {/* Vendor Profile Refresh Results */}
             {backfillResult.vendor_profile_refresh?.profiles && Array.isArray(backfillResult.vendor_profile_refresh.profiles) && backfillResult.vendor_profile_refresh.profiles.length > 0 && (
               <div className="mt-3 pt-3 border-t border-border/50">

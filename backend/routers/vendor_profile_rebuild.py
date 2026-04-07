@@ -103,107 +103,161 @@ async def rebuild_run():
     """Full rebuild of vendor intelligence profiles from document data."""
     db = get_db()
     start = time.time()
+    errors = []
 
-    groups, vendor_no_map = await _aggregate_vendor_data(db)
+    try:
+        groups, vendor_no_map = await _aggregate_vendor_data(db)
+    except Exception as e:
+        logger.error("[RebuildRun] Failed to aggregate vendor data: %s", str(e))
+        return {"status": "error", "message": f"Aggregation failed: {str(e)}"}
 
     # Preserve manual overrides from existing profiles (match by vendor_no or normalized name)
     existing = {}
-    async for p in db.vendor_intelligence_profiles.find({}, {"_id": 0}):
-        vno = (p.get("vendor_no") or "").strip()
-        norm = _normalize_vendor_name(p.get("vendor_name", ""))
-        override_data = {
-            "manual_override_status": p.get("manual_override_status"),
-            "manual_override_reason": p.get("manual_override_reason"),
-            "manual_override_by": p.get("manual_override_by"),
-            "manual_override_at": p.get("manual_override_at"),
-            "manual_override_note": p.get("manual_override_note"),
-            "manual_override_expires_at": p.get("manual_override_expires_at"),
-            "stable_vendor_last_evaluated": p.get("stable_vendor_last_evaluated"),
-        }
-        if vno:
-            existing[vno] = override_data
-        if norm and norm not in existing:
-            existing[norm] = override_data
+    try:
+        async for p in db.vendor_intelligence_profiles.find({}, {"_id": 0}):
+            vno = (p.get("vendor_no") or "").strip()
+            norm = _normalize_vendor_name(p.get("vendor_name", ""))
+            override_data = {
+                "manual_override_status": p.get("manual_override_status"),
+                "manual_override_reason": p.get("manual_override_reason"),
+                "manual_override_by": p.get("manual_override_by"),
+                "manual_override_at": p.get("manual_override_at"),
+                "manual_override_note": p.get("manual_override_note"),
+                "manual_override_expires_at": p.get("manual_override_expires_at"),
+                "stable_vendor_last_evaluated": p.get("stable_vendor_last_evaluated"),
+            }
+            if vno:
+                existing[vno] = override_data
+            if norm and norm not in existing:
+                existing[norm] = override_data
+    except Exception as e:
+        logger.warning("[RebuildRun] Error reading existing overrides (continuing): %s", str(e))
 
-    # Drop and rebuild
-    await db.vendor_intelligence_profiles.delete_many({})
-
-    now = datetime.now(timezone.utc).isoformat()
-    created = 0
-
-    for norm_name, data in groups.items():
-        doc_count = data["doc_count"]
-        auto_cleared = data["auto_cleared_count"]
-        val_passed = data["validation_passed_count"]
-        vendor_resolved = data["vendor_resolved_count"]
-        ref_resolved = data["ref_resolved_count"]
-
-        auto_rate = round(auto_cleared / max(doc_count, 1), 4)
-        val_rate = round(val_passed / max(doc_count, 1), 4)
-        resolution_rate = round(vendor_resolved / max(doc_count, 1), 4)
-        ref_rate = round(ref_resolved / max(doc_count, 1), 4)
-
-        # Stable vendor check — use same config as StableVendorService
+    # Load stable vendor config ONCE before the loop
+    try:
         sv_cfg = await db.stable_vendor_config.find_one(
             {"config_id": "stable_vendor_defaults"}, {"_id": 0}
         ) or {}
-        is_stable = (
-            doc_count >= sv_cfg.get("min_documents_processed", 10)
-            and auto_rate >= sv_cfg.get("min_automation_success_rate", 0.50)
-            and resolution_rate >= sv_cfg.get("min_reference_resolution_rate", 0.70)
-            and val_rate >= sv_cfg.get("min_validation_pass_rate", 0.05)
-        )
+    except Exception:
+        sv_cfg = {}
 
-        # Compute score (0-1)
-        score = round(
-            min(doc_count / 50, 1.0) * 0.15  # volume
-            + auto_rate * 0.30                # automation
-            + resolution_rate * 0.25          # resolution
-            + val_rate * 0.20                 # validation
-            + (1 - data.get("correction_rate", 0)) * 0.10  # low corrections
-        , 4)
+    # Drop all existing profiles, then drop+recreate indexes to avoid conflicts
+    await db.vendor_intelligence_profiles.delete_many({})
+    try:
+        await db.vendor_intelligence_profiles.drop_index("vendor_no_1")
+    except Exception:
+        pass  # Index may not exist
 
-        # Restore manual overrides (try vendor_no first, then normalized name)
-        vendor_no = data.get("vendor_no", "") or data["display_name"]
-        overrides = existing.get(vendor_no, existing.get(norm_name, {}))
+    now = datetime.now(timezone.utc).isoformat()
+    created = 0
+    skipped = 0
+    seen_vendor_nos = set()
 
-        profile = {
-            "vendor_no": vendor_no,
-            "vendor_name": data["display_name"],
-            "vendor_name_normalized": norm_name,
-            "name_variants": data["name_variants"],
-            "invoice_count": doc_count,
-            "document_types_seen": list(data["doc_types"]),
-            "automation_success_count": auto_cleared,
-            "automation_success_rate": auto_rate,
-            "validation_pass_count": val_passed,
-            "validation_pass_rate": val_rate,
-            "resolution_success_count": vendor_resolved,
-            "reference_resolution_success_rate": resolution_rate,
-            "reference_intelligence_rate": ref_rate,
-            "stable_vendor_flag": is_stable,
-            "stable_vendor_score": score,
-            "stable_vendor_last_evaluated": now,
-            "correction_rate": data.get("correction_rate", 0),
-            "created_at": now,
-            "updated_at": now,
-            # Preserve overrides
-            "manual_override_status": overrides.get("manual_override_status", "none"),
-            "manual_override_reason": overrides.get("manual_override_reason", ""),
-            "manual_override_by": overrides.get("manual_override_by", ""),
-            "manual_override_at": overrides.get("manual_override_at"),
-            "manual_override_note": overrides.get("manual_override_note", ""),
-            "manual_override_expires_at": overrides.get("manual_override_expires_at"),
-        }
+    for norm_name, data in groups.items():
+        try:
+            doc_count = data.get("doc_count", 0) or 0
+            if doc_count == 0:
+                skipped += 1
+                continue
 
-        await db.vendor_intelligence_profiles.insert_one(profile)
-        created += 1
+            auto_cleared = data.get("auto_cleared_count", 0) or 0
+            val_passed = data.get("validation_passed_count", 0) or 0
+            vendor_resolved = data.get("vendor_resolved_count", 0) or 0
+            ref_resolved = data.get("ref_resolved_count", 0) or 0
 
-    # Recreate indexes
-    await db.vendor_intelligence_profiles.create_index("vendor_no", unique=True, sparse=True)
-    await db.vendor_intelligence_profiles.create_index("vendor_name")
-    await db.vendor_intelligence_profiles.create_index("vendor_name_normalized")
-    await db.vendor_intelligence_profiles.create_index("stable_vendor_flag")
+            auto_rate = round(auto_cleared / max(doc_count, 1), 4)
+            val_rate = round(val_passed / max(doc_count, 1), 4)
+            resolution_rate = round(vendor_resolved / max(doc_count, 1), 4)
+            ref_rate = round(ref_resolved / max(doc_count, 1), 4)
+
+            is_stable = (
+                doc_count >= sv_cfg.get("min_documents_processed", 10)
+                and auto_rate >= sv_cfg.get("min_automation_success_rate", 0.50)
+                and resolution_rate >= sv_cfg.get("min_reference_resolution_rate", 0.70)
+                and val_rate >= sv_cfg.get("min_validation_pass_rate", 0.05)
+            )
+
+            correction_rate = data.get("correction_rate", 0) or 0
+            score = round(
+                min(doc_count / 50, 1.0) * 0.15
+                + auto_rate * 0.30
+                + resolution_rate * 0.25
+                + val_rate * 0.20
+                + (1 - correction_rate) * 0.10
+            , 4)
+
+            # Determine vendor_no — use bc vendor number if available, else normalized name as key
+            raw_vendor_no = (data.get("vendor_no") or "").strip()
+            display_name = data.get("display_name") or "Unknown"
+            name_variants = data.get("name_variants", []) or []
+
+            if raw_vendor_no:
+                vendor_no = raw_vendor_no
+            else:
+                # For name-only groups, use the normalized name as the vendor_no key
+                vendor_no = norm_name or display_name
+
+            # Deduplicate: if we already inserted a profile with this vendor_no, skip
+            if vendor_no in seen_vendor_nos:
+                logger.warning("[RebuildRun] Duplicate vendor_no '%s' (display: %s) — skipping", vendor_no[:30], display_name[:30])
+                skipped += 1
+                continue
+            seen_vendor_nos.add(vendor_no)
+
+            # Restore manual overrides (try vendor_no first, then normalized name)
+            overrides = existing.get(vendor_no, existing.get(norm_name, {}))
+
+            # Safely convert doc_types set to list
+            try:
+                doc_types_list = list(data.get("doc_types", set()) or set())
+            except Exception:
+                doc_types_list = []
+
+            profile = {
+                "vendor_no": vendor_no,
+                "vendor_name": display_name,
+                "vendor_name_normalized": norm_name,
+                "name_variants": name_variants,
+                "invoice_count": doc_count,
+                "document_types_seen": doc_types_list,
+                "automation_success_count": auto_cleared,
+                "automation_success_rate": auto_rate,
+                "validation_pass_count": val_passed,
+                "validation_pass_rate": val_rate,
+                "resolution_success_count": vendor_resolved,
+                "reference_resolution_success_rate": resolution_rate,
+                "reference_intelligence_rate": ref_rate,
+                "stable_vendor_flag": is_stable,
+                "stable_vendor_score": score,
+                "stable_vendor_last_evaluated": now,
+                "correction_rate": correction_rate,
+                "created_at": now,
+                "updated_at": now,
+                "manual_override_status": overrides.get("manual_override_status", "none") if overrides else "none",
+                "manual_override_reason": overrides.get("manual_override_reason", "") if overrides else "",
+                "manual_override_by": overrides.get("manual_override_by", "") if overrides else "",
+                "manual_override_at": overrides.get("manual_override_at") if overrides else None,
+                "manual_override_note": overrides.get("manual_override_note", "") if overrides else "",
+                "manual_override_expires_at": overrides.get("manual_override_expires_at") if overrides else None,
+            }
+
+            await db.vendor_intelligence_profiles.insert_one(profile)
+            created += 1
+
+        except Exception as e:
+            err_msg = f"Error on vendor '{norm_name[:40]}': {str(e)}"
+            logger.warning("[RebuildRun] %s", err_msg)
+            errors.append(err_msg)
+            skipped += 1
+
+    # Recreate indexes after all inserts
+    try:
+        await db.vendor_intelligence_profiles.create_index("vendor_no", unique=True, sparse=True)
+        await db.vendor_intelligence_profiles.create_index("vendor_name")
+        await db.vendor_intelligence_profiles.create_index("vendor_name_normalized")
+        await db.vendor_intelligence_profiles.create_index("stable_vendor_flag")
+    except Exception as e:
+        logger.warning("[RebuildRun] Index creation issue: %s", str(e))
 
     duration_ms = int((time.time() - start) * 1000)
 
@@ -211,15 +265,19 @@ async def rebuild_run():
 
     # Build consolidation report
     consolidation_report = []
-    for key, data in sorted(groups.items(), key=lambda x: len(x[1]["name_variants"]), reverse=True):
-        if len(data["name_variants"]) > 1:
+    for key, data in sorted(groups.items(), key=lambda x: len(x[1].get("name_variants", [])), reverse=True):
+        variants = data.get("name_variants", []) or []
+        if len(variants) > 1:
             consolidation_report.append({
-                "canonical": data["display_name"],
+                "canonical": data.get("display_name", "Unknown"),
                 "vendor_no": data.get("vendor_no", ""),
-                "total_docs": data["doc_count"],
-                "variants": data["name_variants"],
-                "variant_count": len(data["name_variants"]),
+                "total_docs": data.get("doc_count", 0),
+                "variants": variants,
+                "variant_count": len(variants),
             })
+
+    logger.info("[RebuildRun] Complete: created=%d, skipped=%d, errors=%d, duration=%dms",
+                created, skipped, len(errors), duration_ms)
 
     return {
         "status": "completed",
@@ -227,6 +285,8 @@ async def rebuild_run():
         "stable_vendors": stable_count,
         "consolidation_report": consolidation_report[:30],
         "merged_count": len(consolidation_report),
+        "skipped": skipped,
+        "errors": errors[:10],
         "duration_ms": duration_ms,
         "timestamp": now,
     }
@@ -379,35 +439,37 @@ async def _aggregate_vendor_data(db):
             "doc_type": 1, "document_type": 1, "suggested_job_type": 1,
             "unified_vendor_match": 1,
         },
-    )
+    ).batch_size(200)
 
     async for doc in cursor:
-        raw_name = (
-            doc.get("vendor_canonical")
-            or doc.get("matched_vendor_name")
-            or doc.get("vendor_raw")
-            or doc.get("vendor_normalized")
-        )
-        if not raw_name or raw_name.lower() in ("unknown", "none", "n/a", ""):
-            continue
-
-        # Determine the best grouping key: BC vendor number preferred
-        vendor_no = _resolve_vendor_no(raw_name, doc)
-
-        if vendor_no:
-            # Group by BC vendor number (canonical)
-            group_key = f"bc:{vendor_no}"
-            g = groups[group_key]
-            g["vendor_no"] = vendor_no
-            _accum_doc(g, doc, raw_name)
-        else:
-            # Fallback: group by normalized name
-            norm = _normalize_vendor_name(raw_name)
-            if not norm:
+        try:
+            raw_name = (
+                doc.get("vendor_canonical")
+                or doc.get("matched_vendor_name")
+                or doc.get("vendor_raw")
+                or doc.get("vendor_normalized")
+            )
+            if not raw_name or raw_name.lower() in ("unknown", "none", "n/a", ""):
                 continue
-            group_key = f"name:{norm}"
-            g = groups[group_key]
-            _accum_doc(g, doc, raw_name)
+
+            # Determine the best grouping key: BC vendor number preferred
+            vendor_no = _resolve_vendor_no(raw_name, doc)
+
+            if vendor_no:
+                group_key = f"bc:{vendor_no}"
+                g = groups[group_key]
+                g["vendor_no"] = vendor_no
+                _accum_doc(g, doc, raw_name)
+            else:
+                norm = _normalize_vendor_name(raw_name)
+                if not norm:
+                    continue
+                group_key = f"name:{norm}"
+                g = groups[group_key]
+                _accum_doc(g, doc, raw_name)
+        except Exception as e:
+            logger.warning("[VendorAggregation] Error processing doc %s: %s",
+                          str(doc.get("id", "?"))[:12], str(e))
 
     # Pass 2: Try to merge name-grouped profiles into bc-grouped via aliases
     name_groups = {k: v for k, v in groups.items() if k.startswith("name:")}

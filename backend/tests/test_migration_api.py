@@ -10,7 +10,7 @@ sys.path.insert(0, '/app/backend')
 
 
 # Test configuration
-API_BASE_URL = "https://gap-closer-3.preview.emergentagent.com"
+API_BASE_URL = "https://profile-rebuild-7.preview.emergentagent.com"
 
 
 @pytest.fixture

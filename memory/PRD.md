@@ -52,6 +52,32 @@ Enterprise document processing hub for AP/Sales workflows with Dynamics 365 BC i
 - Stable vendor count should increase as merged profiles exceed stability thresholds
 - Resolution rate accuracy improves with consolidated learning data
 
+### Phase 16b — Vendor Profile Rebuild Bug Fix (Apr 7, 2026)
+
+**Problem**: Clicking "Rebuild Profiles" in production crashed with "not able to rebuild..." error. Data partially consolidated (96→29 profiles) but endpoint returned 500 before completing JSON response.
+
+**Root causes fixed:**
+1. No try/except around individual vendor profile inserts — one bad profile (duplicate key, missing field) crashed entire rebuild
+2. `sv_cfg` (stable vendor config) queried inside the loop for every profile — moved outside
+3. `insert_one` with pre-existing unique `vendor_no` index — duplicate values caused DuplicateKeyError  
+4. Fallback `vendor_no = display_name` for name-only groups — collision risk when multiple groups share same display name
+5. No HTTP status checking in frontend `apiPost()` helper
+
+**Fixes applied:**
+- Wrapped each profile insert in try/except with error collection
+- Moved stable vendor config query before the loop
+- Added `seen_vendor_nos` dedup set to prevent duplicate key errors
+- Drop + recreate unique index around the rebuild  
+- Name-only groups use `norm_name` (unique by definition) as vendor_no key instead of display_name
+- Frontend: `apiPost` now checks `r.ok` before parsing JSON
+- Frontend: rebuild success toast shows profile/stable/error counts
+- Document cursor iteration wrapped in try/except
+- Added `.batch_size(200)` to cursor for large collections
+
+**Files changed:**
+- `/app/backend/routers/vendor_profile_rebuild.py` — Hardened `rebuild_run()` with error handling, dedup, and index management
+- `/app/frontend/src/pages/VendorIntelligencePage.js` — Better error handling and success feedback
+
 ## Active Gap Closers: 10
 ## Backfill Steps: 15
 ## Learning Dimensions: 21

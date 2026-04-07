@@ -15,7 +15,10 @@ import {
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 const api = (path) => fetch(`${API_URL}/api${path}`).then(r => r.json());
-const apiPost = (path) => fetch(`${API_URL}/api${path}`, { method: 'POST' }).then(r => r.json());
+const apiPost = (path) => fetch(`${API_URL}/api${path}`, { method: 'POST' }).then(r => {
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+});
 
 const DOMAIN_ICONS = {
   purchase: Package,
@@ -559,11 +562,17 @@ export default function VendorIntelligencePage() {
   const handleRebuild = async () => {
     try {
       setRebuilding(true);
-      await apiPost('/vendor-profiles/rebuild/run');
-      toast.success('Vendor profiles rebuilt with consolidation');
-      setTimeout(fetchData, 3000);
-    } catch {
-      toast.error('Rebuild failed');
+      const result = await apiPost('/vendor-profiles/rebuild/run');
+      if (result.status === 'error') {
+        toast.error(`Rebuild error: ${result.message || 'Unknown error'}`);
+      } else {
+        const errCount = (result.errors || []).length;
+        const msg = `Profiles rebuilt: ${result.profiles_created} created, ${result.stable_vendors} stable${errCount > 0 ? `, ${errCount} errors` : ''}`;
+        toast.success(msg);
+      }
+      setTimeout(fetchData, 2000);
+    } catch (err) {
+      toast.error(`Rebuild failed: ${err.message || 'Network error'}`);
     } finally {
       setRebuilding(false);
     }

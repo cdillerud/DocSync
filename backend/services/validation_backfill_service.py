@@ -1,11 +1,14 @@
 """
 Validation Gap Backfill Service — batch revalidation for all gap types.
 
-Attacks 4 gap categories:
+Attacks 7 gap categories:
 1. Customer Match — re-run with aliases, vendor→customer history, lower threshold
 2. Sales Order Match — cache-first SO lookup, number normalization
 3. Vendor Match — re-run with current alias DB + email domain mapping
 4. Duplicate Check — enhanced auto-clearing
+5. Extraction Quality Gate — filename parsing, batch context, email sender
+6. Enhanced Vendor Match — cross-doc inference, aggressive matching
+7. Enhanced PO Revalidation — profile relaxation, broader matching
 """
 import re
 import logging
@@ -16,6 +19,16 @@ logger = logging.getLogger("validation_backfill")
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def _normalize_vendor_for_match(name: str) -> str:
+    """Normalize vendor name for fuzzy matching — strip trailing punct and common suffixes."""
+    if not name:
+        return ""
+    n = name.strip().rstrip(".,;:")
+    # Remove common legal suffixes that don't help matching
+    n = re.sub(r'\b(Inc|LLC|Ltd|Corp|Corporation|Company|Co|LP|LLP|PLC|SA|GmbH|Pty|Pte|NV|BV)\b\.?', '', n, flags=re.IGNORECASE)
+    return n.strip().rstrip(",. ")
 
 
 # =============================================================================
@@ -590,11 +603,18 @@ async def batch_revalidate_vendor_gaps(db, limit: int = 500) -> dict:
         match_source = None
 
         # Strategy 1: Re-run unified vendor matching with lower threshold (0.70)
+        # Also try the normalized form (strips trailing punct like "LLC." → "LLC")
         names_to_try = []
         if ref_canonical:
             names_to_try.append(ref_canonical)
+            norm_ref = _normalize_vendor_for_match(ref_canonical)
+            if norm_ref and norm_ref != ref_canonical:
+                names_to_try.append(norm_ref)
         if vendor_name and vendor_name != ref_canonical:
             names_to_try.append(vendor_name)
+            norm_vn = _normalize_vendor_for_match(vendor_name)
+            if norm_vn and norm_vn != vendor_name and norm_vn not in names_to_try:
+                names_to_try.append(norm_vn)
 
         for name in names_to_try:
             if not name:
@@ -704,9 +724,9 @@ async def batch_revalidate_vendor_gaps(db, limit: int = 500) -> dict:
                 substr = False
                 if len(vn_clean) >= 3 and (vn_clean in bc_clean or bc_clean in vn_clean):
                     substr = True
-                # Also check if main words match
-                vn_main = [w for w in vn_clean.split() if len(w) >= 3 and w not in ("inc", "llc", "ltd", "corp", "the")]
-                bc_main = [w for w in bc_clean.split() if len(w) >= 3 and w not in ("inc", "llc", "ltd", "corp", "the")]
+                # Also check if main words match (lowered to 2-char for "SC", "HP", etc.)
+                vn_main = [w for w in vn_clean.split() if len(w) >= 2 and w not in ("inc", "llc", "ltd", "corp", "the")]
+                bc_main = [w for w in bc_clean.split() if len(w) >= 2 and w not in ("inc", "llc", "ltd", "corp", "the")]
                 if vn_main and bc_main and vn_main[0] == bc_main[0]:
                     substr = True
 
@@ -1143,6 +1163,43 @@ async def batch_revalidate_extraction_gaps(db, limit: int = 500) -> dict:
                     new_fields["vendor"] = ctx["vendor_name"]
                     field_source = "batch_sibling"
 
+        # Strategy 2b: Inherit vendor from email sender domain mapping
+        if not new_fields.get("vendor") and not field_source:
+            sender_email = doc.get("sender_email") or ""
+            if sender_email and "@" in sender_email:
+                domain = sender_email.split("@")[1].lower()
+                # Skip generic email domains
+                if domain and not domain.startswith(("gmail", "yahoo", "outlook", "hotmail", "aol")):
+                    try:
+                        # Find vendor from same email domain
+                        domain_match = await db.hub_documents.find_one(
+                            {
+                                "sender_email": {"$regex": f"@{re.escape(domain)}$", "$options": "i"},
+                                "bc_vendor_number": {"$exists": True, "$ne": ""},
+                            },
+                            {"_id": 0, "bc_vendor_number": 1, "vendor_canonical": 1}
+                        )
+                        if domain_match:
+                            new_fields["vendor"] = domain_match.get("vendor_canonical") or domain_match["bc_vendor_number"]
+                            field_source = "email_domain_vendor"
+                    except Exception:
+                        pass
+
+        # Strategy 2c: Extract from email subject line
+        if not new_fields.get("vendor") and not field_source:
+            email_subject = doc.get("source_email_subject") or ""
+            if email_subject:
+                # Try to extract PO from subject
+                po_in_subject = re.search(r'(P0{1,2}\d{4,7})', email_subject, re.IGNORECASE)
+                if po_in_subject and not new_fields.get("po_number"):
+                    new_fields["po_number"] = po_in_subject.group(1).upper()
+                    field_source = "email_subject_po"
+                # Try invoice number
+                inv_in_subject = re.search(r'(?:inv|invoice)[#\s\-_]*(\S+)', email_subject, re.IGNORECASE)
+                if inv_in_subject and not new_fields.get("invoice_number"):
+                    new_fields["invoice_number"] = inv_in_subject.group(1)
+                    field_source = field_source or "email_subject_invoice"
+
         # Strategy 3: Check if extracted_fields actually has data we missed
         # (fields that aren't in the _detected_by exclusion but were empty-string)
         if not field_source:
@@ -1388,30 +1445,49 @@ async def enhanced_vendor_match_backfill(db, limit: int = 500) -> dict:
                 match_source = "email_domain_enhanced"
                 email_resolved += 1
 
-        # Strategy 3: Aggressive first-word match
+        # Strategy 3: Aggressive first-word match (lowered to 2-char words for "SC", "HP", etc.)
         if not matched_vendor and vendor_name:
             vn_clean = re.sub(r'[^a-z0-9\s]', '', vendor_name.strip().lower())
-            vn_words = [w for w in vn_clean.split() if len(w) >= 3 and w not in ("inc", "llc", "ltd", "corp", "the", "and")]
+            vn_words = [w for w in vn_clean.split() if len(w) >= 2 and w not in ("inc", "llc", "ltd", "corp", "the", "and", "of")]
             if vn_words:
                 first_word = vn_words[0]
                 best_match = None
                 best_score = 0
                 for bc_name, bc_info in bc_vendor_cache.items():
                     bc_clean = re.sub(r'[^a-z0-9\s]', '', bc_name)
-                    bc_words = [w for w in bc_clean.split() if len(w) >= 3]
+                    bc_words = [w for w in bc_clean.split() if len(w) >= 2]
                     if bc_words and bc_words[0] == first_word:
                         from difflib import SequenceMatcher
                         score = SequenceMatcher(None, vn_clean, bc_clean).ratio()
                         if score > best_score:
                             best_score = score
                             best_match = bc_info
-                # Accept at 0.50+ for first-word matches (they share the company name)
-                if best_match and best_score >= 0.50:
+                # Accept at 0.45+ for first-word matches (they share the company name)
+                if best_match and best_score >= 0.45:
                     matched_vendor = best_match
                     match_source = f"first_word@{best_score:.0%}"
                     aggressive_resolved += 1
 
-        # Strategy 4: Accept single candidate at lower threshold
+        # Strategy 4: "Contains" match — vendor name is a substring of a BC vendor name
+        if not matched_vendor and vendor_name:
+            vn_normalized = re.sub(r'[^a-z0-9\s]', '', vendor_name.strip().lower()).strip()
+            if len(vn_normalized) >= 4:
+                best_match = None
+                best_len = 0
+                for bc_name, bc_info in bc_vendor_cache.items():
+                    bc_normalized = re.sub(r'[^a-z0-9\s]', '', bc_name).strip()
+                    if vn_normalized in bc_normalized or bc_normalized in vn_normalized:
+                        # Prefer the longest match (most specific)
+                        match_len = min(len(vn_normalized), len(bc_normalized))
+                        if match_len > best_len:
+                            best_len = match_len
+                            best_match = bc_info
+                if best_match:
+                    matched_vendor = best_match
+                    match_source = "contains_match"
+                    aggressive_resolved += 1
+
+        # Strategy 5: Accept single candidate at lower threshold
         if not matched_vendor:
             candidates = validation.get("vendor_candidates", [])
             if len(candidates) == 1 and candidates[0].get("score", 0) >= 0.55:
@@ -1650,7 +1726,41 @@ async def enhanced_po_revalidation(db, limit: int = 500) -> dict:
                 if should_resolve:
                     break
 
-        # Strategy 3: Downgrade for non-AP doc types (freight, shipping docs rarely need POs)
+        # Strategy 3: No vendor matched yet — can't validate PO without vendor context
+        if not should_resolve and not vendor_no:
+            # Check if vendor_match also failed
+            vendor_check_failed = any(
+                ch.get("check_name") == "vendor_match" and not ch.get("passed")
+                for ch in validation.get("checks", [])
+            )
+            if vendor_check_failed:
+                # Downgrade PO to advisory — blocked by vendor match first
+                new_checks = [ch for ch in validation.get("checks", [])
+                              if ch.get("check_name") != "po_validation"]
+                new_checks.append({
+                    "check_name": "po_validation",
+                    "passed": False,
+                    "details": "PO validation deferred: vendor not yet matched — resolve vendor first",
+                    "required": False,  # Advisory until vendor is resolved
+                })
+                all_passed = all(ch.get("passed", True) for ch in new_checks
+                                 if ch.get("required", True))
+                try:
+                    await db.hub_documents.update_one(
+                        {"id": doc_id},
+                        {"$set": {
+                            "validation_results.checks": new_checks,
+                            "validation_results.all_passed": all_passed,
+                            "po_gate_deferred_vendor": True,
+                            "po_gate_deferred_at": _now(),
+                        }}
+                    )
+                    downgraded += 1
+                except Exception:
+                    errors += 1
+                continue
+
+        # Strategy 4: Downgrade for non-AP doc types (freight, shipping docs rarely need POs)
         if not should_resolve:
             non_po_types = {"Shipping_Document", "BOL", "Packing_Slip", "Delivery_Receipt",
                             "Weight_Ticket", "Freight_Bill"}

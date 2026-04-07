@@ -403,9 +403,9 @@ async def build_vendor_profile(
     # POs are clearly not part of their workflow. The system learns this from BC history.
     po_expected = True  # default
     po_rate = 0.0
-    if cache_stats and cache_stats.get("count", 0) >= 10:
+    if cache_stats and cache_stats.get("count", 0) >= 3:
         po_rate = cache_stats.get("po_rate", 1.0)
-        if po_rate < 0.05:  # Less than 5% of invoices have a PO
+        if po_rate < 0.10:  # Less than 10% of invoices have a PO
             po_expected = False
             logger.info(
                 "[VendorProfile] Learned from BC: vendor %s has %d posted PIs, %.1f%% have POs → po_expected=False",

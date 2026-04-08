@@ -128,6 +128,8 @@ function LearningEnginesSection({ onComplete }) {
 function ReEvaluateSection({ onComplete }) {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
+  const [approving, setApproving] = useState(false);
+  const [approveResult, setApproveResult] = useState(null);
 
   const handleRun = async () => {
     setRunning(true);
@@ -152,6 +154,32 @@ function ReEvaluateSection({ onComplete }) {
     setRunning(false);
   };
 
+  const handleAutoApprove = async (dryRun = false) => {
+    setApproving(true);
+    setApproveResult(null);
+    try {
+      const res = await fetch(
+        `${API}/api/posting-patterns/review-queue/auto-approve?dry_run=${dryRun}&min_confidence=medium&min_vendor_invoices=5`,
+        { method: 'POST' }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setApproveResult(data);
+        if (dryRun) {
+          toast.info(`Preview: Would auto-approve ${data.approved} drafts from ${data.top_approved_vendors?.length || 0} vendors`);
+        } else {
+          toast.success(`Auto-approved ${data.approved} drafts! Skipped ${data.skipped}.`);
+          if (onComplete) onComplete();
+        }
+      } else {
+        toast.error('Auto-approve failed');
+      }
+    } catch {
+      toast.error('Network error');
+    }
+    setApproving(false);
+  };
+
   return (
     <Card data-testid="reevaluate-section">
       <CardHeader className="pb-2">
@@ -165,10 +193,67 @@ function ReEvaluateSection({ onComplete }) {
           Re-run readiness evaluation across all documents. Detects and corrects signal contradictions
           (stale duplicate flags, premature PO resolved, etc.) — every correction feeds into the learning pipeline.
         </p>
-        <Button onClick={handleRun} disabled={running} data-testid="reevaluate-all-btn">
-          {running ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RotateCcw className="w-4 h-4 mr-2" />}
-          {running ? 'Re-evaluating...' : 'Re-evaluate All Documents'}
-        </Button>
+        <div className="flex flex-wrap gap-2 mb-3">
+          <Button onClick={handleRun} disabled={running || approving} data-testid="reevaluate-all-btn">
+            {running ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RotateCcw className="w-4 h-4 mr-2" />}
+            {running ? 'Re-evaluating...' : 'Re-evaluate All Documents'}
+          </Button>
+          <Button onClick={() => handleAutoApprove(true)} disabled={running || approving}
+            variant="outline" data-testid="auto-approve-preview-btn">
+            {approving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Eye className="w-4 h-4 mr-2" />}
+            Preview Auto-Approve
+          </Button>
+          <Button onClick={() => handleAutoApprove(false)} disabled={running || approving}
+            variant="default" className="bg-emerald-600 hover:bg-emerald-700"
+            data-testid="auto-approve-run-btn">
+            {approving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
+            Auto-Approve Proven Drafts
+          </Button>
+        </div>
+
+        {/* Auto-Approve Results */}
+        {approveResult && (
+          <div className="mb-3 space-y-2 bg-muted/30 rounded-lg p-3" data-testid="auto-approve-results">
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="bg-emerald-500/10 rounded p-2">
+                <p className="text-xl font-bold text-emerald-400">{approveResult.approved}</p>
+                <p className="text-[10px] text-muted-foreground">{approveResult.dry_run ? 'Would Approve' : 'Approved'}</p>
+              </div>
+              <div className="bg-amber-500/10 rounded p-2">
+                <p className="text-xl font-bold text-amber-400">{approveResult.skipped}</p>
+                <p className="text-[10px] text-muted-foreground">Skipped</p>
+              </div>
+              <div className="bg-blue-500/10 rounded p-2">
+                <p className="text-xl font-bold text-blue-400">{approveResult.top_approved_vendors?.length || 0}</p>
+                <p className="text-[10px] text-muted-foreground">Vendors</p>
+              </div>
+            </div>
+            {approveResult.top_approved_vendors?.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-1">Top Vendors {approveResult.dry_run ? '(Preview)' : 'Approved'}</p>
+                <div className="flex flex-wrap gap-1">
+                  {approveResult.top_approved_vendors.map((v, i) => (
+                    <Badge key={i} variant="outline" className="text-xs text-emerald-400">
+                      {v.vendor}: {v.count}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+            {approveResult.skip_reasons && Object.keys(approveResult.skip_reasons).length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-1">Skip Reasons</p>
+                <div className="flex flex-wrap gap-1">
+                  {Object.entries(approveResult.skip_reasons).map(([reason, count]) => (
+                    <Badge key={reason} variant="outline" className="text-xs text-amber-400">
+                      {reason}: {count}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {result && (
           <div className="mt-4 space-y-3" data-testid="reevaluate-results">

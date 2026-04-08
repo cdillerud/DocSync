@@ -311,6 +311,128 @@ async def approve_draft(doc_id: str, reviewer: str = Query("admin")):
     return {"success": True, "message": f"Draft approved for {doc_id[:8]}", "review_status": "approved"}
 
 
+@router.post("/review-queue/auto-approve")
+async def auto_approve_drafts(
+    min_vendor_invoices: int = Query(5, description="Minimum invoices analyzed for vendor template"),
+    min_confidence: str = Query("medium", description="Minimum template confidence: low, medium, high"),
+    dry_run: bool = Query(False, description="Preview without actually approving"),
+    limit: int = Query(500, le=2000),
+):
+    """
+    Batch auto-approve drafts from vendors with proven posting templates.
+    
+    Logic: If a vendor's posting template has medium+ confidence AND the vendor
+    has been invoiced 5+ times, the auto-draft is highly likely correct → approve it.
+    This is the key to shrinking the Review Queue.
+    """
+    db = get_db()
+    from services.posting_pattern_analyzer import get_posting_profile_for_vendor
+
+    confidence_levels = {"low": 0, "medium": 1, "high": 2}
+    min_conf_level = confidence_levels.get(min_confidence, 1)
+
+    # Fetch pending drafts
+    pending_docs = await db.hub_documents.find(
+        {
+            "auto_draft_created": True,
+            "draft_review_status": {"$nin": ["approved", "corrected", "feedback_synced"]},
+        },
+        {"_id": 0, "id": 1, "bc_vendor_number": 1, "vendor_no": 1,
+         "auto_draft_confidence": 1, "auto_draft_bc_record_no": 1},
+    ).limit(limit).to_list(limit)
+
+    if not pending_docs:
+        return {"approved": 0, "skipped": 0, "message": "No pending drafts found"}
+
+    # Group by vendor for efficient profile lookups
+    vendor_profiles_cache = {}
+    approved = 0
+    skipped = 0
+    skip_reasons = {}
+    approved_vendors = {}
+    now = datetime.now(timezone.utc).isoformat()
+
+    for doc in pending_docs:
+        v_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
+        doc_id = doc.get("id", "")
+
+        if not v_no:
+            skipped += 1
+            skip_reasons["no_vendor"] = skip_reasons.get("no_vendor", 0) + 1
+            continue
+
+        # Load vendor posting profile (cached)
+        if v_no not in vendor_profiles_cache:
+            try:
+                pp = await get_posting_profile_for_vendor(db, v_no)
+                vendor_profiles_cache[v_no] = pp
+            except Exception:
+                vendor_profiles_cache[v_no] = None
+
+        pp = vendor_profiles_cache.get(v_no)
+        if not pp:
+            skipped += 1
+            skip_reasons["no_profile"] = skip_reasons.get("no_profile", 0) + 1
+            continue
+
+        pp_template = pp.get("posting_template") or {}
+        pp_confidence = pp_template.get("confidence", "low")
+        pp_invoices = pp.get("invoices_analyzed", 0)
+        pp_conf_level = confidence_levels.get(pp_confidence, 0)
+
+        # Check thresholds
+        if pp_conf_level < min_conf_level:
+            skipped += 1
+            skip_reasons[f"confidence_too_low_{pp_confidence}"] = skip_reasons.get(f"confidence_too_low_{pp_confidence}", 0) + 1
+            continue
+
+        if pp_invoices < min_vendor_invoices:
+            skipped += 1
+            skip_reasons["insufficient_invoices"] = skip_reasons.get("insufficient_invoices", 0) + 1
+            continue
+
+        # Vendor qualifies — auto-approve this draft
+        if not dry_run:
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    "draft_review_status": "approved",
+                    "draft_reviewed_at": now,
+                    "draft_reviewed_by": "auto_approval_engine",
+                    "auto_approved": True,
+                    "auto_approval_reason": f"Vendor {v_no} has {pp_confidence}-confidence template ({pp_invoices} invoices learned)",
+                }}
+            )
+
+            # Positive feedback event
+            await db.posting_learning_events.insert_one({
+                "vendor_no": v_no,
+                "doc_id": doc_id,
+                "event_type": "draft_auto_approved",
+                "confidence": pp_confidence,
+                "bc_record_no": doc.get("auto_draft_bc_record_no", ""),
+                "reviewer": "auto_approval_engine",
+                "posted_at": now,
+                "feedback": "positive",
+                "invoices_analyzed": pp_invoices,
+            })
+
+        approved += 1
+        approved_vendors[v_no] = approved_vendors.get(v_no, 0) + 1
+
+    # Sort vendors by count for reporting
+    top_approved = sorted(approved_vendors.items(), key=lambda x: -x[1])[:15]
+
+    return {
+        "approved": approved,
+        "skipped": skipped,
+        "skip_reasons": skip_reasons,
+        "dry_run": dry_run,
+        "top_approved_vendors": [{"vendor": v, "count": c} for v, c in top_approved],
+        "message": f"{'Would approve' if dry_run else 'Auto-approved'} {approved} drafts from {len(approved_vendors)} vendors",
+    }
+
+
 @router.post("/review-queue/{doc_id}/correct")
 async def correct_draft(
     doc_id: str,

@@ -1,7 +1,7 @@
 # GPI Document Hub — Product Requirements
 
 ## Original Problem Statement
-Enterprise document processing hub for AP/Sales workflows with Dynamics 365 BC integration. AI-powered classification, validation, routing, and continuous learning. Goal: maximize AI autonomy via continuous learning and aggressive validation gap closure.
+Enterprise document processing hub for AP/Sales workflows with Dynamics 365 BC integration. AI-powered classification, validation, routing, and continuous learning. Goal: maximize AI autonomy, shrink the Review Queue to near-zero.
 
 ## Core Architecture
 - **Frontend**: React + Tailwind + Shadcn/UI + Recharts
@@ -15,56 +15,55 @@ Enterprise document processing hub for AP/Sales workflows with Dynamics 365 BC i
 
 ### Phase 16g — PO Bypass + Vendor Bypass + Batch Alias (Apr 8, 2026)
 - Direct vendor profile lookup for `po_expected` in readiness
-- `PATCH /api/vendor-intelligence/profiles/{vendor_no}/bypass`
-- `POST /api/aliases/vendors/batch-resolve`
+- PATCH /api/vendor-intelligence/profiles/{vendor_no}/bypass
+- POST /api/aliases/vendors/batch-resolve
 
 ### Phase 16h — Aggressive Auto-Processing Engine (Apr 8, 2026)
-- Smart warning categorization: CRITICAL vs INFORMATIONAL
+- Smart warning categorization (CRITICAL vs INFORMATIONAL)
 - Lowered confidence thresholds
-- Expanded auto-post: removed AP-only restriction, cap 50, skip reason tracking
-- Posting template trust: medium/high → auto-upgrade to ready_auto_draft
-- Enhanced re-evaluation results display
+- Expanded auto-post (no AP-only restriction, cap 50, skip tracking)
+- Posting template trust (medium/high → auto-upgrade)
 
 ### Phase 16i — Automation Rate Dashboard Widget (Apr 8, 2026)
-- `GET /api/readiness/automation-rate?days=N` — rate %, trend, top manual vendors
-- Circular SVG gauge + Recharts BarChart + Top Manual Vendors list
-- Period selector (7d / 30d / 90d)
+- GET /api/readiness/automation-rate?days=N
+- Circular gauge + Recharts BarChart + Top Manual Vendors
 
-### Phase 16j — Missing Required Fields Fix: The 421 Unblock (Apr 8, 2026)
+### Phase 16j — Missing Required Fields Fix (Apr 8, 2026)
+- Broadened field lookup (5 vendor sources, normalized_fields, external_document_no)
+- Downgraded missing_required_fields from BLOCKING to WARNING when vendor resolved
+- BOL/shipping docs only require vendor (not invoice_number/amount)
 
-**Problem**: 421 documents BLOCKED with `missing_required_fields`. These included fully-resolved vendors like TUMALOC (2773 docs learned), CARGOMO, ROTONDO, GROUPWA. The check only looked at `extracted_fields` for vendor/invoice_number/amount — missing vendor_canonical, bc_vendor_number, normalized_fields, external_document_no.
+### Phase 16k — Auto-Approval Engine: The Queue Shrinker (Apr 8, 2026)
 
-**Root cause**: `required_fields_complete` in `compute_signals()` only checked `extracted_fields.vendor`, `extracted_fields.invoice_number`, and `extracted_fields.amount`. If AI extraction didn't populate those exact fields (even though vendor was matched via alias, BC lookup, or resolution), the doc was hard-blocked.
+**Problem**: Review Queue at 644 and growing. Investigation revealed the badge counts auto-drafted PIs pending human review (`auto_draft_created=True, draft_review_status NOT IN [approved, corrected]`). The system creates 544 drafts but 0 get approved automatically — they ALL sit in queue.
 
-**Fix — 3 changes:**
+**Root cause**: No auto-approval logic exists. Every draft requires manual human review, even from vendors with proven posting templates (TUMALOC: 374 invoices analyzed, high confidence).
 
-1. **Broadened field lookup** in `compute_signals()`:
-   - Vendor: checks `extracted_fields.vendor` + `vendor_canonical` + `bc_vendor_number` + `vendor_resolution.vendor_no` + `unified_vendor_match.bc_vendor_no`
-   - Invoice number: checks `extracted_fields` + `normalized_fields` + `external_document_no`
-   - Amount: checks `extracted_fields` + `normalized_fields` for all amount variants
-   - Non-invoice doc types (BOL, shipping): only require vendor, not invoice#/amount
+**Fix: POST /api/posting-patterns/review-queue/auto-approve**
+- Batch auto-approves drafts from vendors with proven posting templates
+- Checks: template confidence >= medium AND invoices_analyzed >= 5
+- Dry-run mode (preview without approving)
+- Per-vendor result tracking (top_approved_vendors, skip_reasons)
+- Creates positive feedback events (posting_learning_events)
+- Frontend: "Preview Auto-Approve" and "Auto-Approve Proven Drafts" buttons
 
-2. **Downgraded from BLOCKING to WARNING** when vendor IS resolved:
-   - If vendor is resolved but other fields missing → `missing_required_fields` becomes a warning, doc goes to `ready_auto_draft` instead of `blocked`
-   - If vendor is NOT resolved → stays as blocking (correct behavior)
+**Also identified**: 412 docs blocked by `missing_required_fields` (mostly missing invoice_number). Even known vendors (TUMALOC, CARGOMO, ROTONDO) are affected. Vendor IS resolved, amount IS present, but invoice_number missing from extracted_fields.
 
-3. **Broadened `check_ap_ready_to_post()`** in `ap_auto_post_service.py`:
-   - `invoice_no` also checks `external_document_no`
-   - `amount` also checks `nf.total_amount`, `ef.invoice_amount`
-   - `vendor_raw` also checks `vendor_canonical`
-
-**Expected production impact**: ~400+ documents should move from `blocked` → `ready_auto_draft` after deploy + re-evaluate. Review Queue should drop significantly.
+**Blocking reason distribution (production):**
+- missing_required_fields: 412
+- vendor_unresolved: 101  
+- duplicate_risk: 24
 
 **Files changed:**
-- `/app/backend/services/document_readiness_service.py`
-- `/app/backend/services/ap_auto_post_service.py`
+- `/app/backend/routers/posting_patterns.py` — New auto-approve endpoint
+- `/app/frontend/src/pages/LearningDashboard.js` — Auto-approve UI buttons + results
 
-## Pending Production Steps
-1. Deploy: Save to Github → `git pull && docker compose up -d --build`
-2. Re-evaluate: `POST /api/readiness/reevaluate-all`
-3. Monitor: Automation Rate widget + Review Queue badge
-4. NOFACH bypass: `PATCH /api/vendor-intelligence/profiles/NOFACH/bypass?enabled=true`
-5. SC Warehouses alias: Need target vendor_no from user
+## Production Deploy Steps
+1. Save to Github → `git pull && docker compose up -d --build`
+2. Click "Preview Auto-Approve" to see how many drafts qualify
+3. Click "Auto-Approve Proven Drafts" to approve them — Review Queue badge drops
+4. Click "Re-evaluate All Documents" — fixes blocked docs (Phase 16j field fixes)
+5. Check Automation Rate widget
 
 ## Upcoming Tasks
 - P1: Rep Overrides management UI

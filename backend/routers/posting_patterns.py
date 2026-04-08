@@ -3008,9 +3008,7 @@ async def backfill_per_document_learning(
 
 
 @router.post("/intelligence/recalibrate-confidence")
-async def recalibrate_confidence_bands(
-    background_tasks: BackgroundTasks = None,
-):
+async def recalibrate_confidence_bands():
     """
     Recalibrate confidence bands using effective confidence (extraction-adjusted).
     
@@ -3122,11 +3120,8 @@ async def recalibrate_confidence_bands(
             "calibration": bands_result,
         }
 
-    if background_tasks:
-        background_tasks.add_task(_recalibrate)
-        return {"message": "Confidence recalibration started in background", "async": True}
-    else:
-        return await _recalibrate()
+    # Run synchronously — fast enough for production volumes (<10s for ~3K docs)
+    return await _recalibrate()
 
 
 

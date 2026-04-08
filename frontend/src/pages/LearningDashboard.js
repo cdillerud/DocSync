@@ -267,6 +267,13 @@ function GapCloserSection() {
 
   useEffect(() => { fetchStatus(); }, []);
 
+  // Listen for recalibration events to auto-refresh
+  useEffect(() => {
+    const handler = () => { setTimeout(fetchStatus, 2000); };
+    window.addEventListener('recalibrate-done', handler);
+    return () => window.removeEventListener('recalibrate-done', handler);
+  }, []);
+
   const gapColors = (triggers) => triggers ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-muted';
 
   return (
@@ -1138,8 +1145,10 @@ function LearningPulseSection() {
                     try {
                       const res = await fetch(`${API}/api/posting-patterns/intelligence/recalibrate-confidence`, { method: 'POST' });
                       if (res.ok) {
-                        toast.success('Confidence recalibration started — refresh in ~30s to see updated bands');
-                        setTimeout(fetchPulse, 5000);
+                        const data = await res.json();
+                        toast.success(`Recalibrated ${data.documents_processed?.toLocaleString() || ''} docs in ${data.duration_seconds || '?'}s`);
+                        fetchPulse();
+                        window.dispatchEvent(new Event('recalibrate-done'));
                       } else {
                         toast.error('Recalibration failed');
                       }

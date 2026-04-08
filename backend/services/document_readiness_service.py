@@ -678,7 +678,8 @@ async def batch_reevaluate_all(limit: int = 5000) -> Dict[str, Any]:
             "is_duplicate": {"$ne": True},
             "automation_decision": {"$in": ["hold", "needs_review", "manual"]},
         },
-        {"_id": 0, "id": 1, "readiness": 1, "bc_vendor_number": 1, "vendor_no": 1},
+        {"_id": 0, "id": 1, "readiness": 1, "bc_vendor_number": 1, "vendor_no": 1,
+         "bc_purchase_invoice_no": 1, "doc_type": 1, "suggested_job_type": 1},
     )
     held_docs = await held_cursor.to_list(None)
 
@@ -691,7 +692,8 @@ async def batch_reevaluate_all(limit: int = 5000) -> Dict[str, Any]:
                 "is_duplicate": {"$ne": True},
                 "id": {"$nin": list(held_ids)},
             },
-            {"_id": 0, "id": 1, "readiness": 1, "bc_vendor_number": 1, "vendor_no": 1},
+            {"_id": 0, "id": 1, "readiness": 1, "bc_vendor_number": 1, "vendor_no": 1,
+             "bc_purchase_invoice_no": 1, "doc_type": 1, "suggested_job_type": 1},
         ).limit(remaining_limit)
         other_docs = await other_cursor.to_list(remaining_limit)
     else:
@@ -738,25 +740,25 @@ async def batch_reevaluate_all(limit: int = 5000) -> Dict[str, Any]:
                     "new_confidence": new_readiness.get("confidence", 0),
                 })
 
-            # AUTO-ACT: If doc was promoted to a "ready" state, trigger auto-posting
-            # This closes the gap where readiness says "Ready" but no action is taken.
+            # AUTO-ACT: If doc is in a "ready" state and no BC PI exists, trigger auto-posting
+            # Cap at 25 auto-posts per batch to avoid timeout
             ready_statuses = ("ready_auto_link", "ready_auto_draft", "ready")
-            was_not_ready = old_status not in ready_statuses
             is_now_ready = new_status in ready_statuses
-            if (was_not_ready and is_now_ready) or (is_now_ready and not d.get("bc_purchase_invoice_no")):
+            already_posted = bool(d.get("bc_purchase_invoice_no"))
+            max_auto_acts = 25
+
+            if is_now_ready and not already_posted and results.get("auto_acted", 0) < max_auto_acts:
                 try:
-                    doc_full = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-                    if doc_full and not doc_full.get("bc_purchase_invoice_no"):
-                        doc_type = (doc_full.get("doc_type") or doc_full.get("suggested_job_type") or "").lower()
-                        if "ap" in doc_type or "invoice" in doc_type:
-                            from services.ap_auto_post_service import attempt_ap_auto_post
-                            ap_result = await attempt_ap_auto_post(doc_id, db, source="reevaluation_auto_act")
-                            if ap_result.get("posted") or ap_result.get("created"):
-                                results["auto_acted"] = results.get("auto_acted", 0) + 1
-                                logger.info(
-                                    "[Reevaluate:AutoAct] doc=%s vendor=%s → auto-posted to BC",
-                                    doc_id[:8], vendor_no,
-                                )
+                    doc_type = (d.get("doc_type") or d.get("suggested_job_type") or "").lower()
+                    if "ap" in doc_type or "invoice" in doc_type:
+                        from services.ap_auto_post_service import attempt_ap_auto_post
+                        ap_result = await attempt_ap_auto_post(doc_id, db, source="reevaluation_auto_act")
+                        if ap_result.get("posted") or ap_result.get("created"):
+                            results["auto_acted"] = results.get("auto_acted", 0) + 1
+                            logger.info(
+                                "[Reevaluate:AutoAct] doc=%s vendor=%s → auto-posted to BC",
+                                doc_id[:8], vendor_no,
+                            )
                 except Exception as act_err:
                     logger.warning("[Reevaluate:AutoAct] doc=%s error: %s", doc_id[:8], str(act_err))
 

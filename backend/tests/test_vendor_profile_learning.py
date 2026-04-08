@@ -20,7 +20,7 @@ import asyncio
 # Add backend to path for direct imports
 sys.path.insert(0, '/app/backend')
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://profile-rebuild-7.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://doc-hub-ai.preview.emergentagent.com').rstrip('/')
 
 
 class TestHealthEndpoint:

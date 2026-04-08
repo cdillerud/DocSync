@@ -79,11 +79,31 @@ def compute_signals(doc: Dict[str, Any]) -> Dict[str, bool]:
     po_resolved_bc = po_resolution_status == "resolved"
     po_ambiguous = po_resolution_status == "ambiguous"
 
+    # Check if vendor profile learned that POs are not required
+    po_not_required_by_vendor = bool(doc.get("_vendor_profile_po_not_required"))
+    val_checks = doc.get("validation_checks") or []
+    for vc in val_checks:
+        if vc.get("check_name") in ("po_validation", "po_check"):
+            # If PO check was skipped/advisory because vendor doesn't need POs, respect that
+            if not vc.get("required", True) or "skipped" in str(vc.get("details", "")).lower():
+                po_not_required_by_vendor = True
+                break
+    # Also check the bc_validation checks
+    bc_val_obj = doc.get("bc_validation") or {}
+    for vc in (bc_val_obj.get("checks") or []):
+        if vc.get("check_name") in ("po_validation", "po_check"):
+            if not vc.get("required", True) or "skipped" in str(vc.get("details", "")).lower():
+                po_not_required_by_vendor = True
+                break
+
     # po_resolved = True if PO was resolved against BC, OR if we just have a PO number
     # for non-shipping docs (where BC PO match is not critical)
     from services.po_resolution_service import PO_REQUIRED_DOC_TYPES
     doc_type = doc.get("document_type") or doc.get("suggested_job_type") or ""
-    if doc_type in PO_REQUIRED_DOC_TYPES:
+    if po_not_required_by_vendor:
+        # Vendor profile learned that POs are not required — don't block on PO
+        po_resolved = True
+    elif doc_type in PO_REQUIRED_DOC_TYPES:
         # For shipping docs: require actual BC resolution, not just field presence
         po_resolved = po_resolved_bc
     else:
@@ -387,6 +407,19 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
     if not doc:
         raise ValueError(f"Document not found: {doc_id}")
 
+    # Direct vendor profile lookup for PO requirement and processing bypass
+    vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
+    if vendor_no:
+        vp = await db.vendor_invoice_profiles.find_one(
+            {"vendor_no": vendor_no},
+            {"_id": 0, "po_expected": 1, "auto_process_bypass": 1},
+        )
+        if vp:
+            if vp.get("po_expected") is False:
+                doc["_vendor_profile_po_not_required"] = True
+            if vp.get("auto_process_bypass"):
+                doc["_vendor_bypass_active"] = True
+
     # Capture old readiness before re-evaluation
     old_readiness = doc.get("readiness") or {}
     old_signals = old_readiness.get("signals") or {}
@@ -395,6 +428,17 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
     readiness = evaluate_readiness(doc)
     new_signals = readiness.get("signals") or {}
     new_blocking = readiness.get("blocking_reasons") or []
+
+    # === VENDOR BYPASS: Route to manual review if vendor flagged ===
+    if doc.get("_vendor_bypass_active"):
+        if readiness["status"] in (STATUS_READY_AUTO_DRAFT, STATUS_READY_AUTO_LINK):
+            readiness["status"] = STATUS_NEEDS_REVIEW
+            readiness["recommended_action"] = ACTION_REVIEW
+        readiness["warning_reasons"] = readiness.get("warning_reasons", []) + ["vendor_bypass_active"]
+        readiness["explanations"] = readiness.get("explanations", []) + [
+            "Vendor flagged for processing bypass — routed to manual review"
+        ]
+        logger.info("[Readiness:Bypass] doc=%s vendor=%s — bypassed to manual review", doc_id[:8], vendor_no)
 
     # === GAP CLOSER 1: Confidence Band Awareness ===
     # If this doc's confidence band has low historical accuracy, route to review

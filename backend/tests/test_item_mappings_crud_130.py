@@ -11,7 +11,7 @@ import uuid
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 if not BASE_URL:
-    BASE_URL = "https://profile-rebuild-7.preview.emergentagent.com"
+    BASE_URL = "https://doc-hub-ai.preview.emergentagent.com"
 
 
 class TestItemMappingsAPI:

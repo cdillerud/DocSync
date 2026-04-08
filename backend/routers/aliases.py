@@ -367,3 +367,119 @@ async def accept_vendor_suggestion(body: dict):
         "alias_id": alias_id if not existing else existing.get("alias_id"),
         "docs_updated": updated,
     }
+
+
+@router.post("/vendors/batch-resolve")
+async def batch_resolve_vendor_aliases(body: dict):
+    """
+    Batch-create vendor aliases and re-validate all affected documents.
+    
+    Input: {"mappings": [{"alias_string": "SC Warehouses, LLC", "vendor_no": "GROUPWA", "vendor_name": "Group Warehousing"}]}
+    
+    For each mapping:
+    1. Creates the alias (if it doesn't exist)
+    2. Re-validates all documents matching that vendor name
+    3. Updates vendor_canonical and bc_vendor_number on affected docs
+    """
+    from services.vendor_name_helpers import normalize_vendor_name, VENDOR_ALIAS_MAP
+
+    mappings = body.get("mappings", [])
+    if not mappings:
+        raise HTTPException(status_code=400, detail="No mappings provided")
+
+    db = get_db()
+    results = []
+    total_docs_updated = 0
+
+    for mapping in mappings:
+        alias_string = mapping.get("alias_string", "").strip()
+        vendor_no = mapping.get("vendor_no", "").strip()
+        vendor_name = mapping.get("vendor_name", "").strip()
+
+        if not alias_string or not vendor_no:
+            results.append({
+                "alias_string": alias_string,
+                "status": "skipped",
+                "reason": "missing alias_string or vendor_no",
+            })
+            continue
+
+        normalized = normalize_vendor_name(alias_string)
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Create alias if not exists
+        existing = await db.vendor_aliases.find_one({
+            "$or": [{"alias_string": alias_string}, {"normalized_alias": normalized}]
+        })
+        alias_created = False
+        if not existing:
+            alias_id = str(uuid.uuid4())
+            await db.vendor_aliases.insert_one({
+                "alias_id": alias_id,
+                "alias_string": alias_string,
+                "normalized_alias": normalized,
+                "vendor_no": vendor_no,
+                "vendor_name": vendor_name,
+                "created_by": "batch_resolve",
+                "created_at": now,
+                "usage_count": 0,
+            })
+            VENDOR_ALIAS_MAP[alias_string] = vendor_name or vendor_no
+            VENDOR_ALIAS_MAP[normalized] = vendor_name or vendor_no
+            alias_created = True
+
+        # Find and update all docs with this vendor name (broader matching)
+        doc_query = {
+            "status": {"$nin": ["Completed", "Posted", "Deleted", "Archived"]},
+            "$or": [
+                {"extracted_fields.vendor": {"$regex": f"^{alias_string}$", "$options": "i"}},
+                {"extracted_fields.vendor_name": {"$regex": f"^{alias_string}$", "$options": "i"}},
+                {"normalized_fields.vendor": {"$regex": f"^{alias_string}$", "$options": "i"}},
+                {"vendor_canonical": {"$regex": f"^{alias_string}$", "$options": "i"}},
+            ],
+        }
+        gap_docs = await db.hub_documents.find(
+            doc_query, {"_id": 0, "id": 1, "validation_results": 1}
+        ).to_list(500)
+
+        docs_updated = 0
+        for doc in gap_docs:
+            doc_id = doc.get("id", "")
+            validation = doc.get("validation_results") or {}
+            new_checks = [ch for ch in validation.get("checks", []) if ch.get("check_name") != "vendor_match"]
+            new_checks.append({
+                "check_name": "vendor_match",
+                "passed": True,
+                "details": f"Matched via batch alias: {vendor_name} ({vendor_no})",
+                "required": True,
+                "match_method": "batch_alias",
+                "score": 1.0,
+            })
+            all_passed = all(ch.get("passed", True) for ch in new_checks)
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    "validation_results.checks": new_checks,
+                    "validation_results.all_passed": all_passed,
+                    "bc_vendor_number": vendor_no,
+                    "vendor_canonical": vendor_name or vendor_no,
+                    "vendor_resolved_via": "batch_alias",
+                    "vendor_match_method": "alias_match",
+                }}
+            )
+            docs_updated += 1
+
+        total_docs_updated += docs_updated
+        results.append({
+            "alias_string": alias_string,
+            "vendor_no": vendor_no,
+            "alias_created": alias_created,
+            "docs_updated": docs_updated,
+            "status": "resolved",
+        })
+
+    return {
+        "mappings_processed": len(results),
+        "total_docs_updated": total_docs_updated,
+        "results": results,
+    }

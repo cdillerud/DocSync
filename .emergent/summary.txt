@@ -6,35 +6,23 @@ PRODUCT REQUIREMENTS:
 2. Advanced Intelligence Engines (Gap Closers) for POs, Customers, Vendors, SOs, and Duplicates.
 3. Accurate validation gap reporting across all monitoring dashboards.
 4. Auto-resolution of high-confidence vendor aliases.
-5. Executive Monitoring Dashboard () showing 5 key health metrics with blocking vs. advisory split.
+5. Executive Monitoring Dashboard () showing 5 key health metrics.
 6. Vendor Profile Consolidation to merge fragmented learning profiles.
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
 **what currently exists?** 
-A highly advanced Document Hub with multi-layered intelligence engines. The system features 10 Advanced Intelligence engines acting as Gap Closers. The validation engine has successfully reduced blocking gaps from 1,252 down to 41. Dashboards (Monitoring, Learning, Insights) accurately reflect these numbers. A Vendor Profile Consolidation engine was just built to group learning profiles by  instead of normalized names (fixing fragmented profiles like 4 different TUMALOC variants), but it is currently throwing an error in production during the rebuild process.
+A highly advanced Document Hub with multi-layered intelligence engines. The system successfully runs Vendor Profile Consolidation (grouping by ). It features an Effective Confidence model that penalizes the AI classification score if extraction quality is poor, preventing misleading metrics. The readiness evaluation pipeline now auto-clears stale policy holds, handles auto-posting of newly ready documents during batch re-evaluations, and properly respects vendor  flags to bypass strict PO checks.
 
 **Last working item**: 
-    - Last item agent was working: Fixing the Vendor Profile Consolidation engine. The user clicked Rebuild Profiles on the Vendor Intelligence page, and the UI threw a not able to rebuild... error. The API call partially worked (profiles dropped from 96 to 29 in the UI before erroring out), meaning the backend  endpoint crashes mid-execution or during the response formatting.
+    - Last item agent was working: Fixing a bug where documents from vendors who do not require POs (e.g., TUMALOC, ) were still getting stuck with  and a po missing warning during readiness evaluation. The agent just updated  to ensure the readiness evaluation respects the vendor profile's PO requirement flag.
     - Status: IN PROGRESS
-    - Agent Testing Done: N
-    - Which testing method agent to use? manual testing by curl / python -c
-    - User Testing Done: Y
+    - Agent Testing Done: Y (Backend bash validation done)
+    - Which testing method agent to use? manual testing by curl / python -c / screenshot tool
+    - User Testing Done: N
 
 **All Pending/In progress Issue list**:  
-  Issue 1: Rebuild failed error on Vendor Intelligence page
-     - Attempted fixes: The agent wrote the  logic grouping by  and resolving aliases. The dry-run worked locally, but production data caused a crash.
-     - Next debug checklist: 
-        1. Check  inside the  function (around line 102+).
-        2. Look for exceptions during the  DB updates, missing dict keys (e.g., , ), or type casting errors. 
-        3. Add a robust  inside the profile iteration loop to prevent a single bad vendor profile from crashing the entire rebuild response.
-     - Why fix this issue and what will be achieved with the fix? It unblocks the vendor consolidation feature, which merges fragmented profiles to increase Vendor Maturity scores and Automation stability.
-     - Status: IN PROGRESS
-     - Is recurring issue? N
-     - Should Test frontend/backend/both after fix? backend
-     - Blocked on other issue: None
-
-  Issue 2: NOFACH vendor extraction fails 100% of the time
+  Issue 1: NOFACH vendor extraction fails 100% of the time
      - Attempted fixes: None yet. Mentioned during dashboard analysis.
      - Next debug checklist: Check extraction prompts or create a routing rule to bypass auto-processing for NOFACH since it consistently fails.
      - Why fix this issue and what will be achieved with the fix? Removes guaranteed failures from the metrics.
@@ -42,6 +30,14 @@ A highly advanced Document Hub with multi-layered intelligence engines. The syst
      - Is recurring issue? Y
      - Should Test frontend/backend/both after fix? backend
      - Blocked on other issue: None
+
+  Issue 2: SC Warehouses, LLC stuck documents (17 docs)
+     - Attempted fixes: None yet. Identified via the System Monitor dashboard.
+     - Next debug checklist: Create a vendor alias mapping SC Warehouses, LLC to either GROUPWA or YANDELL to auto-resolve these stuck documents.
+     - Why fix this issue and what will be achieved with the fix? Unblocks 17 manual review items immediately.
+     - Status: NOT STARTED
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? backend
 
 **In progress Task List**:
   None
@@ -56,22 +52,22 @@ A highly advanced Document Hub with multi-layered intelligence engines. The syst
     - P2: Low-volume vendor review routing (vendors with <5 docs skip auto-file).
     - P2: Activate correction replay engine (currently showing 0 replayed).
     - P2: Email sender → vendor mapping (to reduce blank vendor gaps).
-    - P2: Implement Auto-delete on max retries (Square9 alignment gap).
     - P2: Expand stable vendor criteria for Auto-Ready routing.
-    - P2: Vendor Inventory Dashboard.
-    - P2: Product/BOM (Bill of Materials) module.
-    - P2: Production-ready email service and Entra ID SSO.
-    - P3: Continue  extraction (refactoring).
+    - P3: Continue  extraction (refactoring - currently over 7,500 lines).
 
 **Completed work in this session**
-- Fixed stale validation gap hotspots on  dashboard by querying  (DONE)
-- Built Gap Closers 8 (Extraction Quality), 9 (Enhanced Vendor Match), and 10 (Enhanced PO) (DONE)
-- Fixed  overwriting sticky advisory downgrades with  (DONE)
-- Implemented MongoDB  array filter to force-downgrade Extraction Gate failures (DONE)
-- Built Vendor Profile Consolidation Engine using  (DONE, but buggy in prod)
+- Fixed  crashing by adding try/except blocks and handling unique index s. (DONE)
+- Added missing behavioral fields (PO Rate, BOL Rate, Domain) to the Vendor Profile Rebuild output. (DONE)
+- Built  to penalize AI confidence scores on documents with poor extraction. (DONE)
+- Added a synchronous  endpoint and a visible Recalibrate UI button. (DONE)
+- Fixed a  crash on the Re-process button caused by  returning . (DONE)
+- Fixed batch re-evaluation to auto-clear stale policy holds. (DONE)
+- Increased batch re-evaluation limit from 500 to 5000 and prioritized policy-held documents. (DONE)
+- Enabled  to automatically trigger BC Purchase Invoice creation for documents transitioning to Ready (capped at 25 to prevent API timeouts). (DONE)
+- Fixed  flag logic in readiness to respect . (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-None. (Note: Remaining 41 blocking gaps are data issues — 28 vendors don't exist in BC, 10 POs don't exist in BC. These require human data entry, not code fixes).
+None.
 
 **Known issue recurrence from previous fork**
   - Issue recurrence in previous fork: Deployment Context Ignored. 
@@ -80,52 +76,54 @@ None. (Note: Remaining 41 blocking gaps are data issues — 28 vendors don't exi
   Note: The application runs via Docker on a remote Azure VM. **Any code changes made must be pushed via the Save to Github button in the chat**, and the user MUST be instructed to run  on their VM to test.
 
 **Code Architecture**
-rebuild_runupdate_from_document
+
 
 **Key Technical Concepts**
-- **Docker Production Env**: The app runs via Docker Compose on an Azure VM. 
-- **Continuous Learning Loop**: Multiple AI logic layers dynamically adjust validation expectations based on BC history.
-- **Vendor Consolidation**: Replaces normalized name matching with  grouping to combine fragmented profiles (e.g., 4 variants of TUMALOC into 1).
+- **Effective Confidence**: A metric that adjusts the raw AI classification confidence down if the extraction completeness is low (stops the AI from lying about 99% confidence when 0 fields are extracted).
+- **Batch Re-evaluation**: An admin process () that sweeps documents, updates their readiness states, clears stale holds, and auto-posts to BC if conditions are met.
 
 **key DB schema**
-  - : Primary collection containing documents and the  array.
-  - : Stores behavioral profiles per vendor.
-  - : Stores mapped vendor names.
+  - : Primary collection containing documents, the  array, and .
+  - : Tracks accuracy metrics per confidence band (0_50, 50_70, 70_85, 85_95, 95_100).
 
 **changes in tech stack**
-  - No core tech stack changes, but massive refactoring to vendor learning grouping logic.
+  - None.
 
 **All files of reference** 
--  (Must fix )
--  
-- 
-- 
-- 
+-  (Heavily modified this session to clear stale holds and trigger auto-posting)
+-  (Effective confidence logic)
+-  (Recalibration API)
+-  (UI for Recalibrate button)
 
 **Areas that need refactoring**: 
 -  is over 7,500 lines. Routing and orchestration logic need separation (P3 task).
 
 **key api endpoints**
--  (Currently failing)
+- 
+- 
 - 
 
 **Critical Info for New Agent** 
 - **DEPLOYMENT WORKFLOW**: When you complete a feature, instruct the user to click the **Save to Github** button in the chat UI, then run  on their Azure VM.
-- **Current Bug Context**: The user clicked Rebuild Profiles in production. The UI showed not able to rebuild.... However, the background data *did* consolidate (96 profiles went down to 29 in the UI). This means the backend  script successfully grouped documents but crashed before cleanly returning the JSON response to the frontend, likely due to a missing dictionary key or unhandled error on a specific vendor profile loop.
+- **Current Context**: The agent *just* fixed an issue in  where vendors with  were still failing readiness checks with . You need to inform the user to deploy this fix and run the re-evaluation one more time to push those final stuck documents through.
 
 **documents and test reports created in this job** 
 - 
 
 **Last 10 User Messages and any pending HUMAN messages** 
-- **User**: (Provides image of Vendor Intelligence page showing fragmented vendor profiles like TUMALOC).
-- **Assistant**: Analyzes the fragmentation problem. Proposes a Vendor Profile Consolidation Engine.
-- **User**: YES
-- **Assistant**: Writes the backend code grouping by , updates UI. Deploys it.
-- **User**: (Shares image showing a Rebuild failed / not able to rebuild... toast notification on the UI).
-- *Pending Human Messages*: None. Your immediate task is to debug and fix the  endpoint in .
+- **User**: (Provides screenshot of Gap 1 showing old numbers)
+- **Assistant**: Fixes the gap closer status endpoint to read synchronous recalibrated data, adds event dispatcher to frontend.
+- **User**: why did I have to reprocess this???? (Screenshot showing document stuck in Needs Review due to policy hold, even though all signals green).
+- **Assistant**: Identifies stale  flag causing persistent policy holds. Fixes  to auto-clear them.
+- **User**: re-evaluation failed (After pushing button, it didn't work for another doc)
+- **Assistant**: Identifies limit was 500. Increases to 5000.
+- **User**: ummmmmmm....same issues. (Screenshot showing doc with 100% readiness, but no BC PI created)
+- **Assistant**: Fixes  to automatically trigger  for ready docs (capped at 25 to avoid timeouts).
+- **User**: (Screenshot showing another stuck doc)
+- **Assistant**: Fixes  to respect  vendor profiles so they don't get blocked by missing POs. (No human message after this).
+- *Pending Human Messages*: None. You should confirm the fix with the user, tell them to deploy/re-evaluate, and ask if they want to tackle the SC Warehouses aliases or NOFACH bug next.
 
 **Project Health Check:**
-Broken: 
 Mocked:  (Production Azure VM context).
 
 **3rd Party Integrations** 
@@ -137,15 +135,15 @@ Mocked:  (Production Azure VM context).
   - Testing agent used after significant changes: NO
   - Troubleshoot agent used after agent stuck in loop: NO
   - Test files created: None
-  - Known regressions: Vendor Profile rebuild endpoint crashes in production.
+  - Known regressions: None currently.
 
 **Credentials to test flow:**
 -  ( / ).
 
 **What agent forgot to execute**
-The agent forgot to add robust error handling ( blocks) inside the  mapping loop in , causing production data anomalies to crash the endpoint mid-response.
+The agent modified  in the last step to fix the  bug but did not communicate this final fix to the user or instruct them to deploy and test. The testing agent was not utilized during these extensive backend rule changes.
 
 **Debugging checklist for current issue**
-    Issue: Rebuild failed error on Vendor Intelligence page
+    Issue: Vendors with  failing readiness checks.
     Backend files to check: 
-    -  (Focus on  around line 102. Ensure dict variables like , , and  have safe fallback values, and wrap the vendor iteration in a try-except to prevent total failure).</analysis>
+    -  (Verify lines around 90-100 correctly check  before marking ).</analysis>

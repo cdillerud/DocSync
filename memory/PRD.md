@@ -125,6 +125,20 @@ Also updated Pass 2 merge logic to combine all behavioral counters when merging 
 - `/app/frontend/src/pages/LearningDashboard.js` — Recalibrate button
 - `/app/frontend/src/pages/DocumentDetailPage.js` — Effective confidence + penalty badge display
 
+### Phase 16e — Re-process NoneType Crash Fix (Apr 8, 2026)
+
+**Problem**: Clicking "Re-process" on documents like `27852_doc1.pdf` (SC Warehouses, vendor not matched) throws `'NoneType' object has no attribute 'get'` toast error.
+
+**Root cause**: In `bc_validation_service.py` line 493, `unified_result` is initialized to `None`. If `match_vendor_unified()` throws an exception during the for loop, `unified_result` stays `None`. Then line 498 calls `unified_result.get("matched")` → crash. Even though the validation try/except catches it, additional unguarded `.get()` calls downstream in `server.py` (e.g., `make_automation_decision`) can also encounter None objects.
+
+**Fixes applied:**
+1. `bc_validation_service.py`: Wrapped `match_vendor_unified()` call in try/except inside the loop. Added fallback dict if `unified_result` is None or not a dict after the loop.
+2. `server.py`: Wrapped `make_automation_decision()` in try/except with safe fallback to `needs_review`.
+
+**Files changed:**
+- `/app/backend/services/bc_validation_service.py` — Defensive None guard on `unified_result`
+- `/app/backend/server.py` — try/except around `make_automation_decision` in reprocess
+
 ## Active Gap Closers: 10
 ## Backfill Steps: 15
 ## Learning Dimensions: 21

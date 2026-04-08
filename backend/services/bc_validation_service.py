@@ -492,11 +492,23 @@ async def _validate_bc_match_inner(
 
                     unified_result = None
                     for try_name in names_to_try:
-                        unified_result = await match_vendor_unified(
-                            db, try_name, match_threshold,
-                        )
-                        if unified_result.get("matched"):
+                        try:
+                            unified_result = await match_vendor_unified(
+                                db, try_name, match_threshold,
+                            )
+                        except Exception as vm_err:
+                            logger.warning("[BC_VAL] match_vendor_unified error for '%s': %s", try_name[:30], str(vm_err))
+                            unified_result = None
+                        if unified_result and unified_result.get("matched"):
                             break
+
+                    # Safety: ensure unified_result is always a dict
+                    if not unified_result or not isinstance(unified_result, dict):
+                        unified_result = {
+                            "matched": False, "best_match": None, "score": 0.0,
+                            "source": None, "is_freight_carrier": False,
+                            "sources_checked": [], "all_matches": [],
+                        }
 
                     vendor_result: Dict[str, Any] = {
                         "matched": unified_result.get("matched", False),

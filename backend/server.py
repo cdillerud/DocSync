@@ -4307,7 +4307,11 @@ async def _reprocess_document_inner(doc_id: str, doc: dict, reclassify: bool):
     doc_type_for_conf = doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type") or ""
     if doc_type_for_conf not in ("Other", "Unknown", "Unknown_Document", "") and confidence < 0.5:
         confidence = 0.85
-    decision, reasoning, decision_metadata = make_automation_decision(job_configs, confidence, validation_results)
+    try:
+        decision, reasoning, decision_metadata = make_automation_decision(job_configs, confidence, validation_results)
+    except Exception as mad_err:
+        logger.error("[REPROCESS] make_automation_decision error: %s", str(mad_err))
+        decision, reasoning, decision_metadata = "needs_review", f"Decision error: {str(mad_err)}", {}
     if not decision_metadata:
         decision_metadata = {}
     

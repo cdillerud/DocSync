@@ -139,6 +139,18 @@ Also updated Pass 2 merge logic to combine all behavioral counters when merging 
 - `/app/backend/services/bc_validation_service.py` — Defensive None guard on `unified_result`
 - `/app/backend/server.py` — try/except around `make_automation_decision` in reprocess
 
+
+### Phase 16f — Auto-Act on Ready Docs + Extended Re-evaluation (Apr 8, 2026)
+
+**Problem**: Re-evaluation correctly promoted documents to "Ready (Auto-Draft)" status, but didn't create BC Purchase Invoices. User had to manually reprocess each doc.
+
+**Fix**: Added auto-act logic: when re-evaluation promotes a doc to "ready" AND no BC PI exists → auto-triggers `attempt_ap_auto_post()`. Also increased batch limit 500→5000, prioritizes policy-held docs.
+
+**Files changed:**
+- `/app/backend/services/document_readiness_service.py` — Auto-act logic, stale hold auto-clear, extended batch limits
+- `/app/backend/routers/readiness.py` — Limit increase to 5000
+- `/app/frontend/src/pages/LearningDashboard.js` — Toast shows auto-acted count
+
 ## Active Gap Closers: 10
 ## Backfill Steps: 15
 ## Learning Dimensions: 21

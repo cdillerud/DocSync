@@ -137,7 +137,7 @@ function ReEvaluateSection({ onComplete }) {
         const data = await res.json();
         setResult(data);
         toast.success(
-          `Re-evaluated ${data.total_processed} docs — ${data.total_corrections} corrections applied`
+          `Re-evaluated ${data.total_processed} docs — ${data.total_corrections} corrections, ${data.auto_acted || 0} auto-posted to BC`
         );
         if (onComplete) onComplete();
       } else {

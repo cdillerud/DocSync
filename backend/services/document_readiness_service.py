@@ -738,6 +738,28 @@ async def batch_reevaluate_all(limit: int = 5000) -> Dict[str, Any]:
                     "new_confidence": new_readiness.get("confidence", 0),
                 })
 
+            # AUTO-ACT: If doc was promoted to a "ready" state, trigger auto-posting
+            # This closes the gap where readiness says "Ready" but no action is taken.
+            ready_statuses = ("ready_auto_link", "ready_auto_draft", "ready")
+            was_not_ready = old_status not in ready_statuses
+            is_now_ready = new_status in ready_statuses
+            if (was_not_ready and is_now_ready) or (is_now_ready and not d.get("bc_purchase_invoice_no")):
+                try:
+                    doc_full = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+                    if doc_full and not doc_full.get("bc_purchase_invoice_no"):
+                        doc_type = (doc_full.get("doc_type") or doc_full.get("suggested_job_type") or "").lower()
+                        if "ap" in doc_type or "invoice" in doc_type:
+                            from services.ap_auto_post_service import attempt_ap_auto_post
+                            ap_result = await attempt_ap_auto_post(doc_id, db, source="reevaluation_auto_act")
+                            if ap_result.get("posted") or ap_result.get("created"):
+                                results["auto_acted"] = results.get("auto_acted", 0) + 1
+                                logger.info(
+                                    "[Reevaluate:AutoAct] doc=%s vendor=%s → auto-posted to BC",
+                                    doc_id[:8], vendor_no,
+                                )
+                except Exception as act_err:
+                    logger.warning("[Reevaluate:AutoAct] doc=%s error: %s", doc_id[:8], str(act_err))
+
             # Detect signal corrections
             new_signals = new_readiness.get("signals") or {}
             changed_signals = []
@@ -769,9 +791,9 @@ async def batch_reevaluate_all(limit: int = 5000) -> Dict[str, Any]:
     results["vendor_corrections"] = vendor_list[:20]
 
     logger.info(
-        "[Readiness] Batch re-evaluate: processed=%d, corrections=%d, transitions=%d, errors=%d",
+        "[Readiness] Batch re-evaluate: processed=%d, corrections=%d, transitions=%d, auto_acted=%d, errors=%d",
         results["total_processed"], results["total_corrections"],
-        len(results["status_transitions"]), results["errors"],
+        len(results["status_transitions"]), results.get("auto_acted", 0), results["errors"],
     )
     return results
 

@@ -146,6 +146,19 @@ def compute_signals(doc: Dict[str, Any]) -> Dict[str, bool]:
     policy_blocked = decision in ("blocked", "reject")
     policy_held = decision in ("hold", "needs_review", "manual")
 
+    # AUTO-CLEAR stale policy holds: if key validation signals are all green,
+    # the document shouldn't remain held just because the initial automation_decision
+    # said "needs_review". The initial decision was made before vendor matching,
+    # extraction, and validation completed. Re-evaluate based on current reality.
+    if policy_held and not policy_blocked:
+        all_green = (
+            vendor_resolved
+            and required_fields_complete
+            and not duplicate_risk
+        )
+        if all_green:
+            policy_held = False
+
     manually_overridden = bool(
         (vr.get("reviewed_override"))
         or doc.get("approved_by")
@@ -517,6 +530,21 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
         }},
     )
 
+    # Auto-clear stale automation_decision if policy hold was dropped
+    old_held = old_signals.get("policy_held", False)
+    new_held = new_signals.get("policy_held", False)
+    if old_held and not new_held:
+        old_decision = doc.get("automation_decision") or ""
+        if old_decision in ("hold", "needs_review", "manual"):
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {"automation_decision": "auto_process"}},
+            )
+            logger.info(
+                "[Readiness] Auto-cleared stale policy hold on %s (was '%s', all signals green)",
+                doc_id[:8], old_decision,
+            )
+
     # --- Learning: detect contradictions that were corrected ---
     corrections = []
     now = readiness["last_evaluated_at"]
@@ -547,6 +575,15 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
             "old_value": False,
             "new_value": True,
             "reason": "PO now resolved after BC re-validation",
+        })
+
+    # Policy hold auto-cleared (all signals green, stale hold dropped)
+    if old_signals.get("policy_held") and not new_signals.get("policy_held"):
+        corrections.append({
+            "signal": "policy_held",
+            "old_value": True,
+            "new_value": False,
+            "reason": "readiness_self_correction",
         })
 
     # Blocking reasons removed

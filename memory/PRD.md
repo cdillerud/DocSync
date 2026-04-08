@@ -46,110 +46,56 @@ Enterprise document processing hub for AP/Sales workflows with Dynamics 365 BC i
 - `/app/backend/services/vendor_intelligence_service.py` — Fixed `update_from_document()` vendor key resolution
 - `/app/frontend/src/pages/VendorIntelligencePage.js` — Added consolidation preview UI
 
-**Expected impact on production:**
-- 96 profiles → ~30-40 consolidated profiles
-- TUMALOC: 4 profiles (max 222 docs) → 1 profile (420 docs)
-- Stable vendor count should increase as merged profiles exceed stability thresholds
-- Resolution rate accuracy improves with consolidated learning data
-
 ### Phase 16b — Vendor Profile Rebuild Bug Fix (Apr 7, 2026)
 
-**Problem**: Clicking "Rebuild Profiles" in production crashed with "not able to rebuild..." error. Data partially consolidated (96→29 profiles) but endpoint returned 500 before completing JSON response.
+**Problem**: Clicking "Rebuild Profiles" in production crashed with "not able to rebuild..." error.
 
 **Root causes fixed:**
-1. No try/except around individual vendor profile inserts — one bad profile (duplicate key, missing field) crashed entire rebuild
-2. `sv_cfg` (stable vendor config) queried inside the loop for every profile — moved outside
-3. `insert_one` with pre-existing unique `vendor_no` index — duplicate values caused DuplicateKeyError  
-4. Fallback `vendor_no = display_name` for name-only groups — collision risk when multiple groups share same display name
+1. No try/except around individual vendor profile inserts
+2. `sv_cfg` queried inside loop
+3. `insert_one` with pre-existing unique index caused DuplicateKeyError
+4. Fallback `vendor_no = display_name` collision risk
 5. No HTTP status checking in frontend `apiPost()` helper
-
-**Fixes applied:**
-- Wrapped each profile insert in try/except with error collection
-- Moved stable vendor config query before the loop
-- Added `seen_vendor_nos` dedup set to prevent duplicate key errors
-- Drop + recreate unique index around the rebuild  
-- Name-only groups use `norm_name` (unique by definition) as vendor_no key instead of display_name
-- Frontend: `apiPost` now checks `r.ok` before parsing JSON
-- Frontend: rebuild success toast shows profile/stable/error counts
-- Document cursor iteration wrapped in try/except
-- Added `.batch_size(200)` to cursor for large collections
-
-**Files changed:**
-- `/app/backend/routers/vendor_profile_rebuild.py` — Hardened `rebuild_run()` with error handling, dedup, and index management
-- `/app/frontend/src/pages/VendorIntelligencePage.js` — Better error handling and success feedback
 
 ### Phase 16c — Behavioral Fields in Rebuild (Apr 7, 2026)
 
-**Problem**: After rebuild, Domain column showed "?" and PO/BOL rates were 0% for all vendors because the rebuild didn't compute behavioral metrics.
-
-**Fix**: Enhanced `_accum_doc()` and rebuild profile to track and store:
-- `typical_reference_domain` (purchase/sales/shipping/unknown) from best match entity + doc type
-- `po_reference_count` / `po_reference_frequency` from `po_number_clean`
-- `bol_count` / `bol_presence_rate` from `bol_number`
-- `shipment_reference_count` / `shipment_reference_frequency` from reference candidates
-- `freight_invoice_count`, `shipping_document_count` from doc type
-- `typical_bc_match_types`, `bc_match_type_counts`, `avg_match_score`
-- `match_outcome_counts`, `domain_counts`
-
-Also updated Pass 2 merge logic to combine all behavioral counters when merging name-groups into BC-groups.
+Enhanced rebuild to compute and store:
+- `typical_reference_domain`, PO/BOL rates, shipment/freight counts, BC match types, domain counts
 
 ### Phase 16d — Confidence Calibration Fix: Effective Confidence (Apr 8, 2026)
 
-**Problem**: The 85-95% confidence band had only 55% actual accuracy. Documents like "GAMER PACKAGING INC SI338811_doc8.pdf" were classified at 85% confidence but had 0/6 fields extracted (0% completeness). The raw AI confidence was lying — inflating this band with docs that always fail.
-
-**Root cause**: `_calibrate_confidence()` used raw `ai_confidence` to assign bands, ignoring extraction quality. A doc with 85% classification confidence and 0% extraction was placed in the "85-95%" band, where it always fails, dragging down the band's accuracy.
-
-**Solution**: Introduced `compute_effective_confidence(doc)` that penalizes classification confidence based on extraction completeness:
-- Checks 4 core fields: vendor, invoice_number, amount, date
-- If extraction < 50% complete, applies a scaling penalty (0.35x to 1.0x)
-- Small bonus if vendor was resolved despite poor field extraction
-- Example: 85% raw with 0% extraction → 29.8% effective (honest "0-50%" band)
-- Example: 85% raw with 100% extraction → 85% effective (unchanged)
-
-**Where it's applied:**
-1. `_calibrate_confidence()` in per_document_learning_service.py — bands assigned by effective confidence
-2. `get_confidence_band_accuracy()` in gap_closer_service.py — review routing uses effective confidence
-3. `evaluate_readiness()` — readiness confidence uses effective confidence as AI base
-4. `evaluate_and_persist()` — stores `effective_confidence` and `confidence_penalty_applied` on documents
-
-**New features:**
-- `POST /api/posting-patterns/intelligence/recalibrate-confidence` — rebuilds global calibration from scratch using effective confidence
-- "Recalibrate" button on Learning Dashboard confidence calibration section
-- Document detail page shows effective confidence + penalty badge when penalty was applied
-
-**Files changed:**
-- `/app/backend/services/per_document_learning_service.py` — Added `compute_effective_confidence()`, updated `_calibrate_confidence()`
-- `/app/backend/services/gap_closer_service.py` — `get_confidence_band_accuracy()` accepts optional `doc` param for effective confidence
-- `/app/backend/services/document_readiness_service.py` — Uses effective confidence for readiness computation and band checks
-- `/app/backend/routers/posting_patterns.py` — Added recalibration endpoint
-- `/app/frontend/src/pages/LearningDashboard.js` — Recalibrate button
-- `/app/frontend/src/pages/DocumentDetailPage.js` — Effective confidence + penalty badge display
+Introduced `compute_effective_confidence(doc)` that penalizes classification confidence based on extraction completeness.
 
 ### Phase 16e — Re-process NoneType Crash Fix (Apr 8, 2026)
 
-**Problem**: Clicking "Re-process" on documents like `27852_doc1.pdf` (SC Warehouses, vendor not matched) throws `'NoneType' object has no attribute 'get'` toast error.
-
-**Root cause**: In `bc_validation_service.py` line 493, `unified_result` is initialized to `None`. If `match_vendor_unified()` throws an exception during the for loop, `unified_result` stays `None`. Then line 498 calls `unified_result.get("matched")` → crash. Even though the validation try/except catches it, additional unguarded `.get()` calls downstream in `server.py` (e.g., `make_automation_decision`) can also encounter None objects.
-
-**Fixes applied:**
-1. `bc_validation_service.py`: Wrapped `match_vendor_unified()` call in try/except inside the loop. Added fallback dict if `unified_result` is None or not a dict after the loop.
-2. `server.py`: Wrapped `make_automation_decision()` in try/except with safe fallback to `needs_review`.
-
-**Files changed:**
-- `/app/backend/services/bc_validation_service.py` — Defensive None guard on `unified_result`
-- `/app/backend/server.py` — try/except around `make_automation_decision` in reprocess
-
+Fixed `match_vendor_unified()` returning `None` crash in bc_validation_service.py and server.py.
 
 ### Phase 16f — Auto-Act on Ready Docs + Extended Re-evaluation (Apr 8, 2026)
 
-**Problem**: Re-evaluation correctly promoted documents to "Ready (Auto-Draft)" status, but didn't create BC Purchase Invoices. User had to manually reprocess each doc.
+Added auto-act logic: when re-evaluation promotes a doc to "ready" AND no BC PI exists → auto-triggers `attempt_ap_auto_post()`. Increased batch limit 500→5000, prioritizes policy-held docs.
 
-**Fix**: Added auto-act logic: when re-evaluation promotes a doc to "ready" AND no BC PI exists → auto-triggers `attempt_ap_auto_post()`. Also increased batch limit 500→5000, prioritizes policy-held docs.
+### Phase 16g — Robust PO Bypass + Vendor Processing Bypass + Batch Alias Resolution (Apr 8, 2026)
+
+**Problem 1**: Documents from vendors with `po_expected=False` (e.g., TUMALOC) still getting stuck with `po_resolved=False` even after vendor profile was updated.
+
+**Fix**: Enhanced `evaluate_and_persist()` to directly lookup vendor profile's `po_expected` flag from `vendor_invoice_profiles` collection. This covers cases where `validation_checks` weren't updated after the vendor profile learned `po_expected=False`. The flag is injected into the doc dict so `compute_signals()` detects it.
+
+**Problem 2**: NOFACH vendor extraction fails 100% of the time, clogging the pipeline.
+
+**Fix**: Added vendor processing bypass mechanism:
+- `PATCH /api/vendor-intelligence/profiles/{vendor_no}/bypass` — Flags vendor for auto-processing bypass
+- `GET /api/vendor-intelligence/bypassed-vendors` — Lists all bypassed vendors
+- Readiness evaluator checks `auto_process_bypass` flag and routes to manual review
+
+**Problem 3**: SC Warehouses, LLC has 17 stuck documents needing vendor alias mapping.
+
+**Fix**: Added batch alias resolution endpoint:
+- `POST /api/aliases/vendors/batch-resolve` — Takes vendor name→vendor_no mappings, creates aliases, and re-validates all affected documents in one call
 
 **Files changed:**
-- `/app/backend/services/document_readiness_service.py` — Auto-act logic, stale hold auto-clear, extended batch limits
-- `/app/backend/routers/readiness.py` — Limit increase to 5000
-- `/app/frontend/src/pages/LearningDashboard.js` — Toast shows auto-acted count
+- `/app/backend/services/document_readiness_service.py` — Direct vendor profile lookup in evaluate_and_persist for po_expected and auto_process_bypass
+- `/app/backend/routers/vendor_intelligence.py` — PATCH bypass and GET bypassed-vendors endpoints
+- `/app/backend/routers/aliases.py` — POST batch-resolve endpoint
 
 ## Active Gap Closers: 10
 ## Backfill Steps: 15
@@ -159,16 +105,14 @@ Also updated Pass 2 merge logic to combine all behavioral counters when merging 
 ## Upcoming Tasks
 - P1: Rep Overrides management UI
 - P1: Teams Adaptive Card integration
-- P1: Confidence band tightening (85-95% → review)
 - P1: PO pending auto-retry queue
 
 ## Future / Backlog
 - P2: Low-volume vendor review routing
 - P2: Correction replay engine activation
-- P2: Auto-delete on max retries, Vendor Inventory Dashboard, BOM module
-- P2: Production-ready email service, Entra ID SSO
+- P2: Email sender → vendor mapping
+- P2: Expand stable vendor criteria for Auto-Ready
 - P3: server.py refactor (7,500+ lines)
-- P3: Investigate no_bc_match batch failures
 
 ## Deployment
 Docker Compose on Azure VM. "Save to Github" → `git pull && docker compose up -d --build`.

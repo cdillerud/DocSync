@@ -310,6 +310,15 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
     confidence = _compute_confidence(signals, effective_conf, len(blocking), len(warnings))
 
     # --- Status determination ---
+    # Categorize warnings: only CRITICAL ones should force review/ambiguous
+    CRITICAL_WARNINGS = {"policy_hold", "customer_unresolved", "vendor_needs_review",
+                         "amount_anomaly", "auto_escalation"}
+    critical_warnings = [w for w in warnings if w in CRITICAL_WARNINGS]
+    informational_warnings = [w for w in warnings if w not in CRITICAL_WARNINGS]
+
+    # Core readiness: vendor resolved + required fields complete
+    core_ready = signals["vendor_resolved"] and signals["required_fields_complete"]
+
     if blocking:
         status = STATUS_BLOCKED
         action = ACTION_HOLD
@@ -321,24 +330,40 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
         status = STATUS_READY_AUTO_LINK
         action = ACTION_AUTO_LINK
         explanations.append("Document already linked to BC record")
-    elif len(warnings) >= 3:
+    elif len(critical_warnings) >= 3:
         status = STATUS_AMBIGUOUS
         action = ACTION_REVIEW
-        explanations.append("Multiple warnings require human evaluation")
-    elif warnings and not signals["vendor_resolved"]:
+        explanations.append("Multiple critical warnings require human evaluation")
+    elif critical_warnings and not signals["vendor_resolved"]:
         status = STATUS_NEEDS_REVIEW
         action = ACTION_REVIEW
-    elif warnings:
-        if (confidence or 0) >= 0.8:
+    elif critical_warnings:
+        # Has critical warnings — need higher confidence
+        if (confidence or 0) >= 0.75:
             status = STATUS_READY_AUTO_DRAFT
             action = ACTION_AUTO_DRAFT
-            explanations.append("High confidence despite minor warnings")
+            explanations.append("High confidence despite critical warnings")
         else:
             status = STATUS_NEEDS_REVIEW
             action = ACTION_REVIEW
+    elif informational_warnings and core_ready:
+        # Only informational warnings (no_line_items, po_missing, etc.) + core signals green
+        # Much lower bar — these are minor and shouldn't block processing
+        if (confidence or 0) >= 0.55:
+            status = STATUS_READY_AUTO_DRAFT
+            action = ACTION_AUTO_DRAFT
+            explanations.append("Core signals green — minor informational warnings only")
+        else:
+            status = STATUS_READY_AUTO_DRAFT
+            action = ACTION_AUTO_DRAFT
+            explanations.append("Vendor resolved + fields complete — auto-drafting despite low confidence")
+    elif informational_warnings:
+        # Informational warnings but vendor not fully resolved
+        status = STATUS_NEEDS_REVIEW
+        action = ACTION_REVIEW
     else:
         # No blocking, no warnings
-        if signals["vendor_resolved"] and signals["required_fields_complete"]:
+        if core_ready:
             status = STATUS_READY_AUTO_DRAFT
             action = ACTION_AUTO_DRAFT
             explanations.append("All checks passed — ready for automatic processing")
@@ -439,6 +464,32 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
             "Vendor flagged for processing bypass — routed to manual review"
         ]
         logger.info("[Readiness:Bypass] doc=%s vendor=%s — bypassed to manual review", doc_id[:8], vendor_no)
+
+    # === POSTING TEMPLATE TRUST: Upgrade to auto-draft if vendor has proven template ===
+    if readiness["status"] in (STATUS_NEEDS_REVIEW, STATUS_AMBIGUOUS) and vendor_no:
+        try:
+            from services.posting_pattern_analyzer import get_posting_profile_for_vendor
+            pp = await get_posting_profile_for_vendor(db, vendor_no)
+            if pp:
+                pp_template = pp.get("posting_template") or {}
+                pp_confidence = pp_template.get("confidence", "low")
+                pp_invoices = pp.get("invoices_analyzed", 0)
+                has_proven_template = pp_confidence in ("high", "medium") and pp_invoices >= 5
+                if has_proven_template and readiness["signals"].get("vendor_resolved") and readiness["signals"].get("required_fields_complete"):
+                    # Only blockers should hold back a doc with a proven posting template
+                    if not readiness.get("blocking_reasons"):
+                        readiness["status"] = STATUS_READY_AUTO_DRAFT
+                        readiness["recommended_action"] = ACTION_AUTO_DRAFT
+                        readiness["explanations"] = readiness.get("explanations", []) + [
+                            f"TEMPLATE TRUST: Vendor has {pp_confidence}-confidence posting template "
+                            f"({pp_invoices} invoices learned) — upgrading to auto-draft"
+                        ]
+                        logger.info(
+                            "[Readiness:TemplateTrust] doc=%s vendor=%s template=%s invoices=%d → upgraded to auto-draft",
+                            doc_id[:8], vendor_no, pp_confidence, pp_invoices,
+                        )
+        except Exception as tt_err:
+            logger.debug("[Readiness:TemplateTrust] Skipped for %s: %s", doc_id[:8], tt_err)
 
     # === GAP CLOSER 1: Confidence Band Awareness ===
     # If this doc's confidence band has low historical accuracy, route to review
@@ -723,7 +774,7 @@ async def batch_reevaluate_all(limit: int = 5000) -> Dict[str, Any]:
             "automation_decision": {"$in": ["hold", "needs_review", "manual"]},
         },
         {"_id": 0, "id": 1, "readiness": 1, "bc_vendor_number": 1, "vendor_no": 1,
-         "bc_purchase_invoice_no": 1, "doc_type": 1, "suggested_job_type": 1},
+         "bc_purchase_invoice_no": 1, "doc_type": 1, "document_type": 1, "suggested_job_type": 1},
     )
     held_docs = await held_cursor.to_list(None)
 
@@ -737,7 +788,7 @@ async def batch_reevaluate_all(limit: int = 5000) -> Dict[str, Any]:
                 "id": {"$nin": list(held_ids)},
             },
             {"_id": 0, "id": 1, "readiness": 1, "bc_vendor_number": 1, "vendor_no": 1,
-             "bc_purchase_invoice_no": 1, "doc_type": 1, "suggested_job_type": 1},
+             "bc_purchase_invoice_no": 1, "doc_type": 1, "document_type": 1, "suggested_job_type": 1},
         ).limit(remaining_limit)
         other_docs = await other_cursor.to_list(remaining_limit)
     else:
@@ -785,26 +836,35 @@ async def batch_reevaluate_all(limit: int = 5000) -> Dict[str, Any]:
                 })
 
             # AUTO-ACT: If doc is in a "ready" state and no BC PI exists, trigger auto-posting
-            # Cap at 25 auto-posts per batch to avoid timeout
+            # Cap at 50 auto-posts per batch
             ready_statuses = ("ready_auto_link", "ready_auto_draft", "ready")
             is_now_ready = new_status in ready_statuses
             already_posted = bool(d.get("bc_purchase_invoice_no"))
-            max_auto_acts = 25
+            max_auto_acts = 50
 
             if is_now_ready and not already_posted and results.get("auto_acted", 0) < max_auto_acts:
                 try:
-                    doc_type = (d.get("doc_type") or d.get("suggested_job_type") or "").lower()
-                    if "ap" in doc_type or "invoice" in doc_type:
+                    doc_type = (d.get("doc_type") or d.get("document_type") or d.get("suggested_job_type") or "").lower()
+                    # Auto-post for any non-sales doc type — don't gate on doc_type too strictly
+                    is_sales_only = "sales" in doc_type and "invoice" not in doc_type
+                    if not is_sales_only:
                         from services.ap_auto_post_service import attempt_ap_auto_post
                         ap_result = await attempt_ap_auto_post(doc_id, db, source="reevaluation_auto_act")
                         if ap_result.get("posted") or ap_result.get("created"):
                             results["auto_acted"] = results.get("auto_acted", 0) + 1
                             logger.info(
-                                "[Reevaluate:AutoAct] doc=%s vendor=%s → auto-posted to BC",
-                                doc_id[:8], vendor_no,
+                                "[Reevaluate:AutoAct] doc=%s vendor=%s type=%s → auto-posted to BC",
+                                doc_id[:8], vendor_no, doc_type,
                             )
+                        else:
+                            reason = ap_result.get("reason", "unknown")
+                            results["auto_act_skipped"] = results.get("auto_act_skipped", 0) + 1
+                            if results.get("auto_act_skip_reasons") is None:
+                                results["auto_act_skip_reasons"] = {}
+                            results["auto_act_skip_reasons"][reason] = results["auto_act_skip_reasons"].get(reason, 0) + 1
                 except Exception as act_err:
                     logger.warning("[Reevaluate:AutoAct] doc=%s error: %s", doc_id[:8], str(act_err))
+                    results["auto_act_errors"] = results.get("auto_act_errors", 0) + 1
 
             # Detect signal corrections
             new_signals = new_readiness.get("signals") or {}

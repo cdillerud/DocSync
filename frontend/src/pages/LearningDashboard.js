@@ -136,8 +136,10 @@ function ReEvaluateSection({ onComplete }) {
       if (res.ok) {
         const data = await res.json();
         setResult(data);
+        const skipped = data.auto_act_skipped || 0;
+        const skipInfo = skipped > 0 ? `, ${skipped} attempted but skipped` : '';
         toast.success(
-          `Re-evaluated ${data.total_processed} docs — ${data.total_corrections} corrections, ${data.auto_acted || 0} auto-posted to BC`
+          `Re-evaluated ${data.total_processed} docs — ${data.total_corrections} corrections, ${data.auto_acted || 0} auto-posted to BC${skipInfo}`
         );
         if (onComplete) onComplete();
       } else {
@@ -170,7 +172,7 @@ function ReEvaluateSection({ onComplete }) {
         {result && (
           <div className="mt-4 space-y-3" data-testid="reevaluate-results">
             {/* Summary Stats */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
               <div className="bg-muted/50 rounded p-2 text-center">
                 <p className="text-lg font-bold">{result.total_processed}</p>
                 <p className="text-xs text-muted-foreground">Processed</p>
@@ -184,10 +186,28 @@ function ReEvaluateSection({ onComplete }) {
                 <p className="text-xs text-muted-foreground">Status Changes</p>
               </div>
               <div className="bg-muted/50 rounded p-2 text-center">
+                <p className="text-lg font-bold text-emerald-400">{result.auto_acted || 0}</p>
+                <p className="text-xs text-muted-foreground">Auto-Posted to BC</p>
+              </div>
+              <div className="bg-muted/50 rounded p-2 text-center">
                 <p className="text-lg font-bold text-rose-400">{result.errors}</p>
                 <p className="text-xs text-muted-foreground">Errors</p>
               </div>
             </div>
+
+            {/* Auto-Act Skip Reasons (if any) */}
+            {result.auto_act_skip_reasons && Object.keys(result.auto_act_skip_reasons).length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-1">Auto-Post Skip Reasons</p>
+                <div className="flex flex-wrap gap-1">
+                  {Object.entries(result.auto_act_skip_reasons).map(([reason, count]) => (
+                    <Badge key={reason} variant="outline" className="text-xs text-amber-400">
+                      {reason}: {count}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Status Distribution */}
             {result.by_status && Object.keys(result.by_status).length > 0 && (

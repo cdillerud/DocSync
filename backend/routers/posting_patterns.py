@@ -401,6 +401,8 @@ async def auto_approve_drafts(
                     "draft_reviewed_by": "auto_approval_engine",
                     "auto_approved": True,
                     "auto_approval_reason": f"Vendor {v_no} has {pp_confidence}-confidence template ({pp_invoices} invoices learned)",
+                    "status": "ReadyForPost",
+                    "automation_decision": "auto_process",
                 }}
             )
 

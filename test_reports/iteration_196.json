@@ -1,0 +1,66 @@
+{
+  "summary": "Iteration 196: Tested the critical status sync fix for inbox/readiness disconnect. All 8 backend tests passed. The new POST /api/readiness/sync-status endpoint correctly returns readiness_synced, approved_synced, total_fixed, and message fields. All existing endpoints (reevaluate-all, auto-approve, automation-rate, metrics) continue to work correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_status_sync_iteration196.py",
+    "/app/test_reports/pytest/status_sync_iteration196_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Lines 67-113 in readiness.py: New POST /sync-status endpoint correctly implements bulk update_many for both readiness-stuck and approved-stuck documents",
+    "Lines 82-93: First update_many correctly targets docs with ready readiness but stuck status (NeedsReview, Captured, None, '')",
+    "Lines 96-106: Second update_many correctly targets auto-approved drafts still showing as NeedsReview",
+    "Lines 108-113: Response correctly returns readiness_synced, approved_synced, total_fixed, message as specified",
+    "Lines 667-684 in document_readiness_service.py: evaluate_and_persist now syncs document status when readiness is ready - this is the core fix",
+    "Lines 395-406 in posting_patterns.py: auto_approve_drafts now also sets status=ReadyForPost and automation_decision=auto_process"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_status_sync_iteration196.py"
+  ],
+  "success_rate": {
+    "backend": "100% (8/8 tests passed)",
+    "frontend": "N/A (backend only testing)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "None - tested with existing preview environment data",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 196 verified the status sync fix. Key findings: (1) POST /api/readiness/sync-status works and returns correct shape {readiness_synced, approved_synced, total_fixed, message}. (2) In preview env with minimal data, it synced 1 document. (3) All existing endpoints (reevaluate-all, auto-approve, automation-rate, metrics) continue to work. (4) The fix addresses the root cause where readiness.status and document status were disconnected - now evaluate_and_persist syncs status when readiness is ready, and auto-approve also sets status=ReadyForPost.",
+  "tested_features": {
+    "backend_api_tests": [
+      "POST /api/readiness/sync-status - PASS (returns correct shape)",
+      "POST /api/readiness/sync-status?limit=100 - PASS (accepts limit param)",
+      "POST /api/readiness/reevaluate-all?limit=10 - PASS",
+      "POST /api/posting-patterns/review-queue/auto-approve?dry_run=true - PASS",
+      "POST /api/posting-patterns/review-queue/auto-approve?dry_run=true&min_confidence=high - PASS",
+      "GET /api/readiness/automation-rate - PASS",
+      "GET /api/readiness/automation-rate?days=7 - PASS",
+      "GET /api/readiness/metrics - PASS"
+    ]
+  },
+  "data_verification": {
+    "sync_status_response": {
+      "readiness_synced": 1,
+      "approved_synced": 0,
+      "total_fixed": 1,
+      "message": "Moved 1 documents from inbox to ReadyForPost"
+    },
+    "automation_rate_response": {
+      "automation_rate": 29.6,
+      "total_documents": 27,
+      "distribution": {
+        "blocked": 20,
+        "ready_auto_draft": 2,
+        "ready_auto_link": 5
+      }
+    }
+  }
+}

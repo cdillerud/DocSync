@@ -64,6 +64,55 @@ async def reevaluate_all_readiness(limit: int = Query(5000, ge=1, le=10000)):
 
 
 
+@router.post("/sync-status")
+async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
+    """
+    One-time sync: For all docs where readiness says 'ready' but document status
+    is still 'NeedsReview' — update status to 'ReadyForPost'.
+    Also syncs auto-approved drafts to 'ReadyForPost'.
+    This is the fix for the inbox not shrinking despite good readiness scores.
+    """
+    from deps import get_db
+    from datetime import datetime, timezone
+
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+
+    # 1. Docs with ready readiness but stuck status
+    ready_stuck = await db.hub_documents.update_many(
+        {
+            "readiness.status": {"$in": ["ready_auto_draft", "ready_auto_link", "ready"]},
+            "status": {"$in": ["NeedsReview", "Captured", None, ""]},
+            "is_duplicate": {"$ne": True},
+        },
+        {"$set": {
+            "status": "ReadyForPost",
+            "automation_decision": "auto_process",
+            "status_synced_at": now,
+        }},
+    )
+
+    # 2. Auto-approved drafts still showing as NeedsReview
+    approved_stuck = await db.hub_documents.update_many(
+        {
+            "draft_review_status": "approved",
+            "status": {"$in": ["NeedsReview", "Captured", None, ""]},
+        },
+        {"$set": {
+            "status": "ReadyForPost",
+            "automation_decision": "auto_process",
+            "status_synced_at": now,
+        }},
+    )
+
+    return {
+        "readiness_synced": ready_stuck.modified_count,
+        "approved_synced": approved_stuck.modified_count,
+        "total_fixed": ready_stuck.modified_count + approved_stuck.modified_count,
+        "message": f"Moved {ready_stuck.modified_count + approved_stuck.modified_count} documents from inbox to ReadyForPost",
+    }
+
+
 @router.get("/automation-rate")
 async def get_automation_rate(days: int = Query(30, ge=1, le=90)):
     """

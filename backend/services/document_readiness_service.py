@@ -664,6 +664,25 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
         }},
     )
 
+    # Sync document status with readiness — move docs OUT of inbox when ready
+    ready_statuses = ("ready_auto_draft", "ready_auto_link", "ready")
+    stuck_statuses = ("NeedsReview", "Captured", "")
+    current_status = doc.get("status") or ""
+    if readiness["status"] in ready_statuses and current_status in stuck_statuses:
+        # Doc is ready but status hasn't caught up — sync it
+        new_doc_status = "ReadyForPost" if readiness["status"] == "ready_auto_draft" else "Validated"
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {
+                "status": new_doc_status,
+                "automation_decision": "auto_process",
+            }},
+        )
+        logger.info(
+            "[Readiness:StatusSync] doc=%s '%s' → '%s' (readiness=%s)",
+            doc_id[:8], current_status, new_doc_status, readiness["status"],
+        )
+
     # Auto-clear stale automation_decision if policy hold was dropped
     old_held = old_signals.get("policy_held", False)
     new_held = new_signals.get("policy_held", False)

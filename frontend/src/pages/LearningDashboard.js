@@ -130,6 +130,7 @@ function ReEvaluateSection({ onComplete }) {
   const [result, setResult] = useState(null);
   const [approving, setApproving] = useState(false);
   const [approveResult, setApproveResult] = useState(null);
+  const [syncing, setSyncing] = useState(false);
 
   const handleRun = async () => {
     setRunning(true);
@@ -180,6 +181,23 @@ function ReEvaluateSection({ onComplete }) {
     setApproving(false);
   };
 
+  const handleSyncStatus = async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch(`${API}/api/readiness/sync-status`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        toast.success(`Synced ${data.total_fixed} docs from inbox → ReadyForPost`);
+        if (onComplete) onComplete();
+      } else {
+        toast.error('Sync failed');
+      }
+    } catch {
+      toast.error('Network error');
+    }
+    setSyncing(false);
+  };
+
   return (
     <Card data-testid="reevaluate-section">
       <CardHeader className="pb-2">
@@ -203,11 +221,17 @@ function ReEvaluateSection({ onComplete }) {
             {approving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Eye className="w-4 h-4 mr-2" />}
             Preview Auto-Approve
           </Button>
-          <Button onClick={() => handleAutoApprove(false)} disabled={running || approving}
+          <Button onClick={() => handleAutoApprove(false)} disabled={running || approving || syncing}
             variant="default" className="bg-emerald-600 hover:bg-emerald-700"
             data-testid="auto-approve-run-btn">
             {approving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
             Auto-Approve Proven Drafts
+          </Button>
+          <Button onClick={handleSyncStatus} disabled={running || approving || syncing}
+            variant="outline" className="border-emerald-600 text-emerald-500 hover:bg-emerald-600/10"
+            data-testid="sync-status-btn">
+            {syncing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Zap className="w-4 h-4 mr-2" />}
+            Sync Inbox Status
           </Button>
         </div>
 

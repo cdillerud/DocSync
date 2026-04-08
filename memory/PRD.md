@@ -9,61 +9,57 @@ Enterprise document processing hub for AP/Sales workflows with Dynamics 365 BC i
 - **Integrations**: Dynamics 365 BC, OpenAI/Gemini (Emergent LLM Key), MS Graph
 - **Production**: Docker Compose on Azure VM at http://4.204.41.190:8080/
 
-## What's Been Implemented
+## What's Been Implemented (This Session)
 
-### Phases 1-16f — See previous sessions
-
-### Phase 16g — PO Bypass + Vendor Bypass + Batch Alias (Apr 8, 2026)
-- Direct vendor profile lookup for `po_expected` in readiness
+### Phase 16g — PO Bypass + Vendor Bypass + Batch Alias (Apr 8)
+- Direct vendor profile lookup for po_expected in readiness
 - PATCH /api/vendor-intelligence/profiles/{vendor_no}/bypass
 - POST /api/aliases/vendors/batch-resolve
 
-### Phase 16h — Aggressive Auto-Processing Engine (Apr 8, 2026)
+### Phase 16h — Aggressive Auto-Processing Engine (Apr 8)
 - Smart warning categorization (CRITICAL vs INFORMATIONAL)
 - Lowered confidence thresholds
 - Expanded auto-post (no AP-only restriction, cap 50, skip tracking)
 - Posting template trust (medium/high → auto-upgrade)
 
-### Phase 16i — Automation Rate Dashboard Widget (Apr 8, 2026)
+### Phase 16i — Automation Rate Dashboard Widget (Apr 8)
 - GET /api/readiness/automation-rate?days=N
 - Circular gauge + Recharts BarChart + Top Manual Vendors
 
-### Phase 16j — Missing Required Fields Fix (Apr 8, 2026)
+### Phase 16j — Missing Required Fields Fix (Apr 8)
 - Broadened field lookup (5 vendor sources, normalized_fields, external_document_no)
 - Downgraded missing_required_fields from BLOCKING to WARNING when vendor resolved
-- BOL/shipping docs only require vendor (not invoice_number/amount)
+- Result: Blocked 423→110 (75% reduction), Automation Rate 76→88%
 
-### Phase 16k — Auto-Approval Engine: The Queue Shrinker (Apr 8, 2026)
+### Phase 16k — Auto-Approval Engine (Apr 8)
+- POST /api/posting-patterns/review-queue/auto-approve
+- Batch approves drafts from medium/high confidence vendors
+- Result: Review Queue badge 544→42 (92% reduction)
 
-**Problem**: Review Queue at 644 and growing. Investigation revealed the badge counts auto-drafted PIs pending human review (`auto_draft_created=True, draft_review_status NOT IN [approved, corrected]`). The system creates 544 drafts but 0 get approved automatically — they ALL sit in queue.
+### Phase 16l — Status Sync: The Inbox Fixer (Apr 8)
 
-**Root cause**: No auto-approval logic exists. Every draft requires manual human review, even from vendors with proven posting templates (TUMALOC: 374 invoices analyzed, high confidence).
+**Problem**: Inbox showed 515 "Needs Review" documents even though readiness said many were "ready_auto_draft". The readiness.status and document status fields were disconnected — readiness updated but the inbox-visible status field stayed "NeedsReview".
 
-**Fix: POST /api/posting-patterns/review-queue/auto-approve**
-- Batch auto-approves drafts from vendors with proven posting templates
-- Checks: template confidence >= medium AND invoices_analyzed >= 5
-- Dry-run mode (preview without approving)
-- Per-vendor result tracking (top_approved_vendors, skip_reasons)
-- Creates positive feedback events (posting_learning_events)
-- Frontend: "Preview Auto-Approve" and "Auto-Approve Proven Drafts" buttons
+**Root cause**: `evaluate_and_persist()` updated readiness but never synced the document `status`. Auto-approve set `draft_review_status: "approved"` but left `status: "NeedsReview"`. The inbox queries the `status` field, not `readiness.status`.
 
-**Also identified**: 412 docs blocked by `missing_required_fields` (mostly missing invoice_number). Even known vendors (TUMALOC, CARGOMO, ROTONDO) are affected. Vendor IS resolved, amount IS present, but invoice_number missing from extracted_fields.
+**Fix — 3 changes:**
 
-**Blocking reason distribution (production):**
-- missing_required_fields: 412
-- vendor_unresolved: 101  
-- duplicate_risk: 24
+1. **evaluate_and_persist status sync**: After updating readiness, if status is ready_auto_draft/ready_auto_link AND document status is stuck on NeedsReview/Captured → auto-sets status to "ReadyForPost"
 
-**Files changed:**
-- `/app/backend/routers/posting_patterns.py` — New auto-approve endpoint
-- `/app/frontend/src/pages/LearningDashboard.js` — Auto-approve UI buttons + results
+2. **Auto-approve status update**: When auto-approving drafts, now also sets `status: "ReadyForPost"` and `automation_decision: "auto_process"`
+
+3. **POST /api/readiness/sync-status**: Bulk sync endpoint — finds ALL docs where readiness is ready but status is stuck, and all approved drafts still showing NeedsReview. Updates them to ReadyForPost in one sweep.
+
+4. **Frontend**: "Sync Inbox Status" button on AI Learning page
+
+**Expected production impact**: After deploy + clicking "Sync Inbox Status", hundreds of docs should move from inbox to ReadyForPost, dramatically shrinking the 515 pending review count.
 
 ## Production Deploy Steps
 1. Save to Github → `git pull && docker compose up -d --build`
-2. Click "Preview Auto-Approve" to see how many drafts qualify
-3. Click "Auto-Approve Proven Drafts" to approve them — Review Queue badge drops
-4. Click "Re-evaluate All Documents" — fixes blocked docs (Phase 16j field fixes)
-5. Check Automation Rate widget
+2. Click "Re-evaluate All Documents" (updates readiness + auto-syncs status)
+3. Click "Auto-Approve Proven Drafts" (clears remaining draft queue)
+4. Click "Sync Inbox Status" (catches any remaining stuck docs)
+5. Refresh inbox — should see significant reduction
 
 ## Upcoming Tasks
 - P1: Rep Overrides management UI

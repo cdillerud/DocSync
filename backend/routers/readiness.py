@@ -53,7 +53,7 @@ async def batch_evaluate_readiness(limit: int = Query(200, ge=1, le=1000)):
 
 
 @router.post("/reevaluate-all")
-async def reevaluate_all_readiness(limit: int = Query(500, ge=1, le=2000)):
+async def reevaluate_all_readiness(limit: int = Query(5000, ge=1, le=10000)):
     """
     Re-evaluate ALL documents — finds and fixes signal contradictions.
     Every correction feeds into the learning pipeline.

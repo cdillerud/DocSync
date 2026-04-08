@@ -661,7 +661,7 @@ async def batch_evaluate(limit: int = 200) -> Dict[str, int]:
     return {"total": len(docs), **counts}
 
 
-async def batch_reevaluate_all(limit: int = 500) -> Dict[str, Any]:
+async def batch_reevaluate_all(limit: int = 5000) -> Dict[str, Any]:
     """
     Re-evaluate ALL documents (not just new ones).
     Detects and corrects signal contradictions across the entire dataset.
@@ -672,12 +672,32 @@ async def batch_reevaluate_all(limit: int = 500) -> Dict[str, Any]:
     from deps import get_db
     db = get_db()
 
-    # Get all non-duplicate documents
-    cursor = db.hub_documents.find(
-        {"is_duplicate": {"$ne": True}},
+    # Prioritize stale policy-held docs first (the ones most likely to be stuck)
+    held_cursor = db.hub_documents.find(
+        {
+            "is_duplicate": {"$ne": True},
+            "automation_decision": {"$in": ["hold", "needs_review", "manual"]},
+        },
         {"_id": 0, "id": 1, "readiness": 1, "bc_vendor_number": 1, "vendor_no": 1},
-    ).limit(limit)
-    docs = await cursor.to_list(limit)
+    )
+    held_docs = await held_cursor.to_list(None)
+
+    # Then get remaining docs up to the limit
+    held_ids = {d["id"] for d in held_docs if d.get("id")}
+    remaining_limit = max(limit - len(held_docs), 0)
+    if remaining_limit > 0:
+        other_cursor = db.hub_documents.find(
+            {
+                "is_duplicate": {"$ne": True},
+                "id": {"$nin": list(held_ids)},
+            },
+            {"_id": 0, "id": 1, "readiness": 1, "bc_vendor_number": 1, "vendor_no": 1},
+        ).limit(remaining_limit)
+        other_docs = await other_cursor.to_list(remaining_limit)
+    else:
+        other_docs = []
+
+    docs = held_docs + other_docs
 
     results = {
         "total_processed": 0,

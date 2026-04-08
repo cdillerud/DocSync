@@ -13,56 +13,58 @@ Enterprise document processing hub for AP/Sales workflows with Dynamics 365 BC i
 
 ### Phases 1-16f — See previous sessions
 
-### Phase 16g — Robust PO Bypass + Vendor Processing Bypass + Batch Alias Resolution (Apr 8, 2026)
+### Phase 16g — PO Bypass + Vendor Bypass + Batch Alias (Apr 8, 2026)
+- Direct vendor profile lookup for `po_expected` in readiness
+- `PATCH /api/vendor-intelligence/profiles/{vendor_no}/bypass`
+- `POST /api/aliases/vendors/batch-resolve`
 
-- Enhanced `evaluate_and_persist()` with direct vendor profile lookup for `po_expected` and `auto_process_bypass`
-- New `PATCH /api/vendor-intelligence/profiles/{vendor_no}/bypass` for NOFACH-style vendors
-- New `POST /api/aliases/vendors/batch-resolve` for SC Warehouses-style batch alias creation
-
-### Phase 16h — Aggressive Auto-Processing: Inbox Reduction Engine (Apr 8, 2026)
-
-**Problem**: Review Queue had 339 items and growing. Re-evaluation of 1733 docs found 151 corrections but posted 0 to BC.
-
-**5 Fixes:**
-1. **Smart Warning Categorization** — CRITICAL (policy_hold, customer_unresolved, vendor_needs_review, amount_anomaly, auto_escalation) vs INFORMATIONAL (po_missing, no_line_items, low_line_item_confidence). Only critical count toward ambiguous threshold.
-2. **Lowered Confidence Thresholds** — Informational-only warnings auto-draft regardless. Critical: 0.75 (was 0.80).
-3. **Expanded Auto-Post** — Removed AP-only doc type restriction, cap 25→50, added skip reason tracking.
-4. **Posting Template Trust** — Medium/high templates (5+ invoices) auto-upgrade needs_review → ready_auto_draft.
-5. **Frontend Enhanced** — Re-evaluation shows auto-posted count + skip reasons.
+### Phase 16h — Aggressive Auto-Processing Engine (Apr 8, 2026)
+- Smart warning categorization: CRITICAL vs INFORMATIONAL
+- Lowered confidence thresholds
+- Expanded auto-post: removed AP-only restriction, cap 50, skip reason tracking
+- Posting template trust: medium/high → auto-upgrade to ready_auto_draft
+- Enhanced re-evaluation results display
 
 ### Phase 16i — Automation Rate Dashboard Widget (Apr 8, 2026)
+- `GET /api/readiness/automation-rate?days=N` — rate %, trend, top manual vendors
+- Circular SVG gauge + Recharts BarChart + Top Manual Vendors list
+- Period selector (7d / 30d / 90d)
 
-**New feature**: Real-time Automation Rate widget on AI Learning page.
+### Phase 16j — Missing Required Fields Fix: The 421 Unblock (Apr 8, 2026)
 
-**Backend**: `GET /api/readiness/automation-rate?days=N`
-- Current automation rate % (auto-processed / total)
-- BC posting rate %
-- Breakdown: auto-processed, manual review, blocked, BC posted
-- Daily trend: auto vs manual vs blocked per day (bar chart data)
-- Top 10 vendors requiring manual review with primary reason
-- Selectable period (7d / 30d / 90d)
+**Problem**: 421 documents BLOCKED with `missing_required_fields`. These included fully-resolved vendors like TUMALOC (2773 docs learned), CARGOMO, ROTONDO, GROUPWA. The check only looked at `extracted_fields` for vendor/invoice_number/amount — missing vendor_canonical, bc_vendor_number, normalized_fields, external_document_no.
 
-**Frontend**: `AutomationRateWidget` component
-- Circular SVG gauge with color-coded rate (green >70%, amber >40%, red <40%)
-- 4-box breakdown (Auto-Processed, Manual Review, Blocked, Posted to BC)
-- Recharts BarChart with stacked daily auto/manual/blocked
-- Top Manual Review Vendors list with primary reason badges
-- Period selector buttons (7d / 30d / 90d)
+**Root cause**: `required_fields_complete` in `compute_signals()` only checked `extracted_fields.vendor`, `extracted_fields.invoice_number`, and `extracted_fields.amount`. If AI extraction didn't populate those exact fields (even though vendor was matched via alias, BC lookup, or resolution), the doc was hard-blocked.
+
+**Fix — 3 changes:**
+
+1. **Broadened field lookup** in `compute_signals()`:
+   - Vendor: checks `extracted_fields.vendor` + `vendor_canonical` + `bc_vendor_number` + `vendor_resolution.vendor_no` + `unified_vendor_match.bc_vendor_no`
+   - Invoice number: checks `extracted_fields` + `normalized_fields` + `external_document_no`
+   - Amount: checks `extracted_fields` + `normalized_fields` for all amount variants
+   - Non-invoice doc types (BOL, shipping): only require vendor, not invoice#/amount
+
+2. **Downgraded from BLOCKING to WARNING** when vendor IS resolved:
+   - If vendor is resolved but other fields missing → `missing_required_fields` becomes a warning, doc goes to `ready_auto_draft` instead of `blocked`
+   - If vendor is NOT resolved → stays as blocking (correct behavior)
+
+3. **Broadened `check_ap_ready_to_post()`** in `ap_auto_post_service.py`:
+   - `invoice_no` also checks `external_document_no`
+   - `amount` also checks `nf.total_amount`, `ef.invoice_amount`
+   - `vendor_raw` also checks `vendor_canonical`
+
+**Expected production impact**: ~400+ documents should move from `blocked` → `ready_auto_draft` after deploy + re-evaluate. Review Queue should drop significantly.
 
 **Files changed:**
-- `/app/backend/routers/readiness.py` — New GET /automation-rate endpoint
-- `/app/frontend/src/pages/LearningDashboard.js` — AutomationRateWidget + recharts import
-
-## Active Gap Closers: 10
-## Backfill Steps: 15
-## Learning Dimensions: 21
+- `/app/backend/services/document_readiness_service.py`
+- `/app/backend/services/ap_auto_post_service.py`
 
 ## Pending Production Steps
-1. Deploy: Save to Github → `git pull && docker compose up -d --build` on Azure VM
-2. For NOFACH: `PATCH /api/vendor-intelligence/profiles/NOFACH/bypass?enabled=true`
-3. For SC Warehouses: `POST /api/aliases/vendors/batch-resolve` with correct vendor_no
-4. Re-evaluate: `POST /api/readiness/reevaluate-all`
-5. Monitor Automation Rate widget — should show rate increasing
+1. Deploy: Save to Github → `git pull && docker compose up -d --build`
+2. Re-evaluate: `POST /api/readiness/reevaluate-all`
+3. Monitor: Automation Rate widget + Review Queue badge
+4. NOFACH bypass: `PATCH /api/vendor-intelligence/profiles/NOFACH/bypass?enabled=true`
+5. SC Warehouses alias: Need target vendor_no from user
 
 ## Upcoming Tasks
 - P1: Rep Overrides management UI
@@ -73,7 +75,7 @@ Enterprise document processing hub for AP/Sales workflows with Dynamics 365 BC i
 - P2: Low-volume vendor review routing
 - P2: Correction replay engine activation
 - P2: Email sender → vendor mapping
-- P2: Expand stable vendor criteria for Auto-Ready
+- P2: Expand stable vendor criteria
 - P3: server.py refactor (7,500+ lines)
 
 ## Deployment

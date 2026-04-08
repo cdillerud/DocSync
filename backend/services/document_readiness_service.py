@@ -271,8 +271,10 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
         reviewer_actions.append("Confirm or correct vendor match")
 
     # --- Confidence computation ---
-    ai_conf = float(doc.get("ai_confidence") or 0)
-    confidence = _compute_confidence(signals, ai_conf, len(blocking), len(warnings))
+    # Use effective confidence (adjusted for extraction quality) as the AI base
+    from services.per_document_learning_service import compute_effective_confidence
+    effective_conf = compute_effective_confidence(doc)
+    confidence = _compute_confidence(signals, effective_conf, len(blocking), len(warnings))
 
     # --- Status determination ---
     if blocking:
@@ -387,11 +389,11 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
         from services.gap_closer_service import get_confidence_band_accuracy, apply_confidence_awareness
         ai_confidence = doc.get("ai_confidence") or 0.0
         if ai_confidence > 0:
-            band_check = await get_confidence_band_accuracy(db, ai_confidence)
+            band_check = await get_confidence_band_accuracy(db, ai_confidence, doc=doc)
             if band_check.get("should_review"):
                 readiness = apply_confidence_awareness(readiness, band_check)
                 logger.info(
-                    "[GapCloser:ConfBand] doc=%s conf=%.2f band=%s accuracy=%.2f → routed to review",
+                    "[GapCloser:ConfBand] doc=%s raw_conf=%.2f eff_band=%s accuracy=%.2f → routed to review",
                     doc_id[:8], ai_confidence, band_check["band"], band_check.get("accuracy", 0),
                 )
     except Exception as gc_err:
@@ -494,10 +496,14 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
         compute_automation_confidence,
         build_decision_explanation,
     )
+    from services.per_document_learning_service import compute_effective_confidence
     # Temporarily attach readiness so intelligence can read it
     doc["readiness"] = readiness
     auto_conf = compute_automation_confidence(doc)
     explanation = build_decision_explanation(doc)
+
+    effective_conf = compute_effective_confidence(doc)
+    raw_ai_conf = float(doc.get("ai_confidence") or 0)
 
     await db.hub_documents.update_one(
         {"id": doc_id},
@@ -505,6 +511,8 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
             "readiness": readiness,
             "automation_confidence": auto_conf,
             "decision_explanation": explanation,
+            "effective_confidence": effective_conf,
+            "confidence_penalty_applied": round(raw_ai_conf - effective_conf, 4) if raw_ai_conf > effective_conf else 0,
             "updated_utc": readiness["last_evaluated_at"],
         }},
     )

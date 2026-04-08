@@ -1126,9 +1126,29 @@ function LearningPulseSection() {
             {/* Confidence Calibration */}
             {pulse.confidence_calibration && Object.keys(pulse.confidence_calibration).length > 0 && (
               <div>
-                <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
-                  <TrendingUp className="w-3 h-3" /> Confidence Calibration — Is the AI's confidence justified?
-                </p>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                    <TrendingUp className="w-3 h-3" /> Confidence Calibration — Is the AI's confidence justified?
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-6 text-[10px] gap-1"
+                    data-testid="recalibrate-confidence-btn"
+                    onClick={async () => {
+                      try {
+                        const res = await fetch(`${API}/api/posting-patterns/intelligence/recalibrate-confidence`, { method: 'POST' });
+                        if (res.ok) {
+                          toast.success('Confidence recalibration started — refresh in ~30s to see updated bands');
+                        } else {
+                          toast.error('Recalibration failed');
+                        }
+                      } catch { toast.error('Recalibration failed'); }
+                    }}
+                  >
+                    <RefreshCw className="w-2.5 h-2.5" /> Recalibrate
+                  </Button>
+                </div>
                 <div className="grid grid-cols-5 gap-2">
                   {Object.entries(bandLabels).map(([band, label]) => {
                     const d = pulse.confidence_calibration[band] || {};

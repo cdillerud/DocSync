@@ -43,6 +43,60 @@ def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def compute_effective_confidence(doc: Dict) -> float:
+    """
+    Adjust raw AI classification confidence based on extraction completeness.
+
+    Problem: AI may report 85% confidence on classification, but extract 0/6 fields.
+    This inflates the 85-95% confidence band with docs that always fail.
+
+    Fix: Penalize the confidence proportional to extraction gaps so these docs
+    land in a lower (more honest) band.
+
+    Returns the adjusted effective confidence (0.0–1.0).
+    """
+    ai_conf = float(doc.get("ai_confidence") or doc.get("classification_confidence") or 0)
+    if ai_conf == 0:
+        return 0.0
+
+    extracted = doc.get("extracted_fields") or {}
+
+    # Check core required fields
+    has_vendor = bool(extracted.get("vendor"))
+    has_invoice = bool(extracted.get("invoice_number"))
+    has_amount = bool(
+        extracted.get("amount") or extracted.get("invoice_amount") or extracted.get("total_amount")
+    )
+    has_date = bool(extracted.get("invoice_date") or extracted.get("date"))
+
+    # Also check if vendor was resolved (a strong signal)
+    vendor_resolved = bool(
+        doc.get("vendor_canonical")
+        or doc.get("bc_vendor_number")
+        or (doc.get("vendor_resolution") or {}).get("status") == "resolved"
+    )
+
+    core_fields = [has_vendor, has_invoice, has_amount, has_date]
+    core_present = sum(core_fields)
+    core_total = len(core_fields)
+    completeness = core_present / core_total  # 0.0 to 1.0
+
+    # If extraction is >= 50% complete, no penalty
+    if completeness >= 0.5:
+        return ai_conf
+
+    # Scale factor: ranges from 0.35 (0% extraction) to 1.0 (50% extraction)
+    # At 0% extraction: effective = ai_conf * 0.35 → 85% becomes ~30%
+    # At 25% extraction: effective = ai_conf * 0.675 → 85% becomes ~57%
+    scale = 0.35 + 0.65 * (completeness / 0.5)
+
+    # Small bonus if vendor was resolved despite poor extraction
+    if vendor_resolved and not has_vendor:
+        scale = min(1.0, scale + 0.15)
+
+    return round(ai_conf * scale, 4)
+
+
 def _classify_outcome(doc: Dict, trigger: str) -> str:
     """Determine the document's outcome category."""
     status = (doc.get("status") or "").lower()
@@ -226,14 +280,24 @@ async def _update_vendor_intelligence(db, doc: Dict, outcome: str):
 # =========================================================================
 
 async def _calibrate_confidence(db, doc: Dict, outcome: str):
-    """Track confidence vs reality — are we over-confident or under-confident?"""
-    confidence = doc.get("ai_confidence") or 0.0
+    """Track confidence vs reality — are we over-confident or under-confident?
+    
+    Uses EFFECTIVE confidence (adjusted for extraction quality) to assign bands,
+    so docs with high classification confidence but poor extraction get placed
+    in lower bands where they actually belong.
+    """
+    raw_confidence = doc.get("ai_confidence") or 0.0
+    if raw_confidence == 0:
+        return
+
+    # Use effective confidence for band assignment
+    confidence = compute_effective_confidence(doc)
     if confidence == 0:
         return
 
     is_correct = outcome in (OUTCOME_AUTO_VALIDATED, OUTCOME_AUTO_FILED, OUTCOME_APPROVED, OUTCOME_POSTED_BC, OUTCOME_LINKED)
 
-    # Bucket confidence into bands: 0-50, 50-70, 70-85, 85-95, 95-100
+    # Bucket effective confidence into bands
     if confidence < 0.50:
         band = "0_50"
     elif confidence < 0.70:

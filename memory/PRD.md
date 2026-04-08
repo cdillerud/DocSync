@@ -93,6 +93,38 @@ Enterprise document processing hub for AP/Sales workflows with Dynamics 365 BC i
 
 Also updated Pass 2 merge logic to combine all behavioral counters when merging name-groups into BC-groups.
 
+### Phase 16d — Confidence Calibration Fix: Effective Confidence (Apr 8, 2026)
+
+**Problem**: The 85-95% confidence band had only 55% actual accuracy. Documents like "GAMER PACKAGING INC SI338811_doc8.pdf" were classified at 85% confidence but had 0/6 fields extracted (0% completeness). The raw AI confidence was lying — inflating this band with docs that always fail.
+
+**Root cause**: `_calibrate_confidence()` used raw `ai_confidence` to assign bands, ignoring extraction quality. A doc with 85% classification confidence and 0% extraction was placed in the "85-95%" band, where it always fails, dragging down the band's accuracy.
+
+**Solution**: Introduced `compute_effective_confidence(doc)` that penalizes classification confidence based on extraction completeness:
+- Checks 4 core fields: vendor, invoice_number, amount, date
+- If extraction < 50% complete, applies a scaling penalty (0.35x to 1.0x)
+- Small bonus if vendor was resolved despite poor field extraction
+- Example: 85% raw with 0% extraction → 29.8% effective (honest "0-50%" band)
+- Example: 85% raw with 100% extraction → 85% effective (unchanged)
+
+**Where it's applied:**
+1. `_calibrate_confidence()` in per_document_learning_service.py — bands assigned by effective confidence
+2. `get_confidence_band_accuracy()` in gap_closer_service.py — review routing uses effective confidence
+3. `evaluate_readiness()` — readiness confidence uses effective confidence as AI base
+4. `evaluate_and_persist()` — stores `effective_confidence` and `confidence_penalty_applied` on documents
+
+**New features:**
+- `POST /api/posting-patterns/intelligence/recalibrate-confidence` — rebuilds global calibration from scratch using effective confidence
+- "Recalibrate" button on Learning Dashboard confidence calibration section
+- Document detail page shows effective confidence + penalty badge when penalty was applied
+
+**Files changed:**
+- `/app/backend/services/per_document_learning_service.py` — Added `compute_effective_confidence()`, updated `_calibrate_confidence()`
+- `/app/backend/services/gap_closer_service.py` — `get_confidence_band_accuracy()` accepts optional `doc` param for effective confidence
+- `/app/backend/services/document_readiness_service.py` — Uses effective confidence for readiness computation and band checks
+- `/app/backend/routers/posting_patterns.py` — Added recalibration endpoint
+- `/app/frontend/src/pages/LearningDashboard.js` — Recalibrate button
+- `/app/frontend/src/pages/DocumentDetailPage.js` — Effective confidence + penalty badge display
+
 ## Active Gap Closers: 10
 ## Backfill Steps: 15
 ## Learning Dimensions: 21

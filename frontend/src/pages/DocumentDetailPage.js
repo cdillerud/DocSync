@@ -569,6 +569,16 @@ export default function DocumentDetailPage() {
                     <div className="border-t border-border pt-2 mt-2 space-y-1.5">
                       {doc.classification_method && <InfoRow label="Method" value={doc.classification_method} mono />}
                       {doc.ai_confidence !== undefined && <InfoRow label="Confidence" value={`${(doc.ai_confidence * 100).toFixed(0)}%`} />}
+                      {doc.effective_confidence !== undefined && doc.confidence_penalty_applied > 0 && (
+                        <InfoRow label="Effective Confidence" value={
+                          <span className="flex items-center gap-1.5">
+                            <span className="font-mono">{(doc.effective_confidence * 100).toFixed(0)}%</span>
+                            <Badge variant="outline" className="text-[9px] text-amber-500 border-amber-500/30" data-testid="confidence-penalty-badge">
+                              -{(doc.confidence_penalty_applied * 100).toFixed(0)}% extraction penalty
+                            </Badge>
+                          </span>
+                        } />
+                      )}
                     </div>
                   )}
                 </div>

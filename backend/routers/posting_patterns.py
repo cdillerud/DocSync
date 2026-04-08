@@ -3007,6 +3007,129 @@ async def backfill_per_document_learning(
 
 
 
+@router.post("/intelligence/recalibrate-confidence")
+async def recalibrate_confidence_bands(
+    background_tasks: BackgroundTasks = None,
+):
+    """
+    Recalibrate confidence bands using effective confidence (extraction-adjusted).
+    
+    Rebuilds the global confidence_calibration from scratch, using 
+    compute_effective_confidence() so docs with high AI confidence but 
+    poor extraction get placed in honest (lower) bands.
+    """
+    from deps import get_db
+    from services.per_document_learning_service import compute_effective_confidence
+    db = get_db()
+
+    async def _recalibrate():
+        import time
+        start = time.time()
+
+        # Reset calibration
+        await db.confidence_calibration.delete_many({"calibration_id": "global"})
+
+        # Process all documents with ai_confidence
+        cursor = db.hub_documents.find(
+            {"ai_confidence": {"$exists": True, "$gt": 0}},
+            {
+                "_id": 0, "id": 1, "ai_confidence": 1,
+                "extracted_fields": 1, "vendor_canonical": 1,
+                "bc_vendor_number": 1, "vendor_resolution": 1,
+                "status": 1, "automation_decision": 1,
+                "auto_cleared": 1, "workflow_status": 1,
+            },
+        ).batch_size(200)
+
+        total = 0
+        band_counts = {}
+        async for doc in cursor:
+            try:
+                eff_conf = compute_effective_confidence(doc)
+                
+                # Determine band
+                if eff_conf < 0.50:
+                    band = "0_50"
+                elif eff_conf < 0.70:
+                    band = "50_70"
+                elif eff_conf < 0.85:
+                    band = "70_85"
+                elif eff_conf < 0.95:
+                    band = "85_95"
+                else:
+                    band = "95_100"
+
+                # Determine outcome
+                status = (doc.get("status") or "").lower()
+                decision = (doc.get("automation_decision") or "").lower()
+                is_correct = (
+                    status in ("completed", "posted", "linkedtobc", "storedinsp", "archived", "validationpassed")
+                    or decision in ("approved", "auto_process", "auto_clear")
+                    or doc.get("auto_cleared")
+                )
+
+                inc_ops = {f"bands.{band}.total": 1}
+                if is_correct:
+                    inc_ops[f"bands.{band}.correct"] = 1
+                else:
+                    inc_ops[f"bands.{band}.incorrect"] = 1
+
+                await db.confidence_calibration.update_one(
+                    {"calibration_id": "global"},
+                    {"$inc": inc_ops, "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}},
+                    upsert=True,
+                )
+
+                # Also store effective confidence on the document
+                raw_conf = float(doc.get("ai_confidence") or 0)
+                penalty = round(raw_conf - eff_conf, 4) if raw_conf > eff_conf else 0
+                await db.hub_documents.update_one(
+                    {"id": doc["id"]},
+                    {"$set": {
+                        "effective_confidence": eff_conf,
+                        "confidence_penalty_applied": penalty,
+                    }},
+                )
+
+                band_counts[band] = band_counts.get(band, 0) + 1
+                total += 1
+            except Exception as e:
+                logger.warning("[Recalibrate] Error on doc %s: %s", str(doc.get("id", ""))[:8], str(e))
+
+        duration = round(time.time() - start, 1)
+        logger.info("[Recalibrate] Done: %d docs in %.1fs. Bands: %s", total, duration, band_counts)
+
+        # Read back the calibration for the response
+        cal = await db.confidence_calibration.find_one(
+            {"calibration_id": "global"}, {"_id": 0}
+        )
+        bands_result = {}
+        for band_name in ["0_50", "50_70", "70_85", "85_95", "95_100"]:
+            bd = (cal or {}).get("bands", {}).get(band_name, {})
+            t = bd.get("total", 0)
+            c = bd.get("correct", 0)
+            bands_result[band_name] = {
+                "total": t,
+                "correct": c,
+                "accuracy": round(c / t, 4) if t > 0 else 0,
+            }
+
+        return {
+            "status": "completed",
+            "documents_processed": total,
+            "duration_seconds": duration,
+            "band_distribution": band_counts,
+            "calibration": bands_result,
+        }
+
+    if background_tasks:
+        background_tasks.add_task(_recalibrate)
+        return {"message": "Confidence recalibration started in background", "async": True}
+    else:
+        return await _recalibrate()
+
+
+
 # =============================================================================
 # Deep Learning Engine — Advanced Intelligence APIs
 # =============================================================================

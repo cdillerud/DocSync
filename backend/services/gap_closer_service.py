@@ -18,11 +18,18 @@ logger = logging.getLogger("gap_closer")
 # GAP 1: Confidence Band Awareness
 # =============================================================================
 
-async def get_confidence_band_accuracy(db, confidence: float) -> Dict:
+async def get_confidence_band_accuracy(db, confidence: float, doc: dict = None) -> Dict:
     """
     Look up historical accuracy for a confidence band.
+    
+    If doc is provided, uses effective confidence (adjusted for extraction quality).
     Returns the band's accuracy and whether it should trigger review.
     """
+    # Use effective confidence when doc is available
+    if doc:
+        from services.per_document_learning_service import compute_effective_confidence
+        confidence = compute_effective_confidence(doc)
+
     if confidence < 0.50:
         band = "0_50"
     elif confidence < 0.70:

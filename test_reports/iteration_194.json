@@ -1,0 +1,63 @@
+{
+  "summary": "Iteration 194: Tested critical missing_required_fields fix. All 13 backend tests passed. The fix correctly: (1) Downgrades missing_required_fields from BLOCKING to WARNING when vendor IS resolved, (2) Checks vendor from multiple sources (vendor_canonical, bc_vendor_number, unified_vendor_match, vendor_resolution), (3) Checks invoice_number from external_document_no, (4) Checks amount from normalized_fields. BOL doc types correctly only require vendor (not invoice_number/amount).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_missing_required_fields_fix_iteration194.py",
+    "/app/test_reports/pytest/missing_required_fields_fix_iteration194_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Lines 157-190 in document_readiness_service.py: Correctly broadened vendor_present check to include vendor_canonical, bc_vendor_number, vendor_resolution.vendor_no, and unified_vendor_match.bc_vendor_no",
+    "Lines 168-174: Correctly broadened invoice_present check to include normalized_fields.invoice_number, normalized_fields.reference_number, and external_document_no",
+    "Lines 177-181: Correctly broadened amount check to include normalized_fields for amount, invoice_amount, total_amount",
+    "Lines 184-190: Correctly relaxed requirements for non-invoice doc types (BOL, shipping) - only vendor required",
+    "Lines 299-307: Correctly downgraded missing_required_fields from blocking to warning when vendor IS resolved",
+    "Lines 59-62 in ap_auto_post_service.py: Correctly broadened field lookup for invoice_no (+ external_document_no), amount (+ nf.total_amount), vendor_raw (+ vendor_canonical)"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_missing_required_fields_fix_iteration194.py"
+  ],
+  "success_rate": {
+    "backend": "100% (13/13 tests passed)",
+    "frontend": "N/A (backend only testing)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "None - used mock documents for direct function testing",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 194 verified the missing_required_fields fix. Key findings: (1) evaluate_readiness correctly returns ready_auto_draft for AP_Invoice with bc_vendor_number='TUMALOC' but missing invoice_number/amount in extracted_fields - missing_required_fields is WARNING not BLOCKING. (2) Documents with NO vendor anywhere correctly get blocked. (3) BOL doc_type with vendor but no amount/inv# correctly gets ready_auto_draft. (4) check_ap_ready_to_post correctly finds vendor from vendor_canonical when ef.vendor is empty. (5) check_ap_ready_to_post correctly finds invoice_no from external_document_no. (6) API endpoints /api/readiness/metrics, /api/readiness/automation-rate, and POST /api/readiness/reevaluate-all all work correctly.",
+  "tested_features": {
+    "evaluate_readiness_scenarios": [
+      "AP_Invoice with bc_vendor_number but missing fields → ready_auto_draft with WARNING - PASS",
+      "Document with NO vendor anywhere → blocked - PASS",
+      "BOL doc_type with vendor but no amount/inv# → ready_auto_draft - PASS",
+      "Vendor resolved via vendor_canonical only → vendor_resolved=True - PASS",
+      "Vendor resolved via unified_vendor_match → ready_auto_draft - PASS"
+    ],
+    "check_ap_ready_to_post_scenarios": [
+      "vendor_canonical set but ef.vendor empty → NOT fail on 'Missing vendor name' - PASS",
+      "external_document_no set → NOT fail on 'Missing invoice number' - PASS",
+      "normalized_fields.total_amount set → NOT fail on 'Missing amount' - PASS"
+    ],
+    "api_endpoints": [
+      "GET /api/readiness/metrics - PASS",
+      "GET /api/readiness/automation-rate - PASS",
+      "POST /api/readiness/reevaluate-all - PASS"
+    ],
+    "warning_vs_blocking_behavior": [
+      "missing_required_fields is WARNING when vendor resolved - PASS",
+      "missing_required_fields is BLOCKING when vendor not resolved - PASS"
+    ]
+  },
+  "data_verification": {
+    "key_fix_verified": "When vendor IS resolved (bc_vendor_number exists) but other fields are missing, the doc gets 'ready_auto_draft' status instead of 'blocked'. missing_required_fields appears in warning_reasons, not blocking_reasons."
+  }
+}

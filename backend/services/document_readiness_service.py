@@ -154,11 +154,41 @@ def compute_signals(doc: Dict[str, Any]) -> Dict[str, bool]:
         )
         line_items_confident = valid_items >= len(line_items) * 0.5
 
-    # Required fields: vendor, invoice_number, amount
-    required = ["vendor", "invoice_number"]
+    # Required fields: check broadly — not just extracted_fields
+    # Vendor can come from extraction, resolution, canonical, or BC match
+    vendor_present = bool(
+        extracted.get("vendor")
+        or doc.get("vendor_canonical")
+        or doc.get("bc_vendor_number")
+        or (doc.get("vendor_resolution") or {}).get("vendor_no")
+        or (doc.get("unified_vendor_match") or {}).get("bc_vendor_no")
+    )
+
+    # Invoice number / reference — check multiple sources
+    invoice_present = bool(
+        extracted.get("invoice_number")
+        or extracted.get("reference_number")
+        or (doc.get("normalized_fields") or {}).get("invoice_number")
+        or (doc.get("normalized_fields") or {}).get("reference_number")
+        or doc.get("external_document_no")
+    )
+
+    # Amount — check multiple sources
     amount_fields = ["amount", "invoice_amount", "total_amount"]
     has_amount = any(extracted.get(f) for f in amount_fields)
-    has_required = all(extracted.get(f) for f in required) and has_amount
+    if not has_amount:
+        norm = doc.get("normalized_fields") or {}
+        has_amount = any(norm.get(f) for f in amount_fields)
+
+    # For non-invoice doc types (BOL, shipping, etc.), relax invoice_number + amount requirements
+    doc_type_str = (doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type") or "").lower()
+    is_invoice_type = "invoice" in doc_type_str or "ap" in doc_type_str or "credit" in doc_type_str
+    if not is_invoice_type:
+        # BOLs, shipping docs, etc. — only require vendor
+        has_required = vendor_present
+    else:
+        has_required = vendor_present and invoice_present and has_amount
+
     required_fields_complete = has_required
 
     # Policy signals
@@ -256,17 +286,25 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
         reviewer_actions.append("Verify this is not a duplicate")
 
     if not signals["required_fields_complete"]:
-        blocking.append("missing_required_fields")
         missing = []
         extracted = doc.get("extracted_fields") or {}
-        if not extracted.get("vendor"):
+        if not (extracted.get("vendor") or doc.get("vendor_canonical") or doc.get("bc_vendor_number")):
             missing.append("vendor")
-        if not extracted.get("invoice_number"):
+        if not (extracted.get("invoice_number") or (doc.get("normalized_fields") or {}).get("invoice_number") or doc.get("external_document_no")):
             missing.append("invoice_number")
         if not any(extracted.get(f) for f in ["amount", "invoice_amount", "total_amount"]):
-            missing.append("amount")
-        explanations.append(f"Missing required fields: {', '.join(missing)}")
-        reviewer_actions.append(f"Provide missing fields: {', '.join(missing)}")
+            if not any((doc.get("normalized_fields") or {}).get(f) for f in ["amount", "invoice_amount", "total_amount"]):
+                missing.append("amount")
+
+        # If vendor IS resolved, downgrade from blocking to warning
+        # The document can still be auto-drafted using the posting template
+        if signals["vendor_resolved"] and ("vendor" not in missing):
+            warnings.append("missing_required_fields")
+            explanations.append(f"Missing fields ({', '.join(missing)}) — but vendor resolved, can attempt auto-draft")
+        else:
+            blocking.append("missing_required_fields")
+            explanations.append(f"Missing required fields: {', '.join(missing)}")
+            reviewer_actions.append(f"Provide missing fields: {', '.join(missing)}")
 
     if not signals["vendor_resolved"]:
         blocking.append("vendor_unresolved")
@@ -316,8 +354,9 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
     critical_warnings = [w for w in warnings if w in CRITICAL_WARNINGS]
     informational_warnings = [w for w in warnings if w not in CRITICAL_WARNINGS]
 
-    # Core readiness: vendor resolved + required fields complete
-    core_ready = signals["vendor_resolved"] and signals["required_fields_complete"]
+    # Core readiness: vendor resolved is the primary gate. Fields complete is ideal but
+    # not strictly required when vendor is resolved (template-driven drafting can work)
+    core_ready = signals["vendor_resolved"]
 
     if blocking:
         status = STATUS_BLOCKED

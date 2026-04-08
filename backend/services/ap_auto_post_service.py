@@ -56,10 +56,10 @@ def check_ap_ready_to_post(doc: dict, vendor_profile: dict = None, source: str =
         failures.append("Not classified as AP_Invoice")
 
     # 2. Required fields extracted
-    invoice_no = ef.get("invoice_number") or nf.get("invoice_number") or doc.get("invoice_number_clean") or ""
-    amount = ef.get("amount") or nf.get("amount") or doc.get("amount_float")
-    invoice_date = ef.get("invoice_date") or nf.get("invoice_date") or ""
-    vendor_raw = ef.get("vendor") or nf.get("vendor") or ""
+    invoice_no = ef.get("invoice_number") or nf.get("invoice_number") or doc.get("invoice_number_clean") or doc.get("external_document_no") or ""
+    amount = ef.get("amount") or nf.get("amount") or doc.get("amount_float") or ef.get("invoice_amount") or ef.get("total_amount") or nf.get("total_amount") or ""
+    invoice_date = ef.get("invoice_date") or nf.get("invoice_date") or doc.get("document_date") or ""
+    vendor_raw = ef.get("vendor") or nf.get("vendor") or doc.get("vendor_canonical") or ""
 
     if not invoice_no:
         failures.append("Missing invoice number")

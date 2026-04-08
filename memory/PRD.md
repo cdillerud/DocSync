@@ -11,96 +11,76 @@ Enterprise document processing hub for AP/Sales workflows with Dynamics 365 BC i
 
 ## What's Been Implemented
 
-### Phases 1-15d — See previous sessions
-
-### Phase 16 — Vendor Profile Consolidation Engine (Apr 7, 2026)
-
-**Problem**: Vendor Intelligence page showed 96 profiles with massive fragmentation:
-- TUMALOC appeared as 4 profiles: "Tumalo Creek Transportation" (222), "TUMALO CREEK Transportation" (129), "TUMALOC" (43), "TUMALO CREEK TRANSPORTATION" (26)
-- "Gamer Packaging Inc" vs "Gamer Packaging, Inc." — trailing period
-- "Valley Distributing and Storage Company" vs "Valley Distributing & Storage Co." — abbreviation
-- 0 Stable Vendors despite 420+ TUMALOC docs across variants
-
-**Solution**: Three-pass vendor consolidation engine in `vendor_profile_rebuild.py`:
-
-1. **Pass 1: BC Vendor Number Grouping** — Group documents by `bc_vendor_number` first (the canonical identity). Uses 5 lookup sources:
-   - Direct `bc_vendor_number` field on document
-   - `unified_vendor_match.bc_vendor_no`
-   - `vendor_resolution.vendor_no`
-   - Vendor alias DB lookup (1,004 aliases)
-   - BC reference cache name-to-number mapping
-
-2. **Pass 2: Normalized Name Grouping** — Remaining docs (no BC match) grouped by normalized name
-
-3. **Pass 3: Alias-Based Merging** — Name-grouped profiles merged into BC-number groups when aliases or BC cache connect them
-
-**Additional changes:**
-- `VendorIntelligenceService.update_from_document()` now checks `bc_vendor_number`, `unified_vendor_match`, AND `vendor_resolution` for vendor_no
-- Dry-run endpoint shows consolidation preview with merge report
-- Rebuild endpoint returns consolidation report with merged variant counts
-- Override preservation: looks up by vendor_no OR normalized name
-- Frontend: "Preview Consolidation" button, consolidation report UI with variant badges, top vendors grid
-
-**Files changed:**
-- `/app/backend/routers/vendor_profile_rebuild.py` — Rewritten `_aggregate_vendor_data()` with 3-pass consolidation
-- `/app/backend/services/vendor_intelligence_service.py` — Fixed `update_from_document()` vendor key resolution
-- `/app/frontend/src/pages/VendorIntelligencePage.js` — Added consolidation preview UI
-
-### Phase 16b — Vendor Profile Rebuild Bug Fix (Apr 7, 2026)
-
-**Problem**: Clicking "Rebuild Profiles" in production crashed with "not able to rebuild..." error.
-
-**Root causes fixed:**
-1. No try/except around individual vendor profile inserts
-2. `sv_cfg` queried inside loop
-3. `insert_one` with pre-existing unique index caused DuplicateKeyError
-4. Fallback `vendor_no = display_name` collision risk
-5. No HTTP status checking in frontend `apiPost()` helper
-
-### Phase 16c — Behavioral Fields in Rebuild (Apr 7, 2026)
-
-Enhanced rebuild to compute and store:
-- `typical_reference_domain`, PO/BOL rates, shipment/freight counts, BC match types, domain counts
-
-### Phase 16d — Confidence Calibration Fix: Effective Confidence (Apr 8, 2026)
-
-Introduced `compute_effective_confidence(doc)` that penalizes classification confidence based on extraction completeness.
-
-### Phase 16e — Re-process NoneType Crash Fix (Apr 8, 2026)
-
-Fixed `match_vendor_unified()` returning `None` crash in bc_validation_service.py and server.py.
-
-### Phase 16f — Auto-Act on Ready Docs + Extended Re-evaluation (Apr 8, 2026)
-
-Added auto-act logic: when re-evaluation promotes a doc to "ready" AND no BC PI exists → auto-triggers `attempt_ap_auto_post()`. Increased batch limit 500→5000, prioritizes policy-held docs.
+### Phases 1-16f — See previous sessions
 
 ### Phase 16g — Robust PO Bypass + Vendor Processing Bypass + Batch Alias Resolution (Apr 8, 2026)
 
-**Problem 1**: Documents from vendors with `po_expected=False` (e.g., TUMALOC) still getting stuck with `po_resolved=False` even after vendor profile was updated.
+- Enhanced `evaluate_and_persist()` with direct vendor profile lookup for `po_expected` and `auto_process_bypass`
+- New `PATCH /api/vendor-intelligence/profiles/{vendor_no}/bypass` for NOFACH-style vendors
+- New `POST /api/aliases/vendors/batch-resolve` for SC Warehouses-style batch alias creation
 
-**Fix**: Enhanced `evaluate_and_persist()` to directly lookup vendor profile's `po_expected` flag from `vendor_invoice_profiles` collection. This covers cases where `validation_checks` weren't updated after the vendor profile learned `po_expected=False`. The flag is injected into the doc dict so `compute_signals()` detects it.
+### Phase 16h — Aggressive Auto-Processing: Inbox Reduction Engine (Apr 8, 2026)
 
-**Problem 2**: NOFACH vendor extraction fails 100% of the time, clogging the pipeline.
+**Problem**: Review Queue had 339 items and growing. Re-evaluation of 1733 docs found 151 corrections but posted **0** to BC. The system was learning but not acting. 177/218 vendors stuck at LOW confidence. The readiness engine was too conservative.
 
-**Fix**: Added vendor processing bypass mechanism:
-- `PATCH /api/vendor-intelligence/profiles/{vendor_no}/bypass` — Flags vendor for auto-processing bypass
-- `GET /api/vendor-intelligence/bypassed-vendors` — Lists all bypassed vendors
-- Readiness evaluator checks `auto_process_bypass` flag and routes to manual review
+**Root causes identified:**
+1. Confidence threshold of 0.80 too high for auto-draft with warnings
+2. ALL warnings treated equally — minor ones (no_line_items, po_missing) blocked auto-processing same as critical ones (vendor_needs_review)
+3. 3+ warnings of ANY type forced "ambiguous" status = mandatory human review
+4. Auto-post in batch re-evaluation only triggered for AP/invoice doc types
+5. Auto-post cap too low (25), no visibility into WHY docs weren't posting
+6. Vendors with proven posting templates (medium/high confidence) not trusted enough
 
-**Problem 3**: SC Warehouses, LLC has 17 stuck documents needing vendor alias mapping.
+**5 Fixes Applied:**
 
-**Fix**: Added batch alias resolution endpoint:
-- `POST /api/aliases/vendors/batch-resolve` — Takes vendor name→vendor_no mappings, creates aliases, and re-validates all affected documents in one call
+**Fix 1: Smart Warning Categorization**
+- Split warnings into CRITICAL and INFORMATIONAL categories:
+  - CRITICAL: `policy_hold`, `customer_unresolved`, `vendor_needs_review`, `amount_anomaly`, `auto_escalation`
+  - INFORMATIONAL: `po_missing`, `no_line_items`, `low_line_item_confidence`
+- Only CRITICAL warnings count toward the "ambiguous" threshold (3+)
+- Informational warnings alone NEVER block auto-draft when vendor is resolved + fields complete
+
+**Fix 2: Lowered Confidence Thresholds**
+- Docs with only informational warnings + core signals green: auto-draft regardless of confidence score
+- Docs with critical warnings: threshold lowered from 0.80 to 0.75
+- Core readiness = vendor_resolved AND required_fields_complete
+
+**Fix 3: Expanded Auto-Post in Batch Re-evaluation**
+- Removed doc_type restriction (was AP/invoice only, now all non-sales types)
+- Increased cap from 25 to 50 auto-posts per batch
+- Added skip reason tracking (`auto_act_skipped`, `auto_act_skip_reasons`)
+- Added `document_type` to projection for better type detection
+
+**Fix 4: Posting Template Trust**
+- In `evaluate_and_persist`, looks up vendor's posting pattern analysis
+- If template confidence is medium+ AND invoices_analyzed >= 5 AND vendor resolved + fields complete AND no blockers → automatically upgrades `needs_review` to `ready_auto_draft`
+- Logged as "TEMPLATE TRUST" in explanations
+
+**Fix 5: Frontend: Re-evaluation Results Enhanced**
+- Added "Auto-Posted to BC" counter in results grid
+- Added "Auto-Post Skip Reasons" badge display
+- Toast message now shows skip count
+
+**Expected production impact:**
+- Documents from vendors with resolved vendor + complete fields that were stuck due to po_missing/no_line_items → AUTO-RELEASED
+- Documents from 38 medium-confidence + 3 high-confidence vendor templates → AUTO-DRAFTED more aggressively
+- Re-evaluation should now actually POST ready documents, with visibility into why others are skipped
+- Review Queue 339 should decrease significantly after deploy + re-evaluate
 
 **Files changed:**
-- `/app/backend/services/document_readiness_service.py` — Direct vendor profile lookup in evaluate_and_persist for po_expected and auto_process_bypass
-- `/app/backend/routers/vendor_intelligence.py` — PATCH bypass and GET bypassed-vendors endpoints
-- `/app/backend/routers/aliases.py` — POST batch-resolve endpoint
+- `/app/backend/services/document_readiness_service.py` — All 5 backend fixes
+- `/app/frontend/src/pages/LearningDashboard.js` — Enhanced re-evaluation results display
 
 ## Active Gap Closers: 10
 ## Backfill Steps: 15
 ## Learning Dimensions: 21
-## Validation Gap Status: 41 blocking (96.7% reduction from 1,252)
+
+## Pending Production Steps
+1. Deploy: Save to Github → `git pull && docker compose up -d --build` on Azure VM
+2. For NOFACH: `PATCH /api/vendor-intelligence/profiles/NOFACH/bypass?enabled=true&reason=100%25+extraction+failure`
+3. For SC Warehouses: `POST /api/aliases/vendors/batch-resolve` with correct vendor_no mapping
+4. Re-evaluate: `POST /api/readiness/reevaluate-all`
+5. Monitor Review Queue count — should decrease
 
 ## Upcoming Tasks
 - P1: Rep Overrides management UI

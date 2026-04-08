@@ -1,0 +1,78 @@
+{
+  "summary": "Iteration 193: Tested new Automation Rate dashboard widget. All 9 backend tests passed. Frontend widget renders correctly with circular gauge, bar chart, period selector buttons (7d, 30d, 90d), and top manual vendors list. API endpoint GET /api/readiness/automation-rate returns all required fields (automation_rate, posting_rate, total_documents, auto_processed, manual_review, blocked, bc_posted, distribution, daily_trend, top_manual_vendors, period_days).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "LearningDashboard.js",
+        "issues": ["Console warning: HTML hydration error - <tr> cannot be child of <span> in Recent Events table (line ~1659). This is a minor React hydration warning, not blocking functionality."]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_automation_rate_iteration193.py",
+    "/app/test_reports/pytest/automation_rate_iteration193_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "GET /api/readiness/automation-rate endpoint correctly returns all 11 required fields",
+    "days parameter works correctly for 7, 30, and 90 day periods",
+    "automation_rate calculation: auto_count / total * 100 (includes ready_auto_draft, ready_auto_link, Completed, Posted, and docs with bc_purchase_invoice_no)",
+    "daily_trend aggregation uses readiness.last_evaluated_at for date bucketing",
+    "top_manual_vendors aggregation correctly groups by vendor and counts primary blocking reasons",
+    "Frontend AutomationRateWidget has proper data-testid attributes for testing",
+    "Period selector buttons (7d, 30d, 90d) correctly trigger API refetch with new days parameter",
+    "GET /api/readiness/metrics still works correctly (verified)",
+    "POST /api/readiness/reevaluate-all still works with auto_act tracking fields (verified)"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_automation_rate_iteration193.py"
+  ],
+  "success_rate": {
+    "backend": "100% (9/9 tests passed)",
+    "frontend": "100% (widget renders, buttons work, data displays)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "None - used existing 27 test documents",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 193 verified the new Automation Rate widget. Key findings: (1) GET /api/readiness/automation-rate returns automation_rate=29.6%, total_documents=27, auto_processed=8, manual_review=0, blocked=21, bc_posted=0. (2) Period selector buttons (7d, 30d, 90d) work correctly. (3) Widget displays circular gauge, bar chart for daily trend, and top manual vendors list. (4) Minor console warning about HTML hydration in Recent Events table (tr inside span) - cosmetic only.",
+  "tested_features": {
+    "api_endpoints": [
+      "GET /api/readiness/automation-rate (default 30 days) - PASS",
+      "GET /api/readiness/automation-rate?days=7 - PASS",
+      "GET /api/readiness/automation-rate?days=90 - PASS",
+      "GET /api/readiness/metrics - PASS",
+      "POST /api/readiness/reevaluate-all - PASS"
+    ],
+    "frontend_components": [
+      "AutomationRateWidget renders with data-testid='automation-rate-widget' - PASS",
+      "Period selector 7d button with data-testid='period-7d-btn' - PASS",
+      "Period selector 30d button with data-testid='period-30d-btn' - PASS",
+      "Period selector 90d button with data-testid='period-90d-btn' - PASS",
+      "Circular gauge displays automation rate percentage - PASS",
+      "Bar chart displays daily auto vs manual trend - PASS",
+      "Top Manual Review Vendors list displays - PASS"
+    ]
+  },
+  "data_verification": {
+    "automation_rate_response": {
+      "automation_rate": 29.6,
+      "posting_rate": 0,
+      "total_documents": 27,
+      "auto_processed": 8,
+      "manual_review": 0,
+      "blocked": 21,
+      "bc_posted": 0,
+      "period_days": 30,
+      "distribution": "dict with status counts",
+      "daily_trend": "array with date/auto/manual/blocked/total/rate",
+      "top_manual_vendors": "array with vendor/count/primary_reason"
+    }
+  }
+}

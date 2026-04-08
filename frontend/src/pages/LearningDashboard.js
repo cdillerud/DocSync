@@ -9,6 +9,7 @@ import {
   Eye, Search, BarChart3, GitBranch, Copy, FileText, Users
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid } from 'recharts';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -1286,6 +1287,158 @@ function LearningPulseSection() {
   );
 }
 
+function AutomationRateWidget() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [period, setPeriod] = useState(30);
+
+  const fetchRate = async (days) => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/readiness/automation-rate?days=${days}`);
+      if (res.ok) setData(await res.json());
+    } catch (err) {
+      console.error('Automation rate fetch error:', err);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchRate(period); }, [period]);
+
+  if (loading) return (
+    <Card data-testid="automation-rate-loading">
+      <CardContent className="flex items-center justify-center h-32">
+        <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+      </CardContent>
+    </Card>
+  );
+
+  if (!data) return null;
+
+  const rate = data.automation_rate || 0;
+  const rateColor = rate >= 70 ? 'text-emerald-400' : rate >= 40 ? 'text-amber-400' : 'text-rose-400';
+  const ringColor = rate >= 70 ? 'stroke-emerald-500' : rate >= 40 ? 'stroke-amber-500' : 'stroke-rose-500';
+  const circumference = 2 * Math.PI * 40;
+  const strokeDashoffset = circumference - (rate / 100) * circumference;
+
+  const CustomTooltip = ({ active, payload, label }) => {
+    if (!active || !payload?.length) return null;
+    return (
+      <div className="bg-card border border-border rounded-lg p-2 shadow-lg text-xs">
+        <p className="font-medium mb-1">{label}</p>
+        {payload.map((p, i) => (
+          <p key={i} style={{ color: p.color }}>{p.name}: {p.value}</p>
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <Card data-testid="automation-rate-widget" className="border-border/50">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Gauge className="w-4 h-4 text-emerald-500" />
+            Automation Rate
+          </CardTitle>
+          <div className="flex gap-1">
+            {[7, 30, 90].map(d => (
+              <Button key={d} variant={period === d ? 'secondary' : 'ghost'} size="sm"
+                className="h-6 px-2 text-xs" onClick={() => setPeriod(d)}
+                data-testid={`period-${d}d-btn`}>
+                {d}d
+              </Button>
+            ))}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left: Big Rate Circle + Breakdown */}
+          <div className="flex flex-col items-center gap-3">
+            <div className="relative w-28 h-28">
+              <svg className="w-28 h-28 -rotate-90" viewBox="0 0 100 100">
+                <circle cx="50" cy="50" r="40" fill="none" className="stroke-muted/30" strokeWidth="8" />
+                <circle cx="50" cy="50" r="40" fill="none" className={ringColor}
+                  strokeWidth="8" strokeLinecap="round"
+                  strokeDasharray={circumference} strokeDashoffset={strokeDashoffset}
+                  style={{ transition: 'stroke-dashoffset 0.8s ease' }} />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className={`text-2xl font-bold ${rateColor}`}>{rate}%</span>
+                <span className="text-[10px] text-muted-foreground">Auto Rate</span>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 w-full text-center">
+              <div className="bg-emerald-500/10 rounded p-1.5">
+                <p className="text-lg font-bold text-emerald-400">{data.auto_processed}</p>
+                <p className="text-[10px] text-muted-foreground">Auto-Processed</p>
+              </div>
+              <div className="bg-amber-500/10 rounded p-1.5">
+                <p className="text-lg font-bold text-amber-400">{data.manual_review}</p>
+                <p className="text-[10px] text-muted-foreground">Manual Review</p>
+              </div>
+              <div className="bg-rose-500/10 rounded p-1.5">
+                <p className="text-lg font-bold text-rose-400">{data.blocked}</p>
+                <p className="text-[10px] text-muted-foreground">Blocked</p>
+              </div>
+              <div className="bg-blue-500/10 rounded p-1.5">
+                <p className="text-lg font-bold text-blue-400">{data.bc_posted}</p>
+                <p className="text-[10px] text-muted-foreground">Posted to BC</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Center: Daily Trend Chart */}
+          <div className="lg:col-span-1">
+            <p className="text-xs text-muted-foreground mb-2 font-medium">Daily Auto vs Manual</p>
+            {data.daily_trend?.length > 0 ? (
+              <ResponsiveContainer width="100%" height={180}>
+                <BarChart data={data.daily_trend} barGap={0}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                    tickFormatter={(v) => v?.slice(5) || ''} />
+                  <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} width={30} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Bar dataKey="auto" name="Auto" fill="#10b981" radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="manual" name="Manual" fill="#f59e0b" radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="blocked" name="Blocked" fill="#ef4444" radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-[180px] text-sm text-muted-foreground">
+                No trend data yet — run re-evaluation to generate
+              </div>
+            )}
+          </div>
+
+          {/* Right: Top Manual Vendors */}
+          <div>
+            <p className="text-xs text-muted-foreground mb-2 font-medium">Top Manual Review Vendors</p>
+            {data.top_manual_vendors?.length > 0 ? (
+              <div className="space-y-1 max-h-[200px] overflow-y-auto">
+                {data.top_manual_vendors.map((v, i) => (
+                  <div key={i} className="flex items-center justify-between p-1.5 rounded bg-muted/30 text-xs">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono font-medium truncate max-w-[120px]">{v.vendor}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="text-[10px] h-4 px-1">{v.primary_reason}</Badge>
+                      <span className="font-bold text-amber-400 min-w-[20px] text-right">{v.count}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No manual review items</p>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function LearningDashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1347,6 +1500,9 @@ export default function LearningDashboard() {
         <StatCard title="Auto-Drafted PIs" value={s.total_auto_drafted} icon={Zap}
                   subtitle="Template-driven" color="text-emerald-500" />
       </div>
+
+      {/* Automation Rate Widget */}
+      <AutomationRateWidget />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Template Confidence Breakdown */}

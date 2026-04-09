@@ -11,7 +11,8 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 5. Executive Monitoring Dashboard (`/monitor`)
 6. Vendor Profile Consolidation
 7. Exception and Retry mechanisms
-8. **Inbox Metrics Panel** — Detailed breakdown of docs IN the inbox by Status, Type, Age, Vendor, Blocker
+8. Inbox Metrics Panel — Detailed breakdown of docs IN the inbox by Status, Type, Age, Vendor, Blocker
+9. Captured Doc Auto-Retry — Docs stuck in "captured" get 4 retries then escalate to Exception Queue
 
 ## Architecture
 - **Frontend**: React (Vite) with Shadcn UI, dark theme
@@ -21,12 +22,12 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 
 ## Key File References
 - `/app/backend/routers/dashboard.py` — inbox-stats, inbox-metrics, insights endpoints
-- `/app/backend/routers/readiness.py` — Force cleanup, Exception retry, PO park/retry
+- `/app/backend/routers/readiness.py` — Force cleanup, Exception retry, PO park/retry, Captured retry
 - `/app/backend/routers/documents.py` — Queue endpoints, TERMINAL_STATUSES
 - `/app/backend/routers/aliases.py` — Vendor matching & alias suggestions
 - `/app/backend/routers/workflow_fix.py` — Batch-fix stuck "captured" docs
-- `/app/backend/server.py` — Main server, background schedulers, intake pipeline
-- `/app/frontend/src/pages/UnifiedQueuePage.js` — Inbox with metrics panel, tabs
+- `/app/backend/server.py` — Main server, background schedulers (PO retry, Captured retry), intake pipeline
+- `/app/frontend/src/pages/UnifiedQueuePage.js` — Inbox with metrics panel, retry-stuck button, tabs
 - `/app/frontend/src/pages/MonitoringDashboard.js` — Vendor mapping UI
 
 ## Completed Features
@@ -37,6 +38,15 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - Vendor Matching Gap Closer (variants, manual BC search, dismiss)
 - PO Auto-Retry Queue (park, 4h retry, 3d escalation, UI tab)
 - **Inbox Metrics Panel** — `GET /api/dashboard/inbox-metrics` with 5 breakdowns (Status, Type, Age, Vendor, Blocker) + collapsible UI (2026-04-09)
+- **Captured Doc Auto-Retry** — Background scheduler (every 5 min, detects >5 min stuck docs, reprocesses w/ reclassify, max 4 retries → Exception Queue) + manual `POST /api/readiness/retry-captured` + "Retry Stuck" UI button (2026-04-09)
+
+## Key API Endpoints
+- `POST /api/readiness/sync-status` — Force cleanup engine
+- `POST /api/readiness/retry-failed` — Batch retry extraction-failed docs
+- `POST /api/readiness/retry-captured` — Retry stuck captured docs (4 max → exception)
+- `POST /api/readiness/po-pending/park` / `POST /api/readiness/po-pending/retry`
+- `GET /api/dashboard/inbox-stats` / `GET /api/dashboard/inbox-metrics`
+- `GET /api/aliases/vendors/unmatched-gaps` / `GET /api/aliases/vendors/search`
 
 ## Upcoming Tasks
 - P1: Rep Overrides Management UI

@@ -7626,6 +7626,136 @@ async def startup():
     PO_MAX_WAIT_DAYS = 3
     PO_MAX_RETRIES = PO_MAX_WAIT_DAYS * 24 // PO_RETRY_INTERVAL_HOURS  # = 18
 
+    # === Captured Doc Auto-Retry (every 5 minutes) ===
+    CAPTURED_RETRY_INTERVAL_SECONDS = 300   # 5 min
+    CAPTURED_STALE_THRESHOLD_SECONDS = 300  # Docs stuck >5 min
+    CAPTURED_MAX_RETRIES = 4
+
+    async def _captured_retry_scheduler():
+        await asyncio.sleep(180)  # Initial delay: 3 minutes after startup
+        while True:
+            try:
+                logger.info("[CapturedRetry] Starting captured-doc retry cycle...")
+                from datetime import datetime, timezone, timedelta
+                now = datetime.now(timezone.utc)
+                now_iso = now.isoformat()
+                cutoff = (now - timedelta(seconds=CAPTURED_STALE_THRESHOLD_SECONDS)).isoformat()
+
+                # Find docs stuck in "captured" workflow_status for > threshold
+                stuck_docs = await db.hub_documents.find(
+                    {
+                        "workflow_status": {"$in": ["captured", "Captured"]},
+                        "status": {"$nin": ["Completed", "Posted", "Archived", "Exception",
+                                            "exception", "batch_parent", "FileMissing"]},
+                        "created_utc": {"$lt": cutoff},
+                        "captured_retry_escalated": {"$ne": True},
+                    },
+                    {"_id": 0, "id": 1, "file_name": 1, "captured_retry_count": 1},
+                ).limit(50).to_list(50)
+
+                if not stuck_docs:
+                    logger.info("[CapturedRetry] No stuck captured docs found.")
+                else:
+                    retried = 0
+                    escalated = 0
+                    failed = 0
+
+                    for doc in stuck_docs:
+                        doc_id = doc["id"]
+                        retry_count = doc.get("captured_retry_count", 0) + 1
+
+                        if retry_count > CAPTURED_MAX_RETRIES:
+                            # Escalate to Exception Queue
+                            await db.hub_documents.update_one(
+                                {"id": doc_id},
+                                {"$set": {
+                                    "status": "Exception",
+                                    "workflow_status": "exception_review",
+                                    "auto_cleared": True,
+                                    "auto_escalated": True,
+                                    "captured_retry_escalated": True,
+                                    "captured_retry_count": retry_count,
+                                    "escalation_reason": f"Stuck in captured after {retry_count - 1} retries",
+                                    "updated_utc": now_iso,
+                                },
+                                "$push": {"workflow_history": {
+                                    "timestamp": now_iso,
+                                    "from_status": "captured",
+                                    "to_status": "exception_review",
+                                    "event": "captured_retry_escalation",
+                                    "actor": "system",
+                                    "reason": f"Max retries ({CAPTURED_MAX_RETRIES}) reached",
+                                }}},
+                            )
+                            escalated += 1
+                            logger.info("[CapturedRetry] Escalated doc %s to Exception Queue (retries=%d)", doc_id[:8], retry_count - 1)
+                            continue
+
+                        # Attempt reprocess
+                        try:
+                            full_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+                            if not full_doc:
+                                continue
+
+                            result = await _reprocess_document_inner(doc_id, full_doc, reclassify=True)
+                            reprocessed = result.get("reprocessed", False) if isinstance(result, dict) else False
+
+                            # Update retry tracking
+                            update_set = {
+                                "captured_retry_count": retry_count,
+                                "captured_last_retry_utc": now_iso,
+                                "updated_utc": now_iso,
+                            }
+
+                            # Check if the doc moved out of "captured"
+                            refreshed = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "workflow_status": 1, "status": 1})
+                            ws = (refreshed or {}).get("workflow_status", "captured")
+                            if ws not in ("captured", "Captured"):
+                                # Successfully moved forward
+                                logger.info("[CapturedRetry] Doc %s moved to '%s' after retry %d", doc_id[:8], ws, retry_count)
+                                retried += 1
+                            else:
+                                # Still stuck — just track the retry
+                                logger.info("[CapturedRetry] Doc %s still captured after retry %d/%d", doc_id[:8], retry_count, CAPTURED_MAX_RETRIES)
+                                retried += 1
+
+                            await db.hub_documents.update_one(
+                                {"id": doc_id},
+                                {"$set": update_set,
+                                "$push": {"workflow_history": {
+                                    "timestamp": now_iso,
+                                    "from_status": "captured",
+                                    "to_status": ws,
+                                    "event": "captured_auto_retry",
+                                    "actor": "system",
+                                    "reason": f"Auto-retry attempt {retry_count}/{CAPTURED_MAX_RETRIES}",
+                                }}},
+                            )
+                        except Exception as e:
+                            logger.warning("[CapturedRetry] Error reprocessing doc %s: %s", doc_id[:8], str(e))
+                            # Still track the retry attempt even on error
+                            await db.hub_documents.update_one(
+                                {"id": doc_id},
+                                {"$set": {
+                                    "captured_retry_count": retry_count,
+                                    "captured_last_retry_utc": now_iso,
+                                    "captured_last_retry_error": str(e)[:500],
+                                    "updated_utc": now_iso,
+                                }},
+                            )
+                            failed += 1
+
+                    logger.info(
+                        "[CapturedRetry] Cycle done: %d found, %d retried, %d escalated, %d failed",
+                        len(stuck_docs), retried, escalated, failed,
+                    )
+            except Exception as e:
+                logger.warning("[CapturedRetry] Scheduled cycle failed: %s", e)
+
+            await asyncio.sleep(CAPTURED_RETRY_INTERVAL_SECONDS)
+    asyncio.create_task(_captured_retry_scheduler())
+    logger.info("Captured Doc Auto-Retry scheduler started (interval: %ds, max retries: %d)", CAPTURED_RETRY_INTERVAL_SECONDS, CAPTURED_MAX_RETRIES)
+
     async def _po_retry_scheduler():
         await asyncio.sleep(600)  # Initial delay: 10 minutes
         while True:

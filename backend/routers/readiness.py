@@ -11,6 +11,7 @@ Endpoints:
   GET  /api/readiness/inbox-diagnostic  - Preview what cleanup would do
   GET  /api/readiness/automation-rate   - Automation rate dashboard
   POST /api/readiness/retry-failed      - Batch retry extraction-failed docs
+  POST /api/readiness/retry-captured    - Retry docs stuck in 'captured' status
   GET  /api/readiness/exception-queue   - View exception queue
   POST /api/readiness/po-pending/park   - Park PO-gap docs in retry queue
   POST /api/readiness/po-pending/retry  - Re-evaluate all PO-pending docs
@@ -904,6 +905,106 @@ async def retry_failed_extractions(
             f"Processed {len(failed_docs)} failed docs: "
             f"{retried} retried, {escalated} moved to Exception Queue."
         ),
+    }
+
+
+@router.post("/retry-captured")
+async def retry_captured_docs(
+    limit: int = Query(50, le=200),
+    force_escalate: bool = Query(False, description="Immediately move all stuck captured docs to Exception Queue"),
+):
+    """
+    Manual trigger: retry documents stuck in 'captured' workflow_status.
+    Normal: Re-runs reprocess with reclassify=True, up to 4 retries then Exception Queue.
+    Force: Immediately moves all to Exception Queue.
+    """
+    from deps import get_db
+    from datetime import datetime, timezone
+
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+    MAX_RETRIES = 4
+
+    stuck_docs = await db.hub_documents.find(
+        {
+            "workflow_status": {"$in": ["captured", "Captured"]},
+            "status": {"$nin": ["Completed", "Posted", "Archived", "Exception",
+                                "exception", "batch_parent", "FileMissing"]},
+            "captured_retry_escalated": {"$ne": True},
+        },
+        {"_id": 0, "id": 1, "file_name": 1, "captured_retry_count": 1},
+    ).limit(limit).to_list(limit)
+
+    retried = 0
+    escalated = 0
+    details = []
+
+    for doc in stuck_docs:
+        doc_id = doc["id"]
+        retry_count = doc.get("captured_retry_count", 0) + 1
+
+        if force_escalate or retry_count > MAX_RETRIES:
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    "status": "Exception",
+                    "workflow_status": "exception_review",
+                    "auto_cleared": True,
+                    "auto_escalated": True,
+                    "captured_retry_escalated": True,
+                    "captured_retry_count": retry_count,
+                    "escalation_reason": f"{'Force escalated' if force_escalate else f'Max retries ({MAX_RETRIES}) reached'} — stuck in captured",
+                    "updated_utc": now,
+                },
+                "$push": {"workflow_history": {
+                    "timestamp": now,
+                    "from_status": "captured",
+                    "to_status": "exception_review",
+                    "event": "captured_retry_escalation",
+                    "actor": "manual_trigger",
+                    "reason": f"{'Force escalated' if force_escalate else f'Max retries ({MAX_RETRIES})'} — stuck in captured",
+                }}},
+            )
+            escalated += 1
+            details.append({"doc_id": doc_id[:8], "file": doc.get("file_name", "?"), "action": "exception_queue", "retries": retry_count})
+            continue
+
+        # Attempt reprocess
+        try:
+            from server import _reprocess_document_inner
+            full_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+            if full_doc:
+                await _reprocess_document_inner(doc_id, full_doc, reclassify=True)
+        except Exception as e:
+            import logging
+            logging.getLogger("readiness").warning("[RetryCaptured] Reprocess failed for %s: %s", doc_id[:8], str(e))
+
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {
+                "captured_retry_count": retry_count,
+                "captured_last_retry_utc": now,
+                "updated_utc": now,
+            },
+            "$push": {"workflow_history": {
+                "timestamp": now,
+                "from_status": "captured",
+                "to_status": "captured",
+                "event": "captured_manual_retry",
+                "actor": "manual_trigger",
+                "reason": f"Manual retry attempt {retry_count}/{MAX_RETRIES}",
+            }}},
+        )
+        retried += 1
+        details.append({"doc_id": doc_id[:8], "file": doc.get("file_name", "?"), "action": f"retry_{retry_count}/{MAX_RETRIES}", "retries": retry_count})
+
+    return {
+        "total_found": len(stuck_docs),
+        "retried": retried,
+        "escalated_to_exception": escalated,
+        "max_retries": MAX_RETRIES,
+        "details": details[:30],
+        "message": f"Processed {len(stuck_docs)} stuck captured docs: {retried} retried, {escalated} escalated.",
     }
 
 

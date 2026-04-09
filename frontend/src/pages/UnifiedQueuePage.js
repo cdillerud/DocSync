@@ -334,6 +334,21 @@ export default function UnifiedQueuePage() {
     }
   };
 
+  const handleRetryCaptured = async () => {
+    setBulkProcessing(true);
+    try {
+      const res = await api.post('/readiness/retry-captured');
+      const d = res.data;
+      if (d.total_found === 0) {
+        toast.info('No stuck captured docs found.');
+      } else {
+        toast.success(`${d.retried} retried, ${d.escalated_to_exception} escalated to exceptions.`);
+        fetchDocuments();
+      }
+    } catch (err) { toast.error('Retry captured failed: ' + (err.response?.data?.detail || err.message)); }
+    finally { setBulkProcessing(false); }
+  };
+
   const hasSelections = selectedDocs.size > 0;
 
   // ── Render ──
@@ -377,6 +392,9 @@ export default function UnifiedQueuePage() {
               <div className="w-px h-6 bg-border mx-1" />
             </>
           )}
+          <Button variant="ghost" size="sm" className="h-8 text-xs gap-1" onClick={handleRetryCaptured} disabled={bulkProcessing} data-testid="retry-captured-btn" title="Retry documents stuck in Captured status">
+            <RotateCcw className="w-3.5 h-3.5" /> Retry Stuck
+          </Button>
           <Button variant="ghost" size="sm" className="h-8 text-xs gap-1" onClick={() => { fetchDocuments(); toast.success("Refreshed"); }} data-testid="refresh-btn">
             <RefreshCw className="w-3.5 h-3.5" /> Refresh
           </Button>

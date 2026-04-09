@@ -280,6 +280,77 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     results["rule11_reverted_non_ap"] = r11.modified_count
     logger.info("[ForceCleanup] Rule 11 (reverted non-AP): %d docs", r11.modified_count)
 
+    # ── Rule 12: Junk file types misclassified as AP Invoice ──
+    # .jpg, .png, .xlsx, .xls files are NOT real AP invoices
+    JUNK_EXT_REGEX = r"\.(jpg|jpeg|png|gif|bmp|xlsx|xls|csv|tiff?)$"
+    r12 = await db.hub_documents.update_many(
+        base_and({"file_name": {"$regex": JUNK_EXT_REGEX, "$options": "i"}}),
+        {"$set": {
+            "status": "Completed",
+            "workflow_status": "processed",
+            "auto_cleared": True,
+            "automation_decision": "auto_filed",
+            "force_cleanup_rule": "junk_file_type",
+            "force_cleanup_at": now,
+        }},
+    )
+    results["rule12_junk_files"] = r12.modified_count
+    logger.info("[ForceCleanup] Rule 12 (junk file types): %d docs", r12.modified_count)
+
+    # ── Rule 13: Account Statements misclassified as AP Invoice ──
+    # Files with "statement" or "SOA" in name aren't real invoices
+    STATEMENT_REGEX = r"(?i)(statement|SOA_|account.?statement|remittance.?advice|online.?bill.?pay)"
+    r13 = await db.hub_documents.update_many(
+        base_and({"file_name": {"$regex": STATEMENT_REGEX}}),
+        {"$set": {
+            "status": "Completed",
+            "workflow_status": "processed",
+            "auto_cleared": True,
+            "automation_decision": "auto_filed",
+            "force_cleanup_rule": "statement_not_invoice",
+            "force_cleanup_at": now,
+        }},
+    )
+    results["rule13_statements"] = r13.modified_count
+    logger.info("[ForceCleanup] Rule 13 (statements): %d docs", r13.modified_count)
+
+    # ── Rule 14: Self-vendor docs (vendor is Gamer Packaging = own company) ──
+    SELF_VENDOR_REGEX = r"(?i)^gamer\s*(packaging|pack)"
+    r14 = await db.hub_documents.update_many(
+        base_and(
+            {"$or": [
+                {"vendor_canonical": {"$regex": SELF_VENDOR_REGEX}},
+                {"extracted_fields.vendor": {"$regex": SELF_VENDOR_REGEX}},
+            ]},
+        ),
+        {"$set": {
+            "status": "Completed",
+            "workflow_status": "processed",
+            "auto_cleared": True,
+            "automation_decision": "auto_filed",
+            "force_cleanup_rule": "self_vendor",
+            "force_cleanup_at": now,
+        }},
+    )
+    results["rule14_self_vendor"] = r14.modified_count
+    logger.info("[ForceCleanup] Rule 14 (self-vendor): %d docs", r14.modified_count)
+
+    # ── Rule 15: W9 / tax forms misclassified as AP Invoice ──
+    W9_REGEX = r"(?i)(w-?9|w9_|tax.?form)"
+    r15 = await db.hub_documents.update_many(
+        base_and({"file_name": {"$regex": W9_REGEX}}),
+        {"$set": {
+            "status": "Completed",
+            "workflow_status": "processed",
+            "auto_cleared": True,
+            "automation_decision": "auto_filed",
+            "force_cleanup_rule": "tax_form",
+            "force_cleanup_at": now,
+        }},
+    )
+    results["rule15_tax_forms"] = r15.modified_count
+    logger.info("[ForceCleanup] Rule 15 (tax forms): %d docs", r15.modified_count)
+
     # ── Count remaining stuck docs ──
     remaining = await db.hub_documents.count_documents({
         "$and": [
@@ -369,6 +440,7 @@ async def inbox_diagnostic():
             },
             "count": {"$sum": 1},
             "sample_vendors": {"$addToSet": {"$ifNull": ["$vendor_canonical", "—"]}},
+            "sample_files": {"$push": {"$ifNull": ["$file_name", "?"]}},
         }},
         {"$sort": {"count": -1}},
     ]
@@ -378,44 +450,64 @@ async def inbox_diagnostic():
                     "statement", "remittance", "unknown", "receipt", "report",
                     "order_confirm", "w9", "w-9", "ar_invoice"}
 
-    # Classify each group by which cleanup rule would catch it
+    import re
+    JUNK_EXT_RE = re.compile(r"\.(jpg|jpeg|png|gif|bmp|xlsx|xls|csv|tiff?)$", re.IGNORECASE)
+    STATEMENT_RE = re.compile(r"(?i)(statement|SOA_|account.?statement|remittance.?advice|online.?bill.?pay)")
+    W9_RE = re.compile(r"(?i)(w-?9|w9_|tax.?form)")
+    SELF_VENDOR_RE = re.compile(r"(?i)^gamer\s*(packaging|pack)")
+
+    # Classify each group
     categories = []
     for b in breakdown:
         k = b["_id"]
         doc_type_lower = (k.get("doc_type") or "").lower()
         is_non_ap = any(t in doc_type_lower for t in NON_AP_TYPES)
+        sample_files = (b.get("sample_files") or [])[:3]
+
+        # Check filename patterns from sample files
+        has_junk_ext = any(JUNK_EXT_RE.search(f) for f in sample_files)
+        has_statement = any(STATEMENT_RE.search(f) for f in sample_files)
+        has_w9 = any(W9_RE.search(f) for f in sample_files)
+        sample_vendors = list(b.get("sample_vendors", []))[:3]
+        is_self_vendor = any(SELF_VENDOR_RE.match(v) for v in sample_vendors if v)
+
         rule = "no_rule_yet"
         if k.get("has_bc_pi"):
-            rule = "Rule 1: Has BC PI → Completed"
+            rule = "Rule 1: Has BC PI"
         elif k.get("draft_approved"):
-            rule = "Rule 2: Draft approved → Completed"
+            rule = "Rule 2: Draft approved"
         elif k.get("has_draft"):
-            rule = "Rule 3: Auto-draft created → Completed"
+            rule = "Rule 3: Auto-draft"
         elif k.get("readiness") in ("ready_auto_draft", "ready_auto_link", "ready"):
-            rule = "Rule 7: Readiness ready → Completed"
+            rule = "Rule 7: Readiness ready"
         elif k.get("vendor_resolved"):
-            rule = "Rule 5: Vendor resolved → Completed"
+            rule = "Rule 5: Vendor resolved"
         elif is_non_ap and k.get("has_vendor"):
-            rule = "Rule 8: Non-AP + vendor → auto-filed"
+            rule = "Rule 8: Non-AP + vendor"
         elif is_non_ap:
-            rule = "Rule 9: Non-AP → auto-filed"
+            rule = "Rule 9: Non-AP"
+        elif has_junk_ext:
+            rule = "Rule 12: Junk file type"
+        elif has_statement:
+            rule = "Rule 13: Statement/SOA"
+        elif is_self_vendor:
+            rule = "Rule 14: Self-vendor"
+        elif has_w9:
+            rule = "Rule 15: Tax form"
         elif k.get("auto_post_attempted") and k.get("has_vendor"):
-            rule = "Rule 10: Auto-post attempted + vendor → Completed"
+            rule = "Rule 10: Auto-post attempted"
         else:
             rule = "Needs manual review"
-
-        sample = list(b.get("sample_vendors", []))[:3]
 
         categories.append({
             "status": k.get("status"),
             "readiness_status": k.get("readiness"),
             "doc_type": k.get("doc_type"),
-            "has_bc_pi": k.get("has_bc_pi"),
             "has_vendor": k.get("has_vendor"),
-            "vendor_resolved": k.get("vendor_resolved"),
             "count": b["count"],
             "cleanup_rule": rule,
-            "sample_vendors": sample,
+            "sample_vendors": sample_vendors,
+            "sample_files": sample_files,
         })
 
     # Estimate cleanup impact

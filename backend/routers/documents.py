@@ -269,8 +269,10 @@ async def list_documents(
 
     TERMINAL_STATUSES = ["Completed", "Posted", "Archived", "completed", "posted", "archived",
                          "FileMissing", "batch_parent", "Validated", "validated", "ValidationPassed",
-                         "ReadyForPost", "ready_for_post", "AutoFiled", "auto_filed", "LinkedToBC"]
-    DONE_WORKFLOW_STATUSES = ["completed", "validation_passed", "processed", "ready_for_approval", "exported", "file_missing"]
+                         "ReadyForPost", "ready_for_post", "AutoFiled", "auto_filed", "LinkedToBC",
+                         "Exception", "exception"]
+    DONE_WORKFLOW_STATUSES = ["completed", "validation_passed", "processed", "ready_for_approval",
+                              "exported", "file_missing", "exception_review"]
     if queue_view and not include_cleared and not status:
         not_cleared = {"$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}]}
         not_terminal = {"status": {"$nin": TERMINAL_STATUSES}}

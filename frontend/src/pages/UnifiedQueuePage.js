@@ -77,8 +77,8 @@ const SALES_TYPES = ["Sales_Order", "SALES_ORDER", "Sales_PO", "Sales_Quote", "O
 // Terminal statuses — docs that are "done"
 const TERMINAL_STATUSES = ["Completed", "Posted", "Archived", "completed", "posted", "archived",
   "exported", "auto_filed", "AutoFiled", "Validated", "validated", "ValidationPassed",
-  "ReadyForPost", "ready_for_post", "LinkedToBC"];
-const DONE_WORKFLOW_STATUSES = ["completed", "exported", "validation_passed", "processed"];
+  "ReadyForPost", "ready_for_post", "LinkedToBC", "Exception", "exception"];
+const DONE_WORKFLOW_STATUSES = ["completed", "exported", "validation_passed", "processed", "exception_review"];
 
 function isTerminal(doc) {
   const s = (doc.status || "").toLowerCase();
@@ -97,7 +97,7 @@ export default function UnifiedQueuePage() {
   const [activeTab, setActiveTab] = useState("all");
   const [selectedDocs, setSelectedDocs] = useState(new Set());
   const [bulkProcessing, setBulkProcessing] = useState(false);
-  const [counts, setCounts] = useState({ all: 0, accounting: 0, sales: 0, processed: 0, batches: 0 });
+  const [counts, setCounts] = useState({ all: 0, accounting: 0, sales: 0, processed: 0, batches: 0, exceptions: 0 });
   const [stats, setStats] = useState(null);
   const [reprocessing, setReprocessing] = useState(null);
 
@@ -121,9 +121,19 @@ export default function UnifiedQueuePage() {
     try {
       const isProcessedTab = activeTab === "processed";
       const isBatchesTab = activeTab === "batches";
+      const isExceptionsTab = activeTab === "exceptions";
       const params = new URLSearchParams();
       if (searchQuery) params.append("search", searchQuery);
       params.append("limit", "500");
+
+      if (isExceptionsTab) {
+        // Fetch exception queue from dedicated endpoint
+        const exRes = await api.get(`/readiness/exception-queue?limit=500`);
+        setDocuments(exRes.data.documents || []);
+        setSelectedDocs(new Set());
+        setLoading(false);
+        return;
+      }
 
       if (isProcessedTab || isBatchesTab) {
         // Show all docs, then filter client-side
@@ -160,12 +170,19 @@ export default function UnifiedQueuePage() {
         const apCount = activeDocs.filter(d => AP_TYPES.includes(d.document_type || d.doc_type)).length;
         const salesCount = activeDocs.filter(d => SALES_TYPES.includes(d.document_type || d.doc_type)).length;
         const processedCount = response.data.counts?.completed || 0;
-        // Fetch batch count separately
+        // Fetch batch count and exception count
         try {
-          const batchRes = await api.get('/documents?limit=0&queue_view=false&include_cleared=true&status=batch_parent');
-          setCounts({ all: activeDocs.length, accounting: apCount, sales: salesCount, processed: processedCount, batches: batchRes.data.total || 0 });
+          const [batchRes, exRes] = await Promise.all([
+            api.get('/documents?limit=0&queue_view=false&include_cleared=true&status=batch_parent'),
+            api.get('/readiness/exception-queue?limit=0'),
+          ]);
+          setCounts({
+            all: activeDocs.length, accounting: apCount, sales: salesCount,
+            processed: processedCount, batches: batchRes.data.total || 0,
+            exceptions: exRes.data.total || 0,
+          });
         } catch {
-          setCounts({ all: activeDocs.length, accounting: apCount, sales: salesCount, processed: processedCount, batches: 0 });
+          setCounts({ all: activeDocs.length, accounting: apCount, sales: salesCount, processed: processedCount, batches: 0, exceptions: 0 });
         }
       }
     } catch (err) {
@@ -394,7 +411,8 @@ export default function UnifiedQueuePage() {
           { key: "sales", label: "Sales", icon: ShoppingCart, count: counts.sales },
           { key: "processed", label: "Processed", icon: CheckCircle2, count: counts.processed },
           { key: "batches", label: "Batches", icon: Layers, count: counts.batches },
-        ].map(({ key, label, icon: Icon, count }) => (
+          { key: "exceptions", label: "Exceptions", icon: AlertTriangle, count: counts.exceptions, accent: true },
+        ].map(({ key, label, icon: Icon, count, accent }) => (
           <button
             key={key}
             onClick={() => setActiveTab(key)}
@@ -409,6 +427,7 @@ export default function UnifiedQueuePage() {
             {label}
             {count > 0 && (
               <span className={`text-[10px] px-1.5 py-0 rounded-full ${
+                accent && count > 0 ? 'bg-red-500/15 text-red-400' :
                 activeTab === key ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'
               }`}>
                 {count}

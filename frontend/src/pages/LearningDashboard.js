@@ -132,6 +132,8 @@ function ReEvaluateSection({ onComplete }) {
   const [approveResult, setApproveResult] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
+  const [retrying, setRetrying] = useState(false);
+  const [retryResult, setRetryResult] = useState(null);
 
   const handleRun = async () => {
     setRunning(true);
@@ -203,6 +205,29 @@ function ReEvaluateSection({ onComplete }) {
     setSyncing(false);
   };
 
+  const handleRetryFailed = async () => {
+    setRetrying(true);
+    try {
+      const res = await fetch(`${API}/api/readiness/retry-failed?force_escalate=true`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        const msg = data.escalated_to_exception > 0
+          ? `${data.escalated_to_exception} docs moved to Exception Queue`
+          : data.retried > 0
+            ? `${data.retried} docs retry count incremented`
+            : 'No failed docs found in inbox';
+        toast.success(msg);
+        setRetryResult(data);
+        if (onComplete) onComplete();
+      } else {
+        toast.error('Retry failed');
+      }
+    } catch {
+      toast.error('Network error');
+    }
+    setRetrying(false);
+  };
+
   return (
     <Card data-testid="reevaluate-section">
       <CardHeader className="pb-2">
@@ -237,6 +262,12 @@ function ReEvaluateSection({ onComplete }) {
             data-testid="sync-status-btn">
             {syncing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Zap className="w-4 h-4 mr-2" />}
             Force Cleanup Inbox
+          </Button>
+          <Button onClick={handleRetryFailed} disabled={running || approving || syncing || retrying}
+            variant="outline" className="border-red-600 text-red-500 hover:bg-red-600/10"
+            data-testid="retry-failed-btn">
+            {retrying ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RotateCcw className="w-4 h-4 mr-2" />}
+            Retry Failed → Exception Queue
           </Button>
         </div>
 
@@ -306,6 +337,30 @@ function ReEvaluateSection({ onComplete }) {
                 <p className="text-[10px] text-muted-foreground">Readiness Ready</p>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Retry Failed → Exception Queue Results */}
+        {retryResult && (
+          <div className="mb-3 space-y-2 bg-muted/30 rounded-lg p-3" data-testid="retry-results">
+            <p className="text-xs font-semibold text-red-400 mb-2">Retry Failed → Exception Queue</p>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="bg-blue-500/10 rounded p-2">
+                <p className="text-xl font-bold text-blue-400">{retryResult.total_found}</p>
+                <p className="text-[10px] text-muted-foreground">Failed Docs Found</p>
+              </div>
+              <div className="bg-amber-500/10 rounded p-2">
+                <p className="text-xl font-bold text-amber-400">{retryResult.retried}</p>
+                <p className="text-[10px] text-muted-foreground">Retried (count +1)</p>
+              </div>
+              <div className="bg-red-500/10 rounded p-2">
+                <p className="text-xl font-bold text-red-400">{retryResult.escalated_to_exception}</p>
+                <p className="text-[10px] text-muted-foreground">→ Exception Queue</p>
+              </div>
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Max retries: {retryResult.max_retries}. Docs exceeding max retries are moved to the Exception Queue (visible in Inbox → Exceptions tab).
+            </p>
           </div>
         )}
 

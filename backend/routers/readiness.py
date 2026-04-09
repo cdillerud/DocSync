@@ -7,9 +7,11 @@ Endpoints:
   POST /api/readiness/evaluate/{id}     - Evaluate single document
   POST /api/readiness/batch             - Batch evaluate documents
   POST /api/readiness/reevaluate-all    - Re-evaluate ALL documents
-  POST /api/readiness/sync-status       - Force cleanup Inbox (7-rule engine)
+  POST /api/readiness/sync-status       - Force cleanup Inbox (15-rule engine)
   GET  /api/readiness/inbox-diagnostic  - Preview what cleanup would do
   GET  /api/readiness/automation-rate   - Automation rate dashboard
+  POST /api/readiness/retry-failed      - Batch retry extraction-failed docs
+  GET  /api/readiness/exception-queue   - View exception queue
 """
 
 from fastapi import APIRouter, HTTPException, Query
@@ -92,9 +94,9 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     TERMINAL = ["Completed", "Posted", "Archived", "completed", "posted",
                 "archived", "FileMissing", "batch_parent", "Validated", "validated",
                 "ValidationPassed", "ReadyForPost", "ready_for_post", "AutoFiled",
-                "auto_filed", "LinkedToBC"]
+                "auto_filed", "LinkedToBC", "Exception", "exception"]
     DONE_WF = ["completed", "validation_passed", "processed",
-               "ready_for_approval", "exported", "file_missing"]
+               "ready_for_approval", "exported", "file_missing", "exception_review"]
 
     # Base conditions (used with $and to avoid $or key collisions)
     not_dup = {"is_duplicate": {"$ne": True}}
@@ -493,9 +495,9 @@ async def inbox_diagnostic():
     TERMINAL = ["Completed", "Posted", "Archived", "completed", "posted",
                 "archived", "FileMissing", "batch_parent", "Validated", "validated",
                 "ValidationPassed", "ReadyForPost", "ready_for_post", "AutoFiled",
-                "auto_filed", "LinkedToBC"]
+                "auto_filed", "LinkedToBC", "Exception", "exception"]
     DONE_WF = ["completed", "validation_passed", "processed",
-               "ready_for_approval", "exported", "file_missing"]
+               "ready_for_approval", "exported", "file_missing", "exception_review"]
 
     # Count all docs in the inbox view
     stuck_filter = {
@@ -761,4 +763,182 @@ async def get_automation_rate(days: int = Query(30, ge=1, le=90)):
         "daily_trend": daily_trend,
         "top_manual_vendors": top_manual_vendors,
         "period_days": days,
+    }
+
+
+@router.post("/retry-failed")
+async def retry_failed_extractions(
+    limit: int = Query(100, le=500),
+    force_escalate: bool = Query(False, description="If true, immediately move all stuck docs to Exception Queue regardless of retry count"),
+):
+    """
+    Batch retry documents with failed extraction (0 fields, no vendor).
+    Normal mode: Increments retry_count on each. After 4 retries, moves to Exception Queue.
+    Force mode (force_escalate=true): Immediately moves ALL stuck docs to Exception Queue.
+    """
+    from deps import get_db
+    from datetime import datetime, timezone
+    from services.square9_workflow import DEFAULT_WORKFLOW_CONFIG
+
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+    max_retries = DEFAULT_WORKFLOW_CONFIG["max_retry_attempts"]
+
+    TERMINAL = ["Completed", "Posted", "Archived", "completed", "posted",
+                "archived", "FileMissing", "batch_parent", "Validated", "validated",
+                "ValidationPassed", "ReadyForPost", "AutoFiled", "LinkedToBC",
+                "Exception", "exception"]
+
+    # Find docs stuck in inbox with extraction problems
+    failed_docs = await db.hub_documents.find(
+        {
+            "is_duplicate": {"$ne": True},
+            "status": {"$nin": TERMINAL},
+            "$or": [
+                {"auto_cleared": {"$ne": True}},
+                {"auto_cleared": {"$exists": False}},
+            ],
+            # Extraction failure indicators
+            "$and": [
+                {"$or": [
+                    {"readiness.signals.vendor_resolved": {"$ne": True}},
+                    {"readiness.signals.required_fields_complete": {"$ne": True}},
+                    {"readiness.status": {"$in": ["blocked", "needs_review"]}},
+                    {"readiness": {"$exists": False}},
+                ]},
+            ],
+        },
+        {"_id": 0, "id": 1, "file_name": 1, "retry_count": 1, "max_retries": 1,
+         "vendor_canonical": 1, "readiness.status": 1, "status": 1},
+    ).limit(limit).to_list(limit)
+
+    retried = 0
+    escalated = 0
+    already_maxed = 0
+    retry_details = []
+
+    for doc in failed_docs:
+        doc_id = doc["id"]
+        current_retries = doc.get("retry_count", 0)
+        doc_max = doc.get("max_retries", max_retries)
+
+        if force_escalate or current_retries >= doc_max:
+            # Force escalate or already at max — move to Exception Queue
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    "status": "Exception",
+                    "workflow_status": "exception_review",
+                    "auto_cleared": True,
+                    "auto_escalated": True,
+                    "retry_count": max(current_retries, doc_max),
+                    "escalation_reason": f"{'Force escalated' if force_escalate else f'Max retries ({doc_max}) reached'} — extraction failed",
+                    "force_cleanup_rule": "max_retries_exception",
+                    "updated_utc": now,
+                }},
+            )
+            escalated += 1
+            retry_details.append({
+                "doc_id": doc_id[:8],
+                "file": doc.get("file_name", "?"),
+                "action": "exception_queue",
+                "retries": current_retries,
+            })
+            continue
+
+        # Increment retry count
+        new_count = current_retries + 1
+        retry_entry = {
+            "attempt": new_count,
+            "timestamp": now,
+            "reason": "batch_retry_failed_extraction",
+            "stage": "extraction_retry",
+        }
+
+        update = {
+            "retry_count": new_count,
+            "last_retry_utc": now,
+            "last_retry_reason": "batch_retry_failed_extraction",
+            "updated_utc": now,
+        }
+
+        # If this puts us at max, escalate to Exception
+        if new_count >= doc_max:
+            update["status"] = "Exception"
+            update["workflow_status"] = "exception_review"
+            update["auto_cleared"] = True
+            update["auto_escalated"] = True
+            update["escalation_reason"] = f"Max retries ({doc_max}) reached — extraction failed"
+            escalated += 1
+            action = "exception_queue"
+        else:
+            retried += 1
+            action = f"retry_{new_count}/{doc_max}"
+
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {
+                "$set": update,
+                "$push": {"retry_history": retry_entry},
+            },
+        )
+
+        retry_details.append({
+            "doc_id": doc_id[:8],
+            "file": doc.get("file_name", "?"),
+            "action": action,
+            "retries": new_count,
+        })
+
+    return {
+        "total_found": len(failed_docs),
+        "retried": retried,
+        "escalated_to_exception": escalated,
+        "already_maxed": already_maxed,
+        "max_retries": max_retries,
+        "details": retry_details[:30],
+        "message": (
+            f"Processed {len(failed_docs)} failed docs: "
+            f"{retried} retried, {escalated} moved to Exception Queue."
+        ),
+    }
+
+
+@router.get("/exception-queue")
+async def get_exception_queue(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """
+    Returns documents in the Exception Queue — docs that failed extraction
+    after max retries and need human review / manual intervention.
+    """
+    from deps import get_db
+    db = get_db()
+
+    query = {
+        "$or": [
+            {"status": {"$in": ["Exception", "exception"]}},
+            {"workflow_status": "exception_review"},
+            {"auto_escalated": True},
+        ],
+        "is_duplicate": {"$ne": True},
+    }
+
+    total = await db.hub_documents.count_documents(query)
+    docs = await db.hub_documents.find(
+        query,
+        {
+            "_id": 0, "id": 1, "file_name": 1, "status": 1,
+            "vendor_canonical": 1, "doc_type": 1, "document_type": 1,
+            "retry_count": 1, "max_retries": 1, "escalation_reason": 1,
+            "readiness.status": 1, "readiness.blocking_reasons": 1,
+            "created_utc": 1, "updated_utc": 1,
+            "extracted_fields": 1,
+        },
+    ).sort("updated_utc", -1).skip(skip).limit(limit).to_list(limit)
+
+    return {
+        "total": total,
+        "documents": docs,
     }

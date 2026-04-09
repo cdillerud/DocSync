@@ -1,0 +1,87 @@
+{
+  "summary": "Iteration 198: Tested Exception Queue feature - all 21 backend tests passed. Verified POST /api/readiness/retry-failed (with force_escalate=true/false), GET /api/readiness/exception-queue, and that Exception status is properly excluded from main Inbox queue view.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_exception_queue_iteration198.py",
+    "/app/test_reports/pytest/exception_queue_iteration198_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "readiness.py lines 769-904: POST /api/readiness/retry-failed correctly implements force_escalate parameter - when true, immediately moves docs to Exception Queue; when false, increments retry_count",
+    "readiness.py lines 907-944: GET /api/readiness/exception-queue correctly queries for status in ['Exception', 'exception'], workflow_status='exception_review', or auto_escalated=True",
+    "readiness.py lines 94-98: TERMINAL list in sync-status correctly includes 'Exception' and 'exception'",
+    "readiness.py lines 495-498: TERMINAL list in inbox-diagnostic correctly includes 'Exception' and 'exception'",
+    "documents.py lines 270-273: TERMINAL_STATUSES correctly includes 'Exception' and 'exception' for queue_view filtering",
+    "square9_workflow.py lines 61-64: DEFAULT_WORKFLOW_CONFIG correctly sets auto_escalate_on_max_retries=True instead of auto_delete"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_exception_queue_iteration198.py"
+  ],
+  "success_rate": {
+    "backend": "100% (21/21 tests passed)",
+    "frontend": "N/A (backend only testing)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "None - tested with existing preview environment data",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 198 verified Exception Queue feature. Key findings: (1) POST /api/readiness/retry-failed supports force_escalate query param (boolean) - when true, immediately moves all stuck docs to Exception Queue; when false (default), increments retry_count by 1 and escalates only when retry_count >= max_retries (4). (2) GET /api/readiness/exception-queue returns {total, documents} with pagination via skip/limit. (3) Exception status is correctly excluded from main Inbox queue view (documents endpoint with queue_view=true). (4) TERMINAL_STATUSES in documents.py and TERMINAL in readiness.py both include 'Exception' and 'exception'. Current state: 0 docs in exception queue, 0 docs in inbox, 27 total docs.",
+  "tested_features": {
+    "backend_api_tests": [
+      "POST /api/readiness/retry-failed default mode - PASS",
+      "POST /api/readiness/retry-failed?force_escalate=false - PASS",
+      "POST /api/readiness/retry-failed?force_escalate=true - PASS",
+      "POST /api/readiness/retry-failed response details structure - PASS",
+      "POST /api/readiness/retry-failed max_retries=4 - PASS",
+      "GET /api/readiness/exception-queue basic - PASS",
+      "GET /api/readiness/exception-queue pagination - PASS",
+      "GET /api/readiness/exception-queue document structure - PASS",
+      "GET /api/readiness/exception-queue excludes duplicates - PASS",
+      "POST /api/readiness/sync-status with Exception in TERMINAL - PASS",
+      "POST /api/readiness/sync-status returns all 20 rule counts - PASS",
+      "GET /api/readiness/inbox-diagnostic basic - PASS",
+      "GET /api/readiness/inbox-diagnostic excludes Exception status - PASS",
+      "GET /api/documents?queue_view=true excludes Exception - PASS",
+      "GET /api/documents?queue_view=true counts - PASS",
+      "TERMINAL_STATUSES includes Exception - PASS",
+      "Integration: retry escalation flow - PASS",
+      "Integration: exception docs not in inbox - PASS",
+      "Edge case: retry-failed limit=0 - PASS",
+      "Edge case: exception-queue large skip - PASS",
+      "Edge case: retry-failed idempotency - PASS"
+    ]
+  },
+  "data_verification": {
+    "exception_queue_response": {
+      "total": 0,
+      "documents": [],
+      "note": "No documents have been escalated to exception queue yet"
+    },
+    "retry_failed_response": {
+      "total_found": 0,
+      "retried": 0,
+      "escalated_to_exception": 0,
+      "max_retries": 4,
+      "message": "Processed 0 failed docs: 0 retried, 0 moved to Exception Queue.",
+      "note": "No failed extraction docs found - inbox is clean"
+    },
+    "inbox_queue_view": {
+      "documents_count": 0,
+      "counts": {
+        "total_all": 27,
+        "auto_cleared": 10,
+        "pending_review": 0,
+        "completed": 10
+      },
+      "note": "Inbox is empty - all docs processed or cleared"
+    }
+  }
+}

@@ -60,8 +60,8 @@ class Square9Stage(str, Enum):
 # Default configuration - can be overridden per job type
 DEFAULT_WORKFLOW_CONFIG = {
     "max_retry_attempts": 4,              # Square9 uses 4
-    "auto_delete_on_max_retries": True,   # Square9 behavior: delete after max retries
-    "auto_escalate_on_max_retries": False, # Don't escalate, delete instead (Square9 style)
+    "auto_delete_on_max_retries": False,  # Don't delete — escalate to exception queue
+    "auto_escalate_on_max_retries": True, # Escalate to human review / exception queue
     "retry_delay_minutes": 5,             # Wait before auto-retry
     "required_fields": {
         "AP_INVOICE": ["vendor", "invoice_number", "amount"],
@@ -139,15 +139,18 @@ def increment_retry(
     
     # Check if we've hit max retries
     if new_count >= max_retries:
-        if DEFAULT_WORKFLOW_CONFIG["auto_delete_on_max_retries"]:
-            update["square9_stage"] = Square9Stage.DELETED.value
-            update["workflow_status"] = "deleted"
-            return update, True, f"Max retries ({max_retries}) reached - marked for deletion"
-        elif DEFAULT_WORKFLOW_CONFIG["auto_escalate_on_max_retries"]:
+        if DEFAULT_WORKFLOW_CONFIG["auto_escalate_on_max_retries"]:
             update["square9_stage"] = Square9Stage.MANUAL_REVIEW.value
             update["auto_escalated"] = True
             update["escalation_reason"] = f"Max retries ({max_retries}) reached"
-            return update, True, f"Max retries ({max_retries}) reached - escalated to manual review"
+            update["status"] = "Exception"
+            update["workflow_status"] = "exception_review"
+            update["auto_cleared"] = True
+            return update, True, f"Max retries ({max_retries}) reached - moved to Exception Queue"
+        elif DEFAULT_WORKFLOW_CONFIG["auto_delete_on_max_retries"]:
+            update["square9_stage"] = Square9Stage.DELETED.value
+            update["workflow_status"] = "deleted"
+            return update, True, f"Max retries ({max_retries}) reached - marked for deletion"
     
     update["square9_stage"] = Square9Stage.ERROR_RECOVERY.value
     return update, False, f"Retry {new_count}/{max_retries} - {reason}"

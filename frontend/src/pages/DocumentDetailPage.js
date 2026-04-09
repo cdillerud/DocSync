@@ -33,6 +33,8 @@ import ReviewerAssistPanel from '../components/ReviewerAssistPanel';
 import PipelineVisualization from '../components/PipelineVisualization';
 
 const READINESS_CONFIG = {
+  completed: { label: 'Completed', color: 'bg-emerald-600', textColor: 'text-emerald-500', icon: CheckCircle2 },
+  posted: { label: 'Posted to BC', color: 'bg-emerald-600', textColor: 'text-emerald-500', icon: CheckCircle2 },
   ready_auto_draft: { label: 'Ready (Auto-Draft)', color: 'bg-emerald-500', textColor: 'text-emerald-500', icon: CheckCircle2 },
   ready_auto_link: { label: 'Ready (Auto-Link)', color: 'bg-cyan-500', textColor: 'text-cyan-500', icon: Link },
   needs_review: { label: 'Needs Review', color: 'bg-amber-500', textColor: 'text-amber-500', icon: Eye },
@@ -138,10 +140,22 @@ function ExtractedDataCard({ doc }) {
   );
 }
 
-function ReadinessPanel({ readiness }) {
+function ReadinessPanel({ readiness, docStatus }) {
   if (!readiness) return null;
 
-  const cfg = READINESS_CONFIG[readiness.status] || READINESS_CONFIG.needs_review;
+  // Override readiness display for terminal/completed documents
+  const TERMINAL_STATUSES = new Set([
+    'Completed', 'completed', 'Posted', 'posted', 'AutoPosted', 'PostedToBC',
+    'AutoFiled', 'auto_filed', 'LinkedToBC', 'Validated', 'validated',
+  ]);
+  const POSTED_STATUSES = new Set(['Posted', 'posted', 'AutoPosted', 'PostedToBC']);
+
+  let effectiveStatus = readiness.status;
+  if (TERMINAL_STATUSES.has(docStatus)) {
+    effectiveStatus = POSTED_STATUSES.has(docStatus) ? 'posted' : 'completed';
+  }
+
+  const cfg = READINESS_CONFIG[effectiveStatus] || READINESS_CONFIG[readiness.status] || READINESS_CONFIG.needs_review;
   const StatusIcon = cfg.icon;
   const confidencePct = Math.round((readiness.confidence || 0) * 100);
 
@@ -794,7 +808,7 @@ export default function DocumentDetailPage() {
           })()}
 
           {/* Readiness Panel */}
-          <ReadinessPanel readiness={doc.readiness} />
+          <ReadinessPanel readiness={doc.readiness} docStatus={doc.status} />
 
           {/* Extracted Data Card — consolidates extracted_fields, normalized_fields, and top-level fields */}
           <ExtractedDataCard doc={doc} />

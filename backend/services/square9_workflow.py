@@ -245,7 +245,26 @@ def determine_square9_stage(doc: Dict[str, Any]) -> str:
         "exported": Square9Stage.EXPORTED.value,
         "archived": Square9Stage.EXPORTED.value,
         "failed": Square9Stage.ERROR_RECOVERY.value,
+        # ── Additional statuses ──
+        "completed": Square9Stage.EXPORTED.value,
+        "posted": Square9Stage.EXPORTED.value,
+        "processed": Square9Stage.EXPORTED.value,
+        "auto_filed": Square9Stage.EXPORTED.value,
+        "validation_passed": Square9Stage.VALID.value,
+        "ready_for_post": Square9Stage.READY_FOR_EXPORT.value,
+        "needs_review": Square9Stage.MANUAL_REVIEW.value,
+        "NeedsReview": Square9Stage.MANUAL_REVIEW.value,
+        "exception_review": Square9Stage.MANUAL_REVIEW.value,
+        "po_pending": Square9Stage.MISSING_PO.value,
+        "file_missing": Square9Stage.ERROR_RECOVERY.value,
     }
+    
+    # Also check top-level status for terminal docs
+    doc_status = doc.get("status", "")
+    terminal_exported = {"Completed", "Posted", "AutoPosted", "PostedToBC", "AutoFiled",
+                         "LinkedToBC", "Validated", "ValidationPassed", "ReadyForPost"}
+    if doc_status in terminal_exported and workflow_status not in status_mapping:
+        return Square9Stage.EXPORTED.value
     
     stage = status_mapping.get(workflow_status, Square9Stage.IMPORT.value)
     

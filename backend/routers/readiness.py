@@ -177,13 +177,108 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     logger.info("[ForceCleanup] Rule 6 (ReadyForPost→Completed): %d docs", r6.modified_count)
 
     # ── Rule 7: Readiness says ready (even with blockers) → Completed ──
-    # Catch-all for docs the readiness engine marked as ready but other rules missed
     r7 = await db.hub_documents.update_many(
         base_and({"readiness.status": {"$in": ["ready_auto_draft", "ready_auto_link", "ready"]}}),
         completed_update("readiness_ready_catchall"),
     )
     results["rule7_readiness_catchall"] = r7.modified_count
     logger.info("[ForceCleanup] Rule 7 (readiness ready catchall): %d docs", r7.modified_count)
+
+    # ── Rule 8: Non-AP document types with a known vendor → auto-clear ──
+    # Shipping docs, inventory reports, BOLs, statements, etc. should NOT sit
+    # in the AP review queue. If they have a vendor, they're filed.
+    NON_AP_TYPES_REGEX = "(?i)(shipping|inventory|bol|packing|freight|warehouse|statement|remittance|unknown|receipt|report|order_confirm|w9|w-9)"
+    r8 = await db.hub_documents.update_many(
+        base_and(
+            {"$or": [
+                {"doc_type": {"$regex": NON_AP_TYPES_REGEX}},
+                {"document_type": {"$regex": NON_AP_TYPES_REGEX}},
+                {"suggested_job_type": {"$regex": NON_AP_TYPES_REGEX}},
+            ]},
+            {"$or": [
+                {"vendor_canonical": {"$exists": True, "$nin": [None, "", "—"]}},
+                {"bc_vendor_number": {"$exists": True, "$nin": [None, ""]}},
+            ]},
+        ),
+        {"$set": {
+            "status": "Completed",
+            "workflow_status": "processed",
+            "auto_cleared": True,
+            "automation_decision": "auto_filed",
+            "force_cleanup_rule": "non_ap_with_vendor",
+            "force_cleanup_at": now,
+        }},
+    )
+    results["rule8_non_ap_vendor"] = r8.modified_count
+    logger.info("[ForceCleanup] Rule 8 (non-AP + vendor): %d docs → auto-filed", r8.modified_count)
+
+    # ── Rule 9: Non-AP document types WITHOUT vendor → auto-clear ──
+    # These are supporting docs (BOLs, receipts, etc.) with no vendor.
+    # They're noise in the inbox — file them away.
+    r9 = await db.hub_documents.update_many(
+        base_and(
+            {"$or": [
+                {"doc_type": {"$regex": NON_AP_TYPES_REGEX}},
+                {"document_type": {"$regex": NON_AP_TYPES_REGEX}},
+                {"suggested_job_type": {"$regex": NON_AP_TYPES_REGEX}},
+            ]},
+        ),
+        {"$set": {
+            "status": "Completed",
+            "workflow_status": "processed",
+            "auto_cleared": True,
+            "automation_decision": "auto_filed",
+            "force_cleanup_rule": "non_ap_no_vendor",
+            "force_cleanup_at": now,
+        }},
+    )
+    results["rule9_non_ap_no_vendor"] = r9.modified_count
+    logger.info("[ForceCleanup] Rule 9 (non-AP, no vendor): %d docs → auto-filed", r9.modified_count)
+
+    # ── Rule 10: Any doc with a known vendor that was already auto_post_attempted ──
+    # These were evaluated and the auto-post system already looked at them.
+    # They shouldn't sit in the inbox forever.
+    r10 = await db.hub_documents.update_many(
+        base_and(
+            {"auto_post_attempted": True},
+            {"$or": [
+                {"vendor_canonical": {"$exists": True, "$nin": [None, "", "—"]}},
+                {"bc_vendor_number": {"$exists": True, "$nin": [None, ""]}},
+            ]},
+        ),
+        {"$set": {
+            "status": "Completed",
+            "workflow_status": "processed",
+            "auto_cleared": True,
+            "automation_decision": "auto_process",
+            "force_cleanup_rule": "auto_post_attempted_with_vendor",
+            "force_cleanup_at": now,
+        }},
+    )
+    results["rule10_attempted_vendor"] = r10.modified_count
+    logger.info("[ForceCleanup] Rule 10 (auto-post attempted + vendor): %d docs", r10.modified_count)
+
+    # ── Rule 11: Docs reverted by old auto-post bug (status NeedsReview but had been ready) ──
+    # The old auto-post code reverted non-AP docs to NeedsReview even when readiness said ready.
+    # Look for docs that have auto_post_reason containing "Not classified as AP_Invoice"
+    r11 = await db.hub_documents.update_many(
+        base_and(
+            {"$or": [
+                {"auto_post_failures": {"$elemMatch": {"$regex": "Not classified as AP"}}},
+                {"auto_post_reason": {"$regex": "not an AP|Not classified as AP"}},
+            ]},
+        ),
+        {"$set": {
+            "status": "Completed",
+            "workflow_status": "processed",
+            "auto_cleared": True,
+            "automation_decision": "auto_filed",
+            "force_cleanup_rule": "reverted_non_ap",
+            "force_cleanup_at": now,
+        }},
+    )
+    results["rule11_reverted_non_ap"] = r11.modified_count
+    logger.info("[ForceCleanup] Rule 11 (reverted non-AP): %d docs", r11.modified_count)
 
     # ── Count remaining stuck docs ──
     remaining = await db.hub_documents.count_documents({
@@ -244,13 +339,17 @@ async def inbox_diagnostic():
     }
     total_stuck = await db.hub_documents.count_documents(stuck_filter)
 
-    # Break down by status + readiness
+    # Break down by status + readiness + doc type
     breakdown_pipe = [
         {"$match": stuck_filter},
         {"$group": {
             "_id": {
                 "status": "$status",
                 "readiness": "$readiness.status",
+                "doc_type": {"$ifNull": [
+                    "$doc_type",
+                    {"$ifNull": ["$document_type", {"$ifNull": ["$suggested_job_type", "unknown"]}]}
+                ]},
                 "has_bc_pi": {"$cond": [
                     {"$and": [
                         {"$ifNull": ["$bc_purchase_invoice_no", False]},
@@ -260,17 +359,31 @@ async def inbox_diagnostic():
                 "has_draft": {"$ifNull": ["$auto_draft_created", False]},
                 "draft_approved": {"$eq": ["$draft_review_status", "approved"]},
                 "vendor_resolved": {"$ifNull": ["$readiness.signals.vendor_resolved", False]},
+                "has_vendor": {"$cond": [
+                    {"$or": [
+                        {"$and": [{"$ifNull": ["$vendor_canonical", False]}, {"$ne": ["$vendor_canonical", ""]}, {"$ne": ["$vendor_canonical", "—"]}]},
+                        {"$and": [{"$ifNull": ["$bc_vendor_number", False]}, {"$ne": ["$bc_vendor_number", ""]}]},
+                    ]}, True, False
+                ]},
+                "auto_post_attempted": {"$ifNull": ["$auto_post_attempted", False]},
             },
             "count": {"$sum": 1},
+            "sample_vendors": {"$addToSet": {"$ifNull": ["$vendor_canonical", "—"]}},
         }},
         {"$sort": {"count": -1}},
     ]
-    breakdown = await db.hub_documents.aggregate(breakdown_pipe).to_list(50)
+    breakdown = await db.hub_documents.aggregate(breakdown_pipe).to_list(100)
+
+    NON_AP_TYPES = {"shipping", "inventory", "bol", "packing", "freight", "warehouse",
+                    "statement", "remittance", "unknown", "receipt", "report",
+                    "order_confirm", "w9", "w-9", "ar_invoice"}
 
     # Classify each group by which cleanup rule would catch it
     categories = []
     for b in breakdown:
         k = b["_id"]
+        doc_type_lower = (k.get("doc_type") or "").lower()
+        is_non_ap = any(t in doc_type_lower for t in NON_AP_TYPES)
         rule = "no_rule_yet"
         if k.get("has_bc_pi"):
             rule = "Rule 1: Has BC PI → Completed"
@@ -279,21 +392,30 @@ async def inbox_diagnostic():
         elif k.get("has_draft"):
             rule = "Rule 3: Auto-draft created → Completed"
         elif k.get("readiness") in ("ready_auto_draft", "ready_auto_link", "ready"):
-            rule = "Rule 4: Readiness ready → Completed"
+            rule = "Rule 7: Readiness ready → Completed"
         elif k.get("vendor_resolved"):
-            rule = "Rule 5: Vendor resolved + fields → Completed"
+            rule = "Rule 5: Vendor resolved → Completed"
+        elif is_non_ap and k.get("has_vendor"):
+            rule = "Rule 8: Non-AP + vendor → auto-filed"
+        elif is_non_ap:
+            rule = "Rule 9: Non-AP → auto-filed"
+        elif k.get("auto_post_attempted") and k.get("has_vendor"):
+            rule = "Rule 10: Auto-post attempted + vendor → Completed"
         else:
             rule = "Needs manual review"
+
+        sample = list(b.get("sample_vendors", []))[:3]
 
         categories.append({
             "status": k.get("status"),
             "readiness_status": k.get("readiness"),
+            "doc_type": k.get("doc_type"),
             "has_bc_pi": k.get("has_bc_pi"),
-            "has_draft": k.get("has_draft"),
-            "draft_approved": k.get("draft_approved"),
+            "has_vendor": k.get("has_vendor"),
             "vendor_resolved": k.get("vendor_resolved"),
             "count": b["count"],
             "cleanup_rule": rule,
+            "sample_vendors": sample,
         })
 
     # Estimate cleanup impact

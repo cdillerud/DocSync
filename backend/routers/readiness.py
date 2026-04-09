@@ -1011,7 +1011,7 @@ async def retry_captured_docs(
 @router.get("/exception-queue")
 async def get_exception_queue(
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=500),
 ):
     """
     Returns documents in the Exception Queue — docs that failed extraction
@@ -1261,7 +1261,7 @@ async def retry_po_pending_docs():
 @router.get("/po-pending")
 async def get_po_pending_queue(
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=500),
 ):
     """Returns documents in the PO Pending auto-retry queue."""
     from deps import get_db

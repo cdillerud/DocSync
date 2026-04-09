@@ -158,21 +158,47 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
     ready, reason, failures = check_ap_ready_to_post(doc, vendor_profile=vendor_profile, source=source, posting_profile=posting_profile)
 
     if not ready:
-        # Set to NeedsReview
+        # Only revert status for actual AP documents that failed validation.
+        # Non-AP docs (shipping, inventory, etc.) should NOT be reverted to NeedsReview
+        # just because they aren't AP invoices — that's expected, not a failure.
+        doc_type = doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type") or ""
+        is_ap_type = doc_type.upper().replace(" ", "_") in ("AP_INVOICE", "PURCHASE_INVOICE")
+        not_ap_failure = any("Not classified as AP_Invoice" in f for f in failures)
+
         now = datetime.now(timezone.utc).isoformat()
-        await db.hub_documents.update_one({"id": doc_id}, {"$set": {
-            "status": "NeedsReview",
-            "workflow_status": "needs_review",
-            "auto_cleared": False,
-            "auto_post_attempted": True,
-            "auto_post_reason": reason,
-            "auto_post_failures": failures,
-            "updated_utc": now,
-        }})
+
+        if not_ap_failure:
+            # Non-AP doc — don't touch its status, just record the skip
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+                "auto_post_attempted": True,
+                "auto_post_reason": "Skipped — not an AP invoice type",
+                "updated_utc": now,
+            }})
+            logger.debug("[AP Auto-Post] Skipped non-AP doc %s (type: %s)", doc_id[:8], doc_type)
+            return {"success": True, "posted": False, "reason": "not_ap_type", "status": "skipped"}
+        elif is_ap_type:
+            # Genuine AP doc that failed validation — revert to NeedsReview
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+                "status": "NeedsReview",
+                "workflow_status": "needs_review",
+                "auto_cleared": False,
+                "auto_post_attempted": True,
+                "auto_post_reason": reason,
+                "auto_post_failures": failures,
+                "updated_utc": now,
+            }})
+        else:
+            # Non-AP doc with other failures — don't revert status
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+                "auto_post_attempted": True,
+                "auto_post_reason": reason,
+                "auto_post_failures": failures,
+                "updated_utc": now,
+            }})
 
         # Write event
         await _write_event(db, doc_id, "automation.decision.completed", {
-            "decision": "NeedsReview",
+            "decision": "NeedsReview" if is_ap_type else "skipped",
             "auto_clear": False,
             "auto_post": False,
             "reason": reason,
@@ -180,8 +206,8 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
             "source": source,
         })
 
-        logger.info("[AP Auto-Post] NeedsReview for %s: %s", doc_id[:8], reason)
-        return {"success": True, "posted": False, "reason": reason, "status": "NeedsReview", "failures": failures}
+        logger.info("[AP Auto-Post] %s for %s: %s", "NeedsReview" if is_ap_type else "Skipped", doc_id[:8], reason)
+        return {"success": True, "posted": False, "reason": reason, "status": "NeedsReview" if is_ap_type else "skipped", "failures": failures}
 
     # All conditions met — attempt to post to BC
     import os

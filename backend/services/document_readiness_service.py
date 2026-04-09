@@ -913,9 +913,11 @@ async def batch_reevaluate_all(limit: int = 5000) -> Dict[str, Any]:
             if is_now_ready and not already_posted and results.get("auto_acted", 0) < max_auto_acts:
                 try:
                     doc_type = (d.get("doc_type") or d.get("document_type") or d.get("suggested_job_type") or "").lower()
-                    # Auto-post for any non-sales doc type — don't gate on doc_type too strictly
+                    # Only auto-post for AP-type documents — shipping, inventory, etc.
+                    # should NOT go through the AP auto-post pipeline
+                    is_ap_type = any(t in doc_type for t in ("ap", "invoice", "credit", "purchase"))
                     is_sales_only = "sales" in doc_type and "invoice" not in doc_type
-                    if not is_sales_only:
+                    if is_ap_type and not is_sales_only:
                         from services.ap_auto_post_service import attempt_ap_auto_post
                         ap_result = await attempt_ap_auto_post(doc_id, db, source="reevaluation_auto_act")
                         if ap_result.get("posted") or ap_result.get("created"):

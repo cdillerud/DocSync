@@ -18,41 +18,24 @@ Enterprise document processing hub for AP/Sales workflows with Dynamics 365 BC i
 - Missing Required Fields Fix (blocked 423->110)
 - Auto-Approval Engine (review queue 544->42)
 
-### Phase 16m — Force Cleanup Engine + Queue View Fix (Apr 9)
+### Phase 16m — Force Cleanup Engine + Status Revert Bug Fix (Apr 9)
 
-**Problem**: Inbox showed ~134 active docs, ~119 pending review. Two root causes:
-1. "ReadyForPost" and "Validated" statuses were NOT in TERMINAL_STATUSES, so docs with these statuses stayed in the queue view
-2. `$or` key collision bug in MongoDB queries meant cleanup rules weren't matching correctly
+**Problem 1 — Queue View**: "Validated", "ReadyForPost" etc. were NOT in TERMINAL_STATUSES, keeping them visible in inbox.
+**Fix**: Expanded TERMINAL_STATUSES in both backend queue filter and frontend isTerminal.
 
-**Fixes:**
+**Problem 2 — Status Revert Bug (ROOT CAUSE of 982 skipped docs)**: `attempt_ap_auto_post()` was called on ALL non-sales docs (shipping, inventory, BOLs, etc.) during reevaluation. When these failed the AP check ("Not classified as AP_Invoice"), the function REVERTED their status back to `NeedsReview` + `auto_cleared: false` — undoing any progress made by the readiness engine.
+**Fix**:
+- `attempt_ap_auto_post`: Non-AP docs that fail the type check now get a soft skip (no status revert). Only genuine AP docs that fail validation get reverted to NeedsReview.
+- `batch_reevaluate_all`: Auto-act now only targets AP-type documents (invoice, credit, purchase), skipping shipping/inventory/BOL/unknown docs entirely.
 
-1. **Expanded TERMINAL_STATUSES** in queue view filter (`documents.py`) and frontend `isTerminal`:
-   Added: Validated, ValidationPassed, ReadyForPost, AutoFiled, LinkedToBC
-   Effect: ~15-20 "Validated" docs immediately disappear from inbox on deploy
-
-2. **7-Rule Force Cleanup Engine** (`POST /api/readiness/sync-status`):
-   - Rule 1: Has BC Purchase Invoice -> Completed
-   - Rule 2: Draft approved -> Completed
-   - Rule 3: Auto-draft created -> Completed
-   - Rule 4: Readiness ready + no blockers -> Completed
-   - Rule 5: Vendor resolved + fields complete -> Completed
-   - Rule 6: ReadyForPost (legacy) -> Completed
-   - Rule 7: Readiness ready catchall -> Completed
-   - Uses `$and` query construction to avoid `$or` key collisions
-
-3. **Inbox Diagnostic** (`GET /api/readiness/inbox-diagnostic`):
-   Preview cleanup impact before running
-
-4. **evaluate_and_persist**: Sets terminal `Completed` + `auto_cleared=True` instead of "ReadyForPost"
-
-5. **Frontend**: "Force Cleanup Inbox" button with per-rule results display
+**Problem 3 — Force Cleanup**: 7-rule engine to move ready docs to terminal Completed status.
 
 ## Production Deploy Steps
 1. Save to Github -> `git pull && docker compose up -d --build`
-2. Refresh inbox -> "Validated" docs should already be gone
-3. Click "Re-evaluate All Documents" on AI Learning page
-4. Click "Force Cleanup Inbox" -> moves ready docs to Completed
-5. Refresh inbox -> should see dramatic reduction to only genuinely blocked docs
+2. Refresh inbox -> "Validated" docs should already be gone (TERMINAL_STATUSES fix)
+3. Click "Re-evaluate All Documents" -> no more mass revert to NeedsReview
+4. Click "Force Cleanup Inbox" -> moves remaining ready docs to Completed
+5. Refresh inbox -> should see dramatic reduction
 
 ## Key API Endpoints
 - POST /api/readiness/sync-status - Force cleanup (7-rule engine)

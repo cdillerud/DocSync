@@ -58,7 +58,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://doc-hub-ai.preview.emergentagent.com"
+    "api_url": "https://inbox-cleanup-1.preview.emergentagent.com"
   },
   "seed_data_creation": "Used existing sales-eligible documents (6 total: 5 already_created with BC sales orders, 1 needs_review)",
   "retest_needed": false,

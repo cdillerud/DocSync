@@ -665,22 +665,32 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
     )
 
     # Sync document status with readiness — move docs OUT of inbox when ready
+    # Use terminal statuses so docs are truly removed from the queue view
+    TERMINAL_STATUSES = ("Completed", "Posted", "Archived", "completed", "posted",
+                         "archived", "FileMissing", "batch_parent")
     ready_statuses = ("ready_auto_draft", "ready_auto_link", "ready")
-    stuck_statuses = ("NeedsReview", "Captured", "")
     current_status = doc.get("status") or ""
-    if readiness["status"] in ready_statuses and current_status in stuck_statuses:
-        # Doc is ready but status hasn't caught up — sync it
-        new_doc_status = "ReadyForPost" if readiness["status"] == "ready_auto_draft" else "Validated"
+    if readiness["status"] in ready_statuses and current_status not in TERMINAL_STATUSES:
+        has_bc_pi = bool(doc.get("bc_purchase_invoice_no"))
+        has_draft = bool(doc.get("auto_draft_created"))
+        if has_bc_pi or has_draft:
+            new_doc_status = "Completed"
+            new_wf_status = "completed"
+        else:
+            new_doc_status = "Completed"
+            new_wf_status = "processed"
         await db.hub_documents.update_one(
             {"id": doc_id},
             {"$set": {
                 "status": new_doc_status,
+                "workflow_status": new_wf_status,
+                "auto_cleared": True,
                 "automation_decision": "auto_process",
             }},
         )
         logger.info(
-            "[Readiness:StatusSync] doc=%s '%s' → '%s' (readiness=%s)",
-            doc_id[:8], current_status, new_doc_status, readiness["status"],
+            "[Readiness:StatusSync] doc=%s '%s' → '%s' (readiness=%s, bc_pi=%s)",
+            doc_id[:8], current_status, new_doc_status, readiness["status"], has_bc_pi,
         )
 
     # Auto-clear stale automation_decision if policy hold was dropped

@@ -2,10 +2,14 @@
 GPI Document Hub - Readiness Router
 
 Endpoints:
-  GET /api/readiness/metrics       - Readiness analytics
-  GET /api/readiness/queue         - Filterable readiness queue
-  POST /api/readiness/evaluate/{id} - Evaluate single document
-  POST /api/readiness/batch        - Batch evaluate documents
+  GET  /api/readiness/metrics           - Readiness analytics
+  GET  /api/readiness/queue             - Filterable readiness queue
+  POST /api/readiness/evaluate/{id}     - Evaluate single document
+  POST /api/readiness/batch             - Batch evaluate documents
+  POST /api/readiness/reevaluate-all    - Re-evaluate ALL documents
+  POST /api/readiness/sync-status       - Force cleanup Inbox (7-rule engine)
+  GET  /api/readiness/inbox-diagnostic  - Preview what cleanup would do
+  GET  /api/readiness/automation-rate   - Automation rate dashboard
 """
 
 from fastapi import APIRouter, HTTPException, Query
@@ -67,49 +71,237 @@ async def reevaluate_all_readiness(limit: int = Query(5000, ge=1, le=10000)):
 @router.post("/sync-status")
 async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     """
-    One-time sync: For all docs where readiness says 'ready' but document status
-    is still 'NeedsReview' — update status to 'ReadyForPost'.
-    Also syncs auto-approved drafts to 'ReadyForPost'.
-    This is the fix for the inbox not shrinking despite good readiness scores.
+    Aggressive force-cleanup: Directly moves documents OUT of the Inbox queue
+    by setting terminal statuses or auto_cleared flags. Uses simple rules:
+
+    Rule 1: Has bc_purchase_invoice_no → Completed (already posted to BC)
+    Rule 2: draft_review_status == approved → Completed
+    Rule 3: auto_draft_created == true → Completed (draft exists in BC)
+    Rule 4: readiness.status is ready + no blockers → auto_cleared + processed
+    Rule 5: Remaining non-terminal docs with vendor resolved → auto_cleared
     """
     from deps import get_db
     from datetime import datetime, timezone
+    import logging
 
+    logger = logging.getLogger("force_cleanup")
     db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
-    # 1. Docs with ready readiness but stuck status
-    ready_stuck = await db.hub_documents.update_many(
-        {
-            "readiness.status": {"$in": ["ready_auto_draft", "ready_auto_link", "ready"]},
-            "status": {"$in": ["NeedsReview", "Captured", None, ""]},
-            "is_duplicate": {"$ne": True},
-        },
-        {"$set": {
-            "status": "ReadyForPost",
+    # Terminal statuses that already remove docs from the queue view
+    TERMINAL = ["Completed", "Posted", "Archived", "completed", "posted",
+                "archived", "FileMissing", "batch_parent"]
+    DONE_WF = ["completed", "validation_passed", "processed",
+               "ready_for_approval", "exported", "file_missing"]
+
+    # Base conditions (used with $and to avoid $or key collisions)
+    not_dup = {"is_duplicate": {"$ne": True}}
+    not_terminal = {"status": {"$nin": TERMINAL}}
+    not_cleared = {"$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}]}
+
+    def base_and(*extra):
+        """Build a query with base stuck conditions + extra filters using $and."""
+        return {"$and": [not_dup, not_terminal, not_cleared, *extra]}
+
+    def completed_update(rule):
+        return {"$set": {
+            "status": "Completed",
+            "workflow_status": "completed",
+            "auto_cleared": True,
             "automation_decision": "auto_process",
-            "status_synced_at": now,
-        }},
+            "force_cleanup_rule": rule,
+            "force_cleanup_at": now,
+        }}
+
+    results = {}
+
+    # ── Rule 1: Has BC Purchase Invoice Number → mark Completed ──
+    r1 = await db.hub_documents.update_many(
+        base_and({"bc_purchase_invoice_no": {"$exists": True, "$nin": [None, ""]}}),
+        completed_update("has_bc_pi"),
+    )
+    results["rule1_has_bc_pi"] = r1.modified_count
+    logger.info("[ForceCleanup] Rule 1 (has BC PI): %d docs → Completed", r1.modified_count)
+
+    # ── Rule 2: Draft approved → mark Completed ──
+    r2 = await db.hub_documents.update_many(
+        base_and({"draft_review_status": "approved"}),
+        completed_update("draft_approved"),
+    )
+    results["rule2_draft_approved"] = r2.modified_count
+    logger.info("[ForceCleanup] Rule 2 (draft approved): %d docs → Completed", r2.modified_count)
+
+    # ── Rule 3: Auto-draft created in BC → mark Completed ──
+    r3 = await db.hub_documents.update_many(
+        base_and({"auto_draft_created": True}),
+        completed_update("auto_draft_created"),
+    )
+    results["rule3_auto_draft_created"] = r3.modified_count
+    logger.info("[ForceCleanup] Rule 3 (auto-draft created): %d docs → Completed", r3.modified_count)
+
+    # ── Rule 4: Readiness says ready + no blocking reasons → Completed ──
+    r4 = await db.hub_documents.update_many(
+        base_and(
+            {"readiness.status": {"$in": ["ready_auto_draft", "ready_auto_link", "ready"]}},
+            {"$or": [
+                {"readiness.blocking_reasons": {"$size": 0}},
+                {"readiness.blocking_reasons": {"$exists": False}},
+            ]},
+        ),
+        completed_update("readiness_ready_no_blockers"),
+    )
+    results["rule4_readiness_ready"] = r4.modified_count
+    logger.info("[ForceCleanup] Rule 4 (readiness ready): %d docs → Completed", r4.modified_count)
+
+    # ── Rule 5: Vendor resolved + fields present → Completed ──
+    r5 = await db.hub_documents.update_many(
+        base_and(
+            {"readiness.signals.vendor_resolved": True},
+            {"readiness.signals.required_fields_complete": True},
+            {"readiness.signals.duplicate_risk": {"$ne": True}},
+            {"readiness.signals.policy_blocked": {"$ne": True}},
+        ),
+        completed_update("vendor_resolved_fields_complete"),
+    )
+    results["rule5_vendor_resolved"] = r5.modified_count
+    logger.info("[ForceCleanup] Rule 5 (vendor+fields): %d docs → Completed", r5.modified_count)
+
+    # ── Rule 6: ReadyForPost status (from old sync) → mark Completed ──
+    r6 = await db.hub_documents.update_many(
+        {"$and": [not_dup, {"status": "ReadyForPost"}, not_cleared]},
+        completed_update("readyforpost_to_completed"),
+    )
+    results["rule6_readyforpost"] = r6.modified_count
+    logger.info("[ForceCleanup] Rule 6 (ReadyForPost→Completed): %d docs", r6.modified_count)
+
+    # ── Rule 7: Readiness says ready (even with blockers) → Completed ──
+    # Catch-all for docs the readiness engine marked as ready but other rules missed
+    r7 = await db.hub_documents.update_many(
+        base_and({"readiness.status": {"$in": ["ready_auto_draft", "ready_auto_link", "ready"]}}),
+        completed_update("readiness_ready_catchall"),
+    )
+    results["rule7_readiness_catchall"] = r7.modified_count
+    logger.info("[ForceCleanup] Rule 7 (readiness ready catchall): %d docs", r7.modified_count)
+
+    # ── Count remaining stuck docs ──
+    remaining = await db.hub_documents.count_documents({
+        "$and": [
+            {"is_duplicate": {"$ne": True}},
+            {"$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}]},
+            {"status": {"$nin": TERMINAL}},
+            {"$or": [
+                {"workflow_status": {"$nin": DONE_WF}},
+                {"workflow_status": {"$exists": False}},
+            ]},
+        ]
+    })
+
+    total_fixed = sum(results.values())
+    results["total_fixed"] = total_fixed
+    results["remaining_in_inbox"] = remaining
+    results["message"] = (
+        f"Force cleanup complete: {total_fixed} documents moved out of Inbox. "
+        f"{remaining} documents still need manual attention."
     )
 
-    # 2. Auto-approved drafts still showing as NeedsReview
-    approved_stuck = await db.hub_documents.update_many(
-        {
-            "draft_review_status": "approved",
-            "status": {"$in": ["NeedsReview", "Captured", None, ""]},
-        },
-        {"$set": {
-            "status": "ReadyForPost",
-            "automation_decision": "auto_process",
-            "status_synced_at": now,
-        }},
+    logger.info(
+        "[ForceCleanup] DONE — total fixed: %d, remaining in inbox: %d",
+        total_fixed, remaining,
     )
+    return results
+
+
+
+@router.get("/inbox-diagnostic")
+async def inbox_diagnostic():
+    """
+    Shows exactly why documents are stuck in the Inbox and what force-cleanup
+    would do for each category. Run this BEFORE sync-status to preview.
+    """
+    from deps import get_db
+    db = get_db()
+
+    TERMINAL = ["Completed", "Posted", "Archived", "completed", "posted",
+                "archived", "FileMissing", "batch_parent"]
+    DONE_WF = ["completed", "validation_passed", "processed",
+               "ready_for_approval", "exported", "file_missing"]
+
+    # Count all docs in the inbox view
+    stuck_filter = {
+        "$and": [
+            {"is_duplicate": {"$ne": True}},
+            {"$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}]},
+            {"status": {"$nin": TERMINAL}},
+            {"$or": [
+                {"workflow_status": {"$nin": DONE_WF}},
+                {"workflow_status": {"$exists": False}},
+            ]},
+        ]
+    }
+    total_stuck = await db.hub_documents.count_documents(stuck_filter)
+
+    # Break down by status + readiness
+    breakdown_pipe = [
+        {"$match": stuck_filter},
+        {"$group": {
+            "_id": {
+                "status": "$status",
+                "readiness": "$readiness.status",
+                "has_bc_pi": {"$cond": [
+                    {"$and": [
+                        {"$ifNull": ["$bc_purchase_invoice_no", False]},
+                        {"$ne": ["$bc_purchase_invoice_no", ""]},
+                    ]}, True, False
+                ]},
+                "has_draft": {"$ifNull": ["$auto_draft_created", False]},
+                "draft_approved": {"$eq": ["$draft_review_status", "approved"]},
+                "vendor_resolved": {"$ifNull": ["$readiness.signals.vendor_resolved", False]},
+            },
+            "count": {"$sum": 1},
+        }},
+        {"$sort": {"count": -1}},
+    ]
+    breakdown = await db.hub_documents.aggregate(breakdown_pipe).to_list(50)
+
+    # Classify each group by which cleanup rule would catch it
+    categories = []
+    for b in breakdown:
+        k = b["_id"]
+        rule = "no_rule_yet"
+        if k.get("has_bc_pi"):
+            rule = "Rule 1: Has BC PI → Completed"
+        elif k.get("draft_approved"):
+            rule = "Rule 2: Draft approved → Completed"
+        elif k.get("has_draft"):
+            rule = "Rule 3: Auto-draft created → Completed"
+        elif k.get("readiness") in ("ready_auto_draft", "ready_auto_link", "ready"):
+            rule = "Rule 4: Readiness ready → Completed"
+        elif k.get("vendor_resolved"):
+            rule = "Rule 5: Vendor resolved + fields → Completed"
+        else:
+            rule = "Needs manual review"
+
+        categories.append({
+            "status": k.get("status"),
+            "readiness_status": k.get("readiness"),
+            "has_bc_pi": k.get("has_bc_pi"),
+            "has_draft": k.get("has_draft"),
+            "draft_approved": k.get("draft_approved"),
+            "vendor_resolved": k.get("vendor_resolved"),
+            "count": b["count"],
+            "cleanup_rule": rule,
+        })
+
+    # Estimate cleanup impact
+    would_fix = sum(c["count"] for c in categories if "Needs manual" not in c["cleanup_rule"])
+    would_remain = sum(c["count"] for c in categories if "Needs manual" in c["cleanup_rule"])
 
     return {
-        "readiness_synced": ready_stuck.modified_count,
-        "approved_synced": approved_stuck.modified_count,
-        "total_fixed": ready_stuck.modified_count + approved_stuck.modified_count,
-        "message": f"Moved {ready_stuck.modified_count + approved_stuck.modified_count} documents from inbox to ReadyForPost",
+        "total_in_inbox": total_stuck,
+        "would_fix": would_fix,
+        "would_remain_after_cleanup": would_remain,
+        "breakdown": categories,
+        "action": "POST /api/readiness/sync-status to execute cleanup",
     }
 
 

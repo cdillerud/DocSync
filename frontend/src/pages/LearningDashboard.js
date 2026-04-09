@@ -131,6 +131,7 @@ function ReEvaluateSection({ onComplete }) {
   const [approving, setApproving] = useState(false);
   const [approveResult, setApproveResult] = useState(null);
   const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
 
   const handleRun = async () => {
     setRunning(true);
@@ -187,10 +188,14 @@ function ReEvaluateSection({ onComplete }) {
       const res = await fetch(`${API}/api/readiness/sync-status`, { method: 'POST' });
       if (res.ok) {
         const data = await res.json();
-        toast.success(`Synced ${data.total_fixed} docs from inbox → ReadyForPost`);
+        const msg = data.total_fixed > 0
+          ? `Force cleanup: ${data.total_fixed} docs moved out of Inbox. ${data.remaining_in_inbox} remaining.`
+          : `No docs to clean up. ${data.remaining_in_inbox} docs need manual review.`;
+        toast.success(msg);
+        setSyncResult(data);
         if (onComplete) onComplete();
       } else {
-        toast.error('Sync failed');
+        toast.error('Cleanup failed');
       }
     } catch {
       toast.error('Network error');
@@ -231,7 +236,7 @@ function ReEvaluateSection({ onComplete }) {
             variant="outline" className="border-emerald-600 text-emerald-500 hover:bg-emerald-600/10"
             data-testid="sync-status-btn">
             {syncing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Zap className="w-4 h-4 mr-2" />}
-            Sync Inbox Status
+            Force Cleanup Inbox
           </Button>
         </div>
 
@@ -276,6 +281,31 @@ function ReEvaluateSection({ onComplete }) {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Force Cleanup Results */}
+        {syncResult && (
+          <div className="mb-3 space-y-2 bg-muted/30 rounded-lg p-3" data-testid="cleanup-results">
+            <p className="text-xs font-semibold text-emerald-400 mb-2">Force Cleanup Results</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-center">
+              <div className="bg-emerald-500/10 rounded p-2">
+                <p className="text-xl font-bold text-emerald-400">{syncResult.total_fixed}</p>
+                <p className="text-[10px] text-muted-foreground">Cleared from Inbox</p>
+              </div>
+              <div className="bg-amber-500/10 rounded p-2">
+                <p className="text-xl font-bold text-amber-400">{syncResult.remaining_in_inbox}</p>
+                <p className="text-[10px] text-muted-foreground">Still Need Review</p>
+              </div>
+              <div className="bg-blue-500/10 rounded p-2">
+                <p className="text-xl font-bold text-blue-400">{syncResult.rule1_has_bc_pi || 0}</p>
+                <p className="text-[10px] text-muted-foreground">Had BC PI</p>
+              </div>
+              <div className="bg-violet-500/10 rounded p-2">
+                <p className="text-xl font-bold text-violet-400">{(syncResult.rule4_readiness_ready || 0) + (syncResult.rule5_vendor_resolved || 0) + (syncResult.rule7_readiness_catchall || 0)}</p>
+                <p className="text-[10px] text-muted-foreground">Readiness Ready</p>
+              </div>
+            </div>
           </div>
         )}
 

@@ -75,7 +75,9 @@ const AP_TYPES = ["AP_Invoice", "AP_INVOICE", "Purchase_Order", "PURCHASE_ORDER"
 const SALES_TYPES = ["Sales_Order", "SALES_ORDER", "Sales_PO", "Sales_Quote", "Order_Confirmation", "SALES_INVOICE", "SALES_CREDIT_MEMO", "PurchaseOrder", "Purchase_Order"];
 
 // Terminal statuses — docs that are "done"
-const TERMINAL_STATUSES = ["Completed", "Posted", "Archived", "completed", "posted", "archived", "exported", "auto_filed", "AutoFiled"];
+const TERMINAL_STATUSES = ["Completed", "Posted", "Archived", "completed", "posted", "archived",
+  "exported", "auto_filed", "AutoFiled", "Validated", "validated", "ValidationPassed",
+  "ReadyForPost", "ready_for_post", "LinkedToBC"];
 const DONE_WORKFLOW_STATUSES = ["completed", "exported", "validation_passed", "processed"];
 
 function isTerminal(doc) {

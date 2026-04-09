@@ -90,7 +90,9 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
 
     # Terminal statuses that already remove docs from the queue view
     TERMINAL = ["Completed", "Posted", "Archived", "completed", "posted",
-                "archived", "FileMissing", "batch_parent"]
+                "archived", "FileMissing", "batch_parent", "Validated", "validated",
+                "ValidationPassed", "ReadyForPost", "ready_for_post", "AutoFiled",
+                "auto_filed", "LinkedToBC"]
     DONE_WF = ["completed", "validation_passed", "processed",
                "ready_for_approval", "exported", "file_missing"]
 
@@ -222,7 +224,9 @@ async def inbox_diagnostic():
     db = get_db()
 
     TERMINAL = ["Completed", "Posted", "Archived", "completed", "posted",
-                "archived", "FileMissing", "batch_parent"]
+                "archived", "FileMissing", "batch_parent", "Validated", "validated",
+                "ValidationPassed", "ReadyForPost", "ready_for_post", "AutoFiled",
+                "auto_filed", "LinkedToBC"]
     DONE_WF = ["completed", "validation_passed", "processed",
                "ready_for_approval", "exported", "file_missing"]
 

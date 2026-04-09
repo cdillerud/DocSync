@@ -11,48 +11,44 @@ Enterprise document processing hub for AP/Sales workflows with Dynamics 365 BC i
 
 ## What's Been Implemented
 
-### Phase 16g-16k (Apr 8) — Previous Session
+### Phase 16g-16k (Apr 8)
 - PO Bypass, Vendor Bypass, Batch Alias Resolution
-- Aggressive Auto-Processing Engine
-- Automation Rate Dashboard Widget
-- Missing Required Fields Fix (blocked 423->110)
-- Auto-Approval Engine (review queue 544->42)
+- Aggressive Auto-Processing Engine, Automation Rate Widget
+- Missing Required Fields Fix, Auto-Approval Engine
 
-### Phase 16m — Force Cleanup + Exception Queue (Apr 9)
+### Phase 16m — Inbox Cleanup + Exception Queue (Apr 9)
+- **Inbox: 134 → 17 → ~8 → Exception Queue**
+- Root cause fix: auto-post service was reverting non-AP docs back to NeedsReview
+- 20-rule force cleanup engine covering all document patterns
+- Expanded TERMINAL_STATUSES (Validated, ReadyForPost, AutoFiled, Exception)
+- Exception Queue: retry-failed endpoint + dedicated UI tab + auto-escalation
 
-**Inbox Shrinkage: 134 → 17 → ~8 (then to Exception Queue)**
+### Phase 16n — Vendor Matching Gap Closer (Apr 9)
+**Problem**: 23 vendor match gaps, 8 unmatched vendors. Auto-suggestions were terrible quality (SC Warehouses → Group Warehouses?!). No way to manually search or dismiss.
 
-1. **Root Cause Fix — Auto-Post Status Revert Bug**:
-   - `attempt_ap_auto_post()` was reverting non-AP docs (shipping, inventory) back to NeedsReview
-   - Fixed: non-AP docs get soft skip, only real AP failures revert
-   - Auto-act now only targets AP-type documents
+**Fixes:**
+1. **Improved Unmatched Vendors Endpoint** (`GET /api/aliases/vendors/unmatched-gaps`):
+   - Name normalization merges duplicates ("SC Warehouses, LLC" = "SC Warehouses, LLC.")
+   - Better fuzzy scoring: Jaccard word overlap + first-word bonus + abbreviation handling
+   - Shows variants and sample files
+   - Minimum score threshold raised from 0.30 to 0.40
 
-2. **Expanded TERMINAL_STATUSES**: Added Validated, ReadyForPost, AutoFiled, LinkedToBC, Exception
-   - Immediate effect: Validated docs leave the inbox on deploy
+2. **Manual BC Vendor Search** (`GET /api/aliases/vendors/search-bc?q=...`):
+   - Searches bc_reference_cache + vendor_invoice_profiles by name/number
+   - Returns scored results for manual matching
 
-3. **20-Rule Force Cleanup Engine** (`POST /api/readiness/sync-status`):
-   - Rules 1-7: BC PI, draft approved, auto-draft, readiness ready, vendor resolved, ReadyForPost, catchall
-   - Rules 8-9: Non-AP doc types (shipping, inventory, BOL) with/without vendor
-   - Rules 10-11: Auto-post attempted + vendor, reverted non-AP docs
-   - Rules 12-15: Junk files (.jpg/.xlsx), statements/SOA, self-vendor (Gamer Packaging), W9/tax forms
-   - Rules 16-20: Captured/stale docs, XML duplicates, AR invoices, broad self-vendor, duplicate filenames
+3. **Dismiss Unmatched** (`POST /api/aliases/vendors/dismiss-unmatched`):
+   - Marks dismissed vendor docs as Completed + auto_cleared
+   - For vendors not in BC or not real vendors
 
-4. **Exception Queue System**:
-   - `POST /api/readiness/retry-failed` — batch retry extraction-failed docs
-     - Normal mode: increments retry_count (4 max)
-     - Force mode (`force_escalate=true`): immediately moves all to Exception Queue
-   - `GET /api/readiness/exception-queue` — paginated list of exception docs
-   - Exception status = terminal → docs leave main Inbox
-   - Frontend: "Exceptions" tab in Inbox, "Retry Failed → Exception Queue" button on AI Learning page
-   - Config: `auto_escalate_on_max_retries: True` (was auto_delete)
+4. **Accept Suggestion with Variants** (`POST /api/aliases/vendors/accept-suggestion`):
+   - Now creates aliases for ALL name variants at once
+   - Re-validates affected docs immediately
 
-## Production Deploy & Run Sequence
-1. Save to Github → `git pull && docker compose up -d --build`
-2. Refresh inbox → Validated docs gone immediately
-3. AI Learning page: "Re-evaluate All Documents"
-4. "Force Cleanup Inbox"
-5. "Retry Failed → Exception Queue" (moves remaining stuck docs)
-6. Check Inbox → Exceptions tab for human review items
+5. **Frontend — Monitor Page**:
+   - Vendor cards show variants, dismiss button, manual search input
+   - Search results appear as blue clickable buttons
+   - Dismiss button to clear non-vendor gaps
 
 ## Key API Endpoints
 - POST /api/readiness/sync-status — Force cleanup (20-rule engine)
@@ -60,8 +56,10 @@ Enterprise document processing hub for AP/Sales workflows with Dynamics 365 BC i
 - GET /api/readiness/exception-queue — Exception queue listing
 - GET /api/readiness/inbox-diagnostic — Preview cleanup impact
 - POST /api/readiness/reevaluate-all — Re-evaluate all docs
-- POST /api/posting-patterns/review-queue/auto-approve — Auto-approve drafts
-- GET /api/readiness/automation-rate — Automation metrics
+- GET /api/aliases/vendors/unmatched-gaps — Unmatched vendors with improved matching
+- GET /api/aliases/vendors/search-bc?q= — Manual BC vendor search
+- POST /api/aliases/vendors/dismiss-unmatched — Dismiss unmatched vendor
+- POST /api/aliases/vendors/accept-suggestion — Accept alias with variants
 
 ## Upcoming Tasks
 - P1: Rep Overrides management UI

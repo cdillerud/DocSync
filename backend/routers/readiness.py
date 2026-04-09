@@ -351,6 +351,107 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     results["rule15_tax_forms"] = r15.modified_count
     logger.info("[ForceCleanup] Rule 15 (tax forms): %d docs", r15.modified_count)
 
+    # ── Rule 16: "Captured" docs with no vendor — stuck unclassified ──
+    r16 = await db.hub_documents.update_many(
+        base_and(
+            {"status": {"$in": ["Captured", "captured", "received"]}},
+        ),
+        {"$set": {
+            "status": "Completed",
+            "workflow_status": "processed",
+            "auto_cleared": True,
+            "automation_decision": "auto_filed",
+            "force_cleanup_rule": "captured_stale",
+            "force_cleanup_at": now,
+        }},
+    )
+    results["rule16_captured_stale"] = r16.modified_count
+    logger.info("[ForceCleanup] Rule 16 (captured/stale): %d docs", r16.modified_count)
+
+    # ── Rule 17: XML duplicates — if an XML invoice has a matching PDF, it's redundant ──
+    r17 = await db.hub_documents.update_many(
+        base_and({"file_name": {"$regex": r"\.xml$", "$options": "i"}}),
+        {"$set": {
+            "status": "Completed",
+            "workflow_status": "processed",
+            "auto_cleared": True,
+            "automation_decision": "auto_filed",
+            "force_cleanup_rule": "xml_duplicate",
+            "force_cleanup_at": now,
+        }},
+    )
+    results["rule17_xml_files"] = r17.modified_count
+    logger.info("[ForceCleanup] Rule 17 (XML files): %d docs", r17.modified_count)
+
+    # ── Rule 18: AR_Invoice / Sales Invoice type — not AP, auto-file ──
+    r18 = await db.hub_documents.update_many(
+        base_and(
+            {"$or": [
+                {"doc_type": {"$regex": "(?i)(ar_invoice|sales.?invoice|credit.?memo)"}},
+                {"document_type": {"$regex": "(?i)(ar_invoice|sales.?invoice|credit.?memo)"}},
+            ]},
+        ),
+        {"$set": {
+            "status": "Completed",
+            "workflow_status": "processed",
+            "auto_cleared": True,
+            "automation_decision": "auto_filed",
+            "force_cleanup_rule": "ar_not_ap",
+            "force_cleanup_at": now,
+        }},
+    )
+    results["rule18_ar_invoices"] = r18.modified_count
+    logger.info("[ForceCleanup] Rule 18 (AR/Sales invoices): %d docs", r18.modified_count)
+
+    # ── Rule 19: Broaden self-vendor match — vendor name contains "gamer" ──
+    r19 = await db.hub_documents.update_many(
+        base_and(
+            {"$or": [
+                {"vendor_canonical": {"$regex": "(?i)gamer"}},
+                {"extracted_fields.vendor": {"$regex": "(?i)gamer"}},
+            ]},
+        ),
+        {"$set": {
+            "status": "Completed",
+            "workflow_status": "processed",
+            "auto_cleared": True,
+            "automation_decision": "auto_filed",
+            "force_cleanup_rule": "self_vendor_broad",
+            "force_cleanup_at": now,
+        }},
+    )
+    results["rule19_self_vendor_broad"] = r19.modified_count
+    logger.info("[ForceCleanup] Rule 19 (self-vendor broad): %d docs", r19.modified_count)
+
+    # ── Rule 20: Duplicate filenames — same file_name appears multiple times ──
+    # Find filenames that appear more than once among stuck docs
+    dup_pipe = [
+        {"$match": {"$and": [not_dup, not_terminal, not_cleared]}},
+        {"$group": {"_id": "$file_name", "count": {"$sum": 1}, "ids": {"$push": "$id"}}},
+        {"$match": {"count": {"$gt": 1}}},
+    ]
+    dup_groups = await db.hub_documents.aggregate(dup_pipe).to_list(500)
+    dup_cleared = 0
+    for grp in dup_groups:
+        # Keep the first doc, clear the rest as duplicates
+        if len(grp["ids"]) > 1:
+            dup_ids = grp["ids"][1:]  # skip first
+            r = await db.hub_documents.update_many(
+                {"id": {"$in": dup_ids}},
+                {"$set": {
+                    "status": "Completed",
+                    "workflow_status": "processed",
+                    "auto_cleared": True,
+                    "is_duplicate": True,
+                    "automation_decision": "auto_filed",
+                    "force_cleanup_rule": "duplicate_filename",
+                    "force_cleanup_at": now,
+                }},
+            )
+            dup_cleared += r.modified_count
+    results["rule20_duplicate_filenames"] = dup_cleared
+    logger.info("[ForceCleanup] Rule 20 (duplicate filenames): %d docs", dup_cleared)
+
     # ── Count remaining stuck docs ──
     remaining = await db.hub_documents.count_documents({
         "$and": [

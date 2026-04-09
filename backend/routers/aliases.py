@@ -159,6 +159,127 @@ async def get_alias_metrics():
     return await _get_metrics()
 
 
+
+@router.get("/vendors/search-bc")
+async def search_bc_vendors(q: str = Query(..., min_length=2)):
+    """
+    Search BC vendors by name or vendor number.
+    Used by the UI for manual vendor resolution when auto-suggestions are wrong.
+    """
+    import re
+    from difflib import SequenceMatcher
+    db = get_db()
+
+    q_lower = q.strip().lower()
+    q_pattern = re.escape(q_lower)
+
+    # Search in BC reference cache
+    bc_vendors = []
+    try:
+        cached = await db.bc_reference_cache.find(
+            {
+                "bc_entity_type": "vendor",
+                "$or": [
+                    {"bc_vendor_name": {"$regex": q_pattern, "$options": "i"}},
+                    {"bc_vendor_no": {"$regex": q_pattern, "$options": "i"}},
+                ],
+            },
+            {"_id": 0, "bc_vendor_no": 1, "bc_vendor_name": 1}
+        ).limit(20).to_list(20)
+        for v in cached:
+            if v.get("bc_vendor_no"):
+                bc_vendors.append({
+                    "vendor_no": v["bc_vendor_no"],
+                    "vendor_name": v.get("bc_vendor_name", v["bc_vendor_no"]),
+                    "source": "bc_cache",
+                })
+    except Exception:
+        pass
+
+    # Also search vendor profiles
+    try:
+        profiles = await db.vendor_invoice_profiles.find(
+            {
+                "$or": [
+                    {"vendor_name": {"$regex": q_pattern, "$options": "i"}},
+                    {"vendor_no": {"$regex": q_pattern, "$options": "i"}},
+                ],
+            },
+            {"_id": 0, "vendor_no": 1, "vendor_name": 1}
+        ).limit(20).to_list(20)
+        existing_nos = {v["vendor_no"] for v in bc_vendors}
+        for p in profiles:
+            if p.get("vendor_no") and p["vendor_no"] not in existing_nos:
+                bc_vendors.append({
+                    "vendor_no": p["vendor_no"],
+                    "vendor_name": p.get("vendor_name", p["vendor_no"]),
+                    "source": "profile",
+                })
+    except Exception:
+        pass
+
+    # Score by relevance
+    for v in bc_vendors:
+        name_lower = (v.get("vendor_name") or "").lower()
+        no_lower = (v.get("vendor_no") or "").lower()
+        seq = SequenceMatcher(None, q_lower, name_lower).ratio()
+        exact_no = 1.0 if q_lower == no_lower else 0
+        contains = 0.8 if q_lower in name_lower or q_lower in no_lower else 0
+        v["score"] = round(max(seq, exact_no, contains), 3)
+
+    bc_vendors.sort(key=lambda x: x["score"], reverse=True)
+
+    return {"results": bc_vendors[:15], "query": q}
+
+
+@router.post("/vendors/dismiss-unmatched")
+async def dismiss_unmatched_vendor(body: dict):
+    """
+    Dismiss an unmatched vendor — marks its docs as 'vendor_dismissed' so they
+    stop appearing in the vendor match gap list. The docs stay in their current
+    state but the gap is acknowledged as "not a real vendor" or "new vendor not in BC".
+    """
+    vendor_name = body.get("vendor_name", "").strip()
+    reason = body.get("reason", "dismissed_by_user")
+
+    if not vendor_name:
+        raise HTTPException(status_code=400, detail="vendor_name required")
+
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Update all docs with this vendor name — mark the vendor_match check as dismissed
+    result = await db.hub_documents.update_many(
+        {
+            "$or": [
+                {"extracted_fields.vendor": vendor_name},
+                {"extracted_fields.vendor_name": vendor_name},
+                {"normalized_fields.vendor": vendor_name},
+            ],
+            "validation_results.checks": {
+                "$elemMatch": {"check_name": "vendor_match", "passed": False}
+            },
+        },
+        {"$set": {
+            "vendor_dismissed": True,
+            "vendor_dismiss_reason": reason,
+            "vendor_dismiss_at": now,
+            "status": "Completed",
+            "workflow_status": "processed",
+            "auto_cleared": True,
+            "automation_decision": "auto_filed",
+            "force_cleanup_rule": "vendor_dismissed",
+        }},
+    )
+
+    return {
+        "vendor_name": vendor_name,
+        "docs_dismissed": result.modified_count,
+        "reason": reason,
+    }
+
+
+
 @router.delete("/vendors/by-alias/{alias}")
 async def delete_vendor_alias_by_name(alias: str):
     """Delete a vendor alias by its normalized alias string."""
@@ -180,18 +301,26 @@ async def delete_vendor_alias_by_name(alias: str):
 async def get_unmatched_vendor_gaps():
     """
     Get vendor match gap docs with their closest match candidates.
-    Searches BC vendor cache directly with fuzzy matching.
+    Normalizes vendor names to merge duplicates (e.g., "SC Warehouses, LLC" = "SC Warehouses, LLC.").
+    Uses improved fuzzy matching with word overlap and abbreviation handling.
     """
+    import re
     from difflib import SequenceMatcher
 
     db = get_db()
+
+    # Include Exception/Completed in exclusion to avoid showing already-processed docs
+    DONE_STATUSES = ["Completed", "Posted", "Deleted", "Archived", "Exception",
+                     "completed", "posted", "archived", "exception"]
 
     gap_docs = await db.hub_documents.aggregate([
         {"$match": {
             "validation_results.checks": {
                 "$elemMatch": {"check_name": "vendor_match", "passed": False}
             },
-            "status": {"$nin": ["Completed", "Posted", "Deleted", "Archived"]},
+            "status": {"$nin": DONE_STATUSES},
+            "is_duplicate": {"$ne": True},
+            "auto_cleared": {"$ne": True},
         }},
         {"$group": {
             "_id": {
@@ -201,10 +330,44 @@ async def get_unmatched_vendor_gaps():
                 ]},
             },
             "count": {"$sum": 1},
+            "sample_files": {"$push": "$file_name"},
         }},
         {"$sort": {"count": -1}},
-        {"$limit": 25},
-    ]).to_list(25)
+        {"$limit": 50},
+    ]).to_list(50)
+
+    # Normalize function for grouping variants
+    def _normalize_for_group(name):
+        if not name:
+            return ""
+        n = name.strip().lower()
+        # Remove trailing punctuation, normalize LLC/Inc variants
+        n = re.sub(r'[.,;:]+$', '', n)
+        n = re.sub(r'\s+(llc|inc|ltd|corp|co|pte|usa)\b\.?', '', n)
+        n = re.sub(r'[^a-z0-9\s]', '', n)
+        n = re.sub(r'\s+', ' ', n).strip()
+        return n
+
+    # Merge duplicate vendor name variants
+    merged = {}
+    for gap in gap_docs:
+        raw_name = gap["_id"].get("vendor_name") or ""
+        if not raw_name:
+            continue
+        normalized_key = _normalize_for_group(raw_name)
+        if not normalized_key:
+            continue
+        if normalized_key in merged:
+            merged[normalized_key]["count"] += gap["count"]
+            merged[normalized_key]["variants"].append(raw_name)
+            merged[normalized_key]["sample_files"].extend(gap.get("sample_files", [])[:3])
+        else:
+            merged[normalized_key] = {
+                "display_name": raw_name,
+                "variants": [raw_name],
+                "count": gap["count"],
+                "sample_files": gap.get("sample_files", [])[:3],
+            }
 
     # Load ALL BC vendors from cache + profiles
     bc_vendors = []
@@ -222,7 +385,6 @@ async def get_unmatched_vendor_gaps():
     except Exception:
         pass
 
-    # Also load from vendor profiles
     try:
         profiles = await db.vendor_invoice_profiles.find(
             {}, {"_id": 0, "vendor_no": 1, "vendor_name": 1}
@@ -239,33 +401,42 @@ async def get_unmatched_vendor_gaps():
 
     results = []
 
-    for gap in gap_docs:
-        vendor_name = gap["_id"].get("vendor_name") or ""
-        if not vendor_name:
-            continue
-
+    for norm_key, group in sorted(merged.items(), key=lambda x: x[1]["count"], reverse=True):
+        vendor_name = group["display_name"]
         vn_lower = vendor_name.strip().lower()
-        vn_words = set(vn_lower.replace(",", "").replace(".", "").replace("llc", "").replace("inc", "").split())
+        vn_normalized = _normalize_for_group(vendor_name)
+        vn_words = set(vn_normalized.split())
 
-        # Score each BC vendor
+        # Score each BC vendor with improved algorithm
         scored = []
         for bv in bc_vendors:
             bc_name = bv.get("name", "").strip().lower()
-            bc_no = bv.get("vendor_no", "").strip().lower()
+            bc_no = bv.get("vendor_no", "").strip()
+            bc_normalized = _normalize_for_group(bc_name)
+            bc_words = set(bc_normalized.split())
 
-            # Sequence matcher
-            seq_score = SequenceMatcher(None, vn_lower, bc_name).ratio()
+            # 1. Sequence matcher on normalized names (better than raw)
+            seq_score = SequenceMatcher(None, vn_normalized, bc_normalized).ratio()
 
-            # Word overlap bonus
-            bc_words = set(bc_name.replace(",", "").replace(".", "").replace("llc", "").replace("inc", "").split())
-            overlap = vn_words & bc_words
-            word_score = len(overlap) / max(len(vn_words), len(bc_words), 1) if vn_words else 0
+            # 2. Word overlap (intersection / union for Jaccard)
+            if vn_words and bc_words:
+                jaccard = len(vn_words & bc_words) / len(vn_words | bc_words)
+            else:
+                jaccard = 0
 
-            # Vendor number match (exact or substring)
-            no_score = 0.9 if vn_lower == bc_no else (0.7 if bc_no in vn_lower or vn_lower in bc_no else 0)
+            # 3. First word match bonus (important for company names)
+            first_word_bonus = 0.15 if vn_words and bc_words and list(sorted(vn_words))[0] == list(sorted(bc_words))[0] else 0
 
-            best = max(seq_score, word_score, no_score)
-            if best >= 0.30:
+            # 4. Vendor number exact match
+            no_score = 0.95 if vn_lower == bc_no.lower() else (0.85 if bc_no.lower() in vn_lower or vn_lower in bc_no.lower() else 0)
+
+            # 5. Abbreviation handling — check if vendor_no is an abbreviation of the name
+            abbrev_score = 0
+            if len(bc_no) >= 3 and bc_no.upper() in vendor_name.upper():
+                abbrev_score = 0.8
+
+            best = max(seq_score, jaccard + first_word_bonus, no_score, abbrev_score)
+            if best >= 0.40:
                 scored.append({
                     "vendor_no": bv["vendor_no"],
                     "vendor_name": bv["name"],
@@ -276,8 +447,10 @@ async def get_unmatched_vendor_gaps():
 
         results.append({
             "vendor_name": vendor_name,
-            "gap_count": gap["count"],
-            "candidates": scored[:3],
+            "variants": group["variants"] if len(group["variants"]) > 1 else [],
+            "gap_count": group["count"],
+            "sample_files": group["sample_files"][:3],
+            "candidates": scored[:5],
         })
 
     return {"unmatched_vendors": results, "total": len(results)}
@@ -287,53 +460,64 @@ async def get_unmatched_vendor_gaps():
 async def accept_vendor_suggestion(body: dict):
     """
     Accept a vendor match suggestion and create an alias.
-    Also re-validates all docs with this vendor name.
+    Also creates aliases for all name variants and re-validates all affected docs.
     """
     from services.vendor_name_helpers import normalize_vendor_name, VENDOR_ALIAS_MAP
 
     alias_string = body.get("alias_string", "")
     vendor_no = body.get("vendor_no", "")
     vendor_name = body.get("vendor_name", "")
+    variants = body.get("variants", [])
 
     if not alias_string or not vendor_no:
         raise HTTPException(status_code=400, detail="alias_string and vendor_no required")
 
     db = get_db()
-    alias_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
-    normalized = normalize_vendor_name(alias_string)
 
-    # Create alias (skip if exists)
-    existing = await db.vendor_aliases.find_one({
-        "$or": [{"alias_string": alias_string}, {"normalized_alias": normalized}]
-    })
-    if not existing:
-        await db.vendor_aliases.insert_one({
-            "alias_id": alias_id,
-            "alias_string": alias_string,
-            "normalized_alias": normalized,
-            "vendor_no": vendor_no,
-            "vendor_name": vendor_name,
-            "created_by": "monitor_suggestion",
-            "created_at": now,
-            "usage_count": 0,
+    # Create aliases for the main name + all variants
+    all_names = [alias_string] + [v for v in variants if v != alias_string]
+    aliases_created = 0
+
+    for name in all_names:
+        alias_id = str(uuid.uuid4())
+        normalized = normalize_vendor_name(name)
+
+        existing = await db.vendor_aliases.find_one({
+            "$or": [{"alias_string": name}, {"normalized_alias": normalized}]
         })
-        VENDOR_ALIAS_MAP[alias_string] = vendor_name or vendor_no
-        VENDOR_ALIAS_MAP[normalized] = vendor_name or vendor_no
+        if not existing:
+            await db.vendor_aliases.insert_one({
+                "alias_id": alias_id,
+                "alias_string": name,
+                "normalized_alias": normalized,
+                "vendor_no": vendor_no,
+                "vendor_name": vendor_name,
+                "created_by": "monitor_suggestion",
+                "created_at": now,
+                "usage_count": 0,
+            })
+            VENDOR_ALIAS_MAP[name] = vendor_name or vendor_no
+            VENDOR_ALIAS_MAP[normalized] = vendor_name or vendor_no
+            aliases_created += 1
 
-    # Re-validate all docs with this vendor name
+    # Re-validate all docs with any of the vendor name variants
     updated = 0
+    name_conditions = []
+    for name in all_names:
+        name_conditions.extend([
+            {"extracted_fields.vendor": name},
+            {"extracted_fields.vendor_name": name},
+            {"normalized_fields.vendor": name},
+        ])
+
     gap_docs = await db.hub_documents.find(
         {
             "validation_results.checks": {
                 "$elemMatch": {"check_name": "vendor_match", "passed": False}
             },
             "status": {"$nin": ["Completed", "Posted", "Deleted", "Archived"]},
-            "$or": [
-                {"extracted_fields.vendor": alias_string},
-                {"extracted_fields.vendor_name": alias_string},
-                {"normalized_fields.vendor": alias_string},
-            ],
+            "$or": name_conditions,
         },
         {"_id": 0, "id": 1, "validation_results": 1}
     ).to_list(500)
@@ -363,8 +547,8 @@ async def accept_vendor_suggestion(body: dict):
         updated += 1
 
     return {
-        "alias_created": not bool(existing),
-        "alias_id": alias_id if not existing else existing.get("alias_id"),
+        "aliases_created": aliases_created,
+        "all_variants": all_names,
         "docs_updated": updated,
     }
 

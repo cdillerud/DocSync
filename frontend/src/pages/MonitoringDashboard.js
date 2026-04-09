@@ -47,6 +47,9 @@ export default function MonitoringDashboard() {
   const [backfillResult, setBackfillResult] = useState(null);
   const [unmatchedVendors, setUnmatchedVendors] = useState(null);
   const [acceptingAlias, setAcceptingAlias] = useState(null);
+  const [searchQuery, setSearchQuery] = useState({});  // vendor_name -> search query
+  const [searchResults, setSearchResults] = useState({}); // vendor_name -> results
+  const [searching, setSearching] = useState(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -87,21 +90,53 @@ export default function MonitoringDashboard() {
     setBackfillRunning(false);
   };
 
-  const acceptAlias = async (aliasString, vendorNo, vendorName) => {
+  const acceptAlias = async (aliasString, vendorNo, vendorName, variants = []) => {
     setAcceptingAlias(aliasString);
     try {
       const res = await fetch(`${API}/api/aliases/vendors/accept-suggestion`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ alias_string: aliasString, vendor_no: vendorNo, vendor_name: vendorName }),
+        body: JSON.stringify({ alias_string: aliasString, vendor_no: vendorNo, vendor_name: vendorName, variants }),
       });
       if (res.ok) {
-        const result = await res.json();
         setUnmatchedVendors(prev => prev.filter(v => v.vendor_name !== aliasString));
         await fetchAll();
       }
     } catch (e) {
       console.error('[Monitor] accept alias failed', e);
+    }
+    setAcceptingAlias(null);
+  };
+
+  const searchBcVendors = async (vendorName, query) => {
+    if (!query || query.length < 2) return;
+    setSearching(vendorName);
+    try {
+      const res = await fetch(`${API}/api/aliases/vendors/search-bc?q=${encodeURIComponent(query)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSearchResults(prev => ({ ...prev, [vendorName]: data.results }));
+      }
+    } catch (e) {
+      console.error('[Monitor] search BC vendors failed', e);
+    }
+    setSearching(null);
+  };
+
+  const dismissVendor = async (vendorName) => {
+    setAcceptingAlias(vendorName);
+    try {
+      const res = await fetch(`${API}/api/aliases/vendors/dismiss-unmatched`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vendor_name: vendorName, reason: 'dismissed_by_user' }),
+      });
+      if (res.ok) {
+        setUnmatchedVendors(prev => prev.filter(v => v.vendor_name !== vendorName));
+        await fetchAll();
+      }
+    } catch (e) {
+      console.error('[Monitor] dismiss vendor failed', e);
     }
     setAcceptingAlias(null);
   };
@@ -443,40 +478,99 @@ export default function MonitoringDashboard() {
       ) : null}
 
 
-      {/* Unmatched Vendors — one-click alias acceptance */}
+      {/* Unmatched Vendors — alias resolution with search + dismiss */}
       {unmatchedVendors && unmatchedVendors.length > 0 && (
         <Card className="border-red-500/20" data-testid="unmatched-vendors">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-red-400">Unmatched Vendors ({unmatchedVendors.length})</CardTitle>
-            <p className="text-xs text-muted-foreground">Click a candidate to create an alias and auto-resolve the gap</p>
+            <p className="text-xs text-muted-foreground">Click a candidate to create an alias, or search BC vendors manually, or dismiss if not a real vendor</p>
           </CardHeader>
           <CardContent className="pb-4">
-            <div className="space-y-2">
+            <div className="space-y-3">
               {unmatchedVendors.map((v, i) => (
-                <div key={i} className="flex items-center justify-between p-2 rounded bg-accent/30 text-xs">
-                  <div className="flex-1">
-                    <span className="font-mono font-medium">{v.vendor_name}</span>
-                    <span className="text-muted-foreground ml-2">({v.gap_count} doc{v.gap_count !== 1 ? 's' : ''})</span>
+                <div key={i} className="p-3 rounded-lg bg-accent/30 border border-border/40" data-testid={`unmatched-vendor-${i}`}>
+                  {/* Vendor name + count + variants */}
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <span className="font-mono font-medium text-sm">{v.vendor_name}</span>
+                      <span className="text-muted-foreground text-xs ml-2">({v.gap_count} doc{v.gap_count !== 1 ? 's' : ''})</span>
+                      {v.variants && v.variants.length > 0 && (
+                        <span className="text-[10px] text-amber-400 ml-2">
+                          +{v.variants.length - 1} variant{v.variants.length > 2 ? 's' : ''}: {v.variants.filter(x => x !== v.vendor_name).join(', ')}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => dismissVendor(v.vendor_name)}
+                      disabled={acceptingAlias === v.vendor_name}
+                      className="px-2 py-1 rounded text-[10px] font-medium bg-zinc-500/20 text-zinc-400 hover:bg-red-500/20 hover:text-red-400 border border-zinc-500/30 transition-colors"
+                      data-testid={`dismiss-vendor-${i}`}
+                    >
+                      Dismiss
+                    </button>
                   </div>
+
+                  {/* AI-suggested candidates */}
+                  {v.candidates && v.candidates.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {v.candidates.map((c, j) => (
+                        <button
+                          key={j}
+                          onClick={() => acceptAlias(v.vendor_name, c.vendor_no, c.vendor_name, v.variants || [])}
+                          disabled={acceptingAlias === v.vendor_name}
+                          className={`px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+                            c.score >= 0.70 ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/30' :
+                            c.score >= 0.50 ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 border border-amber-500/30' :
+                            'bg-zinc-500/20 text-zinc-400 hover:bg-zinc-500/30 border border-zinc-500/30'
+                          }`}
+                          data-testid={`accept-alias-${i}-${j}`}
+                        >
+                          {acceptingAlias === v.vendor_name ? '...' : `${c.vendor_name} (${c.vendor_no}) ${Math.round(c.score * 100)}%`}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Manual BC vendor search */}
                   <div className="flex items-center gap-2">
-                    {v.candidates && v.candidates.length > 0 ? v.candidates.map((c, j) => (
-                      <button
-                        key={j}
-                        onClick={() => acceptAlias(v.vendor_name, c.vendor_no, c.vendor_name)}
-                        disabled={acceptingAlias === v.vendor_name}
-                        className={`px-2 py-1 rounded text-[10px] font-medium transition-colors ${
-                          c.score >= 0.70 ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/30' :
-                          c.score >= 0.50 ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 border border-amber-500/30' :
-                          'bg-zinc-500/20 text-zinc-400 hover:bg-zinc-500/30 border border-zinc-500/30'
-                        }`}
-                        data-testid={`accept-alias-${i}-${j}`}
-                      >
-                        {acceptingAlias === v.vendor_name ? '...' : `${c.vendor_name} (${c.vendor_no}) ${Math.round(c.score * 100)}%`}
-                      </button>
-                    )) : (
-                      <span className="text-muted-foreground text-[10px]">No candidates found</span>
-                    )}
+                    <input
+                      type="text"
+                      placeholder="Search BC vendors..."
+                      className="flex-1 px-2 py-1 text-xs rounded border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                      value={searchQuery[v.vendor_name] || ''}
+                      onChange={e => setSearchQuery(prev => ({ ...prev, [v.vendor_name]: e.target.value }))}
+                      onKeyDown={e => { if (e.key === 'Enter') searchBcVendors(v.vendor_name, searchQuery[v.vendor_name]); }}
+                      data-testid={`search-bc-${i}`}
+                    />
+                    <button
+                      onClick={() => searchBcVendors(v.vendor_name, searchQuery[v.vendor_name])}
+                      disabled={searching === v.vendor_name}
+                      className="px-2 py-1 rounded text-[10px] font-medium bg-primary/20 text-primary hover:bg-primary/30 border border-primary/30"
+                      data-testid={`search-btn-${i}`}
+                    >
+                      {searching === v.vendor_name ? '...' : 'Search'}
+                    </button>
                   </div>
+
+                  {/* Search results */}
+                  {searchResults[v.vendor_name] && searchResults[v.vendor_name].length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {searchResults[v.vendor_name].map((r, j) => (
+                        <button
+                          key={j}
+                          onClick={() => acceptAlias(v.vendor_name, r.vendor_no, r.vendor_name, v.variants || [])}
+                          disabled={acceptingAlias === v.vendor_name}
+                          className="px-2 py-1 rounded text-[10px] font-medium bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 border border-blue-500/30 transition-colors"
+                          data-testid={`search-result-${i}-${j}`}
+                        >
+                          {r.vendor_name} ({r.vendor_no})
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {searchResults[v.vendor_name] && searchResults[v.vendor_name].length === 0 && (
+                    <p className="text-[10px] text-muted-foreground mt-1">No BC vendors found for "{searchQuery[v.vendor_name]}"</p>
+                  )}
                 </div>
               ))}
             </div>

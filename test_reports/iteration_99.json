@@ -82,7 +82,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://inbox-cleanup-1.preview.emergentagent.com"
+    "api_url": "https://doc-intelligence-33.preview.emergentagent.com"
   },
   "seed_data_created": {
     "existing_valid_bundle": "BDL-B739B77E (customer_order_packet with TEST-BUNDLE-A and TEST-BUNDLE-B) - status: valid",

@@ -940,8 +940,9 @@ async def get_inbox_stats():
     non_batch_total = await db.hub_documents.count_documents({"status": {"$ne": "batch_parent"}})
     auto_rate = round((auto_processed / non_batch_total * 100), 1) if non_batch_total > 0 else 0
 
-    # Pending review (docs needing human attention)
+    # Pending review (docs needing human attention — exclude duplicates to match inbox)
     pending_review = await db.hub_documents.count_documents({
+        "is_duplicate": {"$ne": True},
         "status": {"$nin": ["Completed", "Posted", "Archived", "batch_parent", "auto_filed"]},
         "workflow_status": {"$in": [
             "NeedsReview", "needs_review", "pending_review",
@@ -950,6 +951,7 @@ async def get_inbox_stats():
     })
     # Fallback: also count docs just marked with certain statuses
     pending_simple = await db.hub_documents.count_documents({
+        "is_duplicate": {"$ne": True},
         "status": {"$in": ["NeedsReview", "needs_review", "pending_review"]},
     })
     pending = max(pending_review, pending_simple)
@@ -996,6 +998,7 @@ async def get_inbox_metrics():
 
     inbox_filter = {
         "$and": [
+            {"is_duplicate": {"$ne": True}},
             {"$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}]},
             {"status": {"$nin": TERMINAL_STATUSES}},
             {"$or": [

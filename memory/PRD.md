@@ -23,12 +23,15 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 ## Key File References
 - `/app/backend/routers/dashboard.py` — inbox-stats, inbox-metrics, insights endpoints
 - `/app/backend/routers/readiness.py` — Force cleanup, Exception retry, PO park/retry, Captured retry
-- `/app/backend/routers/documents.py` — Queue endpoints, TERMINAL_STATUSES
+- `/app/backend/routers/documents.py` — Queue endpoints, TERMINAL_STATUSES, is_duplicate filter
 - `/app/backend/routers/aliases.py` — Vendor matching & alias suggestions
 - `/app/backend/routers/workflow_fix.py` — Batch-fix stuck "captured" docs
 - `/app/backend/server.py` — Main server, background schedulers (PO retry, Captured retry), intake pipeline
 - `/app/frontend/src/pages/UnifiedQueuePage.js` — Inbox with metrics panel, retry-stuck button, tabs
 - `/app/frontend/src/pages/MonitoringDashboard.js` — Vendor mapping UI
+
+## Critical Data Rule
+- `is_duplicate: {"$ne": True}` must be included in ALL inbox-related queries (documents list, inbox-stats, inbox-metrics) to match the actual inbox view. The documents endpoint enforces this at line 180.
 
 ## Completed Features
 - Expanded TERMINAL_STATUSES (Validated, ReadyForPost, etc.)
@@ -37,8 +40,9 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - Exception Queue + Retry System (4x retry → escalate)
 - Vendor Matching Gap Closer (variants, manual BC search, dismiss)
 - PO Auto-Retry Queue (park, 4h retry, 3d escalation, UI tab)
-- **Inbox Metrics Panel** — `GET /api/dashboard/inbox-metrics` with 5 breakdowns (Status, Type, Age, Vendor, Blocker) + collapsible UI (2026-04-09)
-- **Captured Doc Auto-Retry** — Background scheduler (every 5 min, detects >5 min stuck docs, reprocesses w/ reclassify, max 4 retries → Exception Queue) + manual `POST /api/readiness/retry-captured` + "Retry Stuck" UI button (2026-04-09)
+- Inbox Metrics Panel — `GET /api/dashboard/inbox-metrics` (2026-04-09)
+- Captured Doc Auto-Retry — Background scheduler + manual endpoint + UI button (2026-04-09)
+- **Bugfix: is_duplicate filter** — Added to inbox-metrics and inbox-stats pending_review so numbers match inbox table (2026-04-09)
 
 ## Key API Endpoints
 - `POST /api/readiness/sync-status` — Force cleanup engine

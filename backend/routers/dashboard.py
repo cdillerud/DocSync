@@ -978,6 +978,142 @@ async def get_inbox_stats():
     }
 
 
+@router.get("/inbox-metrics")
+async def get_inbox_metrics():
+    """Detailed breakdown of documents currently IN the inbox (non-terminal, non-cleared)."""
+    db = get_db()
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+
+    TERMINAL_STATUSES = [
+        "Completed", "Posted", "Archived", "completed", "posted", "archived",
+        "FileMissing", "batch_parent", "Validated", "validated", "ValidationPassed",
+        "ReadyForPost", "ready_for_post", "AutoFiled", "auto_filed", "LinkedToBC",
+        "Exception", "exception",
+    ]
+    DONE_WF = ["completed", "validation_passed", "processed", "ready_for_approval",
+               "exported", "file_missing", "exception_review", "po_pending"]
+
+    inbox_filter = {
+        "$and": [
+            {"$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}]},
+            {"status": {"$nin": TERMINAL_STATUSES}},
+            {"$or": [
+                {"workflow_status": {"$nin": DONE_WF}},
+                {"workflow_status": {"$exists": False}},
+            ]},
+        ]
+    }
+
+    # ── 1. By Status ──
+    status_pipeline = [
+        {"$match": inbox_filter},
+        {"$group": {"_id": {"$ifNull": ["$workflow_status", "unknown"]}, "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    status_raw = await db.hub_documents.aggregate(status_pipeline).to_list(50)
+    by_status = {r["_id"]: r["count"] for r in status_raw}
+
+    # ── 2. By Document Type ──
+    type_pipeline = [
+        {"$match": inbox_filter},
+        {"$group": {"_id": {"$ifNull": [
+            {"$ifNull": ["$doc_type", "$document_type"]},
+            "Unknown"
+        ]}, "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    type_raw = await db.hub_documents.aggregate(type_pipeline).to_list(50)
+    by_type = {r["_id"]: r["count"] for r in type_raw}
+
+    # ── 3. By Age ──
+    one_hour_ago = (now - timedelta(hours=1)).isoformat()
+    one_day_ago = (now - timedelta(hours=24)).isoformat()
+    three_days_ago = (now - timedelta(days=3)).isoformat()
+
+    age_pipeline = [
+        {"$match": inbox_filter},
+        {"$addFields": {"created": {"$ifNull": ["$created_utc", now_iso]}}},
+        {"$group": {
+            "_id": None,
+            "lt_1h": {"$sum": {"$cond": [{"$gte": ["$created", one_hour_ago]}, 1, 0]}},
+            "1h_24h": {"$sum": {"$cond": [
+                {"$and": [{"$lt": ["$created", one_hour_ago]}, {"$gte": ["$created", one_day_ago]}]}, 1, 0
+            ]}},
+            "24h_3d": {"$sum": {"$cond": [
+                {"$and": [{"$lt": ["$created", one_day_ago]}, {"$gte": ["$created", three_days_ago]}]}, 1, 0
+            ]}},
+            "gt_3d": {"$sum": {"$cond": [{"$lt": ["$created", three_days_ago]}, 1, 0]}},
+        }},
+    ]
+    age_raw = await db.hub_documents.aggregate(age_pipeline).to_list(1)
+    by_age = age_raw[0] if age_raw else {"lt_1h": 0, "1h_24h": 0, "24h_3d": 0, "gt_3d": 0}
+    by_age.pop("_id", None)
+
+    # ── 4. By Vendor (top 10) ──
+    vendor_pipeline = [
+        {"$match": inbox_filter},
+        {"$group": {"_id": {"$ifNull": [
+            {"$ifNull": ["$vendor_canonical", "$vendor_normalized"]},
+            "Unknown"
+        ]}, "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 10},
+    ]
+    vendor_raw = await db.hub_documents.aggregate(vendor_pipeline).to_list(10)
+    by_vendor = [{"vendor": r["_id"] or "Unknown", "count": r["count"]} for r in vendor_raw]
+
+    # ── 5. By Blocker Reason ──
+    blocker_pipeline = [
+        {"$match": inbox_filter},
+        {"$group": {
+            "_id": None,
+            "total": {"$sum": 1},
+            "no_vendor": {"$sum": {"$cond": [
+                {"$and": [
+                    {"$in": [{"$ifNull": ["$vendor_canonical", ""]}, ["", None]]},
+                    {"$in": [{"$ifNull": ["$vendor_normalized", ""]}, ["", None]]},
+                ]}, 1, 0
+            ]}},
+            "no_po": {"$sum": {"$cond": [
+                {"$and": [
+                    {"$in": [{"$ifNull": ["$po_number_clean", ""]}, ["", None]]},
+                    {"$in": [{"$ifNull": ["$po_number_raw", ""]}, ["", None]]},
+                ]}, 1, 0
+            ]}},
+            "low_confidence": {"$sum": {"$cond": [
+                {"$lt": [{"$ifNull": ["$ai_confidence", 0]}, 0.5]}, 1, 0
+            ]}},
+            "duplicate_flag": {"$sum": {"$cond": [
+                {"$eq": [{"$ifNull": ["$possible_duplicate", False]}, True]}, 1, 0
+            ]}},
+            "no_extraction": {"$sum": {"$cond": [
+                {"$in": [{"$ifNull": ["$extracted_fields", None]}, [None, {}]]}, 1, 0
+            ]}},
+            "validation_failed": {"$sum": {"$cond": [
+                {"$eq": [{"$ifNull": ["$validation_results.all_passed", True]}, False]}, 1, 0
+            ]}},
+        }},
+    ]
+    blocker_raw = await db.hub_documents.aggregate(blocker_pipeline).to_list(1)
+    by_blocker = blocker_raw[0] if blocker_raw else {
+        "total": 0, "no_vendor": 0, "no_po": 0, "low_confidence": 0,
+        "duplicate_flag": 0, "no_extraction": 0, "validation_failed": 0,
+    }
+    by_blocker.pop("_id", None)
+
+    total_inbox = sum(by_status.values()) if by_status else 0
+
+    return {
+        "total_inbox": total_inbox,
+        "by_status": by_status,
+        "by_type": by_type,
+        "by_age": by_age,
+        "by_vendor": by_vendor,
+        "by_blocker": by_blocker,
+    }
+
+
 @router.get("/insights-trends")
 async def get_insights_trends(days: int = Query(30, le=90)):
     """

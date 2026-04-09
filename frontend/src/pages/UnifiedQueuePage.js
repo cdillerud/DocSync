@@ -10,7 +10,8 @@ import {
   Search, RefreshCw, FileText, ChevronRight, Trash2, Play,
   Receipt, ShoppingCart, Inbox, FolderInput, Brain,
   TrendingUp, ShieldCheck, AlertTriangle, Clock, CheckCircle2,
-  RotateCcw, Layers,
+  RotateCcw, Layers, ChevronDown, ChevronUp, BarChart3,
+  User, FileQuestion, Ban, Copy, Zap, XCircle,
 } from "lucide-react";
 import api, { bulkResubmitDocuments, bulkDeleteDocuments, deleteDocument, bulkFileAndClear, batchAutoResolve, triggerAutoResolve } from "@/lib/api";
 
@@ -100,6 +101,8 @@ export default function UnifiedQueuePage() {
   const [counts, setCounts] = useState({ all: 0, accounting: 0, sales: 0, processed: 0, batches: 0, exceptions: 0, po_pending: 0 });
   const [stats, setStats] = useState(null);
   const [reprocessing, setReprocessing] = useState(null);
+  const [metrics, setMetrics] = useState(null);
+  const [metricsOpen, setMetricsOpen] = useState(false);
 
   // ── Fetch Inbox Stats ──
   useEffect(() => {
@@ -110,8 +113,15 @@ export default function UnifiedQueuePage() {
         if (!cancelled) setStats(res.data);
       } catch { /* silent — stats are non-critical */ }
     };
+    const fetchMetrics = async () => {
+      try {
+        const res = await api.get('/dashboard/inbox-metrics');
+        if (!cancelled) setMetrics(res.data);
+      } catch { /* silent */ }
+    };
     fetchStats();
-    const interval = setInterval(fetchStats, 60000); // refresh every 60s
+    fetchMetrics();
+    const interval = setInterval(() => { fetchStats(); fetchMetrics(); }, 60000);
     return () => { cancelled = true; clearInterval(interval); };
   }, []);
 
@@ -408,6 +418,98 @@ export default function UnifiedQueuePage() {
           <div className="flex items-center gap-1.5" data-testid="stat-ai-confidence">
             <span className="text-muted-foreground">AI confidence</span>
             <span className="font-semibold text-foreground">{stats.avg_ai_confidence}%</span>
+          </div>
+          <div className="w-px h-4 bg-border/40" />
+          <button
+            onClick={() => setMetricsOpen(p => !p)}
+            className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
+            data-testid="toggle-inbox-metrics"
+          >
+            <BarChart3 className="w-3.5 h-3.5" />
+            <span>Details</span>
+            {metricsOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          </button>
+        </div>
+      )}
+
+      {/* ─── Inbox Metrics Panel (Collapsible) ─── */}
+      {metricsOpen && metrics && (
+        <div className="grid grid-cols-5 gap-4 px-1 pb-3 text-xs animate-in fade-in slide-in-from-top-2 duration-200" data-testid="inbox-metrics-panel">
+          {/* By Status */}
+          <div className="space-y-1.5" data-testid="metrics-by-status">
+            <div className="font-medium text-muted-foreground flex items-center gap-1"><Zap className="w-3 h-3" /> By Status</div>
+            {Object.entries(metrics.by_status || {}).map(([s, c]) => (
+              <div key={s} className="flex items-center justify-between gap-2">
+                <span className="truncate text-foreground/80">{STATUS_LABELS[s] || s}</span>
+                <span className="font-mono font-semibold text-foreground tabular-nums">{c}</span>
+              </div>
+            ))}
+            {Object.keys(metrics.by_status || {}).length === 0 && <span className="text-muted-foreground/50">None</span>}
+          </div>
+
+          {/* By Type */}
+          <div className="space-y-1.5" data-testid="metrics-by-type">
+            <div className="font-medium text-muted-foreground flex items-center gap-1"><FileText className="w-3 h-3" /> By Type</div>
+            {Object.entries(metrics.by_type || {}).map(([t, c]) => (
+              <div key={t} className="flex items-center justify-between gap-2">
+                <span className="truncate text-foreground/80">{TYPE_LABELS[t] || t}</span>
+                <span className="font-mono font-semibold text-foreground tabular-nums">{c}</span>
+              </div>
+            ))}
+            {Object.keys(metrics.by_type || {}).length === 0 && <span className="text-muted-foreground/50">None</span>}
+          </div>
+
+          {/* By Age */}
+          <div className="space-y-1.5" data-testid="metrics-by-age">
+            <div className="font-medium text-muted-foreground flex items-center gap-1"><Clock className="w-3 h-3" /> By Age</div>
+            {[
+              { key: "lt_1h", label: "< 1 hour", color: "text-emerald-400" },
+              { key: "1h_24h", label: "1h – 24h", color: "text-sky-400" },
+              { key: "24h_3d", label: "1 – 3 days", color: "text-amber-400" },
+              { key: "gt_3d", label: "> 3 days", color: "text-red-400" },
+            ].map(({ key, label, color }) => (
+              <div key={key} className="flex items-center justify-between gap-2">
+                <span className={`truncate ${color}`}>{label}</span>
+                <span className="font-mono font-semibold text-foreground tabular-nums">{metrics.by_age?.[key] || 0}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* By Vendor */}
+          <div className="space-y-1.5" data-testid="metrics-by-vendor">
+            <div className="font-medium text-muted-foreground flex items-center gap-1"><User className="w-3 h-3" /> Top Vendors</div>
+            {(metrics.by_vendor || []).slice(0, 5).map((v, i) => (
+              <div key={i} className="flex items-center justify-between gap-2">
+                <span className="truncate text-foreground/80 max-w-[120px]">{v.vendor}</span>
+                <span className="font-mono font-semibold text-foreground tabular-nums">{v.count}</span>
+              </div>
+            ))}
+            {(metrics.by_vendor || []).length === 0 && <span className="text-muted-foreground/50">None</span>}
+          </div>
+
+          {/* By Blocker */}
+          <div className="space-y-1.5" data-testid="metrics-by-blocker">
+            <div className="font-medium text-muted-foreground flex items-center gap-1"><Ban className="w-3 h-3" /> Blockers</div>
+            {[
+              { key: "no_vendor", label: "No vendor", icon: User, color: "text-red-400" },
+              { key: "no_extraction", label: "No extraction", icon: FileQuestion, color: "text-red-400" },
+              { key: "low_confidence", label: "Low confidence", icon: AlertTriangle, color: "text-amber-400" },
+              { key: "validation_failed", label: "Validation fail", icon: XCircle, color: "text-amber-400" },
+              { key: "no_po", label: "No PO#", icon: FileText, color: "text-sky-400" },
+              { key: "duplicate_flag", label: "Possible dupe", icon: Copy, color: "text-sky-400" },
+            ].map(({ key, label, icon: Icon, color }) => {
+              const val = metrics.by_blocker?.[key] || 0;
+              if (val === 0) return null;
+              return (
+                <div key={key} className="flex items-center justify-between gap-2">
+                  <span className={`flex items-center gap-1 truncate ${color}`}><Icon className="w-3 h-3 shrink-0" />{label}</span>
+                  <span className="font-mono font-semibold text-foreground tabular-nums">{val}</span>
+                </div>
+              );
+            })}
+            {Object.values(metrics.by_blocker || {}).filter(v => typeof v === 'number' && v > 0).length === 0 && (
+              <span className="text-emerald-400">All clear</span>
+            )}
           </div>
         </div>
       )}

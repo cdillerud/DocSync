@@ -7621,6 +7621,121 @@ async def startup():
     asyncio.create_task(_intelligence_maintenance_scheduler())
     logger.info("Intelligence Maintenance scheduler started (dup clear + escalation + dup backfill, interval: 2h)")
 
+    # === PO Auto-Retry Queue (every 4 hours) ===
+    PO_RETRY_INTERVAL_HOURS = 4
+    PO_MAX_WAIT_DAYS = 3
+    PO_MAX_RETRIES = PO_MAX_WAIT_DAYS * 24 // PO_RETRY_INTERVAL_HOURS  # = 18
+
+    async def _po_retry_scheduler():
+        await asyncio.sleep(600)  # Initial delay: 10 minutes
+        while True:
+            try:
+                logger.info("[PO Retry] Starting scheduled PO pending retry cycle...")
+                # 1. Park any new PO-gap docs
+                from datetime import datetime, timezone
+                now = datetime.now(timezone.utc).isoformat()
+
+                DONE_STATUSES = ["Completed", "Posted", "Archived", "completed", "posted",
+                                 "archived", "FileMissing", "Exception", "exception",
+                                 "Validated", "validated", "ReadyForPost", "AutoFiled"]
+
+                # Auto-park new PO-gap docs
+                new_parked = await db.hub_documents.update_many(
+                    {
+                        "is_duplicate": {"$ne": True},
+                        "status": {"$nin": DONE_STATUSES},
+                        "po_pending_parked": {"$ne": True},
+                        "$or": [
+                            {"readiness.warning_reasons": "po_missing"},
+                            {"readiness.blocking_reasons": {"$regex": "po"}},
+                            {"validation_results.checks": {
+                                "$elemMatch": {"check_name": {"$in": ["po_validation", "po_check"]}, "passed": False},
+                            }},
+                        ],
+                    },
+                    {"$set": {
+                        "po_pending_parked": True,
+                        "po_pending_parked_at": now,
+                        "po_pending_retry_count": 0,
+                        "po_pending_max_retries": PO_MAX_RETRIES,
+                        "po_pending_next_retry": now,
+                        "workflow_status": "po_pending",
+                    }},
+                )
+                if new_parked.modified_count > 0:
+                    logger.info("[PO Retry] Auto-parked %d new PO-gap docs", new_parked.modified_count)
+
+                # 2. Retry all pending docs
+                from services.document_readiness_service import evaluate_and_persist
+
+                pending = await db.hub_documents.find(
+                    {"po_pending_parked": True, "status": {"$nin": ["Completed", "Posted", "Exception", "exception"]}},
+                    {"_id": 0},
+                ).limit(200).to_list(200)
+
+                resolved = 0
+                escalated = 0
+                still_waiting = 0
+
+                for doc in pending:
+                    doc_id = doc["id"]
+                    retry_count = doc.get("po_pending_retry_count", 0) + 1
+                    max_r = doc.get("po_pending_max_retries", PO_MAX_RETRIES)
+
+                    try:
+                        readiness = await evaluate_and_persist(doc)
+                        po_ok = (readiness.get("signals") or {}).get("po_resolved", False)
+                        is_ready = readiness.get("status", "").startswith("ready")
+
+                        if po_ok or is_ready:
+                            await db.hub_documents.update_one(
+                                {"id": doc_id},
+                                {"$set": {
+                                    "po_pending_parked": False,
+                                    "po_pending_resolved_at": now,
+                                    "po_pending_retry_count": retry_count,
+                                }},
+                            )
+                            resolved += 1
+                        elif retry_count >= max_r:
+                            await db.hub_documents.update_one(
+                                {"id": doc_id},
+                                {"$set": {
+                                    "po_pending_parked": False,
+                                    "po_pending_retry_count": retry_count,
+                                    "status": "Exception",
+                                    "workflow_status": "exception_review",
+                                    "auto_cleared": True,
+                                    "auto_escalated": True,
+                                    "escalation_reason": f"PO not found after {retry_count} retries ({PO_MAX_WAIT_DAYS} days)",
+                                    "updated_utc": now,
+                                }},
+                            )
+                            escalated += 1
+                        else:
+                            await db.hub_documents.update_one(
+                                {"id": doc_id},
+                                {"$set": {
+                                    "po_pending_retry_count": retry_count,
+                                    "po_pending_last_retry": now,
+                                    "updated_utc": now,
+                                }},
+                            )
+                            still_waiting += 1
+                    except Exception as e:
+                        logger.warning("[PO Retry] Error on doc=%s: %s", doc_id[:8], str(e))
+
+                logger.info(
+                    "[PO Retry] Cycle done: %d checked, %d resolved, %d still waiting, %d escalated",
+                    len(pending), resolved, still_waiting, escalated,
+                )
+            except Exception as e:
+                logger.warning("[PO Retry] Scheduled cycle failed: %s", e)
+
+            await asyncio.sleep(PO_RETRY_INTERVAL_HOURS * 3600)
+    asyncio.create_task(_po_retry_scheduler())
+    logger.info("PO Auto-Retry scheduler started (interval: %dh, max wait: %d days)", PO_RETRY_INTERVAL_HOURS, PO_MAX_WAIT_DAYS)
+
 async def shutdown_db_client():
     global _email_polling_task, _sales_polling_task, _dynamic_mailbox_polling_task, _pilot_summary_task
     # Cancel dynamic mailbox polling worker

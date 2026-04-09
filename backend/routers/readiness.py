@@ -12,6 +12,9 @@ Endpoints:
   GET  /api/readiness/automation-rate   - Automation rate dashboard
   POST /api/readiness/retry-failed      - Batch retry extraction-failed docs
   GET  /api/readiness/exception-queue   - View exception queue
+  POST /api/readiness/po-pending/park   - Park PO-gap docs in retry queue
+  POST /api/readiness/po-pending/retry  - Re-evaluate all PO-pending docs
+  GET  /api/readiness/po-pending        - View PO pending queue
 """
 
 from fastapi import APIRouter, HTTPException, Query
@@ -942,3 +945,241 @@ async def get_exception_queue(
         "total": total,
         "documents": docs,
     }
+
+
+# ───────────────────────────────────────────────────
+# PO Auto-Retry Queue
+# ───────────────────────────────────────────────────
+
+PO_RETRY_INTERVAL_HOURS = 4
+PO_MAX_WAIT_DAYS = 3
+PO_MAX_RETRIES = PO_MAX_WAIT_DAYS * 24 // PO_RETRY_INTERVAL_HOURS  # = 18 cycles
+
+
+@router.post("/po-pending/park")
+async def park_po_pending_docs():
+    """
+    Finds documents stuck on PO validation gaps and parks them in the
+    'po_pending' queue. These docs will be auto-retried every 4 hours.
+    After 3 days (18 retries) they escalate to the Exception Queue.
+    """
+    from deps import get_db
+    from datetime import datetime, timezone
+
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+
+    DONE_STATUSES = ["Completed", "Posted", "Archived", "completed", "posted",
+                     "archived", "FileMissing", "Exception", "exception",
+                     "Validated", "validated", "ReadyForPost", "AutoFiled",
+                     "batch_parent"]
+
+    # Find docs where PO is the issue — multiple detection methods
+    po_gap_filter = {
+        "is_duplicate": {"$ne": True},
+        "is_batch_parent": {"$ne": True},
+        "status": {"$nin": DONE_STATUSES},
+        "auto_cleared": {"$ne": True},
+        "po_pending_parked": {"$ne": True},  # not already parked
+        "$or": [
+            # Readiness says po_missing in warnings
+            {"readiness.warning_reasons": "po_missing"},
+            # BC validation has po_validation or po_check failed
+            {"validation_results.checks": {
+                "$elemMatch": {
+                    "check_name": {"$in": ["po_validation", "po_check"]},
+                    "passed": False,
+                },
+            }},
+            {"bc_validation.checks": {
+                "$elemMatch": {
+                    "check_name": {"$in": ["po_validation", "po_check"]},
+                    "passed": False,
+                },
+            }},
+            # Readiness blocking includes po_validation
+            {"readiness.blocking_reasons": {"$regex": "po"}},
+        ],
+    }
+
+    docs = await db.hub_documents.find(
+        po_gap_filter,
+        {"_id": 0, "id": 1, "file_name": 1, "vendor_canonical": 1,
+         "po_number_clean": 1, "extracted_fields.po_number": 1},
+    ).limit(500).to_list(500)
+
+    parked = 0
+    details = []
+
+    for doc in docs:
+        doc_id = doc["id"]
+        po = doc.get("po_number_clean") or (doc.get("extracted_fields") or {}).get("po_number", "?")
+
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {
+                "po_pending_parked": True,
+                "po_pending_parked_at": now,
+                "po_pending_retry_count": 0,
+                "po_pending_max_retries": PO_MAX_RETRIES,
+                "po_pending_next_retry": now,  # retry immediately on first cycle
+                "workflow_status": "po_pending",
+            }},
+        )
+        parked += 1
+        details.append({
+            "doc_id": doc_id[:8],
+            "file": doc.get("file_name", "?"),
+            "vendor": doc.get("vendor_canonical", "?"),
+            "po": po,
+        })
+
+    return {
+        "parked": parked,
+        "retry_interval_hours": PO_RETRY_INTERVAL_HOURS,
+        "max_wait_days": PO_MAX_WAIT_DAYS,
+        "max_retries": PO_MAX_RETRIES,
+        "details": details[:30],
+        "message": f"Parked {parked} docs in PO Pending queue. Will retry every {PO_RETRY_INTERVAL_HOURS}h for up to {PO_MAX_WAIT_DAYS} days.",
+    }
+
+
+@router.post("/po-pending/retry")
+async def retry_po_pending_docs():
+    """
+    Re-evaluates all PO-pending documents. If PO now resolves → doc proceeds
+    to normal processing. If max retries exceeded → Exception Queue.
+    Runs full readiness evaluation (not just PO check).
+    """
+    from deps import get_db
+    from datetime import datetime, timezone
+    from services.document_readiness_service import evaluate_and_persist
+    import logging
+
+    logger = logging.getLogger("po_retry")
+    db = get_db()
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+
+    # Find all parked PO-pending docs (exclude batch parents)
+    pending_docs = await db.hub_documents.find(
+        {
+            "po_pending_parked": True,
+            "is_batch_parent": {"$ne": True},
+            "status": {"$nin": ["Completed", "Posted", "Exception", "exception", "batch_parent"]},
+        },
+        {"_id": 0},
+    ).limit(500).to_list(500)
+
+    resolved = 0
+    still_pending = 0
+    escalated = 0
+    errors = 0
+    details = []
+
+    for doc in pending_docs:
+        doc_id = doc["id"]
+        retry_count = doc.get("po_pending_retry_count", 0) + 1
+        max_retries = doc.get("po_pending_max_retries", PO_MAX_RETRIES)
+
+        try:
+            # Full re-evaluation
+            readiness = await evaluate_and_persist(doc)
+            po_resolved = (readiness.get("signals") or {}).get("po_resolved", False)
+            is_ready = readiness.get("status", "").startswith("ready")
+
+            if po_resolved or is_ready:
+                # PO resolved or doc is now ready — unpark and let it proceed
+                await db.hub_documents.update_one(
+                    {"id": doc_id},
+                    {"$set": {
+                        "po_pending_parked": False,
+                        "po_pending_resolved_at": now_iso,
+                        "po_pending_retry_count": retry_count,
+                        "workflow_status": "processed" if is_ready else "validation",
+                    }},
+                )
+                resolved += 1
+                details.append({"doc_id": doc_id[:8], "action": "resolved", "retries": retry_count})
+                logger.info("[PO Retry] RESOLVED doc=%s after %d retries", doc_id[:8], retry_count)
+
+            elif retry_count >= max_retries:
+                # Max retries exceeded — escalate to Exception Queue
+                await db.hub_documents.update_one(
+                    {"id": doc_id},
+                    {"$set": {
+                        "po_pending_parked": False,
+                        "po_pending_retry_count": retry_count,
+                        "status": "Exception",
+                        "workflow_status": "exception_review",
+                        "auto_cleared": True,
+                        "auto_escalated": True,
+                        "escalation_reason": f"PO not found after {retry_count} retries ({PO_MAX_WAIT_DAYS} days)",
+                        "force_cleanup_rule": "po_pending_max_retries",
+                        "updated_utc": now_iso,
+                    }},
+                )
+                escalated += 1
+                details.append({"doc_id": doc_id[:8], "action": "exception_queue", "retries": retry_count})
+                logger.info("[PO Retry] ESCALATED doc=%s after %d retries (max=%d)", doc_id[:8], retry_count, max_retries)
+
+            else:
+                # Still pending — update retry count and schedule next
+                next_retry = (now + __import__("datetime").timedelta(hours=PO_RETRY_INTERVAL_HOURS)).isoformat()
+                await db.hub_documents.update_one(
+                    {"id": doc_id},
+                    {"$set": {
+                        "po_pending_retry_count": retry_count,
+                        "po_pending_next_retry": next_retry,
+                        "po_pending_last_retry": now_iso,
+                        "updated_utc": now_iso,
+                    }},
+                )
+                still_pending += 1
+                details.append({"doc_id": doc_id[:8], "action": f"retry_{retry_count}/{max_retries}", "retries": retry_count})
+
+        except Exception as e:
+            errors += 1
+            details.append({"doc_id": doc_id[:8], "action": "error", "error": str(e)[:80]})
+            logger.error("[PO Retry] Error on doc=%s: %s", doc_id[:8], str(e))
+
+    return {
+        "total_checked": len(pending_docs),
+        "resolved": resolved,
+        "still_pending": still_pending,
+        "escalated_to_exception": escalated,
+        "errors": errors,
+        "details": details[:30],
+        "message": (
+            f"PO retry: {resolved} resolved, {still_pending} still waiting, "
+            f"{escalated} escalated to Exception Queue."
+        ),
+    }
+
+
+@router.get("/po-pending")
+async def get_po_pending_queue(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Returns documents in the PO Pending auto-retry queue."""
+    from deps import get_db
+    db = get_db()
+
+    query = {"po_pending_parked": True}
+    total = await db.hub_documents.count_documents(query)
+    docs = await db.hub_documents.find(
+        query,
+        {
+            "_id": 0, "id": 1, "file_name": 1, "status": 1,
+            "vendor_canonical": 1, "doc_type": 1, "document_type": 1,
+            "po_number_clean": 1, "extracted_fields.po_number": 1,
+            "po_pending_retry_count": 1, "po_pending_max_retries": 1,
+            "po_pending_parked_at": 1, "po_pending_next_retry": 1,
+            "po_pending_last_retry": 1,
+            "readiness.status": 1, "readiness.blocking_reasons": 1,
+            "created_utc": 1, "updated_utc": 1,
+        },
+    ).sort("po_pending_parked_at", -1).skip(skip).limit(limit).to_list(limit)
+
+    return {"total": total, "documents": docs}

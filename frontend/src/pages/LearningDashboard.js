@@ -6,7 +6,7 @@ import {
   Brain, RefreshCw, TrendingUp, CheckCircle2, AlertTriangle,
   Zap, BookOpen, ArrowRight, Activity, Database, Loader2,
   RotateCcw, Sparkles, Shield, Fingerprint, Target, Gauge,
-  Eye, Search, BarChart3, GitBranch, Copy, FileText, Users
+  Eye, Search, BarChart3, GitBranch, Copy, FileText, Users, Clock
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid } from 'recharts';
@@ -134,6 +134,8 @@ function ReEvaluateSection({ onComplete }) {
   const [syncResult, setSyncResult] = useState(null);
   const [retrying, setRetrying] = useState(false);
   const [retryResult, setRetryResult] = useState(null);
+  const [parking, setParking] = useState(false);
+  const [parkResult, setParkResult] = useState(null);
 
   const handleRun = async () => {
     setRunning(true);
@@ -228,6 +230,26 @@ function ReEvaluateSection({ onComplete }) {
     setRetrying(false);
   };
 
+  const handleParkPoPending = async () => {
+    setParking(true);
+    try {
+      const res = await fetch(`${API}/api/readiness/po-pending/park`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        toast.success(data.parked > 0
+          ? `${data.parked} docs parked in PO Pending queue (retry every ${data.retry_interval_hours}h)`
+          : 'No PO-gap docs found to park');
+        setParkResult(data);
+        if (onComplete) onComplete();
+      } else {
+        toast.error('Park failed');
+      }
+    } catch {
+      toast.error('Network error');
+    }
+    setParking(false);
+  };
+
   return (
     <Card data-testid="reevaluate-section">
       <CardHeader className="pb-2">
@@ -268,6 +290,12 @@ function ReEvaluateSection({ onComplete }) {
             data-testid="retry-failed-btn">
             {retrying ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RotateCcw className="w-4 h-4 mr-2" />}
             Retry Failed → Exception Queue
+          </Button>
+          <Button onClick={handleParkPoPending} disabled={running || approving || syncing || retrying || parking}
+            variant="outline" className="border-amber-600 text-amber-500 hover:bg-amber-600/10"
+            data-testid="park-po-pending-btn">
+            {parking ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Clock className="w-4 h-4 mr-2" />}
+            Park PO Pending (Auto-Retry 4h)
           </Button>
         </div>
 
@@ -360,6 +388,30 @@ function ReEvaluateSection({ onComplete }) {
             </div>
             <p className="text-[10px] text-muted-foreground mt-1">
               Max retries: {retryResult.max_retries}. Docs exceeding max retries are moved to the Exception Queue (visible in Inbox → Exceptions tab).
+            </p>
+          </div>
+        )}
+
+        {/* PO Pending Park Results */}
+        {parkResult && parkResult.parked > 0 && (
+          <div className="mb-3 space-y-2 bg-muted/30 rounded-lg p-3" data-testid="park-results">
+            <p className="text-xs font-semibold text-amber-400 mb-2">PO Pending Queue</p>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="bg-amber-500/10 rounded p-2">
+                <p className="text-xl font-bold text-amber-400">{parkResult.parked}</p>
+                <p className="text-[10px] text-muted-foreground">Docs Parked</p>
+              </div>
+              <div className="bg-blue-500/10 rounded p-2">
+                <p className="text-xl font-bold text-blue-400">{parkResult.retry_interval_hours}h</p>
+                <p className="text-[10px] text-muted-foreground">Retry Interval</p>
+              </div>
+              <div className="bg-violet-500/10 rounded p-2">
+                <p className="text-xl font-bold text-violet-400">{parkResult.max_wait_days}d</p>
+                <p className="text-[10px] text-muted-foreground">Max Wait</p>
+              </div>
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Parked docs will be re-evaluated every {parkResult.retry_interval_hours}h. After {parkResult.max_wait_days} days without PO match, they escalate to Exception Queue. View in Inbox → PO Pending tab.
             </p>
           </div>
         )}

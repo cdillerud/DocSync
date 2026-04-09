@@ -78,7 +78,7 @@ const SALES_TYPES = ["Sales_Order", "SALES_ORDER", "Sales_PO", "Sales_Quote", "O
 const TERMINAL_STATUSES = ["Completed", "Posted", "Archived", "completed", "posted", "archived",
   "exported", "auto_filed", "AutoFiled", "Validated", "validated", "ValidationPassed",
   "ReadyForPost", "ready_for_post", "LinkedToBC", "Exception", "exception"];
-const DONE_WORKFLOW_STATUSES = ["completed", "exported", "validation_passed", "processed", "exception_review"];
+const DONE_WORKFLOW_STATUSES = ["completed", "exported", "validation_passed", "processed", "exception_review", "po_pending"];
 
 function isTerminal(doc) {
   const s = (doc.status || "").toLowerCase();
@@ -97,7 +97,7 @@ export default function UnifiedQueuePage() {
   const [activeTab, setActiveTab] = useState("all");
   const [selectedDocs, setSelectedDocs] = useState(new Set());
   const [bulkProcessing, setBulkProcessing] = useState(false);
-  const [counts, setCounts] = useState({ all: 0, accounting: 0, sales: 0, processed: 0, batches: 0, exceptions: 0 });
+  const [counts, setCounts] = useState({ all: 0, accounting: 0, sales: 0, processed: 0, batches: 0, exceptions: 0, po_pending: 0 });
   const [stats, setStats] = useState(null);
   const [reprocessing, setReprocessing] = useState(null);
 
@@ -122,14 +122,22 @@ export default function UnifiedQueuePage() {
       const isProcessedTab = activeTab === "processed";
       const isBatchesTab = activeTab === "batches";
       const isExceptionsTab = activeTab === "exceptions";
+      const isPoPendingTab = activeTab === "po_pending";
       const params = new URLSearchParams();
       if (searchQuery) params.append("search", searchQuery);
       params.append("limit", "500");
 
       if (isExceptionsTab) {
-        // Fetch exception queue from dedicated endpoint
         const exRes = await api.get(`/readiness/exception-queue?limit=500`);
         setDocuments(exRes.data.documents || []);
+        setSelectedDocs(new Set());
+        setLoading(false);
+        return;
+      }
+
+      if (isPoPendingTab) {
+        const poRes = await api.get(`/readiness/po-pending?limit=500`);
+        setDocuments(poRes.data.documents || []);
         setSelectedDocs(new Set());
         setLoading(false);
         return;
@@ -172,17 +180,18 @@ export default function UnifiedQueuePage() {
         const processedCount = response.data.counts?.completed || 0;
         // Fetch batch count and exception count
         try {
-          const [batchRes, exRes] = await Promise.all([
+          const [batchRes, exRes, poRes] = await Promise.all([
             api.get('/documents?limit=0&queue_view=false&include_cleared=true&status=batch_parent'),
             api.get('/readiness/exception-queue?limit=0'),
+            api.get('/readiness/po-pending?limit=0'),
           ]);
           setCounts({
             all: activeDocs.length, accounting: apCount, sales: salesCount,
             processed: processedCount, batches: batchRes.data.total || 0,
-            exceptions: exRes.data.total || 0,
+            exceptions: exRes.data.total || 0, po_pending: poRes.data.total || 0,
           });
         } catch {
-          setCounts({ all: activeDocs.length, accounting: apCount, sales: salesCount, processed: processedCount, batches: 0, exceptions: 0 });
+          setCounts({ all: activeDocs.length, accounting: apCount, sales: salesCount, processed: processedCount, batches: 0, exceptions: 0, po_pending: 0 });
         }
       }
     } catch (err) {
@@ -412,6 +421,7 @@ export default function UnifiedQueuePage() {
           { key: "processed", label: "Processed", icon: CheckCircle2, count: counts.processed },
           { key: "batches", label: "Batches", icon: Layers, count: counts.batches },
           { key: "exceptions", label: "Exceptions", icon: AlertTriangle, count: counts.exceptions, accent: true },
+          { key: "po_pending", label: "PO Pending", icon: Clock, count: counts.po_pending, accent: counts.po_pending > 0 },
         ].map(({ key, label, icon: Icon, count, accent }) => (
           <button
             key={key}

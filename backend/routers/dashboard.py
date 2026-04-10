@@ -985,74 +985,52 @@ async def get_inbox_metrics(
     scope: str = Query("all", description="Tab scope: all, accounting, sales, processed, exceptions, po_pending"),
 ):
     """Detailed breakdown of documents for the active tab scope."""
+    from routers.queue_constants import (
+        TERMINAL_STATUSES, DONE_WORKFLOW_STATUSES, AP_TYPES, SALES_TYPES,
+        build_inbox_filter,
+    )
     db = get_db()
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
 
-    TERMINAL_STATUSES = [
-        "Completed", "Posted", "Archived", "completed", "posted", "archived",
-        "FileMissing", "batch_parent", "Validated", "validated", "ValidationPassed",
-        "ReadyForPost", "ready_for_post", "AutoFiled", "auto_filed", "LinkedToBC",
-        "Exception", "exception",
-    ]
-    DONE_WF = ["completed", "validation_passed", "processed", "ready_for_approval",
-               "exported", "file_missing", "exception_review", "po_pending"]
-
-    AP_TYPES = ["AP_INVOICE", "AP_Invoice", "AP Invoice", "FREIGHT_INVOICE",
-                "Freight Invoice", "CREDIT_MEMO", "Credit Memo"]
-    SALES_TYPES = ["SALES_ORDER", "Sales Order", "PURCHASE_ORDER", "Purchase Order",
-                   "SHIPPING", "Shipping", "BOL"]
-
     # ── Build scope-specific filter ──
     if scope == "exceptions":
-        base_filter = {
+        inbox_filter = {
             "$and": [
                 {"is_duplicate": {"$ne": True}},
                 {"workflow_status": "exception_review"},
             ]
         }
     elif scope == "po_pending":
-        base_filter = {
+        inbox_filter = {
             "$and": [
                 {"is_duplicate": {"$ne": True}},
                 {"workflow_status": "po_pending"},
             ]
         }
     elif scope == "processed":
-        base_filter = {
+        inbox_filter = {
             "$and": [
                 {"is_duplicate": {"$ne": True}},
                 {"$or": [
                     {"status": {"$in": TERMINAL_STATUSES}},
-                    {"workflow_status": {"$in": DONE_WF}},
+                    {"workflow_status": {"$in": DONE_WORKFLOW_STATUSES}},
                     {"auto_cleared": True},
                 ]},
             ]
         }
     else:
-        # Active inbox (all / accounting / sales)
-        base_filter = {
-            "$and": [
-                {"is_duplicate": {"$ne": True}},
-                {"$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}]},
-                {"status": {"$nin": TERMINAL_STATUSES}},
-                {"$or": [
-                    {"workflow_status": {"$nin": DONE_WF}},
-                    {"workflow_status": {"$exists": False}},
-                ]},
-            ]
-        }
+        # Active inbox — uses the EXACT same filter as the documents endpoint
+        inbox_filter = build_inbox_filter(include_cleared=False)
         # Narrow by doc type for accounting/sales tabs
         if scope == "accounting":
-            base_filter["$and"].append(
+            inbox_filter["$and"].append(
                 {"$or": [{"doc_type": {"$in": AP_TYPES}}, {"document_type": {"$in": AP_TYPES}}]}
             )
         elif scope == "sales":
-            base_filter["$and"].append(
+            inbox_filter["$and"].append(
                 {"$or": [{"doc_type": {"$in": SALES_TYPES}}, {"document_type": {"$in": SALES_TYPES}}]}
             )
-
-    inbox_filter = base_filter
 
     # ── 1. By Status ──
     status_pipeline = [

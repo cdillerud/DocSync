@@ -13,7 +13,7 @@ import pytest
 import requests
 import time
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://doc-hub-queue-repair.preview.emergentagent.com")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://auto-post-recovery.preview.emergentagent.com")
 
 
 class TestBatchDemoSetup:

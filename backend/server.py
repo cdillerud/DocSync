@@ -7413,6 +7413,24 @@ async def startup():
 
     asyncio.create_task(_startup_sync_status())
 
+    # ── Periodic: Re-run sync_readiness_to_status every 30 minutes ──
+    async def _periodic_sync_status():
+        """Periodically sync readiness→status to catch any docs that fall through cracks."""
+        await asyncio.sleep(120)  # Initial delay: 2 minutes after startup sync
+        while True:
+            try:
+                from routers.readiness import sync_readiness_to_status
+                result = await sync_readiness_to_status()
+                total = result.get("total_fixed", 0)
+                if total > 0:
+                    logger.info("[PeriodicSync] Sync-status auto-filed %d docs", total)
+            except Exception as e:
+                logger.warning("[PeriodicSync] Sync-status failed: %s", e)
+            await asyncio.sleep(30 * 60)  # Every 30 minutes
+
+    asyncio.create_task(_periodic_sync_status())
+    logger.info("Periodic sync-readiness-to-status scheduler started (interval: 30min)")
+
     # ── Startup: Clean up noise events from posting_learning_events ──
     async def _startup_clean_noise_learning_events():
         """One-time cleanup: move readiness self-correction events out of posting_learning_events."""
@@ -7767,7 +7785,7 @@ async def startup():
                     if not doc_id:
                         continue
                     try:
-                        readiness = await evaluate_and_persist(gdoc)
+                        readiness = await evaluate_and_persist(doc_id)
                         is_ready = readiness.get("status", "").startswith("ready")
                         blocking = readiness.get("blocking_reasons", [])
                         if is_ready or not blocking:
@@ -7980,7 +7998,7 @@ async def startup():
                     max_r = doc.get("po_pending_max_retries", PO_MAX_RETRIES)
 
                     try:
-                        readiness = await evaluate_and_persist(doc)
+                        readiness = await evaluate_and_persist(doc_id)
                         po_ok = (readiness.get("signals") or {}).get("po_resolved", False)
                         is_ready = readiness.get("status", "").startswith("ready")
 

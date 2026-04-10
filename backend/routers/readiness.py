@@ -459,6 +459,40 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     results["rule20_duplicate_filenames"] = dup_cleared
     logger.info("[ForceCleanup] Rule 20 (duplicate filenames): %d docs", dup_cleared)
 
+    # ── Rule 21: Reverted docs — auto_cleared=True but status reverted to non-terminal ──
+    # These docs were previously completed but something set their status back
+    # (e.g., AP auto-post failure, reprocessing). They have auto_cleared=True so
+    # Rules 1-20 skip them (not_cleared filter). Fix them here.
+    r21 = await db.hub_documents.update_many(
+        {"$and": [
+            not_dup,
+            {"auto_cleared": True},
+            {"status": {"$nin": TERMINAL}},
+            {"status": {"$in": ["NeedsReview", "Classified", "StoredInSP", "Received",
+                                "ReadyToLink", "captured", "received"]}},
+        ]},
+        completed_update("reverted_auto_cleared"),
+    )
+    results["rule21_reverted_auto_cleared"] = r21.modified_count
+    logger.info("[ForceCleanup] Rule 21 (reverted auto_cleared): %d docs → re-completed", r21.modified_count)
+
+    # ── Rule 22: Readiness-status mismatch — readiness says ready but status is NeedsReview ──
+    # Direct fix for docs where readiness evaluation worked but status sync was missed
+    r22 = await db.hub_documents.update_many(
+        {"$and": [
+            not_dup,
+            {"status": "NeedsReview"},
+            {"readiness.status": {"$in": ["ready_auto_draft", "ready_auto_link", "ready"]}},
+            {"$or": [
+                {"readiness.blocking_reasons": {"$size": 0}},
+                {"readiness.blocking_reasons": {"$exists": False}},
+            ]},
+        ]},
+        completed_update("readiness_status_mismatch"),
+    )
+    results["rule22_readiness_mismatch"] = r22.modified_count
+    logger.info("[ForceCleanup] Rule 22 (readiness-status mismatch): %d docs → Completed", r22.modified_count)
+
     # ── Count remaining stuck docs ──
     remaining = await db.hub_documents.count_documents({
         "$and": [

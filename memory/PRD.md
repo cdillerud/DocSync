@@ -68,6 +68,16 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - `GET /api/dashboard/inbox-stats` / `GET /api/dashboard/inbox-metrics`
 - `GET /api/aliases/vendors/unmatched-gaps` / `GET /api/aliases/vendors/search`
 
+## Bugfix: "Needs Review" Status-Readiness Mismatch (2026-04-10)
+**Root cause**: Three bugs caused ~270 documents to be stuck in "Needs Review" despite readiness being "ready_auto_draft"/"ready_auto_link":
+1. **Bug 1 (server.py:7770, 7983)**: Gap closer scheduler and PO retry scheduler passed full document dicts instead of `doc["id"]` strings to `evaluate_and_persist()`, causing ALL background re-evaluations to silently fail.
+2. **Bug 2 (readiness.py)**: `sync_readiness_to_status` excluded `auto_cleared=True` docs. If a doc was previously cleared but had its status reverted (e.g., by AP auto-post failure), it became invisible to the sync.
+3. **Bug 3 (server.py)**: `sync_readiness_to_status` only ran once at startup — no periodic scheduler to catch docs that fall through cracks.
+**Fixes applied**:
+- Fixed `evaluate_and_persist(doc_id)` calls in gap closer (line 7770) and PO retry (line 7983) — now correctly pass `doc["id"]`
+- Added Rule 21 (reverted auto_cleared docs) and Rule 22 (readiness-status mismatch) to `sync_readiness_to_status`
+- Added periodic sync scheduler (every 30 minutes) alongside the existing startup-only sync
+
 ## Upcoming Tasks
 - P1: Rep Overrides Management UI
 - P1: Teams Adaptive Card integration (webhook → BC Sales Order)
@@ -76,4 +86,4 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - P2: Low-volume vendor review routing (<5 docs skip auto-file)
 - P2: Activate correction replay engine
 - P2: Email sender → vendor mapping
-- P3: `server.py` extraction/refactoring (7,500+ lines)
+- P3: `server.py` extraction/refactoring (8,200+ lines)

@@ -66,7 +66,7 @@
   },
   "test_credentials": {
     "auth": "admin / admin",
-    "api_url": "https://doc-hub-queue-repair.preview.emergentagent.com"
+    "api_url": "https://auto-post-recovery.preview.emergentagent.com"
   },
   "seed_data_created": {},
   "retest_needed": false,

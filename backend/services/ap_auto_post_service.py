@@ -520,6 +520,33 @@ async def check_auto_draft_eligibility(doc: dict, db) -> Dict:
         existing_no = doc["bc_purchase_invoice"].get("bc_record_no", "?")
         return {"eligible": False, "reason": f"Draft PI already exists: {existing_no}", "vendor_no": vendor_no, "template_confidence": "n/a", "invoices_analyzed": 0}
 
+    # Gate 2b: Cross-document duplicate check — another doc with same vendor+invoice already drafted?
+    ef = doc.get("extracted_fields") or {}
+    nf = doc.get("normalized_fields") or {}
+    invoice_number = ef.get("invoice_number") or nf.get("invoice_number") or doc.get("invoice_number_clean") or ""
+    if invoice_number and vendor_no:
+        existing_draft = await db.hub_documents.find_one(
+            {
+                "id": {"$ne": doc_id},
+                "bc_purchase_invoice": {"$exists": True},
+                "$and": [
+                    {"$or": [
+                        {"bc_vendor_number": vendor_no},
+                        {"vendor_no": vendor_no},
+                    ]},
+                    {"$or": [
+                        {"extracted_fields.invoice_number": invoice_number},
+                        {"normalized_fields.invoice_number": invoice_number},
+                        {"invoice_number_clean": invoice_number},
+                    ]},
+                ],
+            },
+            {"_id": 0, "id": 1, "bc_purchase_invoice.bc_record_no": 1},
+        )
+        if existing_draft:
+            existing_bc = (existing_draft.get("bc_purchase_invoice") or {}).get("bc_record_no", "?")
+            return {"eligible": False, "reason": f"Duplicate: another doc for vendor {vendor_no} / inv {invoice_number} already has PI {existing_bc}", "vendor_no": vendor_no, "template_confidence": "n/a", "invoices_analyzed": 0}
+
     # Gate 3: Load settings
     settings = await _load_auto_post_settings(db)
     if not settings["auto_post_enabled"]:

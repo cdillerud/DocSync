@@ -7488,7 +7488,7 @@ async def startup():
 
     # Start Draft Feedback Sync scheduler (every 2h)
     async def _draft_feedback_sync_scheduler():
-        """Background worker: sync auto-drafted PIs from BC, detect human edits, run all learning engines."""
+        """Background worker: sync auto-drafted PIs from BC, detect human edits, run all learning engines, auto-approve qualifying drafts."""
         await asyncio.sleep(300)  # 5 min delay — let all services start
         while True:
             try:
@@ -7518,6 +7518,22 @@ async def startup():
                 )
             except Exception as e:
                 logger.warning("[ContinuousLearning] Scheduled learning failed: %s", e)
+
+            # Auto-approve qualifying drafts (high-confidence vendors with proven templates)
+            try:
+                from routers.posting_patterns import auto_approve_drafts
+                logger.info("[DraftAutoApprove] Running scheduled auto-approve for pending drafts")
+                approve_result = await auto_approve_drafts(
+                    min_vendor_invoices=5, min_confidence="medium", dry_run=False, limit=500
+                )
+                approved_count = approve_result.get("approved", 0)
+                skipped_count = approve_result.get("skipped", 0)
+                if approved_count > 0:
+                    logger.info("[DraftAutoApprove] Auto-approved %d drafts, skipped %d", approved_count, skipped_count)
+                else:
+                    logger.debug("[DraftAutoApprove] No drafts to auto-approve (skipped=%d)", skipped_count)
+            except Exception as e:
+                logger.warning("[DraftAutoApprove] Scheduled auto-approve failed: %s", e)
 
             await asyncio.sleep(2 * 3600)  # Every 2 hours
     asyncio.create_task(_draft_feedback_sync_scheduler())

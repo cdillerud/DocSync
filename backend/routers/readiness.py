@@ -1275,7 +1275,14 @@ async def get_po_pending_queue(
     from deps import get_db
     db = get_db()
 
-    query = {"po_pending_parked": True}
+    query = {
+        "po_pending_parked": True,
+        "status": {"$nin": [
+            "Completed", "completed", "Posted", "posted", "Archived", "archived",
+            "AutoFiled", "auto_filed", "LinkedToBC", "Validated", "validated",
+            "ValidationPassed", "ReadyForPost", "ready_for_post", "batch_parent",
+        ]},
+    }
     total = await db.hub_documents.count_documents(query)
     docs = await db.hub_documents.find(
         query,

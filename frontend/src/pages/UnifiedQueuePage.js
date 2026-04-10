@@ -113,17 +113,25 @@ export default function UnifiedQueuePage() {
         if (!cancelled) setStats(res.data);
       } catch { /* silent — stats are non-critical */ }
     };
+    fetchStats();
+    const interval = setInterval(fetchStats, 60000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+
+  // ── Fetch Inbox Metrics (scoped to active tab) ──
+  useEffect(() => {
+    let cancelled = false;
     const fetchMetrics = async () => {
       try {
-        const res = await api.get('/dashboard/inbox-metrics');
+        const scope = activeTab === "batches" ? "processed" : activeTab;
+        const res = await api.get(`/dashboard/inbox-metrics?scope=${scope}`);
         if (!cancelled) setMetrics(res.data);
       } catch { /* silent */ }
     };
-    fetchStats();
     fetchMetrics();
-    const interval = setInterval(() => { fetchStats(); fetchMetrics(); }, 60000);
+    const interval = setInterval(fetchMetrics, 60000);
     return () => { cancelled = true; clearInterval(interval); };
-  }, []);
+  }, [activeTab]);
 
   // ── Fetch Documents ──
   const fetchDocuments = useCallback(async () => {

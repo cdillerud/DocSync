@@ -341,6 +341,30 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
         explanations.append("Vendor match is low-confidence, needs human review")
         reviewer_actions.append("Confirm or correct vendor match")
 
+    # --- Freight-specific review triggers (Controller business rules) ---
+    freight_class = doc.get("freight_gl_classification") or {}
+    if freight_class.get("is_freight"):
+        ctrl_rules = freight_class.get("controller_rules") or {}
+        review_flags = ctrl_rules.get("review_flags") or []
+        for flag in review_flags:
+            flag_type = flag.get("type", "")
+            severity = flag.get("severity", "medium")
+            reason = flag.get("reason", "")
+            if flag_type == "freight_variance" and severity == "high":
+                blocking.append("freight_variance")
+                explanations.append(reason)
+                reviewer_actions.append("Review freight variance — cost differs >$100 from reference")
+            elif flag_type == "freight_variance":
+                warnings.append("freight_variance")
+                explanations.append(reason)
+            elif flag_type == "multi_order_invoice":
+                warnings.append("multi_order_freight")
+                explanations.append(reason)
+                reviewer_actions.append("Verify freight costs total correctly across all referenced orders")
+            elif flag_type == "ltl_duplicate_risk":
+                warnings.append("ltl_duplicate_risk")
+                explanations.append(reason)
+
     # --- Confidence computation ---
     # Use effective confidence (adjusted for extraction quality) as the AI base
     from services.per_document_learning_service import compute_effective_confidence
@@ -350,7 +374,8 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
     # --- Status determination ---
     # Categorize warnings: only CRITICAL ones should force review/ambiguous
     CRITICAL_WARNINGS = {"policy_hold", "customer_unresolved", "vendor_needs_review",
-                         "amount_anomaly", "auto_escalation"}
+                         "amount_anomaly", "auto_escalation",
+                         "freight_variance", "multi_order_freight"}
     critical_warnings = [w for w in warnings if w in CRITICAL_WARNINGS]
     informational_warnings = [w for w in warnings if w not in CRITICAL_WARNINGS]
 

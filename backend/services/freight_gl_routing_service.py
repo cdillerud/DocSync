@@ -321,9 +321,27 @@ class FreightGLRoutingService:
         - confidence: 0.0-1.0
         - reasoning: list of reasons for the classification
         - signals: all detected signals
+        - controller_rules: results from Meghan's codified business rules
         """
         signals = []
         direction_scores = {"inbound": 0.0, "outbound": 0.0, "transfer": 0.0, "unknown": 0.0}
+
+        # --- Step 0: Apply controller-defined business rules ---
+        from services.freight_business_rules import classify_freight_document
+        controller_result = classify_freight_document(doc)
+        ctrl_direction = controller_result.get("direction")
+        ctrl_confidence = controller_result.get("confidence", 0)
+
+        if ctrl_direction and ctrl_confidence >= 0.7:
+            weight = 5.0 * ctrl_confidence
+            direction_scores[ctrl_direction] += weight
+            for rule in controller_result.get("rules_applied", []):
+                signals.append({
+                    "source": "controller_rules",
+                    "signal": f"Business rule: {rule}",
+                    "direction": ctrl_direction,
+                    "weight": weight / max(len(controller_result.get("rules_applied", [1])), 1),
+                })
 
         # --- Step 1: Is this a freight document? ---
         is_freight, freight_reasons = self._detect_freight(doc)
@@ -438,6 +456,14 @@ class FreightGLRoutingService:
         sub_type, sub_signals = self._detect_sub_type(doc, text_blob, best_direction)
         signals.extend(sub_signals)
 
+        # Controller rules can override sub_type when they have high-confidence signals
+        if controller_result.get("is_international") and sub_type not in ("international", "dropship_international"):
+            sub_type = "international"
+            signals.append({"source": "controller_rules", "signal": "International vendor override (CARGOMO/USCUSTO)", "direction": best_direction, "weight": 3.0})
+        if controller_result.get("is_drop_ship") and sub_type != "drop_ship":
+            sub_type = "drop_ship"
+            signals.append({"source": "controller_rules", "signal": "Drop ship override (location code 00/001)", "direction": "outbound", "weight": 3.0})
+
         # --- Step 4: Find matching G/L account ---
         accounts = await self.list_accounts()
         recommended = self._match_gl_account(accounts, best_direction, sub_type)
@@ -459,6 +485,14 @@ class FreightGLRoutingService:
             "reasoning": reasoning,
             "signals": signals,
             "classified_at": datetime.now(timezone.utc).isoformat(),
+            "controller_rules": {
+                "order_type": controller_result.get("order_type"),
+                "is_international": controller_result.get("is_international", False),
+                "is_drop_ship": controller_result.get("is_drop_ship", False),
+                "freight_treatment": controller_result.get("freight_treatment"),
+                "review_flags": controller_result.get("review_flags", []),
+                "rules_applied": controller_result.get("rules_applied", []),
+            },
         }
 
         # If freight issues detected, override workflow status suggestion
@@ -510,6 +544,22 @@ class FreightGLRoutingService:
             update_fields["needs_logistics_approval"] = True
         if result.get("workflow_status_override"):
             update_fields["workflow_status"] = result["workflow_status_override"]
+
+        # Persist controller business rules classification
+        ctrl_rules = result.get("controller_rules") or {}
+        if ctrl_rules:
+            update_fields["freight_gl_classification"]["controller_rules"] = ctrl_rules
+            if ctrl_rules.get("is_international"):
+                update_fields["freight_gl_classification"]["is_international"] = True
+            if ctrl_rules.get("is_drop_ship"):
+                update_fields["freight_gl_classification"]["is_drop_ship"] = True
+            if ctrl_rules.get("freight_treatment"):
+                update_fields["freight_gl_classification"]["freight_treatment"] = ctrl_rules["freight_treatment"]
+            # Surface review flags to top level for readiness evaluation
+            if ctrl_rules.get("review_flags"):
+                update_fields["freight_review_flags"] = ctrl_rules["review_flags"]
+                if any(f.get("severity") == "high" for f in ctrl_rules["review_flags"]):
+                    update_fields["needs_freight_review"] = True
 
         if result.get("recommended_gl"):
             update_fields["freight_gl_classification"]["gl_number"] = result["recommended_gl"]["gl_number"]

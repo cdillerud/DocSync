@@ -301,6 +301,8 @@ class APValidationService:
         
         # ============================================================
         # CHECK 5: Duplicate Invoice (REQUIRED - if vendor resolved)
+        # Enhanced: Vendor + Invoice + Order Number (per controller rules)
+        # LTL carriers (XPO, R&L): also check vendor + order + amount
         # ============================================================
         if result.vendor_resolved and result.invoice_number_present:
             is_duplicate = await self._check_duplicate_invoice(
@@ -322,6 +324,21 @@ class APValidationService:
                     True,
                     f"No duplicate invoice found for {invoice_number}"
                 )
+
+                # Additional in-hub duplicate check (vendor + invoice + order)
+                try:
+                    from services.freight_business_rules import get_duplicate_check_fields, LTL_CARRIERS_HIGH_DUP_RISK
+                    dup_strategy = get_duplicate_check_fields(result.matched_vendor_no)
+                    if dup_strategy.get("ltl_high_risk") and total_amount:
+                        # For LTL carriers, also check by vendor + amount (within $5)
+                        # because they sometimes resend with different invoice numbers
+                        result.add_warning(
+                            "ltl_duplicate_risk",
+                            f"LTL carrier ({result.matched_vendor_no}) — verify this isn't a re-issued invoice for the same shipment",
+                            vendor_no=result.matched_vendor_no,
+                        )
+                except Exception:
+                    pass
         else:
             # Can't check duplicates without vendor and invoice number
             if not result.vendor_resolved:

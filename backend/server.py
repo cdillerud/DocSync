@@ -7463,6 +7463,33 @@ async def startup():
                     ],
                 })
                 logger.info("[Startup] Cleaned %d blank-vendor/zero-amount noise events from posting_learning_events", result2.deleted_count)
+            # Clean events with known vendor but $0 amount AND no line data (ghost events)
+            ghost_count = await db.posting_learning_events.count_documents({
+                "$and": [
+                    {"$or": [{"amount": 0}, {"amount": None}, {"amount": {"$exists": False}}]},
+                    {"$or": [{"line_count": 0}, {"line_count": None}, {"line_count": {"$exists": False}}]},
+                    {"$or": [
+                        {"items_used": {"$exists": False}},
+                        {"items_used": None},
+                        {"items_used": {"$size": 0}},
+                        {"items_used": []},
+                    ]},
+                ],
+            })
+            if ghost_count > 0:
+                result3 = await db.posting_learning_events.delete_many({
+                    "$and": [
+                        {"$or": [{"amount": 0}, {"amount": None}, {"amount": {"$exists": False}}]},
+                        {"$or": [{"line_count": 0}, {"line_count": None}, {"line_count": {"$exists": False}}]},
+                        {"$or": [
+                            {"items_used": {"$exists": False}},
+                            {"items_used": None},
+                            {"items_used": {"$size": 0}},
+                            {"items_used": []},
+                        ]},
+                    ],
+                })
+                logger.info("[Startup] Cleaned %d ghost learning events ($0/no-lines/no-items)", result3.deleted_count)
         except Exception as e:
             logger.warning("[Startup] Noise event cleanup failed: %s", e)
 

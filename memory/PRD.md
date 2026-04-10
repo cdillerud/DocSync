@@ -78,6 +78,11 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - Added Rule 21 (reverted auto_cleared docs) and Rule 22 (readiness-status mismatch) to `sync_readiness_to_status`
 - Added periodic sync scheduler (every 30 minutes) alongside the existing startup-only sync
 
+## Bugfix: AI Learning Dashboard Issues (2026-04-10)
+1. **Vendor Maturity showing `/100` with no score**: `get_deep_learning_summary()` returned raw DB documents with `composite_score` field, but frontend expected `score`. Fixed by mapping field in summary response.
+2. **$0/blank learning events**: Added composite filter to exclude events with no amount AND no line_count AND no items_used. Extended startup cleanup to delete ghost events from DB.
+3. **Stuck "Needs Review" docs (server.py)**: Fixed `evaluate_and_persist()` call bugs in gap closer (line 7770) and PO retry (line 7983) schedulers — were passing full dict instead of `doc["id"]`. Added Rule 21/22 to `sync_readiness_to_status` and periodic 30-min sync scheduler.
+
 ## Upcoming Tasks
 - P1: Rep Overrides Management UI
 - P1: Teams Adaptive Card integration (webhook → BC Sales Order)

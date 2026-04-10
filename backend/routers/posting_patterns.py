@@ -38,11 +38,19 @@ async def get_learning_dashboard():
     MEANINGFUL_EVENT_TYPES = {
         "$nin": ["readiness_contradiction_fix", "readiness_self_correction"]
     }
-    total_learning_events = await db.posting_learning_events.count_documents({
+    MEANINGFUL_EVENT_FILTER = {
         "event_type": MEANINGFUL_EVENT_TYPES,
-    })
+        "$or": [
+            {"amount": {"$gt": 0}},
+            {"line_count": {"$gt": 0}},
+            {"items_used": {"$ne": None, "$not": {"$size": 0}}},
+        ],
+    }
+    total_learning_events = await db.posting_learning_events.count_documents(
+        MEANINGFUL_EVENT_FILTER
+    )
     recent_learning = await db.posting_learning_events.find(
-        {"event_type": MEANINGFUL_EVENT_TYPES},
+        MEANINGFUL_EVENT_FILTER,
         {"_id": 0, "vendor_no": 1, "posted_at": 1, "line_count": 1, "items_used": 1, "amount": 1}
     ).sort("posted_at", -1).limit(20).to_list(20)
 

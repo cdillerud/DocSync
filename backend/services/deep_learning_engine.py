@@ -894,7 +894,13 @@ async def get_deep_learning_summary(db) -> Dict:
         },
         "vendor_maturity": {
             "levels": maturity_levels,
-            "top_vendors": top_mature,
+            "top_vendors": [{
+                "vendor_no": m.get("vendor_no", ""),
+                "vendor_name": m.get("vendor_name", ""),
+                "level": m.get("maturity_level", "unknown"),
+                "score": m.get("composite_score", 0),
+                "total_docs": m.get("total_documents", 0),
+            } for m in top_mature],
         },
         "predictive_readiness": {
             "predictions_made": prediction_count,

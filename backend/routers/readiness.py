@@ -1021,12 +1021,20 @@ async def get_exception_queue(
     db = get_db()
 
     query = {
-        "$or": [
-            {"status": {"$in": ["Exception", "exception"]}},
-            {"workflow_status": "exception_review"},
-            {"auto_escalated": True},
+        "$and": [
+            {"is_duplicate": {"$ne": True}},
+            # Exclude docs that have already been resolved/completed
+            {"status": {"$nin": [
+                "Completed", "completed", "Posted", "posted", "Archived", "archived",
+                "AutoFiled", "auto_filed", "LinkedToBC", "Validated", "validated",
+                "ValidationPassed", "ReadyForPost", "ready_for_post", "batch_parent",
+            ]}},
+            {"$or": [
+                {"status": {"$in": ["Exception", "exception"]}},
+                {"workflow_status": "exception_review"},
+                {"auto_escalated": True},
+            ]},
         ],
-        "is_duplicate": {"$ne": True},
     }
 
     total = await db.hub_documents.count_documents(query)

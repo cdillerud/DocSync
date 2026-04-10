@@ -34,19 +34,30 @@ async def get_learning_dashboard():
     db = get_db()
 
     # 1. Posting Learning Events — proof of continuous template learning
-    total_learning_events = await db.posting_learning_events.count_documents({})
+    # Exclude noise events (readiness self-corrections) that have no amount/line data
+    MEANINGFUL_EVENT_TYPES = {
+        "$nin": ["readiness_contradiction_fix", "readiness_self_correction"]
+    }
+    total_learning_events = await db.posting_learning_events.count_documents({
+        "event_type": MEANINGFUL_EVENT_TYPES,
+    })
     recent_learning = await db.posting_learning_events.find(
-        {}, {"_id": 0, "vendor_no": 1, "posted_at": 1, "line_count": 1, "items_used": 1, "amount": 1}
+        {"event_type": MEANINGFUL_EVENT_TYPES},
+        {"_id": 0, "vendor_no": 1, "posted_at": 1, "line_count": 1, "items_used": 1, "amount": 1}
     ).sort("posted_at", -1).limit(20).to_list(20)
 
-    # Learning events by vendor
+    # Learning events by vendor — exclude blank vendors and noise events
     vendor_learning_pipeline = [
+        {"$match": {
+            "vendor_no": {"$nin": [None, ""]},
+            "event_type": MEANINGFUL_EVENT_TYPES,
+        }},
         {"$group": {
             "_id": "$vendor_no",
             "events": {"$sum": 1},
             "last_learned": {"$max": "$posted_at"},
-            "total_amount": {"$sum": "$amount"},
-            "avg_lines": {"$avg": "$line_count"},
+            "total_amount": {"$sum": {"$ifNull": ["$amount", 0]}},
+            "avg_lines": {"$avg": {"$ifNull": ["$line_count", 0]}},
         }},
         {"$sort": {"events": -1}},
         {"$limit": 20},

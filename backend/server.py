@@ -7412,6 +7412,43 @@ async def startup():
             logger.warning("[Startup] Sync-status auto-run failed: %s", e)
 
     asyncio.create_task(_startup_sync_status())
+
+    # ── Startup: Clean up noise events from posting_learning_events ──
+    async def _startup_clean_noise_learning_events():
+        """One-time cleanup: move readiness self-correction events out of posting_learning_events."""
+        await asyncio.sleep(45)
+        try:
+            noise_count = await db.posting_learning_events.count_documents({
+                "event_type": {"$in": ["readiness_contradiction_fix", "readiness_self_correction"]}
+            })
+            if noise_count > 0:
+                result = await db.posting_learning_events.delete_many({
+                    "event_type": {"$in": ["readiness_contradiction_fix", "readiness_self_correction"]}
+                })
+                logger.info("[Startup] Cleaned %d noise events from posting_learning_events (readiness self-corrections)", result.deleted_count)
+            # Also clean events with blank vendor_no and no amount data
+            blank_count = await db.posting_learning_events.count_documents({
+                "vendor_no": {"$in": [None, ""]},
+                "$or": [
+                    {"amount": {"$exists": False}},
+                    {"amount": 0},
+                    {"amount": None},
+                ],
+            })
+            if blank_count > 0:
+                result2 = await db.posting_learning_events.delete_many({
+                    "vendor_no": {"$in": [None, ""]},
+                    "$or": [
+                        {"amount": {"$exists": False}},
+                        {"amount": 0},
+                        {"amount": None},
+                    ],
+                })
+                logger.info("[Startup] Cleaned %d blank-vendor/zero-amount noise events from posting_learning_events", result2.deleted_count)
+        except Exception as e:
+            logger.warning("[Startup] Noise event cleanup failed: %s", e)
+
+    asyncio.create_task(_startup_clean_noise_learning_events())
     
     # Initialize Vendor Intelligence Service
     vendor_intel = set_vendor_intelligence_service(db, event_service)

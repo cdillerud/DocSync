@@ -760,18 +760,10 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
         })
 
     if corrections:
-        await db.posting_learning_events.insert_one({
-            "vendor_no": vendor_no,
-            "doc_id": doc_id,
-            "event_type": "readiness_contradiction_fix",
-            "posted_at": now,
-            "feedback": "self_correction",
-            "corrections": corrections,
-            "old_status": old_readiness.get("status", ""),
-            "new_status": readiness.get("status", ""),
-            "old_confidence": old_readiness.get("confidence", 0),
-            "new_confidence": readiness.get("confidence", 0),
-        })
+        # Record self-corrections in classification_corrections (the proper collection)
+        # NOTE: Do NOT insert into posting_learning_events — these are readiness
+        # re-evaluation events, not BC posting learning events. Inserting them there
+        # creates noise ($0 / blank vendor entries in the Learning dashboard).
         for c in corrections:
             await db.classification_corrections.insert_one({
                 "doc_id": doc_id,

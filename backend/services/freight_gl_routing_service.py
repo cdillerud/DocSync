@@ -501,11 +501,83 @@ class FreightGLRoutingService:
 
         return result
 
+
+    async def _enrich_with_bc_freight_data(self, doc: Dict) -> Dict:
+        """
+        Pre-enrich document with BC freight details before classification.
+        Closes Gaps 1 (rerouted SO), 2 (PO freight comparison), 3 (SO additional charges).
+        """
+        try:
+            from services.bc_reference_cache_service import get_cache_service
+            cache = get_cache_service()
+            if not cache:
+                return doc
+
+            ef = doc.get("extracted_fields") or {}
+            nf = doc.get("normalized_fields") or {}
+
+            # Determine the order reference
+            order_ref = ""
+            for field in ["_po_resolution_number", "po_number", "order_number"]:
+                val = ef.get(field) or nf.get(field)
+                if val:
+                    order_ref = str(val).strip()
+                    break
+
+            if not order_ref:
+                return doc
+
+            vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
+
+            # Gap 2: Look up PO freight details (inbound freight cost box comparison)
+            import re as _re
+            if _re.match(r"^W[R]?\d+", order_ref, _re.IGNORECASE):
+                # Warehouse inbound PO — look up PO lines
+                po_details = await cache.lookup_po_freight_details(order_ref)
+                if po_details.get("source") == "bc_api":
+                    doc["bc_po_freight_details"] = po_details
+                    # Also capture location code from PO
+                    if po_details.get("location_code") and not doc.get("bc_location_code"):
+                        doc["bc_location_code"] = po_details["location_code"]
+
+            # Gap 1: For rerouted (001) orders, find the SO reference
+            location_code = doc.get("bc_location_code") or ef.get("location_code") or ""
+            if location_code == "001":
+                rerouted = await cache.find_so_for_rerouted_po(order_ref, vendor_no)
+                doc["bc_rerouted_so"] = rerouted
+
+                # If we found the SO, also look up its freight lines
+                if rerouted.get("found") and rerouted.get("so_number"):
+                    so_details = await cache.lookup_so_freight_lines(rerouted["so_number"])
+                    if so_details.get("source") == "bc_api":
+                        doc["bc_so_freight_details"] = so_details
+
+            # Gap 3: For outbound/drop-ship, look up SO freight lines
+            # (to compare PI codes against SO codes, detect additional charges)
+            elif _re.match(r"^\d{5,6}$", order_ref):
+                so_details = await cache.lookup_so_freight_lines(order_ref)
+                if so_details.get("source") == "bc_api":
+                    doc["bc_so_freight_details"] = so_details
+
+                # Also look up PO lines for drop-ship (PO might exist too)
+                if location_code == "00":
+                    po_details = await cache.lookup_po_freight_details(order_ref)
+                    if po_details.get("source") == "bc_api":
+                        doc["bc_po_freight_details"] = po_details
+
+        except Exception as e:
+            logger.warning("[FreightGL] BC freight enrichment error: %s", str(e))
+
+        return doc
+
     async def classify_and_save(self, doc_id: str) -> Dict:
         """Classify a document, save the result, and update the document."""
         doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
         if not doc:
             return {"error": "Document not found", "document_id": doc_id}
+
+        # --- Pre-enrich with BC freight data (Gaps 1, 2, 3) ---
+        doc = await self._enrich_with_bc_freight_data(doc)
 
         result = await self.classify_document(doc)
         result["document_id"] = doc_id
@@ -560,6 +632,12 @@ class FreightGLRoutingService:
                 update_fields["freight_review_flags"] = ctrl_rules["review_flags"]
                 if any(f.get("severity") == "high" for f in ctrl_rules["review_flags"]):
                     update_fields["needs_freight_review"] = True
+            # Persist freight comparison data (Gaps 2+3)
+            if ctrl_rules.get("freight_comparison"):
+                update_fields["freight_gl_classification"]["freight_comparison"] = ctrl_rules["freight_comparison"]
+            # Persist rerouted SO reference (Gap 1)
+            if ctrl_rules.get("rerouted_so_reference"):
+                update_fields["freight_gl_classification"]["rerouted_so_reference"] = ctrl_rules["rerouted_so_reference"]
 
         if result.get("recommended_gl"):
             update_fields["freight_gl_classification"]["gl_number"] = result["recommended_gl"]["gl_number"]

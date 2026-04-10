@@ -83,6 +83,27 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 2. **$0/blank learning events**: Added composite filter to exclude events with no amount AND no line_count AND no items_used. Extended startup cleanup to delete ghost events from DB.
 3. **Stuck "Needs Review" docs (server.py)**: Fixed `evaluate_and_persist()` call bugs in gap closer (line 7770) and PO retry (line 7983) schedulers — were passing full dict instead of `doc["id"]`. Added Rule 21/22 to `sync_readiness_to_status` and periodic 30-min sync scheduler.
 
+## Freight Gaps Closed — Meghan Alignment (2026-04-10)
+Three gaps from Meghan's controller rules now implemented:
+
+**Gap 1: PO Notes → SO for Rerouted (001) Orders**
+- `extract_so_from_document_text()` scans extracted fields, notes, remarks, `_po_all_candidates` for 6-digit SO refs
+- `find_so_for_rerouted_po()` in BC cache service provides fallback via base-number matching
+- If no SO found → flags `rerouted_missing_so` for manual review
+
+**Gap 2: Inbound Freight Cost Box Comparison**
+- `lookup_po_freight_details()` queries BC PO lines for freight item codes (FREIGHT, DETENTION, DRAYAGE, CUSTOMS, TARIFF, WHSEFRT)
+- `compare_freight_to_bc_reference()` compares invoice vs PO freight total with $100 threshold
+- Persisted as `freight_comparison` in freight GL classification
+
+**Gap 3: Additional Charges via SO**
+- `lookup_so_freight_lines()` queries BC SO lines for freight codes
+- When invoice exceeds PO freight, checks if SO freight covers the gap (approved additional charges)
+- If SO covers → severity=low, reason explains additional charges approved
+- Also validates PI freight codes match SO codes (Meghan: "The codes should match the Sales Order")
+
+Files modified: `freight_business_rules.py`, `freight_gl_routing_service.py`, `bc_reference_cache_service.py`
+
 ## Upcoming Tasks
 - P1: Rep Overrides Management UI
 - P1: Teams Adaptive Card integration (webhook → BC Sales Order)

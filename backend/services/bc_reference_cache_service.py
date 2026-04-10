@@ -746,7 +746,6 @@ class BCReferenceCacheService:
 
         for record in primary:
             order_no = record.get("bc_order_number", "")
-            doc_no = record.get("bc_document_no", "")
 
             # Find shipments linked to the same order
             if order_no:
@@ -864,6 +863,303 @@ class BCReferenceCacheService:
                     logger.warning("[BC Cache] PO lines lookup error for %s: %s", po, str(e))
 
         return results
+
+    # =========================================================================
+    # FREIGHT GAP CLOSERS — BC data lookups for freight rules alignment
+    # =========================================================================
+
+    async def lookup_po_freight_details(self, po_number: str) -> Dict[str, Any]:
+        """
+        Look up PO line items from BC to find freight-related lines and their amounts.
+
+        Gap 2 (Meghan): "The freight invoice is checked against the Freight Cost box
+        listed in the header on the Posted Purchase Invoice."
+
+        Since the standard BC API doesn't expose the header freight cost box directly,
+        we query PO lines and sum freight-related item lines.
+
+        Returns:
+            {
+                "po_number": str,
+                "location_code": str,       # from first line
+                "freight_lines": [...],      # lines with freight item codes
+                "total_freight_amount": float,
+                "total_po_amount": float,
+                "has_freight_lines": bool,
+                "source": "bc_api" | "not_found"
+            }
+        """
+        FREIGHT_ITEM_CODES = {"FREIGHT", "DETENTION", "DRAYAGE", "CUSTOMS", "TARIFF", "WHSEFRT"}
+
+        result = {
+            "po_number": po_number,
+            "location_code": "",
+            "freight_lines": [],
+            "total_freight_amount": 0.0,
+            "total_po_amount": 0.0,
+            "has_freight_lines": False,
+            "source": "not_found",
+        }
+
+        if not po_number:
+            return result
+
+        # Find the PO in our cache to get the bc_record_id
+        cached = await self.search_multi(po_number, entity_types=["purchase_order"])
+        if not cached:
+            return result
+
+        bc_id = cached[0].get("bc_record_id")
+        if not bc_id:
+            return result
+
+        token = await self._get_token()
+        if not token:
+            return result
+        company_id = await self._get_company_id(token)
+        if not company_id:
+            return result
+
+        try:
+            url = (
+                f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_PROD_ENVIRONMENT}/api/v2.0/"
+                f"companies({company_id})/purchaseOrders({bc_id})/purchaseOrderLines"
+            )
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(
+                    url,
+                    headers={"Authorization": f"Bearer {token}"},
+                    params={
+                        "$select": "lineType,description,quantity,directUnitCost,"
+                                   "amountIncludingTax,amountExcludingTax,locationCode,"
+                                   "lineObjectNumber",
+                    },
+                )
+                if resp.status_code != 200:
+                    logger.warning("[BC Cache] PO lines lookup failed for %s: %s", po_number, resp.status_code)
+                    return result
+
+                lines = resp.json().get("value", [])
+                if not lines:
+                    return result
+
+                result["source"] = "bc_api"
+                result["location_code"] = lines[0].get("locationCode", "")
+
+                for line in lines:
+                    item_no = (line.get("lineObjectNumber") or "").upper().strip()
+                    desc = (line.get("description") or "").upper()
+                    amount = line.get("amountExcludingTax") or line.get("amountIncludingTax") or 0
+
+                    result["total_po_amount"] += amount
+
+                    # Check if this is a freight-related line
+                    is_freight = item_no in FREIGHT_ITEM_CODES or any(fc in desc for fc in FREIGHT_ITEM_CODES)
+                    if is_freight:
+                        result["freight_lines"].append({
+                            "item_code": item_no,
+                            "description": line.get("description", ""),
+                            "amount": amount,
+                            "quantity": line.get("quantity", 0),
+                            "location_code": line.get("locationCode", ""),
+                        })
+                        result["total_freight_amount"] += amount
+
+                result["has_freight_lines"] = len(result["freight_lines"]) > 0
+                logger.info(
+                    "[BC Cache] PO %s freight details: %d freight lines, $%.2f freight, $%.2f total, loc=%s",
+                    po_number, len(result["freight_lines"]),
+                    result["total_freight_amount"], result["total_po_amount"],
+                    result["location_code"],
+                )
+
+        except Exception as e:
+            logger.warning("[BC Cache] PO freight details error for %s: %s", po_number, str(e))
+
+        return result
+
+    async def lookup_so_freight_lines(self, so_number: str) -> Dict[str, Any]:
+        """
+        Look up Sales Order line items from BC to find freight/additional charge lines.
+
+        Gap 3 (Meghan): "Sometimes the order has already been posted and additional
+        charges might be approved via the Notes section. The codes should match."
+
+        Also Gap 1: For rerouted orders (001), the SO reference may appear here.
+
+        Returns:
+            {
+                "so_number": str,
+                "freight_lines": [...],
+                "total_freight_amount": float,
+                "shipment_method_code": str,
+                "has_additional_charges": bool,
+                "source": "bc_api" | "not_found"
+            }
+        """
+        FREIGHT_ITEM_CODES = {"FREIGHT", "DETENTION", "DRAYAGE", "CUSTOMS", "TARIFF", "WHSEFRT"}
+
+        result = {
+            "so_number": so_number,
+            "freight_lines": [],
+            "total_freight_amount": 0.0,
+            "shipment_method_code": "",
+            "has_additional_charges": False,
+            "source": "not_found",
+        }
+
+        if not so_number:
+            return result
+
+        # Find the SO in our cache
+        cached = await self.search_multi(so_number, entity_types=["sales_order"])
+        if not cached:
+            # Try posted sales invoice
+            cached = await self.search_multi(so_number, entity_types=["sales_invoice"])
+        if not cached:
+            return result
+
+        bc_id = cached[0].get("bc_record_id")
+        if not bc_id:
+            return result
+
+        # Get shipment method from the cached SO header
+        result["shipment_method_code"] = cached[0].get("shipmentMethodCode", "")
+
+        token = await self._get_token()
+        if not token:
+            return result
+        company_id = await self._get_company_id(token)
+        if not company_id:
+            return result
+
+        try:
+            # Try salesOrders first (live), then salesInvoices
+            for entity in ["salesOrders", "salesInvoices"]:
+                line_entity = "salesOrderLines" if entity == "salesOrders" else "salesInvoiceLines"
+                url = (
+                    f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_PROD_ENVIRONMENT}/api/v2.0/"
+                    f"companies({company_id})/{entity}({bc_id})/{line_entity}"
+                )
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.get(
+                        url,
+                        headers={"Authorization": f"Bearer {token}"},
+                        params={
+                            "$select": "lineType,description,quantity,unitPrice,"
+                                       "amountIncludingTax,amountExcludingTax,"
+                                       "lineObjectNumber",
+                        },
+                    )
+                    if resp.status_code == 200:
+                        lines = resp.json().get("value", [])
+                        if lines:
+                            result["source"] = "bc_api"
+                            freight_count = 0
+                            for line in lines:
+                                item_no = (line.get("lineObjectNumber") or "").upper().strip()
+                                desc = (line.get("description") or "").upper()
+                                amount = line.get("amountExcludingTax") or line.get("amountIncludingTax") or 0
+                                unit_price = line.get("unitPrice") or 0
+
+                                is_freight = item_no in FREIGHT_ITEM_CODES or any(fc in desc for fc in FREIGHT_ITEM_CODES)
+                                if is_freight:
+                                    freight_count += 1
+                                    result["freight_lines"].append({
+                                        "item_code": item_no,
+                                        "description": line.get("description", ""),
+                                        "amount": amount,
+                                        "unit_price": unit_price,
+                                    })
+                                    result["total_freight_amount"] += amount
+
+                            # Additional charges = more than 1 freight line, or any line
+                            # beyond the primary FREIGHT line
+                            result["has_additional_charges"] = freight_count > 1
+                            logger.info(
+                                "[BC Cache] SO %s freight lines: %d lines, $%.2f total, method=%s",
+                                so_number, freight_count, result["total_freight_amount"],
+                                result["shipment_method_code"],
+                            )
+                            break  # Got data, no need to try next entity
+
+        except Exception as e:
+            logger.warning("[BC Cache] SO freight lines error for %s: %s", so_number, str(e))
+
+        return result
+
+    async def find_so_for_rerouted_po(self, po_number: str, vendor_no: str = "") -> Dict[str, Any]:
+        """
+        Gap 1 (Meghan): For rerouted orders (location code 001), "The SO for my
+        team to bill out is usually listed in the notes on the PO."
+
+        Since BC API doesn't expose PO notes easily, we try multiple strategies:
+        1. Search BC cache for SOs with the same order number pattern
+        2. Look for SOs linked to the same vendor's customer
+        3. Check document extracted fields for SO references
+
+        Returns:
+            {
+                "found": bool,
+                "so_number": str,
+                "so_record_id": str,
+                "match_method": str,
+                "confidence": float,
+            }
+        """
+        result = {
+            "found": False,
+            "so_number": "",
+            "so_record_id": "",
+            "match_method": "",
+            "confidence": 0.0,
+        }
+
+        if not po_number:
+            return result
+
+        # Strategy 1: Same number pattern in SO cache
+        # For rerouted orders, the SO often has the same base number
+        # PO might be W12345 or WR12345, SO would be 112345
+        base_digits = re.sub(r"^W[R]?", "", po_number, flags=re.IGNORECASE)
+        if base_digits:
+            so_matches = await self.search_multi(base_digits, entity_types=["sales_order"])
+            if so_matches:
+                result["found"] = True
+                result["so_number"] = so_matches[0].get("bc_document_no", "")
+                result["so_record_id"] = so_matches[0].get("bc_record_id", "")
+                result["match_method"] = "cache_base_number_match"
+                result["confidence"] = 0.75
+                logger.info(
+                    "[BC Cache] Rerouted PO %s → found SO %s via base number",
+                    po_number, result["so_number"],
+                )
+                return result
+
+        # Strategy 2: Search by vendor cross-reference
+        # If the PO vendor has a customer mapping, look for SOs from that customer
+        if vendor_no:
+            vendor_cache = await self.db.bc_reference_cache.find_one(
+                {"bc_document_no": vendor_no, "bc_entity_type": "vendor"},
+                {"_id": 0},
+            )
+            if vendor_cache:
+                # Look for recent SOs that might be the rerouted order
+                recent_sos = await self.db.bc_reference_cache.find(
+                    {
+                        "bc_entity_type": "sales_order",
+                        "bc_document_no": {"$regex": r"^\d{5,6}$"},
+                    },
+                    {"_id": 0},
+                ).sort("bc_last_modified", -1).limit(10).to_list(10)
+
+                # This is a weaker match — just flag for review
+                if recent_sos:
+                    result["match_method"] = "vendor_cross_ref_candidates"
+                    result["confidence"] = 0.30
+
+        return result
+
 
 
 # =============================================================================

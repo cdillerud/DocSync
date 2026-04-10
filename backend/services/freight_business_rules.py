@@ -59,6 +59,117 @@ def classify_order_number(order_ref: str) -> Dict[str, Any]:
     return {"type": "unknown", "direction": None, "reason": f"Unrecognized order format: '{order_ref}'", "confidence": 0.3}
 
 
+def extract_so_from_document_text(doc: Dict[str, Any]) -> Optional[str]:
+    """
+    Gap 1: For rerouted orders (001), scan all document fields for SO references.
+    Meghan: "The SO for my team to bill out is usually listed in the notes on the PO."
+    Since we can't always access BC PO notes, also scan the freight invoice itself
+    for 6-digit SO references.
+    """
+    SO_PATTERN = re.compile(r"\b(\d{6})\b")
+    search_fields = []
+
+    ef = doc.get("extracted_fields") or {}
+    nf = doc.get("normalized_fields") or {}
+
+    # Scan all text-bearing fields
+    for field in ["notes", "remarks", "description", "reference", "subject",
+                  "so_number", "order_number", "reference_numbers",
+                  "email_subject", "email_body_snippet"]:
+        val = ef.get(field) or nf.get(field) or doc.get(field)
+        if isinstance(val, list):
+            search_fields.extend(str(v) for v in val)
+        elif val:
+            search_fields.append(str(val))
+
+    # Also check _po_all_candidates for non-W/WR 6-digit refs
+    for cand in (ef.get("_po_all_candidates") or []):
+        cand_str = str(cand).strip()
+        if ORDER_PATTERN_STANDARD.match(cand_str):
+            return cand_str
+
+    # Scan all text for 6-digit numbers (SO candidates)
+    all_text = " ".join(search_fields)
+    matches = SO_PATTERN.findall(all_text)
+    for m in matches:
+        # Exclude obvious non-SO numbers (dates, zip codes, etc.)
+        val = int(m)
+        if 100000 <= val <= 999999:
+            return m
+
+    return None
+
+
+def compare_freight_to_bc_reference(
+    invoice_amount: float,
+    bc_freight_amount: float,
+    bc_so_freight_amount: float = 0.0,
+    threshold: float = 100.0,
+) -> Dict[str, Any]:
+    """
+    Gap 2 + 3: Compare invoice amount against BC reference amounts.
+
+    Meghan (Gap 2): "The freight invoice is checked against the Freight Cost box
+    listed in the header on the Posted Purchase Invoice."
+
+    Meghan (Gap 3): "Sometimes the order has already been posted and additional
+    charges might be approved via the Notes section."
+
+    Logic:
+    - First compare with PO freight lines total
+    - If variance exceeds threshold, check if SO has additional approved freight lines
+    - If SO additional charges cover the gap, reduce severity
+    """
+    result = {
+        "invoice_amount": round(invoice_amount, 2),
+        "bc_po_freight": round(bc_freight_amount, 2),
+        "bc_so_freight": round(bc_so_freight_amount, 2),
+        "variance_vs_po": 0.0,
+        "variance_vs_so": 0.0,
+        "needs_review": False,
+        "severity": "none",
+        "reason": "",
+        "additional_charges_detected": bc_so_freight_amount > bc_freight_amount,
+    }
+
+    if bc_freight_amount <= 0 and bc_so_freight_amount <= 0:
+        result["reason"] = "No BC freight reference amounts available"
+        return result
+
+    # Primary: compare against PO freight
+    ref_amount = bc_freight_amount if bc_freight_amount > 0 else bc_so_freight_amount
+    variance = abs(invoice_amount - ref_amount)
+    result["variance_vs_po"] = round(variance, 2)
+
+    if variance > threshold:
+        # Check if SO has additional charges that cover the gap
+        if bc_so_freight_amount > 0:
+            so_variance = abs(invoice_amount - bc_so_freight_amount)
+            result["variance_vs_so"] = round(so_variance, 2)
+
+            if so_variance <= threshold:
+                # SO additional charges cover the difference
+                result["severity"] = "low"
+                result["reason"] = (
+                    f"Invoice ${invoice_amount:.2f} exceeds PO freight ${bc_freight_amount:.2f} by "
+                    f"${variance:.2f}, but SO freight ${bc_so_freight_amount:.2f} covers the "
+                    f"difference (additional charges approved)"
+                )
+                return result
+
+        # Genuine variance — flag for review
+        result["needs_review"] = True
+        result["severity"] = "high" if variance > threshold * 3 else "medium"
+        result["reason"] = (
+            f"Freight variance ${variance:.2f} exceeds ${threshold} threshold "
+            f"(invoice=${invoice_amount:.2f}, PO freight=${bc_freight_amount:.2f})"
+        )
+    else:
+        result["reason"] = f"Variance ${variance:.2f} within ${threshold} threshold"
+
+    return result
+
+
 # =============================================================================
 # LOCATION CODE RULES
 # =============================================================================
@@ -410,6 +521,28 @@ def classify_freight_document(doc: Dict[str, Any]) -> Dict[str, Any]:
             result["confidence"] = max(result["confidence"], loc_class.get("confidence", 0))
             result["rules_applied"].append("location_code")
 
+        # Gap 1: For rerouted (001) orders, find the SO reference
+        if loc_class["type"] == "rerouted_dropship":
+            so_ref = extract_so_from_document_text(doc)
+            if so_ref:
+                result["rerouted_so_reference"] = so_ref
+                result["rules_applied"].append("rerouted_so_extraction")
+            else:
+                # Also check bc_rerouted_so from pre-enrichment (freight_gl_routing)
+                bc_so = doc.get("bc_rerouted_so") or {}
+                if bc_so.get("found"):
+                    result["rerouted_so_reference"] = bc_so["so_number"]
+                    result["rerouted_so_method"] = bc_so["match_method"]
+                    result["rules_applied"].append("rerouted_so_bc_lookup")
+                else:
+                    result["review_flags"].append({
+                        "type": "rerouted_missing_so",
+                        "severity": "medium",
+                        "reason": "Location 001 (rerouted) but no Sales Order reference found. "
+                                  "Meghan: 'The SO is usually listed in the notes on the PO.'",
+                    })
+                    result["rules_applied"].append("rerouted_so_missing")
+
     # 4. Check international vendor
     intl = detect_international(vendor_no, vendor_name)
     if intl["is_international"]:
@@ -433,7 +566,7 @@ def classify_freight_document(doc: Dict[str, Any]) -> Dict[str, Any]:
         })
         result["rules_applied"].append("multi_order_detection")
 
-    # 6. Check freight variance (if we have both invoice amount and reference amount)
+    # 6. Freight amount comparison (Gaps 2 + 3)
     invoice_amount = None
     for f in ["amount", "invoice_amount", "total_amount"]:
         val = ef.get(f) or nf.get(f)
@@ -443,8 +576,35 @@ def classify_freight_document(doc: Dict[str, Any]) -> Dict[str, Any]:
                 break
             except (ValueError, TypeError):
                 pass
+
+    # Gap 2: Compare against BC PO freight details (enriched by freight_gl_routing)
+    bc_po_freight = doc.get("bc_po_freight_details") or {}
+    bc_so_freight = doc.get("bc_so_freight_details") or {}
+    po_freight_amount = bc_po_freight.get("total_freight_amount", 0)
+    so_freight_amount = bc_so_freight.get("total_freight_amount", 0)
+
+    # Use enriched BC data if available, fall back to legacy field
     ref_amount = doc.get("bc_reference_freight_amount")
-    if invoice_amount is not None and ref_amount is not None:
+
+    if invoice_amount is not None and (po_freight_amount > 0 or so_freight_amount > 0):
+        # Gap 2+3: Use enhanced comparison with both PO and SO amounts
+        comparison = compare_freight_to_bc_reference(
+            invoice_amount, po_freight_amount, so_freight_amount,
+        )
+        result["freight_comparison"] = comparison
+        if comparison["needs_review"]:
+            result["review_flags"].append({
+                "type": "freight_variance",
+                "severity": comparison["severity"],
+                "reason": comparison["reason"],
+                "variance_vs_po": comparison["variance_vs_po"],
+                "variance_vs_so": comparison["variance_vs_so"],
+            })
+            result["rules_applied"].append("freight_variance_bc_comparison")
+        elif comparison["additional_charges_detected"]:
+            result["rules_applied"].append("additional_charges_covered")
+    elif invoice_amount is not None and ref_amount is not None:
+        # Legacy: simple variance check
         variance = check_freight_variance(invoice_amount, ref_amount)
         if variance["needs_review"]:
             result["review_flags"].append({
@@ -454,6 +614,20 @@ def classify_freight_document(doc: Dict[str, Any]) -> Dict[str, Any]:
                 "variance": variance["variance"],
             })
             result["rules_applied"].append("freight_variance_check")
+
+    # Gap 2 bonus: Validate item codes match between PO and SO
+    if bc_po_freight.get("has_freight_lines") and bc_so_freight.get("has_freight_lines"):
+        po_codes = {fl["item_code"] for fl in bc_po_freight.get("freight_lines", [])}
+        so_codes = {fl["item_code"] for fl in bc_so_freight.get("freight_lines", [])}
+        if po_codes and so_codes and not po_codes.issubset(so_codes):
+            mismatched = po_codes - so_codes
+            result["review_flags"].append({
+                "type": "freight_code_mismatch",
+                "severity": "medium",
+                "reason": f"PI freight codes {mismatched} not found on SO. "
+                          f"Meghan: 'The codes should match the Sales Order.'",
+            })
+            result["rules_applied"].append("freight_code_match_check")
 
     # 7. Determine freight treatment if not already set
     if not result["freight_treatment"]:

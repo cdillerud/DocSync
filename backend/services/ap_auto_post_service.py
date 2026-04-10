@@ -210,7 +210,6 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
         return {"success": True, "posted": False, "reason": reason, "status": "NeedsReview" if is_ap_type else "skipped", "failures": failures}
 
     # All conditions met — attempt to post to BC
-    import os
     bc_write_enabled = os.environ.get("BC_WRITE_ENABLED", "false").lower() == "true"
 
     if not bc_write_enabled:
@@ -262,7 +261,7 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
         from routers.gpi_integration import create_purchase_invoice_from_document
         result = await create_purchase_invoice_from_document(doc_id, vendor_no_override="", force=False)
 
-        if result.get("success"):
+        if result.get("success") or result.get("already_exists"):
             now = datetime.now(timezone.utc).isoformat()
             await db.hub_documents.update_one({"id": doc_id}, {"$set": {
                 "status": "Posted",
@@ -299,6 +298,32 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
         else:
             error_msg = result.get("error", "Unknown BC API error")
             now = datetime.now(timezone.utc).isoformat()
+            # Keep at ReadyForPost so the background scheduler can retry (transient BC failures)
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+                "status": "ReadyForPost",
+                "workflow_status": "ready_for_post",
+                "auto_post_attempted": True,
+                "auto_post_success": False,
+                "auto_post_error": error_msg,
+                "bc_posting_status": "pending_retry",
+                "updated_utc": now,
+            }})
+            await _write_event(db, doc_id, "automation.decision.completed", {
+                "decision": "ReadyForPost",
+                "auto_post": False,
+                "reason": f"BC post failed (will retry): {error_msg}",
+                "source": source,
+            })
+            logger.warning("[AP Auto-Post] BC post FAILED for %s (staying ReadyForPost for retry): %s", doc_id[:8], error_msg)
+            return {"success": True, "posted": False, "reason": f"BC post failed: {error_msg}", "status": "ReadyForPost"}
+
+    except Exception as e:
+        error_msg = str(e)
+        now = datetime.now(timezone.utc).isoformat()
+        # Distinguish transient errors (keep ReadyForPost) from permanent errors (revert to NeedsReview)
+        from fastapi import HTTPException as _HTTPException
+        is_permanent = isinstance(e, _HTTPException) and e.status_code in (404, 422)
+        if is_permanent:
             await db.hub_documents.update_one({"id": doc_id}, {"$set": {
                 "status": "NeedsReview",
                 "workflow_status": "needs_review",
@@ -311,32 +336,30 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
             await _write_event(db, doc_id, "automation.decision.completed", {
                 "decision": "NeedsReview",
                 "auto_post": False,
-                "reason": f"BC post failed: {error_msg}",
+                "reason": f"BC post permanent error: {error_msg}",
                 "source": source,
             })
-            logger.warning("[AP Auto-Post] BC post FAILED for %s: %s", doc_id[:8], error_msg)
-            return {"success": True, "posted": False, "reason": f"BC post failed: {error_msg}", "status": "NeedsReview"}
-
-    except Exception as e:
-        error_msg = str(e)
-        now = datetime.now(timezone.utc).isoformat()
-        await db.hub_documents.update_one({"id": doc_id}, {"$set": {
-            "status": "NeedsReview",
-            "workflow_status": "needs_review",
-            "auto_post_attempted": True,
-            "auto_post_success": False,
-            "auto_post_error": error_msg,
-            "bc_posting_status": "failed",
-            "updated_utc": now,
-        }})
-        await _write_event(db, doc_id, "automation.decision.completed", {
-            "decision": "NeedsReview",
-            "auto_post": False,
-            "reason": f"BC post error: {error_msg}",
-            "source": source,
-        })
-        logger.error("[AP Auto-Post] Exception for %s: %s", doc_id[:8], error_msg)
-        return {"success": False, "posted": False, "reason": f"Error: {error_msg}", "status": "NeedsReview"}
+            logger.error("[AP Auto-Post] Permanent error for %s → NeedsReview: %s", doc_id[:8], error_msg)
+            return {"success": False, "posted": False, "reason": f"Error: {error_msg}", "status": "NeedsReview"}
+        else:
+            # Transient error — keep at ReadyForPost for background scheduler retry
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+                "status": "ReadyForPost",
+                "workflow_status": "ready_for_post",
+                "auto_post_attempted": True,
+                "auto_post_success": False,
+                "auto_post_error": error_msg,
+                "bc_posting_status": "pending_retry",
+                "updated_utc": now,
+            }})
+            await _write_event(db, doc_id, "automation.decision.completed", {
+                "decision": "ReadyForPost",
+                "auto_post": False,
+                "reason": f"BC post transient error (will retry): {error_msg}",
+                "source": source,
+            })
+            logger.warning("[AP Auto-Post] Transient error for %s → staying ReadyForPost: %s", doc_id[:8], error_msg)
+            return {"success": False, "posted": False, "reason": f"Error (will retry): {error_msg}", "status": "ReadyForPost"}
 
 
 async def _write_event(db, doc_id: str, event_type: str, payload: dict):

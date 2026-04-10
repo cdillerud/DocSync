@@ -72,7 +72,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://doc-intelligence-33.preview.emergentagent.com"
+    "api_url": "https://doc-hub-queue-repair.preview.emergentagent.com"
   },
   "seed_data_created": {
     "intelligence_results": "7 documents processed with intelligence results in document_intelligence_results collection",

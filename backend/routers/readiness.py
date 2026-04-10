@@ -12,6 +12,7 @@ Endpoints:
   GET  /api/readiness/automation-rate   - Automation rate dashboard
   POST /api/readiness/retry-failed      - Batch retry extraction-failed docs
   POST /api/readiness/retry-captured    - Retry docs stuck in 'captured' status
+  POST /api/readiness/retry-ready-to-post - Post ReadyForPost docs to BC
   GET  /api/readiness/exception-queue   - View exception queue
   POST /api/readiness/po-pending/park   - Park PO-gap docs in retry queue
   POST /api/readiness/po-pending/retry  - Re-evaluate all PO-pending docs
@@ -1299,3 +1300,90 @@ async def get_po_pending_queue(
     ).sort("po_pending_parked_at", -1).skip(skip).limit(limit).to_list(limit)
 
     return {"total": total, "documents": docs}
+
+
+@router.post("/retry-ready-to-post")
+async def retry_ready_to_post(
+    limit: int = Query(50, le=200),
+):
+    """
+    Manual trigger: attempt to post all ReadyForPost documents to BC.
+    Picks up docs that passed all validation but haven't been posted yet.
+    """
+    import os
+    from deps import get_db
+    from datetime import datetime, timezone
+
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+
+    bc_write_enabled = os.environ.get("BC_WRITE_ENABLED", "false").lower() == "true"
+    if not bc_write_enabled:
+        return {
+            "success": False,
+            "reason": "BC_WRITE_ENABLED is false — cannot post to BC",
+            "posted": 0, "failed": 0, "total": 0,
+        }
+
+    ready_docs = await db.hub_documents.find(
+        {
+            "$or": [
+                {"status": "ReadyForPost"},
+                {"workflow_status": "ready_for_post"},
+            ],
+            "status": {"$nin": ["Posted", "Completed", "Archived"]},
+            "bc_purchase_invoice": {"$exists": False},
+        },
+        {"_id": 0, "id": 1, "bc_vendor_number": 1, "vendor_no": 1, "file_name": 1,
+         "ready_post_retry_count": 1},
+    ).limit(limit).to_list(limit)
+
+    posted = 0
+    failed = 0
+    details = []
+
+    for doc in ready_docs:
+        doc_id = doc.get("id", "")
+        if not doc_id:
+            continue
+        try:
+            from routers.gpi_integration import create_purchase_invoice_from_document
+            result = await create_purchase_invoice_from_document(
+                doc_id, vendor_no_override="", force=False
+            )
+            if result.get("success") or result.get("already_exists"):
+                bc_record_no = result.get("bc_record_no", "")
+                await db.hub_documents.update_one(
+                    {"id": doc_id},
+                    {"$set": {
+                        "status": "Posted",
+                        "workflow_status": "posted",
+                        "auto_cleared": True,
+                        "auto_post_success": True,
+                        "bc_posting_status": "posted",
+                        "bc_record_no": bc_record_no,
+                        "bc_system_id": result.get("bc_system_id", ""),
+                        "posted_to_bc_at": now,
+                        "updated_utc": now,
+                    }},
+                )
+                posted += 1
+                details.append({"doc_id": doc_id[:8], "file": doc.get("file_name", "?"),
+                                "action": "posted", "bc_record_no": bc_record_no})
+            else:
+                error_msg = str(result.get("error_message") or result.get("error") or "Unknown")[:200]
+                failed += 1
+                details.append({"doc_id": doc_id[:8], "file": doc.get("file_name", "?"),
+                                "action": "failed", "error": error_msg})
+        except Exception as e:
+            failed += 1
+            details.append({"doc_id": doc_id[:8], "file": doc.get("file_name", "?"),
+                            "action": "error", "error": str(e)[:200]})
+
+    return {
+        "success": True,
+        "total": len(ready_docs),
+        "posted": posted,
+        "failed": failed,
+        "details": details,
+    }

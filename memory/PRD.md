@@ -43,11 +43,14 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - Inbox Metrics Panel — `GET /api/dashboard/inbox-metrics` (2026-04-09)
 - Captured Doc Auto-Retry — Background scheduler + manual endpoint + UI button (2026-04-09)
 - **Bugfix: is_duplicate filter** — Added to inbox-metrics and inbox-stats pending_review so numbers match inbox table (2026-04-09)
+- **ReadyForPost Auto-Post Scheduler** — Background loop (5min interval, 5 retries) posts ReadyForPost docs to BC when BC_WRITE_ENABLED=true. Manual trigger: `POST /api/readiness/retry-ready-to-post`. UI "Post Ready" button added. (2026-04-10)
+- **Transient BC error resilience** — Failed BC posts now keep docs at ReadyForPost (not NeedsReview) so the scheduler retries. Permanent errors (404/422) still revert to NeedsReview. (2026-04-10)
 
 ## Key API Endpoints
 - `POST /api/readiness/sync-status` — Force cleanup engine
 - `POST /api/readiness/retry-failed` — Batch retry extraction-failed docs
 - `POST /api/readiness/retry-captured` — Retry stuck captured docs (4 max → exception)
+- `POST /api/readiness/retry-ready-to-post` — Post ReadyForPost docs to BC
 - `POST /api/readiness/po-pending/park` / `POST /api/readiness/po-pending/retry`
 - `GET /api/dashboard/inbox-stats` / `GET /api/dashboard/inbox-metrics`
 - `GET /api/aliases/vendors/unmatched-gaps` / `GET /api/aliases/vendors/search`

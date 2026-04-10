@@ -11,7 +11,7 @@ import {
   Receipt, ShoppingCart, Inbox, FolderInput, Brain,
   TrendingUp, ShieldCheck, AlertTriangle, Clock, CheckCircle2,
   RotateCcw, Layers, ChevronDown, ChevronUp, BarChart3,
-  User, FileQuestion, Ban, Copy, Zap, XCircle,
+  User, FileQuestion, Ban, Copy, Zap, XCircle, Send,
 } from "lucide-react";
 import api, { bulkResubmitDocuments, bulkDeleteDocuments, deleteDocument, bulkFileAndClear, batchAutoResolve, triggerAutoResolve } from "@/lib/api";
 
@@ -357,6 +357,23 @@ export default function UnifiedQueuePage() {
     finally { setBulkProcessing(false); }
   };
 
+  const handlePostReady = async () => {
+    setBulkProcessing(true);
+    try {
+      const res = await api.post('/readiness/retry-ready-to-post');
+      const d = res.data;
+      if (!d.success) {
+        toast.error(d.reason || 'Cannot post — BC writes disabled');
+      } else if (d.total === 0) {
+        toast.info('No ReadyForPost docs to process.');
+      } else {
+        toast.success(`${d.posted} posted to BC, ${d.failed} failed out of ${d.total}.`);
+        fetchDocuments();
+      }
+    } catch (err) { toast.error('Post ready failed: ' + (err.response?.data?.detail || err.message)); }
+    finally { setBulkProcessing(false); }
+  };
+
   const hasSelections = selectedDocs.size > 0;
 
   // ── Render ──
@@ -402,6 +419,9 @@ export default function UnifiedQueuePage() {
           )}
           <Button variant="ghost" size="sm" className="h-8 text-xs gap-1" onClick={handleRetryCaptured} disabled={bulkProcessing} data-testid="retry-captured-btn" title="Retry documents stuck in Captured status">
             <RotateCcw className="w-3.5 h-3.5" /> Retry Stuck
+          </Button>
+          <Button variant="ghost" size="sm" className="h-8 text-xs gap-1" onClick={handlePostReady} disabled={bulkProcessing} data-testid="post-ready-btn" title="Post all ReadyForPost documents to BC">
+            <Send className="w-3.5 h-3.5" /> Post Ready
           </Button>
           <Button variant="ghost" size="sm" className="h-8 text-xs gap-1" onClick={() => { fetchDocuments(); toast.success("Refreshed"); }} data-testid="refresh-btn">
             <RefreshCw className="w-3.5 h-3.5" /> Refresh

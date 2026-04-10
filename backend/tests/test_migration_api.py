@@ -10,7 +10,7 @@ sys.path.insert(0, '/app/backend')
 
 
 # Test configuration
-API_BASE_URL = "https://doc-intelligence-33.preview.emergentagent.com"
+API_BASE_URL = "https://doc-hub-queue-repair.preview.emergentagent.com"
 
 
 @pytest.fixture

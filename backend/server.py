@@ -7883,6 +7883,147 @@ async def startup():
     asyncio.create_task(_po_retry_scheduler())
     logger.info("PO Auto-Retry scheduler started (interval: %dh, max wait: %d days)", PO_RETRY_INTERVAL_HOURS, PO_MAX_WAIT_DAYS)
 
+    # === ReadyForPost Auto-Post Scheduler (every 5 minutes) ===
+    READY_POST_INTERVAL_SECONDS = 300   # 5 min
+    READY_POST_MAX_RETRIES = 5          # Max BC post attempts before giving up
+
+    async def _ready_to_post_scheduler():
+        await asyncio.sleep(120)  # Initial delay: 2 minutes after startup
+        while True:
+            try:
+                import os as _os
+                bc_write_enabled = _os.environ.get("BC_WRITE_ENABLED", "false").lower() == "true"
+                if not bc_write_enabled:
+                    logger.debug("[ReadyToPost] BC_WRITE_ENABLED=false, skipping cycle")
+                    await asyncio.sleep(READY_POST_INTERVAL_SECONDS)
+                    continue
+
+                from datetime import datetime, timezone
+                now = datetime.now(timezone.utc)
+                now_iso = now.isoformat()
+
+                # Find ReadyForPost docs that haven't already been posted
+                ready_docs = await db.hub_documents.find(
+                    {
+                        "$or": [
+                            {"status": "ReadyForPost"},
+                            {"workflow_status": "ready_for_post"},
+                        ],
+                        "status": {"$nin": ["Posted", "Completed", "Archived"]},
+                        "bc_purchase_invoice": {"$exists": False},
+                        "ready_post_exhausted": {"$ne": True},
+                    },
+                    {"_id": 0, "id": 1, "bc_vendor_number": 1, "vendor_no": 1,
+                     "ready_post_retry_count": 1, "file_name": 1},
+                ).limit(50).to_list(50)
+
+                if not ready_docs:
+                    logger.debug("[ReadyToPost] No ReadyForPost docs to process")
+                    await asyncio.sleep(READY_POST_INTERVAL_SECONDS)
+                    continue
+
+                logger.info("[ReadyToPost] Found %d ReadyForPost docs to attempt posting", len(ready_docs))
+                posted = 0
+                failed = 0
+                exhausted = 0
+
+                for doc in ready_docs:
+                    doc_id = doc.get("id", "")
+                    if not doc_id:
+                        continue
+                    retry_count = doc.get("ready_post_retry_count", 0) + 1
+                    vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
+
+                    try:
+                        from routers.gpi_integration import create_purchase_invoice_from_document
+                        result = await create_purchase_invoice_from_document(
+                            doc_id, vendor_no_override="", force=False
+                        )
+
+                        if result.get("success") or result.get("already_exists"):
+                            bc_record_no = result.get("bc_record_no", "")
+                            await db.hub_documents.update_one(
+                                {"id": doc_id},
+                                {"$set": {
+                                    "status": "Posted",
+                                    "workflow_status": "posted",
+                                    "auto_cleared": True,
+                                    "auto_post_success": True,
+                                    "bc_posting_status": "posted",
+                                    "bc_record_no": bc_record_no,
+                                    "bc_system_id": result.get("bc_system_id", ""),
+                                    "posted_to_bc_at": now_iso,
+                                    "ready_post_retry_count": retry_count,
+                                    "updated_utc": now_iso,
+                                }},
+                            )
+                            posted += 1
+                            logger.info("[ReadyToPost] Posted doc %s to BC: PI #%s", doc_id[:8], bc_record_no)
+                        else:
+                            error_msg = result.get("error_message") or result.get("error") or result.get("detail") or "Unknown error"
+                            if retry_count >= READY_POST_MAX_RETRIES:
+                                await db.hub_documents.update_one(
+                                    {"id": doc_id},
+                                    {"$set": {
+                                        "ready_post_retry_count": retry_count,
+                                        "ready_post_exhausted": True,
+                                        "ready_post_last_error": str(error_msg)[:500],
+                                        "updated_utc": now_iso,
+                                    }},
+                                )
+                                exhausted += 1
+                                logger.warning("[ReadyToPost] Exhausted retries for doc %s after %d attempts: %s",
+                                               doc_id[:8], retry_count, str(error_msg)[:200])
+                            else:
+                                await db.hub_documents.update_one(
+                                    {"id": doc_id},
+                                    {"$set": {
+                                        "ready_post_retry_count": retry_count,
+                                        "ready_post_last_error": str(error_msg)[:500],
+                                        "updated_utc": now_iso,
+                                    }},
+                                )
+                                failed += 1
+                                logger.info("[ReadyToPost] BC post attempt %d/%d failed for %s: %s",
+                                            retry_count, READY_POST_MAX_RETRIES, doc_id[:8], str(error_msg)[:200])
+
+                    except Exception as e:
+                        error_msg = str(e)
+                        if retry_count >= READY_POST_MAX_RETRIES:
+                            await db.hub_documents.update_one(
+                                {"id": doc_id},
+                                {"$set": {
+                                    "ready_post_retry_count": retry_count,
+                                    "ready_post_exhausted": True,
+                                    "ready_post_last_error": error_msg[:500],
+                                    "updated_utc": now_iso,
+                                }},
+                            )
+                            exhausted += 1
+                        else:
+                            await db.hub_documents.update_one(
+                                {"id": doc_id},
+                                {"$set": {
+                                    "ready_post_retry_count": retry_count,
+                                    "ready_post_last_error": error_msg[:500],
+                                    "updated_utc": now_iso,
+                                }},
+                            )
+                            failed += 1
+                        logger.warning("[ReadyToPost] Exception posting doc %s (attempt %d): %s",
+                                       doc_id[:8], retry_count, error_msg[:200])
+
+                logger.info("[ReadyToPost] Cycle done: %d found, %d posted, %d failed (will retry), %d exhausted",
+                            len(ready_docs), posted, failed, exhausted)
+            except Exception as e:
+                logger.warning("[ReadyToPost] Scheduled cycle failed: %s", e)
+
+            await asyncio.sleep(READY_POST_INTERVAL_SECONDS)
+
+    asyncio.create_task(_ready_to_post_scheduler())
+    logger.info("ReadyToPost Auto-Post scheduler started (interval: %ds, max retries: %d)",
+                READY_POST_INTERVAL_SECONDS, READY_POST_MAX_RETRIES)
+
 async def shutdown_db_client():
     global _email_polling_task, _sales_polling_task, _dynamic_mailbox_polling_task, _pilot_summary_task
     # Cancel dynamic mailbox polling worker

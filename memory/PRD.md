@@ -45,12 +45,20 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - **Bugfix: is_duplicate filter** — Added to inbox-metrics and inbox-stats pending_review so numbers match inbox table (2026-04-09)
 - **ReadyForPost Auto-Post Scheduler** — Background loop (5min interval, 5 retries) posts ReadyForPost docs to BC when BC_WRITE_ENABLED=true. Manual trigger: `POST /api/readiness/retry-ready-to-post`. UI "Post Ready" button added. (2026-04-10)
 - **Transient BC error resilience** — Failed BC posts now keep docs at ReadyForPost (not NeedsReview) so the scheduler retries. Permanent errors (404/422) still revert to NeedsReview. (2026-04-10)
+- **Draft Auto-Approve in scheduler** — `auto_approve_drafts` now runs automatically every 2h cycle alongside draft feedback sync + continuous learning. High-confidence vendors auto-approved. (2026-04-10)
+- **Cross-document dedup guard** — Gate 2b in `check_auto_draft_eligibility` prevents duplicate PI creation when another doc for same vendor+invoice already has a PI. (2026-04-10)
+- **Posted to BC stats widget** — Inbox stats strip now shows `posted_to_bc_7d` and `ready_for_post` counts in real-time. (2026-04-10)
+- **Vendor maturity fix** — Fixed maturity level labels to match frontend (mastered/proficient/developing/learning/novice), lowered thresholds (75/60/40/20), field_coverage defaults to 50 when no extraction patterns exist. (2026-04-10)
+- **Bulk Classify endpoint + UI** — `POST /api/documents/bulk-classify` assigns doc_type to multiple docs with AI learning feedback. Dropdown + button in Inbox selection bar. (2026-04-10)
+- **Vendor learning backfill** — Background scheduler backfills amount/line data from approved drafts' BC records for vendors showing $0. (2026-04-10)
+- **Auto gap closer** — Gap closer now runs automatically in intelligence maintenance scheduler (2h cycle), re-evaluating docs with blocking validation gaps. (2026-04-10)
 
 ## Key API Endpoints
 - `POST /api/readiness/sync-status` — Force cleanup engine
 - `POST /api/readiness/retry-failed` — Batch retry extraction-failed docs
 - `POST /api/readiness/retry-captured` — Retry stuck captured docs (4 max → exception)
 - `POST /api/readiness/retry-ready-to-post` — Post ReadyForPost docs to BC
+- `POST /api/documents/bulk-classify` — Bulk assign document type with AI learning
 - `POST /api/readiness/po-pending/park` / `POST /api/readiness/po-pending/retry`
 - `GET /api/dashboard/inbox-stats` / `GET /api/dashboard/inbox-metrics`
 - `GET /api/aliases/vendors/unmatched-gaps` / `GET /api/aliases/vendors/search`

@@ -7535,6 +7535,62 @@ async def startup():
             except Exception as e:
                 logger.warning("[DraftAutoApprove] Scheduled auto-approve failed: %s", e)
 
+            # 4. Backfill vendor learning from approved drafts that have BC data but $0 amounts
+            try:
+                from services.posting_pattern_analyzer import learn_from_posting
+                # Find approved docs with bc_purchase_invoice but no learning amount
+                zero_amount_docs = await db.hub_documents.find(
+                    {
+                        "auto_draft_created": True,
+                        "draft_review_status": "approved",
+                        "bc_purchase_invoice": {"$exists": True},
+                        "amount_learning_backfilled": {"$ne": True},
+                    },
+                    {"_id": 0, "id": 1, "bc_vendor_number": 1, "vendor_no": 1,
+                     "vendor_canonical": 1, "doc_type": 1, "extracted_fields": 1,
+                     "normalized_fields": 1, "bc_purchase_invoice": 1},
+                ).limit(50).to_list(50)
+
+                backfilled = 0
+                for zdoc in zero_amount_docs:
+                    doc_id = zdoc.get("id", "")
+                    vendor_no = zdoc.get("bc_vendor_number") or zdoc.get("vendor_no") or ""
+                    if not doc_id or not vendor_no:
+                        continue
+                    try:
+                        pi_data = zdoc.get("bc_purchase_invoice") or {}
+                        pi_lines = pi_data.get("lines") or pi_data.get("purchaseInvoiceLines") or []
+                        # Build simple line objects for learning
+                        clean_lines = []
+                        for pl in pi_lines:
+                            line = {
+                                "No_": pl.get("no") or pl.get("No_") or pl.get("lineObjectNumber") or "",
+                                "Description": pl.get("description") or pl.get("Description") or "",
+                                "Quantity": pl.get("quantity") or pl.get("Quantity") or 1,
+                                "Direct_Unit_Cost": pl.get("directUnitCost") or pl.get("Direct_Unit_Cost") or pl.get("unitCost") or 0,
+                                "Amount": pl.get("amountIncludingVAT") or pl.get("Amount") or pl.get("lineAmount") or 0,
+                            }
+                            clean_lines.append(line)
+
+                        if clean_lines:
+                            await learn_from_posting(
+                                db, doc_id, vendor_no, clean_lines,
+                                result_status="Posted",
+                                source="bc_sync_backfill"
+                            )
+                            await db.hub_documents.update_one(
+                                {"id": doc_id},
+                                {"$set": {"amount_learning_backfilled": True}},
+                            )
+                            backfilled += 1
+                    except Exception as le:
+                        logger.debug("[VendorLearnBackfill] Error for %s: %s", doc_id[:8], le)
+
+                if backfilled > 0:
+                    logger.info("[VendorLearnBackfill] Backfilled learning data for %d docs", backfilled)
+            except Exception as e:
+                logger.warning("[VendorLearnBackfill] Scheduled backfill failed: %s", e)
+
             await asyncio.sleep(2 * 3600)  # Every 2 hours
     asyncio.create_task(_draft_feedback_sync_scheduler())
     logger.info("Draft Feedback Sync + Continuous Learning scheduler started (interval: 2h)")
@@ -7649,6 +7705,47 @@ async def startup():
                     logger.info("[IntelMaint] Duplicate backfill: tracked %d false positives", dup_tracked)
             except Exception as e:
                 logger.warning("[IntelMaint] Duplicate backfill failed: %s", e)
+
+            # 4. Auto-close validation gaps (vendor_match + po_validation)
+            try:
+                from services.document_readiness_service import evaluate_and_persist
+                # Find docs with open validation gaps that might now be resolvable
+                gap_docs = await db.hub_documents.find(
+                    {
+                        "is_duplicate": {"$ne": True},
+                        "status": {"$nin": ["Completed", "Posted", "Archived", "batch_parent",
+                                            "Exception", "exception", "FileMissing"]},
+                        "$or": [
+                            {"readiness.blocking_reasons": {"$exists": True, "$ne": []}},
+                            {"readiness.warning_reasons": {"$exists": True, "$ne": []}},
+                        ],
+                        "gap_closer_last_run": {"$not": {"$gte": datetime.now(timezone.utc).replace(hour=0, minute=0, second=0).isoformat()}},
+                    },
+                    {"_id": 0},
+                ).limit(100).to_list(100)
+
+                gaps_resolved = 0
+                for gdoc in gap_docs:
+                    doc_id = gdoc.get("id", "")
+                    if not doc_id:
+                        continue
+                    try:
+                        readiness = await evaluate_and_persist(gdoc)
+                        is_ready = readiness.get("status", "").startswith("ready")
+                        blocking = readiness.get("blocking_reasons", [])
+                        if is_ready or not blocking:
+                            gaps_resolved += 1
+                        await db.hub_documents.update_one(
+                            {"id": doc_id},
+                            {"$set": {"gap_closer_last_run": datetime.now(timezone.utc).isoformat()}},
+                        )
+                    except Exception:
+                        pass
+
+                if gaps_resolved > 0:
+                    logger.info("[IntelMaint] Gap closer: resolved %d/%d validation gaps", gaps_resolved, len(gap_docs))
+            except Exception as e:
+                logger.warning("[IntelMaint] Gap closer failed: %s", e)
 
             await asyncio.sleep(2 * 3600)  # Every 2 hours
     asyncio.create_task(_intelligence_maintenance_scheduler())

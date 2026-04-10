@@ -959,6 +959,17 @@ async def get_inbox_stats():
     # Bounds alerts (active)
     bounds_alerts = await db.hub_documents.count_documents({"bounds_alert": True})
 
+    # Posted to BC (7-day window)
+    posted_to_bc_7d = await db.hub_documents.count_documents({
+        "status": "Posted",
+        "posted_to_bc_at": {"$gte": seven_days_ago_utc},
+    })
+    # Also count ReadyForPost (queued but not yet posted)
+    ready_for_post = await db.hub_documents.count_documents({
+        "$or": [{"status": "ReadyForPost"}, {"workflow_status": "ready_for_post"}],
+        "status": {"$nin": ["Posted", "Completed", "Archived"]},
+    })
+
     # Avg AI confidence (sampled from last 200 docs for speed)
     conf_docs = await db.hub_documents.find(
         {"ai_confidence": {"$exists": True, "$ne": None}},
@@ -977,6 +988,8 @@ async def get_inbox_stats():
         "bounds_alerts": bounds_alerts,
         "avg_ai_confidence": avg_conf,
         "total_documents": total,
+        "posted_to_bc_7d": posted_to_bc_7d,
+        "ready_for_post": ready_for_post,
     }
 
 

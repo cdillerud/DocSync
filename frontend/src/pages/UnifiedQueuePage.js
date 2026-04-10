@@ -374,6 +374,26 @@ export default function UnifiedQueuePage() {
     finally { setBulkProcessing(false); }
   };
 
+  const [bulkClassifyType, setBulkClassifyType] = useState('');
+  const handleBulkClassify = async () => {
+    if (!bulkClassifyType) { toast.error('Select a document type first'); return; }
+    if (selectedDocs.size === 0) return;
+    setBulkProcessing(true);
+    try {
+      const ids = Array.from(selectedDocs);
+      const params = new URLSearchParams();
+      ids.forEach(id => params.append('doc_ids', id));
+      params.append('doc_type', bulkClassifyType);
+      const res = await api.post(`/documents/bulk-classify?${params.toString()}`);
+      const d = res.data;
+      toast.success(`${d.classified} docs classified as ${bulkClassifyType}`);
+      setSelectedDocs(new Set());
+      setBulkClassifyType('');
+      fetchDocuments();
+    } catch (err) { toast.error('Bulk classify failed: ' + (err.response?.data?.detail || err.message)); }
+    finally { setBulkProcessing(false); }
+  };
+
   const hasSelections = selectedDocs.size > 0;
 
   // ── Render ──
@@ -411,6 +431,26 @@ export default function UnifiedQueuePage() {
               <Button variant="outline" size="sm" className="h-8 text-xs gap-1" onClick={handleBulkRefIntel} disabled={bulkProcessing} data-testid="bulk-ref-intel-btn">
                 <Brain className="w-3 h-3" /> Ref Intel
               </Button>
+              <select
+                value={bulkClassifyType}
+                onChange={(e) => setBulkClassifyType(e.target.value)}
+                className="h-8 text-xs bg-muted/50 border border-border/50 rounded-md px-2"
+                data-testid="bulk-classify-select"
+              >
+                <option value="">Assign Type...</option>
+                <option value="AP_Invoice">AP Invoice</option>
+                <option value="BOL">BOL</option>
+                <option value="SHIPPING">Shipping</option>
+                <option value="PURCHASE_ORDER">Purchase Order</option>
+                <option value="SALES_ORDER">Sales Order</option>
+                <option value="CREDIT_MEMO">Credit Memo</option>
+                <option value="FREIGHT_INVOICE">Freight Invoice</option>
+              </select>
+              {bulkClassifyType && (
+                <Button variant="outline" size="sm" className="h-8 text-xs gap-1" onClick={handleBulkClassify} disabled={bulkProcessing} data-testid="bulk-classify-btn">
+                  <FileQuestion className="w-3 h-3" /> Classify
+                </Button>
+              )}
               <Button variant="destructive" size="sm" className="h-8 text-xs gap-1" onClick={handleBulkDelete} disabled={bulkProcessing} data-testid="bulk-delete-btn">
                 <Trash2 className="w-3 h-3" /> Delete
               </Button>
@@ -465,6 +505,23 @@ export default function UnifiedQueuePage() {
             <span className="text-muted-foreground">AI confidence</span>
             <span className="font-semibold text-foreground">{stats.avg_ai_confidence}%</span>
           </div>
+          <div className="w-px h-4 bg-border/40" />
+          <div className="flex items-center gap-1.5" data-testid="stat-posted-bc">
+            <CheckCircle2 className="w-3.5 h-3.5 text-green-400" />
+            <span className="text-muted-foreground">Posted to BC</span>
+            <span className="font-semibold text-foreground">{stats.posted_to_bc_7d || 0}</span>
+            <span className="text-muted-foreground/60">(7d)</span>
+          </div>
+          {(stats.ready_for_post || 0) > 0 && (
+            <>
+              <div className="w-px h-4 bg-border/40" />
+              <div className="flex items-center gap-1.5" data-testid="stat-ready-post">
+                <Send className="w-3.5 h-3.5 text-blue-400" />
+                <span className="text-muted-foreground">Queued</span>
+                <span className="font-semibold text-blue-400">{stats.ready_for_post}</span>
+              </div>
+            </>
+          )}
           <div className="w-px h-4 bg-border/40" />
           <button
             onClick={() => setMetricsOpen(p => !p)}

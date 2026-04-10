@@ -12,7 +12,7 @@ import hashlib
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File, Form, Query, Body
 from fastapi.responses import FileResponse, StreamingResponse
@@ -2064,4 +2064,101 @@ async def sweep_reclassify_bols(dry_run: bool = False, limit: int = 1000):
         "failed": failed,
         "samples": reclassified[:10],
         "message": f"Reclassified and filed {filed} BOLs ({failed} failed, {skipped} non-BOL skipped).",
+    }
+
+
+@router.post("/bulk-classify")
+async def bulk_classify_documents(
+    doc_ids: List[str] = Query(..., description="Document IDs to classify"),
+    doc_type: str = Query(..., description="Document type to assign (e.g. AP_Invoice, BOL, SHIPPING)"),
+    reclassify_by: str = Query("admin", description="Who is performing the reclassification"),
+):
+    """
+    Bulk assign/change document type for multiple documents.
+    Records classification corrections for AI learning feedback.
+    """
+    from datetime import datetime, timezone
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+
+    classified = 0
+    failed = 0
+    details = []
+
+    for doc_id in doc_ids:
+        try:
+            doc = await db.hub_documents.find_one({"id": doc_id}, {
+                "_id": 0, "id": 1, "doc_type": 1, "document_type": 1,
+                "suggested_job_type": 1, "file_name": 1, "vendor_canonical": 1,
+                "vendor_raw": 1, "raw_text": 1, "extracted_text": 1,
+                "extracted_fields": 1, "classification_method": 1,
+                "classification_confidence": 1,
+            })
+            if not doc:
+                failed += 1
+                details.append({"doc_id": doc_id[:8], "action": "not_found"})
+                continue
+
+            original_type = doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type") or ""
+
+            # Update the document type
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    "doc_type": doc_type,
+                    "document_type": doc_type,
+                    "suggested_job_type": doc_type,
+                    "document_type_source": "manual_bulk",
+                    "classification_override": {
+                        "original_type": original_type,
+                        "corrected_type": doc_type,
+                        "corrected_at": now,
+                        "corrected_by": reclassify_by,
+                    },
+                    "updated_utc": now,
+                }},
+            )
+
+            # Record correction for AI learning
+            if original_type != doc_type:
+                try:
+                    from services.classification_feedback_service import record_correction
+                    raw_text = doc.get("raw_text") or doc.get("extracted_text") or ""
+                    if not raw_text:
+                        ef = doc.get("extracted_fields") or {}
+                        parts = [str(v) for v in ef.values() if v and not isinstance(v, (list, dict))]
+                        raw_text = " | ".join(parts)
+
+                    await record_correction(
+                        doc_id=doc_id,
+                        original_type=original_type,
+                        corrected_type=doc_type,
+                        corrected_by=reclassify_by,
+                        doc_context={
+                            "file_name": doc.get("file_name", ""),
+                            "vendor_raw": doc.get("vendor_raw", ""),
+                            "vendor_canonical": doc.get("vendor_canonical", ""),
+                            "text_snippet": raw_text[:500],
+                            "classification_method": doc.get("classification_method", ""),
+                            "classification_confidence": doc.get("classification_confidence", 0),
+                            "source": "bulk_classify",
+                        },
+                    )
+                except Exception as e:
+                    logger.warning("[BulkClassify] Feedback recording failed for %s: %s", doc_id[:8], e)
+
+            classified += 1
+            details.append({"doc_id": doc_id[:8], "action": "classified",
+                            "from": original_type, "to": doc_type})
+
+        except Exception as e:
+            failed += 1
+            details.append({"doc_id": doc_id[:8], "action": "error", "error": str(e)[:200]})
+
+    return {
+        "success": True,
+        "classified": classified,
+        "failed": failed,
+        "doc_type": doc_type,
+        "details": details[:20],
     }

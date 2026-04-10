@@ -519,13 +519,16 @@ async def compute_vendor_maturity(db, vendor_no: str) -> Dict:
             pass
 
     # DIMENSION 5: Field Coverage (0-100) — how many fields reliably extracted
-    field_coverage_score = 0
+    field_coverage_score = 50  # Default to moderate when no extraction patterns exist
     if patterns:
         reliability = patterns.get("field_reliability") or {}
         if reliability:
             reliable_count = sum(1 for v in reliability.values() if v >= 0.7)
             total_fields = len(reliability)
             field_coverage_score = round((reliable_count / max(total_fields, 1)) * 100)
+        else:
+            # Patterns exist but no reliability data — infer from doc count
+            field_coverage_score = 60 if total >= 20 else 40
 
     # DIMENSION 6: Error Rate (0-100) — low error = high score
     error_rate = failures / max(total, 1)
@@ -558,12 +561,12 @@ async def compute_vendor_maturity(db, vendor_no: str) -> Dict:
 
     composite = round(sum(d["score"] * d["weight"] for d in dimensions.values()))
 
-    # Maturity level
-    if composite >= 80:
-        level = "autonomous"
-    elif composite >= 65:
-        level = "stable"
-    elif composite >= 45:
+    # Maturity level — aligned with UI labels
+    if composite >= 75:
+        level = "mastered"
+    elif composite >= 60:
+        level = "proficient"
+    elif composite >= 40:
         level = "developing"
     elif composite >= 20:
         level = "learning"

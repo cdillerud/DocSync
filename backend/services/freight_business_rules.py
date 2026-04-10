@@ -359,22 +359,44 @@ def classify_freight_document(doc: Dict[str, Any]) -> Dict[str, Any]:
         result["filename_parsed"] = fn_parsed
         result["rules_applied"].append("filename_convention")
 
-    # 2. Classify by order number
-    order_ref = (
-        ef.get("po_number") or ef.get("order_number") or ef.get("so_number") or
-        nf.get("po_number") or nf.get("order_number") or
-        doc.get("external_document_no") or
-        (fn_parsed.get("order_number") if fn_parsed.get("parsed") else None) or ""
-    )
-    if isinstance(order_ref, list):
-        order_ref = order_ref[0] if order_ref else ""
-    order_ref = str(order_ref)
+    # 2. Classify by order number — check all possible order reference fields
+    order_ref = ""
+    for field_name in [
+        "po_number", "order_number", "so_number",
+        "_po_resolution_number",  # Resolved PO from BC matching
+    ]:
+        val = ef.get(field_name) or nf.get(field_name)
+        if val:
+            if isinstance(val, list):
+                order_ref = str(val[0]) if val else ""
+            else:
+                order_ref = str(val)
+            break
+    if not order_ref:
+        order_ref = doc.get("external_document_no") or ""
+    if not order_ref and fn_parsed.get("parsed"):
+        order_ref = fn_parsed.get("order_number") or ""
+    # Also try _po_all_candidates for W/WR patterns
+    if not order_ref or classify_order_number(order_ref).get("type") == "unknown":
+        all_candidates = ef.get("_po_all_candidates") or []
+        for cand in all_candidates:
+            cand_class = classify_order_number(str(cand))
+            if cand_class.get("direction"):
+                order_ref = str(cand)
+                break
+    order_ref = str(order_ref).strip()
     order_class = classify_order_number(order_ref)
     if order_class.get("direction"):
         result["direction"] = order_class["direction"]
         result["order_type"] = order_class["type"]
         result["confidence"] = max(result["confidence"], order_class.get("confidence", 0))
         result["rules_applied"].append("order_number_pattern")
+
+    # 2b. Also check if extraction already detected freight direction
+    existing_direction = ef.get("freight_direction") or ""
+    if existing_direction in ("inbound", "outbound") and not result["direction"]:
+        result["direction"] = existing_direction
+        result["rules_applied"].append("extracted_freight_direction")
 
     # 3. Check location code (from BC reference data if available)
     location_code = doc.get("bc_location_code") or ef.get("location_code") or ""
@@ -396,7 +418,7 @@ def classify_freight_document(doc: Dict[str, Any]) -> Dict[str, Any]:
 
     # 5. Check for multi-order invoice
     all_refs = []
-    for field in ["po_number", "order_number", "so_number", "reference_numbers"]:
+    for field in ["po_number", "order_number", "so_number", "reference_numbers", "_po_all_candidates"]:
         val = ef.get(field) or nf.get(field)
         if isinstance(val, list):
             all_refs.extend(str(v) for v in val)

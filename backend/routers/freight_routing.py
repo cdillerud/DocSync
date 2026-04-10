@@ -202,3 +202,66 @@ async def batch_classify_freight(body: Dict = Body(...)):
         skip_overrides=skip_overrides,
     )
     return result
+
+
+@router.get("/verify-business-rules")
+async def verify_business_rules(
+    vendor_filter: str = Query(None, description="Filter by vendor (e.g. TUMALOC, CARGOMO)"),
+    limit: int = Query(10, le=50),
+):
+    """
+    Verify controller business rules against real production documents.
+    Shows how each document would be classified by the freight business rules engine.
+    Use this after deployment to confirm rules are working correctly.
+    """
+    from services.freight_business_rules import classify_freight_document
+    db = get_db()
+
+    query = {"is_duplicate": {"$ne": True}}
+    if vendor_filter:
+        query["$or"] = [
+            {"bc_vendor_number": vendor_filter.upper()},
+            {"vendor_canonical": {"$regex": vendor_filter, "$options": "i"}},
+        ]
+
+    docs = await db.hub_documents.find(
+        query,
+        {"_id": 0, "id": 1, "file_name": 1, "bc_vendor_number": 1, "vendor_canonical": 1,
+         "extracted_fields": 1, "normalized_fields": 1, "bc_location_code": 1,
+         "external_document_no": 1, "bc_reference_freight_amount": 1,
+         "freight_gl_classification": 1, "status": 1, "doc_type": 1},
+    ).sort("created_utc", -1).limit(limit).to_list(limit)
+
+    results = []
+    for doc in docs:
+        classification = classify_freight_document(doc)
+        existing_gl = doc.get("freight_gl_classification") or {}
+        results.append({
+            "doc_id": doc.get("id", "")[:12],
+            "file_name": doc.get("file_name", ""),
+            "vendor": doc.get("bc_vendor_number") or doc.get("vendor_canonical", "?"),
+            "status": doc.get("status", ""),
+            "doc_type": doc.get("doc_type", ""),
+            "business_rules": {
+                "direction": classification.get("direction"),
+                "order_type": classification.get("order_type"),
+                "is_international": classification.get("is_international"),
+                "is_drop_ship": classification.get("is_drop_ship"),
+                "freight_treatment": classification.get("freight_treatment"),
+                "rules_applied": classification.get("rules_applied", []),
+                "review_flags": [f.get("type") for f in classification.get("review_flags", [])],
+                "confidence": classification.get("confidence"),
+            },
+            "existing_gl": {
+                "direction": existing_gl.get("direction"),
+                "gl_account": existing_gl.get("gl_number"),
+                "confidence": existing_gl.get("confidence"),
+                "has_controller_rules": "controller_rules" in existing_gl,
+            },
+        })
+
+    return {
+        "verified": len(results),
+        "filter": vendor_filter,
+        "documents": results,
+    }

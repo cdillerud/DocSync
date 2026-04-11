@@ -146,10 +146,33 @@ Files modified: `freight_business_rules.py`, `freight_gl_routing_service.py`, `b
 - Step 2: Vendor Resolution — fuzzy-matches all unresolved vendor docs
 - Step 3: Re-evaluates all gap-blocked docs to clear them through the pipeline
 - Exposed as `POST /api/readiness/fix-validation-gaps`
-- Also integrated as Step 2.5 in `POST /api/posting-patterns/system/run-full-cycle` (now 8 steps)
+- Also integrated as Step 2.5 in Run Full Cycle
 
-Files modified: `gap_closer_service.py`, `document_readiness_service.py`, `readiness.py`, `posting_patterns.py`
-Test file: `backend/tests/test_validation_gaps.py` (5 test cases, all passing)
+## Comprehensive Inbox Cleanup (2026-04-11)
+**Problem**: 267 documents stuck in "Needs Review" across multiple categories:
+- ~120+ TUMALOC AP Invoices with non-standard PO formats
+- ~30+ CARGOMO Shipping/AP docs
+- ~12 ROTONDO Shipping/Warehouse docs
+- ~10 XPOLOGI Account Statement splits
+- Various junk, statement, remittance, and unmatched vendor docs
+
+**Fixes Applied**:
+
+1. **Run Full Cycle upgraded to 9 steps** (was 7→8→9):
+   - Step 8: Final Cleanup — runs force_cleanup AFTER readiness re-evaluation to sync all newly-ready docs
+
+2. **Force Cleanup Rules 23-25** added to `readiness.py`:
+   - Rule 23: PO-relaxed vendor — auto-clears docs from vendors whose `po_expected=false` was learned
+   - Rule 24: Shipping supporting docs — catches packing lists, commercial invoices, entry summaries, BOLs misclassified as AP
+   - Rule 25: Broadest catchall — NeedsReview docs with NO blocking reasons + vendor resolved → auto-clear
+
+3. **Enhanced PO Learning** (`gap_closer_service.py`):
+   - Now counts ALL docs for a vendor (not just those with po_resolution attempted)
+   - Also detects docs where PO was never extracted (skipped/no_po_extracted)
+   - More aggressive vendor discovery: searches both po_resolution failures AND readiness.warning_reasons=po_missing
+
+Files modified: `gap_closer_service.py`, `readiness.py`, `posting_patterns.py`
+Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration_204.json` (24/24)
 
 ## Upcoming Tasks
 - P1: Rep Overrides Management UI

@@ -1,29 +1,36 @@
 <analysis>**original_problem_statement**: 
-The user requested continuous refinement of the Sales/AP Modules and Document Inbox. Focus in this session shifted to auto-posting stuck Ready to Post documents, fixing the AI Learning Intelligence dashboard (vendor maturity stuck, /bin/bash blank vendor events), and most critically, implementing the Controller's complex Freight Business Rules for proper GL routing (inbound vs outbound, drop-ship vs warehouse, international multi-order detection). 
+Continuous refinement of the Sales/AP Modules and Document Inbox. The user requested fixes for multiple inter-connected issues: 
+1. ~270 documents were stuck in Needs Review despite being ready.
+2. AI Learning Intelligence dashboard showed UI bugs (/bin/bash / blank vendor events, and Vendor Maturity stuck at /100).
+3. Implementation of 3 specific missing gaps from the Controller's Freight rules (rerouted SO extraction, PO freight comparison, additional approved charges).
+4. Automation Health metric was inaccurately low (49%) and showed 0 Posted to BC despite docs being auto-processed.
+5. Too many manual action buttons on the UI causing confusion—needed a single Run Full Cycle action.
+Post-fixing these, the immediate focus shifted to resolving 45 blocking validation gaps (PO validation & Vendor match) preventing further auto-filing.
 
 PRODUCT REQUIREMENTS:
-1. Auto-post background loop for ReadyForPost documents.
-2. Cross-document duplicate prevention for Auto-Drafts and background auto-approval for high-confidence drafts.
-3. Accuracy in AI Learning Dashboard (fixing blank vendor events, tuning Vendor Maturity scoring thresholds).
-4. Implement Controller's Freight Business Rules Engine () into the intake pipeline.
+1. Sync document readiness accurately with the status to clear the Needs Review queue automatically.
+2. Filter ghost/zero-dollar learning events and accurately map maturity levels on the UI.
+3. Enhance Freight Business Rules using BC cache lookups for advanced matching.
+4. Unify batch evaluation endpoints into a single  call and clean up the UI behind Advanced toggles.
+5. Troubleshoot and resolve PO validation failures (e.g., TUMALOC's non-standard POs).
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
 **what currently exists?** 
-A highly advanced Document Hub with multi-layered intelligence engines. The system now features background schedulers for Auto-Posting and Draft approvals, a tuned Vendor Maturity scoring system, and a robust Freight Business Rules Engine that automatically classifies inbound/outbound, drop-ship, and international freight based on complex PO/SO reference patterns (, ).
+A highly functional Document Hub featuring multi-layered AI intelligence, background auto-posting schedulers, a Freight Business Rules engine strictly aligned with the Controller's 12 rules, and a single Run Full Cycle UX that orchestrates 7 background learning and re-evaluation engines sequentially. 
 
 **Last working item**: 
-    - Last item agent was working: Investigating why ~270 documents are currently stuck in the Inbox with , despite database queries revealing their  is actually  or  with empty  arrays.
+    - Last item agent was working: Investigating the 45 remaining blocking validation gaps (specifically 23 PO validation gaps and 18 vendor match gaps) that are dragging down the Auto-File Rate. Specifically looking at TUMALOC's non-standard PO formats (, , ) and unmatched vendors (SC Warehouses, LLC).
     - Status: IN PROGRESS
     - Agent Testing Done: Y
-    - Which testing method agent to use? backend testing agent or manual testing by python -c / curl
-    - User Testing Done: N
+    - Which testing method agent to use? backend testing agent or manual testing by python -c
+    - User Testing Done: Y
 
 **All Pending/In progress Issue list**:  
-  Issue 1: 270+ Documents are stuck as Needs Review despite being ready for auto-file/auto-draft.
-     - Attempted fixes: The agent just ran a query and confirmed the  field is out of sync with the  field. 
-     - Next debug checklist: Check  auto-file routines and specifically . Determine if the newly added freight gap closers, business rules, or recent scheduler changes accidentally bypassed or decoupled the state transition from  to /.
-     - Why fix this issue and what will be achieved with the fix? Documents will properly clear the inbox and process autonomously instead of requiring manual touches.
+  Issue 1: 45 Blocking Validation Gaps preventing docs from Auto-Filing (P0)
+     - Attempted fixes: The agent just started examining  to trace the PO validation and vendor match blocking logic.
+     - Next debug checklist: Review the validation logic for  and  in . Determine how to gracefully handle/bypass PO validation for TUMALOC's non-standard reference formats, and map SC Warehouses, LLC to its recommended BC counterpart (WAREHOU). 
+     - Why fix this issue and what will be achieved with the fix? Clearing these blockers will allow the system to push these documents through the auto-file/auto-post pipeline, drastically raising the Auto-File rate above 45%.
      - Status: IN PROGRESS
      - Is recurring issue? N
      - Should Test frontend/backend/both after fix? backend
@@ -38,23 +45,23 @@ A highly advanced Document Hub with multi-layered intelligence engines. The syst
     - P1: Teams Adaptive Card integration (webhook handler for Approve -> BC Sales Order).
     
     Future Tasks:
+    - P2: Evergreen multi-PO container allocation spreadsheet integration.
+    - P2: BOL / Tracking No field storage in BC.
     - P2: Low-volume vendor review routing (vendors with <5 docs skip auto-file).
     - P2: Activate correction replay engine.
     - P2: Email sender → vendor mapping.
-    - P2: BOL field mapping (Tracking No field in BC).
-    - P2: Allocation spreadsheet integration for multi-PO containers (Evergreen).
-    - P3: Continue  extraction (refactoring - currently over 7,500 lines).
+    - P3: Continue  extraction (refactoring - currently over 8,200 lines).
 
 **Completed work in this session**
-- Added  to auto-post ReadyForPost docs and added Post Ready UI button. (DONE)
-- Added background auto-approve for high-confidence Drafts and implemented Gate 2.5 cross-document duplicate draft guard. (DONE)
-- Tuned Vendor Maturity thresholds (lowered requirements, fixed default field coverage) to accurately reflect learned vendors. (DONE)
-- Cleaned up /bin/bash/blank vendor events from  (stopped readiness self-corrections from polluting it). (DONE)
-- Built  Engine applying 12 Controller rules and wired it into . (DONE)
-- Enhanced field resolution for production docs using  and  to properly trigger freight rules. (DONE)
+- Fixed 270 Needs Review stuck docs by fixing  parameters and adding a 30-min status-sync scheduler in  and  (DONE).
+- Fixed AI Learning Dashboard (/bin/bash events &  maturity UI) via data filtering and a startup db cleanup migration (DONE).
+- Implemented 3 Controller Freight Gaps (Rerouted 001 SO extraction, PO freight comparison, additional charges) utilizing  (DONE).
+- Fixed 0 Posted to BC widget bug by enforcing standard writes to  during posting, and ran a backfill (DONE).
+- Fixed inaccurate 49% Automation Health by correcting maturity level mappings ( mapped to ) (DONE).
+- Created  and simplified Monitoring/Learning UI to use one button instead of 10+ confusing ones (DONE).
 
 **Earlier issues found/mentioned but not fixed**
-  - None.
+  - None
 
 **Known issue recurrence from previous fork**
   - Issue recurrence in previous fork: Deployment Context Ignored (Docker caching preventing user from seeing changes).
@@ -66,50 +73,53 @@ A highly advanced Document Hub with multi-layered intelligence engines. The syst
 
 
 **Key Technical Concepts**
-- **Controller Freight Rules**: Uses complex heuristics (, , W/WR prefix detection) to categorize docs as , , etc.
-- **Vendor Maturity**: Scored across multiple dimensions. Recently tuned so high-volume/high-accuracy vendors successfully graduate to mastered and proficient.
-- **Background Schedulers**: Handled in . Added new ones for auto-posting and draft approvals.
+- **Run Full Cycle**: A unified orchestration endpoint that sequentially triggers cleanup, intelligence tracking, readiness evaluation, auto-approval, recalibration, learning pulse, and deep learning audits.
+- **Freight Gap Closers**: Pre-enrichment step in  fetches BC cached PO/SO line data to detect freight variance against invoices before applying Controller business rules.
+- **Background Schedulers**: Handled in . 
 
 **key DB schema**
-  - : Fields , , , .
-  - : Used for AI learning dashboard.
+  - : Fields  (standardized string tracking posted docs), , , .
 
 **changes in tech stack**
   - None.
 
 **All files of reference** 
--  (Created this session for Controller rules)
-- 
--  
--  (Updated schedulers)
--  &  (Learning logic updates)
+-  (Added  orchestration)
+-  (Focus area for pending Validation gaps)
+-  &  (Updated with new gaps)
+-  (Added BC PO/SO line fetching)
+-  &  (Major UI cleanups and logic fixes)
+-  (Updated schedulers and startup cleanup scripts)
 
 **Areas that need refactoring**: 
 -  remains extremely large (over 8,200 lines). Needs orchestration logic broken out.
 
 **key api endpoints**
+-  (Orchestrates 7 learning engines sequentially)
 - 
-- 
--  (Used for verifying rules safely against production docs)
 
 **Critical Info for New Agent** 
 - **DEPLOYMENT WORKFLOW**: When you complete a feature or fix, instruct the user to click the **Save to Github** button in the chat UI, then run  on their Azure VM.
-- **Freight Rules**: Freight classification relies heavily on  and . Do not rely strictly on raw extracted string .
+- **Automation Metric Tracking**: Use  explicitly for counting documents successfully posted to BC. 
+- You MUST immediately continue investigating the remaining 45 validation gaps that are blocking auto-file operations (specifically PO Validation and Vendor Matching for TUMALOC / Unmatched vendors).
 
 **documents and test reports created in this job** 
--  (Updated with business rules and new schedulers)
+-  (Updated with Run Full Cycle UX logic, Freight gaps closed, etc.)
 
 **Last 10 User Messages and any pending HUMAN messages** 
-- **User**: Provided a massive email from Meghan (Controller) defining complex warehouse and dropship freight accounting rules.
-- **Assistant**: Built the  engine, enhanced , and added duplicate detection rules.
-- **User**: Asked to verify classification rules on production via 
-- **Assistant**: Fixed field resolution issues () to properly trigger the new rules on live data. Verified it worked beautifully.
-- **User**: why do we hjave all tghese in the inbox again??? (Provided screenshot of 270 documents stuck in Needs Review).
-- **Assistant**: Ran a query and found the docs have  but  is actually  or  with no blockers. (Job ended while investigating).
-- *Pending Human Messages*: None. Agent must immediately debug the  vs  state mismatch.
+- **User**: dig... (User wants the agent to dive into the 45 blocking validation gaps). -> IN PROGRESS
+- **User**: Uploaded screenshot showing health at 64% but pointing out 45 blocking gaps (23 PO validation). -> COMPLETED
+- **User**: yes lets try it (Approving UI consolidation to a single Run Full Cycle button). -> COMPLETED
+- **User**: I, honestly, do NOT know which buttons to push ands when. There are so many endpoints -> COMPLETED
+- **User**: Uploaded screenshot showing health up to 67%. -> COMPLETED
+- **User**: the sandbox is where we are testing posting of PI. -> COMPLETED
+- **User**: why is the automation health number so low? -> COMPLETED
+- **User**: what is this telling us? -> COMPLETED
+- **User**: Lets fill gaps... (Referring to Controller freight rules missing pieces). -> COMPLETED
+- **User**: I want to make sure we are ALIGNED with what Meghan shared with us. + massive email ruleset payload. -> COMPLETED
 
 **Project Health Check:**
-- Broken: Inbox docs failing to auto-advance from Needs Review to Completed/ReadyForPost despite readiness being clear.
+- Broken: 45 blocking validation gaps (PO / Vendor mismatch) holding up the Auto-File pipeline.
 - Mocked:  (Production Azure VM context).
 
 **3rd Party Integrations** 
@@ -118,21 +128,21 @@ A highly advanced Document Hub with multi-layered intelligence engines. The syst
   • MS Graph (Email/SharePoint) — requires User API Key
 
 **Testing status**
-  - Testing agent used after significant changes: NO (Agent performed extensive manual Python script and cURL testing due to specific logic flow checks).
+  - Testing agent used after significant changes: NO (Self-tested via Python bash execution, screenshots, and custom scripts)
   - Troubleshoot agent used after agent stuck in loop: NO
   - Test files created: None
-  - Known regressions: Documents stuck in  status.
+  - Known regressions: None
 
 **Credentials to test flow:**
 - Check  (likely /).
 
 **What agent forgot to execute**
-- Nothing explicitly forgotten, but the agent ran out of context right as it identified the root data state of the Needs Review bug. You must pick up debugging this state mismatch immediately.
+- The agent was about to investigate the PO Validation blocking logic in  to fix TUMALOC's non-standard PO format blocks, but the context limit was reached. You must resume this debugging flow immediately.
 
 **Debugging checklist for current issue**
-    Issue: ~270 documents are sitting in the Inbox as Needs Review despite having  =  or  with no blocking reasons.
+    Issue: 45 blocking Validation Gaps (specifically PO validation and Vendor Matching) preventing documents from achieving auto-filed readiness status.
 
     Backend files to check:
-    -  -> Specifically check . Why isn't it running or transitioning these states?
-    -  -> Check if recent warning additions decoupled status transitions. 
-    - Look into  to see if a pipeline failure is causing docs to silently halt before the final status update.</analysis>
+    -  -> Review the  logic. How can the AI automatically bypass or map non-standard PO formats (like  or  for TUMALOC)?
+    -  -> See if we can add custom PO parsing logic or fuzzy cache matching for these specific vendor profiles.
+    - Inspect the unmapped vendors like SC Warehouses, LLC and see if they can be programmatically aliased.</analysis>

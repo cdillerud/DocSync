@@ -4012,7 +4012,7 @@ async def run_full_cycle():
     """
     from deps import get_db
     db = get_db()
-    results = {"steps_completed": 0, "steps_total": 7, "details": {}}
+    results = {"steps_completed": 0, "steps_total": 8, "details": {}}
     step = 0
 
     # ── Step 1: Force Cleanup Inbox ──
@@ -4046,6 +4046,21 @@ async def run_full_cycle():
         }
     except Exception as e:
         results["details"]["2_intelligence"] = {"status": "error", "error": str(e)}
+    results["steps_completed"] = step
+
+    # ── Step 2.5: Fix Validation Gaps (PO Learning + Vendor Auto-Resolution) ──
+    step += 1
+    try:
+        from services.gap_closer_service import fix_all_validation_gaps
+        gap_fix = await fix_all_validation_gaps(db, limit=500)
+        results["details"]["2b_validation_gaps"] = {
+            "status": "ok",
+            "po_vendors_learned": gap_fix.get("po_learning", {}).get("vendors_learned", 0),
+            "vendors_resolved": gap_fix.get("vendor_resolution", {}).get("resolved", 0),
+            "docs_upgraded": gap_fix.get("reevaluation", {}).get("upgraded", 0),
+        }
+    except Exception as e:
+        results["details"]["2b_validation_gaps"] = {"status": "error", "error": str(e)}
     results["steps_completed"] = step
 
     # ── Step 3: Re-evaluate Readiness ──

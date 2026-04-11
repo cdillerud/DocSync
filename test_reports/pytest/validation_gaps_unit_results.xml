@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="5" failures="0" skipped="0" tests="5" time="0.107" timestamp="2026-04-11T03:20:15.570893+00:00" hostname="agent-env-111c6d79-e079-44a4-bb43-6e489844e2f6"><testcase classname="tests.test_validation_gaps" name="test_po_learning_tumaloc" time="0.001"><error message="failed on setup with &quot;pytest.PytestRemovedIn9Warning: 'test_po_learning_tumaloc' requested an async fixture 'db', with no plugin or hook that handled it. This is usually an error, as pytest does not natively support it. This will turn into an error in pytest 9.&#10;See: https://docs.pytest.org/en/stable/deprecations.html#sync-test-depending-on-async-fixture&quot;">/root/.venv/lib/python3.11/site-packages/pytest_asyncio/plugin.py:458: in setup
+    return super().setup()
+           ^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pytest_asyncio/plugin.py:728: in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+E   pytest.PytestRemovedIn9Warning: 'test_po_learning_tumaloc' requested an async fixture 'db', with no plugin or hook that handled it. This is usually an error, as pytest does not natively support it. This will turn into an error in pytest 9.
+E   See: https://docs.pytest.org/en/stable/deprecations.html#sync-test-depending-on-async-fixture</error></testcase><testcase classname="tests.test_validation_gaps" name="test_vendor_auto_resolution" time="0.000"><error message="failed on setup with &quot;pytest.PytestRemovedIn9Warning: 'test_vendor_auto_resolution' requested an async fixture 'db', with no plugin or hook that handled it. This is usually an error, as pytest does not natively support it. This will turn into an error in pytest 9.&#10;See: https://docs.pytest.org/en/stable/deprecations.html#sync-test-depending-on-async-fixture&quot;">/root/.venv/lib/python3.11/site-packages/pytest_asyncio/plugin.py:458: in setup
+    return super().setup()
+           ^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pytest_asyncio/plugin.py:728: in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+E   pytest.PytestRemovedIn9Warning: 'test_vendor_auto_resolution' requested an async fixture 'db', with no plugin or hook that handled it. This is usually an error, as pytest does not natively support it. This will turn into an error in pytest 9.
+E   See: https://docs.pytest.org/en/stable/deprecations.html#sync-test-depending-on-async-fixture</error></testcase><testcase classname="tests.test_validation_gaps" name="test_readiness_po_relaxation" time="0.000"><error message="failed on setup with &quot;pytest.PytestRemovedIn9Warning: 'test_readiness_po_relaxation' requested an async fixture 'db', with no plugin or hook that handled it. This is usually an error, as pytest does not natively support it. This will turn into an error in pytest 9.&#10;See: https://docs.pytest.org/en/stable/deprecations.html#sync-test-depending-on-async-fixture&quot;">/root/.venv/lib/python3.11/site-packages/pytest_asyncio/plugin.py:458: in setup
+    return super().setup()
+           ^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pytest_asyncio/plugin.py:728: in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+E   pytest.PytestRemovedIn9Warning: 'test_readiness_po_relaxation' requested an async fixture 'db', with no plugin or hook that handled it. This is usually an error, as pytest does not natively support it. This will turn into an error in pytest 9.
+E   See: https://docs.pytest.org/en/stable/deprecations.html#sync-test-depending-on-async-fixture</error></testcase><testcase classname="tests.test_validation_gaps" name="test_po_learning_insufficient_docs" time="0.000"><error message="failed on setup with &quot;pytest.PytestRemovedIn9Warning: 'test_po_learning_insufficient_docs' requested an async fixture 'db', with no plugin or hook that handled it. This is usually an error, as pytest does not natively support it. This will turn into an error in pytest 9.&#10;See: https://docs.pytest.org/en/stable/deprecations.html#sync-test-depending-on-async-fixture&quot;">/root/.venv/lib/python3.11/site-packages/pytest_asyncio/plugin.py:458: in setup
+    return super().setup()
+           ^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pytest_asyncio/plugin.py:728: in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+E   pytest.PytestRemovedIn9Warning: 'test_po_learning_insufficient_docs' requested an async fixture 'db', with no plugin or hook that handled it. This is usually an error, as pytest does not natively support it. This will turn into an error in pytest 9.
+E   See: https://docs.pytest.org/en/stable/deprecations.html#sync-test-depending-on-async-fixture</error></testcase><testcase classname="tests.test_validation_gaps" name="test_vendor_resolution_no_match" time="0.000"><error message="failed on setup with &quot;pytest.PytestRemovedIn9Warning: 'test_vendor_resolution_no_match' requested an async fixture 'db', with no plugin or hook that handled it. This is usually an error, as pytest does not natively support it. This will turn into an error in pytest 9.&#10;See: https://docs.pytest.org/en/stable/deprecations.html#sync-test-depending-on-async-fixture&quot;">/root/.venv/lib/python3.11/site-packages/pytest_asyncio/plugin.py:458: in setup
+    return super().setup()
+           ^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/pytest_asyncio/plugin.py:728: in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+E   pytest.PytestRemovedIn9Warning: 'test_vendor_resolution_no_match' requested an async fixture 'db', with no plugin or hook that handled it. This is usually an error, as pytest does not natively support it. This will turn into an error in pytest 9.
+E   See: https://docs.pytest.org/en/stable/deprecations.html#sync-test-depending-on-async-fixture</error></testcase></testsuite></testsuites>

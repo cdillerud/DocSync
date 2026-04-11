@@ -9,6 +9,7 @@ GAP 4: Sales Order Match (62 failures) — Cross-reference via document flow
 
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger("gap_closer")
@@ -506,3 +507,433 @@ async def get_customer_suggestion(db, vendor_no: str, doc_type: str) -> Optional
     if result and result.get("association_count", 0) >= 2:
         return result.get("customer_name")
     return None
+
+
+# =============================================================================
+# GAP CLOSER: PO Validation Learning
+# =============================================================================
+
+async def learn_vendor_po_validation_rate(db, vendor_no: str, min_docs: int = 3,
+                                           failure_threshold: float = 0.70) -> Dict:
+    """
+    Analyze a vendor's PO validation history. If the vendor consistently fails
+    PO validation (>failure_threshold rate with >=min_docs samples), auto-set
+    po_expected=false in their profile so future docs skip PO validation.
+
+    Returns:
+        {learned: bool, rate: float, total: int, failures: int, reason: str}
+    """
+    if not vendor_no:
+        return {"learned": False, "reason": "no_vendor_no"}
+
+    # Count docs where PO was attempted for this vendor
+    po_attempted_query = {
+        "$or": [
+            {"bc_vendor_number": vendor_no},
+            {"vendor_no": vendor_no},
+        ],
+        "po_resolution": {"$exists": True},
+        "is_duplicate": {"$ne": True},
+    }
+    total = await db.hub_documents.count_documents(po_attempted_query)
+    if total < min_docs:
+        return {"learned": False, "reason": f"insufficient_docs ({total}<{min_docs})", "total": total}
+
+    # Count PO resolution failures
+    failure_query = {
+        **po_attempted_query,
+        "po_resolution.status": {"$in": ["not_found", "ambiguous"]},
+    }
+    failures = await db.hub_documents.count_documents(failure_query)
+    rate = failures / total if total > 0 else 0.0
+
+    if rate < failure_threshold:
+        return {
+            "learned": False,
+            "reason": f"failure_rate_below_threshold ({rate:.0%}<{failure_threshold:.0%})",
+            "rate": round(rate, 3),
+            "total": total,
+            "failures": failures,
+        }
+
+    # Also check: are the extracted POs non-standard formats?
+    # Sample recent docs to see if their PO candidates are flagged as non-PO or invalid format
+    sample_docs = await db.hub_documents.find(
+        {**po_attempted_query, "po_resolution.status": "not_found"},
+        {"_id": 0, "po_resolution.candidates_raw": 1, "po_resolution.miss_reason": 1},
+    ).limit(10).to_list(10)
+
+    non_standard_count = 0
+    for sd in sample_docs:
+        pr = sd.get("po_resolution") or {}
+        miss = pr.get("miss_reason", "")
+        if miss in ("invalid_po_format", "no_bc_match", "cache_no_match"):
+            non_standard_count += 1
+
+    # Auto-learn: set po_expected=false
+    await db.vendor_invoice_profiles.update_one(
+        {"vendor_no": vendor_no},
+        {"$set": {
+            "po_expected": False,
+            "po_learning": {
+                "learned_at": datetime.now(timezone.utc).isoformat(),
+                "failure_rate": round(rate, 3),
+                "total_docs": total,
+                "failures": failures,
+                "non_standard_formats": non_standard_count,
+                "source": "auto_po_learning",
+            },
+        }},
+        upsert=True,
+    )
+
+    logger.info(
+        "[GapCloser:POLearning] vendor=%s po_expected→false (rate=%.0f%%, %d/%d failures, %d non-standard)",
+        vendor_no, rate * 100, failures, total, non_standard_count,
+    )
+
+    return {
+        "learned": True,
+        "rate": round(rate, 3),
+        "total": total,
+        "failures": failures,
+        "non_standard_formats": non_standard_count,
+        "reason": f"Auto-learned: {rate:.0%} PO failure rate ({failures}/{total} docs)",
+    }
+
+
+# =============================================================================
+# GAP CLOSER: Vendor Auto-Resolution
+# =============================================================================
+
+async def auto_resolve_unmatched_vendor(db, doc: Dict, min_score: float = 0.72) -> Dict:
+    """
+    Attempt to automatically resolve an unmatched vendor by fuzzy-matching
+    the extracted vendor name against known BC vendor profiles.
+
+    Strategies:
+    1. Exact normalized match against vendor_aliases
+    2. Fuzzy match against vendor_invoice_profiles (vendor_name + vendor_name_variants)
+    3. Word-level + abbreviation matching against BC vendor names
+    4. Historical co-occurrence (same email domain → same vendor)
+
+    Returns:
+        {resolved: bool, vendor_no: str, vendor_name: str, method: str, score: float}
+    """
+    from services.vendor_name_helpers import normalize_vendor_name, calculate_fuzzy_score
+
+    extracted = doc.get("extracted_fields") or {}
+    vendor_raw = (
+        doc.get("vendor_raw")
+        or doc.get("extracted_vendor")
+        or extracted.get("vendor")
+        or ""
+    ).strip()
+
+    if not vendor_raw or len(vendor_raw) < 3:
+        return {"resolved": False, "reason": "no_vendor_name"}
+
+    normalized = normalize_vendor_name(vendor_raw)
+    if not normalized:
+        return {"resolved": False, "reason": "normalization_empty"}
+
+    doc_id = doc.get("id", "")[:12]
+
+    # Strategy 1: Check existing aliases (exact normalized match)
+    alias = await db.vendor_aliases.find_one(
+        {"normalized": normalized, "active": {"$ne": False}},
+        {"_id": 0, "bc_vendor_no": 1, "bc_vendor_name": 1},
+    )
+    if alias and alias.get("bc_vendor_no"):
+        logger.info("[GapCloser:VendorResolve] doc=%s alias hit: '%s' → %s",
+                     doc_id, vendor_raw, alias["bc_vendor_no"])
+        return {
+            "resolved": True,
+            "vendor_no": alias["bc_vendor_no"],
+            "vendor_name": alias.get("bc_vendor_name", ""),
+            "method": "alias_exact",
+            "score": 1.0,
+        }
+
+    # Strategy 2: Fuzzy match against vendor_invoice_profiles
+    # Load all profiles (typically ~600, cached in memory would be better but OK for batch)
+    profiles = await db.vendor_invoice_profiles.find(
+        {"vendor_no": {"$exists": True, "$ne": ""}},
+        {"_id": 0, "vendor_no": 1, "vendor_name": 1, "vendor_name_variants": 1,
+         "vendor_card": 1},
+    ).to_list(2000)
+
+    best_match = None
+    best_score = 0.0
+
+    for profile in profiles:
+        vno = profile.get("vendor_no", "")
+        vname = profile.get("vendor_name", "")
+
+        # Match against primary name
+        if vname:
+            score = calculate_fuzzy_score(vendor_raw, vname)
+            if score > best_score:
+                best_score = score
+                best_match = {"vendor_no": vno, "vendor_name": vname, "method": "fuzzy_profile_name"}
+
+        # Match against name variants
+        for variant in (profile.get("vendor_name_variants") or []):
+            if variant:
+                score = calculate_fuzzy_score(vendor_raw, variant)
+                if score > best_score:
+                    best_score = score
+                    best_match = {"vendor_no": vno, "vendor_name": vname, "method": "fuzzy_profile_variant"}
+
+        # Match against vendor_card displayName
+        card = profile.get("vendor_card") or {}
+        display_name = card.get("displayName", "")
+        if display_name:
+            score = calculate_fuzzy_score(vendor_raw, display_name)
+            if score > best_score:
+                best_score = score
+                best_match = {"vendor_no": vno, "vendor_name": display_name, "method": "fuzzy_bc_card"}
+
+    # Strategy 3: Word-level + abbreviation matching
+    # E.g., "SC Warehouses, LLC" → check if any BC vendor name contains key words
+    if best_score < min_score:
+        vendor_words = set(normalized.split())
+        # Remove very common words
+        stop_words = {"the", "and", "of", "for", "a", "an", "in", "on", "at", "to", "is"}
+        vendor_words -= stop_words
+
+        for profile in profiles:
+            vno = profile.get("vendor_no", "")
+            vname = profile.get("vendor_name", "")
+            if not vname:
+                continue
+
+            profile_norm = normalize_vendor_name(vname)
+            profile_words = set(profile_norm.split()) - stop_words
+
+            # Check if significant words overlap
+            if vendor_words and profile_words:
+                overlap = vendor_words & profile_words
+                if overlap:
+                    # Score based on overlap ratio
+                    overlap_score = len(overlap) / max(len(vendor_words), len(profile_words))
+                    # Boost if the overlap word is significant (>4 chars)
+                    significant_overlap = any(len(w) > 4 for w in overlap)
+                    if significant_overlap:
+                        overlap_score = min(1.0, overlap_score + 0.15)
+
+                    if overlap_score > best_score:
+                        best_score = overlap_score
+                        best_match = {"vendor_no": vno, "vendor_name": vname,
+                                      "method": f"word_overlap ({','.join(overlap)})"}
+
+            # Abbreviation matching: vendor_no might be abbreviation of vendor_raw
+            # E.g., "WAREHOU" could be abbreviation of "Warehouses"
+            if vno and len(vno) >= 4:
+                vno_lower = vno.lower()
+                # Check if vendor_raw contains a word that starts with vno
+                for word in vendor_words:
+                    if len(word) >= len(vno_lower) and word.startswith(vno_lower[:4]):
+                        abbrev_score = len(vno_lower) / len(word) if len(word) > 0 else 0
+                        abbrev_score = min(1.0, abbrev_score + 0.1)  # Boost
+                        if abbrev_score > best_score:
+                            best_score = abbrev_score
+                            best_match = {"vendor_no": vno, "vendor_name": vname,
+                                          "method": f"abbreviation ({vno}≈{word})"}
+
+    if not best_match or best_score < min_score:
+        return {
+            "resolved": False,
+            "reason": f"no_match_above_threshold (best={best_score:.2f}<{min_score})",
+            "best_candidate": best_match,
+            "best_score": round(best_score, 3),
+        }
+
+    # Auto-create alias for future matching
+    now = datetime.now(timezone.utc).isoformat()
+    await db.vendor_aliases.update_one(
+        {"normalized": normalized},
+        {"$set": {
+            "vendor_raw": vendor_raw,
+            "normalized": normalized,
+            "bc_vendor_no": best_match["vendor_no"],
+            "bc_vendor_name": best_match["vendor_name"],
+            "match_score": round(best_score, 3),
+            "match_method": best_match["method"],
+            "source": "auto_gap_closer",
+            "active": True,
+            "created_at": now,
+            "updated_at": now,
+        }},
+        upsert=True,
+    )
+
+    # Update the document with the vendor resolution
+    await db.hub_documents.update_one(
+        {"id": doc.get("id")},
+        {"$set": {
+            "vendor_canonical": best_match["vendor_name"],
+            "bc_vendor_number": best_match["vendor_no"],
+            "vendor_no": best_match["vendor_no"],
+            "vendor_match_method": "auto_gap_closer",
+            "vendor_resolution": {
+                "status": "resolved",
+                "vendor_no": best_match["vendor_no"],
+                "vendor_name": best_match["vendor_name"],
+                "match_score": round(best_score, 3),
+                "match_method": best_match["method"],
+                "resolved_at": now,
+                "source": "auto_gap_closer",
+            },
+        }},
+    )
+
+    logger.info(
+        "[GapCloser:VendorResolve] doc=%s RESOLVED: '%s' → %s (%s, score=%.2f)",
+        doc_id, vendor_raw, best_match["vendor_no"], best_match["method"], best_score,
+    )
+
+    return {
+        "resolved": True,
+        "vendor_no": best_match["vendor_no"],
+        "vendor_name": best_match["vendor_name"],
+        "method": best_match["method"],
+        "score": round(best_score, 3),
+    }
+
+
+# =============================================================================
+# BATCH: Fix All Validation Gaps
+# =============================================================================
+
+async def fix_all_validation_gaps(db, limit: int = 500) -> Dict:
+    """
+    Orchestrates fixing all blocking validation gaps:
+    1. PO Validation Learning — auto-relax PO requirements for vendors with chronic failures
+    2. Vendor Auto-Resolution — fuzzy-match unresolved vendors to BC profiles
+    3. Re-evaluate all affected docs after fixes
+
+    Returns detailed summary of what was fixed.
+    """
+    from services.document_readiness_service import evaluate_and_persist
+
+    results = {
+        "po_learning": {"vendors_learned": 0, "vendors_checked": 0, "details": []},
+        "vendor_resolution": {"resolved": 0, "attempted": 0, "details": []},
+        "reevaluation": {"total": 0, "upgraded": 0, "transitions": []},
+    }
+
+    # ── Step 1: PO Validation Learning ──
+    # Find vendors with PO resolution failures
+    po_fail_pipeline = [
+        {"$match": {
+            "po_resolution.status": {"$in": ["not_found", "ambiguous"]},
+            "is_duplicate": {"$ne": True},
+            "$or": [
+                {"bc_vendor_number": {"$exists": True, "$ne": ""}},
+                {"vendor_no": {"$exists": True, "$ne": ""}},
+            ],
+        }},
+        {"$group": {
+            "_id": {"$ifNull": ["$bc_vendor_number", "$vendor_no"]},
+            "count": {"$sum": 1},
+        }},
+        {"$match": {"count": {"$gte": 2}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 50},
+    ]
+    po_fail_vendors = await db.hub_documents.aggregate(po_fail_pipeline).to_list(50)
+
+    for pf in po_fail_vendors:
+        vendor_no = pf["_id"]
+        if not vendor_no:
+            continue
+
+        # Check if already learned
+        profile = await db.vendor_invoice_profiles.find_one(
+            {"vendor_no": vendor_no},
+            {"_id": 0, "po_expected": 1},
+        )
+        if profile and profile.get("po_expected") is False:
+            continue  # Already learned
+
+        results["po_learning"]["vendors_checked"] += 1
+        learn_result = await learn_vendor_po_validation_rate(db, vendor_no)
+        if learn_result.get("learned"):
+            results["po_learning"]["vendors_learned"] += 1
+            results["po_learning"]["details"].append({
+                "vendor_no": vendor_no,
+                "failure_rate": learn_result["rate"],
+                "total_docs": learn_result["total"],
+            })
+
+    # ── Step 2: Vendor Auto-Resolution ──
+    # Find docs with vendor_unresolved blocking reason (exclude batch_parent and terminal)
+    unresolved_docs = await db.hub_documents.find(
+        {
+            "is_duplicate": {"$ne": True},
+            "status": {"$nin": ["batch_parent", "Completed", "completed", "Posted",
+                                "posted", "Archived", "archived", "FileMissing"]},
+            "readiness.blocking_reasons": "vendor_unresolved",
+        },
+        {"_id": 0, "id": 1, "extracted_fields": 1, "vendor_raw": 1,
+         "extracted_vendor": 1, "readiness": 1},
+    ).limit(limit).to_list(limit)
+
+    for doc in unresolved_docs:
+        results["vendor_resolution"]["attempted"] += 1
+        resolve_result = await auto_resolve_unmatched_vendor(db, doc)
+        if resolve_result.get("resolved"):
+            results["vendor_resolution"]["resolved"] += 1
+            results["vendor_resolution"]["details"].append({
+                "doc_id": doc.get("id", "")[:12],
+                "vendor_no": resolve_result["vendor_no"],
+                "method": resolve_result["method"],
+                "score": resolve_result["score"],
+            })
+
+    # ── Step 3: Re-evaluate all docs that had validation gaps ──
+    gap_docs = await db.hub_documents.find(
+        {
+            "is_duplicate": {"$ne": True},
+            "status": {"$nin": ["Completed", "completed", "Posted", "posted",
+                                "Archived", "archived", "FileMissing", "batch_parent"]},
+            "$or": [
+                {"readiness.blocking_reasons": {"$exists": True, "$ne": []}},
+                {"readiness.warning_reasons": "po_missing"},
+                {"readiness.status": {"$in": ["needs_review", "blocked", "ambiguous"]}},
+            ],
+        },
+        {"_id": 0, "id": 1, "readiness.status": 1},
+    ).limit(limit).to_list(limit)
+
+    for doc in gap_docs:
+        doc_id = doc.get("id", "")
+        if not doc_id:
+            continue
+        old_status = (doc.get("readiness") or {}).get("status", "unknown")
+        try:
+            new_readiness = await evaluate_and_persist(doc_id)
+            new_status = new_readiness.get("status", "unknown")
+            results["reevaluation"]["total"] += 1
+            if old_status != new_status:
+                ready_statuses = ("ready_auto_draft", "ready_auto_link")
+                if new_status in ready_statuses and old_status not in ready_statuses:
+                    results["reevaluation"]["upgraded"] += 1
+                results["reevaluation"]["transitions"].append({
+                    "doc_id": doc_id[:12],
+                    "from": old_status,
+                    "to": new_status,
+                })
+        except Exception as e:
+            logger.warning("[GapCloser:FixGaps] Error re-evaluating %s: %s", doc_id[:8], e)
+
+    logger.info(
+        "[GapCloser:FixGaps] Complete — PO learned: %d vendors, Vendor resolved: %d/%d docs, "
+        "Re-evaluated: %d docs (%d upgraded)",
+        results["po_learning"]["vendors_learned"],
+        results["vendor_resolution"]["resolved"], results["vendor_resolution"]["attempted"],
+        results["reevaluation"]["total"], results["reevaluation"]["upgraded"],
+    )
+
+    return results

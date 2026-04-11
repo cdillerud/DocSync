@@ -74,7 +74,23 @@ async def reevaluate_all_readiness(limit: int = Query(5000, ge=1, le=10000)):
     return await batch_reevaluate_all(limit=limit)
 
 
+@router.post("/fix-validation-gaps")
+async def fix_validation_gaps(limit: int = Query(500, ge=1, le=5000)):
+    """
+    Targeted fix for blocking validation gaps (PO validation + Vendor matching).
 
+    Orchestrates:
+    1. PO Validation Learning — auto-relaxes PO requirements for vendors with chronic failures
+    2. Vendor Auto-Resolution — fuzzy-matches unresolved vendors to BC profiles
+    3. Re-evaluates all affected docs to clear them through the pipeline
+
+    Returns detailed summary of what was fixed.
+    """
+    from deps import get_db
+    from services.gap_closer_service import fix_all_validation_gaps
+
+    db = get_db()
+    return await fix_all_validation_gaps(db, limit=limit)
 @router.post("/sync-status")
 async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     """

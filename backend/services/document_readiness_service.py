@@ -663,6 +663,82 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
     except Exception as gc_err:
         logger.debug("[GapCloser:Escalation] Skipped for %s: %s", doc_id[:8], gc_err)
 
+    # === GAP CLOSER 8: PO Validation Learning ===
+    # If this vendor consistently fails PO validation, auto-learn po_expected=false
+    # and re-evaluate the PO signal for THIS document immediately.
+    try:
+        if not readiness.get("signals", {}).get("po_resolved") and vendor_no:
+            from services.gap_closer_service import learn_vendor_po_validation_rate
+            po_learn = await learn_vendor_po_validation_rate(db, vendor_no)
+            if po_learn.get("learned"):
+                # Vendor's po_expected was just set to false — re-run signal computation
+                doc["_vendor_profile_po_not_required"] = True
+                new_signals_after_po = compute_signals(doc)
+                if new_signals_after_po.get("po_resolved") and not readiness["signals"].get("po_resolved"):
+                    readiness["signals"]["po_resolved"] = True
+                    # Remove po_missing from warnings if present
+                    readiness["warning_reasons"] = [
+                        w for w in readiness.get("warning_reasons", []) if w != "po_missing"
+                    ]
+                    readiness["explanations"] = readiness.get("explanations", []) + [
+                        f"INTELLIGENCE: PO validation auto-relaxed for {vendor_no} "
+                        f"({po_learn['rate']:.0%} historical failure rate, {po_learn['total']} docs)"
+                    ]
+                    # If this was the only thing keeping the doc from being ready, upgrade
+                    if not readiness.get("blocking_reasons") and readiness["signals"].get("vendor_resolved"):
+                        readiness["status"] = STATUS_READY_AUTO_DRAFT
+                        readiness["recommended_action"] = ACTION_AUTO_DRAFT
+                    logger.info(
+                        "[GapCloser:POLearning] doc=%s — PO signal upgraded after learning vendor=%s",
+                        doc_id[:8], vendor_no,
+                    )
+    except Exception as gc_err:
+        logger.debug("[GapCloser:POLearning] Skipped for %s: %s", doc_id[:8], gc_err)
+
+    # === GAP CLOSER 9: Vendor Auto-Resolution ===
+    # If vendor is unresolved, try fuzzy matching against known BC vendor profiles
+    try:
+        if "vendor_unresolved" in readiness.get("blocking_reasons", []):
+            from services.gap_closer_service import auto_resolve_unmatched_vendor
+            resolve_result = await auto_resolve_unmatched_vendor(db, doc)
+            if resolve_result.get("resolved"):
+                # Vendor was resolved — update signals and remove blocker
+                readiness["signals"]["vendor_resolved"] = True
+                readiness["blocking_reasons"] = [
+                    b for b in readiness.get("blocking_reasons", []) if b != "vendor_unresolved"
+                ]
+                readiness["explanations"] = readiness.get("explanations", []) + [
+                    f"INTELLIGENCE: Vendor auto-resolved via {resolve_result['method']} "
+                    f"→ {resolve_result['vendor_no']} (score={resolve_result['score']:.2f})"
+                ]
+                # Re-check required_fields_complete since vendor is now resolved
+                readiness["signals"]["required_fields_complete"] = True  # vendor present now
+                # Remove missing_required_fields if vendor was the only missing field
+                if "missing_required_fields" in readiness.get("blocking_reasons", []):
+                    # Re-compute: check if other required fields are still missing
+                    extracted = doc.get("extracted_fields") or {}
+                    doc_type_str = (doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type") or "").lower()
+                    is_invoice_type = "invoice" in doc_type_str or "ap" in doc_type_str or "credit" in doc_type_str
+                    invoice_ok = bool(
+                        extracted.get("invoice_number") or (doc.get("normalized_fields") or {}).get("invoice_number") or doc.get("external_document_no")
+                    )
+                    amount_ok = any(extracted.get(f) for f in ["amount", "invoice_amount", "total_amount"]) or any((doc.get("normalized_fields") or {}).get(f) for f in ["amount", "invoice_amount", "total_amount"])
+                    if not is_invoice_type or (invoice_ok and amount_ok):
+                        readiness["blocking_reasons"] = [
+                            b for b in readiness.get("blocking_reasons", []) if b != "missing_required_fields"
+                        ]
+
+                # If no more blockers, upgrade status
+                if not readiness.get("blocking_reasons"):
+                    readiness["status"] = STATUS_READY_AUTO_DRAFT
+                    readiness["recommended_action"] = ACTION_AUTO_DRAFT
+                logger.info(
+                    "[GapCloser:VendorResolve] doc=%s — vendor resolved, readiness upgraded to %s",
+                    doc_id[:8], readiness["status"],
+                )
+    except Exception as gc_err:
+        logger.debug("[GapCloser:VendorResolve] Skipped for %s: %s", doc_id[:8], gc_err)
+
     # Compute automation intelligence alongside readiness
     from services.automation_intelligence_service import (
         compute_automation_confidence,

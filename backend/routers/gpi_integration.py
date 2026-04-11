@@ -2217,6 +2217,7 @@ async def create_purchase_invoice_from_document(
         {"id": doc_id},
         {"$set": {
             "bc_purchase_invoice": bc_purchase_invoice,
+            "bc_purchase_invoice_no": result.get("bc_record_no", ""),
             "updated_utc": now,
         }}
     )

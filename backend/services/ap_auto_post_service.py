@@ -271,6 +271,7 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
                 "auto_post_success": True,
                 "bc_posting_status": "posted",
                 "bc_record_no": result.get("bc_record_no", ""),
+                "bc_purchase_invoice_no": result.get("bc_record_no", ""),
                 "bc_system_id": result.get("bc_system_id", ""),
                 "posted_to_bc_at": now,
                 "updated_utc": now,

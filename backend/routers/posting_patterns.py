@@ -3994,6 +3994,140 @@ async def run_intelligence_backfill():
     return results
 
 
+@router.post("/system/run-full-cycle")
+async def run_full_cycle():
+    """
+    ONE BUTTON TO RULE THEM ALL.
+
+    Runs the complete intelligence cycle in the correct order:
+    1. Force Cleanup — sync stuck readiness→status mismatches
+    2. Intelligence Backfill — 14-step gap closer + vendor maturity + duplicate clearing
+    3. Re-evaluate Readiness — batch readiness evaluation for all open docs
+    4. Auto-Approve Proven Drafts — approve high-confidence drafts
+    5. Recalibrate Confidence — rebuild confidence accuracy bands
+    6. Learning Pulse Backfill — update per-document learning outcomes
+    7. Deep Learning — self-correction audit + vendor scoring
+
+    This replaces the need to manually press 10+ buttons in the correct order.
+    """
+    from deps import get_db
+    db = get_db()
+    results = {"steps_completed": 0, "steps_total": 7, "details": {}}
+    step = 0
+
+    # ── Step 1: Force Cleanup Inbox ──
+    step += 1
+    try:
+        from routers.readiness import sync_readiness_to_status
+        cleanup = await sync_readiness_to_status()
+        results["details"]["1_cleanup"] = {
+            "status": "ok",
+            "total_fixed": cleanup.get("total_fixed", 0),
+            "remaining": cleanup.get("remaining_stuck", 0),
+        }
+    except Exception as e:
+        results["details"]["1_cleanup"] = {"status": "error", "error": str(e)}
+    results["steps_completed"] = step
+
+    # ── Step 2: Intelligence Backfill (14 sub-steps) ──
+    step += 1
+    try:
+        backfill = await run_intelligence_backfill()
+        # Summarize the 14 sub-steps into key numbers
+        results["details"]["2_intelligence"] = {
+            "status": "ok",
+            "escalation_tracked": (backfill.get("escalation_backfill") or {}).get("tracked", 0),
+            "duplicates_cleared": (backfill.get("duplicate_clear") or {}).get("cleared", 0),
+            "vendors_scored": (backfill.get("vendor_maturity") or {}).get("computed", 0),
+            "po_gaps_resolved": (backfill.get("po_revalidation") or {}).get("resolved", 0),
+            "vendor_gaps_resolved": (backfill.get("vendor_revalidation") or {}).get("resolved", 0),
+            "customer_gaps_resolved": (backfill.get("customer_revalidation") or {}).get("resolved", 0),
+            "so_gaps_resolved": (backfill.get("so_revalidation") or {}).get("resolved", 0),
+        }
+    except Exception as e:
+        results["details"]["2_intelligence"] = {"status": "error", "error": str(e)}
+    results["steps_completed"] = step
+
+    # ── Step 3: Re-evaluate Readiness ──
+    step += 1
+    try:
+        from services.document_readiness_service import batch_reevaluate_all
+        reeval = await batch_reevaluate_all(limit=5000)
+        results["details"]["3_readiness"] = {
+            "status": "ok",
+            "processed": reeval.get("total_processed", 0),
+            "corrections": reeval.get("total_corrections", 0),
+            "auto_acted": reeval.get("auto_acted", 0),
+        }
+    except Exception as e:
+        results["details"]["3_readiness"] = {"status": "error", "error": str(e)}
+    results["steps_completed"] = step
+
+    # ── Step 4: Auto-Approve Proven Drafts ──
+    step += 1
+    try:
+        from routers.auto_approve import run_auto_approve
+        approve = await run_auto_approve(
+            require_stable_vendor=True, require_bc_link=False,
+            min_routing_score=0, force=False,
+        )
+        results["details"]["4_auto_approve"] = {
+            "status": "ok",
+            "approved": approve.get("approved", 0),
+            "skipped": approve.get("skipped", 0),
+        }
+    except Exception as e:
+        results["details"]["4_auto_approve"] = {"status": "error", "error": str(e)}
+    results["steps_completed"] = step
+
+    # ── Step 5: Recalibrate Confidence ──
+    step += 1
+    try:
+        recal = await recalibrate_confidence_bands()
+        results["details"]["5_recalibrate"] = {
+            "status": "ok",
+            "documents_processed": recal.get("documents_processed", 0),
+        }
+    except Exception as e:
+        results["details"]["5_recalibrate"] = {"status": "error", "error": str(e)}
+    results["steps_completed"] = step
+
+    # ── Step 6: Learning Pulse Backfill ──
+    step += 1
+    try:
+        pulse = await backfill_per_document_learning(limit=500, background_tasks=None)
+        results["details"]["6_learning_pulse"] = {
+            "status": "ok",
+            "processed": pulse.get("processed", 0),
+            "new_outcomes": pulse.get("new_outcomes", 0),
+        }
+    except Exception as e:
+        results["details"]["6_learning_pulse"] = {"status": "error", "error": str(e)}
+    results["steps_completed"] = step
+
+    # ── Step 7: Deep Learning (Self-Correct + Score) ──
+    step += 1
+    try:
+        from services.deep_learning_engine import run_self_correction_audit, compute_all_vendor_maturity
+        audit = await run_self_correction_audit(db)
+        maturity = await compute_all_vendor_maturity(db)
+        results["details"]["7_deep_learning"] = {
+            "status": "ok",
+            "self_correction_audited": audit.get("audited", 0),
+            "drifts_found": audit.get("drift_count", 0),
+            "vendors_scored": maturity.get("computed", 0),
+        }
+    except Exception as e:
+        results["details"]["7_deep_learning"] = {"status": "error", "error": str(e)}
+    results["steps_completed"] = step
+
+    # ── Summary ──
+    ok_count = sum(1 for d in results["details"].values() if d.get("status") == "ok")
+    results["summary"] = f"{ok_count}/{results['steps_total']} steps completed successfully"
+
+    return results
+
+
 async def _batch_revalidate_po_gaps(db, limit: int = 200) -> dict:
     """
     Re-run PO matching on documents with po_validation gaps.

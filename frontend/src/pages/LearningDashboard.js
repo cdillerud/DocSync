@@ -6,7 +6,7 @@ import {
   Brain, RefreshCw, TrendingUp, CheckCircle2, AlertTriangle,
   Zap, BookOpen, ArrowRight, Activity, Database, Loader2,
   RotateCcw, Sparkles, Shield, Fingerprint, Target, Gauge,
-  Eye, Search, BarChart3, GitBranch, Copy, FileText, Users, Clock
+  Eye, Search, BarChart3, GitBranch, Copy, FileText, Users, Clock, ChevronRight
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid } from 'recharts';
@@ -70,10 +70,16 @@ function LearningEnginesSection({ onComplete }) {
           Runs automatically every 2h. Detects posted drafts in BC, propagates corrections across similar vendors,
           and auto-promotes vendor confidence based on approval ratio.
         </p>
-        <Button onClick={handleRun} disabled={running} data-testid="run-engines-btn">
-          {running ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Zap className="w-4 h-4 mr-2" />}
-          {running ? 'Running Engines...' : 'Run All Learning Engines'}
-        </Button>
+        <details className="group">
+          <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 mb-3">
+            <ChevronRight className="w-3 h-3 group-open:rotate-90 transition-transform" />
+            Run Manually
+          </summary>
+          <Button onClick={handleRun} disabled={running} data-testid="run-engines-btn" size="sm" variant="outline">
+            {running ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Zap className="w-4 h-4 mr-2" />}
+            {running ? 'Running Engines...' : 'Run All Learning Engines'}
+          </Button>
+        </details>
 
         {result && (
           <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3" data-testid="engines-results">
@@ -260,44 +266,50 @@ function ReEvaluateSection({ onComplete }) {
       </CardHeader>
       <CardContent>
         <p className="text-sm text-muted-foreground mb-3">
-          Re-run readiness evaluation across all documents. Detects and corrects signal contradictions
-          (stale duplicate flags, premature PO resolved, etc.) — every correction feeds into the learning pipeline.
+          All operations run automatically on schedule. Use <strong>Run Full Cycle</strong> on the Monitor page
+          to run everything at once. Individual controls are below for debugging.
         </p>
-        <div className="flex flex-wrap gap-2 mb-3">
-          <Button onClick={handleRun} disabled={running || approving} data-testid="reevaluate-all-btn">
-            {running ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RotateCcw className="w-4 h-4 mr-2" />}
-            {running ? 'Re-evaluating...' : 'Re-evaluate All Documents'}
-          </Button>
-          <Button onClick={() => handleAutoApprove(true)} disabled={running || approving}
-            variant="outline" data-testid="auto-approve-preview-btn">
-            {approving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Eye className="w-4 h-4 mr-2" />}
-            Preview Auto-Approve
-          </Button>
-          <Button onClick={() => handleAutoApprove(false)} disabled={running || approving || syncing}
-            variant="default" className="bg-emerald-600 hover:bg-emerald-700"
-            data-testid="auto-approve-run-btn">
-            {approving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
-            Auto-Approve Proven Drafts
-          </Button>
-          <Button onClick={handleSyncStatus} disabled={running || approving || syncing}
-            variant="outline" className="border-emerald-600 text-emerald-500 hover:bg-emerald-600/10"
-            data-testid="sync-status-btn">
-            {syncing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Zap className="w-4 h-4 mr-2" />}
-            Force Cleanup Inbox
-          </Button>
-          <Button onClick={handleRetryFailed} disabled={running || approving || syncing || retrying}
-            variant="outline" className="border-red-600 text-red-500 hover:bg-red-600/10"
-            data-testid="retry-failed-btn">
-            {retrying ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RotateCcw className="w-4 h-4 mr-2" />}
-            Retry Failed → Exception Queue
-          </Button>
-          <Button onClick={handleParkPoPending} disabled={running || approving || syncing || retrying || parking}
-            variant="outline" className="border-amber-600 text-amber-500 hover:bg-amber-600/10"
-            data-testid="park-po-pending-btn">
-            {parking ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Clock className="w-4 h-4 mr-2" />}
-            Park PO Pending (Auto-Retry 4h)
-          </Button>
-        </div>
+        <details className="group">
+          <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 mb-3">
+            <ChevronRight className="w-3 h-3 group-open:rotate-90 transition-transform" />
+            Advanced Operations
+          </summary>
+          <div className="flex flex-wrap gap-2 mb-3">
+            <Button onClick={handleRun} disabled={running || approving} data-testid="reevaluate-all-btn" size="sm" variant="outline">
+              {running ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RotateCcw className="w-4 h-4 mr-2" />}
+              {running ? 'Re-evaluating...' : 'Re-evaluate All'}
+            </Button>
+            <Button onClick={() => handleAutoApprove(true)} disabled={running || approving}
+              variant="outline" size="sm" data-testid="auto-approve-preview-btn">
+              {approving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Eye className="w-4 h-4 mr-2" />}
+              Preview Auto-Approve
+            </Button>
+            <Button onClick={() => handleAutoApprove(false)} disabled={running || approving || syncing}
+              variant="outline" size="sm" className="border-emerald-600 text-emerald-500 hover:bg-emerald-600/10"
+              data-testid="auto-approve-run-btn">
+              {approving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
+              Auto-Approve Drafts
+            </Button>
+            <Button onClick={handleSyncStatus} disabled={running || approving || syncing}
+              variant="outline" size="sm"
+              data-testid="sync-status-btn">
+              {syncing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Zap className="w-4 h-4 mr-2" />}
+              Force Cleanup
+            </Button>
+            <Button onClick={handleRetryFailed} disabled={running || approving || syncing || retrying}
+              variant="outline" size="sm" className="border-red-600 text-red-500 hover:bg-red-600/10"
+              data-testid="retry-failed-btn">
+              {retrying ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RotateCcw className="w-4 h-4 mr-2" />}
+              Retry Failed
+            </Button>
+            <Button onClick={handleParkPoPending} disabled={running || approving || syncing || retrying || parking}
+              variant="outline" size="sm" className="border-amber-600 text-amber-500 hover:bg-amber-600/10"
+              data-testid="park-po-pending-btn">
+              {parking ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Clock className="w-4 h-4 mr-2" />}
+              Park PO Pending
+            </Button>
+          </div>
+        </details>
 
         {/* Auto-Approve Results */}
         {approveResult && (
@@ -897,10 +909,6 @@ function AdvancedLearningSection() {
             <Button variant="outline" size="sm" onClick={fetchSummary} disabled={loading} data-testid="refresh-advanced-btn">
               <RefreshCw className={`w-3 h-3 mr-1 ${loading ? 'animate-spin' : ''}`} />Refresh
             </Button>
-            <Button variant="secondary" size="sm" onClick={handleBackfill} disabled={backfilling} data-testid="backfill-advanced-btn">
-              {backfilling ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Database className="w-3 h-3 mr-1" />}
-              Backfill All 7
-            </Button>
           </div>
         </div>
         <p className="text-xs text-muted-foreground">
@@ -911,7 +919,7 @@ function AdvancedLearningSection() {
         {loading && !summary ? (
           <div className="flex justify-center py-6"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
         ) : !summary ? (
-          <p className="text-sm text-muted-foreground text-center py-4">No data yet. Click "Backfill All 7" to process existing documents.</p>
+          <p className="text-sm text-muted-foreground text-center py-4">No data yet. Run Full Cycle on the Monitor page to process existing documents.</p>
         ) : (
           <div className="space-y-5">
             {/* 7 Engine KPIs */}
@@ -1136,14 +1144,6 @@ function DeepLearningSection() {
             <Button variant="outline" size="sm" onClick={fetchSummary} disabled={loading} data-testid="refresh-deep-btn">
               <RefreshCw className={`w-3 h-3 mr-1 ${loading ? 'animate-spin' : ''}`} />Refresh
             </Button>
-            <Button variant="secondary" size="sm" onClick={runSelfCorrection} disabled={selfCorrecting} data-testid="self-correction-btn">
-              {selfCorrecting ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Shield className="w-3 h-3 mr-1" />}
-              Self-Correct
-            </Button>
-            <Button variant="secondary" size="sm" onClick={computeMaturity} disabled={computingMaturity} data-testid="compute-maturity-btn">
-              {computingMaturity ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Gauge className="w-3 h-3 mr-1" />}
-              Score Vendors
-            </Button>
           </div>
         </div>
         <p className="text-xs text-muted-foreground">
@@ -1366,10 +1366,6 @@ function LearningPulseSection() {
             <Button variant="outline" size="sm" onClick={fetchPulse} disabled={loading} data-testid="refresh-pulse-btn">
               <RefreshCw className={`w-3 h-3 mr-1 ${loading ? 'animate-spin' : ''}`} />Refresh
             </Button>
-            <Button variant="secondary" size="sm" onClick={handleBackfill} disabled={backfilling} data-testid="backfill-btn">
-              {backfilling ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Database className="w-3 h-3 mr-1" />}
-              Backfill History
-            </Button>
           </div>
         </div>
         <p className="text-xs text-muted-foreground">
@@ -1380,7 +1376,7 @@ function LearningPulseSection() {
         {loading && !pulse ? (
           <div className="flex justify-center py-6"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
         ) : !pulse ? (
-          <p className="text-sm text-muted-foreground text-center py-4">No learning pulse data yet. Click "Backfill History" to process existing documents.</p>
+          <p className="text-sm text-muted-foreground text-center py-4">No learning pulse data yet. Run Full Cycle on the Monitor page to process existing documents.</p>
         ) : (
           <div className="space-y-5">
             {/* Total learned + outcome breakdown */}
@@ -1403,27 +1399,6 @@ function LearningPulseSection() {
                 <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
                   <TrendingUp className="w-3 h-3" /> Confidence Calibration — Is the AI's confidence justified?
                 </p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 px-3 text-xs gap-1.5 border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
-                  data-testid="recalibrate-confidence-btn"
-                  onClick={async () => {
-                    try {
-                      const res = await fetch(`${API}/api/posting-patterns/intelligence/recalibrate-confidence`, { method: 'POST' });
-                      if (res.ok) {
-                        const data = await res.json();
-                        toast.success(`Recalibrated ${data.documents_processed?.toLocaleString() || ''} docs in ${data.duration_seconds || '?'}s`);
-                        fetchPulse();
-                        window.dispatchEvent(new Event('recalibrate-done'));
-                      } else {
-                        toast.error('Recalibration failed');
-                      }
-                    } catch { toast.error('Recalibration failed'); }
-                  }}
-                >
-                  <RefreshCw className="w-3 h-3" /> Recalibrate
-                </Button>
               </div>
               {pulse.confidence_calibration && Object.keys(pulse.confidence_calibration).length > 0 ? (
                 <div className="grid grid-cols-5 gap-2">

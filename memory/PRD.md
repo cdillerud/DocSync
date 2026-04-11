@@ -83,6 +83,20 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 2. **$0/blank learning events**: Added composite filter to exclude events with no amount AND no line_count AND no items_used. Extended startup cleanup to delete ghost events from DB.
 3. **Stuck "Needs Review" docs (server.py)**: Fixed `evaluate_and_persist()` call bugs in gap closer (line 7770) and PO retry (line 7983) schedulers — were passing full dict instead of `doc["id"]`. Added Rule 21/22 to `sync_readiness_to_status` and periodic 30-min sync scheduler.
 
+## UX Simplification: One Button to Rule Them All (2026-04-10)
+**Problem**: Too many manual buttons (Run All Learning, Re-evaluate All, Auto-Approve, Force Cleanup, Retry Failed, Backfill All 7, Self-Correct, Score Vendors, Recalibrate, Backfill History) — user didn't know which to press or when.
+**Fix**:
+- Created unified `POST /api/posting-patterns/system/run-full-cycle` endpoint running 7 steps in correct order: cleanup → intelligence backfill → readiness re-eval → auto-approve → recalibrate → learning pulse → deep learning
+- Monitor page: single "Run Full Cycle" button with step-by-step result display
+- AI Learning page: all individual buttons hidden behind `<details>` "Advanced Operations" toggles
+- Background schedulers handle everything automatically; button is only for "I want it NOW"
+
+## Bugfix: "0 Posted to BC" Field Name Mismatch (2026-04-10)
+Posting code wrote `bc_purchase_invoice.bc_record_no` and `bc_record_no`, but dashboard counted `bc_purchase_invoice_no` (never written). Fixed all 3 write paths + added startup backfill migration.
+
+## Bugfix: Automation Health 49% → 67%+ (2026-04-10)
+Vendor maturity level names (`mastered/proficient`) didn't match what monitor expected (`stable/autonomous`). Fixed mapping in MonitoringDashboard.js. Also softened validation gaps formula (threshold 50 instead of 20).
+
 ## Freight Gaps Closed — Meghan Alignment (2026-04-10)
 Three gaps from Meghan's controller rules now implemented:
 

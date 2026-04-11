@@ -78,14 +78,14 @@ export default function MonitoringDashboard() {
     setBackfillRunning(true);
     setBackfillResult(null);
     try {
-      const res = await fetch(`${API}/api/posting-patterns/intelligence/backfill`, { method: 'POST' });
+      const res = await fetch(`${API}/api/posting-patterns/system/run-full-cycle`, { method: 'POST' });
       if (res.ok) {
         const result = await res.json();
         setBackfillResult(result);
         await fetchAll();
       }
     } catch (e) {
-      console.error('[Monitor] backfill failed', e);
+      console.error('[Monitor] full cycle failed', e);
     }
     setBackfillRunning(false);
   };
@@ -168,7 +168,7 @@ export default function MonitoringDashboard() {
             className="px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
             data-testid="backfill-btn"
           >
-            {backfillRunning ? 'Running...' : 'Run Intelligence Backfill'}
+            {backfillRunning ? 'Running Full Cycle...' : 'Run Full Cycle'}
           </button>
           <button
             onClick={fetchAll}
@@ -195,164 +195,29 @@ export default function MonitoringDashboard() {
         </CardContent>
       </Card>
 
-      {/* Backfill Result */}
+      {/* Full Cycle Result */}
       {backfillResult && (
         <Card className="border-emerald-500/30 bg-emerald-500/5" data-testid="backfill-result">
           <CardContent className="p-4">
-            <p className="text-sm font-medium mb-2">Intelligence Backfill Complete</p>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
-              <div>
-                <p className="text-muted-foreground">Escalation Tracked</p>
-                <p className="font-bold">{backfillResult.escalation_backfill?.tracked || 0} docs</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Dup False Positives</p>
-                <p className="font-bold">{backfillResult.duplicate_backfill?.tracked || 0} docs</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Vendor Maturity</p>
-                <p className="font-bold">{backfillResult.vendor_maturity?.computed || 0} vendors</p>
-                {backfillResult.vendor_maturity?.levels && (
-                  <p className="text-muted-foreground">{Object.entries(backfillResult.vendor_maturity.levels).map(([k,v]) => `${v} ${k}`).join(', ')}</p>
-                )}
-              </div>
-              <div>
-                <p className="text-muted-foreground">Dups Cleared</p>
-                <p className="font-bold">{backfillResult.duplicate_clear?.cleared || 0} docs</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">PO Gaps Resolved</p>
-                <p className="font-bold text-emerald-400">{backfillResult.po_revalidation?.resolved || 0} / {backfillResult.po_revalidation?.found || 0}</p>
-                {(backfillResult.po_revalidation?.skipped_by_profile > 0 || backfillResult.po_revalidation?.bc_matched > 0 || backfillResult.po_revalidation?.cache_resolved > 0 || backfillResult.po_revalidation?.unknown_vendor_resolved > 0) && (
-                  <p className="text-muted-foreground">
-                    {backfillResult.po_revalidation?.skipped_by_profile || 0} profile
-                    {backfillResult.po_revalidation?.cache_resolved > 0 ? `, ${backfillResult.po_revalidation.cache_resolved} cache` : ''}
-                    {backfillResult.po_revalidation?.bc_matched > 0 ? `, ${backfillResult.po_revalidation.bc_matched} BC` : ''}
-                    {backfillResult.po_revalidation?.unknown_vendor_resolved > 0 ? `, ${backfillResult.po_revalidation.unknown_vendor_resolved} vendor-resolved` : ''}
-                  </p>
-                )}
-              </div>
+            <p className="text-sm font-medium mb-3">
+              Full Cycle Complete — {backfillResult.summary || `${backfillResult.steps_completed || '?'}/${backfillResult.steps_total || '?'} steps`}
+            </p>
+            <div className="space-y-1.5 text-xs">
+              {backfillResult.details ? Object.entries(backfillResult.details).map(([key, val]) => (
+                <div key={key} className="flex items-start gap-2">
+                  <span className={`w-2 h-2 rounded-full mt-1 shrink-0 ${val.status === 'ok' ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                  <span className="text-muted-foreground w-28 shrink-0 capitalize">{key.replace(/^\d+_/, '').replace(/_/g, ' ')}</span>
+                  <span className="font-medium">
+                    {val.status === 'ok'
+                      ? Object.entries(val).filter(([k]) => k !== 'status').map(([k, v]) => `${v} ${k.replace(/_/g, ' ')}`).join(' · ')
+                      : `Error: ${val.error || 'failed'}`
+                    }
+                  </span>
+                </div>
+              )) : (
+                <p className="text-muted-foreground">No details available</p>
+              )}
             </div>
-            {/* New gap revalidation results */}
-            {(backfillResult.customer_revalidation || backfillResult.so_revalidation || backfillResult.vendor_revalidation) && (
-              <div className="mt-3 pt-3 border-t border-border/50">
-                <p className="text-xs font-medium mb-2">Gap Closer Results</p>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                  {backfillResult.customer_revalidation && (
-                    <div className="p-2 rounded bg-accent/30">
-                      <p className="text-muted-foreground">Customer Match</p>
-                      <p className="font-bold text-emerald-400">{backfillResult.customer_revalidation.resolved || 0} / {backfillResult.customer_revalidation.found || 0}</p>
-                      {backfillResult.customer_revalidation.resolved > 0 && (
-                        <p className="text-[10px] text-muted-foreground">
-                          {backfillResult.customer_revalidation.alias_resolved > 0 ? `${backfillResult.customer_revalidation.alias_resolved} alias` : ''}
-                          {backfillResult.customer_revalidation.vendor_assoc_resolved > 0 ? `${backfillResult.customer_revalidation.alias_resolved > 0 ? ', ' : ''}${backfillResult.customer_revalidation.vendor_assoc_resolved} vendor-assoc` : ''}
-                          {backfillResult.customer_revalidation.cache_resolved > 0 ? `${(backfillResult.customer_revalidation.alias_resolved > 0 || backfillResult.customer_revalidation.vendor_assoc_resolved > 0) ? ', ' : ''}${backfillResult.customer_revalidation.cache_resolved} cache` : ''}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                  {backfillResult.so_revalidation && (
-                    <div className="p-2 rounded bg-accent/30">
-                      <p className="text-muted-foreground">Sales Order Match</p>
-                      <p className="font-bold text-emerald-400">{backfillResult.so_revalidation.resolved || 0} / {backfillResult.so_revalidation.found || 0}</p>
-                      {backfillResult.so_revalidation.resolved > 0 && (
-                        <p className="text-[10px] text-muted-foreground">
-                          {backfillResult.so_revalidation.cache_resolved > 0 ? `${backfillResult.so_revalidation.cache_resolved} cache` : ''}
-                          {backfillResult.so_revalidation.flow_resolved > 0 ? `${backfillResult.so_revalidation.cache_resolved > 0 ? ', ' : ''}${backfillResult.so_revalidation.flow_resolved} flow` : ''}
-                          {backfillResult.so_revalidation.sibling_resolved > 0 ? `${(backfillResult.so_revalidation.cache_resolved > 0 || backfillResult.so_revalidation.flow_resolved > 0) ? ', ' : ''}${backfillResult.so_revalidation.sibling_resolved} sibling` : ''}
-                        </p>
-                      )}
-                      {backfillResult.so_revalidation.cache_size !== undefined && (
-                        <p className="text-[10px] text-muted-foreground">SO cache: {backfillResult.so_revalidation.cache_size} records</p>
-                      )}
-                    </div>
-                  )}
-                  {backfillResult.vendor_revalidation && (
-                    <div className="p-2 rounded bg-accent/30">
-                      <p className="text-muted-foreground">Vendor Match</p>
-                      <p className="font-bold text-emerald-400">{backfillResult.vendor_revalidation.resolved || 0} / {backfillResult.vendor_revalidation.found || 0}</p>
-                      {backfillResult.vendor_revalidation.resolved > 0 && (
-                        <p className="text-[10px] text-muted-foreground">
-                          {backfillResult.vendor_revalidation.alias_resolved > 0 ? `${backfillResult.vendor_revalidation.alias_resolved} alias` : ''}
-                          {backfillResult.vendor_revalidation.auto_accepted > 0 ? `${backfillResult.vendor_revalidation.alias_resolved > 0 ? ', ' : ''}${backfillResult.vendor_revalidation.auto_accepted} auto-accepted` : ''}
-                          {backfillResult.vendor_revalidation.domain_resolved > 0 ? `${(backfillResult.vendor_revalidation.alias_resolved > 0 || backfillResult.vendor_revalidation.auto_accepted > 0) ? ', ' : ''}${backfillResult.vendor_revalidation.domain_resolved} email-domain` : ''}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                  {backfillResult.duplicate_revalidation && (
-                    <div className="p-2 rounded bg-accent/30">
-                      <p className="text-muted-foreground">Duplicate Check</p>
-                      <p className="font-bold text-emerald-400">{backfillResult.duplicate_revalidation.resolved || 0} / {backfillResult.duplicate_revalidation.found || 0}</p>
-                      {backfillResult.duplicate_revalidation.resolved > 0 && (
-                        <p className="text-[10px] text-muted-foreground">
-                          {backfillResult.duplicate_revalidation.posted_resolved > 0 ? `${backfillResult.duplicate_revalidation.posted_resolved} posted/gone` : ''}
-                          {backfillResult.duplicate_revalidation.amount_resolved > 0 ? `${backfillResult.duplicate_revalidation.posted_resolved > 0 ? ', ' : ''}${backfillResult.duplicate_revalidation.amount_resolved} diff-amount` : ''}
-                          {backfillResult.duplicate_revalidation.other_validated_resolved > 0 ? `${(backfillResult.duplicate_revalidation.posted_resolved > 0 || backfillResult.duplicate_revalidation.amount_resolved > 0) ? ', ' : ''}${backfillResult.duplicate_revalidation.other_validated_resolved} validated` : ''}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                  {backfillResult.extraction_revalidation && (
-                    <div className="p-2 rounded bg-accent/30">
-                      <p className="text-muted-foreground">Extraction Gate</p>
-                      <p className="font-bold text-emerald-400">
-                        {(backfillResult.extraction_revalidation.resolved || 0) + (backfillResult.extraction_revalidation.downgraded_to_advisory || 0) + (backfillResult.extraction_force_downgrade?.force_downgraded || 0)} / {backfillResult.extraction_revalidation.found || 0}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground">
-                        {backfillResult.extraction_revalidation.resolved > 0 ? `${backfillResult.extraction_revalidation.resolved} resolved` : ''}
-                        {backfillResult.extraction_revalidation.downgraded_to_advisory > 0 ? `${backfillResult.extraction_revalidation.resolved > 0 ? ', ' : ''}${backfillResult.extraction_revalidation.downgraded_to_advisory} advisory` : ''}
-                        {(backfillResult.extraction_force_downgrade?.force_downgraded || 0) > 0 ? `, ${backfillResult.extraction_force_downgrade.force_downgraded} force-cleared` : ''}
-                      </p>
-                    </div>
-                  )}
-                  {backfillResult.po_enhanced_revalidation && (backfillResult.po_enhanced_revalidation.resolved > 0 || backfillResult.po_enhanced_revalidation.downgraded_to_advisory > 0) && (
-                    <div className="p-2 rounded bg-accent/30">
-                      <p className="text-muted-foreground">Enhanced PO</p>
-                      <p className="font-bold text-emerald-400">
-                        {(backfillResult.po_enhanced_revalidation.resolved || 0) + (backfillResult.po_enhanced_revalidation.downgraded_to_advisory || 0)} / {backfillResult.po_enhanced_revalidation.found || 0}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground">
-                        {backfillResult.po_enhanced_revalidation.profile_skip_resolved > 0 ? `${backfillResult.po_enhanced_revalidation.profile_skip_resolved} profile` : ''}
-                        {backfillResult.po_enhanced_revalidation.downgraded_to_advisory > 0 ? `${backfillResult.po_enhanced_revalidation.profile_skip_resolved > 0 ? ', ' : ''}${backfillResult.po_enhanced_revalidation.downgraded_to_advisory} advisory` : ''}
-                      </p>
-                    </div>
-                  )}
-                  {backfillResult.vendor_enhanced_match && (backfillResult.vendor_enhanced_match.resolved > 0) && (
-                    <div className="p-2 rounded bg-accent/30">
-                      <p className="text-muted-foreground">Enhanced Vendor</p>
-                      <p className="font-bold text-emerald-400">{backfillResult.vendor_enhanced_match.resolved || 0} / {backfillResult.vendor_enhanced_match.found || 0}</p>
-                      <p className="text-[10px] text-muted-foreground">
-                        {backfillResult.vendor_enhanced_match.batch_resolved > 0 ? `${backfillResult.vendor_enhanced_match.batch_resolved} batch` : ''}
-                        {backfillResult.vendor_enhanced_match.email_resolved > 0 ? `${backfillResult.vendor_enhanced_match.batch_resolved > 0 ? ', ' : ''}${backfillResult.vendor_enhanced_match.email_resolved} email` : ''}
-                        {backfillResult.vendor_enhanced_match.aggressive_match_resolved > 0 ? `, ${backfillResult.vendor_enhanced_match.aggressive_match_resolved} fuzzy` : ''}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-            {/* Vendor Profile Refresh Results */}
-            {backfillResult.vendor_profile_refresh?.profiles && Array.isArray(backfillResult.vendor_profile_refresh.profiles) && backfillResult.vendor_profile_refresh.profiles.length > 0 && (
-              <div className="mt-3 pt-3 border-t border-border/50">
-                <p className="text-xs font-medium mb-2">Vendor PO Learning Status ({backfillResult.vendor_profile_refresh.refreshed || 0} profiles refreshed)</p>
-                <div className="space-y-1">
-                  {backfillResult.vendor_profile_refresh.profiles.map((v, i) => (
-                    <div key={i} className="flex items-center justify-between text-[10px] p-1.5 rounded bg-accent/30">
-                      <span className="font-mono">{v.vendor_no}</span>
-                      <div className="flex items-center gap-3">
-                        <span>{v.gaps} gaps</span>
-                        <span>BC cache: {v.bc_cache_invoices ?? '?'} PIs</span>
-                        <span>w/ PO: {v.bc_cache_with_po ?? '?'}</span>
-                        <span className={v.po_expected === false ? 'text-emerald-400 font-bold' : 'text-muted-foreground'}>
-                          {v.po_expected === false ? 'PO SKIP (learned)' : v.bc_cache_invoices === 0 ? 'No BC data yet' : 'PO required'}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </CardContent>
         </Card>
       )}

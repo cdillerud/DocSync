@@ -139,7 +139,7 @@ async def test_vendor_auto_resolution(db):
 
     # Verify alias was created
     alias = await db.vendor_aliases.find_one(
-        {"bc_vendor_no": "GREENFLD_TEST", "source": "auto_gap_closer"},
+        {"vendor_no": "GREENFLD_TEST", "source": "auto_gap_closer"},
         {"_id": 0}
     )
     assert alias is not None, "Expected alias to be created"
@@ -147,7 +147,7 @@ async def test_vendor_auto_resolution(db):
     # Clean up
     await db.hub_documents.delete_one({"id": "test-greenfield-1"})
     await db.vendor_invoice_profiles.delete_one({"vendor_no": "GREENFLD_TEST"})
-    await db.vendor_aliases.delete_one({"bc_vendor_no": "GREENFLD_TEST", "source": "auto_gap_closer"})
+    await db.vendor_aliases.delete_one({"vendor_no": "GREENFLD_TEST", "source": "auto_gap_closer"})
     print("PASS: test_vendor_auto_resolution")
 
 

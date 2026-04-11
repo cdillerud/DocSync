@@ -9,6 +9,7 @@ GAP 4: Sales Order Match (62 failures) — Cross-reference via document flow
 
 import logging
 import re
+import uuid
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
@@ -663,16 +664,19 @@ async def auto_resolve_unmatched_vendor(db, doc: Dict, min_score: float = 0.72) 
 
     # Strategy 1: Check existing aliases (exact normalized match)
     alias = await db.vendor_aliases.find_one(
-        {"normalized": normalized, "active": {"$ne": False}},
-        {"_id": 0, "bc_vendor_no": 1, "bc_vendor_name": 1},
+        {"$or": [
+            {"normalized_alias": normalized},
+            {"alias_string": vendor_raw},
+        ]},
+        {"_id": 0, "vendor_no": 1, "vendor_name": 1},
     )
-    if alias and alias.get("bc_vendor_no"):
+    if alias and alias.get("vendor_no"):
         logger.info("[GapCloser:VendorResolve] doc=%s alias hit: '%s' → %s",
-                     doc_id, vendor_raw, alias["bc_vendor_no"])
+                     doc_id, vendor_raw, alias["vendor_no"])
         return {
             "resolved": True,
-            "vendor_no": alias["bc_vendor_no"],
-            "vendor_name": alias.get("bc_vendor_name", ""),
+            "vendor_no": alias["vendor_no"],
+            "vendor_name": alias.get("vendor_name", ""),
             "method": "alias_exact",
             "score": 1.0,
         }
@@ -771,21 +775,23 @@ async def auto_resolve_unmatched_vendor(db, doc: Dict, min_score: float = 0.72) 
             "best_score": round(best_score, 3),
         }
 
-    # Auto-create alias for future matching
+    # Auto-create alias for future matching using the correct collection schema
     now = datetime.now(timezone.utc).isoformat()
+    alias_id = str(uuid.uuid4())
     await db.vendor_aliases.update_one(
-        {"normalized": normalized},
-        {"$set": {
-            "vendor_raw": vendor_raw,
-            "normalized": normalized,
-            "bc_vendor_no": best_match["vendor_no"],
-            "bc_vendor_name": best_match["vendor_name"],
+        {"normalized_alias": normalized},
+        {"$setOnInsert": {"alias_id": alias_id, "created_at": now},
+         "$set": {
+            "alias_string": vendor_raw,
+            "normalized_alias": normalized,
+            "vendor_no": best_match["vendor_no"],
+            "vendor_name": best_match["vendor_name"],
+            "canonical_vendor_id": best_match["vendor_no"],
             "match_score": round(best_score, 3),
             "match_method": best_match["method"],
             "source": "auto_gap_closer",
-            "active": True,
-            "created_at": now,
-            "updated_at": now,
+            "learned_at": now,
+            "correction_count": 0,
         }},
         upsert=True,
     )

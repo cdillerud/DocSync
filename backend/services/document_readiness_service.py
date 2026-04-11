@@ -379,7 +379,7 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
     # --- Status determination ---
     # Categorize warnings: only CRITICAL ones should force review/ambiguous
     CRITICAL_WARNINGS = {"policy_hold", "customer_unresolved", "vendor_needs_review",
-                         "amount_anomaly", "auto_escalation",
+                         "amount_anomaly",
                          "freight_variance", "multi_order_freight"}
     critical_warnings = [w for w in warnings if w in CRITICAL_WARNINGS]
     informational_warnings = [w for w in warnings if w not in CRITICAL_WARNINGS]
@@ -646,7 +646,9 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
         logger.debug("[GapCloser:AmountAnomaly] Skipped for %s: %s", doc_id[:8], gc_err)
 
     # === GAP CLOSER 7: Auto-Escalation Intelligence ===
-    # If this vendor + doc_type consistently fails automation, pre-route to review
+    # Track vendor+doc_type success rates. Add WARNING for monitoring but
+    # DO NOT block auto-filing — blocking creates a death spiral where
+    # success rate can never improve.
     try:
         vendor_no_for_esc = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
         doc_type_for_esc = doc.get("document_type") or doc.get("suggested_job_type") or ""
@@ -654,15 +656,13 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
             from services.escalation_intelligence_service import should_pre_escalate
             esc_check = await should_pre_escalate(db, vendor_no_for_esc, doc_type_for_esc)
             if esc_check.get("should_escalate"):
-                if readiness["status"] in (STATUS_READY_AUTO_DRAFT, STATUS_READY_AUTO_LINK):
-                    readiness["status"] = STATUS_NEEDS_REVIEW
-                    readiness["recommended_action"] = ACTION_REVIEW
+                # Add as advisory warning only — do NOT downgrade readiness status
                 readiness["warning_reasons"] = readiness.get("warning_reasons", []) + ["auto_escalation"]
                 readiness["explanations"] = readiness.get("explanations", []) + [
-                    f"INTELLIGENCE: {esc_check['reason']}"
+                    f"ADVISORY: {esc_check['reason']}"
                 ]
                 logger.info(
-                    "[GapCloser:Escalation] doc=%s — pre-escalated (success rate: %s)",
+                    "[GapCloser:Escalation] doc=%s — flagged for monitoring (success rate: %s)",
                     doc_id[:8], esc_check.get("success_rate", "?"),
                 )
     except Exception as gc_err:

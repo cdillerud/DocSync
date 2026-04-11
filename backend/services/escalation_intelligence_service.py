@@ -222,10 +222,13 @@ async def recalibrate_escalation_intelligence(db, limit: int = 5000) -> Dict:
 
     Returns: {combos_recalibrated, combos_escalated, combos_automated}
     """
-    # Step 1: Aggregate actual per-doc outcomes grouped by vendor+doc_type
+    # Step 1: Aggregate actual per-doc RESOLVED outcomes grouped by vendor+doc_type
+    # IMPORTANT: Only count docs with definitive outcomes (completed, posted, or explicitly failed)
+    # Docs in intermediate states (NeedsReview, ReadyForPost, Captured) are PENDING, not failures
     pipeline = [
         {"$match": {
             "is_duplicate": {"$ne": True},
+            "status": {"$nin": ["batch_parent"]},
             "$or": [
                 {"bc_vendor_number": {"$exists": True, "$ne": ""}},
                 {"vendor_no": {"$exists": True, "$ne": ""}},
@@ -237,21 +240,25 @@ async def recalibrate_escalation_intelligence(db, limit: int = 5000) -> Dict:
             "doc_type": {"$ifNull": ["$document_type", "$suggested_job_type"]},
             "status": 1,
             "automation_decision": 1,
+            "auto_cleared": 1,
             "readiness_status": "$readiness.status",
         }},
         {"$match": {"vendor_no": {"$ne": None}, "doc_type": {"$ne": None}}},
         {"$group": {
             "_id": {"vendor_no": "$vendor_no", "doc_type": "$doc_type"},
             "total": {"$sum": 1},
-            "success": {"$sum": {"$cond": [
+            "completed": {"$sum": {"$cond": [
                 {"$in": ["$status", ["Completed", "completed", "Posted", "posted"]]},
                 1, 0
             ]}},
-            "auto_filed": {"$sum": {"$cond": [
-                {"$in": ["$automation_decision", ["auto_filed", "auto_linked", "auto_approved"]]},
+            "auto_processed": {"$sum": {"$cond": [
+                {"$or": [
+                    {"$in": ["$automation_decision", ["auto_filed", "auto_linked", "auto_approved", "auto_drafted"]]},
+                    {"$eq": ["$auto_cleared", True]},
+                ]},
                 1, 0
             ]}},
-            "review": {"$sum": {"$cond": [
+            "needs_review": {"$sum": {"$cond": [
                 {"$eq": ["$status", "NeedsReview"]},
                 1, 0
             ]}},
@@ -267,12 +274,23 @@ async def recalibrate_escalation_intelligence(db, limit: int = 5000) -> Dict:
         doc_type = combo["_id"]["doc_type"]
         key = _escalation_key(vendor_no, doc_type)
 
-        total = combo["total"]
-        successes = combo["success"] + combo["auto_filed"]
-        # Deduplicate: a completed + auto_filed doc shouldn't count twice
-        successes = min(successes, total)
-        reviews = combo["review"]
-        failures = max(0, total - successes - reviews)
+        completed = combo["completed"]
+        auto_processed = combo["auto_processed"]
+
+        # Successes = completed/posted OR auto-processed (take max to avoid double-counting)
+        successes = max(completed, auto_processed)
+        needs_review = combo["needs_review"]
+
+        # Only count RESOLVED outcomes for escalation calculation
+        # resolved = successes (made it through) + explicit_review (stuck in review)
+        resolved_total = successes + needs_review
+        if resolved_total < 2:
+            continue  # Not enough resolved data to make a decision
+
+        # The success rate is: successes / resolved_total
+        # NOT total_docs, because pending docs aren't failures
+        # Failure = NeedsReview docs that never made it through (not pending, but genuinely stuck)
+        failures = needs_review  # These are the docs that couldn't be auto-processed
 
         await db[ESCALATION_COL].update_one(
             {"escalation_key": key},
@@ -280,10 +298,10 @@ async def recalibrate_escalation_intelligence(db, limit: int = 5000) -> Dict:
                 "escalation_key": key,
                 "vendor_no": vendor_no,
                 "doc_type": doc_type,
-                "total_attempts": total,
+                "total_attempts": resolved_total,
                 "success_count": successes,
-                "failure_count": failures,
-                "review_count": reviews,
+                "failure_count": 0,  # No explicit failures, just reviews
+                "review_count": failures,
                 "correction_count": 0,
                 "recalibrated_at": _now(),
                 "updated_at": _now(),

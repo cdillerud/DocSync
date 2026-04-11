@@ -509,6 +509,81 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     results["rule22_readiness_mismatch"] = r22.modified_count
     logger.info("[ForceCleanup] Rule 22 (readiness-status mismatch): %d docs → Completed", r22.modified_count)
 
+    # ── Rule 23: AP Invoices with vendor resolved + po_expected=false → auto-clear ──
+    # Vendors whose PO validation has been learned as unnecessary should auto-clear
+    # Find vendor_nos where po_expected=false, then clear their docs
+    po_relaxed_vendors = await db.vendor_invoice_profiles.find(
+        {"po_expected": False},
+        {"_id": 0, "vendor_no": 1},
+    ).to_list(500)
+    po_relaxed_vnos = [v["vendor_no"] for v in po_relaxed_vendors if v.get("vendor_no")]
+    if po_relaxed_vnos:
+        r23 = await db.hub_documents.update_many(
+            base_and(
+                {"$or": [
+                    {"bc_vendor_number": {"$in": po_relaxed_vnos}},
+                    {"vendor_no": {"$in": po_relaxed_vnos}},
+                ]},
+                {"readiness.signals.vendor_resolved": True},
+            ),
+            {"$set": {
+                "status": "Completed",
+                "workflow_status": "processed",
+                "auto_cleared": True,
+                "automation_decision": "auto_filed",
+                "force_cleanup_rule": "po_relaxed_vendor",
+                "force_cleanup_at": now,
+            }},
+        )
+    else:
+        r23 = type("R", (), {"modified_count": 0})()
+    results["rule23_po_relaxed_vendor"] = r23.modified_count
+    logger.info("[ForceCleanup] Rule 23 (PO-relaxed vendor): %d docs → Completed", r23.modified_count)
+
+    # ── Rule 24: Packing lists / Commercial invoices from freight forwarders ──
+    # These are shipping supporting docs misclassified as AP Invoice
+    PACKING_REGEX = r"(?i)(packing.?list|commercial.?invoice|entry.?summary|bill.?of.?lading|house.?bill|hbl|bol|bl_copy|bl_draft)"
+    r24 = await db.hub_documents.update_many(
+        base_and(
+            {"file_name": {"$regex": PACKING_REGEX}},
+            {"$or": [
+                {"vendor_canonical": {"$exists": True, "$nin": [None, "", "—"]}},
+                {"bc_vendor_number": {"$exists": True, "$nin": [None, ""]}},
+            ]},
+        ),
+        {"$set": {
+            "status": "Completed",
+            "workflow_status": "processed",
+            "auto_cleared": True,
+            "automation_decision": "auto_filed",
+            "force_cleanup_rule": "shipping_supporting_doc",
+            "force_cleanup_at": now,
+        }},
+    )
+    results["rule24_shipping_supporting"] = r24.modified_count
+    logger.info("[ForceCleanup] Rule 24 (shipping supporting docs): %d docs", r24.modified_count)
+
+    # ── Rule 25: Broadest readiness catchall — NeedsReview with NO blocking reasons ──
+    # If readiness has no blocking reasons at all (even with warnings), auto-clear
+    r25 = await db.hub_documents.update_many(
+        {"$and": [
+            not_dup,
+            {"status": "NeedsReview"},
+            {"$or": [
+                {"readiness.blocking_reasons": {"$size": 0}},
+                {"readiness.blocking_reasons": {"$exists": False}},
+            ]},
+            {"$or": [
+                {"vendor_canonical": {"$exists": True, "$nin": [None, "", "—"]}},
+                {"bc_vendor_number": {"$exists": True, "$nin": [None, ""]}},
+                {"readiness.signals.vendor_resolved": True},
+            ]},
+        ]},
+        completed_update("no_blockers_with_vendor"),
+    )
+    results["rule25_no_blockers"] = r25.modified_count
+    logger.info("[ForceCleanup] Rule 25 (NeedsReview + no blockers + vendor): %d docs → Completed", r25.modified_count)
+
     # ── Count remaining stuck docs ──
     remaining = await db.hub_documents.count_documents({
         "$and": [

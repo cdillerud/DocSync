@@ -526,23 +526,46 @@ async def learn_vendor_po_validation_rate(db, vendor_no: str, min_docs: int = 3,
     if not vendor_no:
         return {"learned": False, "reason": "no_vendor_no"}
 
-    # Count docs where PO was attempted for this vendor
-    po_attempted_query = {
+    # Count ALL docs for this vendor (not just ones where PO was attempted)
+    vendor_query = {
         "$or": [
             {"bc_vendor_number": vendor_no},
             {"vendor_no": vendor_no},
         ],
-        "po_resolution": {"$exists": True},
         "is_duplicate": {"$ne": True},
     }
-    total = await db.hub_documents.count_documents(po_attempted_query)
+    total_all = await db.hub_documents.count_documents(vendor_query)
+
+    # Count docs where PO was attempted
+    po_attempted_query = {
+        **vendor_query,
+        "po_resolution": {"$exists": True},
+    }
+    total_attempted = await db.hub_documents.count_documents(po_attempted_query)
+
+    # Count docs where PO was NOT attempted (no PO extracted at all)
+    no_po_query = {
+        **vendor_query,
+        "$or": [
+            {"po_resolution": {"$exists": False}},
+            {"po_resolution.status": {"$in": ["skipped", "no_po_extracted"]}},
+        ],
+    }
+    await db.hub_documents.count_documents(no_po_query)  # Count for threshold calc
+
+    # Use the larger of attempted-with-failures or total docs for threshold check
+    total = max(total_attempted, total_all)
     if total < min_docs:
         return {"learned": False, "reason": f"insufficient_docs ({total}<{min_docs})", "total": total}
 
-    # Count PO resolution failures
+    # Count PO resolution failures (not_found, ambiguous, skipped, no_po_extracted)
     failure_query = {
-        **po_attempted_query,
-        "po_resolution.status": {"$in": ["not_found", "ambiguous"]},
+        **vendor_query,
+        "$or": [
+            {"po_resolution.status": {"$in": ["not_found", "ambiguous"]}},
+            {"po_resolution": {"$exists": False}},
+            {"po_resolution.status": {"$in": ["skipped", "no_po_extracted"]}},
+        ],
     }
     failures = await db.hub_documents.count_documents(failure_query)
     rate = failures / total if total > 0 else 0.0
@@ -557,9 +580,8 @@ async def learn_vendor_po_validation_rate(db, vendor_no: str, min_docs: int = 3,
         }
 
     # Also check: are the extracted POs non-standard formats?
-    # Sample recent docs to see if their PO candidates are flagged as non-PO or invalid format
     sample_docs = await db.hub_documents.find(
-        {**po_attempted_query, "po_resolution.status": "not_found"},
+        {**vendor_query, "po_resolution.status": "not_found"},
         {"_id": 0, "po_resolution.candidates_raw": 1, "po_resolution.miss_reason": 1},
     ).limit(10).to_list(10)
 
@@ -824,14 +846,19 @@ async def fix_all_validation_gaps(db, limit: int = 500) -> Dict:
     }
 
     # ── Step 1: PO Validation Learning ──
-    # Find vendors with PO resolution failures
+    # Find vendors with PO resolution failures OR docs stuck on po_missing
     po_fail_pipeline = [
         {"$match": {
-            "po_resolution.status": {"$in": ["not_found", "ambiguous"]},
             "is_duplicate": {"$ne": True},
-            "$or": [
-                {"bc_vendor_number": {"$exists": True, "$ne": ""}},
-                {"vendor_no": {"$exists": True, "$ne": ""}},
+            "$and": [
+                {"$or": [
+                    {"po_resolution.status": {"$in": ["not_found", "ambiguous"]}},
+                    {"readiness.warning_reasons": "po_missing"},
+                ]},
+                {"$or": [
+                    {"bc_vendor_number": {"$exists": True, "$ne": ""}},
+                    {"vendor_no": {"$exists": True, "$ne": ""}},
+                ]},
             ],
         }},
         {"$group": {
@@ -840,12 +867,35 @@ async def fix_all_validation_gaps(db, limit: int = 500) -> Dict:
         }},
         {"$match": {"count": {"$gte": 2}}},
         {"$sort": {"count": -1}},
-        {"$limit": 50},
+        {"$limit": 100},
     ]
-    po_fail_vendors = await db.hub_documents.aggregate(po_fail_pipeline).to_list(50)
+    po_fail_vendors = await db.hub_documents.aggregate(po_fail_pipeline).to_list(100)
 
+    # Also find ALL vendors whose NeedsReview docs have po_missing
+    po_warning_pipeline = [
+        {"$match": {
+            "is_duplicate": {"$ne": True},
+            "status": "NeedsReview",
+            "readiness.warning_reasons": "po_missing",
+        }},
+        {"$group": {
+            "_id": {"$ifNull": ["$bc_vendor_number", "$vendor_no"]},
+            "count": {"$sum": 1},
+        }},
+        {"$match": {"count": {"$gte": 1}}},
+    ]
+    po_warning_vendors = await db.hub_documents.aggregate(po_warning_pipeline).to_list(100)
+
+    # Merge both lists
+    all_po_vendor_ids = set()
     for pf in po_fail_vendors:
-        vendor_no = pf["_id"]
+        if pf["_id"]:
+            all_po_vendor_ids.add(pf["_id"])
+    for pw in po_warning_vendors:
+        if pw["_id"]:
+            all_po_vendor_ids.add(pw["_id"])
+
+    for vendor_no in all_po_vendor_ids:
         if not vendor_no:
             continue
 

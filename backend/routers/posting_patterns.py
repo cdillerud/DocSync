@@ -4012,7 +4012,7 @@ async def run_full_cycle():
     """
     from deps import get_db
     db = get_db()
-    results = {"steps_completed": 0, "steps_total": 8, "details": {}}
+    results = {"steps_completed": 0, "steps_total": 9, "details": {}}
     step = 0
 
     # ── Step 1: Force Cleanup Inbox ──
@@ -4134,6 +4134,20 @@ async def run_full_cycle():
         }
     except Exception as e:
         results["details"]["7_deep_learning"] = {"status": "error", "error": str(e)}
+    results["steps_completed"] = step
+
+    # ── Step 8: Final Cleanup — sync readiness→status for all docs upgraded during this cycle ──
+    step += 1
+    try:
+        from routers.readiness import sync_readiness_to_status
+        final_cleanup = await sync_readiness_to_status()
+        results["details"]["8_final_cleanup"] = {
+            "status": "ok",
+            "total_fixed": final_cleanup.get("total_fixed", 0),
+            "remaining": final_cleanup.get("remaining_stuck", 0),
+        }
+    except Exception as e:
+        results["details"]["8_final_cleanup"] = {"status": "error", "error": str(e)}
     results["steps_completed"] = step
 
     # ── Summary ──

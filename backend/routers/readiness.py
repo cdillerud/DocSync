@@ -781,8 +781,10 @@ async def get_automation_rate(days: int = Query(30, ge=1, le=90)):
         "is_duplicate": {"$ne": True},
         "$or": [
             {"readiness.status": {"$in": auto_statuses}},
-            {"status": {"$in": ["Completed", "Posted"]}},
+            {"status": {"$in": ["Completed", "Posted", "completed", "posted"]}},
             {"bc_purchase_invoice_no": {"$exists": True, "$nin": [None, ""]}},
+            {"automation_decision": {"$in": ["auto_filed", "auto_linked", "auto_approved", "auto_drafted"]}},
+            {"auto_cleared": True},
         ],
     })
     manual_count = await db.hub_documents.count_documents({

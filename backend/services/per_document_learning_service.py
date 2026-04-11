@@ -682,21 +682,26 @@ async def learn_from_document(db, doc_id: str, trigger: str = "ingestion"):
         logger.debug("[PerDocLearn] Duplicate intelligence for %s: %s", doc_id[:8], e)
 
     # === ESCALATION INTELLIGENCE: Learn which vendor+doc_type combos fail ===
+    # IMPORTANT: Only record escalation for genuine new outcomes (ingestion, correction),
+    # NOT for re-evaluations/backfills which would create a death spiral of escalation
     try:
-        vendor = _get_vendor_info(doc)
-        doc_type = doc.get("document_type") or doc.get("suggested_job_type") or ""
-        if vendor["vendor_no"] and doc_type:
-            from services.escalation_intelligence_service import record_automation_outcome
-            if outcome in (OUTCOME_AUTO_VALIDATED, OUTCOME_AUTO_FILED, OUTCOME_POSTED_BC, OUTCOME_LINKED):
-                esc_outcome = "success"
-            elif outcome in (OUTCOME_BLOCKED, OUTCOME_REJECTED):
-                esc_outcome = "failure"
-            elif outcome == OUTCOME_FIELD_CORRECTED:
-                esc_outcome = "correction"
-            else:
-                esc_outcome = "review"
-            await record_automation_outcome(db, vendor["vendor_no"], doc_type, esc_outcome, doc_id)
-            results["dimensions"]["escalation_intel"] = esc_outcome
+        if trigger not in ("backfill", "reevaluation", "recalibration"):
+            vendor = _get_vendor_info(doc)
+            doc_type = doc.get("document_type") or doc.get("suggested_job_type") or ""
+            if vendor["vendor_no"] and doc_type:
+                from services.escalation_intelligence_service import record_automation_outcome
+                if outcome in (OUTCOME_AUTO_VALIDATED, OUTCOME_AUTO_FILED, OUTCOME_POSTED_BC, OUTCOME_LINKED):
+                    esc_outcome = "success"
+                elif outcome in (OUTCOME_BLOCKED, OUTCOME_REJECTED):
+                    esc_outcome = "failure"
+                elif outcome == OUTCOME_FIELD_CORRECTED:
+                    esc_outcome = "correction"
+                else:
+                    esc_outcome = "review"
+                await record_automation_outcome(db, vendor["vendor_no"], doc_type, esc_outcome, doc_id)
+                results["dimensions"]["escalation_intel"] = esc_outcome
+        else:
+            results["dimensions"]["escalation_intel"] = "skipped_backfill"
     except Exception as e:
         results["dimensions"]["escalation_intel"] = f"error: {e}"
         logger.debug("[PerDocLearn] Escalation intelligence for %s: %s", doc_id[:8], e)

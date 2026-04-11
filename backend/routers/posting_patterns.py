@@ -4012,7 +4012,7 @@ async def run_full_cycle():
     """
     from deps import get_db
     db = get_db()
-    results = {"steps_completed": 0, "steps_total": 9, "details": {}}
+    results = {"steps_completed": 0, "steps_total": 10, "details": {}}
     step = 0
 
     # ── Step 1: Force Cleanup Inbox ──
@@ -4105,6 +4105,22 @@ async def run_full_cycle():
         }
     except Exception as e:
         results["details"]["5_recalibrate"] = {"status": "error", "error": str(e)}
+    results["steps_completed"] = step
+
+    # ── Step 5b: Recalibrate Escalation Intelligence ──
+    # Rebuild escalation data from actual document outcomes (not inflated re-evaluation counts)
+    step += 1
+    try:
+        from services.escalation_intelligence_service import recalibrate_escalation_intelligence
+        esc_recal = await recalibrate_escalation_intelligence(db, limit=5000)
+        results["details"]["5b_escalation_recal"] = {
+            "status": "ok",
+            "combos_recalibrated": esc_recal.get("combos_recalibrated", 0),
+            "combos_escalated": esc_recal.get("combos_escalated", 0),
+            "combos_automated": esc_recal.get("combos_automated", 0),
+        }
+    except Exception as e:
+        results["details"]["5b_escalation_recal"] = {"status": "error", "error": str(e)}
     results["steps_completed"] = step
 
     # ── Step 6: Learning Pulse Backfill ──

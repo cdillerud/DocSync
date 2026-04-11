@@ -208,3 +208,102 @@ async def get_escalation_summary(db) -> Dict:
         "top_automated": top_automated,
         "generated_at": _now(),
     }
+
+
+# =========================================================================
+# 4. RECALIBRATE — Rebuild escalation data from actual document outcomes
+# =========================================================================
+
+async def recalibrate_escalation_intelligence(db, limit: int = 5000) -> Dict:
+    """
+    Rebuild escalation intelligence from actual document outcomes.
+    Clears inflated counts from repeated re-evaluations and recalculates
+    from each document's CURRENT state (counted once per doc, not per cycle).
+
+    Returns: {combos_recalibrated, combos_escalated, combos_automated}
+    """
+    # Step 1: Aggregate actual per-doc outcomes grouped by vendor+doc_type
+    pipeline = [
+        {"$match": {
+            "is_duplicate": {"$ne": True},
+            "$or": [
+                {"bc_vendor_number": {"$exists": True, "$ne": ""}},
+                {"vendor_no": {"$exists": True, "$ne": ""}},
+            ],
+        }},
+        {"$project": {
+            "_id": 0,
+            "vendor_no": {"$ifNull": ["$bc_vendor_number", "$vendor_no"]},
+            "doc_type": {"$ifNull": ["$document_type", "$suggested_job_type"]},
+            "status": 1,
+            "automation_decision": 1,
+            "readiness_status": "$readiness.status",
+        }},
+        {"$match": {"vendor_no": {"$ne": None}, "doc_type": {"$ne": None}}},
+        {"$group": {
+            "_id": {"vendor_no": "$vendor_no", "doc_type": "$doc_type"},
+            "total": {"$sum": 1},
+            "success": {"$sum": {"$cond": [
+                {"$in": ["$status", ["Completed", "completed", "Posted", "posted"]]},
+                1, 0
+            ]}},
+            "auto_filed": {"$sum": {"$cond": [
+                {"$in": ["$automation_decision", ["auto_filed", "auto_linked", "auto_approved"]]},
+                1, 0
+            ]}},
+            "review": {"$sum": {"$cond": [
+                {"$eq": ["$status", "NeedsReview"]},
+                1, 0
+            ]}},
+        }},
+        {"$match": {"total": {"$gte": 2}}},
+    ]
+
+    combos = await db.hub_documents.aggregate(pipeline).to_list(limit)
+
+    recalibrated = 0
+    for combo in combos:
+        vendor_no = combo["_id"]["vendor_no"]
+        doc_type = combo["_id"]["doc_type"]
+        key = _escalation_key(vendor_no, doc_type)
+
+        total = combo["total"]
+        successes = combo["success"] + combo["auto_filed"]
+        # Deduplicate: a completed + auto_filed doc shouldn't count twice
+        successes = min(successes, total)
+        reviews = combo["review"]
+        failures = max(0, total - successes - reviews)
+
+        await db[ESCALATION_COL].update_one(
+            {"escalation_key": key},
+            {"$set": {
+                "escalation_key": key,
+                "vendor_no": vendor_no,
+                "doc_type": doc_type,
+                "total_attempts": total,
+                "success_count": successes,
+                "failure_count": failures,
+                "review_count": reviews,
+                "correction_count": 0,
+                "recalibrated_at": _now(),
+                "updated_at": _now(),
+            }},
+            upsert=True,
+        )
+        await _recompute_escalation(db, key)
+        recalibrated += 1
+
+    # Get post-recalibration summary
+    escalated = await db[ESCALATION_COL].count_documents({"should_escalate": True})
+    automated = await db[ESCALATION_COL].count_documents({"decision": "automate"})
+
+    logger.info(
+        "[Escalation] Recalibrated %d combos from actual data. Escalated: %d, Automated: %d",
+        recalibrated, escalated, automated,
+    )
+
+    return {
+        "combos_recalibrated": recalibrated,
+        "combos_escalated": escalated,
+        "combos_automated": automated,
+    }

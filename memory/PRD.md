@@ -59,6 +59,8 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - **Noise Learning Events Cleanup** — Readiness self-corrections no longer pollute `posting_learning_events`. Dashboard queries filter out noise. Startup cleanup removes existing bad data. (2026-04-10)
 
 ## Key API Endpoints
+- `POST /api/readiness/fix-validation-gaps` — Targeted PO learning + vendor resolution + re-evaluation
+- `POST /api/posting-patterns/system/run-full-cycle` — 8-step intelligence orchestration
 - `POST /api/readiness/sync-status` — Force cleanup engine
 - `POST /api/readiness/retry-failed` — Batch retry extraction-failed docs
 - `POST /api/readiness/retry-captured` — Retry stuck captured docs (4 max → exception)
@@ -117,6 +119,37 @@ Three gaps from Meghan's controller rules now implemented:
 - Also validates PI freight codes match SO codes (Meghan: "The codes should match the Sales Order")
 
 Files modified: `freight_business_rules.py`, `freight_gl_routing_service.py`, `bc_reference_cache_service.py`
+
+## Validation Gap Auto-Fixer (2026-04-11)
+**Problem**: 45 documents stuck with blocking validation gaps (23 PO validation, 18 vendor match) preventing auto-filing. Specifically:
+- TUMALOC vendor sends non-standard PO formats (`001307`, `19326`, `SI-02-26-31777`) that consistently fail BC PO validation
+- "SC Warehouses, LLC" and similar vendors have no alias mapping to their BC counterpart
+
+**Fix — 3 New Gap Closers**:
+
+**GAP CLOSER 8: PO Validation Learning**
+- `learn_vendor_po_validation_rate()` in `gap_closer_service.py` analyzes per-vendor PO resolution history
+- If >70% failure rate with >=3 docs, auto-sets `vendor_invoice_profiles.po_expected = false`
+- Integrated into `evaluate_and_persist()` — when PO is unresolved, checks/learns vendor's PO pattern
+- Once learned, `compute_signals()` sets `po_not_required_by_vendor = True`, skipping BC PO check
+
+**GAP CLOSER 9: Vendor Auto-Resolution**
+- `auto_resolve_unmatched_vendor()` in `gap_closer_service.py` uses 4 strategies:
+  1. Exact normalized alias match
+  2. Fuzzy match against `vendor_invoice_profiles` (name + variants + BC card)
+  3. Word-level + abbreviation matching (e.g., "Warehouses" → "WAREHOU")
+  4. Auto-creates vendor alias for future matching
+- Integrated into `evaluate_and_persist()` — for docs with `vendor_unresolved` blocker
+
+**Batch Orchestrator: `fix_all_validation_gaps()`**
+- Step 1: PO Learning — finds vendors with chronic PO failures, auto-learns profiles
+- Step 2: Vendor Resolution — fuzzy-matches all unresolved vendor docs
+- Step 3: Re-evaluates all gap-blocked docs to clear them through the pipeline
+- Exposed as `POST /api/readiness/fix-validation-gaps`
+- Also integrated as Step 2.5 in `POST /api/posting-patterns/system/run-full-cycle` (now 8 steps)
+
+Files modified: `gap_closer_service.py`, `document_readiness_service.py`, `readiness.py`, `posting_patterns.py`
+Test file: `backend/tests/test_validation_gaps.py` (5 test cases, all passing)
 
 ## Upcoming Tasks
 - P1: Rep Overrides Management UI

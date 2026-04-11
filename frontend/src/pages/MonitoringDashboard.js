@@ -618,7 +618,7 @@ export default function MonitoringDashboard() {
         <CardContent className="text-xs text-muted-foreground space-y-2 pb-4">
           <p><strong>Volume is the #1 lever.</strong> Every document that flows through the system trains 20 learning dimensions. The jump from 50 to 500 documents is transformational.</p>
           <p><strong>Confidence accuracy</strong> self-corrects as the AI sees more vendor-specific patterns. If stuck below 50% after 200+ docs, check extraction prompt quality.</p>
-          <p><strong>Vendor maturity</strong> progresses automatically: Learning → Developing → Stable → Autonomous. Each vendor needs ~50 documents to mature.</p>
+          <p><strong>Vendor maturity</strong> progresses automatically: Novice → Learning → Developing → Proficient → Mastered. Each vendor needs ~50 documents to mature.</p>
           <p><strong>Validation gaps</strong> marked "bc_connection" mean BC API is unreachable — that's infrastructure, not AI. Everything else the AI handles.</p>
         </CardContent>
       </Card>
@@ -662,22 +662,26 @@ function computeMetrics(data) {
   }
 
   // 2. Vendor Maturity
+  // DLE uses: mastered, proficient, developing, learning, novice
+  // Map: mastered → Autonomous, proficient → Stable
   const levels = deep?.vendor_maturity?.levels || {};
-  const autonomous = levels.autonomous || 0;
-  const stable = levels.stable || 0;
+  const autonomous = (levels.autonomous || 0) + (levels.mastered || 0);
+  const stable = (levels.stable || 0) + (levels.proficient || 0);
   const developing = levels.developing || 0;
   const learning = levels.learning || 0;
-  const totalVendors = autonomous + stable + developing + learning;
+  const novice = levels.novice || 0;
+  const totalVendors = autonomous + stable + developing + learning + novice;
   const matureCount = autonomous + stable;
   if (totalVendors > 0) {
     m.vendorMaturity = `${matureCount}/${totalVendors}`;
     m.vendorMaturitySubtitle = `${matureCount} mature vendor${matureCount !== 1 ? 's' : ''} (Stable or Autonomous)`;
     m.vendorMaturityStatus = matureCount >= totalVendors * 0.5 ? 'good' : matureCount > 0 ? 'warning' : 'critical';
     const parts = [];
-    if (autonomous) parts.push(`${autonomous} Autonomous`);
-    if (stable) parts.push(`${stable} Stable`);
+    if (autonomous) parts.push(`${autonomous} Mastered`);
+    if (stable) parts.push(`${stable} Proficient`);
     if (developing) parts.push(`${developing} Developing`);
     if (learning) parts.push(`${learning} Learning`);
+    if (novice) parts.push(`${novice} Novice`);
     m.vendorMaturityDetail = parts.join(' · ') + '. Each vendor needs ~50 docs to mature.';
   } else {
     m.vendorMaturity = '0 vendors';
@@ -752,7 +756,7 @@ function computeMetrics(data) {
   if (confTotal > 0) { score += (confAcc || 0) * 30; weights += 30; }
   if (totalVendors > 0) { score += (matureCount / totalVendors) * 20; weights += 20; }
   if (totalLearned > 0) { score += (autoFiled / totalLearned) * 30; weights += 30; }
-  if (totalGaps >= 0) { score += Math.max(0, 1 - totalGaps / 20) * 10; weights += 10; }
+  if (totalGaps >= 0) { score += Math.max(0, 1 - totalGaps / 50) * 10; weights += 10; }
   if (escTotal > 0) { score += Math.max(0, 1 - escAlways / Math.max(escTotal, 1)) * 10; weights += 10; }
 
   m.healthScore = weights > 0 ? Math.round((score / weights) * 100) : 0;

@@ -60,7 +60,12 @@ def compute_signals(doc: Dict[str, Any]) -> Dict[str, bool]:
     vendor_resolved = bool(
         vendor_canonical
         or vr.get("status") == "resolved"
-        or doc.get("vendor_match_method") in ("alias_match", "bc_exact_match", "fuzzy_match", "manual_match")
+        or doc.get("vendor_match_method") in (
+            "alias_match", "bc_exact_match", "fuzzy_match", "manual_match",
+            "auto_gap_closer", "classification_match", "email_domain_match",
+            "first_word_match", "profile_match",
+        )
+        or doc.get("bc_vendor_number")  # Has a BC vendor number = resolved
     )
 
     customer_canonical = doc.get("customer_canonical") or doc.get("customer_id")

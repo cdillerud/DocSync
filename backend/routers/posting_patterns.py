@@ -2170,86 +2170,162 @@ DAILY_TRACE_COUNT = int(os.environ.get("DAILY_TRACE_COUNT", "15"))
 
 async def _run_daily_traces(count: int = None) -> dict:
     """
-    Pick random vendors from vendor_invoice_profiles, fetch a recent invoice
-    from BC Production for each, run the trace comparison, and store results.
+    Fetch recent PIs from BC Production (last 3 months), randomly sample
+    up to `count`, and compare each PROD-posted invoice vs what the AI
+    template would generate.  Candidates are narrowed to vendors that
+    have a profile in vendor_invoice_profiles.
     """
     import random
+    from datetime import timedelta
     db = get_db()
     bc = get_bc_service()
     trace_count = count or DAILY_TRACE_COUNT
     run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     run_started = datetime.now(timezone.utc).isoformat()
 
-    # Get all vendors with profiles
-    all_vendors = []
+    # ── Step 1: Fetch recent PIs from BC PROD (last 3 months) ──
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).strftime("%Y-%m-%d")
+    all_invoices = []
+
+    try:
+        from services.business_central_service import (
+            BC_API_BASE, BC_TENANT_ID, BC_READ_ENVIRONMENT, get_bc_token, BC_REQUEST_TIMEOUT
+        )
+        import httpx
+
+        token = await get_bc_token(environment=BC_READ_ENVIRONMENT)
+        company_id = await bc._get_company_id(environment=BC_READ_ENVIRONMENT)
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Fetch a large batch of recent PIs, paginating if needed
+        fetched = 0
+        page_size = 100
+        max_pages = 5  # cap at 500 invoices to sample from
+
+        for page in range(max_pages):
+            url = (f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/"
+                   f"companies({company_id})/purchaseInvoices")
+            params = {
+                "$select": "id,number,vendorNumber,vendorName,vendorInvoiceNumber,"
+                           "invoiceDate,dueDate,totalAmountExcludingTax,"
+                           "totalAmountIncludingTax,status",
+                "$filter": f"invoiceDate ge {cutoff}",
+                "$orderby": "invoiceDate desc",
+                "$top": str(page_size),
+                "$skip": str(page * page_size),
+            }
+            async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+                resp = await client.get(url, headers=headers, params=params)
+                if resp.status_code != 200:
+                    logger.warning("[DailyTrace] PI fetch page %d failed: %s", page, resp.status_code)
+                    break
+                batch = resp.json().get("value", [])
+                all_invoices.extend(batch)
+                if len(batch) < page_size:
+                    break  # no more pages
+
+        # Also try historical/posted endpoint
+        try:
+            hist_result = await bc.get_historical_posted_purchase_invoices(limit=200, skip=0)
+            for inv in hist_result.get("invoices", []):
+                inv_date = inv.get("invoiceDate", "")
+                if inv_date >= cutoff:
+                    # Avoid duplicates by invoice id
+                    existing_ids = {i.get("id") for i in all_invoices}
+                    if inv.get("id") not in existing_ids:
+                        all_invoices.append(inv)
+        except Exception as hist_err:
+            logger.debug("[DailyTrace] Historical fetch skipped: %s", hist_err)
+
+        logger.info("[DailyTrace] Fetched %d PROD PIs from last 3 months (cutoff=%s)", len(all_invoices), cutoff)
+
+    except Exception as fetch_err:
+        logger.error("[DailyTrace] Failed to fetch PROD PIs: %s", fetch_err)
+        run_doc = {
+            "run_id": run_id, "run_date": run_started,
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "traces_requested": trace_count, "traces_success": 0,
+            "traces_error": 1, "avg_match_rate": 0,
+            "results": [{"error": str(fetch_err)[:300], "vendor_no": "", "vendor_name": "",
+                         "invoice_number": None, "invoice_date": None, "total_amount": None,
+                         "match_rate": None, "verdict": None, "dimension_scores": {},
+                         "line_alignment_avg": None, "human_line_count": 0, "ai_line_count": 0}],
+        }
+        await db.daily_trace_results.insert_one(run_doc)
+        run_doc.pop("_id", None)
+        return run_doc
+
+    if not all_invoices:
+        run_doc = {
+            "run_id": run_id, "run_date": run_started,
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "traces_requested": trace_count, "traces_success": 0,
+            "traces_error": 0, "avg_match_rate": 0,
+            "results": [], "note": f"No PIs found in PROD after {cutoff}",
+        }
+        await db.daily_trace_results.insert_one(run_doc)
+        run_doc.pop("_id", None)
+        return run_doc
+
+    # ── Step 2: Build vendor lookup for profiles/templates ──
+    vendor_profiles = {}
     async for vip in db.vendor_invoice_profiles.find(
         {"vendor_no": {"$exists": True, "$ne": ""}},
         {"_id": 0, "vendor_no": 1, "vendor_name": 1}
     ):
-        all_vendors.append(vip)
+        vendor_profiles[vip["vendor_no"]] = vip
 
-    if not all_vendors:
-        return {"error": "No vendor profiles found", "run_id": run_id}
+    # Load all posting templates
+    templates = {}
+    async for pp in db.posting_pattern_analysis.find(
+        {"status": "analyzed"}, {"_id": 0, "vendor_no": 1, "posting_template": 1}
+    ):
+        templates[pp["vendor_no"]] = pp.get("posting_template", {})
 
-    # Pick random vendors (may repeat if fewer vendors than count)
-    selected = random.sample(all_vendors, min(trace_count, len(all_vendors)))
-    if len(selected) < trace_count:
-        extras = random.choices(all_vendors, k=trace_count - len(selected))
-        selected.extend(extras)
+    # ── Step 3: Filter to candidates we can trace (vendor has a profile) ──
+    candidates = [inv for inv in all_invoices
+                  if inv.get("vendorNumber") and inv["vendorNumber"] in vendor_profiles]
 
+    # If no candidates match profiles, fall back to all invoices
+    if not candidates:
+        candidates = all_invoices
+
+    # Randomly sample
+    sampled = random.sample(candidates, min(trace_count, len(candidates)))
+
+    logger.info("[DailyTrace] Sampling %d from %d candidates (%d total PROD PIs, %d vendor profiles)",
+                len(sampled), len(candidates), len(all_invoices), len(vendor_profiles))
+
+    # ── Step 4: Run traces ──
     results = []
     success_count = 0
     error_count = 0
 
-    for vendor in selected:
-        vendor_no = vendor["vendor_no"]
-        vendor_name = vendor.get("vendor_name", "")
+    for invoice in sampled:
+        vendor_no = invoice.get("vendorNumber", "")
+        vendor_name = invoice.get("vendorName", "")
+        inv_id = invoice.get("id", "")
         entry = {
             "vendor_no": vendor_no,
             "vendor_name": vendor_name,
-            "invoice_number": None,
-            "invoice_date": None,
-            "total_amount": None,
+            "invoice_number": invoice.get("vendorInvoiceNumber") or invoice.get("number", ""),
+            "invoice_date": invoice.get("invoiceDate", ""),
+            "total_amount": invoice.get("totalAmountExcludingTax") or invoice.get("totalAmountIncludingTax", 0),
+            "status": invoice.get("status", ""),
             "match_rate": None,
             "verdict": None,
             "dimension_scores": {},
             "line_alignment_avg": None,
             "human_line_count": 0,
             "ai_line_count": 0,
+            "has_template": vendor_no in templates,
             "error": None,
         }
 
         try:
-            # Pick a random invoice index (0-4) to vary which invoice gets traced
-            rand_idx = random.randint(0, 4)
-            pi_result = await bc.get_posted_purchase_invoices(
-                vendor_id=vendor_no, limit=rand_idx + 1, skip=0
-            )
-            invoices = pi_result.get("invoices", [])
-
-            if not invoices:
-                # Try historical
-                hist_result = await bc.get_historical_posted_purchase_invoices(
-                    vendor_id=vendor_no, limit=rand_idx + 1, skip=0
-                )
-                invoices = hist_result.get("invoices", [])
-
-            if not invoices:
-                entry["error"] = "No invoices in BC"
-                error_count += 1
-                results.append(entry)
-                continue
-
-            idx = min(rand_idx, len(invoices) - 1)
-            invoice = invoices[idx]
-            inv_id = invoice.get("id", "")
-            entry["invoice_number"] = invoice.get("vendorInvoiceNumber") or invoice.get("number", "")
-            entry["invoice_date"] = invoice.get("invoiceDate", "")
-            entry["total_amount"] = invoice.get("totalAmountExcludingTax") or invoice.get("totalAmountIncludingTax", 0)
-
             human_lines = await bc.get_purchase_invoice_lines(inv_id)
             if not human_lines:
-                entry["error"] = "No line data"
+                entry["error"] = "No line data in PROD"
                 error_count += 1
                 results.append(entry)
                 continue
@@ -2257,12 +2333,7 @@ async def _run_daily_traces(count: int = None) -> dict:
             entry["human_line_count"] = len(human_lines)
             human_summary = _build_line_summary(human_lines)
 
-            # Load template (may be empty)
-            profile = await db.posting_pattern_analysis.find_one(
-                {"vendor_no": vendor_no, "status": "analyzed"}, {"_id": 0}
-            )
-            template = profile.get("posting_template", {}) if profile else {}
-
+            template = templates.get(vendor_no, {})
             human_ref_info = _extract_reference_from_human_lines(human_lines)
             ef = {
                 "invoice_number": entry["invoice_number"],
@@ -2288,11 +2359,11 @@ async def _run_daily_traces(count: int = None) -> dict:
         except Exception as exc:
             entry["error"] = str(exc)[:200]
             error_count += 1
-            logger.warning("[DailyTrace] Error tracing %s: %s", vendor_no, exc)
+            logger.warning("[DailyTrace] Error tracing %s/%s: %s", vendor_no, entry["invoice_number"], exc)
 
         results.append(entry)
 
-    # Compute aggregate stats
+    # ── Step 5: Aggregate and store ──
     valid = [r for r in results if r["match_rate"] is not None]
     avg_match = round(sum(r["match_rate"] for r in valid) / max(len(valid), 1)) if valid else 0
 
@@ -2304,6 +2375,9 @@ async def _run_daily_traces(count: int = None) -> dict:
         "traces_success": success_count,
         "traces_error": error_count,
         "avg_match_rate": avg_match,
+        "prod_invoices_scanned": len(all_invoices),
+        "candidates_with_profiles": len([c for c in candidates if c.get("vendorNumber") in vendor_profiles]),
+        "cutoff_date": cutoff,
         "results": results,
     }
 

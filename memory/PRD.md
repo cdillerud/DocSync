@@ -228,6 +228,13 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Frontend: SVG sparkline chart showing match rate trend over time, vendor performance leaderboard (collapsible)
 - Trend auto-populates as daily runs accumulate; sparkline appears after 2+ data points
 
+## Daily Trace — PROD PI Comparison (2026-04-12)
+- Rewrote `_run_daily_traces` to fetch recent PIs from BC Production (last 3 months via `invoiceDate ge` filter)
+- Scans up to 500 PROD PIs across all vendors, filters to those with vendor profiles, randomly samples 10-20
+- Each trace compares PROD human-posted lines vs AI template simulation
+- Results include `has_template` flag, `prod_invoices_scanned`, `cutoff_date`, `status` per invoice
+- Frontend shows "PROD vs AI Template (last 3 months)" label and template indicator badge per row
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

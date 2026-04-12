@@ -240,6 +240,7 @@ function DailyTraceFeed({ onSelectVendor }) {
           <CardTitle className="text-base flex items-center gap-2">
             <BarChart3 className="w-4 h-4 text-muted-foreground" />
             Daily Trace Feed
+            <span className="text-[10px] font-normal text-muted-foreground">PROD vs AI Template (last 3 months)</span>
             {latestRun && (
               <Badge variant="outline" className="text-[10px] ml-1">
                 <Clock className="w-3 h-3 mr-1" />
@@ -294,7 +295,7 @@ function DailyTraceFeed({ onSelectVendor }) {
                 <div className="flex-1 text-right">
                   <div className="flex items-center gap-1.5 justify-end text-xs text-muted-foreground">
                     <TrendingUp className="w-3.5 h-3.5" />
-                    <span>{latestRun.traces_requested} invoices across random vendors</span>
+                    <span>{latestRun.prod_invoices_scanned || latestRun.traces_requested} PROD PIs scanned{latestRun.cutoff_date ? ` (since ${latestRun.cutoff_date})` : ''}</span>
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-0.5">Trend chart appears after 2+ daily runs</p>
                 </div>
@@ -341,6 +342,11 @@ function DailyTraceFeed({ onSelectVendor }) {
                     <span className="text-xs font-mono w-20 shrink-0 text-right">
                       {r.total_amount != null ? `$${Number(r.total_amount).toLocaleString(undefined, { minimumFractionDigits: 0 })}` : '—'}
                     </span>
+                    {r.has_template ? (
+                      <Badge variant="outline" className="text-[9px] border-emerald-300 text-emerald-600 w-8 justify-center shrink-0">T</Badge>
+                    ) : (
+                      <span className="w-8 shrink-0" />
+                    )}
                     <div className="w-14 shrink-0 text-center">
                       {r.error ? (
                         <Badge variant="outline" className="text-[9px] text-red-500 border-red-200">ERR</Badge>

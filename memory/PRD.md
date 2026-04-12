@@ -215,6 +215,14 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Full audit: `llm_vendor_ranking` dict always persisted on document when ranking attempted
 - Also created `vendor_resolution_service.py` (renamed from `vendor_resolution_assist_service.py` per user note)
 
+## Daily Random Trace System (2026-04-12)
+- Background scheduler runs 15 random invoice traces every 24 hours (also runs 2 min after startup)
+- Picks random vendors from `vendor_invoice_profiles` (604 vendors), fetches real invoices from BC Production
+- Compares human-posted lines vs AI template lines, stores results in `daily_trace_results` collection
+- Endpoints: `POST /api/posting-patterns/daily-trace/run` (manual trigger), `GET /api/posting-patterns/daily-trace/latest`, `GET /api/posting-patterns/daily-trace/results`
+- Frontend: "Daily Trace Feed" card on Invoice Trace page with summary stats, clickable vendor rows, "Run Now" button
+- Configurable: `DAILY_TRACE_COUNT=15` (env var)
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

@@ -6,6 +6,7 @@ Phase 2: Template-driven draft PI creation, auto-post settings, ready document q
 """
 import asyncio
 import logging
+import os
 import re
 from datetime import datetime, timezone
 from fastapi import APIRouter, Query, BackgroundTasks, Body
@@ -2158,6 +2159,200 @@ async def batch_trace_invoices(
             else f"WEAK — avg {avg_match}% match, template needs more training data"
         ),
     }
+
+
+# =============================================================================
+# Daily Random Trace — Auto-compare PROD BC invoices across random vendors
+# =============================================================================
+
+DAILY_TRACE_COUNT = int(os.environ.get("DAILY_TRACE_COUNT", "15"))
+
+
+async def _run_daily_traces(count: int = None) -> dict:
+    """
+    Pick random vendors from vendor_invoice_profiles, fetch a recent invoice
+    from BC Production for each, run the trace comparison, and store results.
+    """
+    import random
+    db = get_db()
+    bc = get_bc_service()
+    trace_count = count or DAILY_TRACE_COUNT
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    run_started = datetime.now(timezone.utc).isoformat()
+
+    # Get all vendors with profiles
+    all_vendors = []
+    async for vip in db.vendor_invoice_profiles.find(
+        {"vendor_no": {"$exists": True, "$ne": ""}},
+        {"_id": 0, "vendor_no": 1, "vendor_name": 1}
+    ):
+        all_vendors.append(vip)
+
+    if not all_vendors:
+        return {"error": "No vendor profiles found", "run_id": run_id}
+
+    # Pick random vendors (may repeat if fewer vendors than count)
+    selected = random.sample(all_vendors, min(trace_count, len(all_vendors)))
+    if len(selected) < trace_count:
+        extras = random.choices(all_vendors, k=trace_count - len(selected))
+        selected.extend(extras)
+
+    results = []
+    success_count = 0
+    error_count = 0
+
+    for vendor in selected:
+        vendor_no = vendor["vendor_no"]
+        vendor_name = vendor.get("vendor_name", "")
+        entry = {
+            "vendor_no": vendor_no,
+            "vendor_name": vendor_name,
+            "invoice_number": None,
+            "invoice_date": None,
+            "total_amount": None,
+            "match_rate": None,
+            "verdict": None,
+            "dimension_scores": {},
+            "line_alignment_avg": None,
+            "human_line_count": 0,
+            "ai_line_count": 0,
+            "error": None,
+        }
+
+        try:
+            # Pick a random invoice index (0-4) to vary which invoice gets traced
+            rand_idx = random.randint(0, 4)
+            pi_result = await bc.get_posted_purchase_invoices(
+                vendor_id=vendor_no, limit=rand_idx + 1, skip=0
+            )
+            invoices = pi_result.get("invoices", [])
+
+            if not invoices:
+                # Try historical
+                hist_result = await bc.get_historical_posted_purchase_invoices(
+                    vendor_id=vendor_no, limit=rand_idx + 1, skip=0
+                )
+                invoices = hist_result.get("invoices", [])
+
+            if not invoices:
+                entry["error"] = "No invoices in BC"
+                error_count += 1
+                results.append(entry)
+                continue
+
+            idx = min(rand_idx, len(invoices) - 1)
+            invoice = invoices[idx]
+            inv_id = invoice.get("id", "")
+            entry["invoice_number"] = invoice.get("vendorInvoiceNumber") or invoice.get("number", "")
+            entry["invoice_date"] = invoice.get("invoiceDate", "")
+            entry["total_amount"] = invoice.get("totalAmountExcludingTax") or invoice.get("totalAmountIncludingTax", 0)
+
+            human_lines = await bc.get_purchase_invoice_lines(inv_id)
+            if not human_lines:
+                entry["error"] = "No line data"
+                error_count += 1
+                results.append(entry)
+                continue
+
+            entry["human_line_count"] = len(human_lines)
+            human_summary = _build_line_summary(human_lines)
+
+            # Load template (may be empty)
+            profile = await db.posting_pattern_analysis.find_one(
+                {"vendor_no": vendor_no, "status": "analyzed"}, {"_id": 0}
+            )
+            template = profile.get("posting_template", {}) if profile else {}
+
+            human_ref_info = _extract_reference_from_human_lines(human_lines)
+            ef = {
+                "invoice_number": entry["invoice_number"],
+                "amount": entry["total_amount"],
+                "invoice_date": entry["invoice_date"],
+                "reference_number": human_ref_info.get("ref", ""),
+                "detected_pattern": human_ref_info.get("pattern", ""),
+                "per_line_refs": human_ref_info.get("per_line_refs", []),
+                "trace_human_line_count": len(human_lines),
+            }
+            ai_lines = _simulate_template_lines(template, ef)
+            ai_summary = _build_line_summary(ai_lines)
+            entry["ai_line_count"] = len(ai_lines)
+
+            comparison = _compute_trace_diff(human_lines, human_summary, ai_lines, ai_summary, template)
+            entry["match_rate"] = comparison.get("match_rate", 0)
+            entry["verdict"] = comparison.get("verdict", "")
+            entry["dimension_scores"] = comparison.get("dimension_scores", {})
+            entry["line_alignment_avg"] = comparison.get("line_alignment", {}).get("avg_score", 0)
+            entry["template_confidence"] = template.get("confidence", "none")
+            success_count += 1
+
+        except Exception as exc:
+            entry["error"] = str(exc)[:200]
+            error_count += 1
+            logger.warning("[DailyTrace] Error tracing %s: %s", vendor_no, exc)
+
+        results.append(entry)
+
+    # Compute aggregate stats
+    valid = [r for r in results if r["match_rate"] is not None]
+    avg_match = round(sum(r["match_rate"] for r in valid) / max(len(valid), 1)) if valid else 0
+
+    run_doc = {
+        "run_id": run_id,
+        "run_date": run_started,
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "traces_requested": trace_count,
+        "traces_success": success_count,
+        "traces_error": error_count,
+        "avg_match_rate": avg_match,
+        "results": results,
+    }
+
+    await db.daily_trace_results.insert_one(run_doc)
+    logger.info("[DailyTrace] Run %s complete: %d/%d success, avg match=%d%%",
+                run_id, success_count, trace_count, avg_match)
+
+    run_doc.pop("_id", None)
+    return run_doc
+
+
+@router.post("/daily-trace/run")
+async def run_daily_traces(
+    background_tasks: BackgroundTasks,
+    count: int = Query(None, ge=1, le=50, description="Number of traces (default from env)"),
+    sync: bool = Query(False, description="Run synchronously (slower, returns full results)"),
+):
+    """Trigger a daily random trace run — picks random vendors, traces invoices from BC PROD."""
+    if sync:
+        return await _run_daily_traces(count)
+    background_tasks.add_task(_run_daily_traces, count)
+    return {"status": "started", "count": count or DAILY_TRACE_COUNT, "message": "Daily trace running in background"}
+
+
+@router.get("/daily-trace/results")
+async def get_daily_trace_results(
+    limit: int = Query(10, ge=1, le=50),
+    skip: int = Query(0, ge=0),
+):
+    """Fetch stored daily trace run results, most recent first."""
+    db = get_db()
+    cursor = db.daily_trace_results.find(
+        {}, {"_id": 0}
+    ).sort("run_date", -1).skip(skip).limit(limit)
+    runs = []
+    async for doc in cursor:
+        runs.append(doc)
+    total = await db.daily_trace_results.count_documents({})
+    return {"runs": runs, "total": total}
+
+
+@router.get("/daily-trace/latest")
+async def get_latest_daily_trace():
+    """Fetch the most recent daily trace run with full results."""
+    db = get_db()
+    run = await db.daily_trace_results.find_one({}, {"_id": 0}, sort=[("run_date", -1)])
+    if not run:
+        return {"error": "No daily trace runs found"}
+    return run
 
 
 def _build_line_summary(lines: list) -> dict:

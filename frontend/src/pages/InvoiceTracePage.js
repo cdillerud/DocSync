@@ -7,7 +7,7 @@ import { ScrollArea } from '../components/ui/scroll-area';
 import {
   ArrowLeftRight, ChevronLeft, ChevronRight, Loader2,
   CheckCircle2, XCircle, AlertTriangle, FileText, Search,
-  Layers, Target
+  Layers, Target, Play, Clock, TrendingUp, BarChart3
 } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -132,6 +132,140 @@ function ComparisonRow({ item }) {
   );
 }
 
+/* ─── Match-rate pill ─── */
+function MatchPill({ rate }) {
+  if (rate == null) return <span className="text-xs text-muted-foreground">—</span>;
+  const color = rate >= 80 ? 'bg-emerald-500/15 text-emerald-600' : rate >= 50 ? 'bg-amber-500/15 text-amber-600' : 'bg-red-500/15 text-red-600';
+  return <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded-full ${color}`}>{rate}%</span>;
+}
+
+/* ─── Daily Trace Feed ─── */
+function DailyTraceFeed({ onSelectVendor }) {
+  const [latestRun, setLatestRun] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [running, setRunning] = useState(false);
+
+  const fetchLatest = async () => {
+    try {
+      const res = await fetch(`${API}/api/posting-patterns/daily-trace/latest`);
+      const data = await res.json();
+      if (!data.error) setLatestRun(data);
+    } catch { /* ignore */ }
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchLatest(); }, []);
+
+  const handleRunNow = async () => {
+    setRunning(true);
+    try {
+      const res = await fetch(`${API}/api/posting-patterns/daily-trace/run?sync=true&count=15`, { method: 'POST' });
+      const data = await res.json();
+      if (!data.error) setLatestRun(data);
+    } catch { /* ignore */ }
+    setRunning(false);
+  };
+
+  const results = latestRun?.results || [];
+  const successResults = results.filter(r => r.match_rate != null);
+  const avgMatch = latestRun?.avg_match_rate || 0;
+  const matchColor = avgMatch >= 80 ? 'text-emerald-500' : avgMatch >= 50 ? 'text-amber-500' : 'text-red-500';
+
+  return (
+    <Card data-testid="daily-trace-feed">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2">
+            <BarChart3 className="w-4 h-4 text-muted-foreground" />
+            Daily Trace Feed
+            {latestRun && (
+              <Badge variant="outline" className="text-[10px] ml-1">
+                <Clock className="w-3 h-3 mr-1" />
+                {new Date(latestRun.run_date).toLocaleDateString()} {new Date(latestRun.run_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </Badge>
+            )}
+          </CardTitle>
+          <Button size="sm" variant="outline" onClick={handleRunNow} disabled={running} className="h-8" data-testid="run-daily-trace-btn">
+            {running ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Play className="w-4 h-4 mr-1" />}
+            {running ? 'Running...' : 'Run Now'}
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {loading && (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+          </div>
+        )}
+
+        {!loading && !latestRun && (
+          <div className="text-center py-8 text-sm text-muted-foreground">
+            <p>No daily traces yet. Click <strong>Run Now</strong> to generate your first batch.</p>
+            <p className="text-xs mt-1">Traces also run automatically every 24 hours.</p>
+          </div>
+        )}
+
+        {!loading && latestRun && (
+          <>
+            {/* Summary strip */}
+            <div className="flex items-center gap-6 mb-4 pb-3 border-b border-border/40">
+              <div className="text-center">
+                <p className={`text-2xl font-bold ${matchColor}`}>{avgMatch}%</p>
+                <p className="text-[10px] text-muted-foreground">Avg Match</p>
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-bold">{successResults.length}</p>
+                <p className="text-[10px] text-muted-foreground">Traced</p>
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-bold text-red-500">{results.filter(r => r.error).length}</p>
+                <p className="text-[10px] text-muted-foreground">Errors</p>
+              </div>
+              <div className="flex-1 text-right">
+                <div className="flex items-center gap-1.5 justify-end text-xs text-muted-foreground">
+                  <TrendingUp className="w-3.5 h-3.5" />
+                  <span>{latestRun.traces_requested} invoices across random vendors</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Results table */}
+            <ScrollArea className="max-h-[350px]">
+              <div className="space-y-1" data-testid="daily-trace-results">
+                {results.map((r, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-3 py-2 px-3 rounded-md hover:bg-muted/50 cursor-pointer transition-colors text-sm"
+                    onClick={() => r.vendor_no && onSelectVendor(r.vendor_no)}
+                    data-testid={`daily-trace-row-${i}`}
+                  >
+                    <span className="font-mono text-xs font-semibold w-20 shrink-0 text-blue-600">{r.vendor_no}</span>
+                    <span className="flex-1 min-w-0 truncate text-muted-foreground text-xs">{r.vendor_name || r.vendor_no}</span>
+                    <span className="text-xs text-muted-foreground w-24 shrink-0 truncate">{r.invoice_number || '—'}</span>
+                    <span className="text-xs text-muted-foreground w-20 shrink-0">{r.invoice_date ? new Date(r.invoice_date).toLocaleDateString() : '—'}</span>
+                    <span className="text-xs font-mono w-20 shrink-0 text-right">
+                      {r.total_amount != null ? `$${Number(r.total_amount).toLocaleString(undefined, { minimumFractionDigits: 0 })}` : '—'}
+                    </span>
+                    <div className="w-14 shrink-0 text-center">
+                      {r.error ? (
+                        <Badge variant="outline" className="text-[9px] text-red-500 border-red-200">ERR</Badge>
+                      ) : (
+                        <MatchPill rate={r.match_rate} />
+                      )}
+                    </div>
+                    <span className="text-xs w-8 shrink-0 text-muted-foreground text-right">{r.human_line_count || 0}L</span>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+
 export default function InvoiceTracePage() {
   const [vendorNo, setVendorNo] = useState('TUMALOC');
   const [invoiceIndex, setInvoiceIndex] = useState(0);
@@ -165,6 +299,12 @@ export default function InvoiceTracePage() {
   const handleSearch = () => {
     setInvoiceIndex(0);
     fetchTrace(vendorNo, 0);
+  };
+
+  const handleSelectVendor = (vno) => {
+    setVendorNo(vno);
+    setInvoiceIndex(0);
+    fetchTrace(vno, 0);
   };
 
   const handlePrev = () => {
@@ -208,6 +348,9 @@ export default function InvoiceTracePage() {
           </Button>
         </div>
       </div>
+
+      {/* Daily Trace Feed */}
+      <DailyTraceFeed onSelectVendor={handleSelectVendor} />
 
       {error && (
         <Card className="border-red-200 bg-red-500/5">

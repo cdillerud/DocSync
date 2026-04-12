@@ -197,6 +197,14 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Returns structured diff: fields_agreed, fields_disagreed, fields_missing_in_candidate/baseline, confidence_delta
 - Diff compares: invoice_number, invoice_date, due_date, vendor_name, po_number, total_amount, tax_amount, currency
 
+## Vendor Resolution Ranking Assist (2026-04-12)
+- Service: `services/vendor_resolution_assist_service.py` — LLM-assisted vendor candidate ranking when fuzzy matching is uncertain
+- `rank_vendor_candidates(vendor_raw, candidates, document_context)` → `VendorRankingResult`
+- Uses `get_provider("classification")` slot for disambiguation
+- Safety: rejects model selection not in candidate list, caps at 10 candidates, skips LLM for trivial single-candidate case
+- Test endpoint: `POST /api/dev/test-vendor-ranking` in `routers/dev_tools.py`
+- NOT wired into live ingestion pipeline yet
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

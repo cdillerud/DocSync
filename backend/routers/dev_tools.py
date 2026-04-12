@@ -259,3 +259,29 @@ async def compare_extraction(
         "candidate": candidate_out,
         "diff": diff,
     }
+
+
+# ---------- vendor ranking test ----------
+
+class VendorRankingRequest(BaseModel):
+    vendor_raw: str
+    candidates: List[Dict[str, Any]]
+    document_context: Optional[Dict[str, Any]] = None
+
+
+@router.post("/test-vendor-ranking")
+async def test_vendor_ranking(
+    body: VendorRankingRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Test LLM-assisted vendor candidate ranking. Writes nothing."""
+    _verify_token(authorization)
+
+    from services.vendor_resolution_assist_service import rank_vendor_candidates
+
+    result = await rank_vendor_candidates(
+        vendor_raw=body.vendor_raw,
+        candidates=body.candidates,
+        document_context=body.document_context,
+    )
+    return result.to_dict()

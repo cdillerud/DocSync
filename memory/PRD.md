@@ -174,7 +174,15 @@ Files modified: `freight_business_rules.py`, `freight_gl_routing_service.py`, `b
 Files modified: `gap_closer_service.py`, `readiness.py`, `posting_patterns.py`
 Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration_204.json` (24/24)
 
+## Decision Explainer Service (2026-04-12)
+- `GET /api/documents/{document_id}/explain` — plain-English explanation of document workflow state
+- Service: `services/decision_explainer_service.py` — uses `emergentintegrations` LlmChat with `gemini-2.0-flash`
+- Route: `routers/explain.py` — JWT-protected, read-only, returns ExplainerResult JSON
+- Returns: explanation, blocking_reason, next_action, model_used, generated_at, error (if any)
+- Graceful error handling: missing LLM key, parse failures, import errors all return HTTP 200 with error in payload
+
 ## Upcoming Tasks
+- P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI
 - P1: Teams Adaptive Card integration (webhook → BC Sales Order)
 

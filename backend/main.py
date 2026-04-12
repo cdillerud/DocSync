@@ -91,6 +91,7 @@ from routers.bakeoff import router as bakeoff_router
 from routers.feedback_health import router as feedback_health_router
 from routers.reprocess_comparison import router as reprocess_comparison_router
 from routers.posting_patterns import router as posting_patterns_router
+from routers.explain import router as explain_router
 
 # ==================== APP ====================
 app = FastAPI(title="GPI Document Hub API")
@@ -163,6 +164,7 @@ app.include_router(feedback_health_router, prefix="/api")
 app.include_router(reprocess_comparison_router, prefix="/api")
 app.include_router(knowledge_seed_router, prefix="/api")
 app.include_router(posting_patterns_router, prefix="/api")
+app.include_router(explain_router, prefix="/api")
 
 # ==================== SALES MODULE ====================
 app.include_router(sales_router)

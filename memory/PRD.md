@@ -205,6 +205,16 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Test endpoint: `POST /api/dev/test-vendor-ranking` in `routers/dev_tools.py`
 - NOT wired into live ingestion pipeline yet
 
+## LLM Vendor Ranking — Live Pipeline Integration (2026-04-12)
+- Wired `rank_vendor_candidates()` into both ingestion paths in `server.py` (`_internal_intake_document` + `intake_document`)
+- Feature flag: `ENABLE_LLM_VENDOR_RANKING=false` (default OFF — must be explicitly enabled)
+- Threshold: `VENDOR_RANKING_CONFIDENCE_THRESHOLD=0.80` (env-configurable)
+- Decision gate: skips LLM for high-confidence methods (alias, exact_name, bc_search); activates only for uncertain/no-match cases
+- On success: updates vendor_canonical/vendor_match_method, appends `llm_vendor_ranking_applied` to workflow_events
+- On failure/low-confidence: logs, preserves original resolution unchanged
+- Full audit: `llm_vendor_ranking` dict always persisted on document when ranking attempted
+- Also created `vendor_resolution_service.py` (renamed from `vendor_resolution_assist_service.py` per user note)
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

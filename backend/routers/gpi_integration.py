@@ -291,6 +291,75 @@ async def _build_pi_lines_with_mapping(doc: dict, db, vendor_no: str = "") -> li
             profile.get("bc_invoice_count", 0),
             posting_template.get("confidence", "none") if posting_template else "none",
         )
+
+        # ── Template Value Injection Gate ──
+        ENABLE_TEMPLATE_INJECTION = os.environ.get("ENABLE_TEMPLATE_INJECTION", "false").lower() == "true"
+        TEMPLATE_INJECTION_CONFIDENCE_THRESHOLD = float(os.environ.get("TEMPLATE_INJECTION_CONFIDENCE_THRESHOLD", "0.70"))
+
+        if ENABLE_TEMPLATE_INJECTION:
+            try:
+                ai_extraction = doc.get("ai_extraction") or {}
+                extracted_fields = doc.get("extracted_fields") or {}
+                nf = doc.get("normalized_fields") or {}
+
+                extraction_result = {
+                    "invoice_number": doc.get("invoice_number_clean") or extracted_fields.get("invoice_number") or ai_extraction.get("invoice_number", ""),
+                    "total_amount": doc.get("amount_float") or extracted_fields.get("amount") or ai_extraction.get("total_amount"),
+                    "vendor_raw": doc.get("vendor_raw"),
+                    "po_number": po_ref or extracted_fields.get("po_number") or ai_extraction.get("po_number"),
+                    "bol_number": doc.get("bol_number_extracted") or nf.get("bol_number") or extracted_fields.get("bol_number") or ai_extraction.get("bol_number"),
+                    "quantity": extracted_fields.get("quantity") or ai_extraction.get("quantity"),
+                }
+
+                doc_context = {
+                    "doc_type": doc.get("doc_type") or doc.get("document_type"),
+                    "invoice_number_clean": doc.get("invoice_number_clean"),
+                    "amount_float": doc.get("amount_float"),
+                    "raw_text_snippet": (doc.get("text_content") or "")[:500],
+                    "file_name": doc.get("file_name"),
+                }
+
+                from services.template_value_injector import inject_extracted_values
+                injection_result = await inject_extracted_values(
+                    template_lines=bc_lines,
+                    extraction_result=extraction_result,
+                    vendor_id=vendor_no,
+                    document_context=doc_context,
+                )
+
+                # Store full audit trail on document
+                injection_dict = injection_result.to_dict()
+                injection_update = {"template_injection": injection_dict}
+
+                if injection_result.error:
+                    logger.warning("[TemplateInjection] Error for %s: %s — using original lines", doc_id[:8], injection_result.error)
+                elif injection_result.confidence < TEMPLATE_INJECTION_CONFIDENCE_THRESHOLD:
+                    logger.info("[TemplateInjection] Low confidence for %s: %.2f < %.2f — using original lines",
+                                doc_id[:8], injection_result.confidence, TEMPLATE_INJECTION_CONFIDENCE_THRESHOLD)
+                else:
+                    # Apply injected lines
+                    bc_lines = injection_result.lines
+                    injection_update["workflow_event_push"] = {
+                        "event": "template_injection_applied",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "injections_applied": injection_result.injections_applied,
+                        "injections_skipped": injection_result.injections_skipped,
+                        "confidence": injection_result.confidence,
+                        "vendor_id": vendor_no,
+                    }
+                    logger.info("[TemplateInjection] Applied for %s: %d injected, %d skipped, confidence=%.2f",
+                                doc_id[:8], injection_result.injections_applied,
+                                injection_result.injections_skipped, injection_result.confidence)
+
+                # Persist audit and optional workflow event
+                update_ops = {"$set": {"template_injection": injection_dict}}
+                if "workflow_event_push" in injection_update:
+                    update_ops["$push"] = {"workflow_events": injection_update["workflow_event_push"]}
+                await db.hub_documents.update_one({"id": doc_id}, update_ops)
+
+            except Exception as inj_err:
+                logger.warning("[TemplateInjection] Gate error for %s: %s — using original lines", doc_id[:8], inj_err)
+
         return bc_lines
     
     # Fallback: No BC history — use extraction + defaults (old behavior)

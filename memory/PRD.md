@@ -243,6 +243,15 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Test endpoint: `POST /api/dev/test-template-injection` in dev_tools.py
 - NOT wired into live draft creation yet
 
+## Template Injection — Live Pipeline Integration (2026-04-12)
+- Wired `inject_extracted_values()` into `_build_pi_lines_with_mapping` in `gpi_integration.py`
+- Feature flag: `ENABLE_TEMPLATE_INJECTION=false` (default OFF)
+- Threshold: `TEMPLATE_INJECTION_CONFIDENCE_THRESHOLD=0.70` (env-configurable, lower than vendor ranking)
+- Injection runs after template line selection, before BC API call
+- On success: replaces bc_lines with injected lines, stores full audit trail as `template_injection`, appends `template_injection_applied` to workflow_events
+- On failure/low-confidence: logs, uses original lines, still stores audit trail
+- Both auto-draft and manual PI creation paths covered (single injection point in `_build_pi_lines_with_mapping`)
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

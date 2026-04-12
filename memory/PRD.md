@@ -190,6 +190,13 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - `decision_explainer_service.py` migrated to use `get_provider("explanation")` — existing behavior unchanged
 - ai_classifier.py and invoice_extractor.py NOT yet migrated (future task)
 
+## Side-by-Side Extraction Comparison Endpoint (2026-04-12)
+- `POST /api/dev/compare-extraction` — runs invoice extraction against baseline (emergent/gemini-2.0-flash) and candidate provider in parallel
+- Route: `routers/dev_tools.py` — JWT-protected, read-only, never writes to DB
+- Uses vision-based extraction (FileContentWithMimeType) for Emergent providers, text fallback for Ollama
+- Returns structured diff: fields_agreed, fields_disagreed, fields_missing_in_candidate/baseline, confidence_delta
+- Diff compares: invoice_number, invoice_date, due_date, vendor_name, po_number, total_amount, tax_amount, currency
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

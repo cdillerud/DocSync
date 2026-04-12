@@ -16,7 +16,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://po-vendor-resolver.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://local-inference-hub.preview.emergentagent.com').rstrip('/')
 
 
 class TestVendorContextBuilder:

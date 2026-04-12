@@ -43,7 +43,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://po-vendor-resolver.preview.emergentagent.com",
+    "api_url": "https://local-inference-hub.preview.emergentagent.com",
     "test_document_id": "44b2e236-c1ab-4e0e-9c23-23f542d68a71"
   },
   "seed_data_creation": "Used existing test document 44b2e236-c1ab-4e0e-9c23-23f542d68a71 with Widget A/Widget B lines",

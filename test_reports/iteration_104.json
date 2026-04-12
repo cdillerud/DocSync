@@ -62,7 +62,7 @@
   },
   "test_credentials": {
     "auth": "admin / admin",
-    "api_url": "https://po-vendor-resolver.preview.emergentagent.com"
+    "api_url": "https://local-inference-hub.preview.emergentagent.com"
   },
   "seed_data_created": {},
   "retest_needed": false,

@@ -67,7 +67,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://po-vendor-resolver.preview.emergentagent.com"
+    "api_url": "https://local-inference-hub.preview.emergentagent.com"
   },
   "seed_data_created": {
     "existing_test_bundles": "TEST-BUNDLE-A (Sales_PO, blocked), TEST-BUNDLE-B (AP_Invoice, draft created), bundle BDL-B739B77E",

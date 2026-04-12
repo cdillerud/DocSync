@@ -235,6 +235,14 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Results include `has_template` flag, `prod_invoices_scanned`, `cutoff_date`, `status` per invoice
 - Frontend shows "PROD vs AI Template (last 3 months)" label and template indicator badge per row
 
+## Template Value Injection Service (2026-04-12)
+- Service: `services/template_value_injector.py` — merges template structure with live extracted values
+- `inject_extracted_values(template_lines, extraction_result, vendor_id, document_context)` → `InjectionResult`
+- Injection rules: amounts from extraction (multi-line preserves template ratios), descriptions via ref injection (LLM or extracted PO/BOL), GL/tax/UOM/line_type always from template
+- Full audit_trail per line per field showing source ("extracted" or "template")
+- Test endpoint: `POST /api/dev/test-template-injection` in dev_tools.py
+- NOT wired into live draft creation yet
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

@@ -285,3 +285,85 @@ async def test_vendor_ranking(
         document_context=body.document_context,
     )
     return result.to_dict()
+
+
+# ---------- template value injection test ----------
+
+class TemplateInjectionRequest(BaseModel):
+    document_id: str
+
+
+@router.post("/test-template-injection")
+async def test_template_injection(
+    body: TemplateInjectionRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Test template value injection for a document. Writes nothing."""
+    _verify_token(authorization)
+
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": body.document_id}, {"_id": 0})
+    if doc is None:
+        from bson import ObjectId
+        try:
+            doc = await db.hub_documents.find_one({"_id": ObjectId(body.document_id)}, {"_id": 0})
+        except Exception:
+            pass
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    vendor_no = (doc.get("bc_vendor_number") or doc.get("vendor_canonical")
+                 or doc.get("matched_vendor_no") or "")
+
+    # Load posting template
+    profile = await db.posting_pattern_analysis.find_one(
+        {"vendor_no": vendor_no, "status": "analyzed"}, {"_id": 0}
+    )
+    template = profile.get("posting_template", {}) if profile else {}
+
+    # Build template lines via existing simulation
+    from routers.posting_patterns import _simulate_template_lines
+    extraction = doc.get("ai_extraction") or {}
+    extracted_fields = doc.get("extracted_fields") or {}
+    ef = {
+        "invoice_number": doc.get("invoice_number_clean") or extracted_fields.get("invoice_number", ""),
+        "amount": doc.get("amount_float") or extraction.get("total_amount") or extracted_fields.get("amount", 0),
+        "invoice_date": doc.get("invoice_date") or extraction.get("invoice_date", ""),
+        "reference_number": "",
+        "detected_pattern": "",
+    }
+    template_lines = _simulate_template_lines(template, ef)
+
+    # Build extraction result for injector
+    extraction_result = {
+        **(extraction or {}),
+        "invoice_number_clean": doc.get("invoice_number_clean"),
+        "amount_float": doc.get("amount_float"),
+        "vendor_raw": doc.get("vendor_raw"),
+        "po_number": doc.get("po_number_clean") or extracted_fields.get("po_number"),
+        "bol_number": doc.get("bol_number") or extraction.get("bol_number"),
+    }
+
+    # Build document context
+    doc_context = {
+        "doc_type": doc.get("doc_type"),
+        "raw_text_snippet": (doc.get("text_content") or "")[:500],
+        "file_name": doc.get("file_name"),
+    }
+
+    from services.template_value_injector import inject_extracted_values
+    result = await inject_extracted_values(
+        template_lines=template_lines,
+        extraction_result=extraction_result,
+        vendor_id=vendor_no,
+        document_context=doc_context,
+    )
+
+    return {
+        "document_id": body.document_id,
+        "vendor_no": vendor_no,
+        "template_available": bool(template),
+        "template_line_count": len(template_lines),
+        "extraction_available": bool(extraction),
+        **result.to_dict(),
+    }

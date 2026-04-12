@@ -6,17 +6,16 @@ of why it is in its current workflow status.
 Read-only — never writes to the database.
 """
 
-import os
 import json
 import logging
 from datetime import datetime, timezone
 from dataclasses import dataclass, asdict
 from typing import Dict, Any, Optional
 
-logger = logging.getLogger(__name__)
+from services.llm_router import get_provider
+from services.providers.base_provider import LLMProviderError
 
-EXPLAINER_MODEL_PROVIDER = "gemini"
-EXPLAINER_MODEL_NAME = "gemini-2.0-flash"
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -40,19 +39,22 @@ async def explain_document_status(document: Dict[str, Any]) -> ExplainerResult:
     """
     doc_id = document.get("id", "unknown")
     generated_at = datetime.now(timezone.utc).isoformat()
-    model_used = f"{EXPLAINER_MODEL_PROVIDER}/{EXPLAINER_MODEL_NAME}"
 
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
-    if not api_key:
+    # ---- obtain provider ----
+    try:
+        provider = get_provider("explanation")
+    except LLMProviderError as e:
         return ExplainerResult(
             document_id=doc_id,
             explanation="",
             blocking_reason=None,
             next_action=None,
-            model_used=model_used,
+            model_used="none",
             generated_at=generated_at,
-            error="EMERGENT_LLM_KEY not configured",
+            error=str(e),
         )
+
+    model_used = f"{provider.__class__.__name__}"
 
     # ---- build context ----
     parts = []
@@ -122,7 +124,7 @@ async def explain_document_status(document: Dict[str, Any]) -> ExplainerResult:
 
     context_str = "\n".join(parts) if parts else "(no context fields available)"
 
-    system_message = (
+    system_prompt = (
         "You are a workflow-status explainer for a document processing hub. "
         "Given the current state of a document, respond ONLY with a JSON object "
         "using this exact schema:\n"
@@ -137,17 +139,12 @@ async def explain_document_status(document: Dict[str, Any]) -> ExplainerResult:
     user_prompt = f"Explain the current state of this document:\n\n{context_str}"
 
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-
-        chat = LlmChat(
-            api_key=api_key,
+        raw = await provider.complete(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
             session_id=f"explain_{doc_id}",
-            system_message=system_message,
-        ).with_model(EXPLAINER_MODEL_PROVIDER, EXPLAINER_MODEL_NAME)
-
-        response = await chat.send_message(UserMessage(text=user_prompt))
-
-        raw = str(response).strip()
+            expect_json=True,
+        )
         logger.info("Explainer raw response for %s: %s", doc_id, raw)
 
         # extract JSON
@@ -170,7 +167,7 @@ async def explain_document_status(document: Dict[str, Any]) -> ExplainerResult:
         )
 
     except (json.JSONDecodeError, ValueError) as e:
-        logger.warning("Failed to parse model response for %s: %s — raw: %s", doc_id, e, raw if 'raw' in dir() else "N/A")
+        logger.warning("Failed to parse model response for %s: %s", doc_id, e)
         return ExplainerResult(
             document_id=doc_id,
             explanation="",
@@ -181,8 +178,8 @@ async def explain_document_status(document: Dict[str, Any]) -> ExplainerResult:
             error="Failed to parse model response",
         )
 
-    except ImportError as e:
-        logger.error("emergentintegrations not installed: %s", e)
+    except LLMProviderError as e:
+        logger.error("LLM provider error for %s: %s", doc_id, e)
         return ExplainerResult(
             document_id=doc_id,
             explanation="",
@@ -190,11 +187,11 @@ async def explain_document_status(document: Dict[str, Any]) -> ExplainerResult:
             next_action=None,
             model_used=model_used,
             generated_at=generated_at,
-            error=f"emergentintegrations not available: {e}",
+            error=str(e),
         )
 
     except Exception as e:
-        logger.error("Explainer LLM call failed for %s: %s", doc_id, e)
+        logger.error("Explainer failed for %s: %s", doc_id, e)
         return ExplainerResult(
             document_id=doc_id,
             explanation="",

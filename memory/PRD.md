@@ -223,6 +223,11 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Frontend: "Daily Trace Feed" card on Invoice Trace page with summary stats, clickable vendor rows, "Run Now" button
 - Configurable: `DAILY_TRACE_COUNT=15` (env var)
 
+## Daily Trace Trend Tracking (2026-04-12)
+- `GET /api/posting-patterns/daily-trace/trend?days=30` — returns historical avg match rates + vendor leaderboard
+- Frontend: SVG sparkline chart showing match rate trend over time, vendor performance leaderboard (collapsible)
+- Trend auto-populates as daily runs accumulate; sparkline appears after 2+ data points
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

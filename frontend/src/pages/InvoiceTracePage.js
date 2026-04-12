@@ -139,22 +139,80 @@ function MatchPill({ rate }) {
   return <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded-full ${color}`}>{rate}%</span>;
 }
 
+/* ─── SVG Sparkline ─── */
+function Sparkline({ points, width = 260, height = 48 }) {
+  if (!points || points.length < 2) return null;
+  const rates = points.map(p => p.avg_match_rate);
+  const max = Math.max(...rates, 100);
+  const min = Math.min(...rates, 0);
+  const range = max - min || 1;
+  const step = width / (rates.length - 1);
+  const coords = rates.map((v, i) => ({
+    x: i * step,
+    y: height - ((v - min) / range) * (height - 4) - 2,
+  }));
+  const pathD = coords.map((c, i) => `${i === 0 ? 'M' : 'L'}${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
+  const areaD = `${pathD} L${width},${height} L0,${height} Z`;
+  const last = coords[coords.length - 1];
+  const lastRate = rates[rates.length - 1];
+  const dotColor = lastRate >= 80 ? '#10b981' : lastRate >= 50 ? '#f59e0b' : '#ef4444';
+
+  return (
+    <svg width={width} height={height} className="overflow-visible" data-testid="trend-sparkline">
+      <defs>
+        <linearGradient id="sparkFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={dotColor} stopOpacity="0.15" />
+          <stop offset="100%" stopColor={dotColor} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={areaD} fill="url(#sparkFill)" />
+      <path d={pathD} fill="none" stroke={dotColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={last.x} cy={last.y} r="3" fill={dotColor} />
+    </svg>
+  );
+}
+
+/* ─── Vendor Leaderboard Row ─── */
+function LeaderRow({ v, rank, onClick }) {
+  const color = v.avg_match_rate >= 80 ? 'text-emerald-500' : v.avg_match_rate >= 50 ? 'text-amber-500' : 'text-red-500';
+  return (
+    <div
+      className="flex items-center gap-3 py-1.5 px-2 rounded hover:bg-muted/50 cursor-pointer transition-colors text-xs"
+      onClick={() => onClick(v.vendor_no)}
+      data-testid={`leader-${v.vendor_no}`}
+    >
+      <span className="text-muted-foreground w-5 text-right font-mono">{rank}</span>
+      <span className="font-mono font-semibold text-blue-600 w-16 shrink-0">{v.vendor_no}</span>
+      <span className="flex-1 truncate text-muted-foreground">{v.vendor_name}</span>
+      <span className={`font-mono font-bold w-10 text-right ${color}`}>{v.avg_match_rate}%</span>
+      <span className="text-muted-foreground w-8 text-right">{v.traces_count}x</span>
+    </div>
+  );
+}
+
 /* ─── Daily Trace Feed ─── */
 function DailyTraceFeed({ onSelectVendor }) {
   const [latestRun, setLatestRun] = useState(null);
+  const [trend, setTrend] = useState(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
 
-  const fetchLatest = async () => {
+  const fetchData = async () => {
     try {
-      const res = await fetch(`${API}/api/posting-patterns/daily-trace/latest`);
-      const data = await res.json();
-      if (!data.error) setLatestRun(data);
+      const [latestRes, trendRes] = await Promise.all([
+        fetch(`${API}/api/posting-patterns/daily-trace/latest`),
+        fetch(`${API}/api/posting-patterns/daily-trace/trend?days=30`),
+      ]);
+      const latestData = await latestRes.json();
+      const trendData = await trendRes.json();
+      if (!latestData.error) setLatestRun(latestData);
+      if (trendData.points) setTrend(trendData);
     } catch { /* ignore */ }
     setLoading(false);
   };
 
-  useEffect(() => { fetchLatest(); }, []);
+  useEffect(() => { fetchData(); }, []);
 
   const handleRunNow = async () => {
     setRunning(true);
@@ -162,6 +220,10 @@ function DailyTraceFeed({ onSelectVendor }) {
       const res = await fetch(`${API}/api/posting-patterns/daily-trace/run?sync=true&count=15`, { method: 'POST' });
       const data = await res.json();
       if (!data.error) setLatestRun(data);
+      // Refresh trend after new run
+      const trendRes = await fetch(`${API}/api/posting-patterns/daily-trace/trend?days=30`);
+      const trendData = await trendRes.json();
+      if (trendData.points) setTrend(trendData);
     } catch { /* ignore */ }
     setRunning(false);
   };
@@ -207,7 +269,7 @@ function DailyTraceFeed({ onSelectVendor }) {
 
         {!loading && latestRun && (
           <>
-            {/* Summary strip */}
+            {/* Summary strip + Trend */}
             <div className="flex items-center gap-6 mb-4 pb-3 border-b border-border/40">
               <div className="text-center">
                 <p className={`text-2xl font-bold ${matchColor}`}>{avgMatch}%</p>
@@ -221,13 +283,46 @@ function DailyTraceFeed({ onSelectVendor }) {
                 <p className="text-lg font-bold text-red-500">{results.filter(r => r.error).length}</p>
                 <p className="text-[10px] text-muted-foreground">Errors</p>
               </div>
-              <div className="flex-1 text-right">
-                <div className="flex items-center gap-1.5 justify-end text-xs text-muted-foreground">
-                  <TrendingUp className="w-3.5 h-3.5" />
-                  <span>{latestRun.traces_requested} invoices across random vendors</span>
+              {/* Sparkline trend */}
+              {trend && trend.points && trend.points.length >= 2 && (
+                <div className="flex-1 flex flex-col items-center gap-0.5">
+                  <Sparkline points={trend.points} width={220} height={36} />
+                  <span className="text-[9px] text-muted-foreground">{trend.data_points}-day trend (overall avg: {trend.overall_avg}%)</span>
                 </div>
-              </div>
+              )}
+              {!trend || !trend.points || trend.points.length < 2 ? (
+                <div className="flex-1 text-right">
+                  <div className="flex items-center gap-1.5 justify-end text-xs text-muted-foreground">
+                    <TrendingUp className="w-3.5 h-3.5" />
+                    <span>{latestRun.traces_requested} invoices across random vendors</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Trend chart appears after 2+ daily runs</p>
+                </div>
+              ) : null}
+              {/* Leaderboard toggle */}
+              {trend && trend.vendor_leaderboard && trend.vendor_leaderboard.length > 0 && (
+                <Button
+                  size="sm" variant="ghost" className="h-7 text-xs"
+                  onClick={() => setShowLeaderboard(!showLeaderboard)}
+                  data-testid="toggle-leaderboard-btn"
+                >
+                  <TrendingUp className="w-3.5 h-3.5 mr-1" />
+                  {showLeaderboard ? 'Hide' : 'Top Vendors'}
+                </Button>
+              )}
             </div>
+
+            {/* Vendor Leaderboard (collapsible) */}
+            {showLeaderboard && trend?.vendor_leaderboard && (
+              <div className="mb-4 pb-3 border-b border-border/40" data-testid="vendor-leaderboard">
+                <p className="text-xs font-semibold text-muted-foreground mb-2 px-2">Vendor Performance (30-day window)</p>
+                <ScrollArea className="max-h-[200px]">
+                  {trend.vendor_leaderboard.map((v, i) => (
+                    <LeaderRow key={v.vendor_no} v={v} rank={i + 1} onClick={onSelectVendor} />
+                  ))}
+                </ScrollArea>
+              </div>
+            )}
 
             {/* Results table */}
             <ScrollArea className="max-h-[350px]">

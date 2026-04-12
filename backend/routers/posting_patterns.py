@@ -2355,6 +2355,69 @@ async def get_latest_daily_trace():
     return run
 
 
+@router.get("/daily-trace/trend")
+async def get_daily_trace_trend(
+    days: int = Query(30, ge=1, le=365, description="How many days of history"),
+):
+    """
+    Return daily avg match rates over time for trend charting.
+    Also breaks down per-vendor performance across the window.
+    """
+    db = get_db()
+    cutoff = datetime.now(timezone.utc).isoformat()[:10]  # today
+    # Fetch recent runs
+    cursor = db.daily_trace_results.find(
+        {}, {"_id": 0, "run_id": 1, "run_date": 1, "avg_match_rate": 1,
+             "traces_success": 1, "traces_error": 1, "traces_requested": 1,
+             "results": 1}
+    ).sort("run_date", -1).limit(days)
+
+    points = []
+    vendor_agg = {}  # vendor_no -> {total_match, count, name}
+    async for run in cursor:
+        run_date = run.get("run_date", "")[:10]
+        points.append({
+            "date": run_date,
+            "avg_match_rate": run.get("avg_match_rate", 0),
+            "traced": run.get("traces_success", 0),
+            "errors": run.get("traces_error", 0),
+        })
+        # Aggregate per-vendor stats
+        for r in run.get("results", []):
+            vno = r.get("vendor_no", "")
+            if not vno or r.get("match_rate") is None:
+                continue
+            if vno not in vendor_agg:
+                vendor_agg[vno] = {"name": r.get("vendor_name", vno), "total": 0, "count": 0, "rates": []}
+            vendor_agg[vno]["total"] += r["match_rate"]
+            vendor_agg[vno]["count"] += 1
+            vendor_agg[vno]["rates"].append(r["match_rate"])
+
+    points.reverse()  # chronological order
+
+    # Build vendor leaderboard
+    vendor_stats = []
+    for vno, agg in vendor_agg.items():
+        avg = round(agg["total"] / agg["count"]) if agg["count"] else 0
+        vendor_stats.append({
+            "vendor_no": vno,
+            "vendor_name": agg["name"],
+            "avg_match_rate": avg,
+            "traces_count": agg["count"],
+            "min_rate": min(agg["rates"]) if agg["rates"] else 0,
+            "max_rate": max(agg["rates"]) if agg["rates"] else 0,
+        })
+    vendor_stats.sort(key=lambda x: x["avg_match_rate"], reverse=True)
+
+    return {
+        "days_requested": days,
+        "data_points": len(points),
+        "points": points,
+        "vendor_leaderboard": vendor_stats[:20],
+        "overall_avg": round(sum(p["avg_match_rate"] for p in points) / max(len(points), 1)) if points else 0,
+    }
+
+
 def _build_line_summary(lines: list) -> dict:
     """Summarize invoice lines into comparable dimensions."""
     if not lines:

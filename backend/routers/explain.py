@@ -128,3 +128,76 @@ async def get_so_review_feedback(
     from services.sales_order_reviewer_feedback_service import get_feedback_for_document
     records = await get_feedback_for_document(db, document_id)
     return {"document_id": document_id, "feedback": records, "total": len(records)}
+
+
+@router.get("/{document_id}/sales-order-advisory")
+async def get_sales_order_advisory(
+    document_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Consolidated SO advisory endpoint: combines readiness review,
+    explainer, customer profile context, and reviewer feedback
+    into a single response for the unified panel.
+    """
+    _verify_token(authorization)
+    db = get_db()
+
+    doc = await db.hub_documents.find_one({"id": document_id}, {"_id": 0})
+    if doc is None:
+        try:
+            doc = await db.hub_documents.find_one({"_id": ObjectId(document_id)}, {"_id": 0})
+        except Exception:
+            pass
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # 1. Explainer
+    from services.sales_order_decision_explainer import explain_sales_order_decision
+    explainer = (await explain_sales_order_decision(doc, db=db)).to_dict()
+
+    # 2. Raw readiness review (from document)
+    review = doc.get("so_readiness_review") or {}
+
+    # 3. Customer profile summary
+    customer_no = doc.get("matched_customer_no") or doc.get("customer_no") or ""
+    profile_summary = None
+    if customer_no:
+        profile = await db.customer_posting_profiles.find_one(
+            {"customer_no": customer_no, "status": "analyzed"}, {"_id": 0}
+        )
+        if profile:
+            profile_summary = {
+                "customer_no": profile.get("customer_no"),
+                "customer_name": profile.get("customer_name"),
+                "template_confidence": profile.get("template_confidence"),
+                "invoices_analyzed": profile.get("invoices_analyzed"),
+                "typical_order_value": profile.get("typical_order_value"),
+                "amount_range": profile.get("amount_range"),
+                "common_items_count": len(profile.get("common_items", [])),
+                "top_items": profile.get("common_items", [])[:5],
+            }
+
+    # 4. Feedback
+    from services.sales_order_reviewer_feedback_service import get_feedback_for_document
+    feedback_records = await get_feedback_for_document(db, document_id)
+
+    return {
+        "document_id": document_id,
+        "has_review": bool(review and not review.get("error")),
+        "has_profile": profile_summary is not None,
+        "has_feedback": len(feedback_records) > 0,
+        "explainer": explainer,
+        "review": {
+            "readiness_status": review.get("readiness_status"),
+            "confidence": review.get("confidence"),
+            "blocking_issues": review.get("blocking_issues", []),
+            "warnings": review.get("warnings", []),
+            "unusual_patterns": review.get("unusual_patterns", []),
+            "profile_matches": review.get("profile_matches", []),
+            "model_used": review.get("model_used"),
+            "reviewed_at": review.get("reviewed_at"),
+        } if review else None,
+        "customer_profile": profile_summary,
+        "feedback": feedback_records,
+    }

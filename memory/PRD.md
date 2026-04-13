@@ -308,6 +308,15 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Full filter support: date_from/to, customer_no, reviewer, model, readiness_status, assessment, decision
 - Analytics only — never changes workflow or decisions
 
+## Unified SO Advisory Panel (2026-04-13)
+- Consolidated backend endpoint: `GET /api/documents/{id}/sales-order-advisory` — single call returns explainer + review + customer profile + feedback
+- Frontend: Rewrote `SOReviewFeedbackPanel` as unified panel — compact, collapsible, shows full advisory story:
+  - Status badge + confidence in header (collapsed view: headline only)
+  - Expanded: summary, 4-stat row (blocking/warnings/unusual/matches), detail sections with icons, customer profile context, next steps
+  - Feedback section: shows existing feedback or inline form (assessment, decision, disagreed fields, notes)
+  - Loading/empty/no-review/no-profile states all handled
+- Reuses all existing services — no changes to underlying logic
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

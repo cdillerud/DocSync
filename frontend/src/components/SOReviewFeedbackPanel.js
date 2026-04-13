@@ -2,9 +2,11 @@ import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
+import { ScrollArea } from './ui/scroll-area';
 import {
-  MessageSquare, ThumbsUp, ThumbsDown, AlertTriangle,
-  ChevronDown, ChevronUp, Send, Loader2, CheckCircle2
+  MessageSquare, ThumbsUp, ThumbsDown, AlertTriangle, Shield,
+  ChevronDown, ChevronUp, Send, Loader2, CheckCircle2, XCircle,
+  Eye, UserCheck, Zap, Clock
 } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -17,67 +19,51 @@ const ASSESSMENTS = [
   { value: 'not_helpful', label: 'Not Helpful', icon: ThumbsDown, color: 'text-muted-foreground bg-muted/50 border-border hover:bg-muted' },
 ];
 
+const DECISIONS = ['ready', 'needs_review', 'suspicious', 'incomplete'];
+
 const DISAGREED_OPTIONS = [
   'ship_to', 'amount_range', 'item_match', 'uom',
   'po_pattern', 'customer_profile_assumption', 'line_count',
   'readiness_status', 'confidence', 'other',
 ];
 
-const DECISIONS = ['ready', 'needs_review', 'suspicious', 'incomplete'];
+const STATUS_CONFIG = {
+  ready:        { icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-500/10 border-emerald-300', label: 'Ready' },
+  needs_review: { icon: Eye,          color: 'text-amber-600',   bg: 'bg-amber-500/10 border-amber-300',   label: 'Needs Review' },
+  suspicious:   { icon: Shield,       color: 'text-red-600',     bg: 'bg-red-500/10 border-red-300',       label: 'Suspicious' },
+  incomplete:   { icon: XCircle,      color: 'text-orange-600',  bg: 'bg-orange-500/10 border-orange-300', label: 'Incomplete' },
+};
 
 export default function SOReviewFeedbackPanel({ document }) {
-  const [explainer, setExplainer] = useState(null);
-  const [loadingExplainer, setLoadingExplainer] = useState(false);
+  const [advisory, setAdvisory] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [showFeedbackForm, setShowFeedbackForm] = useState(false);
   const [assessment, setAssessment] = useState('');
   const [decision, setDecision] = useState('');
   const [disagreed, setDisagreed] = useState([]);
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-  const [existingFeedback, setExistingFeedback] = useState(null);
 
   const docId = document?.id;
   const token = typeof window !== 'undefined' ? localStorage.getItem('gpi_token') : null;
   const isSalesType = ['Sales_Order', 'SalesOrder', 'SALES_ORDER', 'SALES_INVOICE', 'SalesInvoice'].includes(document?.document_type || document?.doc_type);
 
-  const fetchExplainer = useCallback(async () => {
+  const fetchAdvisory = useCallback(async () => {
     if (!docId || !token) return;
-    setLoadingExplainer(true);
+    setLoading(true);
     try {
-      const res = await fetch(`${API}/api/documents/${docId}/sales-order-explainer`, {
+      const res = await fetch(`${API}/api/documents/${docId}/sales-order-advisory`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (res.ok) {
-        const data = await res.json();
-        setExplainer(data);
-      }
+      if (res.ok) setAdvisory(await res.json());
     } catch { /* ignore */ }
-    setLoadingExplainer(false);
-  }, [docId, token]);
-
-  const fetchFeedback = useCallback(async () => {
-    if (!docId || !token) return;
-    try {
-      const res = await fetch(`${API}/api/documents/${docId}/sales-order-review-feedback`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.feedback?.length > 0) {
-          setExistingFeedback(data.feedback[0]);
-          setSubmitted(true);
-        }
-      }
-    } catch { /* ignore */ }
+    setLoading(false);
   }, [docId, token]);
 
   useEffect(() => {
-    if (isSalesType) {
-      fetchExplainer();
-      fetchFeedback();
-    }
-  }, [isSalesType, fetchExplainer, fetchFeedback]);
+    if (isSalesType) fetchAdvisory();
+  }, [isSalesType, fetchAdvisory]);
 
   if (!isSalesType) return null;
 
@@ -96,209 +82,252 @@ export default function SOReviewFeedbackPanel({ document }) {
         }),
       });
       if (res.ok) {
-        const data = await res.json();
-        setExistingFeedback(data);
-        setSubmitted(true);
+        setShowFeedbackForm(false);
+        fetchAdvisory(); // refresh to show new feedback
       }
     } catch { /* ignore */ }
     setSubmitting(false);
   };
 
-  const toggleDisagreed = (field) => {
-    setDisagreed(prev => prev.includes(field) ? prev.filter(f => f !== field) : [...prev, field]);
-  };
-
-  const statusColor = {
-    ready: 'bg-emerald-500/10 text-emerald-600 border-emerald-300',
-    needs_review: 'bg-amber-500/10 text-amber-600 border-amber-300',
-    suspicious: 'bg-red-500/10 text-red-600 border-red-300',
-    incomplete: 'bg-orange-500/10 text-orange-600 border-orange-300',
-  };
+  const ex = advisory?.explainer || {};
+  const review = advisory?.review || {};
+  const profile = advisory?.customer_profile;
+  const feedback = advisory?.feedback || [];
+  const latestFb = feedback[0];
+  const statusCfg = STATUS_CONFIG[ex.readiness_status || review?.readiness_status] || STATUS_CONFIG.needs_review;
+  const StatusIcon = statusCfg.icon;
+  const confidence = ex.reviewer_confidence || review?.confidence || 0;
 
   return (
-    <Card data-testid="so-review-feedback-panel">
+    <Card data-testid="so-advisory-panel">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm flex items-center gap-2">
-            <MessageSquare className="w-4 h-4 text-muted-foreground" />
-            AI Advisory Review
-            {explainer?.readiness_status && (
-              <Badge variant="outline" className={`text-[10px] ${statusColor[explainer.readiness_status] || ''}`} data-testid="so-explainer-status">
-                {explainer.readiness_status}
+            <Zap className="w-4 h-4 text-muted-foreground" />
+            <span>SO Advisory</span>
+            {!loading && advisory?.has_review && (
+              <>
+                <Badge variant="outline" className={`text-[10px] ${statusCfg.bg}`} data-testid="advisory-status">
+                  <StatusIcon className="w-3 h-3 mr-0.5" />
+                  {statusCfg.label}
+                </Badge>
+                {confidence > 0 && (
+                  <span className={`text-[10px] font-mono ${statusCfg.color}`} data-testid="advisory-confidence">
+                    {Math.round(confidence * 100)}%
+                  </span>
+                )}
+              </>
+            )}
+            {!loading && !advisory?.has_review && (
+              <Badge variant="outline" className="text-[10px] text-muted-foreground">No Review</Badge>
+            )}
+            {latestFb && (
+              <Badge variant="outline" className="text-[10px] text-blue-600 border-blue-300" data-testid="advisory-feedback-badge">
+                <UserCheck className="w-3 h-3 mr-0.5" />
+                {latestFb.reviewer_assessment}
               </Badge>
             )}
-            {explainer?.reviewer_confidence > 0 && (
-              <span className="text-[10px] text-muted-foreground font-mono" data-testid="so-explainer-confidence">
-                {Math.round(explainer.reviewer_confidence * 100)}%
-              </span>
-            )}
           </CardTitle>
-          <Button
-            size="sm" variant="ghost" className="h-6 text-xs px-2"
-            onClick={() => setExpanded(!expanded)}
-            data-testid="so-feedback-toggle"
-          >
+          <Button size="sm" variant="ghost" className="h-6 px-2" onClick={() => setExpanded(!expanded)} data-testid="advisory-toggle">
             {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </Button>
         </div>
       </CardHeader>
 
-      {/* Collapsed: show headline only */}
-      {!expanded && explainer && (
+      {/* Collapsed summary */}
+      {!expanded && !loading && (
         <CardContent className="pt-0 pb-3">
-          <p className="text-xs text-muted-foreground" data-testid="so-explainer-headline">{explainer.headline}</p>
-          {submitted && existingFeedback && (
-            <div className="flex items-center gap-1.5 mt-1.5">
-              <CheckCircle2 className="w-3 h-3 text-emerald-500" />
-              <span className="text-[10px] text-emerald-600">Feedback submitted: {existingFeedback.reviewer_assessment || existingFeedback.assessment}</span>
-            </div>
-          )}
+          <p className="text-xs text-muted-foreground" data-testid="advisory-headline">
+            {ex.headline || (advisory?.has_review ? review?.readiness_status : 'No advisory review available')}
+          </p>
         </CardContent>
       )}
 
-      {/* Expanded: full explainer + feedback form */}
-      {expanded && (
+      {/* Loading */}
+      {loading && (
+        <CardContent className="pt-0 pb-3">
+          <div className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /><span className="text-xs text-muted-foreground">Loading advisory...</span></div>
+        </CardContent>
+      )}
+
+      {/* Expanded */}
+      {expanded && !loading && (
         <CardContent className="pt-0 space-y-3">
-          {loadingExplainer && (
-            <div className="flex items-center gap-2 py-2">
-              <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-              <span className="text-xs text-muted-foreground">Loading advisory review...</span>
+          {/* Summary */}
+          {ex.plain_english_summary && (
+            <p className="text-xs leading-relaxed" data-testid="advisory-summary">{ex.plain_english_summary}</p>
+          )}
+
+          {/* Status cards row */}
+          <div className="grid grid-cols-4 gap-2">
+            <MiniStat label="Blocking" count={(review?.blocking_issues || ex.why_it_was_flagged || []).length} color="text-red-600" />
+            <MiniStat label="Warnings" count={(review?.warnings || []).length} color="text-amber-600" />
+            <MiniStat label="Unusual" count={(review?.unusual_patterns || []).length} color="text-orange-600" />
+            <MiniStat label="Matches" count={(review?.profile_matches || ex.what_looks_normal || []).length} color="text-emerald-600" />
+          </div>
+
+          {/* Blocking issues */}
+          <DetailSection
+            items={review?.blocking_issues || []}
+            label="Blocking Issues"
+            color="text-red-600"
+            icon={XCircle}
+            testId="advisory-blocking"
+          />
+
+          {/* Warnings */}
+          <DetailSection
+            items={review?.warnings || []}
+            label="Warnings"
+            color="text-amber-600"
+            icon={AlertTriangle}
+            testId="advisory-warnings"
+          />
+
+          {/* Unusual patterns */}
+          <DetailSection
+            items={review?.unusual_patterns || []}
+            label="Unusual Patterns"
+            color="text-orange-600"
+            icon={Shield}
+            testId="advisory-unusual"
+          />
+
+          {/* What looks normal */}
+          <DetailSection
+            items={ex.what_looks_normal || []}
+            label="Matches History"
+            color="text-emerald-600"
+            icon={CheckCircle2}
+            testId="advisory-matches"
+          />
+
+          {/* Next steps */}
+          {(ex.recommended_next_steps || []).length > 0 && (
+            <div data-testid="advisory-nextsteps">
+              <p className="text-[10px] font-semibold text-blue-600 mb-0.5">Next Steps</p>
+              {ex.recommended_next_steps.map((s, i) => (
+                <p key={i} className="text-[11px] text-blue-600/80 pl-2">- {s}</p>
+              ))}
             </div>
           )}
 
-          {explainer && (
-            <div className="space-y-2" data-testid="so-explainer-detail">
-              <p className="text-sm font-medium">{explainer.headline}</p>
-              <p className="text-xs text-muted-foreground">{explainer.plain_english_summary}</p>
-
-              {explainer.why_it_was_flagged?.length > 0 && (
-                <div>
-                  <p className="text-[10px] font-semibold text-red-600 mb-0.5">Flagged:</p>
-                  {explainer.why_it_was_flagged.map((f, i) => (
-                    <p key={i} className="text-[11px] text-red-600/80 pl-2">- {f}</p>
-                  ))}
-                </div>
-              )}
-
-              {explainer.what_looks_normal?.length > 0 && (
-                <div>
-                  <p className="text-[10px] font-semibold text-emerald-600 mb-0.5">Normal:</p>
-                  {explainer.what_looks_normal.map((n, i) => (
-                    <p key={i} className="text-[11px] text-emerald-600/80 pl-2">- {n}</p>
-                  ))}
-                </div>
-              )}
-
-              {explainer.recommended_next_steps?.length > 0 && (
-                <div>
-                  <p className="text-[10px] font-semibold text-blue-600 mb-0.5">Next steps:</p>
-                  {explainer.recommended_next_steps.map((s, i) => (
-                    <p key={i} className="text-[11px] text-blue-600/80 pl-2">- {s}</p>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {!explainer && !loadingExplainer && (
-            <p className="text-xs text-muted-foreground py-2">No advisory review available for this document.</p>
-          )}
-
-          {/* Feedback form */}
-          <div className="border-t border-border/40 pt-3 space-y-2" data-testid="so-feedback-form">
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Your Feedback</p>
-
-            {submitted && existingFeedback ? (
-              <div className="flex items-center gap-2 py-1">
-                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                <span className="text-xs text-emerald-600">
-                  Feedback recorded: <strong>{existingFeedback.reviewer_assessment || existingFeedback.assessment}</strong>
-                  {(existingFeedback.final_human_decision || existingFeedback.decision) && (
-                    <> — decision: <strong>{existingFeedback.final_human_decision || existingFeedback.decision}</strong></>
-                  )}
+          {/* Customer profile context */}
+          {profile && (
+            <div className="border-t border-border/40 pt-2" data-testid="advisory-profile">
+              <p className="text-[10px] font-semibold text-muted-foreground mb-1">Customer Profile</p>
+              <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[10px] text-muted-foreground">
+                <span>
+                  <span className="font-mono font-semibold text-foreground">{profile.customer_no}</span> {profile.customer_name}
                 </span>
+                <span>Confidence: <strong>{profile.template_confidence}</strong></span>
+                <span>{profile.invoices_analyzed} orders analyzed</span>
+                <span>Avg: ${profile.typical_order_value?.toLocaleString()}</span>
+                <span>{profile.common_items_count} known items</span>
+              </div>
+            </div>
+          )}
+          {advisory && !profile && (
+            <div className="border-t border-border/40 pt-2">
+              <p className="text-[10px] text-muted-foreground italic">No customer posting profile available</p>
+            </div>
+          )}
+
+          {/* Feedback section */}
+          <div className="border-t border-border/40 pt-2" data-testid="advisory-feedback-section">
+            {latestFb && !showFeedbackForm ? (
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <UserCheck className="w-3.5 h-3.5 text-blue-500" />
+                  <span className="text-xs">
+                    <strong>{latestFb.reviewer_user_id}</strong> assessed as{' '}
+                    <Badge variant="outline" className="text-[9px] mx-0.5">{latestFb.reviewer_assessment}</Badge>
+                    {latestFb.final_human_decision && (
+                      <> decision: <Badge variant="outline" className="text-[9px]">{latestFb.final_human_decision}</Badge></>
+                    )}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[9px] text-muted-foreground">
+                    <Clock className="w-3 h-3 inline mr-0.5" />
+                    {latestFb.timestamp ? new Date(latestFb.timestamp).toLocaleDateString() : ''}
+                  </span>
+                  <Button size="sm" variant="ghost" className="h-5 text-[10px] px-1.5" onClick={() => setShowFeedbackForm(true)} data-testid="advisory-edit-feedback">
+                    Update
+                  </Button>
+                </div>
               </div>
             ) : (
               <>
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
+                  {latestFb ? 'Update Feedback' : 'Your Feedback'}
+                </p>
+
                 {/* Assessment buttons */}
-                <div className="flex flex-wrap gap-1.5" data-testid="so-feedback-assessments">
+                <div className="flex flex-wrap gap-1.5 mb-2" data-testid="advisory-assessments">
                   {ASSESSMENTS.map(a => {
                     const Icon = a.icon;
-                    const selected = assessment === a.value;
+                    const sel = assessment === a.value;
                     return (
                       <button
                         key={a.value}
                         onClick={() => setAssessment(a.value)}
-                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] transition-colors ${selected ? a.color + ' ring-1 ring-offset-1' : 'border-border text-muted-foreground hover:bg-muted/50'}`}
-                        data-testid={`so-feedback-${a.value}`}
+                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] transition-colors ${sel ? a.color + ' ring-1 ring-offset-1' : 'border-border text-muted-foreground hover:bg-muted/50'}`}
+                        data-testid={`advisory-fb-${a.value}`}
                       >
-                        <Icon className="w-3 h-3" />
-                        {a.label}
+                        <Icon className="w-3 h-3" />{a.label}
                       </button>
                     );
                   })}
                 </div>
 
-                {/* Decision override */}
                 {assessment && (
-                  <div>
-                    <p className="text-[10px] text-muted-foreground mb-1">Your decision (optional):</p>
-                    <div className="flex gap-1.5" data-testid="so-feedback-decisions">
-                      {DECISIONS.map(d => (
-                        <button
-                          key={d}
-                          onClick={() => setDecision(prev => prev === d ? '' : d)}
-                          className={`px-2 py-0.5 rounded text-[10px] border transition-colors ${decision === d ? 'bg-primary/10 text-primary border-primary/30' : 'border-border text-muted-foreground hover:bg-muted/50'}`}
-                          data-testid={`so-feedback-decision-${d}`}
-                        >
-                          {d.replace('_', ' ')}
-                        </button>
-                      ))}
+                  <>
+                    {/* Decision */}
+                    <div className="mb-2">
+                      <p className="text-[10px] text-muted-foreground mb-1">Your decision (optional):</p>
+                      <div className="flex gap-1.5">
+                        {DECISIONS.map(d => (
+                          <button key={d} onClick={() => setDecision(p => p === d ? '' : d)}
+                            className={`px-2 py-0.5 rounded text-[10px] border transition-colors ${decision === d ? 'bg-primary/10 text-primary border-primary/30' : 'border-border text-muted-foreground hover:bg-muted/50'}`}
+                            data-testid={`advisory-fb-dec-${d}`}
+                          >{d.replace('_', ' ')}</button>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
 
-                {/* Disagreed fields */}
-                {assessment && assessment !== 'correct' && (
-                  <div>
-                    <p className="text-[10px] text-muted-foreground mb-1">Disagreed with (optional):</p>
-                    <div className="flex flex-wrap gap-1" data-testid="so-feedback-disagreed">
-                      {DISAGREED_OPTIONS.map(f => (
-                        <button
-                          key={f}
-                          onClick={() => toggleDisagreed(f)}
-                          className={`px-1.5 py-0.5 rounded text-[9px] border transition-colors ${disagreed.includes(f) ? 'bg-red-500/10 text-red-600 border-red-300' : 'border-border text-muted-foreground hover:bg-muted/50'}`}
-                          data-testid={`so-feedback-field-${f}`}
-                        >
-                          {f.replace(/_/g, ' ')}
-                        </button>
-                      ))}
+                    {/* Disagreed fields (only if not "correct") */}
+                    {assessment !== 'correct' && (
+                      <div className="mb-2">
+                        <p className="text-[10px] text-muted-foreground mb-1">Disagreed with (optional):</p>
+                        <div className="flex flex-wrap gap-1">
+                          {DISAGREED_OPTIONS.map(f => (
+                            <button key={f}
+                              onClick={() => setDisagreed(p => p.includes(f) ? p.filter(x => x !== f) : [...p, f])}
+                              className={`px-1.5 py-0.5 rounded text-[9px] border transition-colors ${disagreed.includes(f) ? 'bg-red-500/10 text-red-600 border-red-300' : 'border-border text-muted-foreground hover:bg-muted/50'}`}
+                              data-testid={`advisory-fb-field-${f}`}
+                            >{f.replace(/_/g, ' ')}</button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Notes */}
+                    <textarea value={notes} onChange={e => setNotes(e.target.value)}
+                      placeholder="Optional notes..." className="w-full text-xs p-2 rounded-md border border-border bg-background resize-none h-12 mb-2"
+                      data-testid="advisory-fb-notes" />
+
+                    {/* Submit */}
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" className="h-7 text-xs" onClick={handleSubmit} disabled={submitting} data-testid="advisory-fb-submit">
+                        {submitting ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Send className="w-3 h-3 mr-1" />}
+                        Submit
+                      </Button>
+                      {showFeedbackForm && latestFb && (
+                        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setShowFeedbackForm(false)}>Cancel</Button>
+                      )}
                     </div>
-                  </div>
-                )}
-
-                {/* Notes */}
-                {assessment && (
-                  <textarea
-                    value={notes}
-                    onChange={e => setNotes(e.target.value)}
-                    placeholder="Optional notes..."
-                    className="w-full text-xs p-2 rounded-md border border-border bg-background resize-none h-14"
-                    data-testid="so-feedback-notes"
-                  />
-                )}
-
-                {/* Submit */}
-                {assessment && (
-                  <Button
-                    size="sm" className="h-7 text-xs"
-                    onClick={handleSubmit}
-                    disabled={submitting}
-                    data-testid="so-feedback-submit"
-                  >
-                    {submitting ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Send className="w-3 h-3 mr-1" />}
-                    Submit Feedback
-                  </Button>
+                  </>
                 )}
               </>
             )}
@@ -306,5 +335,31 @@ export default function SOReviewFeedbackPanel({ document }) {
         </CardContent>
       )}
     </Card>
+  );
+}
+
+function MiniStat({ label, count, color }) {
+  return (
+    <div className="text-center py-1.5 rounded-md bg-muted/30">
+      <p className={`text-sm font-bold ${count > 0 ? color : 'text-muted-foreground'}`}>{count}</p>
+      <p className="text-[9px] text-muted-foreground">{label}</p>
+    </div>
+  );
+}
+
+function DetailSection({ items, label, color, icon: Icon, testId }) {
+  if (!items || items.length === 0) return null;
+  return (
+    <div data-testid={testId}>
+      <p className={`text-[10px] font-semibold ${color} mb-0.5`}>{label}</p>
+      <ScrollArea className="max-h-[80px]">
+        {items.map((item, i) => (
+          <div key={i} className="flex items-start gap-1.5 py-0.5">
+            <Icon className={`w-3 h-3 ${color} shrink-0 mt-0.5`} />
+            <p className={`text-[11px] ${color}/80`}>{item}</p>
+          </div>
+        ))}
+      </ScrollArea>
+    </div>
   );
 }

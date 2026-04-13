@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid } from 'recharts';
+import LearningSuggestionsPanel from '../components/LearningSuggestionsPanel';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -1707,6 +1708,9 @@ export default function LearningDashboard() {
           <RefreshCw className="w-4 h-4 mr-1" />Refresh
         </Button>
       </div>
+
+      {/* Learning Suggestions Governance */}
+      <LearningSuggestionsPanel />
 
       {/* Summary Stats */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3" data-testid="learning-stats">

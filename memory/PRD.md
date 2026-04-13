@@ -437,3 +437,12 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Full audit: `so_learning_apply_audit` collection with pre/post snapshots, applier, change summary
 - Admin endpoints: `/approve`, `/reject`, `/apply` per suggestion_id
 - Never auto-applies — explicit human approval required
+
+## Learning Suggestions Admin UI (2026-04-13)
+- Component: `components/LearningSuggestionsPanel.js` — admin governance UI for learning suggestions
+- Placed at top of AI Learning Intelligence page (LearningDashboard.js)
+- Features: filterable list (status + type), expandable detail rows, approve/reject/apply action buttons
+- Detail view: evidence summary, supporting docs count, proposed change, profile snapshot, audit info
+- Action guards: only shows valid actions per status (approve/reject for pending, apply/reject for approved, no actions for applied/rejected)
+- Loading/empty/error states handled
+- Uses existing admin endpoints — no new backend needed

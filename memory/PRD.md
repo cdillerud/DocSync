@@ -499,3 +499,19 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Next workflow recommendation: AP Invoice Vendor Advisory (fit=0.90, 12 reusable components, effort=low)
 - Admin endpoints: `GET /maturity-checkpoint`, `GET /maturity-checkpoint/reusability`
 - Assessment only — never triggers expansion
+
+## AP Invoice Vendor Advisory — Phase 1 (2026-04-13)
+- Framework reuse from Sales Order advisory pattern (72% component reuse)
+- New AP-specific services:
+  - `services/ap_invoice_advisory_reviewer.py` — vendor-profile-aware LLM advisory with profile-state prompts
+  - `services/ap_invoice_decision_explainer.py` — evidence-calibrated tone system (direct/confident/cautious/concerned/neutral)
+  - `services/ap_invoice_feedback_service.py` — feedback capture + basic analytics (reuses generic pattern)
+- New router: `routers/ap_advisory.py` — 7 endpoints:
+  - `POST /api/ap-advisory/review/{id}` — run advisory
+  - `GET /api/ap-advisory/explain/{id}` — explainer
+  - `GET /api/ap-advisory/advisory/{id}` — consolidated view
+  - `POST /api/ap-advisory/feedback/{id}` — submit feedback
+  - `GET /api/ap-advisory/feedback/{id}` — get feedback
+  - `GET /api/ap-advisory/feedback-summary` — analytics
+- Collections: `ap_reviewer_feedback` (feedback), `ap_advisory_review` (stored on doc)
+- Phase 2 (not yet built): disagreement diagnostics, calibration, learning suggestions, approval/apply

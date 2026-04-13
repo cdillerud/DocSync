@@ -244,6 +244,20 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
 
     Returns a canonical readiness object.
     """
+    # --- HARD GUARD: Never downgrade Completed/Posted docs ---
+    current_status = doc.get("status") or ""
+    if current_status in ("Completed", "Posted", "Archived", "LinkedToBC"):
+        # Return current state as-is — do not re-evaluate
+        return {
+            "status": "ready_auto_link",
+            "recommended_action": "none",
+            "confidence": 1.0,
+            "blocking_reasons": [],
+            "warning_reasons": [],
+            "explanations": [f"Document already in terminal state: {current_status}"],
+            "signals": compute_signals(doc),
+        }
+
     # --- Non-postable doc types: route to archive, not review ---
     NON_POSTABLE_TYPES = {
         "Sales_Quote", "Quality_Issue", "REMINDER", "Remittance",

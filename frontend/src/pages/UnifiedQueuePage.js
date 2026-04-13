@@ -11,7 +11,7 @@ import {
   Receipt, ShoppingCart, Inbox, FolderInput, Brain,
   TrendingUp, ShieldCheck, AlertTriangle, Clock, CheckCircle2,
   RotateCcw, Layers, ChevronDown, ChevronUp, BarChart3,
-  User, FileQuestion, Ban, Copy, Zap, XCircle, Send,
+  User, FileQuestion, Ban, Copy, Zap, XCircle, Send, Archive,
 } from "lucide-react";
 import api, { bulkResubmitDocuments, bulkDeleteDocuments, deleteDocument, bulkFileAndClear, batchAutoResolve, triggerAutoResolve } from "@/lib/api";
 
@@ -100,7 +100,7 @@ export default function UnifiedQueuePage() {
   const [activeTab, setActiveTab] = useState("all");
   const [selectedDocs, setSelectedDocs] = useState(new Set());
   const [bulkProcessing, setBulkProcessing] = useState(false);
-  const [counts, setCounts] = useState({ all: 0, accounting: 0, sales: 0, processed: 0, batches: 0, exceptions: 0, po_pending: 0 });
+  const [counts, setCounts] = useState({ all: 0, accounting: 0, sales: 0, processed: 0, batches: 0, exceptions: 0, po_pending: 0, archived: 0 });
   const [stats, setStats] = useState(null);
   const [reprocessing, setReprocessing] = useState(null);
   const [metrics, setMetrics] = useState(null);
@@ -143,9 +143,23 @@ export default function UnifiedQueuePage() {
       const isBatchesTab = activeTab === "batches";
       const isExceptionsTab = activeTab === "exceptions";
       const isPoPendingTab = activeTab === "po_pending";
+      const isArchivedTab = activeTab === "archived";
       const params = new URLSearchParams();
       if (searchQuery) params.append("search", searchQuery);
       params.append("limit", "500");
+
+      if (isArchivedTab) {
+        params.append("queue_view", "false");
+        params.append("include_cleared", "true");
+        params.append("status_filter", "Archived");
+        const response = await api.get(`/documents?${params.toString()}`);
+        const docs = (response.data.documents || []).filter(d => d.status === "Archived" || d.workflow_status === "archived");
+        setDocuments(docs);
+        setCounts(prev => ({ ...prev, archived: docs.length }));
+        setSelectedDocs(new Set());
+        setLoading(false);
+        return;
+      }
 
       if (isExceptionsTab) {
         const exRes = await api.get(`/readiness/exception-queue?limit=500`);
@@ -200,18 +214,20 @@ export default function UnifiedQueuePage() {
         const processedCount = response.data.counts?.completed || 0;
         // Fetch batch count and exception count
         try {
-          const [batchRes, exRes, poRes] = await Promise.all([
+          const [batchRes, exRes, poRes, archRes] = await Promise.all([
             api.get('/documents?limit=0&queue_view=false&include_cleared=true&status=batch_parent'),
             api.get('/readiness/exception-queue?limit=0'),
             api.get('/readiness/po-pending?limit=0'),
+            api.get('/documents?limit=0&queue_view=false&include_cleared=true&status_filter=Archived'),
           ]);
           setCounts({
             all: activeDocs.length, accounting: apCount, sales: salesCount,
             processed: processedCount, batches: batchRes.data.total || 0,
             exceptions: exRes.data.total || 0, po_pending: poRes.data.total || 0,
+            archived: archRes.data.total || 0,
           });
         } catch {
-          setCounts({ all: activeDocs.length, accounting: apCount, sales: salesCount, processed: processedCount, batches: 0, exceptions: 0, po_pending: 0 });
+          setCounts({ all: activeDocs.length, accounting: apCount, sales: salesCount, processed: processedCount, batches: 0, exceptions: 0, po_pending: 0, archived: 0 });
         }
       }
     } catch (err) {
@@ -629,6 +645,7 @@ export default function UnifiedQueuePage() {
           { key: "batches", label: "Batches", icon: Layers, count: counts.batches },
           { key: "exceptions", label: "Exceptions", icon: AlertTriangle, count: counts.exceptions, accent: true },
           { key: "po_pending", label: "PO Pending", icon: Clock, count: counts.po_pending, accent: counts.po_pending > 0 },
+          { key: "archived", label: "Archived", icon: Archive, count: counts.archived },
         ].map(({ key, label, icon: Icon, count, accent }) => (
           <button
             key={key}

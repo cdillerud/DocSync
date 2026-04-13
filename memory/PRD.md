@@ -317,6 +317,13 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
   - Loading/empty/no-review/no-profile states all handled
 - Reuses all existing services — no changes to underlying logic
 
+## Sales Order Disagreement Diagnostics (2026-04-13)
+- Service: `services/sales_order_disagreement_diagnostics_service.py` — root-cause classification of reviewer disagreements
+- Classifies disagreements into 10 root-cause categories: no_customer_profile, profile_too_sparse, order_value_range_too_strict, ship_to_sensitivity_too_high, item_uom_sensitivity_too_high, upstream_extraction_weakness, confidence_overestimation, prompt_wording_issue, new_customer_low_history, other_unknown
+- Outputs: root-cause distribution, per-customer/per-model hotspots, disagreement rate by advisory confidence band, disagreed_field-to-cause mapping, example documents per cause
+- Admin endpoints: `GET /api/admin/sales-learning/disagreement-diagnostics` (full filters), `GET .../examples?root_cause=X`
+- Diagnostics only — never changes workflow or advisory logic
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

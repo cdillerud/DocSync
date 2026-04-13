@@ -545,3 +545,39 @@ async def reviewer_feedback_by_customer(limit: int = Query(30, ge=1, le=100)):
     db = get_db()
     customers = await get_feedback_by_customer(db, limit=limit)
     return {"customers": customers, "total": len(customers)}
+
+
+# =============================================================================
+# Sales Order Disagreement Diagnostics
+# =============================================================================
+
+@router.get("/sales-learning/disagreement-diagnostics")
+async def disagreement_diagnostics(
+    date_from: str = Query(None), date_to: str = Query(None),
+    customer_no: str = Query(None), reviewer: str = Query(None),
+    model: str = Query(None), readiness_status: str = Query(None),
+    assessment: str = Query(None), root_cause: str = Query(None),
+):
+    """Root-cause analysis of reviewer disagreements for system tuning."""
+    from deps import get_db
+    from services.sales_order_disagreement_diagnostics_service import run_disagreement_diagnostics
+    db = get_db()
+    return await run_disagreement_diagnostics(
+        db, date_from=date_from, date_to=date_to,
+        customer_no=customer_no, reviewer=reviewer,
+        model=model, readiness_status=readiness_status,
+        assessment=assessment, root_cause=root_cause,
+    )
+
+
+@router.get("/sales-learning/disagreement-diagnostics/examples")
+async def disagreement_examples(
+    root_cause: str = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Example disagreement records, optionally filtered by root cause."""
+    from deps import get_db
+    from services.sales_order_disagreement_diagnostics_service import get_disagreement_examples
+    db = get_db()
+    examples = await get_disagreement_examples(db, root_cause=root_cause, limit=limit)
+    return {"root_cause_filter": root_cause, "total": len(examples), "examples": examples}

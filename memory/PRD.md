@@ -362,6 +362,14 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Integrated pre-LLM with explicit instructions: "Do NOT flag items as unusual" when severity=none
 - Results stored on review as `item_uom_analysis` and included in advisory endpoint
 
+## Explanation Wording Refinement (2026-04-13)
+- Rewrote `sales_order_decision_explainer.py` with evidence-calibrated tone system
+- 6 tone categories: direct (blockers), confident (ready), cautious (low-history), concerned (strong anomaly), attentive (moderate deviation), neutral (default)
+- Headline, summary, flagged items, attention items, and steps now consistent per tone — no mixed signals
+- Uses structured pre-analysis (ship_to severity, item_uom severity, profile state, calibrated confidence) to determine wording strength
+- Low-evidence patterns qualified with "minor:" prefix; no-profile cases get "limited comparison basis" language
+- Added `explanation_tone` field to SOExplanation output for observability
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

@@ -377,3 +377,70 @@ async def get_sh_invoice_queue(
         "processor_filter": processor,
         "documents": docs,
     }
+
+
+# =============================================================================
+# Sales Order Learning
+# =============================================================================
+
+@router.post("/sales-learning/backfill-bc-orders")
+async def backfill_sales_learning(background_tasks: BackgroundTasks):
+    """Trigger bulk customer posting profile build from BC sales orders."""
+    from deps import get_db
+    db = get_db()
+
+    async def _run_backfill():
+        try:
+            from services.sales_order_learning_service import build_all_customer_posting_profiles
+            from services.business_central_service import BusinessCentralService
+            bc = BusinessCentralService()
+            await build_all_customer_posting_profiles(db, bc, top_n=50)
+        except Exception as exc:
+            logger.error("[SalesLearning] Background backfill failed: %s", exc)
+
+    background_tasks.add_task(_run_backfill)
+    return {"job_started": True, "message": "Sales order learning backfill started in background"}
+
+
+@router.get("/sales-learning/customer-profiles")
+async def get_customer_profiles_summary():
+    """Summary of all customer posting profiles."""
+    from deps import get_db
+    db = get_db()
+
+    total = await db.customer_posting_profiles.count_documents({})
+    high = await db.customer_posting_profiles.count_documents({"template_confidence": "high"})
+    medium = await db.customer_posting_profiles.count_documents({"template_confidence": "medium"})
+    low = await db.customer_posting_profiles.count_documents({"template_confidence": "low"})
+
+    # Top customers by orders analyzed
+    cursor = db.customer_posting_profiles.find(
+        {"status": "analyzed"},
+        {"_id": 0, "customer_no": 1, "customer_name": 1, "invoices_analyzed": 1,
+         "template_confidence": 1, "typical_order_value": 1, "common_items": 1}
+    ).sort("invoices_analyzed", -1).limit(20)
+    top_customers = []
+    async for doc in cursor:
+        top_customers.append(doc)
+
+    # Last run
+    last_job = await db.sales_learning_jobs.find_one(
+        {}, {"_id": 0}, sort=[("started_at", -1)]
+    )
+
+    return {
+        "total_profiles": total,
+        "confidence_breakdown": {"high": high, "medium": medium, "low": low},
+        "top_customers": top_customers,
+        "last_job": last_job,
+    }
+
+
+@router.post("/sales-learning/detect-posted-drafts")
+async def detect_posted_so_drafts():
+    """Manually trigger SO draft detection."""
+    from deps import get_db
+    from services.sales_order_learning_service import detect_posted_sales_drafts
+    db = get_db()
+    result = await detect_posted_sales_drafts(db)
+    return result

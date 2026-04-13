@@ -252,6 +252,15 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - On failure/low-confidence: logs, uses original lines, still stores audit trail
 - Both auto-draft and manual PI creation paths covered (single injection point in `_build_pi_lines_with_mapping`)
 
+## Sales Order Learning Foundation (2026-04-13)
+- Service: `services/sales_order_learning_service.py` — reads BC sales orders, builds customer posting profiles
+- Collection: `customer_posting_profiles` (one doc per customer_no) + `sales_posting_learning_events` + `sales_learning_jobs`
+- Functions: `build_all_customer_posting_profiles()` (bulk BC backfill), `analyze_customer_ordering_patterns()` (per-customer), `learn_from_sales_order_posting()` (incremental), `detect_posted_sales_drafts()` (feedback loop)
+- Wired into `run_all_learning_engines()` in continuous_learning_service.py
+- Admin endpoints: `POST /api/admin/sales-learning/backfill-bc-orders`, `GET /api/admin/sales-learning/customer-profiles`, `POST /api/admin/sales-learning/detect-posted-drafts`
+- Profile includes: common_items, common_uoms, po_number_pattern, typical_order_value, amount_range, typical_ship_to, days_to_ship_p50, line_count_distribution
+- NOT wired into SO draft creation yet
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

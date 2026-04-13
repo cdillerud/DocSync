@@ -423,6 +423,13 @@ async def run_all_learning_engines(db) -> Dict:
         results["confidence_auto_promotion"] = {"error": str(e)}
         logger.warning("[ContinuousLearning] Confidence promotion failed: %s", e)
 
+    try:
+        from services.sales_order_learning_service import detect_posted_sales_drafts
+        results["posted_so_detection"] = await detect_posted_sales_drafts(db)
+    except Exception as e:
+        results["posted_so_detection"] = {"error": str(e)}
+        logger.warning("[ContinuousLearning] SO draft detection failed: %s", e)
+
     logger.info("[ContinuousLearning] All engines complete: %s", {
         k: "ok" if "error" not in v else "error" for k, v in results.items() if isinstance(v, dict)
     })

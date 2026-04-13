@@ -57,3 +57,26 @@ async def explain_document(
 
     result = await explain_document_status(doc)
     return result.to_dict()
+
+
+@router.get("/{document_id}/sales-order-explainer")
+async def explain_sales_order(
+    document_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Return a plain-English explanation of a sales order's readiness status."""
+    _verify_token(authorization)
+
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": document_id}, {"_id": 0})
+    if doc is None:
+        try:
+            doc = await db.hub_documents.find_one({"_id": ObjectId(document_id)}, {"_id": 0})
+        except Exception:
+            pass
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    from services.sales_order_decision_explainer import explain_sales_order_decision
+    result = await explain_sales_order_decision(doc, db=db)
+    return result.to_dict()

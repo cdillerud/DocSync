@@ -280,6 +280,15 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Admin endpoints: `POST /api/admin/sales-learning/evaluate-readiness` (sync or background), `GET /api/admin/sales-learning/readiness-evaluations`, `GET /api/admin/sales-learning/readiness-evaluations/{run_id}`
 - Evaluation only — never changes workflow or posting decisions
 
+## Sales Order Decision Explainer (2026-04-13)
+- Service: `services/sales_order_decision_explainer.py` — plain-English explanation layer for SO readiness
+- Endpoint: `GET /api/documents/{document_id}/sales-order-explainer` (JWT-protected, on existing explain router)
+- Prefers explaining existing `so_readiness_review` data (`review_reused: true`) — no unnecessary LLM calls
+- Falls back to deterministic signals from validation_results and document state when no review exists
+- Output: headline, plain_english_summary, why_it_was_flagged, what_looks_normal, what_needs_attention, recommended_next_steps, reviewer_confidence, readiness_status
+- Logging: doc_id, review_reused, latency_ms, readiness_status, confidence
+- Explanation only — never alters posting decisions or routing
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

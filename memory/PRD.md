@@ -399,15 +399,15 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Analysis only — never changes workflow, weights, or prompts
 
 ## Upcoming Tasks
-- P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
-- P1: Rep Overrides Management UI
 - P1: Teams Adaptive Card integration (webhook → BC Sales Order)
 
 ## Future/Backlog
+- P2: Evergreen multi-PO container allocation spreadsheet integration
+- P2: BOL / Tracking No field storage in BC
 - P2: Low-volume vendor review routing (<5 docs skip auto-file)
 - P2: Activate correction replay engine
 - P2: Email sender → vendor mapping
-- P3: `server.py` extraction/refactoring (8,200+ lines)
+- P3: `server.py` extraction/refactoring (8,500+ lines)
 
 ## Sales Order Draft Context Service (2026-04-13)
 - Service: `services/sales_order_draft_context_service.py` — profile-based draft assistance
@@ -522,7 +522,26 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Learning suggestions: `ap_invoice_feedback_learning_service.py` — governed suggestion generation (add_vendor_alias, add_accepted_reference_pattern, widen_amount_tolerance, add_accepted_po_behavior, increase_vendor_variability)
 - Collection: `ap_learning_suggestions` — same lifecycle as SO suggestions (pending → approved → applied)
 - Endpoints on ap_advisory router: GET /diagnostics, POST /calibrate/{id}, POST /generate-suggestions, GET /suggestions
-- Phase 3 (not yet): impact review, drift controls, hotspot review for AP
+
+## AP Invoice Vendor Advisory — Phase 3 (2026-04-14)
+- Suggestion approval workflow: `ap_invoice_learning_suggestion_apply_service.py` — governed approve/reject/apply lifecycle
+  - State machine: pending → approved → applied (terminal), pending → rejected, rejected → pending (un-reject)
+  - Mutation logic per type: add vendor alias, add accepted reference pattern, widen amount tolerance, relax PO requirement, increase vendor variability
+  - Duplicate detection: no-op if value already present in profile
+  - Full audit: `ap_learning_apply_audit` collection with pre/post snapshots
+  - Endpoints: POST `/suggestions/{id}/approve`, `/reject`, `/apply`
+- Learning impact review: `ap_invoice_learning_impact_review_service.py` — pre/post apply outcome comparison per vendor/type
+  - Outputs: improved/no_change/regressed counts, per-type and per-vendor deltas, actionable recommendations
+  - Endpoints: GET `/learning-impact-review`, GET `/learning-impact-review/details`
+- Profile drift controls: `ap_invoice_profile_drift_service.py` — vendor profile evolution monitoring
+  - Risk indicators: change cadence (>8/30d), alias growth (>10), variability (>0.90), amount range swing (>50%)
+  - Endpoints: GET `/profile-drift`, GET `/profile-drift/{vendor_no}`, GET `/profile-change-history/{vendor_no}`
+- Vendor hotspot review: `ap_invoice_vendor_hotspot_review_service.py` — cross-signal friction analysis
+  - Root causes: low_profile_maturity, vendor_match_ambiguity, extraction_quality, amount_sensitivity, po_reference_friction, duplicate_sensitivity, profile_drift_risk, high_volume_low_learning
+  - Endpoints: GET `/vendor-hotspots`, GET `/vendor-hotspots/{vendor_no}`
+- All 14 new endpoints added to `routers/ap_advisory.py`
+- Integration tests: `tests/test_ap_phase3.py` (12/12 passing)
+- AP Invoice Advisory is now at feature parity with Sales Order governed learning pipeline
 
 ## Bug Fix: Readiness Completed with 0% Extraction (2026-04-13)
 - **Root cause:** `evaluate_readiness()` would mark docs as `ready_auto_draft` when vendor was resolved via email sender BUT zero fields were extracted (e.g., .xls files the AI couldn't read)

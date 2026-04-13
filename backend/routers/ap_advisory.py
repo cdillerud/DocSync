@@ -278,3 +278,132 @@ async def list_ap_suggestions(
         db, vendor_no=vendor_no, suggestion_type=suggestion_type,
         status=status, limit=limit, skip=skip,
     )
+
+
+# =============================================================================
+# Phase 3: Suggestion Approve/Reject/Apply, Impact Review, Drift, Hotspots
+# =============================================================================
+
+@router.post("/suggestions/{suggestion_id}/approve")
+async def approve_ap_suggestion_endpoint(
+    suggestion_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Approve an AP learning suggestion."""
+    user = _verify_token(authorization)
+    db = get_db()
+    from services.ap_invoice_learning_suggestion_apply_service import approve_ap_suggestion
+    result = await approve_ap_suggestion(db, suggestion_id, user)
+    if result.get("error"):
+        raise HTTPException(status_code=422, detail=result["error"])
+    return result
+
+
+@router.post("/suggestions/{suggestion_id}/reject")
+async def reject_ap_suggestion_endpoint(
+    suggestion_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Reject an AP learning suggestion."""
+    user = _verify_token(authorization)
+    db = get_db()
+    from services.ap_invoice_learning_suggestion_apply_service import reject_ap_suggestion
+    result = await reject_ap_suggestion(db, suggestion_id, user)
+    if result.get("error"):
+        raise HTTPException(status_code=422, detail=result["error"])
+    return result
+
+
+@router.post("/suggestions/{suggestion_id}/apply")
+async def apply_ap_suggestion_endpoint(
+    suggestion_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Apply an approved AP learning suggestion to the vendor profile."""
+    user = _verify_token(authorization)
+    db = get_db()
+    from services.ap_invoice_learning_suggestion_apply_service import apply_ap_suggestion
+    result = await apply_ap_suggestion(db, suggestion_id, user)
+    if result.get("error"):
+        raise HTTPException(status_code=422, detail=result["error"])
+    return result
+
+
+@router.get("/learning-impact-review")
+async def ap_learning_impact_review(
+    date_from: str = Query(None), date_to: str = Query(None),
+    vendor_no: str = Query(None), suggestion_type: str = Query(None),
+    applied_by: str = Query(None),
+):
+    """AP learning impact review — pre/post apply outcomes."""
+    db = get_db()
+    from services.ap_invoice_learning_impact_review_service import run_ap_learning_impact_review
+    return await run_ap_learning_impact_review(
+        db, date_from=date_from, date_to=date_to,
+        vendor_no=vendor_no, suggestion_type=suggestion_type, applied_by=applied_by,
+    )
+
+
+@router.get("/learning-impact-review/details")
+async def ap_learning_impact_details(
+    vendor_no: str = Query(None), suggestion_type: str = Query(None),
+    limit: int = Query(50, ge=1, le=500), skip: int = Query(0, ge=0),
+):
+    """Per-suggestion impact detail records for AP."""
+    db = get_db()
+    from services.ap_invoice_learning_impact_review_service import get_ap_impact_details
+    return await get_ap_impact_details(db, limit=limit, skip=skip, vendor_no=vendor_no, suggestion_type=suggestion_type)
+
+
+@router.get("/profile-drift")
+async def ap_profile_drift(
+    date_from: str = Query(None), date_to: str = Query(None),
+    vendor_no: str = Query(None), drift_risk: str = Query(None),
+    suggestion_type: str = Query(None), applied_by: str = Query(None),
+):
+    """Vendor profile drift summary for AP."""
+    db = get_db()
+    from services.ap_invoice_profile_drift_service import get_ap_profile_drift_summary
+    return await get_ap_profile_drift_summary(
+        db, date_from=date_from, date_to=date_to, vendor_no=vendor_no,
+        drift_risk=drift_risk, suggestion_type=suggestion_type, applied_by=applied_by,
+    )
+
+
+@router.get("/profile-drift/{vendor_no}")
+async def ap_vendor_drift_detail(vendor_no: str):
+    """Detailed drift analysis for one AP vendor."""
+    db = get_db()
+    from services.ap_invoice_profile_drift_service import get_ap_vendor_drift_detail
+    return await get_ap_vendor_drift_detail(db, vendor_no)
+
+
+@router.get("/profile-change-history/{vendor_no}")
+async def ap_change_history(vendor_no: str, limit: int = Query(50, ge=1, le=200)):
+    """Full change history with pre/post snapshots for an AP vendor."""
+    db = get_db()
+    from services.ap_invoice_profile_drift_service import get_ap_change_history
+    return await get_ap_change_history(db, vendor_no, limit=limit)
+
+
+@router.get("/vendor-hotspots")
+async def ap_vendor_hotspots(
+    date_from: str = Query(None), date_to: str = Query(None),
+    severity: str = Query(None), root_cause: str = Query(None),
+    vendor_no: str = Query(None), limit: int = Query(30, ge=1, le=100),
+):
+    """AP vendor hotspots — friction ranking and root-cause diagnosis."""
+    db = get_db()
+    from services.ap_invoice_vendor_hotspot_review_service import get_ap_vendor_hotspots
+    return await get_ap_vendor_hotspots(
+        db, date_from=date_from, date_to=date_to,
+        severity=severity, root_cause=root_cause, vendor_no=vendor_no, limit=limit,
+    )
+
+
+@router.get("/vendor-hotspots/{vendor_no}")
+async def ap_vendor_hotspot_detail(vendor_no: str):
+    """Detailed hotspot analysis for one AP vendor."""
+    db = get_db()
+    from services.ap_invoice_vendor_hotspot_review_service import get_ap_vendor_hotspot_detail
+    return await get_ap_vendor_hotspot_detail(db, vendor_no)

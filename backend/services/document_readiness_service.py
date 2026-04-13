@@ -376,16 +376,19 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
     effective_conf = compute_effective_confidence(doc)
     confidence = _compute_confidence(signals, effective_conf, len(blocking), len(warnings))
 
-    # --- Extraction quality gate: prevent auto-clearing docs with no meaningful data ---
+    # --- Extraction quality gate: prevent auto-clearing docs with truly no data ---
     extracted = doc.get("extracted_fields") or {}
-    meaningful_extracted = sum(
-        1 for k, v in extracted.items()
-        if v and not k.endswith("_detected_by") and k not in ("is_credit_memo", "is_international", "is_tooling", "is_dunnage", "is_storage_handling")
+    has_invoice_number = bool(
+        extracted.get("invoice_number")
+        or (doc.get("normalized_fields") or {}).get("invoice_number")
+        or doc.get("invoice_number_clean")
     )
-    has_invoice_number = bool(extracted.get("invoice_number") or (doc.get("normalized_fields") or {}).get("invoice_number") or doc.get("invoice_number_clean"))
-    has_amount = bool(any(extracted.get(f) for f in ["amount", "invoice_amount", "total_amount"]) or doc.get("amount_float"))
-
-    extraction_too_weak = meaningful_extracted < 2 or (not has_invoice_number and not has_amount)
+    has_amount = bool(
+        any(extracted.get(f) for f in ("amount", "invoice_amount", "total_amount"))
+        or doc.get("amount_float")
+    )
+    # Only block auto-clear if BOTH invoice number AND amount are missing everywhere
+    extraction_too_weak = not has_invoice_number and not has_amount
 
     # --- Status determination ---
     # Categorize warnings: only CRITICAL ones should force review/ambiguous
@@ -795,7 +798,6 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
     TERMINAL_STATUSES = ("Completed", "Posted", "Archived", "completed", "posted",
                          "archived", "FileMissing", "batch_parent")
     ready_statuses = ("ready_auto_draft", "ready_auto_link", "ready")
-    needs_review_statuses = ("needs_review", "blocked", "needs_correction")
     current_status = doc.get("status") or ""
     readiness_status = readiness["status"]
 
@@ -821,23 +823,6 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
             "[Readiness:StatusSync] doc=%s '%s' → '%s' (readiness=%s, bc_pi=%s)",
             doc_id[:8], current_status, new_doc_status, readiness["status"], has_bc_pi,
         )
-
-    # Reverse sync: if readiness is needs_review but doc was previously auto-cleared
-    # to "Completed", reset it back so the doc re-appears in the review queue
-    elif readiness_status in needs_review_statuses and current_status == "Completed":
-        if not doc.get("bc_purchase_invoice_no") and not doc.get("posted_to_bc"):
-            await db.hub_documents.update_one(
-                {"id": doc_id},
-                {"$set": {
-                    "status": "NeedsReview",
-                    "workflow_status": "reviewing",
-                    "auto_cleared": False,
-                }},
-            )
-            logger.info(
-                "[Readiness:StatusSync] doc=%s REVERSED 'Completed' → 'NeedsReview' (readiness=%s)",
-                doc_id[:8], readiness_status,
-            )
 
     # Auto-clear stale automation_decision if policy hold was dropped
     old_held = old_signals.get("policy_held", False)

@@ -415,3 +415,15 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Returns: ship_to_suggestions (primary + alternates), item_suggestions (core/regular/occasional with per-item UOM alternates), value_context (typical/min/max), common_uoms, po_pattern, guidance messages, profile richness/variability indicators
 - No-profile: graceful degradation with "No customer history — draft will use extracted data only"
 - Assistive only — never forces values or overrides user data
+
+## Feedback-to-Learning Pipeline (2026-04-13)
+- Service: `services/sales_order_feedback_learning_service.py` — converts reviewer feedback into candidate profile-learning suggestions
+- Collection: `so_learning_suggestions` — one doc per suggestion with full audit (suggestion_id, type, customer, evidence, confidence, proposed_change, status, fingerprint)
+- Suggestion types: add_alternate_ship_to, add_occasional_valid_item, add_alternate_uom_for_item, widen_order_value_tolerance, revise_po_pattern, increase_variability_tolerance
+- Status lifecycle: pending → (approved / rejected / applied) — never auto-applied
+- Deduplication via fingerprint (customer + type + change key)
+- Confidence: evidence-weighted (0.3 base + 0.15 per supporting feedback, capped)
+- Insufficient evidence: single-occurrence suggestions stored as "insufficient_evidence"
+- Admin endpoints: `POST /generate-learning-suggestions?sync=true`, `GET /learning-suggestions`, `GET /learning-suggestions/{id}`
+- Full filter support: customer, type, status, min_confidence, date range
+- Suggestion generation only — never mutates profiles

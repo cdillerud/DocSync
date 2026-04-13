@@ -703,3 +703,61 @@ async def strong_profile_review_details(
     return await get_strong_profile_details(db, limit=limit, skip=skip,
                                             date_from=date_from, date_to=date_to,
                                             customer_no=customer_no)
+
+
+# =============================================================================
+# Feedback-to-Learning Pipeline
+# =============================================================================
+
+@router.post("/sales-learning/generate-learning-suggestions")
+async def gen_learning_suggestions(
+    background_tasks: BackgroundTasks,
+    customer_no: str = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    sync: bool = Query(False),
+):
+    """Generate candidate profile-learning suggestions from reviewer feedback."""
+    from deps import get_db
+    from services.sales_order_feedback_learning_service import generate_learning_suggestions
+    db = get_db()
+    if sync:
+        return await generate_learning_suggestions(db, customer_no=customer_no, limit=limit)
+    async def _run():
+        try:
+            await generate_learning_suggestions(db, customer_no=customer_no, limit=limit)
+        except Exception as exc:
+            logger.error("[FeedbackLearning] Background generation failed: %s", exc)
+    background_tasks.add_task(_run)
+    return {"job_started": True, "customer_no": customer_no, "limit": limit}
+
+
+@router.get("/sales-learning/learning-suggestions")
+async def list_learning_suggestions(
+    customer_no: str = Query(None),
+    suggestion_type: str = Query(None),
+    status: str = Query(None),
+    min_confidence: float = Query(None),
+    date_from: str = Query(None), date_to: str = Query(None),
+    limit: int = Query(50, ge=1, le=500), skip: int = Query(0, ge=0),
+):
+    """Fetch learning suggestions with filters."""
+    from deps import get_db
+    from services.sales_order_feedback_learning_service import get_suggestions
+    db = get_db()
+    return await get_suggestions(
+        db, customer_no=customer_no, suggestion_type=suggestion_type,
+        status=status, min_confidence=min_confidence,
+        date_from=date_from, date_to=date_to, limit=limit, skip=skip,
+    )
+
+
+@router.get("/sales-learning/learning-suggestions/{suggestion_id}")
+async def get_learning_suggestion(suggestion_id: str):
+    """Fetch a single suggestion by ID."""
+    from deps import get_db
+    from services.sales_order_feedback_learning_service import get_suggestion_by_id
+    db = get_db()
+    result = await get_suggestion_by_id(db, suggestion_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Suggestion not found")
+    return result

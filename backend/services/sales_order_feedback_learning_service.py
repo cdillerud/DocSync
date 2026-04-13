@@ -9,6 +9,7 @@ SUGGESTION GENERATION ONLY: Never mutates profiles or changes advisory behavior.
 """
 
 import logging
+import os
 import uuid
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -16,7 +17,25 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-MIN_EVIDENCE_FOR_SUGGESTION = 2
+# Default evidence thresholds (can be overridden by env vars)
+DEFAULT_THRESHOLDS = {
+    "add_alternate_ship_to":        2,
+    "add_occasional_valid_item":    2,
+    "add_alternate_uom_for_item":   2,
+    "widen_order_value_tolerance":   2,
+    "revise_po_pattern":            2,
+    "increase_variability_tolerance": 3,
+}
+
+# Tuned (relaxed) thresholds for low-risk types — env-configurable
+TUNED_THRESHOLDS = {
+    "add_alternate_ship_to":     int(os.environ.get("LEARN_THRESH_SHIP_TO", "1")),
+    "add_occasional_valid_item": int(os.environ.get("LEARN_THRESH_ITEM", "1")),
+}
+
+# Types eligible for threshold relaxation
+RELAXABLE_TYPES = {"add_alternate_ship_to", "add_occasional_valid_item"}
+
 MIN_CONFIDENCE = 0.4
 
 
@@ -30,6 +49,9 @@ async def generate_learning_suggestions(
     profile-learning suggestions. Does NOT apply any changes.
     """
     started = datetime.now(timezone.utc).isoformat()
+
+    # Pre-load drift risk for affected customers
+    drift_cache: Dict[str, str] = {}
 
     # Fetch disagreement feedback
     match: Dict[str, Any] = {
@@ -73,7 +95,9 @@ async def generate_learning_suggestions(
     suggestions = []
     for cno, fbs in by_customer.items():
         profile = profiles.get(cno)
-        cust_suggestions = _analyze_customer_feedback(cno, fbs, profile, docs_map)
+        # Load drift risk
+        drift_risk = await _get_drift_risk(db, cno, drift_cache)
+        cust_suggestions = _analyze_customer_feedback(cno, fbs, profile, docs_map, drift_risk)
         suggestions.extend(cust_suggestions)
 
     # Store suggestions (skip duplicates by type+customer+proposed_change key)
@@ -168,6 +192,7 @@ def _analyze_customer_feedback(
     feedback: List[Dict],
     profile: Optional[Dict],
     docs_map: Dict,
+    drift_risk: str = "low",
 ) -> List[Dict]:
     """Generate candidate suggestions for one customer from their feedback."""
     suggestions = []
@@ -230,8 +255,10 @@ def _analyze_customer_feedback(
 
     # ── Ship-to suggestions ──
     ship_to_counter = Counter(d["ship_to"] for d in ship_to_disagreements if d["ship_to"])
+    ship_thresh = _get_threshold("add_alternate_ship_to", drift_risk)
     for ship_to, count in ship_to_counter.most_common():
-        if count >= MIN_EVIDENCE_FOR_SUGGESTION:
+        relaxed = ship_thresh < DEFAULT_THRESHOLDS["add_alternate_ship_to"]
+        if count >= ship_thresh:
             conf = min(0.95, 0.3 + count * 0.15)
             suggestions.append(_make_suggestion(
                 stype="add_alternate_ship_to",
@@ -242,8 +269,11 @@ def _analyze_customer_feedback(
                 count=count,
                 change={"key": f"alternate_ship_tos.{ship_to}", "action": "add", "value": ship_to},
                 profile_snapshot=profile_snapshot, now=now,
+                threshold_used=ship_thresh,
+                relaxed_threshold=relaxed,
+                drift_risk=drift_risk,
             ))
-        elif count == 1:
+        elif count >= 1 and count < ship_thresh:
             suggestions.append(_make_suggestion(
                 stype="add_alternate_ship_to",
                 customer_no=customer_no, customer_name=customer_name,
@@ -254,12 +284,17 @@ def _analyze_customer_feedback(
                 change={"key": f"alternate_ship_tos.{ship_to}", "action": "add", "value": ship_to},
                 profile_snapshot=profile_snapshot, now=now,
                 status="insufficient_evidence",
+                threshold_used=ship_thresh,
+                relaxed_threshold=False,
+                drift_risk=drift_risk,
             ))
 
     # ── Item suggestions ──
     item_counter = Counter(d["item"] for d in item_disagreements if d["item"])
+    item_thresh = _get_threshold("add_occasional_valid_item", drift_risk)
     for item, count in item_counter.most_common():
-        if count >= MIN_EVIDENCE_FOR_SUGGESTION:
+        relaxed = item_thresh < DEFAULT_THRESHOLDS["add_occasional_valid_item"]
+        if count >= item_thresh:
             conf = min(0.90, 0.3 + count * 0.15)
             suggestions.append(_make_suggestion(
                 stype="add_occasional_valid_item",
@@ -270,8 +305,11 @@ def _analyze_customer_feedback(
                 count=count,
                 change={"key": f"occasional_valid_items.{item}", "action": "add", "value": item},
                 profile_snapshot=profile_snapshot, now=now,
+                threshold_used=item_thresh,
+                relaxed_threshold=relaxed,
+                drift_risk=drift_risk,
             ))
-        elif count == 1:
+        elif count >= 1 and count < item_thresh:
             suggestions.append(_make_suggestion(
                 stype="add_occasional_valid_item",
                 customer_no=customer_no, customer_name=customer_name,
@@ -282,14 +320,18 @@ def _analyze_customer_feedback(
                 change={"key": f"occasional_valid_items.{item}", "action": "add", "value": item},
                 profile_snapshot=profile_snapshot, now=now,
                 status="insufficient_evidence",
+                threshold_used=item_thresh,
+                relaxed_threshold=False,
+                drift_risk=drift_risk,
             ))
 
     # ── UOM suggestions ──
+    uom_thresh = _get_threshold("add_alternate_uom_for_item", drift_risk)
     uom_pairs = Counter((d["item"], d["uom"]) for d in uom_disagreements if d["item"] and d["uom"])
     for (item, uom), count in uom_pairs.most_common():
         if count >= 1:
-            conf = min(0.85, 0.35 + count * 0.15) if count >= MIN_EVIDENCE_FOR_SUGGESTION else 0.3
-            stat = "pending" if count >= MIN_EVIDENCE_FOR_SUGGESTION else "insufficient_evidence"
+            conf = min(0.85, 0.35 + count * 0.15) if count >= uom_thresh else 0.3
+            stat = "pending" if count >= uom_thresh else "insufficient_evidence"
             suggestions.append(_make_suggestion(
                 stype="add_alternate_uom_for_item",
                 customer_no=customer_no, customer_name=customer_name,
@@ -303,7 +345,8 @@ def _analyze_customer_feedback(
             ))
 
     # ── Amount range suggestion ──
-    if len(amount_disagreements) >= MIN_EVIDENCE_FOR_SUGGESTION:
+    amt_thresh = _get_threshold("widen_order_value_tolerance", drift_risk)
+    if len(amount_disagreements) >= amt_thresh:
         suggestions.append(_make_suggestion(
             stype="widen_order_value_tolerance",
             customer_no=customer_no, customer_name=customer_name,
@@ -316,7 +359,8 @@ def _analyze_customer_feedback(
         ))
 
     # ── PO pattern suggestion ──
-    if len(po_disagreements) >= MIN_EVIDENCE_FOR_SUGGESTION:
+    po_thresh = _get_threshold("revise_po_pattern", drift_risk)
+    if len(po_disagreements) >= po_thresh:
         suggestions.append(_make_suggestion(
             stype="revise_po_pattern",
             customer_no=customer_no, customer_name=customer_name,
@@ -353,6 +397,9 @@ def _make_suggestion(
     supporting_docs: List[str], count: int,
     change: Dict, profile_snapshot: Dict, now: str,
     status: str = "pending",
+    threshold_used: int = 2,
+    relaxed_threshold: bool = False,
+    drift_risk: str = "low",
 ) -> Dict[str, Any]:
     return {
         "suggestion_id": str(uuid.uuid4())[:12],
@@ -366,6 +413,48 @@ def _make_suggestion(
         "proposed_profile_change": change,
         "current_profile_snapshot": profile_snapshot,
         "status": status,
+        "threshold_used": threshold_used,
+        "relaxed_threshold": relaxed_threshold,
+        "drift_risk_at_generation": drift_risk,
         "created_at": now,
         "updated_at": now,
     }
+
+
+def _get_threshold(stype: str, drift_risk: str) -> int:
+    """
+    Return the evidence threshold for a suggestion type, considering drift risk.
+    High-drift customers use stricter (default) thresholds even for relaxable types.
+    """
+    default = DEFAULT_THRESHOLDS.get(stype, 2)
+
+    if stype not in RELAXABLE_TYPES:
+        return default
+
+    if drift_risk == "high":
+        # High drift = conservative — use default or stricter
+        logger.info("[FeedbackLearning] High drift risk — using default threshold %d for %s", default, stype)
+        return default
+
+    tuned = TUNED_THRESHOLDS.get(stype, default)
+
+    if tuned < default:
+        logger.info("[FeedbackLearning] Using relaxed threshold %d (default %d) for %s (drift=%s)",
+                    tuned, default, stype, drift_risk)
+    return tuned
+
+
+async def _get_drift_risk(db, customer_no: str, cache: Dict[str, str]) -> str:
+    """Load drift risk for a customer, with caching."""
+    if customer_no in cache:
+        return cache[customer_no]
+
+    try:
+        from services.sales_order_profile_drift_service import get_customer_drift_detail
+        detail = await get_customer_drift_detail(db, customer_no)
+        risk = detail.get("drift_risk", "low")
+    except Exception:
+        risk = "low"
+
+    cache[customer_no] = risk
+    return risk

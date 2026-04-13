@@ -463,3 +463,11 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Admin endpoints: `GET /profile-drift`, `GET /profile-drift/{customer_id}`, `GET /profile-change-history/{customer_id}`
 - Full filter support: date range, customer, drift_risk, suggestion_type, applied_by
 - Governance/visibility only — never reverts or blocks changes
+
+## Evidence Threshold Tuning (2026-04-13)
+- Per-type configurable thresholds via env vars: `LEARN_THRESH_SHIP_TO=1`, `LEARN_THRESH_ITEM=1`
+- Only low-risk types relaxable: add_alternate_ship_to, add_occasional_valid_item
+- Higher-risk types unchanged: increase_variability, widen_amount, revise_po (default threshold=2-3)
+- Drift-aware: high-drift customers automatically use default (conservative) thresholds even for relaxable types
+- Suggestions record: threshold_used, relaxed_threshold (bool), drift_risk_at_generation
+- All governance preserved: suggestions still require explicit approve + apply

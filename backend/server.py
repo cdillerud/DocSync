@@ -4497,7 +4497,9 @@ async def _reprocess_document_inner(doc_id: str, doc: dict, reclassify: bool):
     job_type = doc.get("suggested_job_type", "AP_Invoice")
     job_configs = await db.hub_job_types.find_one({"job_type": job_type}, {"_id": 0})
     if not job_configs:
-        job_configs = DEFAULT_JOB_TYPES.get(job_type, DEFAULT_JOB_TYPES["AP_Invoice"])
+        job_configs = DEFAULT_JOB_TYPES.get(job_type) or DEFAULT_JOB_TYPES.get("AP_Invoice") or {
+            "job_type": job_type, "automation_level": 0, "requires_human_review_if_exception": True,
+        }
     
     # Get extracted fields
     extracted_fields = doc.get("extracted_fields") or {}
@@ -4535,6 +4537,15 @@ async def _reprocess_document_inner(doc_id: str, doc: dict, reclassify: bool):
             "warnings": [], "match_method": "none", "match_score": 0.0,
             "normalized_fields": {}, "validation_status": "fail",
         }
+
+    # Safety: ensure validation_results is never None
+    if not validation_results:
+        validation_results = {
+            "all_passed": False, "checks": [], "warnings": [],
+            "match_method": "none", "match_score": 0.0,
+            "normalized_fields": {}, "validation_status": "fail",
+        }
+
     new_match_method = validation_results.get("match_method", "none")
     
     # Make new automation decision

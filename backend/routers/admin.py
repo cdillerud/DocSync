@@ -908,3 +908,25 @@ async def customer_hotspot_detail(customer_id: str):
     if result.get("error"):
         raise HTTPException(status_code=404, detail=result["error"])
     return result
+
+
+# =============================================================================
+# Maturity Checkpoint & Reusability
+# =============================================================================
+
+@router.get("/sales-learning/maturity-checkpoint")
+async def maturity_checkpoint():
+    """Overall maturity assessment of the SO advisory/learning system."""
+    from deps import get_db
+    from services.sales_order_maturity_checkpoint_service import run_maturity_checkpoint
+    db = get_db()
+    return await run_maturity_checkpoint(db)
+
+
+@router.get("/sales-learning/maturity-checkpoint/reusability")
+async def maturity_reusability():
+    """Component reusability inventory and next-workflow recommendation."""
+    from deps import get_db
+    from services.sales_order_maturity_checkpoint_service import get_reusability_review
+    db = get_db()
+    return await get_reusability_review(db)

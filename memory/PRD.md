@@ -490,3 +490,12 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Detail endpoint: recent feedback + pending suggestions
 - Admin endpoints: `GET /customer-hotspots`, `GET /customer-hotspots/{customer_id}` — full filter support
 - Analysis only — never changes profiles, overrides, or thresholds
+
+## Maturity Checkpoint & Reusability Review (2026-04-13)
+- Service: `services/sales_order_maturity_checkpoint_service.py` — system-wide maturity assessment
+- 7 dimensions scored: feedback_volume, agreement_quality, profile_coverage, learning_loop, governance_controls, drift_health, override_governance
+- Maturity bands: mature (≥75) / operational (≥50) / developing (<50) → ready_to_reuse / mostly_ready / not_ready
+- Component inventory: 13 generic framework components (72.2% reuse ratio), 5 domain-specific
+- Next workflow recommendation: AP Invoice Vendor Advisory (fit=0.90, 12 reusable components, effort=low)
+- Admin endpoints: `GET /maturity-checkpoint`, `GET /maturity-checkpoint/reusability`
+- Assessment only — never triggers expansion

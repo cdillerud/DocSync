@@ -480,3 +480,13 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Backend extended: added override_type, reason, notes, expires_at, updated_by fields + filter support
 - Overrides remain separate from learned profiles — no silent merging
 - Audit: created_utc, updated_utc, updated_by on every change
+
+## Customer Hotspot Review (2026-04-13)
+- Service: `services/sales_order_customer_hotspot_review_service.py` — cross-signal friction analysis
+- Combines: feedback, disagreement fields, overrides, applied suggestions, audit count, profile richness/confidence
+- Hotspot score: weighted (incorrect×3, ship_to×2, item_uom×2, overrides×2, drift audit, low richness bonus)
+- Root causes: low_profile_richness, override_dependence, extraction_quality, threshold_tuning_needed, ship_to_friction, item_uom_friction, profile_drift_risk, high_volume_low_learning, monitor_only
+- Fix paths: profile_improvement, override_management, extraction_improvement, threshold_tuning, monitor_only
+- Detail endpoint: recent feedback + pending suggestions
+- Admin endpoints: `GET /customer-hotspots`, `GET /customer-hotspots/{customer_id}` — full filter support
+- Analysis only — never changes profiles, overrides, or thresholds

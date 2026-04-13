@@ -874,3 +874,37 @@ async def profile_change_history(customer_id: str, limit: int = Query(50, ge=1, 
     from services.sales_order_profile_drift_service import get_change_history
     db = get_db()
     return await get_change_history(db, customer_id, limit=limit)
+
+
+# =============================================================================
+# Customer Hotspot Review
+# =============================================================================
+
+@router.get("/sales-learning/customer-hotspots")
+async def customer_hotspots(
+    date_from: str = Query(None), date_to: str = Query(None),
+    rep: str = Query(None), severity: str = Query(None),
+    root_cause: str = Query(None), customer_no: str = Query(None),
+    limit: int = Query(30, ge=1, le=100),
+):
+    """Rank customers by advisory friction with root-cause diagnosis."""
+    from deps import get_db
+    from services.sales_order_customer_hotspot_review_service import get_customer_hotspots
+    db = get_db()
+    return await get_customer_hotspots(
+        db, date_from=date_from, date_to=date_to,
+        rep=rep, severity=severity, root_cause=root_cause,
+        customer_no=customer_no, limit=limit,
+    )
+
+
+@router.get("/sales-learning/customer-hotspots/{customer_id}")
+async def customer_hotspot_detail(customer_id: str):
+    """Detailed hotspot analysis for one customer."""
+    from deps import get_db
+    from services.sales_order_customer_hotspot_review_service import get_customer_hotspot_detail
+    db = get_db()
+    result = await get_customer_hotspot_detail(db, customer_id)
+    if result.get("error"):
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result

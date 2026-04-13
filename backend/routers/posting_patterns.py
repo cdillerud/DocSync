@@ -2383,10 +2383,24 @@ async def _run_daily_traces(count: int = None) -> dict:
                     inv_date = inv.get("invoiceDate", "")
                     if inv_date >= cutoff:
                         all_invoices.append(inv)
-                if len(all_invoices) >= trace_count * 3:
-                    break  # enough candidates
             except Exception:
-                continue
+                pass
+
+            # Also try historical/posted endpoint for this vendor
+            try:
+                hist = await bc.get_historical_posted_purchase_invoices(
+                    vendor_id=vendor_no, limit=10, skip=0
+                )
+                existing_ids = {i.get("id") for i in all_invoices}
+                for inv in hist.get("invoices", []):
+                    inv_date = inv.get("invoiceDate", "")
+                    if inv_date >= cutoff and inv.get("id") not in existing_ids:
+                        all_invoices.append(inv)
+            except Exception:
+                pass
+
+            if len(all_invoices) >= trace_count * 3:
+                break  # enough candidates
 
         logger.info("[DailyTrace] Fetched %d PROD PIs from %d vendors (cutoff=%s)",
                     len(all_invoices), min(len(vendor_nos), 30), cutoff)

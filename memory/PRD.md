@@ -515,3 +515,11 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
   - `GET /api/ap-advisory/feedback-summary` — analytics
 - Collections: `ap_reviewer_feedback` (feedback), `ap_advisory_review` (stored on doc)
 - Phase 2 (not yet built): disagreement diagnostics, calibration, learning suggestions, approval/apply
+
+## AP Invoice Vendor Advisory — Phase 2 (2026-04-13)
+- Disagreement diagnostics: `ap_invoice_disagreement_diagnostics_service.py` — AP-specific root causes (vendor_match_ambiguity, extraction_ambiguity, po_reference_mismatch, amount_tolerance_sensitivity, duplicate_sensitivity, confidence_overestimation, explanation_wording)
+- Confidence calibration: `ap_invoice_confidence_calibration_service.py` — penalty-based calibration preserving raw values (no_profile -20%, weak -10%, per_warning -5%, per_unusual -7%, per_blocker -15%)
+- Learning suggestions: `ap_invoice_feedback_learning_service.py` — governed suggestion generation (add_vendor_alias, add_accepted_reference_pattern, widen_amount_tolerance, add_accepted_po_behavior, increase_vendor_variability)
+- Collection: `ap_learning_suggestions` — same lifecycle as SO suggestions (pending → approved → applied)
+- Endpoints on ap_advisory router: GET /diagnostics, POST /calibrate/{id}, POST /generate-suggestions, GET /suggestions
+- Phase 3 (not yet): impact review, drift controls, hotspot review for AP

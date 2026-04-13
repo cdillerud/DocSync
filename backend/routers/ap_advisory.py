@@ -215,3 +215,66 @@ async def feedback_summary():
 
     from services.ap_invoice_feedback_service import get_ap_feedback_summary
     return await get_ap_feedback_summary(db)
+
+
+# =============================================================================
+# Phase 2: Diagnostics, Calibration, Learning Suggestions
+# =============================================================================
+
+@router.get("/diagnostics")
+async def ap_disagreement_diagnostics(
+    date_from: str = Query(None), date_to: str = Query(None),
+    vendor_no: str = Query(None), assessment: str = Query(None),
+    root_cause: str = Query(None),
+):
+    """AP disagreement root-cause diagnostics."""
+    db = get_db()
+    from services.ap_invoice_disagreement_diagnostics_service import run_ap_disagreement_diagnostics
+    return await run_ap_disagreement_diagnostics(
+        db, date_from=date_from, date_to=date_to,
+        vendor_no=vendor_no, assessment=assessment, root_cause=root_cause,
+    )
+
+
+@router.post("/calibrate/{document_id}")
+async def calibrate_ap_document(
+    document_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Run confidence calibration on a single AP document."""
+    _verify_token(authorization)
+    db = get_db()
+    from services.ap_invoice_confidence_calibration_service import calibrate_ap_document as _cal
+    result = await _cal(db, document_id)
+    if result.error:
+        raise HTTPException(status_code=404, detail=result.error)
+    return result.to_dict()
+
+
+@router.post("/generate-suggestions")
+async def generate_ap_suggestions(
+    vendor_no: str = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    sync: bool = Query(True),
+):
+    """Generate AP learning suggestions from reviewer feedback."""
+    db = get_db()
+    from services.ap_invoice_feedback_learning_service import generate_ap_learning_suggestions
+    return await generate_ap_learning_suggestions(db, vendor_no=vendor_no, limit=limit)
+
+
+@router.get("/suggestions")
+async def list_ap_suggestions(
+    vendor_no: str = Query(None),
+    suggestion_type: str = Query(None),
+    status: str = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    skip: int = Query(0, ge=0),
+):
+    """List AP learning suggestions with filters."""
+    db = get_db()
+    from services.ap_invoice_feedback_learning_service import get_ap_suggestions
+    return await get_ap_suggestions(
+        db, vendor_no=vendor_no, suggestion_type=suggestion_type,
+        status=status, limit=limit, skip=skip,
+    )

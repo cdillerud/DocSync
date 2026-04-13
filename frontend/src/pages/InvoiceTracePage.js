@@ -215,7 +215,11 @@ function ELTSummaryBanner() {
   const above95 = leaders.filter(v => v.avg_match_rate >= 95).length;
   const totalVendors = leaders.length;
   const dataPoints = data.data_points || 0;
-  const totalTraced = data.points.reduce((s, p) => s + (p.traced || 0), 0);
+  const successfulRuns = (data.points || []).filter(p => (p.traced || 0) > 0).length;
+  const totalTraced = (data.points || []).reduce((s, p) => s + (p.traced || 0), 0);
+
+  // Don't show banner if no successful traces
+  if (totalTraced === 0) return null;
 
   const avgColor = overallAvg >= 80 ? 'text-emerald-500' : overallAvg >= 50 ? 'text-amber-500' : 'text-red-500';
   const avgBg = overallAvg >= 80 ? 'from-emerald-500/5 to-emerald-500/0' : overallAvg >= 50 ? 'from-amber-500/5 to-amber-500/0' : 'from-red-500/5 to-red-500/0';
@@ -231,7 +235,7 @@ function ELTSummaryBanner() {
           <div className="border-l border-border/40 pl-8 space-y-1">
             <p className="text-sm font-medium">AI replicates human posting at <span className={`font-bold ${avgColor}`}>{overallAvg}%</span> accuracy</p>
             <p className="text-xs text-muted-foreground">
-              Across <strong>{totalVendors}</strong> vendors, <strong>{totalTraced}</strong> invoices traced over <strong>{dataPoints}</strong> daily runs
+              Across <strong>{totalVendors}</strong> vendors, <strong>{totalTraced}</strong> invoices traced over <strong>{successfulRuns}</strong> successful runs
             </p>
             {above95 > 0 && (
               <p className="text-xs text-emerald-600 font-medium">

@@ -2635,12 +2635,16 @@ async def get_daily_trace_trend(
         })
     vendor_stats.sort(key=lambda x: x["avg_match_rate"], reverse=True)
 
+    # Only include runs that actually traced invoices in the average
+    successful_points = [p for p in points if p.get("traced", 0) > 0]
+    overall_avg = round(sum(p["avg_match_rate"] for p in successful_points) / max(len(successful_points), 1)) if successful_points else 0
+
     return {
         "days_requested": days,
         "data_points": len(points),
         "points": points,
         "vendor_leaderboard": vendor_stats[:20],
-        "overall_avg": round(sum(p["avg_match_rate"] for p in points) / max(len(points), 1)) if points else 0,
+        "overall_avg": overall_avg,
     }
 
 

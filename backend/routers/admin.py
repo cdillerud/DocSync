@@ -761,3 +761,43 @@ async def get_learning_suggestion(suggestion_id: str):
     if not result:
         raise HTTPException(status_code=404, detail="Suggestion not found")
     return result
+
+
+# =============================================================================
+# Learning Suggestion Approval / Apply Workflow
+# =============================================================================
+
+@router.post("/sales-learning/learning-suggestions/{suggestion_id}/approve")
+async def approve_learning_suggestion(suggestion_id: str):
+    """Approve a pending learning suggestion."""
+    from deps import get_db
+    from services.sales_order_learning_suggestion_apply_service import approve_suggestion
+    db = get_db()
+    result = await approve_suggestion(db, suggestion_id, approver="admin")
+    if result.get("error"):
+        raise HTTPException(status_code=422, detail=result["error"])
+    return result
+
+
+@router.post("/sales-learning/learning-suggestions/{suggestion_id}/reject")
+async def reject_learning_suggestion(suggestion_id: str):
+    """Reject a pending or approved suggestion."""
+    from deps import get_db
+    from services.sales_order_learning_suggestion_apply_service import reject_suggestion
+    db = get_db()
+    result = await reject_suggestion(db, suggestion_id, approver="admin")
+    if result.get("error"):
+        raise HTTPException(status_code=422, detail=result["error"])
+    return result
+
+
+@router.post("/sales-learning/learning-suggestions/{suggestion_id}/apply")
+async def apply_learning_suggestion(suggestion_id: str):
+    """Apply an approved suggestion to the customer profile."""
+    from deps import get_db
+    from services.sales_order_learning_suggestion_apply_service import apply_suggestion
+    db = get_db()
+    result = await apply_suggestion(db, suggestion_id, applier="admin")
+    if result.get("error"):
+        raise HTTPException(status_code=422, detail=result["error"])
+    return result

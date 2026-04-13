@@ -427,3 +427,13 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Admin endpoints: `POST /generate-learning-suggestions?sync=true`, `GET /learning-suggestions`, `GET /learning-suggestions/{id}`
 - Full filter support: customer, type, status, min_confidence, date range
 - Suggestion generation only — never mutates profiles
+
+## Learning Suggestion Approval/Apply Workflow (2026-04-13)
+- Service: `services/sales_order_learning_suggestion_apply_service.py` — governed approval + apply workflow
+- State machine: pending → approved → applied (terminal), pending → rejected, rejected → pending (un-reject)
+- Mutation logic per type: add ship-to, add item, add UOM-for-item, widen amount range (±15-20%), relax PO pattern, increase variability (+0.15)
+- Duplicate detection: no-op if value already present in profile
+- Guard: cannot apply rejected/pending — must be approved first
+- Full audit: `so_learning_apply_audit` collection with pre/post snapshots, applier, change summary
+- Admin endpoints: `/approve`, `/reject`, `/apply` per suggestion_id
+- Never auto-applies — explicit human approval required

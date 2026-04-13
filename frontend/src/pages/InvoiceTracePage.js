@@ -190,6 +190,71 @@ function LeaderRow({ v, rank, onClick }) {
   );
 }
 
+/* ─── ELT Summary Banner — the one number for the executive pitch ─── */
+function ELTSummaryBanner() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API}/api/posting-patterns/daily-trace/trend?days=90`);
+        const d = await res.json();
+        setData(d);
+      } catch { /* ignore */ }
+      setLoading(false);
+    })();
+  }, []);
+
+  if (loading) return null;
+  if (!data || !data.points || data.points.length === 0) return null;
+
+  const overallAvg = data.overall_avg || 0;
+  const leaders = data.vendor_leaderboard || [];
+  const above80 = leaders.filter(v => v.avg_match_rate >= 80).length;
+  const above95 = leaders.filter(v => v.avg_match_rate >= 95).length;
+  const totalVendors = leaders.length;
+  const dataPoints = data.data_points || 0;
+  const totalTraced = data.points.reduce((s, p) => s + (p.traced || 0), 0);
+
+  const avgColor = overallAvg >= 80 ? 'text-emerald-500' : overallAvg >= 50 ? 'text-amber-500' : 'text-red-500';
+  const avgBg = overallAvg >= 80 ? 'from-emerald-500/5 to-emerald-500/0' : overallAvg >= 50 ? 'from-amber-500/5 to-amber-500/0' : 'from-red-500/5 to-red-500/0';
+
+  return (
+    <div className={`rounded-xl border border-border/40 bg-gradient-to-r ${avgBg} p-6`} data-testid="elt-summary-banner">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-8">
+          <div className="text-center">
+            <p className={`text-5xl font-bold tracking-tight ${avgColor}`}>{overallAvg}%</p>
+            <p className="text-xs text-muted-foreground mt-1 font-medium">AI Match Rate</p>
+          </div>
+          <div className="border-l border-border/40 pl-8 space-y-1">
+            <p className="text-sm font-medium">AI replicates human posting at <span className={`font-bold ${avgColor}`}>{overallAvg}%</span> accuracy</p>
+            <p className="text-xs text-muted-foreground">
+              Across <strong>{totalVendors}</strong> vendors, <strong>{totalTraced}</strong> invoices traced over <strong>{dataPoints}</strong> daily runs
+            </p>
+            {above95 > 0 && (
+              <p className="text-xs text-emerald-600 font-medium">
+                {above95} vendor{above95 > 1 ? 's' : ''} at 95%+ match — production-ready for automation
+              </p>
+            )}
+            {above80 > above95 && (
+              <p className="text-xs text-blue-600 font-medium">
+                {above80} vendor{above80 > 1 ? 's' : ''} at 80%+ match — ready to replace manual posting
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="text-right text-xs text-muted-foreground">
+          <p>PROD BC vs AI Template</p>
+          <p>Last 90 days</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 /* ─── Daily Trace Feed ─── */
 function DailyTraceFeed({ onSelectVendor }) {
   const [latestRun, setLatestRun] = useState(null);
@@ -449,6 +514,9 @@ export default function InvoiceTracePage() {
           </Button>
         </div>
       </div>
+
+      {/* Executive Summary — The one number that matters */}
+      <ELTSummaryBanner />
 
       {/* Daily Trace Feed */}
       <DailyTraceFeed onSelectVendor={handleSelectVendor} />

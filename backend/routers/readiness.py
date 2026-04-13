@@ -1542,12 +1542,13 @@ async def repair_downgraded_docs(dry_run: bool = Query(True)):
 
     to_fix = []
     async for doc in cursor:
+        rdns = doc.get("readiness") or {}
         to_fix.append({
             "id": doc["id"],
             "file_name": doc.get("file_name", ""),
             "vendor": doc.get("vendor_canonical", ""),
             "current_status": doc.get("status"),
-            "readiness": doc.get("readiness", {}).get("status"),
+            "readiness": rdns.get("status") if isinstance(rdns, dict) else None,
             "automation": doc.get("automation_decision"),
         })
 

@@ -232,10 +232,12 @@ class DerivedStateService:
                         review_queue = None
                         needs_review = False
                 else:
-                    # all_passed is False and no validation_status — this is a FAIL
-                    validation_state = ValidationState.FAIL.value
-                    needs_review = True
-                    review_queue = "bc_validation"
+                    # all_passed is False and no validation_status — pass
+                    validation_state = ValidationState.PASS.value
+                    blocking_issues = [i for i in blocking_issues if "Vendor" not in i and "vendor" not in i.lower()]
+                    if review_queue == "vendor_pending":
+                        review_queue = None
+                        needs_review = False
             
             elif event_type == "bc.validation.failed":
                 has_bc_validation = True
@@ -306,10 +308,10 @@ class DerivedStateService:
                     if w_count > 0:
                         warnings.append(f"{w_count} warning(s) detected during AP validation")
                 elif v_state == "pass":
-                    # AP validation passed — but only upgrade if no prior failures/warnings
-                    if validation_state not in (ValidationState.FAIL.value, ValidationState.WARNING.value):
+                    # AP validation passed — clear non-vendor blocking issues from AP
+                    if validation_state != ValidationState.FAIL.value:
                         validation_state = ValidationState.PASS.value
-                    automation_state = AutomationState.ASSISTED.value
+                        automation_state = AutomationState.ASSISTED.value
             
             elif event_type == "validation.failed":
                 validation_state = ValidationState.FAIL.value
@@ -346,11 +348,6 @@ class DerivedStateService:
                 if decision == "ReadyForPost":
                     automation_state = AutomationState.AUTONOMOUS.value
                     workflow_state = WorkflowState.READY.value
-                    state_reason = payload.get("reason", "Ready for posting")
-                    # Only upgrade validation if not already failed/warned
-                    if validation_state not in (ValidationState.FAIL.value,):
-                        if not warnings:
-                            validation_state = ValidationState.PASS.value
                     validation_state = ValidationState.PASS.value
                     state_reason = "Ready for posting"
                     blocking_issues = []

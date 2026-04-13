@@ -199,18 +199,21 @@ export default function UnifiedQueuePage() {
 
       // Filter out non-postable doc types from active work tabs
       const NON_POSTABLE = new Set([
-        'Sales_Quote', 'Quality_Issue', 'REMINDER', 'Remittance',
-        'Statement', 'Account_Statement', 'Inventory_Report', 'Warehouse',
+        'Sales_Quote', 'Sales Quote', 'SalesQuote',
+        'Quality_Issue', 'Quality Issue', 'QualityIssue',
+        'REMINDER', 'Reminder',
+        'Remittance', 'Statement', 'Account_Statement', 'Account Statement',
+        'Inventory_Report', 'Inventory Report', 'InventoryReport',
+        'Warehouse', 'Bill_of_Lading', 'Bill of Lading', 'BOL',
       ]);
-      if (!isProcessedTab && !isBatchesTab) {
+      if (!isProcessedTab && !isBatchesTab && !isArchivedTab) {
         docs = docs.filter(d => {
           const dt = d.document_type || d.doc_type || '';
-          // Remove non-postable types
           if (NON_POSTABLE.has(dt)) return false;
-          // Remove vendorless docs with no useful data that are just sitting there
+          // Vendorless docs with "Approved"/"Ready to Post" status and no useful data
           const hasVendor = d.vendor_canonical || d.bc_vendor_number || d.vendor_raw;
           const hasData = d.invoice_number_clean || d.amount_float;
-          if (!hasVendor && !hasData && d.status === 'Approved') return false;
+          if (!hasVendor && !hasData) return false;
           return true;
         });
       }

@@ -1523,19 +1523,21 @@ async def repair_downgraded_docs(dry_run: bool = Query(True)):
         from deps import get_db
         db = get_db()
 
+        # Any doc in NeedsReview/reviewing that has good data (vendor + invoice OR amount)
+        # should be Completed — these were incorrectly downgraded by the readiness changes
         to_fix = []
         async for doc in db.hub_documents.find(
-            {"status": {"$in": ["NeedsReview", "reviewing", "Approved"]}},
-            {"_id": 0, "id": 1, "status": 1, "file_name": 1, "vendor_canonical": 1,
-             "auto_cleared": 1, "automation_decision": 1}
+            {
+                "status": {"$in": ["NeedsReview", "reviewing"]},
+                "vendor_canonical": {"$exists": True, "$ne": None, "$ne": ""},
+                "$or": [
+                    {"invoice_number_clean": {"$exists": True, "$ne": None, "$ne": ""}},
+                    {"amount_float": {"$exists": True, "$ne": None, "$gt": 0}},
+                ]
+            },
+            {"_id": 0, "id": 1, "status": 1, "vendor_canonical": 1, "invoice_number_clean": 1}
         ):
-            # Only restore docs that were previously auto-cleared or auto-decided
-            is_auto = (
-                doc.get("auto_cleared") == True
-                or (doc.get("automation_decision") or "") in ("auto_filed", "auto_linked", "auto_approved", "auto_drafted", "ReadyForPost")
-            )
-            if is_auto:
-                to_fix.append(doc["id"])
+            to_fix.append(doc["id"])
 
         if not dry_run and to_fix:
             result = await db.hub_documents.update_many(
@@ -1544,7 +1546,7 @@ async def repair_downgraded_docs(dry_run: bool = Query(True)):
             )
             return {"repaired": result.modified_count, "total_found": len(to_fix)}
 
-        return {"dry_run": True, "would_repair": len(to_fix)}
+        return {"dry_run": dry_run, "would_repair": len(to_fix)}
 
     except Exception as e:
         return {"error": str(e), "type": type(e).__name__}

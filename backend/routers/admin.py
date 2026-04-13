@@ -801,3 +801,37 @@ async def apply_learning_suggestion(suggestion_id: str):
     if result.get("error"):
         raise HTTPException(status_code=422, detail=result["error"])
     return result
+
+
+# =============================================================================
+# Learning Apply-Impact Review
+# =============================================================================
+
+@router.get("/sales-learning/learning-impact-review")
+async def learning_impact_review(
+    date_from: str = Query(None), date_to: str = Query(None),
+    customer_no: str = Query(None), suggestion_type: str = Query(None),
+    applied_by: str = Query(None),
+):
+    """Measure whether applied suggestions improved future advisory quality."""
+    from deps import get_db
+    from services.sales_order_learning_impact_review_service import run_learning_impact_review
+    db = get_db()
+    return await run_learning_impact_review(
+        db, date_from=date_from, date_to=date_to,
+        customer_no=customer_no, suggestion_type=suggestion_type,
+        applied_by=applied_by,
+    )
+
+
+@router.get("/sales-learning/learning-impact-review/details")
+async def learning_impact_details(
+    limit: int = Query(50, ge=1, le=500), skip: int = Query(0, ge=0),
+    customer_no: str = Query(None), suggestion_type: str = Query(None),
+):
+    """Per-suggestion apply audit detail records."""
+    from deps import get_db
+    from services.sales_order_learning_impact_review_service import get_impact_details
+    db = get_db()
+    return await get_impact_details(db, limit=limit, skip=skip,
+                                    customer_no=customer_no, suggestion_type=suggestion_type)

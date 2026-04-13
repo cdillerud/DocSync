@@ -446,3 +446,11 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Action guards: only shows valid actions per status (approve/reject for pending, apply/reject for approved, no actions for applied/rejected)
 - Loading/empty/error states handled
 - Uses existing admin endpoints — no new backend needed
+
+## Learning Apply-Impact Review (2026-04-13)
+- Service: `services/sales_order_learning_impact_review_service.py` — pre/post apply outcome comparison
+- Compares: agreement rate, disagreement field frequency, root-cause changes per customer and suggestion type
+- Outputs: improved/no_change/regressed counts, per-type and per-customer deltas, examples, actionable recommendations
+- Recommendation engine: suggests lowering thresholds for high-impact types, flags regressions, notes insufficient data
+- Admin endpoints: `GET /learning-impact-review`, `GET /learning-impact-review/details` — full filter support
+- Analysis only — never changes thresholds or behavior

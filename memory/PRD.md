@@ -333,6 +333,17 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Frontend: unified panel shows calibrated confidence with "cal" indicator, expanded view shows raw→calibrated with reasons
 - Advisory/display only — never changes routing or posting decisions
 
+## Low-History Profile Handling Improvements (2026-04-13)
+- Reviewer: profile-state-aware prompts (none/weak/medium/strong) — reduces over-assertive anomaly language
+  - No profile: caps confidence at 0.60, avoids speculative anomalies, uses "limited comparison basis" phrasing
+  - Weak profile: caps confidence at 0.70, phrases deviations as "differs from limited sample"
+  - Medium: flags deviations as "worth verifying"
+  - Strong: full comparison (existing behavior)
+- Added `profile_state` field to ReadinessReviewResult and advisory endpoint response
+- Explainer: adjusted headlines ("Limited customer history — manual review recommended"), attention items, and next steps for low-history cases
+- Frontend: "No History" / "Limited History" badge in advisory panel header for low-history documents
+- All existing schemas backward-compatible (profile_state is additive)
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

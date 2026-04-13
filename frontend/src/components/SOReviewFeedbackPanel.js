@@ -95,12 +95,17 @@ export default function SOReviewFeedbackPanel({ document }) {
   const calibration = advisory?.calibration;
   const feedback = advisory?.feedback || [];
   const latestFb = feedback[0];
+  const profileState = review?.profile_state || (profile ? (profile.template_confidence === 'high' ? 'strong' : profile.template_confidence === 'medium' ? 'medium' : 'weak') : 'none');
   const statusCfg = STATUS_CONFIG[ex.readiness_status || review?.readiness_status] || STATUS_CONFIG.needs_review;
   const StatusIcon = statusCfg.icon;
   const rawConf = ex.reviewer_confidence || review?.confidence || 0;
   const calConf = calibration?.calibrated_confidence;
   const displayConf = calConf != null ? calConf : rawConf;
   const isCalibrated = calConf != null && Math.abs(calConf - rawConf) > 0.005;
+  const isLowHistory = profileState === 'none' || profileState === 'weak';
+
+  const PROFILE_LABELS = { none: 'No History', weak: 'Limited History', medium: 'Moderate History', strong: 'Strong History' };
+  const PROFILE_COLORS = { none: 'text-red-500 bg-red-500/10 border-red-300', weak: 'text-amber-600 bg-amber-500/10 border-amber-300', medium: 'text-blue-600 bg-blue-500/10 border-blue-300', strong: 'text-emerald-600 bg-emerald-500/10 border-emerald-300' };
 
   return (
     <Card data-testid="so-advisory-panel">
@@ -115,6 +120,11 @@ export default function SOReviewFeedbackPanel({ document }) {
                   <StatusIcon className="w-3 h-3 mr-0.5" />
                   {statusCfg.label}
                 </Badge>
+                {isLowHistory && (
+                  <Badge variant="outline" className={`text-[9px] ${PROFILE_COLORS[profileState]}`} data-testid="advisory-profile-state">
+                    {PROFILE_LABELS[profileState]}
+                  </Badge>
+                )}
                 {displayConf > 0 && (
                   <span className={`text-[10px] font-mono ${statusCfg.color}`} data-testid="advisory-confidence" title={isCalibrated ? `Raw: ${Math.round(rawConf * 100)}% → Calibrated: ${Math.round(calConf * 100)}%` : `Model confidence: ${Math.round(rawConf * 100)}%`}>
                     {Math.round(displayConf * 100)}%

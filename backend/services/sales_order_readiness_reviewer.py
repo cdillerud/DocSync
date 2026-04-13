@@ -51,6 +51,7 @@ class ReadinessReviewResult:
     customer_profile_id: Optional[str]
     customer_profile_version: Optional[str]
     reviewed_at: str
+    profile_state: str = "unknown"  # none | weak | medium | strong
     error: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -80,6 +81,7 @@ async def review_sales_order_readiness(
 
     profile_id = customer_profile.get("customer_no") if customer_profile else None
     profile_version = customer_profile.get("last_analyzed") if customer_profile else None
+    profile_state = _classify_profile_state(customer_profile)
 
     # --- Obtain LLM provider ---
     try:
@@ -90,8 +92,8 @@ async def review_sales_order_readiness(
     model_used = type(provider).__name__
 
     # --- Build prompts ---
-    system_prompt = _build_system_prompt()
-    user_prompt = _build_user_prompt(extracted_order, customer_profile, validation_results, document_context)
+    system_prompt = _build_system_prompt(profile_state)
+    user_prompt = _build_user_prompt(extracted_order, customer_profile, validation_results, document_context, profile_state)
 
     # --- Call LLM with retry ---
     raw = ""
@@ -142,6 +144,7 @@ async def review_sales_order_readiness(
             customer_profile_id=profile_id,
             customer_profile_version=profile_version,
             reviewed_at=reviewed_at,
+            profile_state=profile_state,
         )
 
         logger.info(
@@ -177,8 +180,8 @@ async def review_sales_order_readiness(
 # Prompt construction
 # =============================================================================
 
-def _build_system_prompt() -> str:
-    return (
+def _build_system_prompt(profile_state: str) -> str:
+    base = (
         "You are a sales order readiness reviewer for a document processing hub. "
         "Given a sales order's extracted data and the customer's historical posting profile, "
         "evaluate whether the order looks ready for posting, needs human review, "
@@ -197,12 +200,41 @@ def _build_system_prompt() -> str:
         "Rules:\n"
         "- 'ready' = all fields present, matches customer history, no red flags\n"
         "- 'needs_review' = mostly OK but has warnings or minor gaps\n"
-        "- 'suspicious' = significant deviations from history (unusual items, amounts, ship-to)\n"
+        "- 'suspicious' = significant deviations from a STRONG known pattern\n"
         "- 'incomplete' = missing critical fields (customer, items, amounts)\n"
         "- Always explain your reasoning in summary\n"
-        "- If no customer profile exists, note this as a warning (new customer)\n"
-        "Do not include any text outside the JSON object."
     )
+
+    if profile_state == "none":
+        base += (
+            "\nIMPORTANT — NO CUSTOMER PROFILE EXISTS:\n"
+            "- There is no historical data for this customer. You CANNOT determine what is 'normal' for them.\n"
+            "- Do NOT mark items, amounts, ship-to, or UOM as 'unusual' — you have no baseline to compare against.\n"
+            "- Treat this as a 'limited comparison basis' situation, not an anomaly.\n"
+            "- Use 'needs_review' if the order data looks structurally complete but you have no history.\n"
+            "- Only use 'suspicious' if the extracted data itself is internally inconsistent (e.g., zero amounts, contradictory fields).\n"
+            "- Keep confidence below 0.60 — you are working without historical context.\n"
+            "- In warnings, state 'No customer history available — manual verification recommended' rather than listing speculative anomalies.\n"
+        )
+    elif profile_state == "weak":
+        base += (
+            "\nIMPORTANT — WEAK CUSTOMER PROFILE (few historical orders):\n"
+            "- The profile has very limited data. Patterns may not be statistically reliable.\n"
+            "- Phrase deviations as 'differs from limited sample' rather than 'unusual' or 'anomalous.'\n"
+            "- Do NOT treat deviations from a small sample as strong evidence of risk.\n"
+            "- Keep confidence below 0.70 — the comparison basis is thin.\n"
+            "- Prefer 'needs_review' over 'suspicious' unless the order has actual blocking issues.\n"
+        )
+    elif profile_state == "medium":
+        base += (
+            "\nCUSTOMER PROFILE: MODERATE HISTORY.\n"
+            "- The profile has a reasonable number of orders. Patterns are indicative but not definitive.\n"
+            "- Flag deviations as 'worth verifying' rather than 'anomalous.'\n"
+        )
+    # strong: no special instruction — default behavior is appropriate
+
+    base += "Do not include any text outside the JSON object."
+    return base
 
 
 def _build_user_prompt(
@@ -210,6 +242,7 @@ def _build_user_prompt(
     customer_profile: Optional[Dict[str, Any]],
     validation_results: Optional[Dict[str, Any]],
     document_context: Optional[Dict[str, Any]],
+    profile_state: str = "unknown",
 ) -> str:
     parts = []
 
@@ -233,10 +266,11 @@ def _build_user_prompt(
 
     # Customer profile
     if customer_profile and customer_profile.get("status") == "analyzed":
-        parts.append("\n=== CUSTOMER POSTING PROFILE ===")
+        analyzed = customer_profile.get("invoices_analyzed", 0)
+        parts.append(f"\n=== CUSTOMER POSTING PROFILE (state: {profile_state}, {analyzed} orders analyzed) ===")
         parts.append(f"customer_no: {customer_profile.get('customer_no')}")
         parts.append(f"customer_name: {customer_profile.get('customer_name')}")
-        parts.append(f"invoices_analyzed: {customer_profile.get('invoices_analyzed')}")
+        parts.append(f"invoices_analyzed: {analyzed}")
         parts.append(f"template_confidence: {customer_profile.get('template_confidence')}")
         parts.append(f"common_items: {customer_profile.get('common_items', [])}")
         parts.append(f"common_uoms: {customer_profile.get('common_uoms', [])}")
@@ -247,9 +281,12 @@ def _build_user_prompt(
         parts.append(f"typical_ship_to: {customer_profile.get('typical_ship_to')}")
         parts.append(f"typical_line_count: {customer_profile.get('typical_line_count')}")
         parts.append(f"days_to_ship_p50: {customer_profile.get('days_to_ship_p50')}")
+        if profile_state == "weak":
+            parts.append("NOTE: This profile is based on very few orders — treat patterns as tentative, not definitive.")
     else:
-        parts.append("\n=== CUSTOMER POSTING PROFILE ===")
-        parts.append("No historical profile available (new or unknown customer)")
+        parts.append("\n=== CUSTOMER POSTING PROFILE (state: none) ===")
+        parts.append("No historical profile available. This is a new or unknown customer.")
+        parts.append("You have no basis to judge what is 'normal' for this customer.")
 
     # Existing validation
     if validation_results:
@@ -294,6 +331,19 @@ def _validate_schema(data: Dict[str, Any]) -> bool:
     except (ValueError, TypeError):
         return False
     return True
+
+
+def _classify_profile_state(profile: Optional[Dict[str, Any]]) -> str:
+    """Classify customer profile into none/weak/medium/strong."""
+    if not profile or profile.get("status") != "analyzed":
+        return "none"
+    analyzed = profile.get("invoices_analyzed", 0)
+    conf = profile.get("template_confidence", "low")
+    if conf == "high" and analyzed >= 20:
+        return "strong"
+    if conf == "medium" or analyzed >= 5:
+        return "medium"
+    return "weak"
 
 
 def _error_result(

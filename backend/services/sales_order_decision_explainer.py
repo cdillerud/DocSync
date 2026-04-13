@@ -101,8 +101,15 @@ def _explain_from_review(
     status = review.get("readiness_status", "needs_review")
     confidence = float(review.get("confidence", 0))
     summary = review.get("summary", "")
+    profile_state = review.get("profile_state", "unknown")
 
-    headline = _HEADLINES.get(status, "Sales order status unclear")
+    # Adjust headline for low-history cases
+    if profile_state in ("none", "weak") and status == "needs_review":
+        headline = "Limited customer history — manual review recommended"
+    elif profile_state in ("none", "weak") and status == "suspicious":
+        headline = "Flagged for review — note: limited customer history available"
+    else:
+        headline = _HEADLINES.get(status, "Sales order status unclear")
 
     # Why it was flagged
     why_flagged = []
@@ -117,7 +124,10 @@ def _explain_from_review(
     # What looks normal
     what_normal = []
     for match in review.get("profile_matches", []):
-        what_normal.append(f"{match} matches customer history")
+        if profile_state in ("none", "weak"):
+            what_normal.append(f"{match} (limited comparison basis)")
+        else:
+            what_normal.append(f"{match} matches customer history")
 
     # What needs attention
     what_attention = []
@@ -128,13 +138,23 @@ def _explain_from_review(
         if issue not in why_flagged:
             what_attention.append(issue)
 
+    # Add profile-state context
+    if profile_state == "none":
+        what_attention.insert(0, "No customer history available — all comparisons are limited")
+    elif profile_state == "weak":
+        what_attention.insert(0, "Customer profile based on very few orders — patterns may not be reliable")
+
     # Recommended next steps
     steps = []
     rec = review.get("recommended_next_step", "")
     if rec:
         steps.append(rec)
 
-    if status == "ready" and confidence >= 0.8:
+    if profile_state in ("none", "weak"):
+        if not steps:
+            steps.append("Review this order manually — insufficient history for automated confidence")
+        steps.append("This customer's profile will improve as more orders are processed")
+    elif status == "ready" and confidence >= 0.8:
         if not steps:
             steps.append("Review and approve — this order matches the customer's typical pattern")
     elif status == "suspicious":

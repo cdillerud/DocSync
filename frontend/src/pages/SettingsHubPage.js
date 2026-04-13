@@ -8,6 +8,7 @@ import VendorIntelligencePage from './VendorIntelligencePage';
 import StableVendorsPage from './StableVendorsPage';
 import FeedbackLoopHealthPage from './FeedbackLoopHealthPage';
 import ReprocessComparisonPage from './ReprocessComparisonPage';
+import RepOverridesPanel from '../components/RepOverridesPanel';
 
 const TABS = [
   { key: 'general', label: 'General' },
@@ -16,6 +17,7 @@ const TABS = [
   { key: 'item-mappings', label: 'Item Mappings' },
   { key: 'vendors', label: 'Vendor Intelligence' },
   { key: 'stable-vendors', label: 'Stable Vendors' },
+  { key: 'rep-overrides', label: 'Rep Overrides' },
   { key: 'feedback-loop', label: 'Feedback Loop' },
   { key: 'reprocess', label: 'Before/After' },
 ];
@@ -50,6 +52,7 @@ export default function SettingsHubPage() {
       {activeTab === 'item-mappings' && <ItemMappingsPage />}
       {activeTab === 'vendors' && <VendorIntelligencePage />}
       {activeTab === 'stable-vendors' && <StableVendorsPage />}
+      {activeTab === 'rep-overrides' && <RepOverridesPanel />}
       {activeTab === 'feedback-loop' && <FeedbackLoopHealthPage />}
       {activeTab === 'reprocess' && <ReprocessComparisonPage />}
     </div>

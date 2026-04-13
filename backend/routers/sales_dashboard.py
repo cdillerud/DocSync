@@ -1021,15 +1021,42 @@ class RepOverrideRequest(BaseModel):
     rep_email: str
     rep_name: str = ""
     salesperson_code: str = ""
+    override_type: str = "rep_assignment"
+    reason: str = ""
+    notes: str = ""
+    expires_at: Optional[str] = None
 
 
 @router.get("/rep-overrides")
-async def list_rep_overrides():
-    """List all customer→rep manual overrides."""
+async def list_rep_overrides(
+    active_only: bool = Query(True),
+    override_type: str = Query(None),
+    rep_email: str = Query(None),
+    customer_no: str = Query(None),
+):
+    """List customer→rep manual overrides with filters."""
     db = get_db()
+    match: dict = {}
+    if active_only:
+        match["active"] = True
+    if override_type:
+        match["override_type"] = override_type
+    if rep_email:
+        match["rep_email"] = rep_email
+    if customer_no:
+        match["customer_no"] = customer_no
+
     overrides = await db.customer_rep_overrides.find(
-        {"active": True}, {"_id": 0}
+        match, {"_id": 0}
     ).sort([("customer_name", 1)]).to_list(500)
+
+    # Mark expired ones
+    now = datetime.now(timezone.utc).isoformat()
+    for o in overrides:
+        exp = o.get("expires_at")
+        if exp and exp < now:
+            o["expired"] = True
+
     return {"overrides": overrides, "count": len(overrides)}
 
 
@@ -1057,8 +1084,13 @@ async def create_rep_override(body: RepOverrideRequest):
         "rep_email": body.rep_email,
         "rep_name": body.rep_name,
         "salesperson_code": body.salesperson_code,
+        "override_type": body.override_type,
+        "reason": body.reason,
+        "notes": body.notes,
+        "expires_at": body.expires_at,
         "active": True,
         "updated_utc": now,
+        "updated_by": "admin",
     }
 
     result = await db.customer_rep_overrides.update_one(

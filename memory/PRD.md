@@ -471,3 +471,12 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Drift-aware: high-drift customers automatically use default (conservative) thresholds even for relaxable types
 - Suggestions record: threshold_used, relaxed_threshold (bool), drift_risk_at_generation
 - All governance preserved: suggestions still require explicit approve + apply
+
+## Rep Overrides Management UI (2026-04-13)
+- Component: `components/RepOverridesPanel.js` — full admin CRUD for rep overrides
+- Placed in Settings Hub as "Rep Overrides" tab
+- Features: list/search/filter overrides, expandable detail, create/edit/disable, type badges
+- Override types: rep_assignment, ship_to_exception, item_uom_exception, draft_preference, business_note
+- Backend extended: added override_type, reason, notes, expires_at, updated_by fields + filter support
+- Overrides remain separate from learned profiles — no silent merging
+- Audit: created_utc, updated_utc, updated_by on every change

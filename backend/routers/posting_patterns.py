@@ -2162,6 +2162,175 @@ async def batch_trace_invoices(
 
 
 # =============================================================================
+# Document-Level Trace — Compare specific doc's Sandbox draft vs PROD posting
+# =============================================================================
+
+@router.get("/trace-document/{document_id}")
+async def trace_document_posting(document_id: str):
+    """
+    For a specific document that was draft-created in Sandbox, find the same
+    invoice in PROD and compare line-by-line: what accounting posted vs what
+    the AI created.
+    """
+    db = get_db()
+    bc = get_bc_service()
+
+    # Load the document
+    doc = await db.hub_documents.find_one({"id": document_id}, {"_id": 0})
+    if not doc:
+        return {"error": "Document not found"}
+
+    vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_canonical") or ""
+    invoice_number = doc.get("invoice_number_clean") or ""
+    amount = doc.get("amount_float") or 0
+
+    if not vendor_no or not invoice_number:
+        return {"error": f"Document missing vendor ({vendor_no}) or invoice number ({invoice_number})"}
+
+    # ── Sandbox side: what the AI created ──
+    sandbox_pi = doc.get("bc_purchase_invoice") or {}
+    sandbox_pi_no = sandbox_pi.get("bc_pi_number") or doc.get("bc_purchase_invoice_no") or ""
+    sandbox_lines = []
+
+    if sandbox_pi_no:
+        # Try to fetch lines from sandbox BC
+        try:
+            from services.business_central_service import (
+                BC_API_BASE, BC_TENANT_ID, BC_WRITE_ENVIRONMENT, get_bc_token, BC_REQUEST_TIMEOUT
+            )
+            import httpx
+            token = await get_bc_token(environment=BC_WRITE_ENVIRONMENT)
+            company_id = await bc._get_company_id(environment=BC_WRITE_ENVIRONMENT)
+            # Find the PI by number in sandbox
+            url = (f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/v2.0/"
+                   f"companies({company_id})/purchaseInvoices")
+            params = {"$filter": f"number eq '{sandbox_pi_no}'", "$select": "id,number,vendorInvoiceNumber,totalAmountExcludingTax,status"}
+            async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+                resp = await client.get(url, headers={"Authorization": f"Bearer {token}"}, params=params)
+                if resp.status_code == 200:
+                    pis = resp.json().get("value", [])
+                    if pis:
+                        sandbox_inv_id = pis[0].get("id", "")
+                        # Fetch lines
+                        lines_url = f"{url}({sandbox_inv_id})/purchaseInvoiceLines"
+                        lines_resp = await client.get(lines_url, headers={"Authorization": f"Bearer {token}"})
+                        if lines_resp.status_code == 200:
+                            sandbox_lines = lines_resp.json().get("value", [])
+        except Exception as e:
+            logger.warning("[DocTrace] Failed to fetch sandbox lines for %s: %s", sandbox_pi_no, e)
+
+    # If we couldn't fetch from sandbox, use the draft data from the document
+    if not sandbox_lines:
+        draft_lines = doc.get("draft_pi_lines") or doc.get("auto_draft_result", {}).get("lines") or []
+        ef = doc.get("extracted_fields") or {}
+        nf = doc.get("normalized_fields") or {}
+        line_items = nf.get("line_items") or ef.get("line_items") or doc.get("line_items") or []
+
+        for li in (draft_lines or line_items):
+            sandbox_lines.append({
+                "lineObjectNumber": li.get("lineObjectNumber") or li.get("item_or_account") or li.get("item_number") or li.get("description", ""),
+                "description": li.get("description", ""),
+                "quantity": li.get("quantity", 1),
+                "unitCost": li.get("unitCost") or li.get("unit_price") or li.get("price", 0),
+                "lineAmount": li.get("netAmount") or li.get("lineAmount") or li.get("total") or li.get("amount", 0),
+                "taxCode": li.get("taxCode", ""),
+                "unitOfMeasureCode": li.get("uom") or li.get("unitOfMeasureCode", ""),
+                "lineType": li.get("lineType") or li.get("line_type", "Item"),
+            })
+
+    # ── PROD side: what accounting actually posted ──
+    prod_lines = []
+    prod_invoice = None
+
+    try:
+        # Search PROD for the same vendor + invoice number
+        pi_result = await bc.get_posted_purchase_invoices(vendor_id=vendor_no, limit=50, skip=0)
+        for inv in pi_result.get("invoices", []):
+            vi_num = inv.get("vendorInvoiceNumber", "")
+            if vi_num == invoice_number or vi_num == invoice_number.lstrip("0"):
+                prod_invoice = inv
+                break
+
+        # Also try historical
+        if not prod_invoice:
+            hist = await bc.get_historical_posted_purchase_invoices(vendor_id=vendor_no, limit=100, skip=0)
+            for inv in hist.get("invoices", []):
+                vi_num = inv.get("vendorInvoiceNumber", "")
+                if vi_num == invoice_number or vi_num == invoice_number.lstrip("0"):
+                    prod_invoice = inv
+                    break
+
+        if prod_invoice:
+            prod_lines = await bc.get_purchase_invoice_lines(prod_invoice.get("id", ""))
+    except Exception as e:
+        logger.warning("[DocTrace] Failed to fetch PROD invoice for %s/%s: %s", vendor_no, invoice_number, e)
+
+    if not prod_invoice:
+        return {
+            "document_id": document_id,
+            "vendor_no": vendor_no,
+            "invoice_number": invoice_number,
+            "sandbox_pi_no": sandbox_pi_no,
+            "sandbox_lines": len(sandbox_lines),
+            "prod_found": False,
+            "error": f"Invoice {invoice_number} not yet posted in PROD for vendor {vendor_no}",
+            "note": "Accounting may not have posted this invoice yet. Try again later.",
+        }
+
+    # ── Compare ──
+    sandbox_summary = _build_line_summary(sandbox_lines)
+    prod_summary = _build_line_summary(prod_lines)
+
+    # Load template for comparison
+    profile = await db.posting_pattern_analysis.find_one(
+        {"vendor_no": vendor_no, "status": "analyzed"}, {"_id": 0}
+    )
+    template = profile.get("posting_template", {}) if profile else {}
+
+    comparison = _compute_trace_diff(prod_lines, prod_summary, sandbox_lines, sandbox_summary, template)
+
+    return {
+        "document_id": document_id,
+        "vendor_no": vendor_no,
+        "vendor_name": doc.get("vendor_raw", ""),
+        "invoice_number": invoice_number,
+        "amount": amount,
+        "sandbox": {
+            "pi_number": sandbox_pi_no,
+            "line_count": len(sandbox_lines),
+            "lines": [{
+                "item": l.get("lineObjectNumber", ""),
+                "description": l.get("description", ""),
+                "quantity": l.get("quantity", 0),
+                "unit_cost": l.get("unitCost", 0),
+                "net_amount": l.get("lineAmount") or l.get("netAmount", 0),
+                "tax_code": l.get("taxCode", ""),
+                "uom": l.get("unitOfMeasureCode", ""),
+            } for l in sandbox_lines],
+            "source": "bc_sandbox" if sandbox_pi_no else "draft_data",
+        },
+        "production": {
+            "pi_number": prod_invoice.get("number", ""),
+            "vendor_invoice_number": prod_invoice.get("vendorInvoiceNumber", ""),
+            "total": prod_invoice.get("totalAmountExcludingTax", 0),
+            "status": prod_invoice.get("status", ""),
+            "invoice_date": prod_invoice.get("invoiceDate", ""),
+            "line_count": len(prod_lines),
+            "lines": [{
+                "item": l.get("lineObjectNumber", ""),
+                "description": l.get("description", ""),
+                "quantity": l.get("quantity", 0),
+                "unit_cost": l.get("unitCost") or l.get("directUnitCost", 0),
+                "net_amount": l.get("lineAmount") or l.get("netAmount", 0),
+                "tax_code": l.get("taxCode") or l.get("taxGroupCode", ""),
+                "uom": l.get("unitOfMeasureCode", ""),
+            } for l in prod_lines],
+        },
+        "comparison": comparison,
+    }
+
+
+# =============================================================================
 # Daily Random Trace — Auto-compare PROD BC invoices across random vendors
 # =============================================================================
 

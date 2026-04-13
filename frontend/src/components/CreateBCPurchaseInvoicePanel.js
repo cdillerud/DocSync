@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { purchaseInvoicePreflight, createPurchaseInvoiceFromDocument } from '../lib/api';
 import api from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -10,10 +10,12 @@ import { toast } from 'sonner';
 import {
   FileInput, Loader2, CheckCircle2, AlertCircle,
   AlertTriangle, ChevronRight, Package, Building2, Calendar,
-  FileText, Hash, Shield, XCircle, Receipt, RefreshCw, RotateCcw
+  FileText, Hash, Shield, XCircle, Receipt, RefreshCw, RotateCcw,
+  ArrowLeftRight
 } from 'lucide-react';
 
 const ELIGIBLE_TYPES = new Set(['AP_Invoice']);
+const API = process.env.REACT_APP_BACKEND_URL;
 
 function isEligible(doc) {
   return ELIGIBLE_TYPES.has(doc?.document_type);
@@ -388,6 +390,88 @@ function SuccessDisplay({ data }) {
           <FieldRow icon={<Calendar className="w-3.5 h-3.5" />} label="Created" value={new Date(data.created_at).toLocaleString()} />
         )}
       </div>
+      {/* Trace vs PROD button */}
+      <TraceVsProdButton documentId={document?.id} />
+    </div>
+  );
+}
+
+function TraceVsProdButton({ documentId }) {
+  const [traceResult, setTraceResult] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const [expanded, setExpanded] = React.useState(false);
+
+  const handleTrace = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/posting-patterns/trace-document/${documentId}`);
+      const data = await res.json();
+      setTraceResult(data);
+      setExpanded(true);
+    } catch (e) {
+      setTraceResult({ error: e.message });
+    }
+    setLoading(false);
+  };
+
+  if (!documentId) return null;
+  const comp = traceResult?.comparison || {};
+  const matchRate = comp.match_rate;
+
+  return (
+    <div className="mt-2 border-t border-border/40 pt-2" data-testid="trace-vs-prod">
+      <div className="flex items-center justify-between">
+        <button onClick={handleTrace} disabled={loading}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium bg-blue-500/10 text-blue-600 border border-blue-300 hover:bg-blue-500/20 transition-colors disabled:opacity-50"
+          data-testid="trace-vs-prod-btn">
+          {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowLeftRight className="w-3 h-3" />}
+          Trace vs PROD
+        </button>
+        {matchRate != null && (
+          <span className={`text-xs font-mono font-bold ${matchRate >= 80 ? 'text-emerald-600' : matchRate >= 50 ? 'text-amber-600' : 'text-red-600'}`}>{matchRate}% match</span>
+        )}
+      </div>
+      {traceResult && expanded && (
+        <div className="mt-2 space-y-2">
+          {traceResult.error ? (
+            <p className="text-[11px] text-muted-foreground bg-muted/30 rounded p-2">{traceResult.error}{traceResult.note ? ` — ${traceResult.note}` : ''}</p>
+          ) : (
+            <>
+              <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                <span>Sandbox: {traceResult.sandbox?.line_count || 0} lines ({traceResult.sandbox?.source})</span>
+                <span>PROD: {traceResult.production?.line_count || 0} lines ({traceResult.production?.status})</span>
+              </div>
+              {comp.dimension_scores && (
+                <div className="space-y-1">
+                  {Object.entries(comp.dimension_scores).map(([name, data]) => (
+                    <div key={name} className="flex items-center gap-2 text-[10px]">
+                      <span className="w-20 text-muted-foreground truncate">{name.replace(/_/g, ' ')}</span>
+                      <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full ${data.score >= 80 ? 'bg-emerald-500' : data.score >= 50 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${data.score}%` }} />
+                      </div>
+                      <span className="font-mono w-8 text-right">{data.score}%</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {comp.line_alignment?.pairs && (
+                <div className="space-y-1">
+                  <p className="text-[10px] font-semibold text-muted-foreground">Lines (Avg: {comp.line_alignment.avg_score}%)</p>
+                  {comp.line_alignment.pairs.map((p, i) => (
+                    <div key={i} className={`flex items-center gap-2 text-[10px] px-2 py-1 rounded ${p.score >= 80 ? 'bg-emerald-500/5' : p.score >= 50 ? 'bg-amber-500/5' : 'bg-red-500/5'}`}>
+                      <span className="flex-1 truncate text-blue-600">{p.human_item} {p.human_desc} ${Number(p.human_amount || 0).toLocaleString()}</span>
+                      <span className={`font-mono font-bold w-8 text-center ${p.score >= 80 ? 'text-emerald-600' : 'text-amber-600'}`}>{p.score}%</span>
+                      <span className="flex-1 truncate text-right text-violet-600">{p.ai_item} {p.ai_desc} ${Number(p.ai_amount || 0).toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {comp.verdict && <p className="text-[10px] font-medium text-muted-foreground">{comp.verdict}</p>}
+            </>
+          )}
+          <button onClick={() => setExpanded(false)} className="text-[9px] text-muted-foreground hover:text-foreground">Collapse</button>
+        </div>
+      )}
     </div>
   );
 }

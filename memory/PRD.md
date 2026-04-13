@@ -261,6 +261,16 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Profile includes: common_items, common_uoms, po_number_pattern, typical_order_value, amount_range, typical_ship_to, days_to_ship_p50, line_count_distribution
 - NOT wired into SO draft creation yet
 
+## Sales Order Readiness Reviewer (2026-04-13)
+- Service: `services/sales_order_readiness_reviewer.py` — LLM-assisted advisory layer for SO readiness
+- Uses `get_provider("classification")` from LLM router — no hardcoded provider logic
+- Returns structured JSON: readiness_status (ready/needs_review/suspicious/incomplete), confidence, summary, blocking_issues, warnings, unusual_patterns, profile_matches, recommended_next_step
+- Evaluates: item familiarity, UOM consistency, order value range, PO format, ship-to, line count vs customer history
+- Full observability: model_used, latency_ms, schema_valid, retry_count, customer_profile_id/version
+- Integration: runs advisory-only in sales workflow (server.py line ~2279), stores result as `so_readiness_review` on document
+- Test endpoint: `POST /api/dev/test-so-readiness` in dev_tools.py
+- NEVER changes posting decisions — recommendation mode only
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

@@ -367,3 +367,51 @@ async def test_template_injection(
         "extraction_available": bool(extraction),
         **result.to_dict(),
     }
+
+
+# ---------- SO readiness review test ----------
+
+class SOReadinessRequest(BaseModel):
+    customer_name: str
+    customer_number: Optional[str] = None
+    order_number: Optional[str] = None
+    po_number: Optional[str] = None
+    total_amount: Optional[float] = None
+    line_items: Optional[List[Dict[str, Any]]] = None
+    ship_to_name: Optional[str] = None
+
+
+@router.post("/test-so-readiness")
+async def test_so_readiness(
+    body: SOReadinessRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Test SO readiness review against a customer's posting profile. Writes nothing."""
+    _verify_token(authorization)
+    db = get_db()
+
+    from services.sales_order_readiness_reviewer import review_sales_order_readiness
+
+    customer_profile = None
+    if body.customer_number:
+        customer_profile = await db.customer_posting_profiles.find_one(
+            {"customer_no": body.customer_number, "status": "analyzed"}, {"_id": 0}
+        )
+
+    result = await review_sales_order_readiness(
+        extracted_order={
+            "customer_name": body.customer_name,
+            "customer_number": body.customer_number,
+            "order_number": body.order_number,
+            "po_number": body.po_number,
+            "total_amount": body.total_amount,
+            "line_items": body.line_items or [],
+            "ship_to_name": body.ship_to_name,
+        },
+        customer_profile=customer_profile,
+        document_context={"doc_id": "test", "doc_type": "SALES_ORDER"},
+    )
+    return {
+        "profile_found": customer_profile is not None,
+        **result.to_dict(),
+    }

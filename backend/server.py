@@ -2278,6 +2278,41 @@ async def _update_standard_workflow_status(
         )
         logger.info("[Sales Workflow] Doc %s: VALIDATED - ready for BC Sales Order creation", doc_id)
         
+        # ── Advisory: LLM Sales Order Readiness Review ──
+        try:
+            from services.sales_order_readiness_reviewer import review_sales_order_readiness
+            customer_no = doc.get("matched_customer_no") or doc.get("customer_no") or ""
+            cust_profile = None
+            if customer_no:
+                cust_profile = await db.customer_posting_profiles.find_one(
+                    {"customer_no": customer_no, "status": "analyzed"}, {"_id": 0}
+                )
+
+            so_extracted = {
+                "customer_name": customer,
+                "customer_number": customer_no,
+                "order_number": order_number,
+                "po_number": normalized_fields.get("customer_po") or normalized_fields.get("po_number"),
+                "order_date": normalized_fields.get("order_date") or normalized_fields.get("invoice_date"),
+                "ship_to_name": normalized_fields.get("ship_to") or normalized_fields.get("ship_to_name"),
+                "total_amount": normalized_fields.get("amount_float") or normalized_fields.get("amount"),
+                "line_items": normalized_fields.get("line_items") or doc.get("line_items") or [],
+            }
+            review = await review_sales_order_readiness(
+                extracted_order=so_extracted,
+                customer_profile=cust_profile,
+                validation_results=doc.get("validation_results"),
+                document_context={"doc_id": doc_id, "doc_type": doc_type, "file_name": doc.get("file_name")},
+            )
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {"so_readiness_review": review.to_dict()}}
+            )
+            logger.info("[Sales Workflow] Doc %s: SO readiness review: status=%s confidence=%.2f",
+                        doc_id[:8], review.readiness_status, review.confidence)
+        except Exception as rev_err:
+            logger.warning("[Sales Workflow] SO readiness review failed for %s: %s", doc_id[:8], rev_err)
+
         # AUTO-CREATE: Attempt to create BC Sales Order
         if AUTO_CREATE_SALES_ORDER_ENABLED:
             try:

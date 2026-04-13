@@ -2355,7 +2355,7 @@ async def _run_daily_traces(count: int = None) -> dict:
     # ── Step 1: Fetch recent PIs from BC PROD via per-vendor queries ──
     # The per-vendor trace works (purchaseInvoices filtered by vendor), so we
     # reuse that approach: iterate known vendors and fetch their recent invoices.
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).strftime("%Y-%m-%d")
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=365*5)).strftime("%Y-%m-%d")  # 5 years — get everything
     all_invoices = []
 
     try:

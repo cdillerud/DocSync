@@ -1514,3 +1514,49 @@ async def retry_ready_to_post(
         "failed": failed,
         "details": details,
     }
+
+
+@router.post("/repair-downgraded-docs")
+async def repair_downgraded_docs(dry_run: bool = Query(True)):
+    """
+    Repair docs that were incorrectly downgraded from Completed/Approved to NeedsReview.
+    Restores auto-cleared docs that have good readiness signals back to Completed.
+    Set dry_run=false to actually fix.
+    """
+    db = get_db()
+
+    # Find docs that were auto-cleared or had auto decisions but are now in review
+    cursor = db.hub_documents.find(
+        {
+            "status": {"$in": ["NeedsReview", "reviewing", "Approved"]},
+            "$or": [
+                {"auto_cleared": True},
+                {"automation_decision": {"$in": ["auto_filed", "auto_linked", "auto_approved", "auto_drafted", "ReadyForPost"]}},
+                {"readiness.status": {"$in": ["ready_auto_draft", "ready_auto_link", "ready"]}},
+                {"readiness.recommended_action": {"$in": ["auto_draft", "auto_link"]}},
+            ]
+        },
+        {"_id": 0, "id": 1, "status": 1, "file_name": 1, "vendor_canonical": 1,
+         "automation_decision": 1, "readiness": 1}
+    )
+
+    to_fix = []
+    async for doc in cursor:
+        to_fix.append({
+            "id": doc["id"],
+            "file_name": doc.get("file_name", ""),
+            "vendor": doc.get("vendor_canonical", ""),
+            "current_status": doc.get("status"),
+            "readiness": doc.get("readiness", {}).get("status"),
+            "automation": doc.get("automation_decision"),
+        })
+
+    if not dry_run and to_fix:
+        ids = [d["id"] for d in to_fix]
+        result = await db.hub_documents.update_many(
+            {"id": {"$in": ids}},
+            {"$set": {"status": "Completed", "workflow_status": "completed"}}
+        )
+        return {"repaired": result.modified_count, "docs": to_fix[:20]}
+
+    return {"dry_run": True, "would_repair": len(to_fix), "sample": to_fix[:20]}

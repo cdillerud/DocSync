@@ -283,6 +283,23 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
         except (ValueError, TypeError):
             pass
 
+    # --- Dead docs: 0% extraction + retries exhausted → archive ---
+    extracted = doc.get("extracted_fields") or {}
+    _has_inv = bool(extracted.get("invoice_number") or (doc.get("normalized_fields") or {}).get("invoice_number") or doc.get("invoice_number_clean"))
+    _has_amt = bool(any(extracted.get(f) for f in ("amount", "invoice_amount", "total_amount")) or doc.get("amount_float"))
+    retry_count = doc.get("retry_count") or doc.get("reprocess_count") or 0
+    max_retries = doc.get("max_retries", 4)
+    if not _has_inv and not _has_amt and not vendor and retry_count >= max_retries:
+        return {
+            "status": "archived",
+            "recommended_action": "archive",
+            "confidence": 1.0,
+            "blocking_reasons": [],
+            "warning_reasons": [],
+            "explanations": [f"No extractable data after {retry_count} retries — auto-archived"],
+            "signals": compute_signals(doc),
+        }
+
     signals = compute_signals(doc)
 
     # --- Short-circuit: already completed/auto-cleared docs ---
@@ -840,13 +857,14 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
     current_status = doc.get("status") or ""
     readiness_status = readiness["status"]
 
-    # Archive non-postable docs
-    if readiness_status == "archived" and current_status not in TERMINAL_STATUSES:
-        await db.hub_documents.update_one(
-            {"id": doc_id},
-            {"$set": {"status": "Archived", "workflow_status": "archived", "auto_cleared": True}},
-        )
-        logger.info("[Readiness:StatusSync] doc=%s → Archived (non-postable doc type)", doc_id[:8])
+    # Archive non-postable docs — overrides ANY current status
+    if readiness_status == "archived":
+        if current_status != "Archived":
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {"status": "Archived", "workflow_status": "archived", "auto_cleared": True}},
+            )
+            logger.info("[Readiness:StatusSync] doc=%s → Archived (non-postable: %s)", doc_id[:8], current_status)
 
     elif readiness_status in ready_statuses and current_status not in TERMINAL_STATUSES:
         has_bc_pi = bool(doc.get("bc_purchase_invoice_no"))

@@ -244,6 +244,45 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
 
     Returns a canonical readiness object.
     """
+    # --- Non-postable doc types: route to archive, not review ---
+    NON_POSTABLE_TYPES = {
+        "Sales_Quote", "Quality_Issue", "REMINDER", "Remittance",
+        "Statement", "Account_Statement", "Unknown", "Unknown_Document",
+        "Inventory_Report", "Warehouse",
+    }
+    doc_type = doc.get("doc_type") or doc.get("document_type") or ""
+    if doc_type in NON_POSTABLE_TYPES:
+        return {
+            "status": "archived",
+            "recommended_action": "archive",
+            "confidence": 1.0,
+            "blocking_reasons": [],
+            "warning_reasons": [],
+            "explanations": [f"Document type '{doc_type}' is non-postable — auto-archived"],
+            "signals": compute_signals(doc),
+        }
+
+    # --- Vendorless docs older than 14 days: archive ---
+    from datetime import datetime, timezone, timedelta
+    created = doc.get("created_utc") or doc.get("ingested_at") or ""
+    vendor = doc.get("vendor_canonical") or doc.get("bc_vendor_number") or doc.get("vendor_raw")
+    if not vendor and created:
+        try:
+            created_dt = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+            age_days = (datetime.now(timezone.utc) - created_dt).days
+            if age_days >= 14:
+                return {
+                    "status": "archived",
+                    "recommended_action": "archive",
+                    "confidence": 1.0,
+                    "blocking_reasons": [],
+                    "warning_reasons": [],
+                    "explanations": [f"No vendor identified after {age_days} days — auto-archived"],
+                    "signals": compute_signals(doc),
+                }
+        except (ValueError, TypeError):
+            pass
+
     signals = compute_signals(doc)
 
     # --- Short-circuit: already completed/auto-cleared docs ---
@@ -801,7 +840,15 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
     current_status = doc.get("status") or ""
     readiness_status = readiness["status"]
 
-    if readiness_status in ready_statuses and current_status not in TERMINAL_STATUSES:
+    # Archive non-postable docs
+    if readiness_status == "archived" and current_status not in TERMINAL_STATUSES:
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {"status": "Archived", "workflow_status": "archived", "auto_cleared": True}},
+        )
+        logger.info("[Readiness:StatusSync] doc=%s → Archived (non-postable doc type)", doc_id[:8])
+
+    elif readiness_status in ready_statuses and current_status not in TERMINAL_STATUSES:
         has_bc_pi = bool(doc.get("bc_purchase_invoice_no"))
         has_draft = bool(doc.get("auto_draft_created"))
         if has_bc_pi or has_draft:

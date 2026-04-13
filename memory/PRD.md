@@ -271,6 +271,15 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Test endpoint: `POST /api/dev/test-so-readiness` in dev_tools.py
 - NEVER changes posting decisions — recommendation mode only
 
+## Sales Order Readiness Evaluator (2026-04-13)
+- Service: `services/sales_order_readiness_evaluator.py` — batch evaluation harness for readiness reviewer
+- `run_batch_evaluation(db, limit)` — loads historical sales docs, runs reviewer, compares against known outcomes, stores results
+- Collections: `so_readiness_evaluations` (run summaries), `so_readiness_eval_details` (per-doc results)
+- Per-doc detail: doc_id, customer, readiness_status, confidence, profile/blocking/warning/pattern counts, model_used, latency_ms, schema_valid, known_outcomes
+- Summary metrics: status distribution, avg confidence, avg latency, no-profile %, posted-cleanly %, top recurring warnings, top unusual patterns
+- Admin endpoints: `POST /api/admin/sales-learning/evaluate-readiness` (sync or background), `GET /api/admin/sales-learning/readiness-evaluations`, `GET /api/admin/sales-learning/readiness-evaluations/{run_id}`
+- Evaluation only — never changes workflow or posting decisions
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

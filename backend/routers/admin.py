@@ -444,3 +444,52 @@ async def detect_posted_so_drafts():
     db = get_db()
     result = await detect_posted_sales_drafts(db)
     return result
+
+
+
+# =============================================================================
+# Sales Order Readiness Evaluation
+# =============================================================================
+
+@router.post("/sales-learning/evaluate-readiness")
+async def evaluate_readiness(
+    background_tasks: BackgroundTasks,
+    limit: int = Query(50, ge=1, le=500),
+    sync: bool = Query(False, description="Run synchronously (slower, returns full results)"),
+):
+    """Run readiness reviewer against historical sales docs. Evaluation only — changes nothing."""
+    from deps import get_db
+    from services.sales_order_readiness_evaluator import run_batch_evaluation
+    db = get_db()
+
+    if sync:
+        return await run_batch_evaluation(db, limit=limit)
+
+    async def _run():
+        try:
+            await run_batch_evaluation(db, limit=limit)
+        except Exception as exc:
+            logger.error("[SOEval] Background evaluation failed: %s", exc)
+
+    background_tasks.add_task(_run)
+    return {"job_started": True, "limit": limit, "message": "Readiness evaluation started in background"}
+
+
+@router.get("/sales-learning/readiness-evaluations")
+async def list_readiness_evaluations(limit: int = Query(20, ge=1, le=100)):
+    """Fetch recent evaluation run summaries."""
+    from deps import get_db
+    from services.sales_order_readiness_evaluator import get_evaluation_runs
+    db = get_db()
+    runs = await get_evaluation_runs(db, limit=limit)
+    return {"runs": runs, "total": len(runs)}
+
+
+@router.get("/sales-learning/readiness-evaluations/{run_id}")
+async def get_readiness_evaluation_details(run_id: str, limit: int = Query(100, ge=1, le=500)):
+    """Fetch per-document details for a specific evaluation run."""
+    from deps import get_db
+    from services.sales_order_readiness_evaluator import get_evaluation_details
+    db = get_db()
+    details = await get_evaluation_details(db, run_id, limit=limit)
+    return {"run_id": run_id, "total": len(details), "details": details}

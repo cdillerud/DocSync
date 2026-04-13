@@ -222,3 +222,16 @@ async def get_sales_order_advisory(
         "customer_profile": profile_summary,
         "feedback": feedback_records,
     }
+
+
+@router.get("/sales-orders/draft-context/{customer_id}")
+async def get_so_draft_context(
+    customer_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Return profile-based draft-assist context for SO creation."""
+    _verify_token(authorization)
+    db = get_db()
+
+    from services.sales_order_draft_context_service import get_draft_context
+    return await get_draft_context(db, customer_id)

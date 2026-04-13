@@ -408,3 +408,10 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - P2: Activate correction replay engine
 - P2: Email sender → vendor mapping
 - P3: `server.py` extraction/refactoring (8,200+ lines)
+
+## Sales Order Draft Context Service (2026-04-13)
+- Service: `services/sales_order_draft_context_service.py` — profile-based draft assistance
+- Endpoint: `GET /api/documents/sales-orders/draft-context/{customer_id}` — JWT-protected
+- Returns: ship_to_suggestions (primary + alternates), item_suggestions (core/regular/occasional with per-item UOM alternates), value_context (typical/min/max), common_uoms, po_pattern, guidance messages, profile richness/variability indicators
+- No-profile: graceful degradation with "No customer history — draft will use extracted data only"
+- Assistive only — never forces values or overrides user data

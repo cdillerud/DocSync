@@ -48,6 +48,8 @@ async def analyze_customer_ordering_patterns(
     # ── Aggregate metrics ──
     item_counter = Counter()
     uom_counter = Counter()
+    item_uom_pairs = Counter()  # (item, uom) pairs
+    item_to_uoms = defaultdict(Counter)  # item -> {uom: count}
     po_patterns = Counter()
     line_count_dist = Counter()
     amounts = []
@@ -103,6 +105,9 @@ async def analyze_customer_ordering_patterns(
                 uom = line.get("unitOfMeasureCode") or line.get("uom") or ""
                 if uom:
                     uom_counter[uom] += 1
+                if item and uom:
+                    item_uom_pairs[(item, uom)] += 1
+                    item_to_uoms[item][uom] += 1
 
     n = len(orders)
     avg_lines = sum(int(k.replace("3+", "3")) * v for k, v in line_count_dist.items()) / max(n, 1)
@@ -114,6 +119,48 @@ async def analyze_customer_ordering_patterns(
     else:
         confidence = "low"
 
+    # ── Compute diversity metrics ──
+    unique_items = len(item_counter)
+    unique_uoms = len(uom_counter)
+
+    # Item frequency bands: core (>20% of orders), regular (5-20%), occasional (<5%)
+    core_items = []
+    regular_items = []
+    occasional_items = []
+    for item, cnt in item_counter.most_common():
+        rate = cnt / max(n, 1)
+        if rate >= 0.20:
+            core_items.append(item)
+        elif rate >= 0.05:
+            regular_items.append(item)
+        else:
+            occasional_items.append(item)
+
+    # Per-item valid UOMs
+    alternate_uoms_by_item = {}
+    for item, uom_counts in item_to_uoms.items():
+        if len(uom_counts) > 1:
+            alternate_uoms_by_item[item] = [u for u, _ in uom_counts.most_common()]
+
+    # Diversity scores (0-1 scale)
+    item_diversity = min(1.0, unique_items / max(n * 0.5, 1))  # diverse if many items relative to orders
+    uom_diversity = min(1.0, (unique_uoms - 1) / 4) if unique_uoms > 0 else 0  # diverse if uses many UOMs
+
+    # Customer variability index: composite of item diversity, UOM diversity, ship-to diversity
+    ship_to_diversity = min(1.0, len(ship_to_counter) / 5) if ship_to_counter else 0
+    variability_index = round((item_diversity * 0.4 + uom_diversity * 0.3 + ship_to_diversity * 0.3), 4)
+
+    # Profile richness score (0-100)
+    richness_signals = [
+        min(n / 20, 1.0) * 30,           # order count (max 30 pts at 20+ orders)
+        min(unique_items / 8, 1.0) * 25,  # item breadth (max 25 pts at 8+ items)
+        min(unique_uoms / 3, 1.0) * 10,   # UOM breadth
+        min(len(ship_to_counter) / 3, 1.0) * 10,  # ship-to breadth
+        (1.0 if occasional_items else 0) * 10,     # has occasional items
+        min(len(alternate_uoms_by_item) / 2, 1.0) * 15,  # item-UOM flexibility
+    ]
+    profile_richness_score = round(sum(richness_signals))
+
     profile = {
         "customer_no": customer_no,
         "customer_name": _pick_customer_name(orders),
@@ -123,16 +170,32 @@ async def analyze_customer_ordering_patterns(
         "template_confidence": confidence,
         "typical_line_count": round(avg_lines, 1),
         "line_count_distribution": dict(line_count_dist),
+        # Existing fields (backward-compatible)
         "common_items": [item for item, _ in item_counter.most_common(10)],
         "common_uoms": [u for u, _ in uom_counter.most_common(5)],
         "po_number_pattern": po_patterns.most_common(1)[0][0] if po_patterns else "unknown",
         "typical_order_value": round(sum(amounts) / max(len(amounts), 1), 2) if amounts else 0.0,
         "amount_range": {"min": round(min(amounts), 2), "max": round(max(amounts), 2)} if amounts else {"min": 0, "max": 0},
         "typical_ship_to": ship_to_counter.most_common(1)[0][0] if ship_to_counter else None,
+        "alternate_ship_tos": [s for s, _ in ship_to_counter.most_common(5)[1:]],
         "days_to_ship_p50": _median(days_to_ship) if days_to_ship else None,
         "bc_order_ids_learned": bc_order_ids,
         "continuous_learning_count": 0,
         "last_continuous_learning": None,
+        # New richness / diversity fields
+        "core_items": core_items,
+        "regular_items": regular_items,
+        "occasional_valid_items": occasional_items,
+        "alternate_valid_uoms_by_item": alternate_uoms_by_item,
+        "item_frequency_bands": {
+            "core": len(core_items),
+            "regular": len(regular_items),
+            "occasional": len(occasional_items),
+        },
+        "item_diversity_score": round(item_diversity, 4),
+        "uom_diversity_score": round(uom_diversity, 4),
+        "customer_variability_index": variability_index,
+        "profile_richness_score": profile_richness_score,
     }
 
     return profile

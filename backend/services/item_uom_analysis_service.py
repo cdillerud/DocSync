@@ -89,9 +89,17 @@ def analyze_items_uom(
 
     known_items_raw = set(profile.get("common_items", [])) if profile else set()
     known_items_norm = {_normalize_item(i) for i in known_items_raw}
+    # Include occasional valid items for broader matching
+    occasional_items_raw = set(profile.get("occasional_valid_items", [])) if profile else set()
+    occasional_items_norm = {_normalize_item(i) for i in occasional_items_raw}
+    all_valid_items_norm = known_items_norm | occasional_items_norm
+
     known_uoms_raw = set(profile.get("common_uoms", [])) if profile else set()
     known_uoms_norm = {_normalize_uom(u) for u in known_uoms_raw}
     known_uoms_canonical = {_UOM_CANONICAL.get(u.lower().strip(), u.lower().strip()) for u in known_uoms_raw}
+
+    # Per-item valid UOMs from enriched profile
+    alt_uoms_by_item = profile.get("alternate_valid_uoms_by_item", {}) if profile else {}
 
     details: List[LineAnalysis] = []
 
@@ -105,20 +113,29 @@ def analyze_items_uom(
         # Item match classification
         if norm_item in known_items_norm:
             item_match = "exact"
-        elif known_items_norm and _fuzzy_item_match(norm_item, known_items_norm):
+        elif norm_item in occasional_items_norm:
+            item_match = "normalized"  # occasional but historically valid
+        elif all_valid_items_norm and _fuzzy_item_match(norm_item, all_valid_items_norm):
             item_match = "normalized"
-        elif not known_items_norm:
+        elif not all_valid_items_norm:
             item_match = "new_plausible"
         else:
             item_match = "unknown"
 
-        # UOM match classification
+        # UOM match classification — check per-item alternates first
+        item_specific_uoms = set()
+        for raw_key, uom_list in alt_uoms_by_item.items():
+            if _normalize_item(raw_key) == norm_item:
+                item_specific_uoms = {_normalize_uom(u) for u in uom_list}
+                break
+
         if not raw_uom:
             uom_match = "exact"  # no UOM specified — no mismatch
         elif norm_uom in known_uoms_norm or uom_canonical in known_uoms_canonical:
             uom_match = "exact"
+        elif norm_uom in item_specific_uoms:
+            uom_match = "exact"  # valid alternate UOM for this specific item
         elif known_uoms_canonical and uom_canonical in _UOM_CANONICAL.values():
-            # It's a valid UOM but not one this customer usually uses
             uom_match = "known_alternate"
         elif not known_uoms_norm:
             uom_match = "exact"  # no history — can't compare
@@ -224,10 +241,15 @@ def _classify_line_severity(
             if other_normal:
                 return "low", "Item not in moderate history — rest of order looks normal"
             return "medium", "Item not in moderate history and other signals also warrant review"
-        # strong — consider item diversity
+        # strong — consider item diversity and variability
         known_item_count = len(profile.get("common_items", [])) if profile else 0
-        if known_item_count >= 5 and other_normal:
-            return "low", "Item not in history — but customer has diverse product range and other signals are normal"
+        occasional_count = len(profile.get("occasional_valid_items", [])) if profile else 0
+        variability_idx = float(profile.get("customer_variability_index", 0)) if profile else 0
+
+        if variability_idx >= 0.5 and other_normal:
+            return "none", "Item not in history — but this customer has high operational diversity and other signals are normal"
+        if (known_item_count + occasional_count) >= 8 and other_normal:
+            return "low", "Item not in history — but customer has broad product range and other signals are normal"
         if other_normal:
             return "low", "Item not previously seen — other order signals match established pattern"
         return "medium", "Unknown item combined with other atypical signals — worth verifying"

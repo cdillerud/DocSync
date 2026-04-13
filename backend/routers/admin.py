@@ -417,7 +417,9 @@ async def get_customer_profiles_summary():
     cursor = db.customer_posting_profiles.find(
         {"status": "analyzed"},
         {"_id": 0, "customer_no": 1, "customer_name": 1, "invoices_analyzed": 1,
-         "template_confidence": 1, "typical_order_value": 1, "common_items": 1}
+         "template_confidence": 1, "typical_order_value": 1, "common_items": 1,
+         "item_diversity_score": 1, "customer_variability_index": 1,
+         "profile_richness_score": 1, "item_frequency_bands": 1}
     ).sort("invoices_analyzed", -1).limit(20)
     top_customers = []
     async for doc in cursor:

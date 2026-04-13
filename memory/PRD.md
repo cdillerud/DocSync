@@ -324,6 +324,15 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Admin endpoints: `GET /api/admin/sales-learning/disagreement-diagnostics` (full filters), `GET .../examples?root_cause=X`
 - Diagnostics only — never changes workflow or advisory logic
 
+## Sales Order Confidence Calibration (2026-04-13)
+- Service: `services/sales_order_confidence_calibration_service.py` — heuristic calibration layer
+- Penalties: no_profile (-20%), weak_profile (-10%), per_warning (-5%), per_unusual (-7%), per_blocker (-15%), new_customer (-15%), overconfidence_history (-12%)
+- Preserves raw_confidence, adds calibrated_confidence + confidence_band + calibration_reasons + penalties_applied
+- Integrated into `sales-order-advisory` consolidated endpoint (on-demand calibration)
+- Admin endpoints: `POST /calibrate-confidence` (batch), `GET /calibration-comparison` (raw vs calibrated bands), `POST /calibrate-document/{id}` (single)
+- Frontend: unified panel shows calibrated confidence with "cal" indicator, expanded view shows raw→calibrated with reasons
+- Advisory/display only — never changes routing or posting decisions
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

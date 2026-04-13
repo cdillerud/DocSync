@@ -182,11 +182,28 @@ async def get_sales_order_advisory(
     from services.sales_order_reviewer_feedback_service import get_feedback_for_document
     feedback_records = await get_feedback_for_document(db, document_id)
 
+    # 5. Confidence calibration (run on-demand if review exists)
+    calibration = None
+    if review and not review.get("error"):
+        existing_cal = doc.get("so_confidence_calibration")
+        if existing_cal and not existing_cal.get("error"):
+            calibration = existing_cal
+        else:
+            from services.sales_order_confidence_calibration_service import calibrate_confidence as _calibrate
+            profile_for_cal = None
+            if customer_no:
+                profile_for_cal = await db.customer_posting_profiles.find_one(
+                    {"customer_no": customer_no, "status": "analyzed"}, {"_id": 0}
+                )
+            cal_result = _calibrate(review, profile_for_cal)
+            calibration = cal_result.to_dict()
+
     return {
         "document_id": document_id,
         "has_review": bool(review and not review.get("error")),
         "has_profile": profile_summary is not None,
         "has_feedback": len(feedback_records) > 0,
+        "has_calibration": calibration is not None,
         "explainer": explainer,
         "review": {
             "readiness_status": review.get("readiness_status"),
@@ -198,6 +215,7 @@ async def get_sales_order_advisory(
             "model_used": review.get("model_used"),
             "reviewed_at": review.get("reviewed_at"),
         } if review else None,
+        "calibration": calibration,
         "customer_profile": profile_summary,
         "feedback": feedback_records,
     }

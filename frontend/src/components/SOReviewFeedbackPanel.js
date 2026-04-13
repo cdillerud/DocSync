@@ -92,11 +92,15 @@ export default function SOReviewFeedbackPanel({ document }) {
   const ex = advisory?.explainer || {};
   const review = advisory?.review || {};
   const profile = advisory?.customer_profile;
+  const calibration = advisory?.calibration;
   const feedback = advisory?.feedback || [];
   const latestFb = feedback[0];
   const statusCfg = STATUS_CONFIG[ex.readiness_status || review?.readiness_status] || STATUS_CONFIG.needs_review;
   const StatusIcon = statusCfg.icon;
-  const confidence = ex.reviewer_confidence || review?.confidence || 0;
+  const rawConf = ex.reviewer_confidence || review?.confidence || 0;
+  const calConf = calibration?.calibrated_confidence;
+  const displayConf = calConf != null ? calConf : rawConf;
+  const isCalibrated = calConf != null && Math.abs(calConf - rawConf) > 0.005;
 
   return (
     <Card data-testid="so-advisory-panel">
@@ -111,9 +115,10 @@ export default function SOReviewFeedbackPanel({ document }) {
                   <StatusIcon className="w-3 h-3 mr-0.5" />
                   {statusCfg.label}
                 </Badge>
-                {confidence > 0 && (
-                  <span className={`text-[10px] font-mono ${statusCfg.color}`} data-testid="advisory-confidence">
-                    {Math.round(confidence * 100)}%
+                {displayConf > 0 && (
+                  <span className={`text-[10px] font-mono ${statusCfg.color}`} data-testid="advisory-confidence" title={isCalibrated ? `Raw: ${Math.round(rawConf * 100)}% → Calibrated: ${Math.round(calConf * 100)}%` : `Model confidence: ${Math.round(rawConf * 100)}%`}>
+                    {Math.round(displayConf * 100)}%
+                    {isCalibrated && <span className="text-[8px] text-muted-foreground ml-0.5">cal</span>}
                   </span>
                 )}
               </>
@@ -230,6 +235,24 @@ export default function SOReviewFeedbackPanel({ document }) {
           {advisory && !profile && (
             <div className="border-t border-border/40 pt-2">
               <p className="text-[10px] text-muted-foreground italic">No customer posting profile available</p>
+            </div>
+          )}
+
+          {/* Calibration detail */}
+          {isCalibrated && calibration && (
+            <div className="border-t border-border/40 pt-2" data-testid="advisory-calibration">
+              <p className="text-[10px] font-semibold text-muted-foreground mb-1">Confidence Calibration</p>
+              <div className="flex items-center gap-3 text-[10px]">
+                <span className="text-muted-foreground">Raw: <strong>{Math.round(rawConf * 100)}%</strong></span>
+                <span className="text-muted-foreground">→</span>
+                <span className={statusCfg.color}>Calibrated: <strong>{Math.round(calConf * 100)}%</strong></span>
+                <span className="text-muted-foreground">Band: {calibration.confidence_band}</span>
+              </div>
+              <div className="mt-1 space-y-0.5">
+                {(calibration.calibration_reasons || []).map((r, i) => (
+                  <p key={i} className="text-[10px] text-muted-foreground pl-2">- {r}</p>
+                ))}
+              </div>
             </div>
           )}
 

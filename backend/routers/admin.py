@@ -581,3 +581,49 @@ async def disagreement_examples(
     db = get_db()
     examples = await get_disagreement_examples(db, root_cause=root_cause, limit=limit)
     return {"root_cause_filter": root_cause, "total": len(examples), "examples": examples}
+
+
+# =============================================================================
+# Sales Order Confidence Calibration
+# =============================================================================
+
+@router.post("/sales-learning/calibrate-confidence")
+async def calibrate_confidence_batch(
+    background_tasks: BackgroundTasks,
+    limit: int = Query(200, ge=1, le=1000),
+    sync: bool = Query(False),
+):
+    """Run confidence calibration on recent reviewed documents."""
+    from deps import get_db
+    from services.sales_order_confidence_calibration_service import batch_calibrate
+    db = get_db()
+    if sync:
+        return await batch_calibrate(db, limit=limit)
+    async def _run():
+        try:
+            await batch_calibrate(db, limit=limit)
+        except Exception as exc:
+            logger.error("[SOCalibration] Batch failed: %s", exc)
+    background_tasks.add_task(_run)
+    return {"job_started": True, "limit": limit}
+
+
+@router.get("/sales-learning/calibration-comparison")
+async def calibration_comparison(limit: int = Query(100, ge=1, le=500)):
+    """Compare raw vs calibrated confidence with agreement rates per band."""
+    from deps import get_db
+    from services.sales_order_confidence_calibration_service import get_calibration_comparison
+    db = get_db()
+    return await get_calibration_comparison(db, limit=limit)
+
+
+@router.post("/sales-learning/calibrate-document/{document_id}")
+async def calibrate_single_document(document_id: str):
+    """Run calibration on a single document and return the result."""
+    from deps import get_db
+    from services.sales_order_confidence_calibration_service import calibrate_document_review
+    db = get_db()
+    result = await calibrate_document_review(db, document_id)
+    if result.error:
+        raise HTTPException(status_code=404, detail=result.error)
+    return result.to_dict()

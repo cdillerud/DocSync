@@ -529,3 +529,11 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - **Fix:** Added extraction quality gate — requires ≥2 meaningful extracted fields AND (invoice_number OR amount) before allowing auto-clear
 - **Also tightened:** terminal short-circuit threshold from 1 to 2 meaningful fields, excluding boolean flags
 - **Tested:** GAMMIN doc (0 fields) now correctly goes to `needs_review`; normal TUMALOC doc still auto-clears
+
+## Status Model Cleanup (2026-04-13)
+- **Bug 1 (Critical):** `derived_state_service.py` line 234 — when BC validation returned `all_passed=false` without `validation_status` field, the system defaulted to PASS instead of FAIL. Fixed: now correctly sets FAIL.
+- **Bug 2:** AP validation "pass" event was overriding prior WARNING/FAIL states. Fixed: only upgrades validation_state if no prior failure/warning exists.
+- **Bug 3:** `ReadyForPost` automation decision was silently overriding FAIL validation state. Fixed: only upgrades to PASS when validation hasn't already failed.
+- **Bug 4 (Loop):** Reprocess loop — docs already decided as ReadyForPost were re-evaluated every full cycle (20+ times). Fixed: skip re-evaluation if `auto_post_attempted=true` and status already `ReadyForPost`.
+- **Frontend:** Top badge now distinguishes "Ready to Post" (workflow=ready + validation=pass) from "Validated" (validation=pass), "Warnings", "Failed", and "Posted".
+- Hierarchy enforced: Failed > Warnings > Validated > Ready to Post > Posted

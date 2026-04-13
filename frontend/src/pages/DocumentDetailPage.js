@@ -484,6 +484,8 @@ export default function DocumentDetailPage() {
               ) : (STATUS_CLASSES[doc.status] || '')
             }`} data-testid="doc-status-badge">
               {derivedState ? (
+                derivedState.workflow_state === 'completed' && derivedState.automation_state === 'autonomous' ? 'Posted' :
+                derivedState.workflow_state === 'ready' && derivedState.validation_state === 'pass' ? 'Ready to Post' :
                 derivedState.validation_state === 'pass' ? 'Validated' :
                 derivedState.validation_state === 'warning' ? 'Warnings' :
                 derivedState.validation_state === 'fail' ? 'Failed' :

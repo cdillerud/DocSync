@@ -157,6 +157,12 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
 
     ready, reason, failures = check_ap_ready_to_post(doc, vendor_profile=vendor_profile, source=source, posting_profile=posting_profile)
 
+    # ── LOOP PREVENTION: skip docs already decided + no new data ──
+    already_decided = doc.get("auto_post_attempted") and doc.get("status") == "ReadyForPost"
+    if already_decided and ready and source != "manual":
+        logger.debug("[AP Auto-Post] Skipping %s — already ReadyForPost, no new data", doc_id[:8])
+        return {"success": True, "posted": False, "reason": "already_decided", "status": "ReadyForPost", "skipped": True}
+
     if not ready:
         # Only revert status for actual AP documents that failed validation.
         # Non-AP docs (shipping, inventory, etc.) should NOT be reverted to NeedsReview

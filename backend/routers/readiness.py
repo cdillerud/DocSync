@@ -1518,46 +1518,32 @@ async def retry_ready_to_post(
 
 @router.post("/repair-downgraded-docs")
 async def repair_downgraded_docs(dry_run: bool = Query(True)):
-    """
-    Repair docs that were incorrectly downgraded from Completed/Approved to NeedsReview.
-    Restores auto-cleared docs that have good readiness signals back to Completed.
-    Set dry_run=false to actually fix.
-    """
-    db = get_db()
+    """Repair docs incorrectly downgraded from Completed to NeedsReview."""
+    try:
+        db = get_db()
 
-    # Find docs that were auto-cleared or had auto decisions but are now in review
-    cursor = db.hub_documents.find(
-        {
-            "status": {"$in": ["NeedsReview", "reviewing", "Approved"]},
-            "$or": [
-                {"auto_cleared": True},
-                {"automation_decision": {"$in": ["auto_filed", "auto_linked", "auto_approved", "auto_drafted", "ReadyForPost"]}},
-                {"readiness.status": {"$in": ["ready_auto_draft", "ready_auto_link", "ready"]}},
-                {"readiness.recommended_action": {"$in": ["auto_draft", "auto_link"]}},
-            ]
-        },
-        {"_id": 0, "id": 1, "status": 1, "file_name": 1, "vendor_canonical": 1,
-         "automation_decision": 1, "readiness": 1}
-    )
+        to_fix = []
+        async for doc in db.hub_documents.find(
+            {"status": {"$in": ["NeedsReview", "reviewing", "Approved"]}},
+            {"_id": 0, "id": 1, "status": 1, "file_name": 1, "vendor_canonical": 1,
+             "auto_cleared": 1, "automation_decision": 1}
+        ):
+            # Only restore docs that were previously auto-cleared or auto-decided
+            is_auto = (
+                doc.get("auto_cleared") == True
+                or (doc.get("automation_decision") or "") in ("auto_filed", "auto_linked", "auto_approved", "auto_drafted", "ReadyForPost")
+            )
+            if is_auto:
+                to_fix.append(doc["id"])
 
-    to_fix = []
-    async for doc in cursor:
-        rdns = doc.get("readiness") or {}
-        to_fix.append({
-            "id": doc["id"],
-            "file_name": doc.get("file_name", ""),
-            "vendor": doc.get("vendor_canonical", ""),
-            "current_status": doc.get("status"),
-            "readiness": rdns.get("status") if isinstance(rdns, dict) else None,
-            "automation": doc.get("automation_decision"),
-        })
+        if not dry_run and to_fix:
+            result = await db.hub_documents.update_many(
+                {"id": {"$in": to_fix}},
+                {"$set": {"status": "Completed", "workflow_status": "completed"}}
+            )
+            return {"repaired": result.modified_count, "total_found": len(to_fix)}
 
-    if not dry_run and to_fix:
-        ids = [d["id"] for d in to_fix]
-        result = await db.hub_documents.update_many(
-            {"id": {"$in": ids}},
-            {"$set": {"status": "Completed", "workflow_status": "completed"}}
-        )
-        return {"repaired": result.modified_count, "docs": to_fix[:20]}
+        return {"dry_run": True, "would_repair": len(to_fix)}
 
-    return {"dry_run": True, "would_repair": len(to_fix), "sample": to_fix[:20]}
+    except Exception as e:
+        return {"error": str(e), "type": type(e).__name__}

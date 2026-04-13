@@ -795,8 +795,11 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
     TERMINAL_STATUSES = ("Completed", "Posted", "Archived", "completed", "posted",
                          "archived", "FileMissing", "batch_parent")
     ready_statuses = ("ready_auto_draft", "ready_auto_link", "ready")
+    needs_review_statuses = ("needs_review", "blocked", "needs_correction")
     current_status = doc.get("status") or ""
-    if readiness["status"] in ready_statuses and current_status not in TERMINAL_STATUSES:
+    readiness_status = readiness["status"]
+
+    if readiness_status in ready_statuses and current_status not in TERMINAL_STATUSES:
         has_bc_pi = bool(doc.get("bc_purchase_invoice_no"))
         has_draft = bool(doc.get("auto_draft_created"))
         if has_bc_pi or has_draft:
@@ -818,6 +821,23 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
             "[Readiness:StatusSync] doc=%s '%s' → '%s' (readiness=%s, bc_pi=%s)",
             doc_id[:8], current_status, new_doc_status, readiness["status"], has_bc_pi,
         )
+
+    # Reverse sync: if readiness is needs_review but doc was previously auto-cleared
+    # to "Completed", reset it back so the doc re-appears in the review queue
+    elif readiness_status in needs_review_statuses and current_status == "Completed":
+        if not doc.get("bc_purchase_invoice_no") and not doc.get("posted_to_bc"):
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    "status": "NeedsReview",
+                    "workflow_status": "reviewing",
+                    "auto_cleared": False,
+                }},
+            )
+            logger.info(
+                "[Readiness:StatusSync] doc=%s REVERSED 'Completed' → 'NeedsReview' (readiness=%s)",
+                doc_id[:8], readiness_status,
+            )
 
     # Auto-clear stale automation_decision if policy hold was dropped
     old_held = old_signals.get("policy_held", False)

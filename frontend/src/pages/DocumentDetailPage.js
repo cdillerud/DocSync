@@ -152,7 +152,11 @@ function ReadinessPanel({ readiness, docStatus }) {
   const POSTED_STATUSES = new Set(['Posted', 'posted', 'AutoPosted', 'PostedToBC']);
 
   let effectiveStatus = readiness.status;
-  if (TERMINAL_STATUSES.has(docStatus)) {
+  // Only override for true terminal successes — not for docs with failed validation
+  const hasFailedValidation = readiness.warning_reasons?.includes('missing required fields')
+    || (readiness.confidence || 0) < 0.3
+    || readiness.signals?.required_fields_complete === false;
+  if (TERMINAL_STATUSES.has(docStatus) && !hasFailedValidation) {
     effectiveStatus = POSTED_STATUSES.has(docStatus) ? 'posted' : 'completed';
   }
 

@@ -493,3 +493,55 @@ async def get_readiness_evaluation_details(run_id: str, limit: int = Query(100, 
     db = get_db()
     details = await get_evaluation_details(db, run_id, limit=limit)
     return {"run_id": run_id, "total": len(details), "details": details}
+
+
+# =============================================================================
+# Sales Order Reviewer Feedback Analytics
+# =============================================================================
+
+@router.get("/sales-learning/reviewer-feedback-summary")
+async def reviewer_feedback_summary(
+    date_from: str = Query(None), date_to: str = Query(None),
+    customer_no: str = Query(None), reviewer: str = Query(None),
+    model: str = Query(None), readiness_status: str = Query(None),
+    assessment: str = Query(None), decision: str = Query(None),
+):
+    """Aggregate metrics on how the advisory system performs against human feedback."""
+    from deps import get_db
+    from services.sales_order_feedback_analytics_service import get_feedback_summary
+    db = get_db()
+    return await get_feedback_summary(
+        db, date_from=date_from, date_to=date_to,
+        customer_no=customer_no, reviewer=reviewer,
+        model=model, readiness_status=readiness_status,
+        assessment=assessment, decision=decision,
+    )
+
+
+@router.get("/sales-learning/reviewer-feedback-details")
+async def reviewer_feedback_details(
+    limit: int = Query(50, ge=1, le=500), skip: int = Query(0, ge=0),
+    date_from: str = Query(None), date_to: str = Query(None),
+    customer_no: str = Query(None), reviewer: str = Query(None),
+    assessment: str = Query(None),
+):
+    """Individual feedback records with filtering."""
+    from deps import get_db
+    from services.sales_order_feedback_analytics_service import get_feedback_details
+    db = get_db()
+    return await get_feedback_details(
+        db, limit=limit, skip=skip,
+        date_from=date_from, date_to=date_to,
+        customer_no=customer_no, reviewer=reviewer,
+        assessment=assessment,
+    )
+
+
+@router.get("/sales-learning/reviewer-feedback-by-customer")
+async def reviewer_feedback_by_customer(limit: int = Query(30, ge=1, le=100)):
+    """Per-customer feedback summary."""
+    from deps import get_db
+    from services.sales_order_feedback_analytics_service import get_feedback_by_customer
+    db = get_db()
+    customers = await get_feedback_by_customer(db, limit=limit)
+    return {"customers": customers, "total": len(customers)}

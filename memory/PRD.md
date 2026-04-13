@@ -299,6 +299,15 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Frontend: `SOReviewFeedbackPanel` component added to DocumentDetailPage — expandable panel with explainer + feedback form (assessment buttons, decision override, disagreed fields, notes)
 - Feedback capture only — never changes posting, routing, or validation
 
+## Sales Order Feedback Analytics (2026-04-13)
+- Service: `services/sales_order_feedback_analytics_service.py` — MongoDB aggregation pipelines for reviewer feedback analysis
+- Admin endpoints:
+  - `GET /api/admin/sales-learning/reviewer-feedback-summary` — rates, distributions, confidence by assessment, by model/customer/reviewer, top disagreed fields + combos
+  - `GET /api/admin/sales-learning/reviewer-feedback-details` — paginated individual records
+  - `GET /api/admin/sales-learning/reviewer-feedback-by-customer` — per-customer breakdown
+- Full filter support: date_from/to, customer_no, reviewer, model, readiness_status, assessment, decision
+- Analytics only — never changes workflow or decisions
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

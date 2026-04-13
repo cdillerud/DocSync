@@ -344,6 +344,15 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Frontend: "No History" / "Limited History" badge in advisory panel header for low-history documents
 - All existing schemas backward-compatible (profile_state is additive)
 
+## Ship-To Sensitivity Tuning (2026-04-13)
+- New service: `services/ship_to_analysis_service.py` — normalization + context-aware comparison
+- Match types: exact | normalized_match | known_alternate | plausible_new | unknown_new
+- Severity levels: none | low | medium | high — determined by profile strength + other signal context
+- Normalization handles: casing, whitespace, punctuation, abbreviations (st/ave/blvd/whse/dist/etc.)
+- Integrated pre-LLM: analysis runs before prompt, injected as structured context with explicit instructions to LLM
+- Results stored on review as `ship_to_analysis` (match_type, severity, context_notes, known_locations)
+- Frontend advisory endpoint includes ship_to_analysis in response
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

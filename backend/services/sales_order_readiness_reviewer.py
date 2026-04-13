@@ -52,6 +52,7 @@ class ReadinessReviewResult:
     customer_profile_version: Optional[str]
     reviewed_at: str
     profile_state: str = "unknown"  # none | weak | medium | strong
+    ship_to_analysis: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -83,6 +84,31 @@ async def review_sales_order_readiness(
     profile_version = customer_profile.get("last_analyzed") if customer_profile else None
     profile_state = _classify_profile_state(customer_profile)
 
+    # --- Ship-to pre-analysis ---
+    from services.ship_to_analysis_service import analyze_ship_to
+    ship_to_raw = extracted_order.get("ship_to_name") or ""
+    ship_to_result = analyze_ship_to(
+        ship_to_raw, customer_profile, profile_state,
+        other_signals_normal=True,  # refined below after amount check
+    )
+    # Refine: check if amount/items also look off
+    if customer_profile and customer_profile.get("status") == "analyzed":
+        total = float(extracted_order.get("total_amount") or 0)
+        amt_range = customer_profile.get("amount_range", {})
+        amt_ok = (amt_range.get("min", 0) <= total <= amt_range.get("max", float("inf"))) if total > 0 else True
+        items = [li.get("item_number") or li.get("description", "") for li in (extracted_order.get("line_items") or [])]
+        known_items = set(customer_profile.get("common_items", []))
+        items_ok = not items or any(i in known_items for i in items)
+        if not amt_ok or not items_ok:
+            ship_to_result = analyze_ship_to(ship_to_raw, customer_profile, profile_state, other_signals_normal=False)
+
+    doc_id = (document_context or {}).get("doc_id", "unknown")
+    logger.info(
+        "[SO-Readiness] ship_to: doc=%s profile=%s raw='%s' norm='%s' match=%s severity=%s",
+        doc_id[:8], profile_state, ship_to_raw[:40], ship_to_result.normalized[:40],
+        ship_to_result.match_type, ship_to_result.severity,
+    )
+
     # --- Obtain LLM provider ---
     try:
         provider = get_provider("classification")
@@ -93,7 +119,7 @@ async def review_sales_order_readiness(
 
     # --- Build prompts ---
     system_prompt = _build_system_prompt(profile_state)
-    user_prompt = _build_user_prompt(extracted_order, customer_profile, validation_results, document_context, profile_state)
+    user_prompt = _build_user_prompt(extracted_order, customer_profile, validation_results, document_context, profile_state, ship_to_result)
 
     # --- Call LLM with retry ---
     raw = ""
@@ -145,6 +171,7 @@ async def review_sales_order_readiness(
             customer_profile_version=profile_version,
             reviewed_at=reviewed_at,
             profile_state=profile_state,
+            ship_to_analysis=ship_to_result.to_dict(),
         )
 
         logger.info(
@@ -243,6 +270,7 @@ def _build_user_prompt(
     validation_results: Optional[Dict[str, Any]],
     document_context: Optional[Dict[str, Any]],
     profile_state: str = "unknown",
+    ship_to_analysis=None,
 ) -> str:
     parts = []
 
@@ -299,6 +327,19 @@ def _build_user_prompt(
         checks = validation_results.get("checks", [])
         for c in checks[:5]:
             parts.append(f"  check: {c.get('check_name')} = {'PASS' if c.get('passed') else 'FAIL'}")
+
+    # Ship-to pre-analysis
+    if ship_to_analysis:
+        parts.append("\n=== SHIP-TO ANALYSIS (pre-computed) ===")
+        parts.append(f"match_type: {ship_to_analysis.match_type}")
+        parts.append(f"severity: {ship_to_analysis.severity}")
+        parts.append(f"context: {ship_to_analysis.context_notes}")
+        if ship_to_analysis.match_type in ("exact", "normalized_match"):
+            parts.append("INSTRUCTION: The ship-to matches a known customer location. Do NOT flag it as unusual.")
+        elif ship_to_analysis.match_type == "known_alternate":
+            parts.append("INSTRUCTION: The ship-to is in the same area as known locations. Mention it only as a minor note, not as an anomaly.")
+        elif ship_to_analysis.severity == "none":
+            parts.append("INSTRUCTION: Ship-to cannot be compared (no history). Do NOT treat it as unusual.")
 
     return "\n".join(parts)
 

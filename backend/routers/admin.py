@@ -627,3 +627,39 @@ async def calibrate_single_document(document_id: str):
     if result.error:
         raise HTTPException(status_code=404, detail=result.error)
     return result.to_dict()
+
+
+# =============================================================================
+# Post-Tuning Calibration & Impact Review
+# =============================================================================
+
+@router.get("/sales-learning/post-tuning-review")
+async def post_tuning_review(
+    date_from: str = Query(None), date_to: str = Query(None),
+    customer_no: str = Query(None), reviewer: str = Query(None),
+    model: str = Query(None), profile_state: str = Query(None),
+    readiness_status: str = Query(None), assessment: str = Query(None),
+):
+    """Comprehensive post-tuning impact analysis."""
+    from deps import get_db
+    from services.sales_order_post_tuning_review_service import run_post_tuning_review
+    db = get_db()
+    return await run_post_tuning_review(
+        db, date_from=date_from, date_to=date_to,
+        customer_no=customer_no, reviewer=reviewer,
+        model=model, profile_state=profile_state,
+        readiness_status=readiness_status, assessment=assessment,
+    )
+
+
+@router.get("/sales-learning/post-tuning-review/details")
+async def post_tuning_review_details(
+    limit: int = Query(50, ge=1, le=500), skip: int = Query(0, ge=0),
+    date_from: str = Query(None), date_to: str = Query(None),
+):
+    """Individual feedback records enriched with tuning context."""
+    from deps import get_db
+    from services.sales_order_post_tuning_review_service import get_post_tuning_details
+    db = get_db()
+    return await get_post_tuning_details(db, limit=limit, skip=skip,
+                                         date_from=date_from, date_to=date_to)

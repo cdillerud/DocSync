@@ -370,6 +370,15 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Low-evidence patterns qualified with "minor:" prefix; no-profile cases get "limited comparison basis" language
 - Added `explanation_tone` field to SOExplanation output for observability
 
+## Post-Tuning Calibration & Impact Review (2026-04-13)
+- Service: `services/sales_order_post_tuning_review_service.py` — comprehensive post-tuning impact analysis
+- Outputs: agreement rates, disagreement root-cause distribution, raw vs calibrated confidence band agreement, profile-state outcomes, ship-to/item-UOM disagreement counts, explanation-tone distribution, tuning impact signals, calibration weight assessment
+- Calibration assessment: checks monotonicity of agreement across confidence bands, recommends penalty adjustments if warranted
+- Tuning impact signals: per-area assessment (ship_to, item_uom, no_profile, wording) with positive/needs_monitoring verdict
+- Detail endpoint: individual records enriched with profile_state, ship_to_severity, item_uom_severity, calibrated_confidence
+- Admin endpoints: `GET /post-tuning-review`, `GET /post-tuning-review/details` — full filter support
+- Analysis only — never changes workflow, weights, or prompts
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

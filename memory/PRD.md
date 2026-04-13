@@ -523,3 +523,9 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Collection: `ap_learning_suggestions` — same lifecycle as SO suggestions (pending → approved → applied)
 - Endpoints on ap_advisory router: GET /diagnostics, POST /calibrate/{id}, POST /generate-suggestions, GET /suggestions
 - Phase 3 (not yet): impact review, drift controls, hotspot review for AP
+
+## Bug Fix: Readiness Completed with 0% Extraction (2026-04-13)
+- **Root cause:** `evaluate_readiness()` would mark docs as `ready_auto_draft` when vendor was resolved via email sender BUT zero fields were extracted (e.g., .xls files the AI couldn't read)
+- **Fix:** Added extraction quality gate — requires ≥2 meaningful extracted fields AND (invoice_number OR amount) before allowing auto-clear
+- **Also tightened:** terminal short-circuit threshold from 1 to 2 meaningful fields, excluding boolean flags
+- **Tested:** GAMMIN doc (0 fields) now correctly goes to `needs_review`; normal TUMALOC doc still auto-clears

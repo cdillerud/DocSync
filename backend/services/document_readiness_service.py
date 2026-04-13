@@ -259,9 +259,9 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
     extracted = doc.get("extracted_fields") or {}
     meaningful_count = sum(
         1 for k, v in extracted.items()
-        if v and not k.endswith("_detected_by")
+        if v and not k.endswith("_detected_by") and k not in ("is_credit_memo", "is_international", "is_tooling", "is_dunnage", "is_storage_handling")
     )
-    if is_terminal and meaningful_count >= 1:
+    if is_terminal and meaningful_count >= 2:
         return {
             "status": STATUS_READY_AUTO_LINK,
             "confidence": 1.0,
@@ -376,6 +376,17 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
     effective_conf = compute_effective_confidence(doc)
     confidence = _compute_confidence(signals, effective_conf, len(blocking), len(warnings))
 
+    # --- Extraction quality gate: prevent auto-clearing docs with no meaningful data ---
+    extracted = doc.get("extracted_fields") or {}
+    meaningful_extracted = sum(
+        1 for k, v in extracted.items()
+        if v and not k.endswith("_detected_by") and k not in ("is_credit_memo", "is_international", "is_tooling", "is_dunnage", "is_storage_handling")
+    )
+    has_invoice_number = bool(extracted.get("invoice_number") or (doc.get("normalized_fields") or {}).get("invoice_number") or doc.get("invoice_number_clean"))
+    has_amount = bool(any(extracted.get(f) for f in ["amount", "invoice_amount", "total_amount"]) or doc.get("amount_float"))
+
+    extraction_too_weak = meaningful_extracted < 2 or (not has_invoice_number and not has_amount)
+
     # --- Status determination ---
     # Categorize warnings: only CRITICAL ones should force review/ambiguous
     CRITICAL_WARNINGS = {"policy_hold", "customer_unresolved", "vendor_needs_review",
@@ -418,7 +429,12 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
     elif informational_warnings and core_ready:
         # Only informational warnings (no_line_items, po_missing, etc.) + core signals green
         # Much lower bar — these are minor and shouldn't block processing
-        if (confidence or 0) >= 0.55:
+        # BUT: if extraction is too weak, don't auto-clear
+        if extraction_too_weak:
+            status = STATUS_NEEDS_REVIEW
+            action = ACTION_REVIEW
+            explanations.append("Vendor resolved but extraction quality too low for auto-processing (missing invoice number or amount)")
+        elif (confidence or 0) >= 0.55:
             status = STATUS_READY_AUTO_DRAFT
             action = ACTION_AUTO_DRAFT
             explanations.append("Core signals green — minor informational warnings only")
@@ -432,10 +448,14 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
         action = ACTION_REVIEW
     else:
         # No blocking, no warnings
-        if core_ready:
+        if core_ready and not extraction_too_weak:
             status = STATUS_READY_AUTO_DRAFT
             action = ACTION_AUTO_DRAFT
             explanations.append("All checks passed — ready for automatic processing")
+        elif core_ready and extraction_too_weak:
+            status = STATUS_NEEDS_REVIEW
+            action = ACTION_REVIEW
+            explanations.append("Vendor resolved but extraction quality too low for auto-processing")
         else:
             status = STATUS_NEEDS_REVIEW
             action = ACTION_REVIEW

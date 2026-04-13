@@ -197,6 +197,24 @@ export default function UnifiedQueuePage() {
       const response = await api.get(`/documents?${params.toString()}`);
       let docs = response.data.documents || [];
 
+      // Filter out non-postable doc types from active work tabs
+      const NON_POSTABLE = new Set([
+        'Sales_Quote', 'Quality_Issue', 'REMINDER', 'Remittance',
+        'Statement', 'Account_Statement', 'Inventory_Report', 'Warehouse',
+      ]);
+      if (!isProcessedTab && !isBatchesTab) {
+        docs = docs.filter(d => {
+          const dt = d.document_type || d.doc_type || '';
+          // Remove non-postable types
+          if (NON_POSTABLE.has(dt)) return false;
+          // Remove vendorless docs with no useful data that are just sitting there
+          const hasVendor = d.vendor_canonical || d.bc_vendor_number || d.vendor_raw;
+          const hasData = d.invoice_number_clean || d.amount_float;
+          if (!hasVendor && !hasData && d.status === 'Approved') return false;
+          return true;
+        });
+      }
+
       if (isProcessedTab) {
         docs = docs.filter(isTerminal);
       } else if (isBatchesTab) {

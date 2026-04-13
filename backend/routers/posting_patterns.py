@@ -1323,7 +1323,11 @@ async def preview_draft_pi(doc_id: str):
     # Build preview lines from template
     preview_lines = []
     if template.get("line_templates"):
-        for lt in template["line_templates"]:
+        line_templates = template["line_templates"]
+        # Compute total usage_rate to distribute amounts proportionally
+        total_usage = sum(lt.get("usage_rate", 0) for lt in line_templates)
+
+        for lt in line_templates:
             line = {
                 "lineType": lt.get("type", "Account"),
                 "lineObjectNumber": lt.get("account_number") or lt.get("item_number", ""),
@@ -1342,14 +1346,31 @@ async def preview_draft_pi(doc_id: str):
             else:
                 line["description"] = f"Per invoice {invoice_number}" if invoice_number else "Invoice line"
 
-            # Try to compute amount from extracted total
+            # Distribute extracted total proportionally using usage_rate
             try:
                 total = float(str(amount).replace("$", "").replace(",", "").strip())
-                line["unitCost"] = total
+                usage_rate = lt.get("usage_rate", 0)
+                if total_usage > 0 and usage_rate > 0:
+                    line["unitCost"] = round(total * (usage_rate / total_usage), 2)
+                elif len(line_templates) > 0:
+                    line["unitCost"] = round(total / len(line_templates), 2)
+                else:
+                    line["unitCost"] = total
             except (ValueError, TypeError):
                 pass
 
             preview_lines.append(line)
+
+        # Fix rounding so line amounts sum to exact total
+        try:
+            total = float(str(amount).replace("$", "").replace(",", "").strip())
+            line_sum = sum(l["unitCost"] for l in preview_lines)
+            rounding_diff = round(total - line_sum, 2)
+            if abs(rounding_diff) > 0 and abs(rounding_diff) <= 1.0 and preview_lines:
+                biggest = max(range(len(preview_lines)), key=lambda i: preview_lines[i]["unitCost"])
+                preview_lines[biggest]["unitCost"] = round(preview_lines[biggest]["unitCost"] + rounding_diff, 2)
+        except (ValueError, TypeError):
+            pass
     else:
         # Fallback: single line with total amount
         try:

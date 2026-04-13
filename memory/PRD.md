@@ -555,6 +555,12 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Sidebar: "Governance" nav item with Shield icon
 - Tested: 18/18 backend + 7/7 frontend tests passing (iteration_205.json)
 
+## Bug Fix: Draft PI Preview Showing Identical Amounts (2026-04-14)
+- **Root cause**: `posting_patterns.py` line 1348 — `preview_draft_pi()` assigned the FULL extracted total to EVERY template line instead of distributing it
+- **Impact**: A $3,300 invoice with 3 template lines showed $3,300 × 3 = $9,900, or a $1,100 invoice showed $1,100 on all 3 lines
+- **Fix**: Uses template `usage_rate` to distribute amounts proportionally. Falls back to even split when usage_rates are zero. Includes rounding correction to ensure line total matches document total exactly
+- **Note**: The actual `create-draft` path (which posts to BC) was NOT affected — it uses the `template_value_injector.py` service which already handled ratios correctly. Only the preview modal was wrong
+
 ## Bug Fix: Readiness Completed with 0% Extraction (2026-04-13)
 - **Root cause:** `evaluate_readiness()` would mark docs as `ready_auto_draft` when vendor was resolved via email sender BUT zero fields were extracted (e.g., .xls files the AI couldn't read)
 - **Fix:** Added extraction quality gate — requires ≥2 meaningful extracted fields AND (invoice_number OR amount) before allowing auto-clear

@@ -454,7 +454,39 @@ def determine_folder_path(
             routing_details,
         )
 
-    # RULE 9: Miscellaneous / Unknown
+    # RULE 9: Remittance / Statement → Remittance Advices
+    if doc_type in ("Remittance", "Statement", "Account_Statement", "REMINDER"):
+        vendor_folder = _get_vendor_subfolder(vendor_name) if vendor_name else "Unmatched"
+        return (
+            f"Remittance Advices/{vendor_folder}",
+            f"Remittance/statement from {vendor_name or 'unknown vendor'}",
+            routing_details,
+        )
+
+    # RULE 9b: Inventory Reports → Warehouse Reports
+    if doc_type in ("Inventory_Report", "Warehouse"):
+        vendor_folder = _get_vendor_subfolder(vendor_name) if vendor_name else "General"
+        return (
+            f"Warehouse Reports/{vendor_folder}",
+            f"Inventory/warehouse report from {vendor_name or 'unknown'}",
+            routing_details,
+        )
+
+    # RULE 9c: Bill of Lading (standalone, not part of a shipment flow)
+    if doc_type in ("Bill_of_Lading", "BOL"):
+        if order_number:
+            return (
+                f"Dropship Not International Documents/{order_number}",
+                f"Bill of Lading for order {order_number}",
+                routing_details,
+            )
+        return (
+            "Miscellaneous Documents/Shipping Documents - Unmatched",
+            "Bill of Lading with no order reference",
+            routing_details,
+        )
+
+    # RULE 10c: Miscellaneous / Unknown
     if doc_type in ("OTHER", "Unknown", "Unknown_Document"):
         if doc.get("approved") or doc.get("status") == "Approved":
             return (
@@ -468,7 +500,7 @@ def determine_folder_path(
             routing_details,
         )
 
-    # RULE 10: DO NOT PAY
+    # RULE 11: DO NOT PAY
     if doc.get("do_not_pay") or doc.get("status") == "DO_NOT_PAY":
         year = datetime.now().year
         return (

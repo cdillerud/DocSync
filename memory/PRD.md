@@ -379,6 +379,16 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Admin endpoints: `GET /post-tuning-review`, `GET /post-tuning-review/details` — full filter support
 - Analysis only — never changes workflow, weights, or prompts
 
+## Strong-Profile Behavior Tuning (2026-04-13)
+- Ship-to: strong profile with 3+ known locations + normal signals → severity downgraded from medium to low ("likely normal expansion")
+- Ship-to: strong profile where everything else matches → severity downgraded from medium to low ("all other signals match")
+- Ship-to: only escalates to medium when combined with other atypical signals
+- Item/UOM: considers profile item diversity (6+ items = diverse); unknown item with diverse profile + normal signals → low not medium
+- Item/UOM: majority rules — if >75% of lines are clean, caps overall severity one level lower
+- Item/UOM: unknown item with all-normal signals → low ("not previously seen — other signals match established pattern")
+- Reviewer LLM prompt: strong-profile instruction explicitly states "mature customers naturally evolve" and "one new item/destination is routine expansion"
+- All structured outputs backward-compatible
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

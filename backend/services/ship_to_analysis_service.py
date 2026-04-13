@@ -121,7 +121,9 @@ def analyze_ship_to(
                 known_locations=known_raw,
             )
 
-    # Truly new destination — severity depends on context
+    # Truly new destination — severity depends on context + profile diversity
+    location_diversity = len(known_raw)  # how many distinct locations has this customer used?
+
     if profile_state == "weak":
         severity = "low"
         notes = "New destination not seen in limited order history — may be normal, limited comparison basis"
@@ -133,12 +135,16 @@ def analyze_ship_to(
             severity = "medium"
             notes = "Destination differs from common historical locations and other signals also warrant review"
     else:  # strong
-        if other_signals_normal:
-            severity = "medium"
-            notes = "New destination not seen in extensive order history — worth verifying with customer"
+        if location_diversity >= 3 and other_signals_normal:
+            # Customer already ships to 3+ locations — adding another is routine
+            severity = "low"
+            notes = f"New destination for a customer with {location_diversity} known locations — likely a normal expansion"
+        elif other_signals_normal:
+            severity = "low"
+            notes = "New destination — but all other order signals match this customer's established pattern"
         else:
-            severity = "high"
-            notes = "New destination combined with other anomalies — elevated concern"
+            severity = "medium"
+            notes = "New destination combined with other atypical signals — worth verifying"
 
     return ShipToAnalysis(
         raw_input=raw, normalized=normalized, match_type="unknown_new",

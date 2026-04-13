@@ -283,6 +283,17 @@ def _build_system_prompt(profile_state: str) -> str:
             "- Flag deviations as 'worth verifying' rather than 'anomalous.'\n"
         )
     # strong: no special instruction — default behavior is appropriate
+    elif profile_state == "strong":
+        base += (
+            "\nSTRONG CUSTOMER PROFILE — MATURE RELATIONSHIP:\n"
+            "- This customer has extensive order history. The profile is reliable.\n"
+            "- However, mature customers naturally evolve: new products, new locations, seasonal variation.\n"
+            "- If most order signals match (items, amounts, UOM, PO pattern) but one or two differ, "
+            "treat this as 'worth noting' not as a significant anomaly.\n"
+            "- Only escalate to 'suspicious' if multiple signals deviate simultaneously "
+            "AND the deviations are materially inconsistent with the customer's established range.\n"
+            "- One new item or one new destination in an otherwise normal order is routine customer expansion.\n"
+        )
 
     base += "Do not include any text outside the JSON object."
     return base

@@ -127,7 +127,7 @@ def analyze_items_uom(
 
         # Line severity
         severity, note = _classify_line_severity(
-            item_match, uom_match, profile_state, other_signals_normal
+            item_match, uom_match, profile_state, other_signals_normal, profile
         )
 
         details.append(LineAnalysis(
@@ -200,6 +200,7 @@ def _fuzzy_item_match(needle: str, known_set: set) -> bool:
 def _classify_line_severity(
     item_match: str, uom_match: str,
     profile_state: str, other_normal: bool,
+    profile: Optional[Dict[str, Any]] = None,
 ) -> tuple:
     # No history — everything is plausible
     if profile_state == "none":
@@ -223,10 +224,13 @@ def _classify_line_severity(
             if other_normal:
                 return "low", "Item not in moderate history — rest of order looks normal"
             return "medium", "Item not in moderate history and other signals also warrant review"
-        # strong
+        # strong — consider item diversity
+        known_item_count = len(profile.get("common_items", [])) if profile else 0
+        if known_item_count >= 5 and other_normal:
+            return "low", "Item not in history — but customer has diverse product range and other signals are normal"
         if other_normal:
-            return "medium", "Item not seen in extensive order history — worth verifying"
-        return "high", "Unknown item combined with other anomalies — elevated concern"
+            return "low", "Item not previously seen — other order signals match established pattern"
+        return "medium", "Unknown item combined with other atypical signals — worth verifying"
 
     if uom_match == "unknown":
         if profile_state in ("weak", "none"):
@@ -242,14 +246,24 @@ def _compute_overall_severity(
     if not details:
         return "none"
     severities = [d.severity for d in details]
+    total = len(severities)
+    none_count = severities.count("none")
+
+    # Majority rules: if >75% of lines are fine, cap overall severity
+    if total > 0 and none_count / total >= 0.75:
+        # Even with some low/medium lines, the majority is clean
+        if "high" in severities:
+            return "medium"  # downgrade from high
+        if "medium" in severities:
+            return "low"  # downgrade from medium
+        return "low" if "low" in severities else "none"
+
     if "high" in severities:
         return "high"
     medium_count = severities.count("medium")
     if medium_count >= 2:
-        return "high"
+        return "high" if not other_normal else "medium"
     if medium_count == 1:
-        return "medium"
-    if severities.count("low") >= 2 and profile_state == "strong":
         return "medium" if not other_normal else "low"
     if "low" in severities:
         return "low"

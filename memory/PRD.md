@@ -289,6 +289,16 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Logging: doc_id, review_reused, latency_ms, readiness_status, confidence
 - Explanation only — never alters posting decisions or routing
 
+## Sales Order Reviewer Feedback (2026-04-13)
+- Service: `services/sales_order_reviewer_feedback_service.py` — captures human feedback on advisory reviews
+- Collection: `so_reviewer_feedback` (structured, queryable by customer/assessment/model/reviewer)
+- Endpoints: `POST /api/documents/{id}/sales-order-review-feedback`, `GET /api/documents/{id}/sales-order-review-feedback`
+- Payload: reviewer_assessment (5 values), final_human_decision, disagreed_fields, notes, auto-captured reviewer_user_id from JWT
+- Snapshots linked_review (readiness_status, confidence, model, profile_id/version) at feedback time
+- Also stores `so_review_feedback_latest` summary on document for quick display
+- Frontend: `SOReviewFeedbackPanel` component added to DocumentDetailPage — expandable panel with explainer + feedback form (assessment buttons, decision override, disagreed fields, notes)
+- Feedback capture only — never changes posting, routing, or validation
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

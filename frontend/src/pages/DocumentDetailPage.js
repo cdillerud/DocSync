@@ -31,6 +31,7 @@ import ARReleaseGatePanel from '../components/ARReleaseGatePanel';
 import DecisionExplainabilityPanel from '../components/DecisionExplainabilityPanel';
 import ReviewerAssistPanel from '../components/ReviewerAssistPanel';
 import PipelineVisualization from '../components/PipelineVisualization';
+import SOReviewFeedbackPanel from '../components/SOReviewFeedbackPanel';
 
 const READINESS_CONFIG = {
   completed: { label: 'Completed', color: 'bg-emerald-600', textColor: 'text-emerald-500', icon: CheckCircle2 },
@@ -847,6 +848,9 @@ export default function DocumentDetailPage() {
               onUpdate={() => fetchDoc()} 
             />
           )}
+
+          {/* SO Advisory Review & Feedback */}
+          <SOReviewFeedbackPanel document={doc} />
 
           {/* BC Purchase Invoice Panel - only for AP_Invoice documents */}
           {(doc.document_type === 'AP_Invoice' || doc.bc_purchase_invoice) && (

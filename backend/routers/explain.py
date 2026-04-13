@@ -7,7 +7,8 @@ Returns a plain-English explanation of why a document is in its current status.
 
 import logging
 from fastapi import APIRouter, HTTPException, Header
-from typing import Optional
+from pydantic import BaseModel
+from typing import List, Optional
 from bson import ObjectId
 from deps import get_db
 from services.decision_explainer_service import explain_document_status
@@ -80,3 +81,50 @@ async def explain_sales_order(
     from services.sales_order_decision_explainer import explain_sales_order_decision
     result = await explain_sales_order_decision(doc, db=db)
     return result.to_dict()
+
+
+class SOReviewFeedbackBody(BaseModel):
+    reviewer_assessment: str
+    final_human_decision: Optional[str] = None
+    disagreed_fields: Optional[List[str]] = None
+    notes: Optional[str] = None
+
+
+@router.post("/{document_id}/sales-order-review-feedback")
+async def submit_so_review_feedback(
+    document_id: str,
+    body: SOReviewFeedbackBody,
+    authorization: Optional[str] = Header(None),
+):
+    """Submit reviewer feedback on a sales order advisory review. Changes nothing about the document's status."""
+    user = _verify_token(authorization)
+    db = get_db()
+
+    from services.sales_order_reviewer_feedback_service import submit_feedback
+    result = await submit_feedback(
+        db=db,
+        document_id=document_id,
+        reviewer_user_id=user,
+        reviewer_assessment=body.reviewer_assessment,
+        final_human_decision=body.final_human_decision,
+        disagreed_fields=body.disagreed_fields,
+        notes=body.notes,
+    )
+
+    if result.get("error"):
+        raise HTTPException(status_code=422, detail=result["error"])
+    return result
+
+
+@router.get("/{document_id}/sales-order-review-feedback")
+async def get_so_review_feedback(
+    document_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Get all feedback records for a document's SO advisory review."""
+    _verify_token(authorization)
+    db = get_db()
+
+    from services.sales_order_reviewer_feedback_service import get_feedback_for_document
+    records = await get_feedback_for_document(db, document_id)
+    return {"document_id": document_id, "feedback": records, "total": len(records)}

@@ -1520,6 +1520,7 @@ async def retry_ready_to_post(
 async def repair_downgraded_docs(dry_run: bool = Query(True)):
     """Repair docs incorrectly downgraded from Completed to NeedsReview."""
     try:
+        from deps import get_db
         db = get_db()
 
         to_fix = []

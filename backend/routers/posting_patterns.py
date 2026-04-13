@@ -2352,71 +2352,44 @@ async def _run_daily_traces(count: int = None) -> dict:
     run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     run_started = datetime.now(timezone.utc).isoformat()
 
-    # ── Step 1: Fetch recent PIs from BC PROD (last 3 months) ──
+    # ── Step 1: Fetch recent PIs from BC PROD via per-vendor queries ──
+    # The per-vendor trace works (purchaseInvoices filtered by vendor), so we
+    # reuse that approach: iterate known vendors and fetch their recent invoices.
     cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).strftime("%Y-%m-%d")
     all_invoices = []
 
     try:
-        from services.business_central_service import (
-            BC_API_BASE, BC_TENANT_ID, BC_READ_ENVIRONMENT, get_bc_token, BC_REQUEST_TIMEOUT
-        )
-        import httpx
+        # Get vendor list from profiles
+        vendor_nos = []
+        async for vip in db.vendor_invoice_profiles.find(
+            {"vendor_no": {"$exists": True, "$ne": ""}},
+            {"_id": 0, "vendor_no": 1}
+        ).limit(100):
+            vendor_nos.append(vip["vendor_no"])
 
-        token = await get_bc_token(environment=BC_READ_ENVIRONMENT)
-        company_id = await bc._get_company_id(environment=BC_READ_ENVIRONMENT)
-        headers = {"Authorization": f"Bearer {token}"}
+        if not vendor_nos:
+            raise Exception("No vendor profiles found")
 
-        # Fetch a large batch of recent posted PIs, paginating
-        fetched = 0
-        page_size = 100
-        max_pages = 5  # cap at 500 invoices to sample from
+        import random
+        random.shuffle(vendor_nos)
 
-        for page in range(max_pages):
-            # Use postedPurchaseInvoices — the actual posted history, not draft/open
-            url = (f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/"
-                   f"companies({company_id})/purchaseInvoices")
-            params = {
-                "$select": "id,number,vendorNumber,vendorName,vendorInvoiceNumber,"
-                           "invoiceDate,dueDate,totalAmountExcludingTax,"
-                           "totalAmountIncludingTax,status",
-                "$filter": f"invoiceDate ge {cutoff}",
-                "$orderby": "invoiceDate desc",
-                "$top": str(page_size),
-                "$skip": str(page * page_size),
-            }
-            async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
-                resp = await client.get(url, headers=headers, params=params)
-                if resp.status_code == 200:
-                    batch = resp.json().get("value", [])
-                    all_invoices.extend(batch)
-                    if len(batch) < page_size:
-                        break
-                else:
-                    logger.warning("[DailyTrace] PI fetch page %d failed: %s", page, resp.status_code)
-                    break
-
-        # Also fetch from historical/posted endpoint (the main source)
-        for page in range(max_pages):
+        # Fetch invoices for a random subset of vendors until we have enough
+        for vendor_no in vendor_nos[:30]:
             try:
-                hist_result = await bc.get_historical_posted_purchase_invoices(
-                    limit=page_size, skip=page * page_size
+                result = await bc.get_posted_purchase_invoices(
+                    vendor_id=vendor_no, limit=10, skip=0
                 )
-                hist_invoices = hist_result.get("invoices", [])
-                existing_ids = {i.get("id") for i in all_invoices}
-                added = 0
-                for inv in hist_invoices:
+                for inv in result.get("invoices", []):
                     inv_date = inv.get("invoiceDate", "")
-                    if inv_date >= cutoff and inv.get("id") not in existing_ids:
+                    if inv_date >= cutoff:
                         all_invoices.append(inv)
-                        existing_ids.add(inv.get("id"))
-                        added += 1
-                if len(hist_invoices) < page_size:
-                    break
-            except Exception as hist_err:
-                logger.debug("[DailyTrace] Historical page %d skipped: %s", page, hist_err)
-                break
+                if len(all_invoices) >= trace_count * 3:
+                    break  # enough candidates
+            except Exception:
+                continue
 
-        logger.info("[DailyTrace] Fetched %d PROD PIs from last 3 months (cutoff=%s)", len(all_invoices), cutoff)
+        logger.info("[DailyTrace] Fetched %d PROD PIs from %d vendors (cutoff=%s)",
+                    len(all_invoices), min(len(vendor_nos), 30), cutoff)
 
     except Exception as fetch_err:
         logger.error("[DailyTrace] Failed to fetch PROD PIs: %s", fetch_err)

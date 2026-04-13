@@ -543,6 +543,18 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Integration tests: `tests/test_ap_phase3.py` (12/12 passing)
 - AP Invoice Advisory is now at feature parity with Sales Order governed learning pipeline
 
+## Unified Governance Dashboard (2026-04-14)
+- Backend: `routers/governance.py` — single consolidated endpoint aggregating SO + AP + system health
+- Endpoint: `GET /api/governance/dashboard` — returns cross-pipeline metrics
+- Sections: sales_orders (suggestions, feedback, drift_30d, hotspots), ap_invoices (same), system_health (7 metrics), combined_drift
+- Frontend: `pages/GovernanceDashboard.js` — new standalone page at `/governance`
+- System health strip: 7 stat cards (Total Docs, Pending, Completed, Posted 7D, Ready, Vendor Profiles, Auto Rate)
+- Combined drift risk distribution: stacked bar chart (low/medium/high) — front and center
+- Pipeline cards: SO + AP side-by-side with suggestion counts, agreement rates, drift mini-bars, expandable hotspot lists
+- Actionable alert: shows when suggestions need attention
+- Sidebar: "Governance" nav item with Shield icon
+- Tested: 18/18 backend + 7/7 frontend tests passing (iteration_205.json)
+
 ## Bug Fix: Readiness Completed with 0% Extraction (2026-04-13)
 - **Root cause:** `evaluate_readiness()` would mark docs as `ready_auto_draft` when vendor was resolved via email sender BUT zero fields were extracted (e.g., .xls files the AI couldn't read)
 - **Fix:** Added extraction quality gate — requires ≥2 meaningful extracted fields AND (invoice_number OR amount) before allowing auto-clear

@@ -94,9 +94,12 @@ async def upload_to_sharepoint(file_content: bytes, file_name: str, folder: str)
             raise Exception(f"Document library '{SHAREPOINT_LIBRARY_NAME}' not found. Available: {[d['name'] for d in drives]}")
         drive_id = drive["id"]
 
-        # Step 3: Upload file
+        # Step 3: Upload file (URL-encode path components to handle # and special chars)
+        from urllib.parse import quote
+        safe_folder = quote(folder, safe="/")
+        safe_name = quote(file_name, safe="")
         upload_resp = await c.put(
-            f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{folder}/{file_name}:/content",
+            f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{safe_folder}/{safe_name}:/content",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/octet-stream"},
             content=file_content)
         item = upload_resp.json()
@@ -165,7 +168,9 @@ async def ensure_sharepoint_folder_exists(folder_path: str) -> bool:
                 continue
             current_path = f"{current_path}/{part}" if current_path else part
 
-            check_url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{current_path}"
+            from urllib.parse import quote
+            safe_path = quote(current_path, safe="/")
+            check_url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{safe_path}"
             check_resp = await c.get(check_url, headers={"Authorization": f"Bearer {token}"})
 
             if check_resp.status_code == 404:
@@ -173,7 +178,8 @@ async def ensure_sharepoint_folder_exists(folder_path: str) -> bool:
                     create_url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root/children"
                 else:
                     parent = "/".join(folder_parts[:folder_parts.index(part)])
-                    create_url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{parent}:/children"
+                    safe_parent = quote(parent, safe="/")
+                    create_url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{safe_parent}:/children"
 
                 create_resp = await c.post(
                     create_url,

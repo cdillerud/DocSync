@@ -463,8 +463,12 @@ async def move_document_to_sharepoint(doc_id: str):
                     import aiofiles
                     async with aiofiles.open(file_path, "rb") as f:
                         content = await f.read()
+                    from urllib.parse import quote
+                    safe_lib = quote(SHAREPOINT_LIBRARY_NAME, safe="/")
+                    safe_folder = quote(folder_path, safe="/")
+                    safe_name = quote(file_name, safe="")
                     upload_resp = await client.put(
-                        f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root:/{SHAREPOINT_LIBRARY_NAME}/{folder_path}/{file_name}:/content",
+                        f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root:/{safe_lib}/{safe_folder}/{safe_name}:/content",
                         headers={
                             "Authorization": f"Bearer {token}",
                             "Content-Type": "application/octet-stream",

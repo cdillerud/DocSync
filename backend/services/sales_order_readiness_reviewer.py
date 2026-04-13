@@ -53,6 +53,7 @@ class ReadinessReviewResult:
     reviewed_at: str
     profile_state: str = "unknown"  # none | weak | medium | strong
     ship_to_analysis: Optional[Dict[str, Any]] = None
+    item_uom_analysis: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -109,6 +110,28 @@ async def review_sales_order_readiness(
         ship_to_result.match_type, ship_to_result.severity,
     )
 
+    # --- Item/UOM pre-analysis ---
+    from services.item_uom_analysis_service import analyze_items_uom
+    line_items = extracted_order.get("line_items") or []
+    # Determine if amount is within range for context
+    amt_normal = True
+    if customer_profile and customer_profile.get("amount_range"):
+        total = float(extracted_order.get("total_amount") or 0)
+        ar = customer_profile["amount_range"]
+        if total > 0:
+            amt_normal = ar.get("min", 0) <= total <= ar.get("max", float("inf"))
+
+    item_uom_result = analyze_items_uom(
+        line_items, customer_profile, profile_state,
+        other_signals_normal=amt_normal and ship_to_result.severity in ("none", "low"),
+    )
+    logger.info(
+        "[SO-Readiness] items: doc=%s profile=%s lines=%d exact=%d unknown=%d severity=%s",
+        doc_id[:8], profile_state, item_uom_result.total_lines,
+        item_uom_result.lines_exact, item_uom_result.lines_unknown,
+        item_uom_result.overall_severity,
+    )
+
     # --- Obtain LLM provider ---
     try:
         provider = get_provider("classification")
@@ -119,7 +142,7 @@ async def review_sales_order_readiness(
 
     # --- Build prompts ---
     system_prompt = _build_system_prompt(profile_state)
-    user_prompt = _build_user_prompt(extracted_order, customer_profile, validation_results, document_context, profile_state, ship_to_result)
+    user_prompt = _build_user_prompt(extracted_order, customer_profile, validation_results, document_context, profile_state, ship_to_result, item_uom_result)
 
     # --- Call LLM with retry ---
     raw = ""
@@ -172,6 +195,7 @@ async def review_sales_order_readiness(
             reviewed_at=reviewed_at,
             profile_state=profile_state,
             ship_to_analysis=ship_to_result.to_dict(),
+            item_uom_analysis=item_uom_result.to_dict(),
         )
 
         logger.info(
@@ -271,6 +295,7 @@ def _build_user_prompt(
     document_context: Optional[Dict[str, Any]],
     profile_state: str = "unknown",
     ship_to_analysis=None,
+    item_uom_analysis=None,
 ) -> str:
     parts = []
 
@@ -340,6 +365,18 @@ def _build_user_prompt(
             parts.append("INSTRUCTION: The ship-to is in the same area as known locations. Mention it only as a minor note, not as an anomaly.")
         elif ship_to_analysis.severity == "none":
             parts.append("INSTRUCTION: Ship-to cannot be compared (no history). Do NOT treat it as unusual.")
+
+    # Item/UOM pre-analysis
+    if item_uom_analysis:
+        parts.append("\n=== ITEM/UOM ANALYSIS (pre-computed) ===")
+        parts.append(f"overall_severity: {item_uom_analysis.overall_severity}")
+        parts.append(f"context: {item_uom_analysis.context_notes}")
+        parts.append(f"lines: {item_uom_analysis.total_lines} total, {item_uom_analysis.lines_exact} exact match, {item_uom_analysis.lines_unknown} unknown")
+        if item_uom_analysis.overall_severity == "none":
+            parts.append("INSTRUCTION: Item/UOM analysis shows no concerns. Do NOT flag items or UOMs as unusual.")
+        elif item_uom_analysis.overall_severity == "low":
+            parts.append("INSTRUCTION: Minor item/UOM variations detected. Mention as a note, not as a significant anomaly.")
+        # Let medium/high speak for themselves
 
     return "\n".join(parts)
 

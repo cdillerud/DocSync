@@ -216,6 +216,7 @@ async def get_sales_order_advisory(
             "reviewed_at": review.get("reviewed_at"),
             "profile_state": review.get("profile_state"),
             "ship_to_analysis": review.get("ship_to_analysis"),
+            "item_uom_analysis": review.get("item_uom_analysis"),
         } if review else None,
         "calibration": calibration,
         "customer_profile": profile_summary,

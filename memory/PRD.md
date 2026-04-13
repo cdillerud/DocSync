@@ -353,6 +353,15 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Results stored on review as `ship_to_analysis` (match_type, severity, context_notes, known_locations)
 - Frontend advisory endpoint includes ship_to_analysis in response
 
+## Item/UOM Sensitivity Tuning (2026-04-13)
+- New service: `services/item_uom_analysis_service.py` — pre-LLM item and UOM normalization + comparison
+- Item match types: exact | normalized | known_alternate | new_plausible | unknown
+- UOM match: exact | alias_match | known_alternate | unknown — with 14 canonical UOM groups (ea/cs/pk/bx/pl/ct/lb/kg etc.)
+- Severity: context-aware (profile strength × other signals × count of unknown lines)
+- Normalization: casing, punctuation, spacing, UOM alias resolution (case=cs, each=ea, pallet=pl, etc.)
+- Integrated pre-LLM with explicit instructions: "Do NOT flag items as unusual" when severity=none
+- Results stored on review as `item_uom_analysis` and included in advisory endpoint
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

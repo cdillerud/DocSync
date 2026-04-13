@@ -835,3 +835,42 @@ async def learning_impact_details(
     db = get_db()
     return await get_impact_details(db, limit=limit, skip=skip,
                                     customer_no=customer_no, suggestion_type=suggestion_type)
+
+
+# =============================================================================
+# Profile Drift & Change History
+# =============================================================================
+
+@router.get("/sales-learning/profile-drift")
+async def profile_drift_summary(
+    date_from: str = Query(None), date_to: str = Query(None),
+    customer_no: str = Query(None), drift_risk: str = Query(None),
+    suggestion_type: str = Query(None), applied_by: str = Query(None),
+):
+    """Profile drift summary across all customers with applied changes."""
+    from deps import get_db
+    from services.sales_order_profile_drift_service import get_profile_drift_summary
+    db = get_db()
+    return await get_profile_drift_summary(
+        db, date_from=date_from, date_to=date_to,
+        customer_no=customer_no, drift_risk=drift_risk,
+        suggestion_type=suggestion_type, applied_by=applied_by,
+    )
+
+
+@router.get("/sales-learning/profile-drift/{customer_id}")
+async def profile_drift_detail(customer_id: str):
+    """Detailed drift analysis for a single customer."""
+    from deps import get_db
+    from services.sales_order_profile_drift_service import get_customer_drift_detail
+    db = get_db()
+    return await get_customer_drift_detail(db, customer_id)
+
+
+@router.get("/sales-learning/profile-change-history/{customer_id}")
+async def profile_change_history(customer_id: str, limit: int = Query(50, ge=1, le=200)):
+    """Full change history with pre/post snapshots."""
+    from deps import get_db
+    from services.sales_order_profile_drift_service import get_change_history
+    db = get_db()
+    return await get_change_history(db, customer_id, limit=limit)

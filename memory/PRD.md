@@ -454,3 +454,12 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Recommendation engine: suggests lowering thresholds for high-impact types, flags regressions, notes insufficient data
 - Admin endpoints: `GET /learning-impact-review`, `GET /learning-impact-review/details` — full filter support
 - Analysis only — never changes thresholds or behavior
+
+## Profile Drift & Change History Controls (2026-04-13)
+- Service: `services/sales_order_profile_drift_service.py` — drift detection and change history
+- Risk indicators: change cadence (>8/30d), ship-to growth (>8), occasional item growth (>15), variability (>0.90), richness jumps (>25pts)
+- Risk classification: low/medium/high based on weighted signal count
+- Outputs: per-customer risk assessment, risk distribution, change type breakdown, timeline, current profile metrics
+- Admin endpoints: `GET /profile-drift`, `GET /profile-drift/{customer_id}`, `GET /profile-change-history/{customer_id}`
+- Full filter support: date range, customer, drift_risk, suggestion_type, applied_by
+- Governance/visibility only — never reverts or blocks changes

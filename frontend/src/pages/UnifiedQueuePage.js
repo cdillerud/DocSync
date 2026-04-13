@@ -35,9 +35,10 @@ const STATUS_LABELS = {
   classified: "Classified", Classified: "Classified",
   extracted: "Extracted", processed: "Processed",
   NeedsReview: "Needs Review", needs_review: "Needs Review",
+  reviewing: "Needs Review",
   pending_review: "Pending Review", vendor_pending: "Vendor Pending",
   bc_validation_pending: "BC Validation",
-  ready_for_approval: "Ready", approved: "Approved",
+  ready_for_approval: "Ready to Post", approved: "Ready to Post",
   ValidationPassed: "Validated", Validated: "Validated", validated: "Validated",
   LinkedToBC: "Linked to BC",
   rejected: "Rejected", exported: "Exported",
@@ -47,15 +48,16 @@ const STATUS_LABELS = {
   Posted: "Posted", posted: "Posted",
   Archived: "Archived", archived: "Archived",
   Exception: "Exception", batch_parent: "Batch",
-  auto_approved: "Approved",
+  auto_approved: "Ready to Post",
   ReadyForPost: "Ready to Post", ready_for_post: "Ready to Post",
   Failed: "Failed",
+  Approved: "Ready to Post",
 };
 
 const getStatusColor = (status) => {
   const s = (status || "").toLowerCase();
-  if (s.includes("ready_for_post") || s === "readyforpost") return "bg-emerald-500/15 text-emerald-400";
-  if (s.includes("complete") || s.includes("posted") || s.includes("approved") || s.includes("exported") || s === "validated" || s === "validationpassed") return "bg-emerald-500/15 text-emerald-400";
+  if (s.includes("ready_for_post") || s === "readyforpost" || s === "approved" || s === "auto_approved" || s === "ready_for_approval") return "bg-blue-500/15 text-blue-400";
+  if (s.includes("complete") || s.includes("posted") || s.includes("exported") || s === "validated" || s === "validationpassed") return "bg-emerald-500/15 text-emerald-400";
   if (s.includes("bounds") || s.includes("exception") || s.includes("rejected") || s.includes("fail")) return "bg-red-500/15 text-red-400";
   if (s.includes("review") || s.includes("pending") || s.includes("vendor")) return "bg-amber-500/15 text-amber-400";
   if (s.includes("classif") || s.includes("extract") || s.includes("linked") || s.includes("captured")) return "bg-sky-500/15 text-sky-400";

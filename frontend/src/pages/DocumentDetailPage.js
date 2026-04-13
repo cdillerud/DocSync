@@ -490,7 +490,7 @@ export default function DocumentDetailPage() {
                 derivedState.validation_state === 'warning' ? 'Warnings' :
                 derivedState.validation_state === 'fail' ? 'Failed' :
                 doc.status
-              ) : doc.status}
+              ) : ({'Approved': 'Ready to Post', 'auto_approved': 'Ready to Post', 'reviewing': 'Needs Review', 'ReadyForPost': 'Ready to Post'}[doc.status] || doc.status)}
             </span>
           </div>
           <p className="text-xs text-muted-foreground font-mono mt-1" data-testid="doc-id-display">{doc.id}</p>

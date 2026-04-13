@@ -1103,7 +1103,9 @@ function DailyIngestionCard({ data, date, onDateChange }) {
                         {doc.vendor_canonical || doc.matched_vendor_name || '-'}
                       </TableCell>
                       <TableCell className="py-1.5">
-                        <Badge variant="outline" className="text-[9px]">{doc.status || doc.workflow_status || '-'}</Badge>
+                        <Badge variant="outline" className="text-[9px]">{
+                          ({'Approved': 'Ready to Post', 'auto_approved': 'Ready to Post', 'reviewing': 'Needs Review', 'ReadyForPost': 'Ready to Post'}[doc.status] || doc.status || doc.workflow_status || '-')
+                        }</Badge>
                       </TableCell>
                       <TableCell className="py-1.5 font-mono text-muted-foreground">
                         {doc.created_utc ? doc.created_utc.substring(11, 16) : '-'}

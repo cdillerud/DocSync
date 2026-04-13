@@ -2366,12 +2366,13 @@ async def _run_daily_traces(count: int = None) -> dict:
         company_id = await bc._get_company_id(environment=BC_READ_ENVIRONMENT)
         headers = {"Authorization": f"Bearer {token}"}
 
-        # Fetch a large batch of recent PIs, paginating if needed
+        # Fetch a large batch of recent posted PIs, paginating
         fetched = 0
         page_size = 100
         max_pages = 5  # cap at 500 invoices to sample from
 
         for page in range(max_pages):
+            # Use postedPurchaseInvoices — the actual posted history, not draft/open
             url = (f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/"
                    f"companies({company_id})/purchaseInvoices")
             params = {
@@ -2385,26 +2386,35 @@ async def _run_daily_traces(count: int = None) -> dict:
             }
             async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
                 resp = await client.get(url, headers=headers, params=params)
-                if resp.status_code != 200:
+                if resp.status_code == 200:
+                    batch = resp.json().get("value", [])
+                    all_invoices.extend(batch)
+                    if len(batch) < page_size:
+                        break
+                else:
                     logger.warning("[DailyTrace] PI fetch page %d failed: %s", page, resp.status_code)
                     break
-                batch = resp.json().get("value", [])
-                all_invoices.extend(batch)
-                if len(batch) < page_size:
-                    break  # no more pages
 
-        # Also try historical/posted endpoint
-        try:
-            hist_result = await bc.get_historical_posted_purchase_invoices(limit=200, skip=0)
-            for inv in hist_result.get("invoices", []):
-                inv_date = inv.get("invoiceDate", "")
-                if inv_date >= cutoff:
-                    # Avoid duplicates by invoice id
-                    existing_ids = {i.get("id") for i in all_invoices}
-                    if inv.get("id") not in existing_ids:
+        # Also fetch from historical/posted endpoint (the main source)
+        for page in range(max_pages):
+            try:
+                hist_result = await bc.get_historical_posted_purchase_invoices(
+                    limit=page_size, skip=page * page_size
+                )
+                hist_invoices = hist_result.get("invoices", [])
+                existing_ids = {i.get("id") for i in all_invoices}
+                added = 0
+                for inv in hist_invoices:
+                    inv_date = inv.get("invoiceDate", "")
+                    if inv_date >= cutoff and inv.get("id") not in existing_ids:
                         all_invoices.append(inv)
-        except Exception as hist_err:
-            logger.debug("[DailyTrace] Historical fetch skipped: %s", hist_err)
+                        existing_ids.add(inv.get("id"))
+                        added += 1
+                if len(hist_invoices) < page_size:
+                    break
+            except Exception as hist_err:
+                logger.debug("[DailyTrace] Historical page %d skipped: %s", page, hist_err)
+                break
 
         logger.info("[DailyTrace] Fetched %d PROD PIs from last 3 months (cutoff=%s)", len(all_invoices), cutoff)
 

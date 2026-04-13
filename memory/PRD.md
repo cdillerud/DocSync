@@ -389,6 +389,15 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Reviewer LLM prompt: strong-profile instruction explicitly states "mature customers naturally evolve" and "one new item/destination is routine expansion"
 - All structured outputs backward-compatible
 
+## Strong-Profile Validation Review (2026-04-13)
+- Service: `services/sales_order_strong_profile_review_service.py` — pre vs post tuning comparison for strong-profile cases
+- Compares: agreement rate, disagreement drivers, ship-to/item-UOM frequency, confidence behavior, status distribution
+- Customer-level breakdown: per-customer agreement + disagreement drivers
+- Examples: improved cases (agreement rose) + still-problematic cases (with severity context)
+- Verdict engine: positive/marginally_positive/neutral/needs_investigation with specific recommendations
+- Admin endpoints: `GET /strong-profile-review`, `GET /strong-profile-review/details` — full filter support
+- Analysis only — never changes workflow, weights, or prompts
+
 ## Upcoming Tasks
 - P0: Ollama Provider Abstraction Layer (base_provider.py, ollama_provider.py, llm_router.py)
 - P1: Rep Overrides Management UI

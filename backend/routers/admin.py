@@ -663,3 +663,41 @@ async def post_tuning_review_details(
     db = get_db()
     return await get_post_tuning_details(db, limit=limit, skip=skip,
                                          date_from=date_from, date_to=date_to)
+
+
+# =============================================================================
+# Strong-Profile Validation Review
+# =============================================================================
+
+@router.get("/sales-learning/strong-profile-review")
+async def strong_profile_review(
+    date_from: str = Query(None), date_to: str = Query(None),
+    customer_no: str = Query(None), reviewer: str = Query(None),
+    model: str = Query(None), readiness_status: str = Query(None),
+    disagreement_field: str = Query(None),
+):
+    """Validate strong-profile tuning impact with pre/post comparison."""
+    from deps import get_db
+    from services.sales_order_strong_profile_review_service import run_strong_profile_review
+    db = get_db()
+    return await run_strong_profile_review(
+        db, date_from=date_from, date_to=date_to,
+        customer_no=customer_no, reviewer=reviewer,
+        model=model, readiness_status=readiness_status,
+        disagreement_field=disagreement_field,
+    )
+
+
+@router.get("/sales-learning/strong-profile-review/details")
+async def strong_profile_review_details(
+    limit: int = Query(50, ge=1, le=500), skip: int = Query(0, ge=0),
+    date_from: str = Query(None), date_to: str = Query(None),
+    customer_no: str = Query(None),
+):
+    """Individual strong-profile feedback records with enrichment."""
+    from deps import get_db
+    from services.sales_order_strong_profile_review_service import get_strong_profile_details
+    db = get_db()
+    return await get_strong_profile_details(db, limit=limit, skip=skip,
+                                            date_from=date_from, date_to=date_to,
+                                            customer_no=customer_no)

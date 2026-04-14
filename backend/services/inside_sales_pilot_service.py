@@ -385,6 +385,16 @@ async def poll_inside_sales_pilot_mailbox(mailbox_address: str) -> Dict[str, Any
                             else:
                                 stats["extraction_failed"] += 1
 
+                            # --- Run BC Production cross-validation ---
+                            try:
+                                from services.bc_prod_validator import validate_document_against_bc
+                                await validate_document_against_bc(doc_id)
+                            except Exception as val_err:
+                                logger.warning(
+                                    "[InsideSalesPilot:%s] BC validation failed for %s: %s",
+                                    run_id, doc_id, val_err,
+                                )
+
                             # --- Track classified type ---
                             doc_rec = await db.hub_documents.find_one(
                                 {"id": doc_id}, {"_id": 0, "doc_type": 1}

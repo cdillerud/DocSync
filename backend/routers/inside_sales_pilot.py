@@ -150,3 +150,69 @@ async def review_extractions(
         .to_list(limit)
     )
     return {"total": total, "documents": docs}
+
+
+
+# ── BC Production Validation Endpoints ──────────────────────
+
+@router.post("/validate/{doc_id}")
+async def validate_single_document(doc_id: str):
+    """
+    Run BC Production cross-validation on a single pilot document.
+    Read-only — never writes to BC.
+    """
+    from services.bc_prod_validator import validate_document_against_bc
+    result = await validate_document_against_bc(doc_id)
+    return result
+
+
+@router.post("/validate-all")
+async def validate_all_documents():
+    """
+    Run BC Production cross-validation on all pilot documents
+    that haven't been validated yet.
+    """
+    from services.bc_prod_validator import validate_all_pilot_documents
+    result = await validate_all_pilot_documents()
+    return result
+
+
+@router.get("/validation-results")
+async def list_validation_results(
+    mailbox: Optional[str] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """
+    List pilot documents with their BC Production validation results.
+    """
+    db = get_db()
+    query = {
+        "inside_sales_pilot": True,
+        "bc_prod_validation": {"$exists": True, "$ne": None},
+    }
+    if mailbox:
+        query["pilot_mailbox"] = mailbox
+
+    total = await db.hub_documents.count_documents(query)
+    docs = (
+        await db.hub_documents.find(
+            query,
+            {
+                "_id": 0,
+                "id": 1,
+                "file_name": 1,
+                "doc_type": 1,
+                "email_sender": 1,
+                "pilot_mailbox": 1,
+                "sales_pilot_extraction": 1,
+                "bc_prod_validation": 1,
+                "created_utc": 1,
+            },
+        )
+        .sort("created_utc", -1)
+        .skip(skip)
+        .limit(limit)
+        .to_list(limit)
+    )
+    return {"total": total, "documents": docs}

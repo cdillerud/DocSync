@@ -101,6 +101,22 @@ def _is_relevant_message(subject: str, body_preview: str) -> bool:
     return bool(_RELEVANCE_RE.search(text))
 
 
+def _has_relevant_filename(filenames: list) -> bool:
+    """Check if any attachment filename contains order-related signals."""
+    if not filenames:
+        return False
+    # Use looser matching for filenames (no trailing \b — underscores are common)
+    _FILENAME_KEYWORDS = re.compile(
+        r"(?:^|[\s_\-.])(po|order|invoice|quote|release|bol|confirmation"
+        r"|shipment|packing|forecast|rma|return|contract|pricing)",
+        re.IGNORECASE,
+    )
+    for fn in filenames:
+        if _FILENAME_KEYWORDS.search(fn or ""):
+            return True
+    return False
+
+
 def _is_relevant_attachment(filename: str, content_type: str, size_bytes: int, is_inline: bool) -> tuple:
     """Return (keep, skip_reason). keep=True means we should ingest."""
     if is_inline:
@@ -216,15 +232,33 @@ async def poll_inside_sales_pilot_mailbox(mailbox_address: str) -> Dict[str, Any
                 stats["messages_with_attachments"] += 1
 
                 # --- Gate 2: Relevance filter ---
-                # Accept if: has relevant keywords OR sender is external
+                # Require at least one order-related signal:
+                #   a) keywords in subject/body, OR
+                #   b) keywords in attachment filename
+                # External sender alone is NOT enough (too much noise).
                 has_keywords = _is_relevant_message(subject, body_preview)
-                is_external = not _is_internal_sender(sender)
-                if not has_keywords and not is_external:
-                    stats["messages_skipped_relevance"] += 1
-                    await _log_pilot_event(db, run_id, mailbox_address, msg_id,
-                                           "skipped_relevance",
-                                           {"subject": subject, "sender": sender})
-                    continue
+                if not has_keywords:
+                    # Peek at attachment names before fetching content
+                    try:
+                        _peek_resp = await client.get(
+                            f"https://graph.microsoft.com/v1.0/users/{mailbox_address}/messages/{msg_id}/attachments",
+                            headers={"Authorization": f"Bearer {token}"},
+                            params={"$select": "name"},
+                        )
+                        _peek_names = [
+                            a.get("name", "")
+                            for a in (_peek_resp.json().get("value", []) if _peek_resp.status_code == 200 else [])
+                        ]
+                        has_filename_signal = _has_relevant_filename(_peek_names)
+                    except Exception:
+                        has_filename_signal = False
+
+                    if not has_filename_signal:
+                        stats["messages_skipped_relevance"] += 1
+                        await _log_pilot_event(db, run_id, mailbox_address, msg_id,
+                                               "skipped_relevance",
+                                               {"subject": subject, "sender": sender})
+                        continue
 
                 # --- Fetch attachments ---
                 try:

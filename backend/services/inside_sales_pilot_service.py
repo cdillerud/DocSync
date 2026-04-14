@@ -65,14 +65,38 @@ INSIDE_SALES_PILOT_MAX_MESSAGES = int(
 
 # Subject / body keywords that indicate a sales/order document
 _RELEVANCE_KEYWORDS = [
-    r"\bpo\b", r"\bpurchase\s*order\b", r"\border\b", r"\bcustomer\s*order\b",
-    r"\bquote\b", r"\brelease\b", r"\bshipment\s*request\b", r"\bship\s*to\b",
-    r"\bdelivery\b", r"\binvoice\b", r"\bconfirmation\b", r"\bsku\b",
-    r"\bqty\b", r"\bquantity\b", r"\bpallet\b", r"\bcase\b",
-    r"\bbill\s*to\b", r"\bbol\b", r"\bbill\s*of\s*lading\b",
-    r"\bforecast\b", r"\brma\b", r"\breturn\b",
+    r"\bpo\b", r"\bpurchase\s*order\b", r"\bcustomer\s*order\b",
+    r"\bquote\s*request\b", r"\brelease\s*order\b",
+    r"\bshipment\s*request\b", r"\bship\s*to\b",
+    r"\bsku\b", r"\bqty\b", r"\bquantity\b",
+    r"\bbill\s*to\b",
+    r"\bforecast\b", r"\brma\b",
+    # PO patterns commonly seen: W-prefixed, WR-prefixed, numeric 5+ digit
+    r"\bW\d{5,}\b", r"\bWR\d{5,}\b",
 ]
 _RELEVANCE_RE = re.compile("|".join(_RELEVANCE_KEYWORDS), re.IGNORECASE)
+
+# Negative signals — subjects/bodies that are clearly NOT sales orders
+_NOISE_SUBJECT_PATTERNS = [
+    r"\bcertificate\b", r"\bcertification\b", r"\bISO[\s\-]", r"\bSQF\b",
+    r"\baccess\s*issue", r"\bpassword\b", r"\blogin\b",
+    r"\bdunnage\s*return\b", r"\bdunnage\s*request\b",
+    r"\bmeeting\s*notes?\b", r"\bcalendar\b", r"\bschedule\s*call\b",
+    r"\bout\s*of\s*office\b", r"\bOOO\b",
+    r"\bnewsletter\b", r"\bwebinar\b", r"\btraining\b",
+    r"\bsurvey\b", r"\bfeedback\s*form\b",
+]
+_NOISE_RE = re.compile("|".join(_NOISE_SUBJECT_PATTERNS), re.IGNORECASE)
+
+# Filename patterns that are clearly NOT sales orders
+_NOISE_FILENAME_PATTERNS = [
+    r"(?i)certificate", r"(?i)certification", r"(?i)\bISO[\s\-_]", r"(?i)\bSQF\b",
+    r"(?i)information\s*sheet", r"(?i)info\s*sheet",
+    r"(?i)dunnage.*return", r"(?i)dunnage.*request", r"(?i)dunnage.*tracking",
+    r"(?i)communication.*realignment", r"(?i)CSR.*realignment",
+    r"(?i)^logo", r"(?i)^signature", r"(?i)^banner",
+]
+_NOISE_FILENAME_RE = [re.compile(p) for p in _NOISE_FILENAME_PATTERNS]
 
 # Attachment extensions considered relevant
 _RELEVANT_EXTENSIONS = {
@@ -84,6 +108,7 @@ _RELEVANT_EXTENSIONS = {
 SKIP_CONTENT_TYPES = {"image/gif", "image/x-icon", "image/bmp"}
 SKIP_FILENAME_PATTERNS = [
     r"^image\d+\.(png|jpg|gif)$",
+    r"^CID_",
     r"^signature",
     r"^logo",
     r"\.vcf$",
@@ -98,21 +123,40 @@ _skip_re_compiled = [re.compile(p, re.IGNORECASE) for p in SKIP_FILENAME_PATTERN
 def _is_relevant_message(subject: str, body_preview: str) -> bool:
     """Check whether the subject or body contains order-related signals."""
     text = f"{subject} {body_preview}"
-    return bool(_RELEVANCE_RE.search(text))
+    # Positive signal required
+    if not _RELEVANCE_RE.search(text):
+        return False
+    # Reject if strong negative signal present
+    if _NOISE_RE.search(text):
+        return False
+    return True
+
+
+def _is_noise_filename(filename: str) -> bool:
+    """Check if a filename is clearly not a sales order."""
+    for pat in _NOISE_FILENAME_RE:
+        if pat.search(filename or ""):
+            return True
+    return False
 
 
 def _has_relevant_filename(filenames: list) -> bool:
     """Check if any attachment filename contains order-related signals."""
     if not filenames:
         return False
-    # Use looser matching for filenames (no trailing \b — underscores are common)
     _FILENAME_KEYWORDS = re.compile(
-        r"(?:^|[\s_\-.])(po|order|invoice|quote|release|bol|confirmation"
-        r"|shipment|packing|forecast|rma|return|contract|pricing)",
+        r"(?:^|[\s_\-.])(po|order|invoice|quote|release|confirmation"
+        r"|shipment|packing|forecast|rma|purchase|openorder)",
         re.IGNORECASE,
     )
+    # Also match W-prefixed PO patterns in filenames (W117579, WR112624)
+    _PO_PATTERN = re.compile(r"\bW[R]?\d{5,}\b", re.IGNORECASE)
     for fn in filenames:
+        if _is_noise_filename(fn):
+            continue
         if _FILENAME_KEYWORDS.search(fn or ""):
+            return True
+        if _PO_PATTERN.search(fn or ""):
             return True
     return False
 
@@ -132,6 +176,9 @@ def _is_relevant_attachment(filename: str, content_type: str, size_bytes: int, i
     ext = os.path.splitext(filename or "")[1].lower()
     if ext and ext not in _RELEVANT_EXTENSIONS:
         return False, f"irrelevant_extension:{ext}"
+    # Reject filenames that are clearly not sales documents
+    if _is_noise_filename(filename):
+        return False, f"noise_filename:{filename}"
     return True, None
 
 
@@ -473,38 +520,98 @@ async def _extract_sales_fields(
 
     ef = doc.get("extracted_fields") or {}
     nf = doc.get("normalized_fields") or {}
-    combined_text = f"{email_subject} {email_body} {filename}".lower()
+    combined_text = f"{email_subject} {email_body} {filename}"
+
+    # ── Smart PO extraction ──
+    po_from_ai = (
+        ef.get("po_number") or ef.get("purchase_order")
+        or nf.get("customer_po") or nf.get("po_number")
+    )
+    po_from_text = _extract_po_number(combined_text)
+    # Validate AI-extracted PO: must look like a real PO (alphanumeric, 4+ chars)
+    po_number = _validate_po(po_from_ai) or po_from_text
+
+    # ── Smart order number extraction ──
+    order_from_ai = (
+        ef.get("order_number") or ef.get("sales_order_number")
+        or nf.get("order_number")
+    )
+    order_number = _validate_order_number(order_from_ai) or _extract_order_number(combined_text)
+
+    # ── Customer name ──
+    customer_name = (
+        ef.get("customer") or ef.get("customer_name")
+        or nf.get("customer")
+    )
+    # Don't accept "Gamer Packaging" as customer — that's us, not the customer
+    if customer_name and "gamer" in customer_name.lower():
+        # Try to find the REAL customer from ship-to or other fields
+        alt_customer = ef.get("ship_to_name") or ef.get("bill_to_name")
+        if alt_customer and "gamer" not in alt_customer.lower():
+            customer_name = alt_customer
+
+    # ── Ship-to ──
+    ship_to = (
+        ef.get("ship_to") or ef.get("ship_to_address")
+        or nf.get("ship_to")
+    )
+
+    # ── Items and quantities ──
+    raw_items = ef.get("items") or ef.get("item_numbers") or ef.get("line_items") or []
+    raw_quantities = ef.get("quantities") or []
+    line_items = nf.get("line_items") or doc.get("line_items") or []
+
+    # Build structured line data from line_items if available
+    extracted_lines = []
+    for li in line_items:
+        line = {}
+        desc = li.get("description") or li.get("item_description") or ""
+        if desc:
+            line["description"] = desc
+        qty = li.get("quantity") or li.get("ordered_qty")
+        if qty:
+            line["quantity"] = qty
+        price = li.get("unit_price") or li.get("price")
+        if price:
+            line["unit_price"] = price
+        item_no = li.get("item_no") or li.get("item_number")
+        if item_no:
+            line["item_no"] = item_no
+        if line:
+            extracted_lines.append(line)
+
+    # ── Amount ──
+    amount = (
+        nf.get("amount_float") or ef.get("total_amount")
+        or doc.get("total_amount")
+    )
 
     extraction: Dict[str, Any] = {
-        "customer_name": (
-            ef.get("customer") or ef.get("customer_name")
-            or nf.get("customer") or _guess_from_text(combined_text, "customer")
-        ),
-        "po_number": (
-            ef.get("po_number") or ef.get("purchase_order")
-            or nf.get("customer_po") or nf.get("po_number")
-            or _guess_from_text(combined_text, "po_number")
-        ),
-        "order_number": (
-            ef.get("order_number") or ef.get("sales_order_number")
-            or nf.get("order_number")
-        ),
+        "customer_name": customer_name,
+        "po_number": po_number,
+        "order_number": order_number,
         "requested_ship_date": (
             ef.get("requested_ship_date") or ef.get("ship_date")
             or nf.get("requested_ship_date")
         ),
-        "ship_to": (
-            ef.get("ship_to") or ef.get("ship_to_address")
-            or nf.get("ship_to")
-        ),
-        "item_numbers": ef.get("items") or ef.get("item_numbers") or [],
-        "quantities": ef.get("quantities") or [],
+        "ship_to": ship_to,
+        "total_amount": amount,
+        "line_count": len(extracted_lines) or len(raw_items) or None,
+        "extracted_lines": extracted_lines if extracted_lines else None,
+        "item_numbers": raw_items if raw_items and not extracted_lines else None,
+        "quantities": raw_quantities if raw_quantities and not extracted_lines else None,
         "document_type": doc.get("doc_type") or doc.get("suggested_job_type"),
         "sender": sender,
         "mailbox_source": doc.get("pilot_mailbox"),
         "email_subject": email_subject,
         "extracted_at": datetime.now(timezone.utc).isoformat(),
     }
+
+    # ── Quality score ──
+    quality_fields = ["customer_name", "po_number", "ship_to", "total_amount"]
+    filled = sum(1 for f in quality_fields if extraction.get(f))
+    extraction["extraction_quality"] = f"{filled}/{len(quality_fields)}"
+    extraction["extraction_quality_pct"] = round(filled / len(quality_fields) * 100)
 
     # Remove None values for cleanliness
     extraction = {k: v for k, v in extraction.items() if v is not None}
@@ -516,14 +623,85 @@ async def _extract_sales_fields(
     return extraction
 
 
-def _guess_from_text(text: str, field: str) -> Optional[str]:
-    """Very light regex extraction from email subject/body."""
-    if field == "po_number":
-        m = re.search(r"(?:po|purchase\s*order)[#:\s]*(\S+)", text, re.IGNORECASE)
-        return m.group(1) if m else None
-    if field == "customer":
-        # Can't reliably guess customer from subject alone
+# ── PO / Order Number validation and extraction ──
+
+# Real PO patterns seen at GPI: W117579, WR112624, 67697-04, 21103-01, 110826409
+_PO_PATTERNS = [
+    re.compile(r"\bW[R]?\d{5,}\b"),                  # W117579, WR112624
+    re.compile(r"\b\d{5,9}\b"),                        # 110826409, 67697
+    re.compile(r"\b\d{4,6}[-]\d{1,3}\b"),             # 67697-04, 21103-01
+    re.compile(r"\b[A-Z]{2,4}[-]?\d{4,}\b"),          # PO-12345, ETB-2024-0042
+]
+
+_GARBAGE_PO = {
+    "rate", "intment", "number", "number.", "rt", "logies", "the", "and",
+    "for", "from", "with", "this", "that", "please", "thanks", "order",
+    "re", "fw", "fwd", "ext", "external",
+}
+
+
+def _validate_po(po: Optional[str]) -> Optional[str]:
+    """Validate an AI-extracted PO number — reject garbage."""
+    if not po:
         return None
+    po = po.strip().strip("#:").strip()
+    if len(po) < 4:
+        return None
+    if po.lower() in _GARBAGE_PO:
+        return None
+    # Must contain at least one digit
+    if not re.search(r"\d", po):
+        return None
+    # Reject if it's just a common word fragment
+    if re.match(r"^[a-z]+$", po, re.IGNORECASE) and len(po) < 6:
+        return None
+    return po
+
+
+def _validate_order_number(order_no: Optional[str]) -> Optional[str]:
+    """Validate an AI-extracted order number."""
+    if not order_no:
+        return None
+    order_no = order_no.strip()
+    if len(order_no) < 3:
+        return None
+    if order_no.lower() in _GARBAGE_PO:
+        return None
+    if not re.search(r"\d", order_no):
+        return None
+    return order_no
+
+
+def _extract_po_number(text: str) -> Optional[str]:
+    """Extract PO number from email subject/body/filename using known patterns."""
+    # Try explicit "PO" or "Purchase Order" prefix first
+    m = re.search(
+        r"(?:po|purchase\s*order)[#:\s]+([A-Z0-9][\w\-]{3,})",
+        text, re.IGNORECASE,
+    )
+    if m:
+        candidate = m.group(1).strip()
+        if _validate_po(candidate):
+            return candidate
+
+    # Try W-prefixed patterns (very common at GPI)
+    m = re.search(r"\b(W[R]?\d{5,})\b", text)
+    if m:
+        return m.group(1)
+
+    return None
+
+
+def _extract_order_number(text: str) -> Optional[str]:
+    """Extract order number from email text."""
+    m = re.search(
+        r"(?:order|order\s*(?:no|num|number|#))[#:\s]+([A-Z0-9][\w\-]{3,})",
+        text, re.IGNORECASE,
+    )
+    if m:
+        candidate = m.group(1).strip()
+        if _validate_order_number(candidate):
+            return candidate
     return None
 
 

@@ -177,6 +177,20 @@ export default function UnifiedQueuePage() {
         return;
       }
 
+      const isReadyToPostTab = activeTab === "ready_to_post";
+      if (isReadyToPostTab) {
+        params.append("queue_view", "false");
+        params.append("include_cleared", "true");
+        params.append("status", "ReadyForPost");
+        const response = await api.get(`/documents?${params.toString()}`);
+        const docs = response.data.documents || [];
+        setDocuments(docs);
+        setCounts(prev => ({ ...prev, ready_to_post: docs.length }));
+        setSelectedDocs(new Set());
+        setLoading(false);
+        return;
+      }
+
       if (isProcessedTab || isBatchesTab) {
         // Show all docs, then filter client-side
         params.append("queue_view", "false");
@@ -235,20 +249,22 @@ export default function UnifiedQueuePage() {
         const processedCount = response.data.counts?.completed || 0;
         // Fetch batch count and exception count
         try {
-          const [batchRes, exRes, poRes, archRes] = await Promise.all([
+          const [batchRes, exRes, poRes, archRes, readyRes] = await Promise.all([
             api.get('/documents?limit=0&queue_view=false&include_cleared=true&status=batch_parent'),
             api.get('/readiness/exception-queue?limit=0'),
             api.get('/readiness/po-pending?limit=0'),
             api.get('/documents?limit=0&queue_view=false&include_cleared=true&status_filter=Archived'),
+            api.get('/documents?limit=0&queue_view=false&include_cleared=true&status=ReadyForPost'),
           ]);
           setCounts({
             all: activeDocs.length, accounting: apCount, sales: salesCount,
             processed: processedCount, batches: batchRes.data.total || 0,
             exceptions: exRes.data.total || 0, po_pending: poRes.data.total || 0,
             archived: archRes.data.total || 0,
+            ready_to_post: readyRes.data.total || 0,
           });
         } catch {
-          setCounts({ all: activeDocs.length, accounting: apCount, sales: salesCount, processed: processedCount, batches: 0, exceptions: 0, po_pending: 0, archived: 0 });
+          setCounts({ all: activeDocs.length, accounting: apCount, sales: salesCount, processed: processedCount, batches: 0, exceptions: 0, po_pending: 0, archived: 0, ready_to_post: 0 });
         }
       }
     } catch (err) {
@@ -554,11 +570,16 @@ export default function UnifiedQueuePage() {
           {(stats.ready_for_post || 0) > 0 && (
             <>
               <div className="w-px h-4 bg-border/40" />
-              <div className="flex items-center gap-1.5" data-testid="stat-ready-post">
+              <button
+                onClick={() => setActiveTab("ready_to_post")}
+                className="flex items-center gap-1.5 hover:opacity-80 transition-opacity cursor-pointer"
+                data-testid="stat-ready-post"
+                title="Click to view Ready to Post documents"
+              >
                 <Send className="w-3.5 h-3.5 text-blue-400" />
                 <span className="text-muted-foreground">Queued</span>
                 <span className="font-semibold text-blue-400">{stats.ready_for_post}</span>
-              </div>
+              </button>
             </>
           )}
           <div className="w-px h-4 bg-border/40" />
@@ -663,6 +684,7 @@ export default function UnifiedQueuePage() {
           { key: "accounting", label: "Accounting", icon: Receipt, count: counts.accounting },
           { key: "sales", label: "Sales", icon: ShoppingCart, count: counts.sales },
           { key: "processed", label: "Processed", icon: CheckCircle2, count: counts.processed },
+          { key: "ready_to_post", label: "Ready to Post", icon: Send, count: counts.ready_to_post },
           { key: "batches", label: "Batches", icon: Layers, count: counts.batches },
           { key: "exceptions", label: "Exceptions", icon: AlertTriangle, count: counts.exceptions, accent: true },
           { key: "po_pending", label: "PO Pending", icon: Clock, count: counts.po_pending, accent: counts.po_pending > 0 },

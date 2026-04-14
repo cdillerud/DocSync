@@ -7760,6 +7760,49 @@ async def startup():
 
     asyncio.create_task(_startup_clean_noise_learning_events())
 
+    # ── Startup: Fix shipping docs incorrectly parked/escalated by PO retry ──
+    async def _startup_fix_shipping_po_escalations():
+        await asyncio.sleep(12)
+        try:
+            NON_PO_TYPES = [
+                "Shipping_Document", "Shipping Document", "Packing_Slip", "Packing_List",
+                "BOL", "Bill_of_Lading", "Bill of Lading", "Warehouse_Receipt",
+                "STATEMENT", "Statement", "Account_Statement", "Remittance",
+            ]
+            # Un-park non-AP docs that were incorrectly parked by PO retry
+            r1 = await db.hub_documents.update_many(
+                {
+                    "po_pending_parked": True,
+                    "$or": [
+                        {"doc_type": {"$in": NON_PO_TYPES}},
+                        {"document_type": {"$in": NON_PO_TYPES}},
+                    ],
+                },
+                {"$set": {"po_pending_parked": False}, "$unset": {"escalation_reason": ""}},
+            )
+            # Fix shipping docs incorrectly escalated to Exception/Manual Review
+            r2 = await db.hub_documents.update_many(
+                {
+                    "$or": [
+                        {"doc_type": {"$in": NON_PO_TYPES}},
+                        {"document_type": {"$in": NON_PO_TYPES}},
+                    ],
+                    "escalation_reason": {"$regex": "PO not found", "$options": "i"},
+                },
+                {
+                    "$set": {"po_pending_parked": False},
+                    "$unset": {"escalation_reason": "", "auto_escalated": ""},
+                },
+            )
+            if r1.modified_count or r2.modified_count:
+                logger.info("[Startup] Fixed %d incorrectly PO-parked + %d incorrectly escalated non-AP docs",
+                            r1.modified_count, r2.modified_count)
+        except Exception as e:
+            logger.warning("[Startup] Shipping PO-escalation fix failed: %s", e)
+
+    asyncio.create_task(_startup_fix_shipping_po_escalations())
+
+
     # ── Startup: Backfill bc_purchase_invoice_no from bc_purchase_invoice.bc_record_no ──
     async def _startup_backfill_pi_no():
         await asyncio.sleep(15)
@@ -8279,12 +8322,24 @@ async def startup():
                                  "archived", "FileMissing", "Exception", "exception",
                                  "Validated", "validated", "ReadyForPost", "AutoFiled"]
 
-                # Auto-park new PO-gap docs
+                # Doc types that should NEVER enter the PO retry loop
+                NON_PO_TYPES = [
+                    "Shipping_Document", "Shipping Document", "Packing_Slip", "Packing_List",
+                    "BOL", "Bill_of_Lading", "Bill of Lading", "Warehouse_Receipt",
+                    "STATEMENT", "Statement", "Account_Statement", "Remittance",
+                    "REMINDER", "Reminder", "Sales_Quote", "Quality_Issue",
+                    "Inventory_Report", "SALES_CREDIT_MEMO", "Return_Request",
+                ]
+
+                # Auto-park new PO-gap docs (AP types only, not already cleared)
                 new_parked = await db.hub_documents.update_many(
                     {
                         "is_duplicate": {"$ne": True},
                         "status": {"$nin": DONE_STATUSES},
+                        "auto_cleared": {"$ne": True},
                         "po_pending_parked": {"$ne": True},
+                        "doc_type": {"$nin": NON_PO_TYPES},
+                        "document_type": {"$nin": NON_PO_TYPES},
                         "$or": [
                             {"readiness.warning_reasons": "po_missing"},
                             {"readiness.blocking_reasons": {"$regex": "po"}},
@@ -8309,7 +8364,12 @@ async def startup():
                 from services.document_readiness_service import evaluate_and_persist
 
                 pending = await db.hub_documents.find(
-                    {"po_pending_parked": True, "status": {"$nin": ["Completed", "Posted", "Exception", "exception"]}},
+                    {
+                        "po_pending_parked": True,
+                        "status": {"$nin": ["Completed", "Posted", "Exception", "exception"]},
+                        "auto_cleared": {"$ne": True},
+                        "doc_type": {"$nin": NON_PO_TYPES},
+                    },
                     {"_id": 0},
                 ).limit(200).to_list(200)
 
@@ -8369,6 +8429,21 @@ async def startup():
                     "[PO Retry] Cycle done: %d checked, %d resolved, %d still waiting, %d escalated",
                     len(pending), resolved, still_waiting, escalated,
                 )
+
+                # Cleanup: un-park non-AP docs that were incorrectly parked
+                cleanup = await db.hub_documents.update_many(
+                    {
+                        "po_pending_parked": True,
+                        "$or": [
+                            {"doc_type": {"$in": NON_PO_TYPES}},
+                            {"document_type": {"$in": NON_PO_TYPES}},
+                            {"auto_cleared": True},
+                        ],
+                    },
+                    {"$set": {"po_pending_parked": False}, "$unset": {"escalation_reason": ""}},
+                )
+                if cleanup.modified_count > 0:
+                    logger.info("[PO Retry] Cleaned up %d incorrectly parked non-AP/cleared docs", cleanup.modified_count)
             except Exception as e:
                 logger.warning("[PO Retry] Scheduled cycle failed: %s", e)
 

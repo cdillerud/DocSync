@@ -1,6 +1,92 @@
-export const APP_VERSION = "1.6.0";
+export const APP_VERSION = "2.0.0";
 
 export const CHANGELOG = [
+  {
+    version: "2.0.0",
+    date: "2026-04-14",
+    title: "Unified Governance & AP Advisory Phase 3",
+    changes: [
+      { type: "feature", text: "Governance Dashboard — cross-pipeline view of SO + AP learning, drift controls, and system health" },
+      { type: "feature", text: "AP Invoice Advisory Phase 3 — suggestion approve/reject/apply workflow, impact review, drift controls, vendor hotspots" },
+      { type: "fix", text: "Draft PI Preview was showing identical amounts on all lines — now distributes proportionally using template usage rates" },
+    ],
+  },
+  {
+    version: "1.12.0",
+    date: "2026-04-13",
+    title: "AP Advisory Phases 1-2 & Status Model Cleanup",
+    changes: [
+      { type: "feature", text: "AP Invoice Vendor Advisory — reviewer, explainer, feedback, diagnostics, calibration, learning suggestions" },
+      { type: "feature", text: "Maturity Checkpoint & Reusability Review — system-wide readiness assessment for framework reuse" },
+      { type: "fix", text: "Status model cleanup — fixed validation state overrides, reprocess loop, and completed-doc downgrade bug" },
+      { type: "fix", text: "Readiness extraction quality gate — docs with 0% extraction no longer auto-clear" },
+    ],
+  },
+  {
+    version: "1.11.0",
+    date: "2026-04-13",
+    title: "Governed Learning Pipeline Complete",
+    changes: [
+      { type: "feature", text: "Feedback-to-Learning Pipeline — converts reviewer feedback into candidate profile suggestions" },
+      { type: "feature", text: "Learning Suggestion Approval Workflow — governed approve/reject/apply with full audit trail" },
+      { type: "feature", text: "Learning Apply-Impact Review — pre/post apply outcome comparison" },
+      { type: "feature", text: "Profile Drift Controls — change cadence monitoring, risk classification" },
+      { type: "feature", text: "Rep Overrides Management UI — admin CRUD for business exceptions" },
+      { type: "feature", text: "Customer Hotspot Review — cross-signal friction analysis with root-cause diagnosis" },
+    ],
+  },
+  {
+    version: "1.10.0",
+    date: "2026-04-13",
+    title: "SO Advisory Tuning & Calibration",
+    changes: [
+      { type: "feature", text: "Confidence Calibration — heuristic penalty system preserving raw values" },
+      { type: "feature", text: "Ship-To & Item/UOM Sensitivity Tuning — pre-LLM analysis with context-aware severity" },
+      { type: "feature", text: "Explanation Wording Refinement — evidence-calibrated tone system (6 categories)" },
+      { type: "feature", text: "Strong-Profile Behavior Tuning — reduced false positives for mature customers" },
+      { type: "feature", text: "Post-Tuning Calibration Review — comprehensive impact analysis" },
+    ],
+  },
+  {
+    version: "1.9.0",
+    date: "2026-04-13",
+    title: "Sales Order Governed Learning Foundation",
+    changes: [
+      { type: "feature", text: "Customer Posting Profiles — BC backfill + incremental learning from posted orders" },
+      { type: "feature", text: "SO Readiness Reviewer — LLM-assisted advisory (never changes posting decisions)" },
+      { type: "feature", text: "SO Decision Explainer — plain-English explanations of advisory results" },
+      { type: "feature", text: "Reviewer Feedback Capture & Analytics — structured human corrections" },
+      { type: "feature", text: "Unified SO Advisory Panel — consolidated explainer + review + profile + feedback" },
+      { type: "feature", text: "Disagreement Diagnostics — root-cause classification of reviewer disagreements" },
+    ],
+  },
+  {
+    version: "1.8.0",
+    date: "2026-04-12",
+    title: "LLM Abstraction & Daily Trace System",
+    changes: [
+      { type: "feature", text: "LLM Provider Abstraction — Emergent + Ollama providers with env-based routing" },
+      { type: "feature", text: "Decision Explainer Service — plain-English document workflow explanations" },
+      { type: "feature", text: "Side-by-Side Extraction Comparison — baseline vs candidate provider testing" },
+      { type: "feature", text: "Vendor Resolution Ranking Assist — LLM-assisted disambiguation for uncertain matches" },
+      { type: "feature", text: "Daily Random Trace System — 15 random PROD PI comparisons with trend tracking" },
+      { type: "feature", text: "Template Value Injection — merges template structure with live extracted values" },
+    ],
+  },
+  {
+    version: "1.7.0",
+    date: "2026-04-11",
+    title: "Validation Gap Auto-Fixer & Freight Rules Engine",
+    changes: [
+      { type: "feature", text: "Gap Closer 8 (PO Learning) & Gap Closer 9 (Vendor Auto-Resolution) — closed 45 blocking gaps" },
+      { type: "feature", text: "Run Full Cycle expanded to 10 steps with one-button orchestration" },
+      { type: "feature", text: "Freight Business Rules Engine — controller rules codified (order patterns, location routing, carrier detection)" },
+      { type: "feature", text: "Freight-specific readiness checks and enhanced duplicate detection" },
+      { type: "fix", text: "Vendor alias duplicate key error resolved (UUID-based alias_id)" },
+      { type: "fix", text: "Escalation death spiral — auto_escalation demoted from blocking to advisory" },
+      { type: "fix", text: "Noise learning events cleanup — self-corrections no longer pollute dashboard" },
+    ],
+  },
   {
     version: "1.6.0",
     date: "2026-03-21",
@@ -22,9 +108,7 @@ export const CHANGELOG = [
     changes: [
       { type: "feature", text: "Unified Queue Page with workflow category filters (AP, Sales, Operations) and date range picker" },
       { type: "feature", text: "Vendor Intelligence & Stable Vendors moved into Settings hub" },
-      { type: "feature", text: "Document Types dashboard tab on main Dashboard" },
       { type: "improvement", text: "Navigation consolidated from 8 to 7 items for cleaner UX" },
-      { type: "improvement", text: "Deleted 9 orphaned page files reducing frontend complexity" },
       { type: "feature", text: "App versioning system with changelog" },
     ],
   },
@@ -36,36 +120,6 @@ export const CHANGELOG = [
       { type: "feature", text: "BC Sales Order shipment events synced into Inventory Ledger as outbound movements" },
       { type: "feature", text: "Customer & salesperson sync from Business Central with rep assignment service" },
       { type: "improvement", text: "Extracted 600+ lines from server.py into dedicated domain services" },
-    ],
-  },
-  {
-    version: "1.3.0",
-    date: "2026-03-19",
-    title: "SO Routing & Warehouse Notifications",
-    changes: [
-      { type: "feature", text: "Drop-Ship vs Warehouse SO type routing with automatic field mapping" },
-      { type: "feature", text: "Automated warehouse receiving notifications when WH SO is booked" },
-      { type: "feature", text: "SO confirmation emails to customers" },
-    ],
-  },
-  {
-    version: "1.2.0",
-    date: "2026-03-18",
-    title: "BC Catalog Sync & Square9 Decommission",
-    changes: [
-      { type: "feature", text: "BC catalog sync scheduling with health monitoring" },
-      { type: "feature", text: "Square9 decommission tooling and cutover dashboard" },
-      { type: "improvement", text: "Freight GL routing extensions (storage handling, international dropship)" },
-    ],
-  },
-  {
-    version: "1.1.0",
-    date: "2026-03-17",
-    title: "AP Automation & AI Classification",
-    changes: [
-      { type: "feature", text: "Auto-post AP invoices for stable vendors" },
-      { type: "feature", text: "Azure OpenAI fallback classifier when Gemini confidence is low" },
-      { type: "fix", text: "FastAPI dependency injection cleanup" },
     ],
   },
   {

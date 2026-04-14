@@ -1,6 +1,19 @@
-export const APP_VERSION = "2.0.0";
+export const APP_VERSION = "2.1.0";
 
 export const CHANGELOG = [
+  {
+    version: "2.1.0",
+    date: "2026-04-14",
+    title: "Inside Sales Pilot — Controlled Ingestion",
+    changes: [
+      { type: "feature", text: "Inside Sales Pilot — ingest-only polling for mkoch & nhannover mailboxes with 5-layer BC write safety" },
+      { type: "feature", text: "Relevance filtering — keyword + filename matching, noise rejection (certificates, dunnage, signatures)" },
+      { type: "feature", text: "Structured sales extraction — customer, PO, order number, ship-to, items, quantities with quality scoring" },
+      { type: "feature", text: "BC Production cross-validation — read-only customer match, order lookup, item validation, amount range check" },
+      { type: "feature", text: "Pilot dashboard — /api/inside-sales-pilot/status, documents, runs, logs, extraction-review, validation-results" },
+      { type: "improvement", text: "Smart PO extraction — rejects garbage (rate, intment, number.) while catching real patterns (W117579, WR112624)" },
+    ],
+  },
   {
     version: "2.0.0",
     date: "2026-04-14",

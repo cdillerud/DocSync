@@ -834,11 +834,13 @@ async def get_pilot_run_history(db, limit: int = 20) -> List[Dict[str, Any]]:
 
 
 async def get_pilot_status_summary(db) -> Dict[str, Any]:
-    """Build a status dashboard for the Inside Sales pilot."""
-    total_docs = await db.hub_documents.count_documents({"inside_sales_pilot": True})
+    """Build a comprehensive progress dashboard for the Inside Sales pilot."""
+    base_q = {"inside_sales_pilot": True}
+    total_docs = await db.hub_documents.count_documents(base_q)
 
+    # ── Docs by mailbox ──
     by_mailbox_pipeline = [
-        {"$match": {"inside_sales_pilot": True}},
+        {"$match": base_q},
         {"$group": {"_id": "$pilot_mailbox", "count": {"$sum": 1}}},
     ]
     by_mailbox = {
@@ -846,8 +848,9 @@ async def get_pilot_status_summary(db) -> Dict[str, Any]:
         for r in await db.hub_documents.aggregate(by_mailbox_pipeline).to_list(10)
     }
 
+    # ── Docs by type ──
     by_type_pipeline = [
-        {"$match": {"inside_sales_pilot": True}},
+        {"$match": base_q},
         {"$group": {"_id": {"$ifNull": ["$doc_type", "Unknown"]}, "count": {"$sum": 1}}},
     ]
     by_type = {
@@ -855,28 +858,120 @@ async def get_pilot_status_summary(db) -> Dict[str, Any]:
         for r in await db.hub_documents.aggregate(by_type_pipeline).to_list(30)
     }
 
-    # Extraction coverage
+    # ── Extraction quality ──
     with_extraction = await db.hub_documents.count_documents(
-        {"inside_sales_pilot": True, "sales_pilot_extraction": {"$exists": True, "$ne": None}}
+        {**base_q, "sales_pilot_extraction": {"$exists": True, "$ne": None}}
     )
+    quality_pipeline = [
+        {"$match": {**base_q, "sales_pilot_extraction.extraction_quality_pct": {"$exists": True}}},
+        {"$group": {
+            "_id": None,
+            "avg_quality": {"$avg": "$sales_pilot_extraction.extraction_quality_pct"},
+            "high_quality": {"$sum": {"$cond": [{"$gte": ["$sales_pilot_extraction.extraction_quality_pct", 50]}, 1, 0]}},
+            "has_po": {"$sum": {"$cond": [{"$and": [
+                {"$ne": ["$sales_pilot_extraction.po_number", None]},
+                {"$ne": ["$sales_pilot_extraction.po_number", ""]},
+            ]}, 1, 0]}},
+            "has_customer": {"$sum": {"$cond": [{"$and": [
+                {"$ne": ["$sales_pilot_extraction.customer_name", None]},
+                {"$ne": ["$sales_pilot_extraction.customer_name", ""]},
+            ]}, 1, 0]}},
+            "has_ship_to": {"$sum": {"$cond": [{"$and": [
+                {"$ne": ["$sales_pilot_extraction.ship_to", None]},
+                {"$ne": ["$sales_pilot_extraction.ship_to", ""]},
+            ]}, 1, 0]}},
+            "has_amount": {"$sum": {"$cond": [{"$and": [
+                {"$ne": ["$sales_pilot_extraction.total_amount", None]},
+                {"$gt": ["$sales_pilot_extraction.total_amount", 0]},
+            ]}, 1, 0]}},
+        }},
+    ]
+    quality_result = await db.hub_documents.aggregate(quality_pipeline).to_list(1)
+    qr = quality_result[0] if quality_result else {}
 
-    # Recent runs
-    recent_runs = (
-        await db.inside_sales_pilot_runs.find({}, {"_id": 0})
-        .sort("started_at", -1)
-        .limit(5)
-        .to_list(5)
+    # ── BC Validation scores ──
+    with_validation = await db.hub_documents.count_documents(
+        {**base_q, "bc_prod_validation": {"$exists": True, "$ne": None}}
     )
+    bc_pipeline = [
+        {"$match": {**base_q, "bc_prod_validation.overall_score": {"$exists": True}}},
+        {"$group": {
+            "_id": None,
+            "avg_score": {"$avg": "$bc_prod_validation.overall_score"},
+            "customer_found": {"$sum": {"$cond": [
+                {"$eq": ["$bc_prod_validation.customer_match.found", True]}, 1, 0
+            ]}},
+            "order_found": {"$sum": {"$cond": [
+                {"$eq": ["$bc_prod_validation.order_lookup.found", True]}, 1, 0
+            ]}},
+        }},
+    ]
+    bc_result = await db.hub_documents.aggregate(bc_pipeline).to_list(1)
+    br = bc_result[0] if bc_result else {}
+
+    # ── Polling stats (last 24h) ──
+    from datetime import timedelta
+    cutoff_24h = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    recent_runs = (
+        await db.inside_sales_pilot_runs.find(
+            {"started_at": {"$gte": cutoff_24h}}, {"_id": 0}
+        ).sort("started_at", -1).to_list(50)
+    )
+    total_scanned = sum(r.get("messages_scanned", 0) for r in recent_runs)
+    total_ingested = sum(r.get("attachments_ingested", 0) for r in recent_runs)
+    total_skipped_relevance = sum(r.get("messages_skipped_relevance", 0) for r in recent_runs)
+    total_skipped_noise = sum(r.get("attachments_skipped_noise", 0) for r in recent_runs)
+    total_skipped_dup = sum(r.get("attachments_skipped_duplicate", 0) for r in recent_runs)
 
     return {
         "enabled": INSIDE_SALES_PILOT_ENABLED,
+        "version": "2.1.0",
         "mailboxes": INSIDE_SALES_PILOT_MAILBOXES,
         "interval_minutes": INSIDE_SALES_PILOT_INTERVAL_MINUTES,
+
+        # ── Progress headline ──
         "total_documents": total_docs,
         "by_mailbox": by_mailbox,
         "by_doc_type": by_type,
-        "extraction_coverage": f"{with_extraction}/{total_docs}" if total_docs else "0/0",
-        "recent_runs": recent_runs,
+
+        # ── Extraction quality ──
+        "extraction": {
+            "coverage": f"{with_extraction}/{total_docs}",
+            "avg_quality_pct": round(qr.get("avg_quality", 0)),
+            "high_quality_count": qr.get("high_quality", 0),
+            "field_hit_rates": {
+                "customer_name": f"{qr.get('has_customer', 0)}/{total_docs}",
+                "po_number": f"{qr.get('has_po', 0)}/{total_docs}",
+                "ship_to": f"{qr.get('has_ship_to', 0)}/{total_docs}",
+                "total_amount": f"{qr.get('has_amount', 0)}/{total_docs}",
+            } if total_docs else {},
+        },
+
+        # ── BC Production validation ──
+        "bc_validation": {
+            "validated": f"{with_validation}/{total_docs}",
+            "avg_score_pct": round(br.get("avg_score", 0)),
+            "customer_match_rate": f"{br.get('customer_found', 0)}/{with_validation}" if with_validation else "0/0",
+            "order_match_rate": f"{br.get('order_found', 0)}/{with_validation}" if with_validation else "0/0",
+        },
+
+        # ── Last 24h polling activity ──
+        "last_24h": {
+            "poll_runs": len(recent_runs),
+            "messages_scanned": total_scanned,
+            "attachments_ingested": total_ingested,
+            "skipped_relevance": total_skipped_relevance,
+            "skipped_noise": total_skipped_noise,
+            "skipped_duplicate": total_skipped_dup,
+            "signal_to_noise": (
+                f"{total_ingested}:{total_skipped_noise + total_skipped_relevance}"
+                if (total_skipped_noise + total_skipped_relevance) > 0
+                else f"{total_ingested}:0"
+            ),
+        },
+
+        # ── Latest 3 runs ──
+        "recent_runs": recent_runs[:3],
     }
 
 

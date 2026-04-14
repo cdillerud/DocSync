@@ -216,3 +216,36 @@ async def list_validation_results(
         .to_list(limit)
     )
     return {"total": total, "documents": docs}
+
+
+# ── Sales Corpus Validation (existing 1000+ docs) ───────────
+
+@router.post("/validate-sales-corpus")
+async def validate_sales_corpus_batch(
+    batch_size: int = Query(100, ge=10, le=500),
+):
+    """
+    Run BC Production cross-validation on existing sales documents
+    (NOT pilot docs).  Processes in batches — call repeatedly until
+    `remaining` reaches 0.
+
+    Read-only — never writes to BC.
+    """
+    from services.bc_prod_validator import validate_sales_corpus
+    result = await validate_sales_corpus(batch_size=batch_size)
+    return result
+
+
+@router.get("/corpus-validation-summary")
+async def corpus_validation_summary():
+    """
+    Comprehensive validation summary comparing:
+    - Existing sales corpus (1000+ docs)
+    - Inside Sales pilot (mkoch/nhannover)
+
+    Shows customer match rates, order match rates, score distribution,
+    top customers, and side-by-side comparison.
+    """
+    db = get_db()
+    from services.bc_prod_validator import get_corpus_validation_summary
+    return await get_corpus_validation_summary(db)

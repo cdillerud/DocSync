@@ -461,3 +461,233 @@ async def validate_all_pilot_documents() -> Dict[str, Any]:
     if results["scores"]:
         results["avg_score"] = round(sum(results["scores"]) / len(results["scores"]))
     return results
+
+
+# ─────────────────────────────────────────────────────────────
+# SALES CORPUS VALIDATION (existing 1000+ sales docs)
+# ─────────────────────────────────────────────────────────────
+
+async def validate_sales_corpus(batch_size: int = 100) -> Dict[str, Any]:
+    """
+    Run BC Production validation on existing sales documents (non-pilot).
+
+    Targets docs that:
+      - Are classified as sales-related (SALES_INVOICE, Sales_Order, etc.)
+      - Are NOT already pilot-tagged
+      - Haven't been validated yet
+
+    Processes in batches to avoid timeout.  Stores results as
+    `bc_prod_validation` on each document (same field as pilot docs).
+    """
+    db = get_db()
+
+    sales_types = [
+        "SALES_INVOICE", "Sales_Order", "Order_Confirmation",
+        "DS_SALES_ORDER", "WH_SALES_ORDER", "AR_Invoice",
+    ]
+
+    query = {
+        "$and": [
+            {"$or": [
+                {"doc_type": {"$in": sales_types}},
+                {"suggested_job_type": {"$regex": "sales|order|AR_Invoice", "$options": "i"}},
+                {"mailbox_category": "SALES"},
+            ]},
+            {"inside_sales_pilot": {"$ne": True}},
+            {"$or": [
+                {"bc_prod_validation": {"$exists": False}},
+                {"bc_prod_validation": None},
+            ]},
+        ]
+    }
+
+    total_pending = await db.hub_documents.count_documents(query)
+    docs = await db.hub_documents.find(
+        query, {"_id": 0, "id": 1}
+    ).limit(batch_size).to_list(batch_size)
+
+    results = {
+        "scope": "sales_corpus",
+        "total_pending": total_pending,
+        "batch_size": batch_size,
+        "processed": 0,
+        "validated": 0,
+        "errors": 0,
+        "scores": [],
+        "remaining": max(0, total_pending - batch_size),
+    }
+
+    for doc in docs:
+        results["processed"] += 1
+        try:
+            r = await validate_document_against_bc(doc["id"])
+            results["validated"] += 1
+            results["scores"].append(r.get("overall_score", 0))
+        except Exception as e:
+            results["errors"] += 1
+            logger.error("[CorpusValidation] Error on %s: %s", doc["id"][:8], e)
+
+    if results["scores"]:
+        results["avg_score"] = round(sum(results["scores"]) / len(results["scores"]))
+        results["score_distribution"] = {
+            "0%": sum(1 for s in results["scores"] if s == 0),
+            "1-25%": sum(1 for s in results["scores"] if 0 < s <= 25),
+            "26-50%": sum(1 for s in results["scores"] if 25 < s <= 50),
+            "51-75%": sum(1 for s in results["scores"] if 50 < s <= 75),
+            "76-100%": sum(1 for s in results["scores"] if 75 < s <= 100),
+        }
+
+    logger.info(
+        "[CorpusValidation] Batch complete: %d/%d validated, avg_score=%d%%, remaining=%d",
+        results["validated"], results["processed"],
+        results.get("avg_score", 0), results["remaining"],
+    )
+    return results
+
+
+async def get_corpus_validation_summary(db) -> Dict[str, Any]:
+    """
+    Aggregate validation results across all validated sales corpus documents.
+    Returns a comprehensive summary comparing pilot vs existing pipeline.
+    """
+    # ── Existing sales corpus stats ──
+    corpus_q = {
+        "inside_sales_pilot": {"$ne": True},
+        "bc_prod_validation": {"$exists": True, "$ne": None},
+    }
+    corpus_count = await db.hub_documents.count_documents(corpus_q)
+
+    corpus_pipeline = [
+        {"$match": corpus_q},
+        {"$group": {
+            "_id": None,
+            "avg_score": {"$avg": "$bc_prod_validation.overall_score"},
+            "customer_found": {"$sum": {"$cond": [
+                {"$eq": ["$bc_prod_validation.customer_match.found", True]}, 1, 0
+            ]}},
+            "order_found": {"$sum": {"$cond": [
+                {"$eq": ["$bc_prod_validation.order_lookup.found", True]}, 1, 0
+            ]}},
+            "has_items": {"$sum": {"$cond": [
+                {"$gt": ["$bc_prod_validation.item_validation.match_rate", 0]}, 1, 0
+            ]}},
+            "amount_in_range": {"$sum": {"$cond": [
+                {"$eq": ["$bc_prod_validation.amount_check.within_range", True]}, 1, 0
+            ]}},
+        }},
+    ]
+    corpus_result = await db.hub_documents.aggregate(corpus_pipeline).to_list(1)
+    cr = corpus_result[0] if corpus_result else {}
+
+    # ── Pilot stats for comparison ──
+    pilot_q = {
+        "inside_sales_pilot": True,
+        "bc_prod_validation": {"$exists": True, "$ne": None},
+    }
+    pilot_count = await db.hub_documents.count_documents(pilot_q)
+
+    pilot_pipeline = [
+        {"$match": pilot_q},
+        {"$group": {
+            "_id": None,
+            "avg_score": {"$avg": "$bc_prod_validation.overall_score"},
+            "customer_found": {"$sum": {"$cond": [
+                {"$eq": ["$bc_prod_validation.customer_match.found", True]}, 1, 0
+            ]}},
+            "order_found": {"$sum": {"$cond": [
+                {"$eq": ["$bc_prod_validation.order_lookup.found", True]}, 1, 0
+            ]}},
+        }},
+    ]
+    pilot_result = await db.hub_documents.aggregate(pilot_pipeline).to_list(1)
+    pr = pilot_result[0] if pilot_result else {}
+
+    # ── Score distribution for corpus ──
+    score_dist_pipeline = [
+        {"$match": corpus_q},
+        {"$bucket": {
+            "groupBy": "$bc_prod_validation.overall_score",
+            "boundaries": [0, 1, 26, 51, 76, 101],
+            "default": "unknown",
+            "output": {"count": {"$sum": 1}},
+        }},
+    ]
+    try:
+        score_dist = await db.hub_documents.aggregate(score_dist_pipeline).to_list(10)
+    except Exception:
+        score_dist = []
+
+    dist_labels = {0: "0%", 1: "1-25%", 26: "26-50%", 51: "51-75%", 76: "76-100%"}
+    score_distribution = {}
+    for bucket in score_dist:
+        label = dist_labels.get(bucket["_id"], str(bucket["_id"]))
+        score_distribution[label] = bucket["count"]
+
+    # ── Top validated customers ──
+    top_customers_pipeline = [
+        {"$match": {**corpus_q, "bc_prod_validation.customer_match.found": True}},
+        {"$group": {
+            "_id": "$bc_prod_validation.customer_match.bc_customer_no",
+            "name": {"$first": "$bc_prod_validation.customer_match.bc_customer_name"},
+            "count": {"$sum": 1},
+            "avg_score": {"$avg": "$bc_prod_validation.overall_score"},
+        }},
+        {"$sort": {"count": -1}},
+        {"$limit": 15},
+    ]
+    top_customers = await db.hub_documents.aggregate(top_customers_pipeline).to_list(15)
+
+    # ── Unvalidated remaining ──
+    unvalidated_sales = await db.hub_documents.count_documents({
+        "$and": [
+            {"$or": [
+                {"doc_type": {"$in": ["SALES_INVOICE", "Sales_Order", "Order_Confirmation",
+                                       "DS_SALES_ORDER", "WH_SALES_ORDER", "AR_Invoice"]}},
+                {"mailbox_category": "SALES"},
+            ]},
+            {"inside_sales_pilot": {"$ne": True}},
+            {"$or": [
+                {"bc_prod_validation": {"$exists": False}},
+                {"bc_prod_validation": None},
+            ]},
+        ]
+    })
+
+    def _rate(num, denom):
+        if not denom:
+            return "0%"
+        return f"{round(num / denom * 100)}%"
+
+    return {
+        "corpus": {
+            "validated_count": corpus_count,
+            "unvalidated_remaining": unvalidated_sales,
+            "avg_score": round(cr.get("avg_score", 0)),
+            "customer_match_rate": _rate(cr.get("customer_found", 0), corpus_count),
+            "order_match_rate": _rate(cr.get("order_found", 0), corpus_count),
+            "item_match_rate": _rate(cr.get("has_items", 0), corpus_count),
+            "amount_in_range_rate": _rate(cr.get("amount_in_range", 0), corpus_count),
+            "score_distribution": score_distribution,
+            "top_customers": [
+                {
+                    "customer_no": c["_id"],
+                    "name": c.get("name"),
+                    "doc_count": c["count"],
+                    "avg_score": round(c.get("avg_score", 0)),
+                }
+                for c in top_customers
+            ],
+        },
+        "pilot": {
+            "validated_count": pilot_count,
+            "avg_score": round(pr.get("avg_score", 0)),
+            "customer_match_rate": _rate(pr.get("customer_found", 0), pilot_count),
+            "order_match_rate": _rate(pr.get("order_found", 0), pilot_count),
+        },
+        "comparison": {
+            "corpus_avg": round(cr.get("avg_score", 0)),
+            "pilot_avg": round(pr.get("avg_score", 0)),
+            "corpus_customer_rate": _rate(cr.get("customer_found", 0), corpus_count),
+            "pilot_customer_rate": _rate(pr.get("customer_found", 0), pilot_count),
+        },
+    }

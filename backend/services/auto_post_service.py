@@ -81,7 +81,12 @@ async def check_auto_post_eligibility(doc: Dict[str, Any]) -> tuple[bool, str]:
     """
     if not AUTO_POST_ENABLED:
         return False, "Auto-post disabled (AUTO_POST_ENABLED=false)"
-    
+
+    # SAFETY: Block Inside Sales Pilot documents from any BC auto-posting
+    if (doc.get("inside_sales_pilot")
+        or doc.get("source") == "inside_sales_pilot"):
+        return False, "Inside Sales Pilot document — BC writes blocked"
+
     # Check document type - only AP invoices
     doc_type = doc.get("doc_type", "").upper()
     if doc_type not in ("AP_INVOICE", "AP_Invoice"):
@@ -445,7 +450,13 @@ def check_sales_order_eligibility(doc: Dict[str, Any]) -> tuple[bool, str]:
     """
     if not AUTO_CREATE_SALES_ORDER_ENABLED:
         return False, "Auto-create sales order disabled"
-    
+
+    # SAFETY: Block Inside Sales Pilot documents from SO auto-creation
+    if (doc.get("inside_sales_pilot")
+        or doc.get("ingestion_source") == "inside_sales_pilot"
+        or doc.get("source") == "inside_sales_pilot"):
+        return False, "Inside Sales Pilot document — BC writes blocked"
+
     # Check document type
     doc_type = doc.get("doc_type", "").upper()
     suggested_type = (doc.get("suggested_job_type") or "").upper()

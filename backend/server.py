@@ -2314,7 +2314,9 @@ async def _update_standard_workflow_status(
             logger.warning("[Sales Workflow] SO readiness review failed for %s: %s", doc_id[:8], rev_err)
 
         # AUTO-CREATE: Attempt to create BC Sales Order
-        if AUTO_CREATE_SALES_ORDER_ENABLED:
+        # SAFETY: Skip for Inside Sales Pilot documents (ingest-only mode)
+        _is_pilot = doc.get("inside_sales_pilot") or doc.get("source") == "inside_sales_pilot"
+        if AUTO_CREATE_SALES_ORDER_ENABLED and not _is_pilot:
             try:
                 # Refresh document after validation update
                 updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
@@ -7524,6 +7526,24 @@ async def startup():
         _sales_polling_task = asyncio.create_task(email_polling_svc._sales_email_polling_worker())
         logger.info("Sales email polling worker started (interval: %d min, user: %s)", 
                    SALES_EMAIL_POLLING_INTERVAL_MINUTES, SALES_EMAIL_POLLING_USER)
+
+    # Start Inside Sales Pilot worker (controlled ingestion for mkoch/nhannover)
+    from services.inside_sales_pilot_service import (
+        INSIDE_SALES_PILOT_ENABLED as _ISP_ENABLED,
+        INSIDE_SALES_PILOT_MAILBOXES as _ISP_MAILBOXES,
+        INSIDE_SALES_PILOT_INTERVAL_MINUTES as _ISP_INTERVAL,
+        inside_sales_pilot_worker,
+        ensure_pilot_indexes,
+    )
+    await ensure_pilot_indexes(db)
+    if _ISP_ENABLED:
+        _inside_sales_pilot_task = asyncio.create_task(inside_sales_pilot_worker())
+        logger.info(
+            "Inside Sales Pilot worker started (mailboxes=%s, interval=%dm)",
+            _ISP_MAILBOXES, _ISP_INTERVAL,
+        )
+    else:
+        logger.info("Inside Sales Pilot disabled (INSIDE_SALES_PILOT_ENABLED=false)")
     
     # Initialize email service
     email_service = EmailService(db=db)

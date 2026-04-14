@@ -409,6 +409,34 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - P2: Email sender → vendor mapping
 - P3: `server.py` extraction/refactoring (8,500+ lines)
 
+## Inside Sales Pilot — Controlled Ingestion (2026-04-14)
+- **Purpose**: Controlled ingest-only pilot for two Inside Sales mailboxes — learn from real sales documents without creating operational risk
+- **Pilot mailboxes**: `mkoch@gamerpackaging.com`, `nhannover@gamerpackaging.com`
+- **Feature flag**: `INSIDE_SALES_PILOT_ENABLED` (default: `false` — must be explicitly enabled in `.env`)
+- **Service**: `services/inside_sales_pilot_service.py` — dedicated polling, relevance filtering, structured extraction, logging
+- **Router**: `routers/inside_sales_pilot.py` — 5 endpoints:
+  - `GET /api/inside-sales-pilot/status` — config + dashboard summary
+  - `POST /api/inside-sales-pilot/poll-now` — manual trigger
+  - `GET /api/inside-sales-pilot/documents` — pilot documents (filterable by mailbox/type)
+  - `GET /api/inside-sales-pilot/runs` — polling run history
+  - `GET /api/inside-sales-pilot/logs` — detailed ingestion logs
+  - `GET /api/inside-sales-pilot/extraction-review` — structured extraction results
+- **Ingestion path**: Uses unified `hub_documents` pipeline via `_internal_intake_document()` → full AI classification + extraction
+- **Safety guards (5 layers)**:
+  1. `source="inside_sales_pilot"` check in server.py SO auto-create path
+  2. `inside_sales_pilot` flag check in `auto_post_service.check_sales_order_eligibility()`
+  3. `inside_sales_pilot` flag check in `auto_post_service.check_auto_post_eligibility()`
+  4. `auto_create_so_blocked=True` persisted on document
+  5. `bc_write_blocked=True` persisted on document
+- **Relevance filtering**: subject/body keyword matching (PO, order, quote, ship, release, etc.), external sender preference, attachment type filtering, inline/noise skip rules
+- **Structured extraction**: customer name, PO number, order number, ship date, ship-to, items, quantities, sender, mailbox source — persisted as `sales_pilot_extraction` on document
+- **Pilot metadata tags**: `ingestion_source: "inside_sales_pilot"`, `pilot_group: "inside_sales"`, `pilot_mailbox`, `pilot_run_id`
+- **Collections**: `inside_sales_pilot_log` (intake + event logs), `inside_sales_pilot_runs` (run summaries)
+- **Background worker**: polls all pilot mailboxes at `INSIDE_SALES_PILOT_INTERVAL_MINUTES` (default 10min)
+- **Config vars**: `INSIDE_SALES_PILOT_ENABLED`, `INSIDE_SALES_PILOT_MAILBOXES`, `INSIDE_SALES_PILOT_INTERVAL_MINUTES`, `INSIDE_SALES_PILOT_LOOKBACK_MINUTES`, `INSIDE_SALES_PILOT_MAX_MESSAGES`
+- **Tests**: 9/9 passing (`tests/test_inside_sales_pilot.py`), all safety guard tests verified
+- **NO BC writes, NO auto-create sales orders, NO downstream automation**
+
 ## Sales Order Draft Context Service (2026-04-13)
 - Service: `services/sales_order_draft_context_service.py` — profile-based draft assistance
 - Endpoint: `GET /api/documents/sales-orders/draft-context/{customer_id}` — JWT-protected

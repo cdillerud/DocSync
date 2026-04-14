@@ -1,150 +1,138 @@
 <analysis>**original_problem_statement**: 
-Extend the existing production-style GPI Hub application by designing and implementing a clean Ollama provider layer for the FastAPI backend. This layer must support both the existing hosted LLM provider and local Ollama models using an abstraction layer (e.g., , , ). 
+Extend the existing GPI Hub application to maintain and refine the production system. Address user-reported production UI bugs, backend status inconsistencies, and complete the final phase of the governed learning pipeline. 
 
 PRODUCT REQUIREMENTS:
-1. Create a provider abstraction layer (no hardcoded Ollama calls).
-2. Support chat/generation, structured JSON outputs, configurable models, timeout handling, retries, and clean error handling.
-3. Use environment-based configuration for provider selection, Ollama base URL, model names, and timeouts.
-4. Return normalized response objects to keep the rest of the app provider-agnostic.
-5. Do NOT break existing functionality (deterministic rules, BC write guards, policy gates).
-6. Add pipeline observability logging (provider, model, latency, success/failure, prompt purpose).
-7. Create a minimal example endpoint to test Ollama connectivity.
+1. Implement AP Invoice Vendor Advisory Phase 3 (impact review, drift controls, hotspot review).
+2. Build a Unified Governance Dashboard for ELT to monitor system health and drift risk.
+3. Fix UI/UX inconsistencies (e.g., Draft PI Preview amount duplication, Queued docs visibility).
+4. Stop background schedulers from incorrectly escalating non-AP documents.
+5. Provide admin UIs for reviewing overrides, learning suggestions, and daily traces.
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
 **what currently exists?** 
-A mature React + FastAPI + MongoDB Document Hub that uses a 9-stage pipeline (classification, extraction, layout, entity resolution, etc.) and a 10-step background orchestration cycle to evaluate and auto-file documents into Dynamics 365 Business Central. It previously used deterministic gap closers, fuzzy matchers, and a hosted LLM provider.
+A mature React + FastAPI + MongoDB Document Hub at v2.0.0. The system features a massive governed-learning pipeline for Sales Orders and AP Invoices, a Unified Governance Dashboard, advanced LLM abstraction (Emergent/Ollama), and a complex background orchestration engine. It successfully handles document intake, classification, extraction, validation, and auto-posting to Business Central.
 
 **Last working item**: 
-    - Last item agent was working: Gathering context from  and  to start building the LLM Provider Abstraction layer (Ollama integration).
-    - Status: IN PROGRESS
-    - Agent Testing Done: N
-    - Which testing method agent to use? backend manual testing by curl/python -c
+    - Last item agent was working: Fixing a bug in  where the background PO retry scheduler was incorrectly parking and escalating already-cleared Shipping Documents (e.g., BOLs) because it didn't filter out non-AP document types. The agent added strict type/status guards and a startup cleanup script to automatically repair affected historical documents.
+    - Status: USER VERIFICATION PENDING
+    - Agent Testing Done: Y
+    - Which testing method agent to use? manual testing by curl/ bash logs
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:  
-  Issue 1: Implement Ollama Provider Abstraction Layer (P0)
-     - Attempted fixes: The agent just read the directory structure and environment variables. No code has been written for this specific requirement yet.
-     - Next debug checklist: 
-        1. Create , , and (if needed) a wrapper for the existing hosted provider.
-        2. Create  to handle routing between Ollama and the existing hosted provider.
-        3. Update backend  variables (, , , etc.).
-        4. Add the minimal test endpoint in an appropriate router.
-     - Why fix this issue and what will be achieved with the fix? Allows the application to switch between a local, private LLM (Ollama) and cloud providers seamlessly without breaking the existing pipeline, enabling local inference and future LLM-based extraction.
-     - Status: IN PROGRESS
-     - Is recurring issue? N
-     - Should Test frontend/backend/both after fix? backend
-     - Blocked on other issue: none
+  None (All user-reported bugs in the current session were successfully resolved. Awaiting user verification on the final fix.)
 
 **In progress Task List**: 
   None
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - P1: Build Rep Overrides management UI (Admin screen to map customers to reps without using DB scripts).
     - P1: Teams Adaptive Card integration (webhook handler for Approve -> BC Sales Order).
     
     Future Tasks:
     - P2: Evergreen multi-PO container allocation spreadsheet integration.
     - P2: BOL / Tracking No field storage in BC.
     - P2: Low-volume vendor review routing (vendors with <5 docs skip auto-file).
-    - P2: Activate correction replay engine.
-    - P2: Email sender → vendor mapping.
-    - P3: Continue  extraction (refactoring - currently over 8,200 lines).
+    - P3: Continue  extraction (refactoring - currently over 8,500 lines).
 
 **Completed work in this session**
-- Implemented GAP CLOSER 8 (PO learning) and GAP CLOSER 9 (Vendor auto-resolution) to address 45 blocking validation gaps (DONE).
-- Expanded  orchestration to 10 steps, adding , , and  (DONE).
-- Fixed  duplicate key error in vendor aliases by properly utilizing UUIDs (DONE).
-- Fixed vendor match gaps by expanding  conditions to include  (DONE).
-- Resolved Escalation Death Spiral by skipping escalation recording during backfills and demoting  from a blocking critical warning to an advisory warning (DONE).
-- Corrected the  calculation to properly reflect auto-filed documents (DONE).
+- Built AP Invoice Advisory Phase 3 (Suggestion apply service, impact review, profile drift, and hotspot review services) (DONE)
+- Built Unified Governance Dashboard (Backend router + Frontend page) (DONE)
+- Fixed Draft PI Preview identical amounts bug (Corrected template value distribution logic in ) (DONE)
+- Updated application version to v2.0.0 and updated changelog (DONE)
+- Fixed Inbox UI hidden docs issue by adding a Ready to Post tab and making the Queued stat clickable (DONE)
+- Fixed PO Retry Scheduler bug escalating non-AP documents (Shipping Documents/BOLs) and added a startup cleanup to heal existing data (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-  - Process-Level Gaps (Advisory): Some shipping documents (e.g., from CARGOMO and ROTONDO) legitimately lack POs or vendor names that the current extraction regex can parse. User noted these will eventually be solved by the LLM extraction phase.
+   - Issue 1:  is bloated (8,500+ lines).
+   - Debug checklist: Gradually break out routing, scheduling, and validation functions into dedicated modules.
+   - Why to solve this issue and what will be achieved with this? Maintainability and separation of concerns.
+   - Should Test frontend/backend/both after fix: backend
+   - Is recurring issue? Y
 
 **Known issue recurrence from previous fork**
   - Issue recurrence in previous fork: Deployment Context Ignored (Docker caching preventing user from seeing changes).
-  - Recurrence count: 6+
-  - Status: RESOLVED (But needs constant enforcement)
-  Note: Application runs via Docker on a remote Azure VM. The user MUST be instructed to click **Save to Github** in the chat, then run  on their VM.
+  - Recurrence count: 8+
+  - Status: RESOLVED (But needs constant enforcement. ALWAYS remind user to run ).
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
-- **LLM Abstraction Layer**: A new provider pattern to dynamically route requests to either Ollama or an existing cloud provider, normalizing JSON inputs and outputs.
-- **Pipeline Observability**: Requires logging of provider used, model used, latency, success/failure, and prompt purpose.
-- **Run Full Cycle**: Orchestrates 10 background intelligence engines.
+- **Governed Learning Loop**: AI recommends profile changes based on feedback -> human approves -> profile mutates (No silent mutation).
+- **Background Orchestration**: Handled via  async loops (e.g., , ).
+- **Template Value Injection**: Distributes extracted totals proportionally across line items based on learned .
 
 **key DB schema**
-  - : Tracks document states, readiness, and .
-  - : Matches  to . Now properly generates a UUID for .
+  - : Core document collection containing , , and  flags.
+  - : Learned behavioral profiles for customers.
 
 **changes in tech stack**
-  - Adding **Ollama** (Local LLM Provider) abstraction to the FastAPI backend.
+  - No new tech stack added, but application version bumped to v2.0.0 to reflect massive architectural additions.
 
 **All files of reference** 
--  (Updated to handle PO/Vendor learning)
--  (Updated strictness signals and warnings)
--  (Fixed recalculation logic)
--  (Updated run-full-cycle)
--  (Updated cleanup routes and auto-file rate calculation)
--  (Created unit tests)
+-  (Fixed Draft PI proportional amount splitting bug)
+-  (Updated to v2.0.0)
+-  (Added Ready to Post tab)
+-  (Fixed PO Retry scheduler, added startup cleanup)
+-  (New endpoint for dashboard)
+-  (New dashboard UI)
 
 **Areas that need refactoring**: 
--  remains extremely large (over 8,200 lines). Needs orchestration logic broken out.
+-  remains critically bloated and handles too many background loops and routing rules directly.
 
 **key api endpoints**
--  
-- *(Upcoming)* Minimal endpoint for testing Ollama connectivity
+- 
+- 
 
 **Critical Info for New Agent** 
-- The user's most recent request completely pivoted from fixing validation gaps to **building an LLM provider abstraction layer**. You MUST build this layer following the strict requirements in the original problem statement ( modularity, environment variables, observability logging, normalized outputs, and preserving existing deterministic logic).
-- Make sure to implement proper timeout and retry handling within the .
+- The system is heavily reliant on deriving complex statuses for documents. If the user posts a screenshot showing conflicting statuses (e.g., Ready to Post vs Manual Review), it's almost always a background scheduler ignoring a document's core classification or completion state.
+- Always trace document state issues through the frontend () -> API () -> DB flags (e.g., ).
+- Remind the user to deploy via docker after making backend/frontend code changes, as they are running this on a live external sandbox VM.
 
 **documents and test reports created in this job** 
 - 
 - 
-- 
 
 **Last 10 User Messages and any pending HUMAN messages** 
-- **User**: fix it all -> COMPLETED (Fixed all 267 stuck docs, resolved duplicate key error, fixed escalation death spiral)
-- **User**: Uploaded Monitor screenshot showing gaps. -> COMPLETED
-- **User**: Uploaded Monitor screenshot showing auto-file rate dropped. -> COMPLETED
-- **User**: Uploaded Monitor screenshot showing health. -> COMPLETED
-- **User**: how difficult would it be to convert this to a true LLM -> COMPLETED
-- **User**: We are extending an existing production-style application called GPI Hub... Design and implement a clean Ollama provider layer for the FastAPI backend...  -> IN PROGRESS
+1. **User**: yes! (Approves building the Governance Dashboard) -> COMPLETED
+2. **User**: Provides Scope/Audience details for the Dashboard -> COMPLETED
+3. **User**: Uploads image of Draft PI Preview with what is this???? -> COMPLETED (Fixed duplicated line amounts)
+4. **User**: the identical amounts is what I saw -> COMPLETED
+5. **User**: Provides system monitor copy BTW, we havew NOTR been iteratring versions!!! -> COMPLETED (Updated to v2.0.0)
+6. **User**: Uploads image of Inbox where are these 230 queued files???? -> COMPLETED (Added Ready to Post tab)
+7. **User**: why are these in this status??? -> COMPLETED (Agent explained they are blocked by Auto-Post confidence gates)
+8. **User**: Uploads image of lowered confidence gates kicking in -> COMPLETED (Agent reviewed successful auto-posting)
+9. **User**: Uploads image of Shipping Doc Detail again with conflicting statuses... fix it -> COMPLETED (Agent fixed  PO retry loop and added cleanup).
+10. *(No pending human messages. Waiting for user to verify the  shipping doc fix.)*
 
 **Project Health Check:**
-- Broken: None. The validation gap loop has been stabilized.
+- Broken: None. 
 - Mocked: .
 
 **3rd Party Integrations** 
   • Dynamics 365 BC — requires User API Key
   • Hosted LLM — uses Emergent LLM Key
   • MS Graph (Email/SharePoint) — requires User API Key
-  • **Ollama (New)** — requires local URL configuration via 
+  • Ollama — Local LLM Provider configured via env
 
 **Testing status**
-  - Testing agent used after significant changes: YES ( was used successfully)
+  - Testing agent used after significant changes: YES ( was used successfully for Governance endpoints)
   - Troubleshoot agent used after agent stuck in loop: NO
   - Test files created: 
   - Known regressions: None
 
 **Credentials to test flow:**
-- Check  (likely /).
+- Refer to  (admin/admin).
 
 **What agent forgot to execute**
-- The agent successfully analyzed the initial files but had not yet written any code for the Ollama Provider Abstraction Layer. You should immediately start implementing , , and .
+- The agent addressed all immediate user-reported issues and requests. The upcoming Teams Adaptive Card integration (P1) is the next logical step from the backlog once the user verifies the current fix.
 
 **Debugging checklist for current issue**
-    Issue: Implement Ollama Provider Abstraction Layer
+    Issue: Wait for User Verification on  Shipping Doc fix
     
-    Backend files to check/create:
-    - 
-    - Create  (Define Abstract Base Class with required async methods).
-    - Create  (Implement Ollama calls with timeouts, retries, and normalized JSON responses).
-    - Create  (Route to correct provider based on  configuration).
-    - Add test API endpoint (e.g. in  or new file) to test connectivity.
-    - Update  to include variables: , , , .</analysis>
+    Backend files to check:
+    -  (Check  and  if user says issue persists)
+    
+    Action: If user says it is fixed, ask if they want to proceed with the P1 Teams Adaptive Card integration task.</analysis>

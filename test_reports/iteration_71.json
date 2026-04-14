@@ -69,7 +69,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://local-inference-hub.preview.emergentagent.com"
+    "api_url": "https://ap-phase3.preview.emergentagent.com"
   },
   "seed_data_used": "Used existing Hormel Foods workspace (customer_id: 366bfcce-4d68-4daf-b9f4-cb05a35de8c8). Items with supply coverage: TEST-ITEM-WARN (coverage=-5000, at_risk), SPAM-LITE (coverage=-799, at_risk), TEST-WARNONLY-732C83 (coverage=10, covered), TEST-COMMIT-7CC683 (coverage=75, covered), SPAM-12OZ (coverage=700, covered). Item without coverage: IMPORT-ITEM-B (committed=0, supply_coverage=null).",
   "retest_needed": false,

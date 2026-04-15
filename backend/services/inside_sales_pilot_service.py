@@ -544,16 +544,43 @@ async def _extract_sales_fields(
     line_items = nf.get("line_items") or doc.get("line_items") or []
     combined_text = f"{email_subject} {email_body} {filename}"
 
-    # ── Customer: use main pipeline's resolution first ──
-    customer_name = (
-        doc.get("vendor_canonical")  # Main pipeline's resolved vendor/customer
-        or ef.get("customer") or ef.get("customer_name")
-        or nf.get("customer")
-    )
+    # ── Customer: resolve the BUYER (who sent the order), not the ship-to ──
+    # The main pipeline's "vendor_canonical" is the doc sender — for Inside Sales,
+    # this IS the customer (the entity ordering from Gamer). However, sometimes
+    # the main pipeline incorrectly resolves "Gamer" as the vendor because Gamer
+    # appears in the Ship-To address. In that case, fall back to email sender-
+    # derived customer or extracted fields.
+    raw_vendor = doc.get("vendor_canonical") or ""
+    is_gamer_resolved = "gamer" in raw_vendor.lower()
+
+    # Derive customer from email sender domain (e.g., orders@giovannis.com → Giovanni's)
+    sender_domain = ""
+    if sender and "@" in sender:
+        sender_domain = sender.split("@")[1].split(".")[0]  # e.g., "giovannis"
+
+    if is_gamer_resolved:
+        # Gamer is the seller, not the customer. Use sender or extracted fields.
+        customer_name = (
+            ef.get("customer") or ef.get("customer_name") or ef.get("bill_to")
+            or ef.get("vendor_name")  # On inbound POs, AI sometimes puts buyer in vendor_name
+            or nf.get("customer")
+            or (sender_domain.replace("-", " ").replace("_", " ").title() if sender_domain and sender_domain.lower() not in ("gamerpackaging", "gamer", "gmail", "outlook", "hotmail", "yahoo") else None)
+        )
+    else:
+        customer_name = (
+            raw_vendor  # Main pipeline's resolved entity (correct when not Gamer)
+            or ef.get("customer") or ef.get("customer_name")
+            or nf.get("customer")
+        )
+
     customer_no = (
         doc.get("matched_customer_no") or doc.get("customer_no")
         or nf.get("customer_no")
     )
+    # If customer_no resolved to a Gamer number but we know it's wrong, clear it
+    if customer_no and customer_no.upper() in ("GAMER", "GAMERPA", "GAMER1"):
+        customer_no = None
+
     # Flag if Gamer is the "customer" — means this is inbound, not a sales order
     is_gamer_customer = "gamer" in (customer_name or "").lower()
 
@@ -576,10 +603,13 @@ async def _extract_sales_fields(
     # ── Ship-to ──
     ship_to = ef.get("ship_to") or ef.get("ship_to_address") or nf.get("ship_to")
 
-    # ── Amount: use main pipeline's extracted amount ──
+    # ── Amount: main pipeline stores as "amount_float" (top-level), NOT "total_amount" ──
     amount = (
-        doc.get("total_amount")  # Main pipeline sets this
-        or nf.get("amount_float") or ef.get("total_amount")
+        doc.get("amount_float")  # Main pipeline's top-level amount field
+        or doc.get("total_amount")  # Fallback if set by SO-specific paths
+        or nf.get("amount_float") or nf.get("amount")
+        or ef.get("total_amount") or ef.get("amount") or ef.get("grand_total")
+        or ef.get("invoice_total") or ef.get("net_amount")
         or ef.get("amount_raw")
     )
     # Try to parse if it's a string

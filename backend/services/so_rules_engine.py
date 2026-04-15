@@ -210,20 +210,40 @@ def _build_order_context(
 
     Priority: main pipeline fields > extracted_fields > normalized_fields > pilot extraction.
     The main pipeline has 2-3 months of learned intelligence — always prefer it.
+
+    Special handling:
+    - If vendor_canonical resolves to "Gamer", skip it (Gamer is the seller, not the customer)
+    - For amount, the main pipeline stores as "amount_float", not "total_amount"
     """
 
-    # Customer: main pipeline's vendor resolution first
-    customer = (
-        doc.get("vendor_canonical")  # Main pipeline (learned)
-        or ef.get("customer") or ef.get("customer_name")
-        or nf.get("customer")
-        or ext.get("customer_name")
-    )
+    # Customer: main pipeline's vendor resolution first, but skip if Gamer
+    raw_vendor = doc.get("vendor_canonical") or ""
+    is_gamer_vendor = "gamer" in raw_vendor.lower()
+
+    if is_gamer_vendor:
+        # Gamer resolved as vendor — wrong for sales context. Use extracted fields.
+        customer = (
+            ef.get("customer") or ef.get("customer_name") or ef.get("bill_to")
+            or ef.get("vendor_name")
+            or nf.get("customer")
+            or ext.get("customer_name")
+        )
+    else:
+        customer = (
+            raw_vendor  # Main pipeline (learned)
+            or ef.get("customer") or ef.get("customer_name")
+            or nf.get("customer")
+            or ext.get("customer_name")
+        )
+
     customer_no = (
         doc.get("matched_customer_no") or doc.get("customer_no")  # Main pipeline
         or nf.get("customer_no")
         or (bc_val.get("customer_match") or {}).get("bc_customer_no")
     )
+    # Clear Gamer customer_no — it's the seller, not the customer
+    if customer_no and customer_no.upper() in ("GAMER", "GAMERPA", "GAMER1"):
+        customer_no = None
 
     # PO: main pipeline's resolution first
     po_number = (
@@ -239,10 +259,12 @@ def _build_order_context(
         or ext.get("order_number")
     )
 
-    # Amount: main pipeline
+    # Amount: main pipeline stores as "amount_float" (top-level), not "total_amount"
     amount = (
-        doc.get("total_amount")  # Main pipeline
-        or nf.get("amount_float") or ef.get("total_amount")
+        doc.get("amount_float")  # Main pipeline's top-level amount
+        or doc.get("total_amount")  # Fallback
+        or nf.get("amount_float") or nf.get("amount")
+        or ef.get("total_amount") or ef.get("amount") or ef.get("grand_total")
         or ext.get("total_amount")
     )
 
@@ -412,8 +434,11 @@ def _check_customer_po(ctx, blocking, present, missing, rules):
         file_name = (ctx.get("file_name") or "").lower()
         is_vendor_confirmation = any(ind in file_name for ind in [
             "confirmation", "order ack", "ord_ack",
+            "_ack.", "_ack_", "acknowledg", "proforma",
         ])
-        if is_inbound or is_vendor_confirmation:
+        doc_type = ctx.get("doc_type", "")
+        is_vendor_type = doc_type in ("Vendor_Document", "Purchase_Order")
+        if is_inbound or is_vendor_confirmation or is_vendor_type:
             rules.append("SO-001: Customer PO not extracted — but this appears to be an inbound vendor document (PO implicit)")
         else:
             blocking.append("SO-001: Customer PO missing — required control absent, Non-Compliant unless exception evidence exists")
@@ -466,11 +491,14 @@ def _check_cost_rules(ctx, blocking, present, missing, rules):
     file_name = (ctx.get("file_name") or "").lower()
     is_vendor_doc = any(ind in file_name for ind in [
         "confirmation", "order ack", "ord_ack", "vendor", "supplier",
+        "_ack.", "_ack_", "acknowledg", "proforma",
     ])
+    doc_type = ctx.get("doc_type", "")
+    is_vendor_type = doc_type in ("Vendor_Document", "Purchase_Order")
     # If the customer resolved as "GAMER" — this is a vendor sending TO us, not our SO
     is_inbound = (ctx.get("customer") or "").lower().startswith("gamer")
 
-    if is_vendor_doc or is_inbound:
+    if is_vendor_doc or is_inbound or is_vendor_type:
         rules.append("SO-005: Skipped — inbound vendor document (cost lives on BC PO, not vendor confirmation)")
         return
 
@@ -686,12 +714,17 @@ def _determine_next_action(stage, blocking, missing, ctx) -> Tuple[str, str]:
 # ─────────────────────────────────────────────────────────────
 
 async def evaluate_all_pilot_sales_orders() -> Dict[str, Any]:
-    """Run the rules engine on all pilot sales order documents."""
+    """Run the rules engine on all pilot sales order documents.
+
+    Skips docs that have been reclassified (e.g., Vendor_Document) since
+    they are not genuine customer purchase orders.
+    """
     db = get_db()
     docs = await db.hub_documents.find(
         {
             "inside_sales_pilot": True,
             "doc_type": {"$in": ["SALES_INVOICE", "Sales_Order", "Order_Confirmation"]},
+            "reclassified_from": {"$exists": False},  # Skip reclassified docs
         },
         {"_id": 0, "id": 1},
     ).to_list(500)

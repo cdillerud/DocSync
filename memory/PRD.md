@@ -604,3 +604,19 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - **Bug 4 (Loop):** Reprocess loop — docs already decided as ReadyForPost were re-evaluated every full cycle (20+ times). Fixed: skip re-evaluation if `auto_post_attempted=true` and status already `ReadyForPost`.
 - **Frontend:** Top badge now distinguishes "Ready to Post" (workflow=ready + validation=pass) from "Validated" (validation=pass), "Warnings", "Failed", and "Posted".
 - Hierarchy enforced: Failed > Warnings > Validated > Ready to Post > Posted
+
+
+## Bug Fix: Vendor Confirmations Falsely Triggering SO Rules (2026-04-15)
+- **Root cause**: `pilot_smart_reclassifier.py` had no rules for order confirmations, order acknowledgments, or proforma invoices. Docs from vendors like Herdez, Aptar, O-I with filenames like "Order Confirmation", "OrderAck_W117579", "_ack.pdf" were classified as SALES_INVOICE and fed into the SO Rules Engine, triggering false SO-005 (missing cost) failures.
+- **Fix 1 (Reclassifier)**: Added 6 new rules to Section 3 of `_RULES`: `order_confirmation`, `order_acknowledgment`, `vendor_confirmation`, `acknowledgment_file`, `ack_suffix`, `proforma_invoice`. All reclassify to `Vendor_Document`. Certificate negative lookahead prevents false positives. Already-reclassified docs are now skipped (checks `reclassified_from`).
+- **Fix 2 (SO Rules Engine)**: `evaluate_all_pilot_sales_orders()` now excludes docs with `reclassified_from` in its query. `_check_cost_rules()` and `_check_customer_po()` expanded with additional vendor indicators (`_ack.`, `_ack_`, `acknowledg`, `proforma`) and `doc_type` check for `Vendor_Document`/`Purchase_Order`.
+- **Tests**: 17/17 passing (`tests/test_p0_fixes.py`)
+
+## Bug Fix: Incorrect Customer Extraction on Inbound Customer POs (2026-04-15)
+- **Root cause**: `inside_sales_pilot_service.py` and `so_rules_engine.py` both used `vendor_canonical` as the primary customer source. When a customer (e.g., Giovanni) sends a PO to Gamer, the main pipeline sometimes resolves "Gamer" as `vendor_canonical` because Gamer appears in the Ship-To address on the PO.
+- **Fix (Pilot Service)**: When `vendor_canonical` resolves to "Gamer", skip it and fall back to: extracted_fields customer/bill_to, then email sender domain-derived name (e.g., `orders@giovannis.com` → "Giovannis"). Gamer-related customer_no values (GAMER, GAMERPA, GAMER1) are cleared.
+- **Fix (SO Rules Engine)**: Same Gamer-aware resolution in `_build_order_context()`. When `vendor_canonical` is Gamer, falls back to extracted fields and pilot extraction.
+
+## Bug Fix: Total Amount Field Hit Rate at 0% (2026-04-15)
+- **Root cause**: `inside_sales_pilot_service.py` checked `doc.get("total_amount")` first, but the main pipeline stores amount as `amount_float` at the top level (line 3229 of `server.py`). The field `total_amount` was never set by the main pipeline for most docs.
+- **Fix**: Changed primary lookup to `doc.get("amount_float")` in both `inside_sales_pilot_service.py` and `so_rules_engine.py`. Extended fallback chain to also check `ef.get("amount")`, `ef.get("grand_total")`, `ef.get("invoice_total")`, `ef.get("net_amount")`.

@@ -38,13 +38,23 @@ _RULES: List[Tuple[str, Any, str, str]] = [
     ("cert_generic", re.compile(r"(?i)\bcertificate\b"), "Certificate", "Certificate document"),
     ("cert_filename", re.compile(r"(?i)certif"), "Certificate", "Certificate (filename match)"),
 
-    # ── 3. Information Sheets / Vendor Docs ──
+    # ── 3. Order Confirmations / Vendor Acknowledgments ──
+    # These are INBOUND vendor documents (vendor confirming THEIR order to Gamer),
+    # NOT customer purchase orders. Must be caught before generic rules.
+    ("order_confirmation", re.compile(r"(?i)\border\s*confirm"), "Vendor_Document", "Order confirmation from vendor — not a customer PO"),
+    ("order_acknowledgment", re.compile(r"(?i)\border\s*ack"), "Vendor_Document", "Order acknowledgment from vendor — not a customer PO"),
+    ("vendor_confirmation", re.compile(r"(?i)\bconfirmation\b(?!.*\bcertif)"), "Vendor_Document", "Vendor confirmation document — not a customer PO"),
+    ("acknowledgment_file", re.compile(r"(?i)\back(?:nowledg(?:e?ment)?)?[_\s\-]"), "Vendor_Document", "Vendor acknowledgment document"),
+    ("ack_suffix", re.compile(r"(?i)_ack\b|_ack\."), "Vendor_Document", "Vendor acknowledgment (filename suffix _ack)"),
+    ("proforma_invoice", re.compile(r"(?i)\bproforma"), "Vendor_Document", "Proforma invoice from vendor"),
+
+    # ── 4. Information Sheets / Vendor Docs ──
     ("info_sheet", re.compile(r"(?i)information\s*sheet|info\s*sheet"), "Vendor_Document", "Vendor information sheet"),
     ("vendor_spec", re.compile(r"(?i)spec\s*sheet|specification"), "Vendor_Document", "Specification sheet"),
     ("terms_doc", re.compile(r"(?i)\bterms\s*of\s*acceptance\b"), "Vendor_Document", "Terms of acceptance document"),
     ("graphics_policy", re.compile(r"(?i)graphics?\s*art\s*policy"), "Vendor_Document", "Graphics/art policy document"),
 
-    # ── 4. Dunnage / Returns ──
+    # ── 5. Dunnage / Returns ──
     ("dunnage_return", re.compile(r"(?i)dunnage.*return"), "BOL", "Dunnage return BOL"),
     ("dunnage_request", re.compile(r"(?i)dunnage.*request"), "BOL", "Dunnage request"),
     ("dunnage_tracking", re.compile(r"(?i)dunnage.*track"), "Shipping_Document", "Dunnage tracking"),
@@ -53,26 +63,26 @@ _RULES: List[Tuple[str, Any, str, str]] = [
     ("bol_explicit", re.compile(r"(?i)\bbol\b|bill\s*of\s*lading"), "BOL", "Bill of Lading"),
     ("rma_bol", re.compile(r"(?i)\brma\b.*\bbol\b"), "BOL", "RMA Bill of Lading"),
 
-    # ── 5. Quotes / RFQs (before reports — "quote" is specific) ──
+    # ── 6. Quotes / RFQs (before reports — "quote" is specific) ──
     ("quote_filename", re.compile(r"(?i)\bquote\b"), "Quote", "Quote document — not a sales order"),
     ("rfq_filename", re.compile(r"(?i)\brfq\b"), "Quote", "RFQ document"),
     ("pricing_doc", re.compile(r"(?i)\bpricing\b.*\.(xlsx|xls|docx|pdf)$"), "Quote", "Pricing document"),
 
-    # ── 6. Reports / Lists ──
+    # ── 7. Reports / Lists ──
     ("open_orders_report", re.compile(r"(?i)open\s*order"), "Report", "Open orders report"),
     ("orders_report_file", re.compile(r"(?i)open_?orders_?report"), "Report", "Open orders report file"),
     ("report_generic", re.compile(r"(?i)\breport\b.*\.(xlsx|xls|csv)$"), "Report", "Report spreadsheet"),
 
-    # ── 7. Forecasts / Consignment ──
+    # ── 8. Forecasts / Consignment ──
     ("forecast", re.compile(r"(?i)\bforecast\b"), "Forecast", "Forecast document"),
     ("consignment_invoice", re.compile(r"(?i)consignment.*invoic"), "AR_Invoice", "Consignment invoicing spreadsheet"),
 
-    # ── 8. Scanned misc ──
+    # ── 9. Scanned misc ──
     ("scan_generic", re.compile(r"(?i)^scan[-_\s]"), "Miscellaneous", "Scanned document — no order indicators"),
     ("lexmark_scan", re.compile(r"(?i)scanned.*lexmark"), "Miscellaneous", "Lexmark scanned document"),
     ("packing_slip", re.compile(r"(?i)packing\s*slip.*sample"), "Miscellaneous", "Sample packing slip — not an order"),
 
-    # ── 9. Internal Communications ──
+    # ── 10. Internal Communications ──
     ("csr_realignment", re.compile(r"(?i)CSR.*realign|communication.*realign"), "Miscellaneous", "Internal CSR communication"),
     ("access_issues", re.compile(r"(?i)access\s*issue|password\s*reset|login\s*issue"), "Miscellaneous", "IT access communication"),
 ]
@@ -122,7 +132,7 @@ async def smart_reclassify_pilot_docs(
         {
             "_id": 0, "id": 1, "file_name": 1, "doc_type": 1,
             "email_subject": 1, "email_sender": 1,
-            "sales_pilot_extraction": 1,
+            "sales_pilot_extraction": 1, "reclassified_from": 1,
         },
     ).to_list(500)
 
@@ -144,6 +154,11 @@ async def smart_reclassify_pilot_docs(
         ext = doc.get("sales_pilot_extraction") or {}
         quality_pct = ext.get("extraction_quality_pct", 0)
         customer_name = ext.get("customer_name") or ""
+
+        # ── Skip already-reclassified docs ──
+        if doc.get("reclassified_from"):
+            results["kept_as_sales"] += 1
+            continue
 
         # ── HARD GATE: Gamer is never the customer on a Sales Order ──
         if "gamer" in customer_name.lower() and doc.get("doc_type") in (

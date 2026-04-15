@@ -173,35 +173,52 @@ async def _check_customer(
 
     # Try by name in the cache
     if customer_name:
-        # Escape regex special characters in customer name
-        safe_name = re.escape(customer_name.strip())
-        # Search customer records first, then fall back to sales_order records
-        for entity_types in [["customer"], ["sales_order", "customer", "invoice"]]:
-            try:
-                results = await db.bc_reference_cache.find(
-                    {
-                        "bc_entity_type": {"$in": entity_types},
-                        "$or": [
-                            {"bc_customer_name": {"$regex": safe_name, "$options": "i"}},
-                            {"displayName": {"$regex": safe_name, "$options": "i"}},
-                            {"bc_customer_no": {"$regex": safe_name, "$options": "i"}},
-                        ],
-                    },
-                    {"_id": 0, "bc_customer_no": 1, "bc_customer_name": 1, "displayName": 1, "bc_entity_type": 1},
-                ).limit(5).to_list(5)
-            except Exception as regex_err:
-                logger.warning("[BCProdValidation] Regex search failed for '%s': %s", customer_name[:30], regex_err)
-                results = []
+        # Try multiple search strategies:
+        # 1. Exact escaped name
+        # 2. Simplified name (strip punctuation, collapse whitespace)
+        # 3. First significant word(s)
+        name_variants = set()
+        name_variants.add(re.escape(customer_name.strip()))
+        # Strip periods, commas, parentheses and collapse whitespace
+        simplified = re.sub(r'[.,;:()\[\]\'\"]+', ' ', customer_name)
+        simplified = re.sub(r'\s+', ' ', simplified).strip()
+        if simplified:
+            name_variants.add(re.escape(simplified))
+        # First 2 words (e.g., "Herdez SA" from "HERDEZ S.A. DE C.V.")
+        words = simplified.split()
+        if len(words) >= 2:
+            name_variants.add(re.escape(" ".join(words[:2])))
+        if len(words) >= 1 and len(words[0]) >= 4:
+            name_variants.add(re.escape(words[0]))
 
-            if results:
-                r = results[0]
-                return {
-                    "found": True,
-                    "bc_customer_no": r.get("bc_customer_no"),
-                    "bc_customer_name": r.get("bc_customer_name") or r.get("displayName"),
-                    "match_method": f"name_search_{r.get('bc_entity_type', 'unknown')}",
-                    "candidates": len(results),
-                }
+        for safe_name in name_variants:
+            # Search customer records first, then fall back to sales_order records
+            for entity_types in [["customer"], ["sales_order", "customer", "invoice"]]:
+                try:
+                    results = await db.bc_reference_cache.find(
+                        {
+                            "bc_entity_type": {"$in": entity_types},
+                            "$or": [
+                                {"bc_customer_name": {"$regex": safe_name, "$options": "i"}},
+                                {"displayName": {"$regex": safe_name, "$options": "i"}},
+                                {"bc_customer_no": {"$regex": safe_name, "$options": "i"}},
+                            ],
+                        },
+                        {"_id": 0, "bc_customer_no": 1, "bc_customer_name": 1, "displayName": 1, "bc_entity_type": 1},
+                    ).limit(5).to_list(5)
+                except Exception as regex_err:
+                    logger.warning("[BCProdValidation] Regex search failed for '%s': %s", customer_name[:30], regex_err)
+                    results = []
+
+                if results:
+                    r = results[0]
+                    return {
+                        "found": True,
+                        "bc_customer_no": r.get("bc_customer_no"),
+                        "bc_customer_name": r.get("bc_customer_name") or r.get("displayName"),
+                        "match_method": f"name_search_{r.get('bc_entity_type', 'unknown')}",
+                        "candidates": len(results),
+                    }
 
     return {
         "found": False,

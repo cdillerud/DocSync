@@ -174,20 +174,24 @@ async def _check_customer(
     # Try by name in the cache
     if customer_name:
         # Escape regex special characters in customer name
-        safe_name = re.escape(customer_name)
+        safe_name = re.escape(customer_name.strip())
         # Search customer records first, then fall back to sales_order records
         for entity_types in [["customer"], ["sales_order", "customer", "invoice"]]:
-            results = await db.bc_reference_cache.find(
-                {
-                    "bc_entity_type": {"$in": entity_types},
-                    "$or": [
-                        {"bc_customer_name": {"$regex": safe_name, "$options": "i"}},
-                        {"displayName": {"$regex": safe_name, "$options": "i"}},
-                        {"bc_customer_no": {"$regex": safe_name, "$options": "i"}},
-                    ],
-                },
-                {"_id": 0, "bc_customer_no": 1, "bc_customer_name": 1, "displayName": 1, "bc_entity_type": 1},
-            ).limit(5).to_list(5)
+            try:
+                results = await db.bc_reference_cache.find(
+                    {
+                        "bc_entity_type": {"$in": entity_types},
+                        "$or": [
+                            {"bc_customer_name": {"$regex": safe_name, "$options": "i"}},
+                            {"displayName": {"$regex": safe_name, "$options": "i"}},
+                            {"bc_customer_no": {"$regex": safe_name, "$options": "i"}},
+                        ],
+                    },
+                    {"_id": 0, "bc_customer_no": 1, "bc_customer_name": 1, "displayName": 1, "bc_entity_type": 1},
+                ).limit(5).to_list(5)
+            except Exception as regex_err:
+                logger.warning("[BCProdValidation] Regex search failed for '%s': %s", customer_name[:30], regex_err)
+                results = []
 
             if results:
                 r = results[0]
@@ -215,7 +219,7 @@ async def _check_customer_direct(
     if customer_no:
         conditions.append({"bc_customer_no": customer_no})
     if customer_name:
-        safe_name = re.escape(customer_name)
+        safe_name = re.escape(customer_name.strip())
         conditions.append({"bc_customer_name": {"$regex": safe_name, "$options": "i"}})
         conditions.append({"displayName": {"$regex": safe_name, "$options": "i"}})
     if not conditions:
@@ -227,7 +231,10 @@ async def _check_customer_direct(
         {"bc_entity_type": {"$in": ["customer", "sales_order", "invoice"]}},
     ]:
         query = {**entity_filter, "$or": conditions}
-        result = await db.bc_reference_cache.find_one(query, {"_id": 0})
+        try:
+            result = await db.bc_reference_cache.find_one(query, {"_id": 0})
+        except Exception:
+            continue
         if result:
             return {
                 "found": True,
@@ -344,17 +351,21 @@ async def _check_items(
 
     for ref in all_refs[:20]:  # Cap to avoid excessive queries
         # Search bc_reference_cache for items
-        item_hit = await db.bc_reference_cache.find_one(
-            {
-                "bc_entity_type": "item",
-                "$or": [
-                    {"bc_document_no": ref},
-                    {"displayName": {"$regex": ref[:30], "$options": "i"}},
-                    {"description": {"$regex": ref[:30], "$options": "i"}},
-                ],
-            },
-            {"_id": 0, "bc_document_no": 1, "displayName": 1, "description": 1},
-        )
+        safe_ref = re.escape((ref or "")[:30])
+        try:
+            item_hit = await db.bc_reference_cache.find_one(
+                {
+                    "bc_entity_type": "item",
+                    "$or": [
+                        {"bc_document_no": ref},
+                        {"displayName": {"$regex": safe_ref, "$options": "i"}},
+                        {"description": {"$regex": safe_ref, "$options": "i"}},
+                    ],
+                },
+                {"_id": 0, "bc_document_no": 1, "displayName": 1, "description": 1},
+            )
+        except Exception:
+            item_hit = None
         if item_hit:
             matched.append({
                 "extracted": ref[:50],

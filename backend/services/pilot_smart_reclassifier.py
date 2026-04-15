@@ -22,44 +22,57 @@ logger = logging.getLogger(__name__)
 
 _RULES: List[Tuple[str, Any, str, str]] = [
     # (rule_name, pattern_or_callable, new_doc_type, reason)
+    #
+    # ORDER MATTERS: most specific / noise rules first, broad rules last.
+    # Filename-anchored rules ($) are also checked against filename alone.
 
-    # ── Certificates / Compliance ──
-    ("cert_sqf", re.compile(r"(?i)\bSQF\b"), "Certificate", "SQF certification document"),
-    ("cert_iso", re.compile(r"(?i)\bISO[\s\-_]\d"), "Certificate", "ISO certification document"),
-    ("cert_generic", re.compile(r"(?i)\bcertificate\b"), "Certificate", "Certificate document"),
-    ("cert_filename", re.compile(r"(?i)certif"), "Certificate", "Certificate (filename match)"),
-
-    # ── Information Sheets / Vendor Docs ──
-    ("info_sheet", re.compile(r"(?i)information\s*sheet|info\s*sheet"), "Vendor_Document", "Vendor information sheet"),
-    ("vendor_spec", re.compile(r"(?i)spec\s*sheet|specification"), "Vendor_Document", "Specification sheet"),
-
-    # ── Dunnage / Returns ──
-    ("dunnage_return", re.compile(r"(?i)dunnage.*return"), "BOL", "Dunnage return BOL"),
-    ("dunnage_request", re.compile(r"(?i)dunnage.*request"), "BOL", "Dunnage request"),
-    ("dunnage_tracking", re.compile(r"(?i)dunnage.*track"), "Shipping_Document", "Dunnage tracking"),
-    ("dunnage_generic", re.compile(r"(?i)\bdunnage\b"), "Shipping_Document", "Dunnage-related document"),
-    ("bol_explicit", re.compile(r"(?i)\bbol\b|bill\s*of\s*lading"), "BOL", "Bill of Lading"),
-
-    # ── Reports / Lists ──
-    ("open_orders_report", re.compile(r"(?i)open.*order.*list|order.*report"), "Report", "Open orders report"),
-    ("report_generic", re.compile(r"(?i)\breport\b.*\.(xlsx|xls|csv)$"), "Report", "Report spreadsheet"),
-    ("forecast", re.compile(r"(?i)\bforecast\b"), "Forecast", "Forecast document"),
-    ("consignment_invoice", re.compile(r"(?i)consignment\s*invoic"), "AR_Invoice", "Consignment invoicing spreadsheet"),
-
-    # ── Quotes (not orders) ──
-    ("quote_filename", re.compile(r"(?i)\bquote\b"), "Quote", "Quote document — not a sales order"),
-    ("pricing_doc", re.compile(r"(?i)\bpricing\b.*\.(xlsx|xls|docx|pdf)$"), "Quote", "Pricing document"),
-
-    # ── Logos / Images / Signatures (noise) ──
+    # ── 1. Logos / Images / Signatures (noise — highest priority) ──
     ("logo_file", re.compile(r"(?i)logo.*\.(png|jpg|jpeg|gif|bmp|svg|webp)$"), "Miscellaneous", "Logo image — not a document"),
     ("image_noise", re.compile(r"(?i)^(image|img|photo|pic|banner|icon)[_\s\-]?\d*\.(png|jpg|jpeg|gif|bmp|svg|webp)$"), "Miscellaneous", "Image file — not a document"),
     ("signature_file", re.compile(r"(?i)(signature|sig)[_\s\-]?\d*\.(png|jpg|jpeg|gif)$"), "Miscellaneous", "Email signature image"),
     ("small_jpg", re.compile(r"(?i)^[^/]{0,30}\.(png|jpg|jpeg|gif)$"), "Miscellaneous", "Small image file — likely not a sales document"),
 
-    # ── Scanned misc ──
-    ("scan_generic", re.compile(r"(?i)^scan[-_\s]"), "Miscellaneous", "Scanned document — no order indicators"),
+    # ── 2. Certificates / Compliance ──
+    ("cert_sqf", re.compile(r"(?i)\bSQF\b"), "Certificate", "SQF certification document"),
+    ("cert_iso", re.compile(r"(?i)\bISO[\s\-_]\d"), "Certificate", "ISO certification document"),
+    ("cert_generic", re.compile(r"(?i)\bcertificate\b"), "Certificate", "Certificate document"),
+    ("cert_filename", re.compile(r"(?i)certif"), "Certificate", "Certificate (filename match)"),
 
-    # ── Internal Communications ──
+    # ── 3. Information Sheets / Vendor Docs ──
+    ("info_sheet", re.compile(r"(?i)information\s*sheet|info\s*sheet"), "Vendor_Document", "Vendor information sheet"),
+    ("vendor_spec", re.compile(r"(?i)spec\s*sheet|specification"), "Vendor_Document", "Specification sheet"),
+    ("terms_doc", re.compile(r"(?i)\bterms\s*of\s*acceptance\b"), "Vendor_Document", "Terms of acceptance document"),
+    ("graphics_policy", re.compile(r"(?i)graphics?\s*art\s*policy"), "Vendor_Document", "Graphics/art policy document"),
+
+    # ── 4. Dunnage / Returns ──
+    ("dunnage_return", re.compile(r"(?i)dunnage.*return"), "BOL", "Dunnage return BOL"),
+    ("dunnage_request", re.compile(r"(?i)dunnage.*request"), "BOL", "Dunnage request"),
+    ("dunnage_tracking", re.compile(r"(?i)dunnage.*track"), "Shipping_Document", "Dunnage tracking"),
+    ("dunnage_commercial_inv", re.compile(r"(?i)dunnage.*(?:commercial|invoice)"), "Shipping_Document", "Dunnage commercial invoice"),
+    ("dunnage_generic", re.compile(r"(?i)\bdunnage\b"), "Shipping_Document", "Dunnage-related document"),
+    ("bol_explicit", re.compile(r"(?i)\bbol\b|bill\s*of\s*lading"), "BOL", "Bill of Lading"),
+    ("rma_bol", re.compile(r"(?i)\brma\b.*\bbol\b"), "BOL", "RMA Bill of Lading"),
+
+    # ── 5. Quotes / RFQs (before reports — "quote" is specific) ──
+    ("quote_filename", re.compile(r"(?i)\bquote\b"), "Quote", "Quote document — not a sales order"),
+    ("rfq_filename", re.compile(r"(?i)\brfq\b"), "Quote", "RFQ document"),
+    ("pricing_doc", re.compile(r"(?i)\bpricing\b.*\.(xlsx|xls|docx|pdf)$"), "Quote", "Pricing document"),
+
+    # ── 6. Reports / Lists ──
+    ("open_orders_report", re.compile(r"(?i)open\s*order"), "Report", "Open orders report"),
+    ("orders_report_file", re.compile(r"(?i)open_?orders_?report"), "Report", "Open orders report file"),
+    ("report_generic", re.compile(r"(?i)\breport\b.*\.(xlsx|xls|csv)$"), "Report", "Report spreadsheet"),
+
+    # ── 7. Forecasts / Consignment ──
+    ("forecast", re.compile(r"(?i)\bforecast\b"), "Forecast", "Forecast document"),
+    ("consignment_invoice", re.compile(r"(?i)consignment.*invoic"), "AR_Invoice", "Consignment invoicing spreadsheet"),
+
+    # ── 8. Scanned misc ──
+    ("scan_generic", re.compile(r"(?i)^scan[-_\s]"), "Miscellaneous", "Scanned document — no order indicators"),
+    ("lexmark_scan", re.compile(r"(?i)scanned.*lexmark"), "Miscellaneous", "Lexmark scanned document"),
+    ("packing_slip", re.compile(r"(?i)packing\s*slip.*sample"), "Miscellaneous", "Sample packing slip — not an order"),
+
+    # ── 9. Internal Communications ──
     ("csr_realignment", re.compile(r"(?i)CSR.*realign|communication.*realign"), "Miscellaneous", "Internal CSR communication"),
     ("access_issues", re.compile(r"(?i)access\s*issue|password\s*reset|login\s*issue"), "Miscellaneous", "IT access communication"),
 ]

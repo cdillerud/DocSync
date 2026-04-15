@@ -442,6 +442,17 @@ async def poll_inside_sales_pilot_mailbox(mailbox_address: str) -> Dict[str, Any
                                     run_id, doc_id, val_err,
                                 )
 
+                            # --- Run Spiro CRM match ---
+                            try:
+                                from services.spiro_service import match_document_to_spiro, SPIRO_ENABLED
+                                if SPIRO_ENABLED:
+                                    await match_document_to_spiro(doc_id)
+                            except Exception as spiro_err:
+                                logger.warning(
+                                    "[InsideSalesPilot:%s] Spiro match failed for %s: %s",
+                                    run_id, doc_id, spiro_err,
+                                )
+
                             # --- Track classified type ---
                             doc_rec = await db.hub_documents.find_one(
                                 {"id": doc_id}, {"_id": 0, "doc_type": 1}

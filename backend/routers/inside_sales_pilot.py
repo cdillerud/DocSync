@@ -319,3 +319,66 @@ async def corpus_validation_summary():
     db = get_db()
     from services.bc_prod_validator import get_corpus_validation_summary
     return await get_corpus_validation_summary(db)
+
+
+# ── Spiro CRM Integration Endpoints ─────────────────────────
+
+@router.post("/spiro-match/{doc_id}")
+async def spiro_match_single(doc_id: str):
+    """Match a single document against Spiro CRM (company + quotes)."""
+    from services.spiro_service import match_document_to_spiro
+    return await match_document_to_spiro(doc_id)
+
+
+@router.post("/spiro-match-all")
+async def spiro_match_all():
+    """Run Spiro matching on all unmatched pilot sales documents."""
+    from services.spiro_service import match_all_pilot_documents
+    return await match_all_pilot_documents()
+
+
+@router.get("/spiro-results")
+async def spiro_match_results(
+    mailbox: Optional[str] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """List pilot documents with their Spiro match results."""
+    db = get_db()
+    query = {
+        "inside_sales_pilot": True,
+        "spiro_match": {"$exists": True, "$ne": None},
+    }
+    if mailbox:
+        query["pilot_mailbox"] = mailbox
+
+    total = await db.hub_documents.count_documents(query)
+    docs = (
+        await db.hub_documents.find(
+            query,
+            {
+                "_id": 0,
+                "id": 1,
+                "file_name": 1,
+                "doc_type": 1,
+                "email_sender": 1,
+                "pilot_mailbox": 1,
+                "spiro_match": 1,
+                "sales_pilot_extraction": 1,
+                "created_utc": 1,
+            },
+        )
+        .sort("created_utc", -1)
+        .skip(skip)
+        .limit(limit)
+        .to_list(limit)
+    )
+    return {"total": total, "documents": docs}
+
+
+@router.get("/spiro-search")
+async def spiro_company_search(name: str = Query(..., min_length=2)):
+    """Search Spiro companies by name (for manual lookup)."""
+    from services.spiro_service import search_company
+    results = await search_company(name)
+    return {"results": results, "count": len(results)}

@@ -5,6 +5,7 @@ import InventoryLedgerPage from './InventoryLedgerPage';
 import SalespersonDashboardPage from './SalespersonDashboardPage';
 import MyQueuePage from './MyQueuePage';
 import TriageQueuePage from './TriageQueuePage';
+import InsideSalesPilotPage from './InsideSalesPilotPage';
 import { Badge } from '../components/ui/badge';
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -14,6 +15,7 @@ const TABS = [
   { key: 'triage', label: 'Triage' },
   { key: 'sales', label: 'Sales Orders' },
   { key: 'rep-performance', label: 'Rep Performance' },
+  { key: 'inside-sales-pilot', label: 'Inside Sales Pilot' },
   { key: 'inventory', label: 'Inventory Ledger' },
 ];
 
@@ -62,6 +64,7 @@ export default function SalesInventoryHubPage() {
       {activeTab === 'triage' && <TriageQueuePage />}
       {activeTab === 'sales' && <SalesDashboardPage />}
       {activeTab === 'rep-performance' && <SalespersonDashboardPage />}
+      {activeTab === 'inside-sales-pilot' && <InsideSalesPilotPage />}
       {activeTab === 'inventory' && <InventoryLedgerPage />}
     </div>
   );

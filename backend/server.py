@@ -1887,7 +1887,9 @@ async def on_document_ingested(doc_id: str, source: str = "unknown"):
 
         # Auto-file check: if this doc type + vendor pattern has been filed enough times, auto-clear it
         # SAFETY: Must still pass PO validation checks — never auto-file if PO is missing from BC
-        if new_status == "NeedsReview":
+        # SAFETY: Never auto-file Inside Sales Pilot documents
+        _is_pilot_for_filing = doc.get("inside_sales_pilot") or doc.get("source") == "inside_sales_pilot"
+        if new_status == "NeedsReview" and not _is_pilot_for_filing:
             try:
                 doc_type_for_filing = doc.get("document_type") or doc.get("suggested_job_type") or "Unknown"
                 vendor_for_filing = (doc.get("vendor_canonical") or doc.get("normalized_fields", {}).get("vendor") or "").lower()
@@ -2227,6 +2229,24 @@ async def _update_standard_workflow_status(
     
     # =============== SALES WORKFLOW ===============
     elif doc_type in [DocType.SALES_INVOICE.value, "SALES_ORDER", "Sales_Order", "SalesOrder", "SalesInvoice"]:
+        # SAFETY: Inside Sales Pilot documents stop here — observation only
+        _is_pilot_doc = doc.get("inside_sales_pilot") or doc.get("source") == "inside_sales_pilot"
+        if _is_pilot_doc:
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    "workflow_status": "pilot_review",
+                    "status": "PilotReview",
+                    "square9_stage": "pilot_observation",
+                    "bc_create_ready": False,
+                    "auto_create_so_blocked": True,
+                    "pilot_note": "Ingest-only pilot — no BC writes, no workflow progression",
+                    "workflow_status_updated_utc": now,
+                }}
+            )
+            logger.info("[Sales Workflow] Doc %s: PILOT doc — parked at pilot_review (no BC writes)", doc_id)
+            return
+
         # Step 2: Check Customer
         customer = normalized_fields.get("customer") or normalized_fields.get("customer_raw")
         if not customer:

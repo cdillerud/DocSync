@@ -158,19 +158,21 @@ async def review_extractions(
 async def re_extract_all_pilot_docs():
     """
     Re-run structured extraction + BC validation on ALL pilot documents
-    using the latest improved logic.  Use after upgrading extraction code.
+    using the latest improved logic.  Also fixes workflow status to
+    pilot_review for any pilot docs that were incorrectly exported.
     """
     db = get_db()
     docs = await db.hub_documents.find(
         {"inside_sales_pilot": True},
         {"_id": 0, "id": 1, "file_name": 1, "email_sender": 1,
-         "email_subject": 1, "pilot_mailbox": 1},
+         "email_subject": 1, "pilot_mailbox": 1, "workflow_status": 1},
     ).to_list(500)
 
     from services.inside_sales_pilot_service import _extract_sales_fields
     from services.bc_prod_validator import validate_document_against_bc
 
-    results = {"total": len(docs), "re_extracted": 0, "re_validated": 0, "errors": []}
+    results = {"total": len(docs), "re_extracted": 0, "re_validated": 0,
+               "status_fixed": 0, "errors": []}
     for doc in docs:
         try:
             body = ""
@@ -180,9 +182,24 @@ async def re_extract_all_pilot_docs():
             )
             if ext:
                 results["re_extracted"] += 1
-            # Also re-validate against BC
+            # Re-validate against BC
             await validate_document_against_bc(doc["id"])
             results["re_validated"] += 1
+            # Fix workflow status — pilot docs should never be "exported" or "completed"
+            ws = doc.get("workflow_status", "")
+            if ws in ("exported", "completed", "validated", "posted", "ready_to_post"):
+                await db.hub_documents.update_one(
+                    {"id": doc["id"]},
+                    {"$set": {
+                        "workflow_status": "pilot_review",
+                        "status": "PilotReview",
+                        "square9_stage": "pilot_observation",
+                        "bc_create_ready": False,
+                        "auto_create_so_blocked": True,
+                        "pilot_note": "Ingest-only pilot — no BC writes, no workflow progression",
+                    }},
+                )
+                results["status_fixed"] += 1
         except Exception as e:
             results["errors"].append(f"{doc['id'][:8]}: {e}")
     return results

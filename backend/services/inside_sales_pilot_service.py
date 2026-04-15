@@ -524,8 +524,16 @@ async def _extract_sales_fields(
     email_subject: str, email_body: str, sender: str,
 ) -> Optional[Dict[str, Any]]:
     """
-    Extract structured sales fields from the document's already-extracted data
-    plus email context.  Persists as `sales_pilot_extraction` on the document.
+    Build a sales pilot summary from the MAIN PIPELINE's already-extracted data.
+
+    This is NOT a duplicate extraction — it reads from the fields that
+    _internal_intake_document already populated (extracted_fields,
+    normalized_fields, vendor_canonical, matched_customer_no, line_items,
+    po_resolution_number, etc.) and adds a quality score + pilot context.
+
+    The main pipeline has 2-3 months of learned classification,
+    vendor matching, customer resolution, and PO resolution.
+    We leverage all of it.
     """
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
@@ -533,98 +541,117 @@ async def _extract_sales_fields(
 
     ef = doc.get("extracted_fields") or {}
     nf = doc.get("normalized_fields") or {}
+    line_items = nf.get("line_items") or doc.get("line_items") or []
     combined_text = f"{email_subject} {email_body} {filename}"
 
-    # ── Smart PO extraction ──
-    po_from_ai = (
-        ef.get("po_number") or ef.get("purchase_order")
+    # ── Customer: use main pipeline's resolution first ──
+    customer_name = (
+        doc.get("vendor_canonical")  # Main pipeline's resolved vendor/customer
+        or ef.get("customer") or ef.get("customer_name")
+        or nf.get("customer")
+    )
+    customer_no = (
+        doc.get("matched_customer_no") or doc.get("customer_no")
+        or nf.get("customer_no")
+    )
+    # Flag if Gamer is the "customer" — means this is inbound, not a sales order
+    is_gamer_customer = "gamer" in (customer_name or "").lower()
+
+    # ── PO: use main pipeline's resolution, validate, fall back to text ──
+    po_from_pipeline = (
+        doc.get("po_resolution_number")  # Main pipeline's PO resolution
+        or ef.get("po_number") or ef.get("purchase_order")
         or nf.get("customer_po") or nf.get("po_number")
     )
     po_from_text = _extract_po_number(combined_text)
-    # Validate AI-extracted PO: must look like a real PO (alphanumeric, 4+ chars)
-    po_number = _validate_po(po_from_ai) or po_from_text
+    po_number = _validate_po(po_from_pipeline) or po_from_text
 
-    # ── Smart order number extraction ──
-    order_from_ai = (
+    # ── Order number ──
+    order_from_pipeline = (
         ef.get("order_number") or ef.get("sales_order_number")
         or nf.get("order_number")
     )
-    order_number = _validate_order_number(order_from_ai) or _extract_order_number(combined_text)
-
-    # ── Customer name ──
-    customer_name = (
-        ef.get("customer") or ef.get("customer_name")
-        or nf.get("customer")
-    )
-    # Don't accept "Gamer Packaging" as customer — that's us, not the customer
-    if customer_name and "gamer" in customer_name.lower():
-        # Try to find the REAL customer from ship-to or other fields
-        alt_customer = ef.get("ship_to_name") or ef.get("bill_to_name")
-        if alt_customer and "gamer" not in alt_customer.lower():
-            customer_name = alt_customer
+    order_number = _validate_order_number(order_from_pipeline) or _extract_order_number(combined_text)
 
     # ── Ship-to ──
-    ship_to = (
-        ef.get("ship_to") or ef.get("ship_to_address")
-        or nf.get("ship_to")
+    ship_to = ef.get("ship_to") or ef.get("ship_to_address") or nf.get("ship_to")
+
+    # ── Amount: use main pipeline's extracted amount ──
+    amount = (
+        doc.get("total_amount")  # Main pipeline sets this
+        or nf.get("amount_float") or ef.get("total_amount")
+        or ef.get("amount_raw")
     )
+    # Try to parse if it's a string
+    if isinstance(amount, str):
+        try:
+            amount = float(amount.replace(",", "").replace("$", "").strip())
+        except (ValueError, AttributeError):
+            amount = None
 
-    # ── Items and quantities ──
-    raw_items = ef.get("items") or ef.get("item_numbers") or ef.get("line_items") or []
-    raw_quantities = ef.get("quantities") or []
-    line_items = nf.get("line_items") or doc.get("line_items") or []
-
-    # Build structured line data from line_items if available
+    # ── Lines: use main pipeline's extracted line items ──
     extracted_lines = []
     for li in line_items:
         line = {}
-        desc = li.get("description") or li.get("item_description") or ""
-        if desc:
-            line["description"] = desc
-        qty = li.get("quantity") or li.get("ordered_qty")
-        if qty:
-            line["quantity"] = qty
-        price = li.get("unit_price") or li.get("price")
-        if price:
-            line["unit_price"] = price
-        item_no = li.get("item_no") or li.get("item_number")
-        if item_no:
-            line["item_no"] = item_no
+        for key in ("description", "item_description", "quantity", "ordered_qty",
+                     "unit_price", "price", "item_no", "item_number", "total",
+                     "uom", "location_code", "drop_shipment"):
+            val = li.get(key)
+            if val is not None:
+                line[key] = val
         if line:
             extracted_lines.append(line)
 
-    # ── Amount ──
-    amount = (
-        nf.get("amount_float") or ef.get("total_amount")
-        or doc.get("total_amount")
-    )
+    # ── Classification: use main pipeline's AI classification ──
+    doc_type = doc.get("doc_type") or doc.get("suggested_job_type")
+    classification_method = doc.get("classification_method") or ef.get("classification_method")
+    ai_confidence = doc.get("ai_confidence")
+
+    # ── Vendor matching: use main pipeline's vendor intelligence ──
+    vendor_canonical = doc.get("vendor_canonical")
+    vendor_match_method = doc.get("vendor_match_method")
+    vendor_match_score = doc.get("vendor_match_score")
 
     extraction: Dict[str, Any] = {
+        # Core fields
         "customer_name": customer_name,
+        "customer_no": customer_no,
+        "is_gamer_customer": is_gamer_customer,
         "po_number": po_number,
         "order_number": order_number,
-        "requested_ship_date": (
-            ef.get("requested_ship_date") or ef.get("ship_date")
-            or nf.get("requested_ship_date")
-        ),
+        "requested_ship_date": ef.get("requested_ship_date") or ef.get("ship_date") or nf.get("requested_ship_date"),
         "ship_to": ship_to,
         "total_amount": amount,
-        "line_count": len(extracted_lines) or len(raw_items) or None,
+        "line_count": len(extracted_lines) or None,
         "extracted_lines": extracted_lines if extracted_lines else None,
-        "item_numbers": raw_items if raw_items and not extracted_lines else None,
-        "quantities": raw_quantities if raw_quantities and not extracted_lines else None,
-        "document_type": doc.get("doc_type") or doc.get("suggested_job_type"),
+
+        # Main pipeline intelligence (leveraged, not duplicated)
+        "document_type": doc_type,
+        "classification_method": classification_method,
+        "ai_confidence": ai_confidence,
+        "vendor_canonical": vendor_canonical,
+        "vendor_match_method": vendor_match_method,
+        "vendor_match_score": vendor_match_score,
+
+        # Pilot context
         "sender": sender,
         "mailbox_source": doc.get("pilot_mailbox"),
         "email_subject": email_subject,
         "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "pipeline_source": "unified",  # Confirms we're using main pipeline data
     }
 
-    # ── Quality score ──
+    # ── Quality score: how much useful data did the main pipeline extract? ──
     quality_fields = ["customer_name", "po_number", "ship_to", "total_amount"]
     filled = sum(1 for f in quality_fields if extraction.get(f))
     extraction["extraction_quality"] = f"{filled}/{len(quality_fields)}"
     extraction["extraction_quality_pct"] = round(filled / len(quality_fields) * 100)
+
+    # ── Extended quality: include vendor + lines + classification ──
+    extended_fields = ["vendor_canonical", "line_count", "ai_confidence", "order_number"]
+    ext_filled = filled + sum(1 for f in extended_fields if extraction.get(f))
+    ext_total = len(quality_fields) + len(extended_fields)
+    extraction["extended_quality_pct"] = round(ext_filled / ext_total * 100)
 
     # Remove None values for cleanliness
     extraction = {k: v for k, v in extraction.items() if v is not None}

@@ -206,35 +206,52 @@ def _build_order_context(
     doc: Dict, ef: Dict, nf: Dict, ext: Dict,
     line_items: List, bc_val: Dict, spiro: Dict,
 ) -> Dict[str, Any]:
-    """Build a normalized order context from all available data sources."""
+    """Build a normalized order context from all available data sources.
 
+    Priority: main pipeline fields > extracted_fields > normalized_fields > pilot extraction.
+    The main pipeline has 2-3 months of learned intelligence — always prefer it.
+    """
+
+    # Customer: main pipeline's vendor resolution first
     customer = (
-        ext.get("customer_name") or ef.get("customer")
-        or nf.get("customer") or doc.get("vendor_canonical")
+        doc.get("vendor_canonical")  # Main pipeline (learned)
+        or ef.get("customer") or ef.get("customer_name")
+        or nf.get("customer")
+        or ext.get("customer_name")
     )
     customer_no = (
-        doc.get("matched_customer_no") or doc.get("customer_no")
+        doc.get("matched_customer_no") or doc.get("customer_no")  # Main pipeline
         or nf.get("customer_no")
         or (bc_val.get("customer_match") or {}).get("bc_customer_no")
     )
+
+    # PO: main pipeline's resolution first
     po_number = (
-        ext.get("po_number") or ef.get("po_number")
-        or nf.get("customer_po") or doc.get("po_resolution_number")
+        doc.get("po_resolution_number")  # Main pipeline
+        or ef.get("po_number") or nf.get("customer_po")
+        or ext.get("po_number")
     )
+
+    # Order number
     order_number = (
-        ext.get("order_number") or ef.get("order_number")
-        or nf.get("order_number") or ef.get("sales_order_number")
+        ef.get("order_number") or ef.get("sales_order_number")
+        or nf.get("order_number")
+        or ext.get("order_number")
     )
+
+    # Amount: main pipeline
     amount = (
-        ext.get("total_amount") or nf.get("amount_float")
-        or ef.get("total_amount") or doc.get("total_amount")
+        doc.get("total_amount")  # Main pipeline
+        or nf.get("amount_float") or ef.get("total_amount")
+        or ext.get("total_amount")
     )
+
     status = (
         ef.get("order_status") or ef.get("status")
         or nf.get("order_status") or doc.get("workflow_status")
     )
-    ship_to = ext.get("ship_to") or ef.get("ship_to") or nf.get("ship_to")
-    ship_date = ext.get("requested_ship_date") or ef.get("ship_date") or nf.get("requested_ship_date")
+    ship_to = ef.get("ship_to") or nf.get("ship_to") or ext.get("ship_to")
+    ship_date = ef.get("ship_date") or nf.get("requested_ship_date") or ext.get("requested_ship_date")
 
     # Detect drop ship indicators
     is_drop_ship = False

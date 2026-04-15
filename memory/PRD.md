@@ -410,31 +410,33 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - P3: `server.py` extraction/refactoring (8,500+ lines)
 
 ## Inside Sales Pilot — Controlled Ingestion (2026-04-14)
-- **Purpose**: Controlled ingest-only pilot for two Inside Sales mailboxes — learn from real sales documents without creating operational risk
-- **Pilot mailboxes**: `mkoch@gamerpackaging.com`, `nhannover@gamerpackaging.com`
+- **Purpose**: Controlled ingest-only pilot for Inside Sales mailboxes — learn from real sales documents without creating operational risk
+- **Pilot mailboxes**: `mkoch@gamerpackaging.com`, `nhannover@gamerpackaging.com`, `ASaumweber@gamerpackaging.com`
 - **Feature flag**: `INSIDE_SALES_PILOT_ENABLED` (default: `false` — must be explicitly enabled in `.env`)
 - **Service**: `services/inside_sales_pilot_service.py` — dedicated polling, relevance filtering, structured extraction, logging
-- **Router**: `routers/inside_sales_pilot.py` — 5 endpoints:
-  - `GET /api/inside-sales-pilot/status` — config + dashboard summary
-  - `POST /api/inside-sales-pilot/poll-now` — manual trigger
-  - `GET /api/inside-sales-pilot/documents` — pilot documents (filterable by mailbox/type)
-  - `GET /api/inside-sales-pilot/runs` — polling run history
-  - `GET /api/inside-sales-pilot/logs` — detailed ingestion logs
-  - `GET /api/inside-sales-pilot/extraction-review` — structured extraction results
-- **Ingestion path**: Uses unified `hub_documents` pipeline via `_internal_intake_document()` → full AI classification + extraction
-- **Safety guards (5 layers)**:
+- **Router**: `routers/inside_sales_pilot.py` — full endpoint suite:
+  - Core: `GET /status`, `POST /poll-now`, `GET /documents`, `GET /runs`, `GET /logs`, `GET /extraction-review`
+  - BC Validation: `POST /validate/{id}`, `POST /validate-all`, `GET /validation-results`
+  - Corpus: `POST /validate-sales-corpus`, `GET /corpus-validation-summary`
+  - Maintenance: `POST /re-extract-all`, `POST /smart-reclassify`
+  - Spiro: `POST /spiro-match/{id}`, `POST /spiro-match-all`, `GET /spiro-results`, `GET /spiro-search`
+- **Safety guards (6 layers)**:
   1. `source="inside_sales_pilot"` check in server.py SO auto-create path
   2. `inside_sales_pilot` flag check in `auto_post_service.check_sales_order_eligibility()`
   3. `inside_sales_pilot` flag check in `auto_post_service.check_auto_post_eligibility()`
   4. `auto_create_so_blocked=True` persisted on document
   5. `bc_write_blocked=True` persisted on document
-- **Relevance filtering**: subject/body keyword matching (PO, order, quote, ship, release, etc.), external sender preference, attachment type filtering, inline/noise skip rules
-- **Structured extraction**: customer name, PO number, order number, ship date, ship-to, items, quantities, sender, mailbox source — persisted as `sales_pilot_extraction` on document
-- **Pilot metadata tags**: `ingestion_source: "inside_sales_pilot"`, `pilot_group: "inside_sales"`, `pilot_mailbox`, `pilot_run_id`
-- **Collections**: `inside_sales_pilot_log` (intake + event logs), `inside_sales_pilot_runs` (run summaries)
-- **Background worker**: polls all pilot mailboxes at `INSIDE_SALES_PILOT_INTERVAL_MINUTES` (default 10min)
+  6. Sales workflow guard — pilot docs stop at `pilot_review` status, never progress to exported/posted
+- **Relevance filtering**: keyword + filename matching, noise rejection (certificates, dunnage, signatures, info sheets)
+- **Smart PO extraction**: validates AI-extracted POs, rejects garbage (rate, intment, number.), catches real patterns (W117579, WR112624)
+- **Smart reclassifier**: auto-tags non-sales docs (certificates→Certificate, dunnage→BOL, reports→Report, etc.)
+- **BC Production cross-validation**: read-only customer match, order lookup, item validation, amount range check
+- **Sales corpus validation**: batch validation of existing 1000+ sales docs with side-by-side comparison
+- **Spiro CRM integration**: company lookup, opportunity/quote matching, PO-to-quote matching
+- **Frontend**: Inside Sales Pilot tab on Sales page + Build Roadmap page
 - **Config vars**: `INSIDE_SALES_PILOT_ENABLED`, `INSIDE_SALES_PILOT_MAILBOXES`, `INSIDE_SALES_PILOT_INTERVAL_MINUTES`, `INSIDE_SALES_PILOT_LOOKBACK_MINUTES`, `INSIDE_SALES_PILOT_MAX_MESSAGES`
-- **Tests**: 9/9 passing (`tests/test_inside_sales_pilot.py`), all safety guard tests verified
+- **Spiro config**: `SPIRO_CLIENT_ID`, `SPIRO_CLIENT_SECRET`, `SPIRO_REFRESH_TOKEN`, `SPIRO_API_BASE`, `SPIRO_OAUTH_URL`
+- **Version**: v2.1.0
 - **NO BC writes, NO auto-create sales orders, NO downstream automation**
 
 ## Sales Order Draft Context Service (2026-04-13)

@@ -318,46 +318,48 @@ def _normalize_status(status: Optional[str]) -> str:
 
 
 # ─────────────────────────────────────────────────────────────
-# RULE CHECKS
+# RULE CHECKS — SO-001 through SO-011
 # ─────────────────────────────────────────────────────────────
 
 def _check_status_governance(ctx, blocking, present, missing, rules):
-    """Rule 1: Status governance."""
+    """SO-002/003/004: Status governance."""
     status = ctx["status"]
-    if status in ("Pending Approval", "Pending Prepayment"):
-        blocking.append(f"Order is {status} — blocked from downstream execution")
-        rules.append(f"R1: Order status is {status}, not Released")
+    if status == "Pending Approval":
+        blocking.append("SO-003: Order blocked by approval workflow (Pending Approval)")
+        rules.append("SO-003: Status = Pending Approval → classified as blocked by approval workflow")
+    elif status == "Pending Prepayment":
+        blocking.append("SO-004: Order blocked by prepayment workflow (Pending Prepayment)")
+        rules.append("SO-004: Status = Pending Prepayment → classified as blocked by prepayment workflow")
     elif status in ("Open", "Draft / Open"):
-        rules.append("R1: Order is Open/Draft — not yet released for execution")
+        rules.append("SO-002: Status != Released → downstream completion not allowed")
     elif status == "Released":
         present.append("Order status: Released")
-        rules.append("R1: Order is Released — downstream actions may proceed")
+        rules.append("SO-002: Status = Released → downstream actions may proceed")
     elif status == "Posted":
         present.append("Order status: Posted")
     elif status == "Unknown":
         missing.append("Order status not determined")
-        rules.append("R1: Cannot determine order status — treating as Draft")
+        rules.append("SO-002: Cannot determine order status → treating as not Released")
 
 
 def _check_customer_po(ctx, blocking, present, missing, rules):
-    """Rule 2: Customer PO control."""
+    """SO-001: Customer PO control."""
     if ctx["po_number"]:
         present.append(f"Customer PO: {ctx['po_number']}")
     else:
-        missing.append("Customer PO number not extracted")
-        blocking.append("Customer PO missing — required control absent")
-        rules.append("R2: Customer PO attachment is a required control — not present")
+        missing.append("Customer PO")
+        blocking.append("SO-001: Customer PO missing — required control absent, Non-Compliant unless exception evidence exists")
+        rules.append("SO-001: Customer PO attachment missing → Required Controls Missing = Customer PO, Compliance = Non-Compliant")
 
     if not ctx["has_po_attachment"]:
-        rules.append("R2: No evidence of PO attachment in Documents fact box")
+        rules.append("SO-001: No evidence of PO attachment in Documents fact box")
 
 
 def _check_line_items(ctx, blocking, present, missing, rules, risks):
-    """Rule 3: Sales order line rules."""
+    """Line item evaluation (supports SO-005, SO-008, SO-009)."""
     lines = ctx["line_items"]
     if not lines:
         missing.append("No line items extracted")
-        rules.append("R3: Cannot evaluate line rules — no lines present")
         return
 
     present.append(f"Line items: {len(lines)} extracted")
@@ -377,11 +379,11 @@ def _check_line_items(ctx, blocking, present, missing, rules, risks):
 
     for field, count in missing_fields.items():
         if count > 0:
-            risks.append(f"R3: {count} line(s) missing {field}")
+            risks.append(f"{count} line(s) missing {field}")
 
 
 def _check_cost_rules(ctx, blocking, present, missing, rules):
-    """Rule 4: Cost rules."""
+    """SO-005: Service item cost rule."""
     lines = ctx["inventory_lines"]
     if not lines:
         return
@@ -393,73 +395,70 @@ def _check_cost_rules(ctx, blocking, present, missing, rules):
     ]
 
     if lines_needing_cost and ctx["lines_with_cost"] == 0:
-        rules.append("R4: Service/item lines without drop ship should have cost entered")
-        if ctx["status"] == "Released":
-            rules.append("R4: Cost may be conditionally acceptable if documented process allows later entry")
+        blocking.append("SO-005: Service/item lines (non drop ship) with missing cost — business rule violation")
+        rules.append("SO-005: Line is service item AND not drop ship AND cost missing → business rule violation")
 
 
 def _check_price_rules(ctx, blocking, rules, risks):
-    """Rule 5: Price change rules."""
+    """SO-010: Price change on released order."""
     if ctx["status"] == "Released" and ctx["lines_with_price"] == 0:
-        risks.append("R5: Released order with no prices on lines — potential price issue")
-    # Note: We can't detect price changes without historical data
-    # Flag as a risk if order is released and we're re-evaluating
-    rules.append("R5: If price changes after release, order must be reopened and re-released")
+        risks.append("SO-010: Released order with no prices on lines — potential price issue")
+    rules.append("SO-010: If released order price changed → must reopen and rerelease")
 
 
 def _check_drop_ship_rules(ctx, blocking, present, missing, rules):
-    """Rule 6: Drop-ship rules."""
+    """SO-008/009: Drop-ship PO rules."""
     if not ctx["is_drop_ship"]:
         return
 
-    rules.append("R6: Drop-ship order detected")
-
     if ctx["has_po_linkage"]:
         present.append("Drop-ship PO linkage present")
+        # SO-009: Check if PO cost is present
+        # We can't directly check PO cost from the SO doc, flag as risk
+        rules.append("SO-009: Drop ship PO exists — verify PO cost is entered (cannot confirm from SO data alone)")
     else:
-        missing.append("Drop-ship PO linkage not found")
-        blocking.append("Drop-ship order missing corresponding PO linkage")
-        rules.append("R6: Missing PO linkage is a blocking exception for drop-ship orders")
+        missing.append("Drop-ship PO linkage")
+        blocking.append("SO-008: Drop ship order AND PO missing → stage = Drop Ship PO Needed")
+        rules.append("SO-008: Drop ship order AND PO missing → Drop Ship PO Needed, blocking")
 
-    # Check that drop-ship lines are properly marked
     ds_lines = [li for li in ctx["line_items"] if li.get("drop_shipment") or li.get("purchasing_code") == "DROP SHIP"]
     non_freight_lines = ctx["inventory_lines"]
 
     if non_freight_lines and not ds_lines:
-        rules.append("R6: Inventory lines found but none marked as Drop Shipment — verify purchasing code")
+        rules.append("SO-008: Inventory lines found but none marked as Drop Shipment — verify purchasing code")
 
 
 def _check_freight_rules(ctx, blocking, present, missing, rules, risks):
-    """Rule 7: Freight rules."""
+    """Freight evaluation (supports operational assessment)."""
     if ctx["freight_lines"]:
         present.append(f"Freight lines: {len(ctx['freight_lines'])}")
     elif ctx["is_drop_ship"]:
-        rules.append("R7: Drop-ship order with no freight lines — may be acceptable if Gamer Logistics manages freight on SO")
+        rules.append("Freight: Drop-ship order with no freight lines — acceptable if Gamer Logistics manages freight on SO")
     elif ctx["line_count"] > 0:
-        risks.append("R7: No freight lines detected — verify freight coordination")
+        risks.append("No freight lines detected — verify freight coordination")
 
 
 def _check_confirmation_rules(ctx, blocking, rules):
-    """Rule 8: Confirmation rules."""
+    """SO-006: Confirmation on released order."""
     if ctx["status"] == "Released" and not ctx["confirmation_sent"]:
-        rules.append("R8: Released order without confirmation sent — classify as Confirmation Needed")
+        rules.append("SO-006: Released order has unsent confirmation → stage = Confirmation Needed")
     elif ctx["confirmation_sent"]:
-        rules.append("R8: Order confirmation has been sent")
+        rules.append("SO-006: Order confirmation has been sent")
 
 
 def _check_pick_rules(ctx, blocking, rules):
-    """Rule 9: Pick rules."""
+    """SO-007: Pick instructions on warehouse order."""
     if ctx["is_warehouse"] and ctx["status"] == "Released" and not ctx["pick_sent"]:
-        rules.append("R9: Warehouse order without pick instructions — classify as Pick Needed")
+        rules.append("SO-007: Warehouse order AND pick instructions unsent → stage = Pick Needed")
 
 
 def _check_readiness(ctx, blocking, present, missing, rules):
-    """Rule 10: Shipping and invoicing readiness."""
+    """SO-011: Shipping and invoicing readiness."""
     if ctx["shipped"]:
         present.append("Shipment evidence detected")
-        rules.append("R10: Shipped — may still require review before invoicing")
+        rules.append("SO-011: Shipped but final readiness controls not fully evidenced → stage = Shipped / Ready to Invoice, NOT Ready to Post Invoice")
     elif ctx["status"] == "Released":
-        rules.append("R10: Released but not shipped — not ready for invoice posting")
+        rules.append("SO-011: Released but not shipped — not ready for invoice posting")
 
     if not ctx["has_customer_resolved"]:
         missing.append("Customer not resolved in BC")
@@ -472,33 +471,55 @@ def _check_readiness(ctx, blocking, present, missing, rules):
 # ─────────────────────────────────────────────────────────────
 
 def _determine_stage(ctx, blocking, rules) -> str:
-    """Determine the canonical workflow stage."""
+    """Determine the canonical workflow stage using SO rule precedence."""
     status = ctx["status"]
 
     if status == "Posted":
         return "Posted"
+
+    # SO-003: Pending Approval = blocked
     if status == "Pending Approval":
         return "Pending Approval"
+
+    # SO-004: Pending Prepayment = blocked
     if status == "Pending Prepayment":
         return "Pending Prepayment"
 
-    if blocking:
-        return "Exception / Needs Review"
-
+    # SO-002: If not Released, treat as Draft unless blocking
     if status in ("Open", "Draft / Open", "Unknown"):
+        if blocking:
+            return "Exception / Needs Review"
         return "Draft / Open"
 
-    # Released path
+    # Released path — apply downstream rules in order
     if status == "Released":
+        # Check blocking issues first
+        if blocking:
+            # SO-008: Drop ship PO missing
+            if ctx["is_drop_ship"] and not ctx["has_po_linkage"]:
+                return "Drop Ship PO Needed"
+            return "Exception / Needs Review"
+
+        # SO-011: Shipped but readiness not fully evidenced
         if ctx["shipped"]:
             return "Shipped / Ready to Invoice"
+
+        # SO-008: Drop ship PO needed
         if ctx["is_drop_ship"] and not ctx["has_po_linkage"]:
             return "Drop Ship PO Needed"
+
+        # SO-006: Confirmation needed
         if not ctx["confirmation_sent"]:
             return "Confirmation Needed"
+
+        # SO-007: Pick needed
         if ctx["is_warehouse"] and not ctx["pick_sent"]:
             return "Pick Needed"
+
         return "Released"
+
+    if blocking:
+        return "Exception / Needs Review"
 
     return "Exception / Needs Review"
 

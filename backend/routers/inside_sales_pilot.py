@@ -331,10 +331,10 @@ async def spiro_match_single(doc_id: str):
 
 
 @router.post("/spiro-match-all")
-async def spiro_match_all():
+async def spiro_match_all(force: bool = Query(False, description="Re-match all docs, even already matched")):
     """Run Spiro matching on all unmatched pilot sales documents."""
     from services.spiro_service import match_all_pilot_documents
-    return await match_all_pilot_documents()
+    return await match_all_pilot_documents(force=force)
 
 
 @router.get("/spiro-results")

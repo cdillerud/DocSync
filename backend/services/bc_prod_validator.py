@@ -13,6 +13,7 @@ Checks:
 
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
@@ -172,15 +173,17 @@ async def _check_customer(
 
     # Try by name in the cache
     if customer_name:
+        # Escape regex special characters in customer name
+        safe_name = re.escape(customer_name)
         # Search customer records first, then fall back to sales_order records
         for entity_types in [["customer"], ["sales_order", "customer", "invoice"]]:
             results = await db.bc_reference_cache.find(
                 {
                     "bc_entity_type": {"$in": entity_types},
                     "$or": [
-                        {"bc_customer_name": {"$regex": customer_name, "$options": "i"}},
-                        {"displayName": {"$regex": customer_name, "$options": "i"}},
-                        {"bc_customer_no": {"$regex": customer_name, "$options": "i"}},
+                        {"bc_customer_name": {"$regex": safe_name, "$options": "i"}},
+                        {"displayName": {"$regex": safe_name, "$options": "i"}},
+                        {"bc_customer_no": {"$regex": safe_name, "$options": "i"}},
                     ],
                 },
                 {"_id": 0, "bc_customer_no": 1, "bc_customer_name": 1, "displayName": 1, "bc_entity_type": 1},
@@ -212,8 +215,9 @@ async def _check_customer_direct(
     if customer_no:
         conditions.append({"bc_customer_no": customer_no})
     if customer_name:
-        conditions.append({"bc_customer_name": {"$regex": customer_name, "$options": "i"}})
-        conditions.append({"displayName": {"$regex": customer_name, "$options": "i"}})
+        safe_name = re.escape(customer_name)
+        conditions.append({"bc_customer_name": {"$regex": safe_name, "$options": "i"}})
+        conditions.append({"displayName": {"$regex": safe_name, "$options": "i"}})
     if not conditions:
         return {"found": False, "reason": "Nothing to search"}
 

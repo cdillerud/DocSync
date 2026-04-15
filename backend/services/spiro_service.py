@@ -399,23 +399,24 @@ def _match_opportunity(
 # BATCH MATCH
 # ─────────────────────────────────────────────────────────────
 
-async def match_all_pilot_documents() -> Dict[str, Any]:
+async def match_all_pilot_documents(force: bool = False) -> Dict[str, Any]:
     """Run Spiro matching on all pilot documents that haven't been matched yet."""
     if not SPIRO_ENABLED:
         return {"skipped": True, "reason": "Spiro not configured"}
 
     db = get_db()
-    docs = await db.hub_documents.find(
-        {
-            "inside_sales_pilot": True,
-            "doc_type": "SALES_INVOICE",
-            "$or": [
-                {"spiro_match": {"$exists": False}},
-                {"spiro_match": None},
-            ],
-        },
-        {"_id": 0, "id": 1},
-    ).to_list(200)
+
+    query = {
+        "inside_sales_pilot": True,
+        "doc_type": "SALES_INVOICE",
+    }
+    if not force:
+        query["$or"] = [
+            {"spiro_match": {"$exists": False}},
+            {"spiro_match": None},
+        ]
+
+    docs = await db.hub_documents.find(query, {"_id": 0, "id": 1}).to_list(500)
 
     results = {"total": len(docs), "matched": 0, "company_found": 0, "quote_matched": 0, "errors": 0}
     for doc in docs:

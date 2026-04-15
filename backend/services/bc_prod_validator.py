@@ -172,26 +172,29 @@ async def _check_customer(
 
     # Try by name in the cache
     if customer_name:
-        results = await db.bc_reference_cache.find(
-            {
-                "bc_entity_type": "customer",
-                "$or": [
-                    {"bc_customer_name": {"$regex": customer_name, "$options": "i"}},
-                    {"displayName": {"$regex": customer_name, "$options": "i"}},
-                ],
-            },
-            {"_id": 0, "bc_customer_no": 1, "bc_customer_name": 1, "displayName": 1},
-        ).limit(5).to_list(5)
+        # Search customer records first, then fall back to sales_order records
+        for entity_types in [["customer"], ["sales_order", "customer", "invoice"]]:
+            results = await db.bc_reference_cache.find(
+                {
+                    "bc_entity_type": {"$in": entity_types},
+                    "$or": [
+                        {"bc_customer_name": {"$regex": customer_name, "$options": "i"}},
+                        {"displayName": {"$regex": customer_name, "$options": "i"}},
+                        {"bc_customer_no": {"$regex": customer_name, "$options": "i"}},
+                    ],
+                },
+                {"_id": 0, "bc_customer_no": 1, "bc_customer_name": 1, "displayName": 1, "bc_entity_type": 1},
+            ).limit(5).to_list(5)
 
-        if results:
-            r = results[0]
-            return {
-                "found": True,
-                "bc_customer_no": r.get("bc_customer_no"),
-                "bc_customer_name": r.get("bc_customer_name") or r.get("displayName"),
-                "match_method": "name_search",
-                "candidates": len(results),
-            }
+            if results:
+                r = results[0]
+                return {
+                    "found": True,
+                    "bc_customer_no": r.get("bc_customer_no"),
+                    "bc_customer_name": r.get("bc_customer_name") or r.get("displayName"),
+                    "match_method": f"name_search_{r.get('bc_entity_type', 'unknown')}",
+                    "candidates": len(results),
+                }
 
     return {
         "found": False,
@@ -205,7 +208,6 @@ async def _check_customer_direct(
     db, customer_name: Optional[str], customer_no: Optional[str],
 ) -> Dict[str, Any]:
     """Direct DB search when cache service isn't available."""
-    query = {"bc_entity_type": "customer"}
     conditions = []
     if customer_no:
         conditions.append({"bc_customer_no": customer_no})
@@ -214,16 +216,21 @@ async def _check_customer_direct(
         conditions.append({"displayName": {"$regex": customer_name, "$options": "i"}})
     if not conditions:
         return {"found": False, "reason": "Nothing to search"}
-    query["$or"] = conditions
 
-    result = await db.bc_reference_cache.find_one(query, {"_id": 0})
-    if result:
-        return {
-            "found": True,
-            "bc_customer_no": result.get("bc_customer_no"),
-            "bc_customer_name": result.get("bc_customer_name") or result.get("displayName"),
-            "match_method": "direct_cache_search",
-        }
+    # Search customer records first, then any entity type
+    for entity_filter in [
+        {"bc_entity_type": "customer"},
+        {"bc_entity_type": {"$in": ["customer", "sales_order", "invoice"]}},
+    ]:
+        query = {**entity_filter, "$or": conditions}
+        result = await db.bc_reference_cache.find_one(query, {"_id": 0})
+        if result:
+            return {
+                "found": True,
+                "bc_customer_no": result.get("bc_customer_no"),
+                "bc_customer_name": result.get("bc_customer_name") or result.get("displayName"),
+                "match_method": f"direct_cache_{result.get('bc_entity_type', 'unknown')}",
+            }
     return {"found": False, "reason": "Not found in BC cache"}
 
 

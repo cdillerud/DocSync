@@ -105,12 +105,14 @@ _RELEVANT_EXTENSIONS = {
 }
 
 # Inline / noise skip rules
-SKIP_CONTENT_TYPES = {"image/gif", "image/x-icon", "image/bmp"}
+SKIP_CONTENT_TYPES = {"image/gif", "image/x-icon", "image/bmp", "image/svg+xml"}
 SKIP_FILENAME_PATTERNS = [
     r"^image\d+\.(png|jpg|gif)$",
     r"^CID_",
     r"^signature",
     r"^logo",
+    r"logo[_\s\-]?\d*\.(png|jpg|jpeg|gif|bmp|svg|webp)$",
+    r"^(img|photo|pic|banner|icon)[_\s\-]?\d*\.(png|jpg|jpeg|gif)$",
     r"\.vcf$",
 ]
 _skip_re_compiled = [re.compile(p, re.IGNORECASE) for p in SKIP_FILENAME_PATTERNS]

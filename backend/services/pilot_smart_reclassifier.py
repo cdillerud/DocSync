@@ -43,6 +43,21 @@ _RULES: List[Tuple[str, Any, str, str]] = [
     # ── Reports / Lists ──
     ("open_orders_report", re.compile(r"(?i)open.*order.*list|order.*report"), "Report", "Open orders report"),
     ("report_generic", re.compile(r"(?i)\breport\b.*\.(xlsx|xls|csv)$"), "Report", "Report spreadsheet"),
+    ("forecast", re.compile(r"(?i)\bforecast\b"), "Forecast", "Forecast document"),
+    ("consignment_invoice", re.compile(r"(?i)consignment\s*invoic"), "AR_Invoice", "Consignment invoicing spreadsheet"),
+
+    # ── Quotes (not orders) ──
+    ("quote_filename", re.compile(r"(?i)\bquote\b"), "Quote", "Quote document — not a sales order"),
+    ("pricing_doc", re.compile(r"(?i)\bpricing\b.*\.(xlsx|xls|docx|pdf)$"), "Quote", "Pricing document"),
+
+    # ── Logos / Images / Signatures (noise) ──
+    ("logo_file", re.compile(r"(?i)logo.*\.(png|jpg|jpeg|gif|bmp|svg|webp)$"), "Miscellaneous", "Logo image — not a document"),
+    ("image_noise", re.compile(r"(?i)^(image|img|photo|pic|banner|icon)[_\s\-]?\d*\.(png|jpg|jpeg|gif|bmp|svg|webp)$"), "Miscellaneous", "Image file — not a document"),
+    ("signature_file", re.compile(r"(?i)(signature|sig)[_\s\-]?\d*\.(png|jpg|jpeg|gif)$"), "Miscellaneous", "Email signature image"),
+    ("small_jpg", re.compile(r"(?i)^[^/]{0,30}\.(png|jpg|jpeg|gif)$"), "Miscellaneous", "Small image file — likely not a sales document"),
+
+    # ── Scanned misc ──
+    ("scan_generic", re.compile(r"(?i)^scan[-_\s]"), "Miscellaneous", "Scanned document — no order indicators"),
 
     # ── Internal Communications ──
     ("csr_realignment", re.compile(r"(?i)CSR.*realign|communication.*realign"), "Miscellaneous", "Internal CSR communication"),
@@ -59,7 +74,9 @@ def _classify_document(filename: str, email_subject: str, email_body: str) -> Op
 
     for rule_name, pattern, new_type, reason in _RULES:
         if isinstance(pattern, re.Pattern):
-            if pattern.search(combined):
+            # Check against combined text AND filename separately
+            # ($ anchors only work on filename, not combined string)
+            if pattern.search(combined) or pattern.search(filename or ""):
                 return new_type, rule_name, reason
 
     return None

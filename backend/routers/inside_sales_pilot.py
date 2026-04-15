@@ -153,6 +153,24 @@ async def review_extractions(
 
 
 
+@router.post("/smart-reclassify")
+async def smart_reclassify(
+    dry_run: bool = Query(True, description="Preview changes without applying"),
+    quality_threshold: int = Query(25, ge=0, le=100),
+):
+    """
+    Auto-reclassify pilot documents that aren't real sales orders.
+
+    Uses filename/subject pattern matching + extraction quality scoring.
+    Default is dry_run=true (preview only).  Set dry_run=false to apply.
+    """
+    from services.pilot_smart_reclassifier import smart_reclassify_pilot_docs
+    return await smart_reclassify_pilot_docs(
+        quality_threshold=quality_threshold,
+        dry_run=dry_run,
+    )
+
+
 
 @router.post("/re-extract-all")
 async def re_extract_all_pilot_docs():

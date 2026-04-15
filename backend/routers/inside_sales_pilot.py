@@ -382,3 +382,18 @@ async def spiro_company_search(name: str = Query(..., min_length=2)):
     from services.spiro_service import search_company
     results = await search_company(name)
     return {"results": results, "count": len(results)}
+
+
+
+@router.get("/spiro-bc-crossref")
+async def spiro_bc_cross_reference():
+    """
+    Spiro ↔ BC cross-reference dashboard.
+
+    Shows which customers exist in both systems, which are Spiro-only
+    (pipeline leakage), which are BC-only (CRM gap), ISR coverage,
+    and opportunity pipeline value.
+    """
+    db = get_db()
+    from services.spiro_bc_cross_ref_service import build_cross_reference_dashboard
+    return await build_cross_reference_dashboard(db)

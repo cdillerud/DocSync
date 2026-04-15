@@ -6,6 +6,7 @@ import SalespersonDashboardPage from './SalespersonDashboardPage';
 import MyQueuePage from './MyQueuePage';
 import TriageQueuePage from './TriageQueuePage';
 import InsideSalesPilotPage from './InsideSalesPilotPage';
+import SpiroBCCrossRefDashboard from './SpiroBCCrossRefDashboard';
 import { Badge } from '../components/ui/badge';
 
 const API = process.env.REACT_APP_BACKEND_URL;
@@ -16,6 +17,7 @@ const TABS = [
   { key: 'sales', label: 'Sales Orders' },
   { key: 'rep-performance', label: 'Rep Performance' },
   { key: 'inside-sales-pilot', label: 'Inside Sales Pilot' },
+  { key: 'spiro-bc', label: 'Spiro ↔ BC' },
   { key: 'inventory', label: 'Inventory Ledger' },
 ];
 
@@ -65,6 +67,7 @@ export default function SalesInventoryHubPage() {
       {activeTab === 'sales' && <SalesDashboardPage />}
       {activeTab === 'rep-performance' && <SalespersonDashboardPage />}
       {activeTab === 'inside-sales-pilot' && <InsideSalesPilotPage />}
+      {activeTab === 'spiro-bc' && <SpiroBCCrossRefDashboard />}
       {activeTab === 'inventory' && <InventoryLedgerPage />}
     </div>
   );

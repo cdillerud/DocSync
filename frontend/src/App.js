@@ -26,6 +26,7 @@ import LearningDashboard from "@/pages/LearningDashboard";
 import ReviewQueuePage from "@/pages/ReviewQueuePage";
 import MonitoringDashboard from "@/pages/MonitoringDashboard";
 import GovernanceDashboard from "@/pages/GovernanceDashboard";
+import RoadmapGanttPage from "@/pages/RoadmapGanttPage";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -54,6 +55,7 @@ function AppRoutes() {
         <Route path="ai-learning" element={<LearningDashboard />} />
         <Route path="monitor" element={<MonitoringDashboard />} />
         <Route path="governance" element={<GovernanceDashboard />} />
+        <Route path="roadmap" element={<RoadmapGanttPage />} />
         <Route path="review-queue" element={<ReviewQueuePage />} />
         <Route path="intake-benchmark" element={<BakeOffPage />} />
         {/* Redirects */}

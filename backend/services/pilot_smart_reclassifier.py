@@ -143,6 +143,37 @@ async def smart_reclassify_pilot_docs(
         subject = doc.get("email_subject", "")
         ext = doc.get("sales_pilot_extraction") or {}
         quality_pct = ext.get("extraction_quality_pct", 0)
+        customer_name = ext.get("customer_name") or ""
+
+        # ── HARD GATE: Gamer is never the customer on a Sales Order ──
+        if "gamer" in customer_name.lower() and doc.get("doc_type") in (
+            "SALES_INVOICE", "Sales_Order", "Order_Confirmation",
+        ):
+            action = {
+                "doc_id": doc_id,
+                "file_name": filename,
+                "action": "reclassified",
+                "old_type": doc.get("doc_type"),
+                "new_type": "Vendor_Document",
+                "rule": "gamer_is_buyer",
+                "reason": f"Customer is '{customer_name}' (Gamer) — this is an inbound vendor document, not a sales order",
+                "quality_pct": quality_pct,
+            }
+            if not dry_run:
+                await db.hub_documents.update_one(
+                    {"id": doc_id},
+                    {"$set": {
+                        "doc_type": "Vendor_Document",
+                        "reclassified_from": doc.get("doc_type"),
+                        "reclassified_by": "pilot_smart_reclassifier",
+                        "reclassified_rule": "gamer_is_buyer",
+                        "reclassified_reason": action["reason"],
+                        "reclassified_at": now,
+                    }},
+                )
+            results["reclassified"] += 1
+            results["actions"].append(action)
+            continue
 
         # Try pattern-based reclassification
         match = _classify_document(filename, subject, "")

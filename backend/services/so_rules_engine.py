@@ -69,6 +69,47 @@ async def evaluate_sales_order(doc_id: str) -> Dict[str, Any]:
     # Build the order context
     ctx = _build_order_context(doc, ef, nf, ext, line_items, bc_val, spiro)
 
+    # ── HARD GATE: Gamer is NEVER the customer on a Sales Order ──
+    # If customer resolves to Gamer, this is an inbound vendor/purchase document.
+    customer = (ctx.get("customer") or "").lower()
+    customer_no = (ctx.get("customer_no") or "").upper()
+    is_gamer_customer = (
+        "gamer" in customer
+        or customer_no in ("GAMER", "GAMERPA", "GAMER1")
+    )
+    if is_gamer_customer:
+        result = {
+            "document_id": doc_id,
+            "evaluated_at": datetime.now(timezone.utc).isoformat(),
+            "stage": "Not a Sales Order",
+            "compliance_status": "Not Applicable",
+            "blocking_issues": ["Customer is Gamer Packaging — this is an inbound vendor/purchase document, not a sales order"],
+            "required_controls_present": [],
+            "required_controls_missing": [],
+            "business_rules_triggered": ["HARD GATE: Gamer is never the customer on a Sales Order. Gamer is the seller."],
+            "operational_risks": ["Document should be reclassified as Vendor_Document or Purchase_Order"],
+            "recommended_next_action": "Reclassify — this is a vendor document (PO to Gamer), not a GPI sales order",
+            "why": "Gamer Packaging is the buyer on this document. Sales Orders are documents where Gamer sells TO a customer.",
+            "confidence": "High",
+            "order_context": {
+                "customer": ctx["customer"],
+                "customer_no": ctx["customer_no"],
+                "po_number": ctx["po_number"],
+                "order_number": ctx["order_number"],
+                "status": ctx["status"],
+                "amount": ctx["amount"],
+                "line_count": ctx["line_count"],
+                "is_drop_ship": ctx["is_drop_ship"],
+                "has_po_attachment": ctx["has_po_attachment"],
+            },
+        }
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {"so_rules_evaluation": result}},
+        )
+        logger.info("[SORulesEngine] doc=%s HARD GATE: customer is Gamer — not a sales order", doc_id[:8])
+        return result
+
     # Run all rule checks
     blocking_issues = []
     controls_present = []

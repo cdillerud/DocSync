@@ -397,3 +397,70 @@ async def spiro_bc_cross_reference():
     db = get_db()
     from services.spiro_bc_cross_ref_service import build_cross_reference_dashboard
     return await build_cross_reference_dashboard(db)
+
+
+# ── Sales Order Rules Engine Endpoints ───────────────────────
+
+@router.post("/so-rules-evaluate/{doc_id}")
+async def evaluate_single_so(doc_id: str):
+    """
+    Run the Sales Order Rules Engine on a single document.
+
+    Evaluates against all 11 business rules and returns structured
+    stage, compliance, blocking issues, and recommended next action.
+    """
+    from services.so_rules_engine import evaluate_sales_order
+    return await evaluate_sales_order(doc_id)
+
+
+@router.post("/so-rules-evaluate-all")
+async def evaluate_all_sos():
+    """
+    Run the Sales Order Rules Engine on all pilot sales documents.
+    """
+    from services.so_rules_engine import evaluate_all_pilot_sales_orders
+    return await evaluate_all_pilot_sales_orders()
+
+
+@router.get("/so-rules-results")
+async def so_rules_results(
+    stage: Optional[str] = Query(None),
+    compliance: Optional[str] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """
+    List pilot documents with their SO Rules Engine evaluation results.
+    Filterable by stage and compliance status.
+    """
+    db = get_db()
+    query = {
+        "inside_sales_pilot": True,
+        "so_rules_evaluation": {"$exists": True, "$ne": None},
+    }
+    if stage:
+        query["so_rules_evaluation.stage"] = stage
+    if compliance:
+        query["so_rules_evaluation.compliance_status"] = compliance
+
+    total = await db.hub_documents.count_documents(query)
+    docs = (
+        await db.hub_documents.find(
+            query,
+            {
+                "_id": 0,
+                "id": 1,
+                "file_name": 1,
+                "doc_type": 1,
+                "email_sender": 1,
+                "pilot_mailbox": 1,
+                "so_rules_evaluation": 1,
+                "created_utc": 1,
+            },
+        )
+        .sort("created_utc", -1)
+        .skip(skip)
+        .limit(limit)
+        .to_list(limit)
+    )
+    return {"total": total, "documents": docs}

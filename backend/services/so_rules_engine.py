@@ -348,8 +348,18 @@ def _check_customer_po(ctx, blocking, present, missing, rules):
         present.append(f"Customer PO: {ctx['po_number']}")
     else:
         missing.append("Customer PO")
-        blocking.append("SO-001: Customer PO missing — required control absent, Non-Compliant unless exception evidence exists")
-        rules.append("SO-001: Customer PO attachment missing → Required Controls Missing = Customer PO, Compliance = Non-Compliant")
+        # Only block if this appears to be a GPI-originated sales order
+        # Inbound vendor docs may not have a separate PO number — the doc itself IS the PO
+        is_inbound = (ctx.get("customer") or "").lower().startswith("gamer")
+        file_name = (ctx.get("file_name") or "").lower()
+        is_vendor_confirmation = any(ind in file_name for ind in [
+            "confirmation", "order ack", "ord_ack",
+        ])
+        if is_inbound or is_vendor_confirmation:
+            rules.append("SO-001: Customer PO not extracted — but this appears to be an inbound vendor document (PO implicit)")
+        else:
+            blocking.append("SO-001: Customer PO missing — required control absent, Non-Compliant unless exception evidence exists")
+            rules.append("SO-001: Customer PO attachment missing → Required Controls Missing = Customer PO, Compliance = Non-Compliant")
 
     if not ctx["has_po_attachment"]:
         rules.append("SO-001: No evidence of PO attachment in Documents fact box")
@@ -383,9 +393,27 @@ def _check_line_items(ctx, blocking, present, missing, rules, risks):
 
 
 def _check_cost_rules(ctx, blocking, present, missing, rules):
-    """SO-005: Service item cost rule."""
+    """SO-005: Service item cost rule.
+
+    Only applies to GPI-created Sales Orders where cost should be present.
+    Does NOT apply to inbound vendor documents (POs, order confirmations)
+    where cost naturally lives on the BC Purchase Order, not the PDF.
+    """
     lines = ctx["inventory_lines"]
     if not lines:
+        return
+
+    # Detect if this is an inbound vendor document vs a GPI sales order
+    # Inbound vendor docs: order confirmations, vendor POs, invoices FROM vendors
+    file_name = (ctx.get("file_name") or "").lower()
+    is_vendor_doc = any(ind in file_name for ind in [
+        "confirmation", "order ack", "ord_ack", "vendor", "supplier",
+    ])
+    # If the customer resolved as "GAMER" — this is a vendor sending TO us, not our SO
+    is_inbound = (ctx.get("customer") or "").lower().startswith("gamer")
+
+    if is_vendor_doc or is_inbound:
+        rules.append("SO-005: Skipped — inbound vendor document (cost lives on BC PO, not vendor confirmation)")
         return
 
     lines_needing_cost = [

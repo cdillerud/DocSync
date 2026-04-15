@@ -153,6 +153,41 @@ async def review_extractions(
 
 
 
+
+@router.post("/re-extract-all")
+async def re_extract_all_pilot_docs():
+    """
+    Re-run structured extraction + BC validation on ALL pilot documents
+    using the latest improved logic.  Use after upgrading extraction code.
+    """
+    db = get_db()
+    docs = await db.hub_documents.find(
+        {"inside_sales_pilot": True},
+        {"_id": 0, "id": 1, "file_name": 1, "email_sender": 1,
+         "email_subject": 1, "pilot_mailbox": 1},
+    ).to_list(500)
+
+    from services.inside_sales_pilot_service import _extract_sales_fields
+    from services.bc_prod_validator import validate_document_against_bc
+
+    results = {"total": len(docs), "re_extracted": 0, "re_validated": 0, "errors": []}
+    for doc in docs:
+        try:
+            body = ""
+            ext = await _extract_sales_fields(
+                db, doc["id"], doc.get("file_name", ""),
+                doc.get("email_subject", ""), body, doc.get("email_sender", ""),
+            )
+            if ext:
+                results["re_extracted"] += 1
+            # Also re-validate against BC
+            await validate_document_against_bc(doc["id"])
+            results["re_validated"] += 1
+        except Exception as e:
+            results["errors"].append(f"{doc['id'][:8]}: {e}")
+    return results
+
+
 # ── BC Production Validation Endpoints ──────────────────────
 
 @router.post("/validate/{doc_id}")

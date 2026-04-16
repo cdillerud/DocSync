@@ -78,45 +78,38 @@ async def review_pilot_document(doc_id: str) -> Dict[str, Any]:
         )
 
     # If no profile by customer_no, try fuzzy name match against profiles
+    # IMPORTANT: Only match with high confidence — wrong profile is worse than no profile
     if not customer_profile and customer_name:
         import re
         safe_name = re.escape(customer_name.strip()[:30])
-        # Try exact name match first
+
+        # Try exact customer_name match in profiles
         try:
             customer_profile = await db.customer_posting_profiles.find_one(
                 {
                     "status": "analyzed",
-                    "$or": [
-                        {"customer_name": {"$regex": safe_name, "$options": "i"}},
-                        {"customer_no": {"$regex": safe_name[:8], "$options": "i"}},
-                    ],
+                    "customer_name": {"$regex": f"^{safe_name}$", "$options": "i"},
                 },
                 {"_id": 0},
             )
         except Exception:
             pass
 
-        # Try first significant word (e.g., "COMAR" from "Comar Inc.")
+        # Try customer_no = customer_name (some customers use name as number)
         if not customer_profile:
-            words = customer_name.strip().split()
-            first_word = words[0] if words else ""
-            if first_word and len(first_word) >= 3:
-                safe_word = re.escape(first_word)
-                try:
-                    customer_profile = await db.customer_posting_profiles.find_one(
-                        {
-                            "status": "analyzed",
-                            "$or": [
-                                {"customer_name": {"$regex": f"^{safe_word}", "$options": "i"}},
-                                {"customer_no": {"$regex": f"^{safe_word[:6]}", "$options": "i"}},
-                            ],
-                        },
-                        {"_id": 0},
-                    )
-                except Exception:
-                    pass
+            try:
+                customer_profile = await db.customer_posting_profiles.find_one(
+                    {
+                        "status": "analyzed",
+                        "customer_no": {"$regex": f"^{re.escape(customer_name.strip()[:8])}$", "$options": "i"},
+                    },
+                    {"_id": 0},
+                )
+            except Exception:
+                pass
 
-        # Try searching bc_reference_cache to bridge name → customer_no → profile
+        # Bridge via bc_reference_cache: name → bc_customer_no → profile
+        # Use strict matching (starts with) to avoid false positives
         if not customer_profile and customer_name:
             safe_name_short = re.escape(customer_name.strip()[:20])
             try:
@@ -124,17 +117,22 @@ async def review_pilot_document(doc_id: str) -> Dict[str, Any]:
                     {
                         "bc_entity_type": "customer",
                         "$or": [
-                            {"bc_customer_name": {"$regex": safe_name_short, "$options": "i"}},
-                            {"displayName": {"$regex": safe_name_short, "$options": "i"}},
+                            {"bc_customer_name": {"$regex": f"^{safe_name_short}", "$options": "i"}},
+                            {"displayName": {"$regex": f"^{safe_name_short}", "$options": "i"}},
                         ],
                     },
-                    {"_id": 0, "bc_customer_no": 1},
+                    {"_id": 0, "bc_customer_no": 1, "bc_customer_name": 1},
                 )
                 if bc_hit and bc_hit.get("bc_customer_no"):
-                    customer_no = bc_hit["bc_customer_no"]
-                    customer_profile = await db.customer_posting_profiles.find_one(
-                        {"customer_no": customer_no, "status": "analyzed"}, {"_id": 0}
-                    )
+                    # Verify the match is reasonable (first word overlap)
+                    bc_name = (bc_hit.get("bc_customer_name") or "").lower()
+                    search_first = customer_name.strip().split()[0].lower() if customer_name.strip() else ""
+                    bc_first = bc_name.split()[0] if bc_name else ""
+                    if search_first and bc_first and (search_first in bc_first or bc_first in search_first):
+                        customer_no = bc_hit["bc_customer_no"]
+                        customer_profile = await db.customer_posting_profiles.find_one(
+                            {"customer_no": customer_no, "status": "analyzed"}, {"_id": 0}
+                        )
             except Exception:
                 pass
 

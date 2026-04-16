@@ -162,7 +162,12 @@ export default function SalesOrderReviewPage() {
               )}
             </div>
             <p className="text-xs text-muted-foreground">
-              {ef.customer_name || doc.vendor_canonical || 'Unknown Customer'}
+              {ef.customer_name || ef.customer || doc.customer_extracted
+                || (doc.sales_pilot_extraction || {}).customer_name
+                || ((doc.bc_prod_validation || {}).customer_match || {}).bc_customer_name
+                || ((doc.spiro_match || {}).company_match || {}).name
+                || (doc.vendor_canonical && !doc.vendor_canonical.toLowerCase().includes('gamer') ? doc.vendor_canonical : null)
+                || 'Unknown Customer'}
               {ef.total_amount ? ` — $${Number(ef.total_amount).toLocaleString()}` : ''}
             </p>
           </div>

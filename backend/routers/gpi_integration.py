@@ -565,22 +565,63 @@ async def _resolve_customer_no(doc: dict) -> dict:
     match_method = "none"
     confidence = 0.0
 
+    # Skip Gamer as customer
+    if customer_name and "gamer" in customer_name.lower():
+        customer_name = ""
+
     # 1. Check if a BC customer number was already resolved (e.g. validation)
     bc_record_info = vr.get("bc_record_info") or {}
     if bc_record_info.get("number"):
-        customer_no = bc_record_info["number"]
-        customer_name = customer_name or bc_record_info.get("displayName", "")
-        match_method = vr.get("match_method", "validation")
-        confidence = float(vr.get("match_score", 0.9))
+        cno = bc_record_info["number"]
+        if cno.upper() not in ("GAMER", "GAMERPA", "GAMER1"):
+            customer_no = cno
+            customer_name = customer_name or bc_record_info.get("displayName", "")
+            match_method = vr.get("match_method", "validation")
+            confidence = float(vr.get("match_score", 0.9))
 
     # 1.5 Check extracted_fields or normalized_fields for customer number
     if not customer_no:
-        cno = ef.get("customer_no") or nf.get("bc_customer_no") or nf.get("customer_no") or ""
-        if cno:
+        cno = ef.get("customer_no") or nf.get("bc_customer_no") or nf.get("customer_no") or doc.get("matched_customer_no") or doc.get("customer_no") or ""
+        if cno and cno.upper() not in ("GAMER", "GAMERPA", "GAMER1"):
             customer_no = cno
             customer_name = customer_name or ef.get("customer_name") or nf.get("customer_name") or ""
             match_method = "extracted_field"
             confidence = 0.95
+
+    # 1.6 BC prod validation customer match
+    if not customer_no:
+        bc_val = doc.get("bc_prod_validation") or {}
+        bc_cm = bc_val.get("customer_match") or {}
+        if bc_cm.get("found") and bc_cm.get("bc_customer_no"):
+            cno = bc_cm["bc_customer_no"]
+            if cno.upper() not in ("GAMER", "GAMERPA", "GAMER1"):
+                customer_no = cno
+                customer_name = customer_name or bc_cm.get("bc_customer_name", "")
+                match_method = bc_cm.get("match_method", "bc_prod_validation")
+                confidence = 0.85
+
+    # 1.7 Spiro match external_id (this IS the BC customer number)
+    if not customer_no:
+        spiro = doc.get("spiro_match") or {}
+        spiro_cm = spiro.get("company_match") or {}
+        if spiro_cm.get("external_id"):
+            customer_no = spiro_cm["external_id"]
+            customer_name = customer_name or spiro_cm.get("name", "")
+            match_method = "spiro_external_id"
+            confidence = 0.80
+
+    # 1.8 Pilot extraction customer name (if no customer_name yet)
+    if not customer_name:
+        pilot_ext = doc.get("sales_pilot_extraction") or {}
+        pn = pilot_ext.get("customer_name") or ""
+        if pn and "gamer" not in pn.lower():
+            customer_name = pn
+
+    # 1.9 vendor_canonical (for sales docs, often the customer)
+    if not customer_name:
+        vc = doc.get("vendor_canonical") or ""
+        if vc and "gamer" not in vc.lower():
+            customer_name = vc
 
     # 2. Try customer_candidates on the doc
     if not customer_no:
@@ -595,13 +636,20 @@ async def _resolve_customer_no(doc: dict) -> dict:
     # 3. Try bc_reference_cache lookup
     if not customer_no and customer_name:
         db = get_db()
+        import re as _re
+        safe_name = _re.escape(customer_name[:30])
         cached = await db.bc_reference_cache.find_one(
-            {"displayName": {"$regex": customer_name[:30], "$options": "i"}, "entity_type": {"$in": ["customer", "Customer"]}},
-            {"_id": 0, "number": 1, "displayName": 1, "entity_type": 1}
+            {
+                "$or": [
+                    {"displayName": {"$regex": safe_name, "$options": "i"}, "entity_type": {"$in": ["customer", "Customer"]}},
+                    {"bc_customer_name": {"$regex": safe_name, "$options": "i"}, "bc_entity_type": "customer"},
+                ],
+            },
+            {"_id": 0, "number": 1, "bc_customer_no": 1, "displayName": 1, "bc_customer_name": 1}
         )
         if cached:
-            customer_no = cached.get("number", "")
-            customer_name = customer_name or cached.get("displayName", "")
+            customer_no = cached.get("number") or cached.get("bc_customer_no", "")
+            customer_name = customer_name or cached.get("displayName") or cached.get("bc_customer_name", "")
             match_method = "cache_lookup"
             confidence = 0.7
 

@@ -159,8 +159,45 @@ async def get_sales_order_advisory(
     # 2. Raw readiness review (from document)
     review = doc.get("so_readiness_review") or {}
 
-    # 3. Customer profile summary
-    customer_no = doc.get("matched_customer_no") or doc.get("customer_no") or ""
+    # If no review exists for a pilot sales doc, run it on-demand
+    is_sales_type = doc.get("doc_type") in ("Sales_Order", "SalesOrder", "SALES_ORDER", "SALES_INVOICE", "SalesInvoice")
+    is_pilot = doc.get("inside_sales_pilot", False)
+    if (not review or review.get("error")) and is_sales_type and is_pilot:
+        try:
+            from services.pilot_readiness_review_service import review_pilot_document
+            review = await review_pilot_document(document_id)
+        except Exception:
+            pass
+
+    # 3. Customer profile summary — use full resolution chain
+    customer_no = (
+        doc.get("matched_customer_no") or doc.get("customer_no") or ""
+    )
+
+    # Bridge: BC prod validation
+    if not customer_no:
+        bc_val = doc.get("bc_prod_validation") or {}
+        bc_cm = bc_val.get("customer_match") or {}
+        if bc_cm.get("found") and bc_cm.get("bc_customer_no"):
+            customer_no = bc_cm["bc_customer_no"]
+
+    # Bridge: Spiro external_id
+    if not customer_no:
+        spiro = doc.get("spiro_match") or {}
+        spiro_cm = spiro.get("company_match") or {}
+        if spiro_cm.get("external_id"):
+            customer_no = spiro_cm["external_id"]
+
+    # Bridge: pilot readiness review already resolved it
+    if not customer_no and review:
+        pc = review.get("pilot_context") or {}
+        if pc.get("profile_customer_no"):
+            customer_no = pc["profile_customer_no"]
+
+    # Skip Gamer
+    if customer_no and customer_no.upper() in ("GAMER", "GAMERPA", "GAMER1"):
+        customer_no = ""
+
     profile_summary = None
     if customer_no:
         profile = await db.customer_posting_profiles.find_one(

@@ -110,7 +110,7 @@ async def _assess_readiness(doc: dict) -> dict:
             customer_name = vc
 
     # Bridge: inherit from batch parent (split docs like _doc1, _doc2)
-    if not customer_no and not customer_name and doc.get("batch_parent_id"):
+    if (not customer_no or not customer_name) and doc.get("batch_parent_id"):
         try:
             parent = await db.hub_documents.find_one(
                 {"id": doc["batch_parent_id"]},
@@ -348,7 +348,11 @@ async def _compute_summary(db) -> dict:
     all_docs = await db.hub_documents.find(
         query,
         {"_id": 0, "id": 1, "extracted_fields": 1, "normalized_fields": 1,
-         "bc_sales_order": 1, "vendor_name": 1, "document_type": 1}
+         "bc_sales_order": 1, "vendor_name": 1, "document_type": 1,
+         "sales_pilot_extraction": 1, "bc_prod_validation": 1,
+         "spiro_match": 1, "vendor_canonical": 1, "matched_customer_no": 1,
+         "customer_no": 1, "inside_sales_pilot": 1, "batch_parent_id": 1,
+         "validation_results": 1, "customer_extracted": 1, "source": 1}
     ).to_list(500)
 
     counts = {"ready": 0, "ready_warnings": 0, "needs_review": 0, "already_created": 0, "total": len(all_docs)}

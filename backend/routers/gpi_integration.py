@@ -624,7 +624,7 @@ async def _resolve_customer_no(doc: dict) -> dict:
             customer_name = vc
 
     # 1.10 Inherit from batch parent (split docs like _doc1, _doc2)
-    if not customer_no and not customer_name and doc.get("batch_parent_id"):
+    if (not customer_no or not customer_name) and doc.get("batch_parent_id"):
         try:
             db = get_db()
             parent = await db.hub_documents.find_one(

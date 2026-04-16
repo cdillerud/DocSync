@@ -653,6 +653,42 @@ async def _resolve_customer_no(doc: dict) -> dict:
             match_method = "cache_lookup"
             confidence = 0.7
 
+    # 4. If we have customer_no but no customer_name, look up the name
+    if customer_no and not customer_name:
+        db = get_db()
+        cached = await db.bc_reference_cache.find_one(
+            {
+                "$or": [
+                    {"number": customer_no, "entity_type": {"$in": ["customer", "Customer"]}},
+                    {"bc_customer_no": customer_no, "bc_entity_type": "customer"},
+                ],
+            },
+            {"_id": 0, "displayName": 1, "bc_customer_name": 1}
+        )
+        if cached:
+            customer_name = cached.get("displayName") or cached.get("bc_customer_name", "")
+
+    # 5. Consistency gate: verify customer_name and customer_no don't conflict
+    # e.g., OWENSBR should not pair with "Giovanni Food Company"
+    if customer_no and customer_name:
+        db = get_db()
+        cached = await db.bc_reference_cache.find_one(
+            {
+                "$or": [
+                    {"number": customer_no, "entity_type": {"$in": ["customer", "Customer"]}},
+                    {"bc_customer_no": customer_no, "bc_entity_type": "customer"},
+                ],
+            },
+            {"_id": 0, "displayName": 1, "bc_customer_name": 1}
+        )
+        if cached:
+            bc_name = (cached.get("displayName") or cached.get("bc_customer_name") or "").lower()
+            extracted_first = customer_name.lower().split()[0] if customer_name else ""
+            bc_first = bc_name.split()[0] if bc_name else ""
+            # If first words don't overlap at all, use the BC-authoritative name
+            if extracted_first and bc_first and extracted_first[:3] != bc_first[:3]:
+                customer_name = cached.get("displayName") or cached.get("bc_customer_name") or customer_name
+
     return {
         "customer_no": customer_no,
         "customer_name": customer_name,

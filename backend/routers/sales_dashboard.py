@@ -36,10 +36,11 @@ REVIEW_STATUSES = {
 }
 
 
-def _assess_readiness(doc: dict) -> dict:
+async def _assess_readiness(doc: dict) -> dict:
     """Lightweight readiness assessment without running full preflight.
     Returns {status, readiness, warnings, customer_no, customer_name, ...}.
     """
+    db = get_db()
     ef = doc.get("extracted_fields") or {}
     nf = doc.get("normalized_fields") or {}
 
@@ -113,6 +114,45 @@ def _assess_readiness(doc: dict) -> dict:
         customer_no = ""
     if customer_name and "gamer" in customer_name.lower():
         customer_name = ""
+
+    # If customer_no resolved but no customer_name, look up the name from BC cache
+    if customer_no and not customer_name:
+        try:
+            import re as _re
+            bc_cached = await db.bc_reference_cache.find_one(
+                {
+                    "$or": [
+                        {"number": customer_no, "entity_type": {"$in": ["customer", "Customer"]}},
+                        {"bc_customer_no": customer_no, "bc_entity_type": "customer"},
+                    ],
+                },
+                {"_id": 0, "displayName": 1, "bc_customer_name": 1}
+            )
+            if bc_cached:
+                customer_name = bc_cached.get("displayName") or bc_cached.get("bc_customer_name", "")
+        except Exception:
+            pass
+
+    # Consistency gate: verify name matches customer_no
+    if customer_no and customer_name:
+        try:
+            bc_cached = await db.bc_reference_cache.find_one(
+                {
+                    "$or": [
+                        {"number": customer_no, "entity_type": {"$in": ["customer", "Customer"]}},
+                        {"bc_customer_no": customer_no, "bc_entity_type": "customer"},
+                    ],
+                },
+                {"_id": 0, "displayName": 1, "bc_customer_name": 1}
+            )
+            if bc_cached:
+                bc_name = (bc_cached.get("displayName") or bc_cached.get("bc_customer_name") or "").lower()
+                ext_first = customer_name.lower().split()[0] if customer_name else ""
+                bc_first = bc_name.split()[0] if bc_name else ""
+                if ext_first and bc_first and ext_first[:3] != bc_first[:3]:
+                    customer_name = bc_cached.get("displayName") or bc_cached.get("bc_customer_name") or customer_name
+        except Exception:
+            pass
 
     if not customer_no:
         blocking.append("Customer not resolved")
@@ -237,7 +277,7 @@ async def sales_queue(
     # Assess readiness for each doc
     items = []
     for doc in docs:
-        assessment = _assess_readiness(doc)
+        assessment = await _assess_readiness(doc)
 
         # Post-filter by status if requested
         if status and assessment["status"] != status:
@@ -283,7 +323,7 @@ async def _compute_summary(db) -> dict:
 
     counts = {"ready": 0, "ready_warnings": 0, "needs_review": 0, "already_created": 0, "total": len(all_docs)}
     for doc in all_docs:
-        a = _assess_readiness(doc)
+        a = await _assess_readiness(doc)
         counts[a["status"]] = counts.get(a["status"], 0) + 1
 
     return counts
@@ -422,7 +462,7 @@ async def my_queue(
 
     items = []
     for doc in docs:
-        assessment = _assess_readiness(doc)
+        assessment = await _assess_readiness(doc)
         items.append({
             "id": doc.get("id", ""),
             "file_name": doc.get("file_name", ""),
@@ -502,7 +542,7 @@ async def triage_queue(
 
     items = []
     for doc in docs:
-        assessment = _assess_readiness(doc)
+        assessment = await _assess_readiness(doc)
         items.append({
             "id": doc.get("id", ""),
             "file_name": doc.get("file_name", ""),

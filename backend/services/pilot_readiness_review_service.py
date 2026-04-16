@@ -52,6 +52,24 @@ async def review_pilot_document(doc_id: str) -> Dict[str, Any]:
     if not customer_no and bc_cm.get("found"):
         customer_no = bc_cm.get("bc_customer_no")
 
+    # Also try Spiro match external_id (this IS the BC customer number)
+    spiro = doc.get("spiro_match") or {}
+    spiro_cm = spiro.get("company_match") or {}
+    if not customer_no and spiro_cm.get("external_id"):
+        customer_no = spiro_cm["external_id"]
+
+    # Also try vendor_canonical from the main pipeline
+    if not customer_no:
+        vc = doc.get("vendor_canonical") or ""
+        if vc and "gamer" not in vc.lower():
+            # vendor_canonical might be a BC customer number or name
+            # Try direct lookup in profiles
+            candidate = await db.customer_posting_profiles.find_one(
+                {"customer_no": vc, "status": "analyzed"}, {"_id": 0, "customer_no": 1}
+            )
+            if candidate:
+                customer_no = candidate["customer_no"]
+
     # ---- Look up customer posting profile ----
     customer_profile = None
     if customer_no:
@@ -59,23 +77,66 @@ async def review_pilot_document(doc_id: str) -> Dict[str, Any]:
             {"customer_no": customer_no, "status": "analyzed"}, {"_id": 0}
         )
 
-    # If no profile by customer_no, try fuzzy name match
+    # If no profile by customer_no, try fuzzy name match against profiles
     if not customer_profile and customer_name:
         import re
         safe_name = re.escape(customer_name.strip()[:30])
+        # Try exact name match first
         try:
             customer_profile = await db.customer_posting_profiles.find_one(
                 {
                     "status": "analyzed",
                     "$or": [
                         {"customer_name": {"$regex": safe_name, "$options": "i"}},
-                        {"customer_no": {"$regex": safe_name[:6], "$options": "i"}},
+                        {"customer_no": {"$regex": safe_name[:8], "$options": "i"}},
                     ],
                 },
                 {"_id": 0},
             )
         except Exception:
             pass
+
+        # Try first significant word (e.g., "COMAR" from "Comar Inc.")
+        if not customer_profile:
+            words = customer_name.strip().split()
+            first_word = words[0] if words else ""
+            if first_word and len(first_word) >= 3:
+                safe_word = re.escape(first_word)
+                try:
+                    customer_profile = await db.customer_posting_profiles.find_one(
+                        {
+                            "status": "analyzed",
+                            "$or": [
+                                {"customer_name": {"$regex": f"^{safe_word}", "$options": "i"}},
+                                {"customer_no": {"$regex": f"^{safe_word[:6]}", "$options": "i"}},
+                            ],
+                        },
+                        {"_id": 0},
+                    )
+                except Exception:
+                    pass
+
+        # Try searching bc_reference_cache to bridge name → customer_no → profile
+        if not customer_profile and customer_name:
+            safe_name_short = re.escape(customer_name.strip()[:20])
+            try:
+                bc_hit = await db.bc_reference_cache.find_one(
+                    {
+                        "bc_entity_type": "customer",
+                        "$or": [
+                            {"bc_customer_name": {"$regex": safe_name_short, "$options": "i"}},
+                            {"displayName": {"$regex": safe_name_short, "$options": "i"}},
+                        ],
+                    },
+                    {"_id": 0, "bc_customer_no": 1},
+                )
+                if bc_hit and bc_hit.get("bc_customer_no"):
+                    customer_no = bc_hit["bc_customer_no"]
+                    customer_profile = await db.customer_posting_profiles.find_one(
+                        {"customer_no": customer_no, "status": "analyzed"}, {"_id": 0}
+                    )
+            except Exception:
+                pass
 
     # ---- Build extracted order from pilot data ----
     line_items = nf.get("line_items") or doc.get("line_items") or []

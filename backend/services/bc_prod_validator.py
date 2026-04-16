@@ -75,6 +75,18 @@ async def validate_document_against_bc(doc_id: str) -> Dict[str, Any]:
             else:
                 customer_name = None
 
+    # Bridge: use Spiro match external_id as customer_no (it IS the BC number)
+    spiro = doc.get("spiro_match") or {}
+    spiro_cm = spiro.get("company_match") or {}
+    if not customer_no and spiro_cm.get("external_id"):
+        customer_no = spiro_cm["external_id"]
+
+    # Bridge: use vendor_canonical from main pipeline (may be a BC customer name/no)
+    if not customer_no and not customer_name:
+        vc = doc.get("vendor_canonical") or ""
+        if vc and "gamer" not in vc.lower():
+            customer_name = vc
+
     result["customer_match"] = await _check_customer(db, customer_name, customer_no)
     result["checks_total"] += 1
     if result["customer_match"].get("found"):

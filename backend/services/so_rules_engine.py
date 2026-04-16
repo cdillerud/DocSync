@@ -372,11 +372,16 @@ def _build_order_context(
 
 
 def _normalize_status(status: Optional[str]) -> str:
-    """Normalize workflow status to canonical form."""
+    """Normalize workflow status to canonical form.
+
+    Must handle both BC order statuses AND hub internal statuses,
+    since extracted_fields may contain either.
+    """
     if not status:
         return "Unknown"
     s = str(status).lower().strip()
     mapping = {
+        # BC order statuses
         "open": "Open",
         "draft": "Draft / Open",
         "pending_approval": "Pending Approval",
@@ -386,16 +391,29 @@ def _normalize_status(status: Optional[str]) -> str:
         "released": "Released",
         "posted": "Posted",
         "shipped": "Shipped / Ready to Invoice",
+        # Hub internal statuses → map to Draft / Open (early stage)
         "exported": "Released",
         "pilot_review": "Draft / Open",
         "needs_review": "Draft / Open",
         "validated": "Released",
         "ready_to_post": "Released",
+        "captured": "Draft / Open",
+        "extracted": "Draft / Open",
+        "classified": "Draft / Open",
+        "ingested": "Draft / Open",
+        "processing": "Draft / Open",
+        "queued": "Draft / Open",
+        "new": "Draft / Open",
+        "pending": "Draft / Open",
+        "exception": "Exception / Needs Review",
+        "failed": "Exception / Needs Review",
+        "error": "Exception / Needs Review",
     }
     for k, v in mapping.items():
         if k in s:
             return v
-    return status
+    # If unrecognized, treat as Draft / Open (safe default for early-stage docs)
+    return "Draft / Open"
 
 
 # ─────────────────────────────────────────────────────────────

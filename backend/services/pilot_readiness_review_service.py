@@ -77,6 +77,35 @@ async def review_pilot_document(doc_id: str) -> Dict[str, Any]:
             {"customer_no": customer_no, "status": "analyzed"}, {"_id": 0}
         )
 
+    # ---- VALIDATION GATE: Reject false profile matches ----
+    # If we found a profile, verify the name has overlap with extracted customer
+    # A COMAR doc should NOT match an ORTHO profile, etc.
+    if customer_profile and customer_name:
+        profile_name = (customer_profile.get("customer_name") or "").lower()
+        extracted_name = customer_name.lower().strip()
+        extracted_first = extracted_name.split()[0] if extracted_name else ""
+        profile_first = profile_name.split()[0] if profile_name else ""
+
+        # Check: first word overlap, or customer_no matches extracted name
+        name_ok = (
+            extracted_first and profile_first and (
+                extracted_first in profile_first
+                or profile_first in extracted_first
+                or extracted_first[:4] == profile_first[:4]
+            )
+        )
+        no_ok = customer_no and (
+            customer_no.lower().startswith(extracted_first[:4])
+            or extracted_first.startswith(customer_no.lower()[:4])
+        )
+        if not name_ok and not no_ok:
+            logger.info(
+                "[PilotReadiness] Rejecting false match: '%s' → profile '%s' (%s)",
+                customer_name, profile_name, customer_no,
+            )
+            customer_profile = None
+            customer_no = None
+
     # If no profile by customer_no, try fuzzy name match against profiles
     # IMPORTANT: Only match with high confidence — wrong profile is worse than no profile
     if not customer_profile and customer_name:

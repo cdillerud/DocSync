@@ -886,6 +886,7 @@ async def get_pilot_documents(
                 "bc_prod_validation": 1,
                 "spiro_match": 1,
                 "reclassified_from": 1,
+                "so_readiness_review": 1,
             },
         )
         .sort("created_utc", -1)

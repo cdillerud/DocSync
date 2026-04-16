@@ -290,6 +290,71 @@ async def list_validation_results(
     return {"total": total, "documents": docs}
 
 
+# ── SO Readiness Review (Profile Comparison) ─────────────
+
+@router.post("/readiness-review/{doc_id}")
+async def run_readiness_review(doc_id: str):
+    """
+    Run SO Readiness Review on a single pilot document.
+    Compares extracted order against the customer's BC Prod posting profile.
+    Advisory only — never writes to BC.
+    """
+    from services.pilot_readiness_review_service import review_pilot_document
+    result = await review_pilot_document(doc_id)
+    return result
+
+
+@router.post("/readiness-review-all")
+async def run_readiness_review_all(
+    force: bool = Query(False, description="Re-review ALL docs, not just unreviewed"),
+):
+    """
+    Run SO Readiness Review on all pilot sales documents.
+    Compares each doc against the customer's BC Prod posting profile.
+    """
+    from services.pilot_readiness_review_service import review_all_pilot_documents
+    result = await review_all_pilot_documents(force=force)
+    return result
+
+
+@router.get("/readiness-review-results")
+async def list_readiness_review_results(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """
+    List pilot documents with their SO readiness review results.
+    Shows profile comparison intelligence.
+    """
+    db = get_db()
+    docs = await db.hub_documents.find(
+        {
+            "inside_sales_pilot": True,
+            "so_readiness_review": {"$exists": True, "$ne": None},
+        },
+        {
+            "_id": 0, "id": 1, "file_name": 1, "doc_type": 1,
+            "email_sender": 1, "pilot_mailbox": 1,
+            "sales_pilot_extraction": 1,
+            "so_readiness_review": 1,
+            "so_rules_evaluation": 1,
+        },
+    ).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
+
+    # Summary stats
+    statuses = {}
+    for d in docs:
+        rev = d.get("so_readiness_review") or {}
+        st = rev.get("readiness_status", "unknown")
+        statuses[st] = statuses.get(st, 0) + 1
+
+    return {
+        "total": len(docs),
+        "status_distribution": statuses,
+        "documents": docs,
+    }
+
+
 # ── Sales Corpus Validation (existing 1000+ docs) ───────────
 
 @router.post("/validate-sales-corpus")

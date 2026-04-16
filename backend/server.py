@@ -2245,6 +2245,9 @@ async def _update_standard_workflow_status(
                 }}
             )
             logger.info("[Sales Workflow] Doc %s: PILOT doc — parked at pilot_review (no BC writes)", doc_id)
+
+            # Auto-run pilot enrichment pipeline (fire-and-forget)
+            asyncio.create_task(_run_pilot_enrichment(doc_id))
             return
 
         # Step 2: Check Customer
@@ -2816,6 +2819,30 @@ async def _attempt_llm_vendor_ranking(
         # Never break the pipeline — fall through with original result
 
     return vendor_alias_result, llm_ranking_dict, workflow_event
+
+
+
+async def _run_pilot_enrichment(pid: str):
+    """Fire-and-forget: run BC validation, Spiro match, SO rules, readiness review on a pilot doc."""
+    try:
+        logger.info("[Pilot Enrichment] Starting auto-enrichment for %s", pid[:8])
+
+        from services.bc_prod_validator import validate_document_against_bc
+        await validate_document_against_bc(pid)
+
+        from services.spiro_service import match_document_to_spiro
+        await match_document_to_spiro(pid)
+
+        from services.so_rules_engine import evaluate_sales_order
+        await evaluate_sales_order(pid)
+
+        from services.pilot_readiness_review_service import review_pilot_document
+        await review_pilot_document(pid)
+
+        logger.info("[Pilot Enrichment] Completed auto-enrichment for %s", pid[:8])
+    except Exception as e:
+        logger.warning("[Pilot Enrichment] Error enriching %s: %s", pid[:8], e)
+
 
 
 async def _internal_intake_document(

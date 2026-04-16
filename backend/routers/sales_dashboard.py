@@ -109,6 +109,36 @@ async def _assess_readiness(doc: dict) -> dict:
         if vc and "gamer" not in vc.lower():
             customer_name = vc
 
+    # Bridge: inherit from batch parent (split docs like _doc1, _doc2)
+    if not customer_no and not customer_name and doc.get("batch_parent_id"):
+        try:
+            parent = await db.hub_documents.find_one(
+                {"id": doc["batch_parent_id"]},
+                {"_id": 0, "vendor_canonical": 1, "matched_customer_no": 1,
+                 "sales_pilot_extraction": 1, "bc_prod_validation": 1,
+                 "spiro_match": 1, "extracted_fields": 1}
+            )
+            if parent:
+                p_ext = parent.get("sales_pilot_extraction") or {}
+                p_ef = parent.get("extracted_fields") or {}
+                p_bc = (parent.get("bc_prod_validation") or {}).get("customer_match") or {}
+                p_spiro = (parent.get("spiro_match") or {}).get("company_match") or {}
+                customer_name = (
+                    p_ext.get("customer_name") or p_ef.get("customer") or p_ef.get("customer_name")
+                    or parent.get("vendor_canonical") or ""
+                )
+                customer_no = (
+                    parent.get("matched_customer_no")
+                    or (p_bc.get("bc_customer_no") if p_bc.get("found") else "")
+                    or p_spiro.get("external_id") or ""
+                )
+                if customer_name and "gamer" in customer_name.lower():
+                    customer_name = ""
+                if customer_no and customer_no.upper() in ("GAMER", "GAMERPA", "GAMER1"):
+                    customer_no = ""
+        except Exception:
+            pass
+
     # Skip Gamer as customer (Gamer is the seller)
     if customer_no and customer_no.upper() in ("GAMER", "GAMERPA", "GAMER1"):
         customer_no = ""

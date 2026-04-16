@@ -37,6 +37,35 @@ async def review_pilot_document(doc_id: str) -> Dict[str, Any]:
     ef = doc.get("extracted_fields") or {}
     nf = doc.get("normalized_fields") or {}
 
+    # ---- Skip vendor docs (Spiro-designated vendors are not customers) ----
+    spiro = doc.get("spiro_match") or {}
+    spiro_cm = spiro.get("company_match") or {}
+    spiro_rel = (spiro_cm.get("relationship_type") or "").lower()
+    if spiro_rel == "vendor":
+        result = {
+            "readiness_status": "not_applicable",
+            "confidence": 1.0,
+            "summary": f"{spiro_cm.get('name', 'Company')} is a Vendor per Spiro CRM — not a customer order",
+            "blocking_issues": [],
+            "warnings": [],
+            "unusual_patterns": [],
+            "profile_matches": [],
+            "recommended_next_step": "Route to purchasing/vendor management",
+            "pilot_context": {
+                "customer_name": ext.get("customer_name"),
+                "customer_no": None,
+                "profile_found": False,
+                "spiro_relationship": "vendor",
+                "spiro_company": spiro_cm.get("name"),
+                "spiro_isr": spiro_cm.get("assigned_isr"),
+            },
+        }
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {"so_readiness_review": result}},
+        )
+        return result
+
     # ---- Resolve customer ----
     customer_name = ext.get("customer_name") or ef.get("customer") or nf.get("customer")
     customer_no = (

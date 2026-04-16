@@ -69,6 +69,48 @@ async def evaluate_sales_order(doc_id: str) -> Dict[str, Any]:
     # Build the order context
     ctx = _build_order_context(doc, ef, nf, ext, line_items, bc_val, spiro)
 
+    # ── HARD GATE: Spiro-designated Vendor is NOT a customer ──
+    spiro_cm = spiro.get("company_match") or {}
+    spiro_rel = (spiro_cm.get("relationship_type") or "").lower()
+    if spiro_rel == "vendor":
+        result = {
+            "document_id": doc_id,
+            "evaluated_at": datetime.now(timezone.utc).isoformat(),
+            "stage": "Not a Sales Order",
+            "compliance_status": "Not Applicable",
+            "blocking_issues": [f"Spiro designates '{spiro_cm.get('name', '?')}' as Vendor — this company supplies TO Gamer, not a customer"],
+            "required_controls_present": [],
+            "required_controls_missing": [],
+            "business_rules_triggered": ["SPIRO GATE: Company is a vendor/supplier per CRM, not a customer placing orders"],
+            "operational_risks": ["Document is from a vendor — may be order confirmation, spec sheet, or supply chain doc"],
+            "recommended_next_action": "Route to purchasing/vendor management — not a sales order",
+            "why": f"{spiro_cm.get('name', 'Company')} is designated as Vendor in Spiro CRM (ISR: {spiro_cm.get('assigned_isr', '?')}). Vendor documents are supply-side, not customer orders.",
+            "confidence": "High",
+            "spiro_context": {
+                "relationship_type": spiro_cm.get("relationship_type"),
+                "spiro_name": spiro_cm.get("name"),
+                "assigned_isr": spiro_cm.get("assigned_isr"),
+                "external_id": spiro_cm.get("external_id"),
+            },
+            "order_context": {
+                "customer": ctx.get("customer"),
+                "customer_no": ctx.get("customer_no"),
+                "po_number": ctx.get("po_number"),
+                "order_number": ctx.get("order_number"),
+                "status": ctx.get("status"),
+                "amount": ctx.get("amount"),
+                "line_count": ctx.get("line_count"),
+                "is_drop_ship": ctx.get("is_drop_ship"),
+                "has_po_attachment": ctx.get("has_po_attachment"),
+            },
+        }
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {"so_rules_evaluation": result}},
+        )
+        logger.info("[SORulesEngine] doc=%s SPIRO GATE: vendor '%s' — not a sales order", doc_id[:8], spiro_cm.get("name"))
+        return result
+
     # ── HARD GATE: Gamer is NEVER the customer on a Sales Order ──
     # If customer resolves to Gamer, this is an inbound vendor/purchase document.
     customer = (ctx.get("customer") or "").lower()

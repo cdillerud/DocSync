@@ -133,6 +133,7 @@ async def smart_reclassify_pilot_docs(
             "_id": 0, "id": 1, "file_name": 1, "doc_type": 1,
             "email_subject": 1, "email_sender": 1,
             "sales_pilot_extraction": 1, "reclassified_from": 1,
+            "spiro_match": 1,
         },
     ).to_list(500)
 
@@ -158,6 +159,39 @@ async def smart_reclassify_pilot_docs(
         # ── Skip already-reclassified docs ──
         if doc.get("reclassified_from"):
             results["kept_as_sales"] += 1
+            continue
+
+        # ── SPIRO VENDOR GATE: Docs from Spiro-designated vendors are not customer POs ──
+        spiro = doc.get("spiro_match") or {}
+        spiro_cm = spiro.get("company_match") or {}
+        spiro_rel = (spiro_cm.get("relationship_type") or "").lower()
+        if spiro_rel == "vendor" and doc.get("doc_type") in (
+            "SALES_INVOICE", "Sales_Order", "Order_Confirmation",
+        ):
+            action = {
+                "doc_id": doc_id,
+                "file_name": filename,
+                "action": "reclassified",
+                "old_type": doc.get("doc_type"),
+                "new_type": "Vendor_Document",
+                "rule": "spiro_vendor",
+                "reason": f"Spiro designates '{spiro_cm.get('name', '?')}' as Vendor — not a customer PO",
+                "quality_pct": quality_pct,
+            }
+            if not dry_run:
+                await db.hub_documents.update_one(
+                    {"id": doc_id},
+                    {"$set": {
+                        "doc_type": "Vendor_Document",
+                        "reclassified_from": doc.get("doc_type"),
+                        "reclassified_by": "pilot_smart_reclassifier",
+                        "reclassified_rule": "spiro_vendor",
+                        "reclassified_reason": action["reason"],
+                        "reclassified_at": now,
+                    }},
+                )
+            results["reclassified"] += 1
+            results["actions"].append(action)
             continue
 
         # ── HARD GATE: Gamer is never the customer on a Sales Order ──

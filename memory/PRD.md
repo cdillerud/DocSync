@@ -637,3 +637,27 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
   4. **Stage determination**: Draft/Open docs stay as "Draft / Open" with guidance. Only hard blockers (e.g., Gamer-is-customer, reclassification needed) push to Exception.
   5. **Compliance**: Draft/Open docs with PO + customer identified → "Conditionally Compliant" (can proceed to SO creation).
 - **Expected impact**: Most pilot docs should now show "Draft / Open" + "Conditionally Compliant" with clear next-action guidance, instead of being dumped into exceptions.
+
+
+## Pilot BC Prod Profile Comparison (2026-04-15)
+- **Service**: `services/pilot_readiness_review_service.py` — bridges pilot docs with SO Readiness Reviewer + customer posting profiles
+- **Endpoints**: `POST /api/inside-sales-pilot/readiness-review/{doc_id}`, `POST /readiness-review-all`, `GET /readiness-review-results`
+- **Resolution chain**: customer_no from extraction → BC validation → Spiro external_id → vendor_canonical → fuzzy name → bc_reference_cache bridge
+- **Validation gate**: Rejects false profile matches by verifying customer name overlap (first-word comparison)
+- **Results**: 10/37 docs with accurate BC Prod profiles (Giovanni→GIOVANN, Herdez→HERDEZ, Ortho→ORTHO)
+- **Intelligence**: "Order value within typical range", "New ship-to address detected", "Item matches customer history"
+- Advisory only — never writes to BC
+
+## Spiro Vendor Gate (2026-04-15)
+- **Problem**: Docs from Spiro-designated Vendor companies (Owens, Phoenix, Ball Corp, Aptar, etc.) were entering the sales pipeline as customer POs. These companies are suppliers TO Gamer, not customers ordering FROM Gamer.
+- **Fix**: Added Spiro `relationship_type` check to three services:
+  1. **Reclassifier**: Vendor-company docs with SALES_INVOICE type → reclassified to Vendor_Document
+  2. **SO Rules Engine**: Vendor docs → "Not a Sales Order" stage with routing guidance
+  3. **Readiness Review**: Vendor docs → "not_applicable" with vendor context
+- **Impact**: 3 vendor docs reclassified, pipeline reduced from 37 → 36 genuine sales docs
+- **ISR context**: Jon Hawkes handles all vendor relationships (0 opportunities, 43% in BC) — vendor docs are supply-side communications
+
+## Status Normalization Fix (2026-04-15)
+- **Root cause**: `_normalize_status()` in `so_rules_engine.py` returned raw status strings for unrecognized values (e.g., "captured", "extracted"). These fell through all stage checks to the final "Exception / Needs Review" return.
+- **Fix**: Added 10+ hub internal statuses to the mapping (captured, extracted, classified, ingested, processing, queued, new, pending → Draft/Open; exception, failed, error → Exception). Unrecognized statuses now default to "Draft / Open" instead of raw passthrough.
+- **Impact**: All 37 docs moved from "Exception / Needs Review" to "Draft / Open"

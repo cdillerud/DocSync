@@ -66,11 +66,54 @@ def _assess_readiness(doc: dict) -> dict:
     warnings = []
     blocking = []
 
-    # Customer resolution
+    # Customer resolution — check all available data sources
     customer_no = (nf.get("bc_customer_no") or nf.get("customer_number")
-                   or ef.get("customer_number") or "")
+                   or ef.get("customer_number")
+                   or doc.get("matched_customer_no") or doc.get("customer_no")
+                   or "")
+
+    # Bridge: BC prod validation customer match
+    if not customer_no:
+        bc_val = doc.get("bc_prod_validation") or {}
+        bc_cm = bc_val.get("customer_match") or {}
+        if bc_cm.get("found") and bc_cm.get("bc_customer_no"):
+            customer_no = bc_cm["bc_customer_no"]
+
+    # Bridge: Spiro match external_id (this IS the BC customer number)
+    if not customer_no:
+        spiro = doc.get("spiro_match") or {}
+        spiro_cm = spiro.get("company_match") or {}
+        if spiro_cm.get("external_id"):
+            customer_no = spiro_cm["external_id"]
+
     customer_name = (nf.get("customer_name") or ef.get("customer_name")
-                     or ef.get("company_name") or doc.get("vendor_name") or "")
+                     or ef.get("customer") or ef.get("company_name")
+                     or doc.get("customer_extracted") or doc.get("vendor_name") or "")
+
+    # Bridge: pilot extraction customer name
+    if not customer_name:
+        pilot_ext = doc.get("sales_pilot_extraction") or {}
+        customer_name = pilot_ext.get("customer_name") or ""
+
+    # Bridge: Spiro company name
+    if not customer_name:
+        spiro = doc.get("spiro_match") or {}
+        spiro_cm = spiro.get("company_match") or {}
+        if spiro_cm.get("name"):
+            customer_name = spiro_cm["name"]
+
+    # Bridge: vendor_canonical (for sales docs, this is often the customer)
+    if not customer_name:
+        vc = doc.get("vendor_canonical") or ""
+        if vc and "gamer" not in vc.lower():
+            customer_name = vc
+
+    # Skip Gamer as customer (Gamer is the seller)
+    if customer_no and customer_no.upper() in ("GAMER", "GAMERPA", "GAMER1"):
+        customer_no = ""
+    if customer_name and "gamer" in customer_name.lower():
+        customer_name = ""
+
     if not customer_no:
         blocking.append("Customer not resolved")
 

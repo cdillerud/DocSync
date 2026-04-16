@@ -61,6 +61,20 @@ async def validate_document_against_bc(doc_id: str) -> Dict[str, Any]:
         or doc.get("customer_no")
         or nf.get("customer_no")
     )
+
+    # Guard: if customer resolved as Gamer, clear it (Gamer is the seller)
+    if customer_no and customer_no.upper() in ("GAMER", "GAMERPA", "GAMER1"):
+        customer_no = None
+    if customer_name and "gamer" in customer_name.lower():
+        # Try to use the email sender entity instead
+        sender = doc.get("email_sender") or ""
+        if sender and "@" in sender:
+            domain = sender.split("@")[1].split(".")[0]
+            if domain.lower() not in ("gamerpackaging", "gamer", "gmail", "outlook", "hotmail", "yahoo"):
+                customer_name = domain.replace("-", " ").replace("_", " ").title()
+            else:
+                customer_name = None
+
     result["customer_match"] = await _check_customer(db, customer_name, customer_no)
     result["checks_total"] += 1
     if result["customer_match"].get("found"):
@@ -101,9 +115,10 @@ async def validate_document_against_bc(doc_id: str) -> Dict[str, Any]:
 
     # ── 4. Amount Range Check ───────────────────────────────
     amount = (
-        nf.get("amount_float")
-        or ef.get("total_amount")
+        doc.get("amount_float")  # Main pipeline's top-level amount
         or doc.get("total_amount")
+        or nf.get("amount_float") or nf.get("amount")
+        or ef.get("total_amount") or ef.get("amount") or ef.get("grand_total")
     )
     if amount and result["customer_match"].get("bc_customer_no"):
         result["amount_check"] = await _check_amount_range(
@@ -473,19 +488,23 @@ async def _check_amount_range(
 # BATCH VALIDATION
 # ─────────────────────────────────────────────────────────────
 
-async def validate_all_pilot_documents() -> Dict[str, Any]:
-    """Run BC Production validation on all pilot documents that haven't been validated yet."""
+async def validate_all_pilot_documents(force: bool = False) -> Dict[str, Any]:
+    """Run BC Production validation on all pilot documents.
+
+    Args:
+        force: If True, re-validates ALL pilot docs (not just unvalidated ones).
+    """
     db = get_db()
+    query: Dict[str, Any] = {"inside_sales_pilot": True}
+    if not force:
+        query["$or"] = [
+            {"bc_prod_validation": {"$exists": False}},
+            {"bc_prod_validation": None},
+        ]
+
     docs = await db.hub_documents.find(
-        {
-            "inside_sales_pilot": True,
-            "$or": [
-                {"bc_prod_validation": {"$exists": False}},
-                {"bc_prod_validation": None},
-            ],
-        },
-        {"_id": 0, "id": 1},
-    ).to_list(200)
+        query, {"_id": 0, "id": 1}
+    ).to_list(500)
 
     results = {"total": len(docs), "validated": 0, "errors": 0, "scores": []}
     for doc in docs:

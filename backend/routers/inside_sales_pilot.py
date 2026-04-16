@@ -237,13 +237,15 @@ async def validate_single_document(doc_id: str):
 
 
 @router.post("/validate-all")
-async def validate_all_documents():
+async def validate_all_documents(
+    force: bool = Query(False, description="Re-validate ALL docs, not just unvalidated"),
+):
     """
-    Run BC Production cross-validation on all pilot documents
-    that haven't been validated yet.
+    Run BC Production cross-validation on all pilot documents.
+    Set force=true to re-validate docs that already have results.
     """
     from services.bc_prod_validator import validate_all_pilot_documents
-    result = await validate_all_pilot_documents()
+    result = await validate_all_pilot_documents(force=force)
     return result
 
 

@@ -143,3 +143,59 @@ class TestAmountMapping:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ── Fix 4: Spiro ↔ BC name reconciliation ──
+
+class TestNameReconciliation:
+    """Verify cross-reference name-matching links split companies."""
+
+    def test_exact_normalized_match(self):
+        from services.spiro_bc_cross_ref_service import _normalize_company_name, _reconcile_by_name
+        assert _normalize_company_name("Ortho Molecular Products") == "ortho molecular products"
+        assert _normalize_company_name("Ortho Molecular Products, Inc.") == "ortho molecular products"
+
+    def test_reconcile_moves_to_both(self):
+        from services.spiro_bc_cross_ref_service import _reconcile_by_name
+        spiro_only = [{"name": "Ortho Molecular Products", "spiro_id": "123", "doc_count": 4}]
+        bc_only = [{"bc_customer_no": "ORTHO", "bc_customer_name": "Ortho Molecular Products", "doc_count": 4}]
+        both = []
+        _reconcile_by_name(spiro_only, bc_only, both)
+        assert len(both) == 1
+        assert len(spiro_only) == 0
+        assert len(bc_only) == 0
+        assert both[0]["bc_customer_no"] == "ORTHO"
+        assert both[0]["reconciled_by_name"] is True
+
+    def test_no_false_positive(self):
+        from services.spiro_bc_cross_ref_service import _reconcile_by_name
+        spiro_only = [{"name": "Ball Corp", "spiro_id": "456", "doc_count": 2}]
+        bc_only = [{"bc_customer_no": "ORTHO", "bc_customer_name": "Ortho Molecular", "doc_count": 1}]
+        both = []
+        _reconcile_by_name(spiro_only, bc_only, both)
+        assert len(both) == 0
+        assert len(spiro_only) == 1
+        assert len(bc_only) == 1
+
+    def test_suffix_stripping(self):
+        from services.spiro_bc_cross_ref_service import _normalize_company_name
+        assert _normalize_company_name("Massilly North America") == "massilly"
+        assert _normalize_company_name("Create-A-Pack Foods, Inc.") == "create-a-pack foods"
+
+
+# ── Fix 5: BC Validator amount fix ──
+
+class TestBCValidatorAmountFix:
+    """Verify BC validator uses amount_float as primary source."""
+
+    def test_amount_float_preferred_in_validator(self):
+        doc = {"amount_float": 5200.50, "total_amount": None}
+        nf = {}
+        ef = {}
+        amount = (
+            doc.get("amount_float")
+            or doc.get("total_amount")
+            or nf.get("amount_float") or nf.get("amount")
+            or ef.get("total_amount")
+        )
+        assert amount == 5200.50

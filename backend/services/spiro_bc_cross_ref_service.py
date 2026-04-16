@@ -18,6 +18,81 @@ from services.spiro_service import SPIRO_ENABLED, search_company, get_company_op
 
 logger = logging.getLogger(__name__)
 
+def _normalize_company_name(name: str) -> str:
+    """Normalize a company name for fuzzy matching."""
+    import re as _re
+    if not name:
+        return ""
+    n = name.lower().strip()
+    # Strip common suffixes
+    for suffix in [", inc.", " inc.", " inc", ", llc", " llc", " ltd",
+                   " corp", " co.", " co", " s.a.", " sa de cv", " de cv",
+                   " north america", " na"]:
+        n = n.replace(suffix, "")
+    # Remove punctuation and extra whitespace
+    n = _re.sub(r'[.,;:()\[\]\'\"]+', ' ', n)
+    n = _re.sub(r'\s+', ' ', n).strip()
+    return n
+
+
+def _reconcile_by_name(
+    spiro_only: List[Dict], bc_only: List[Dict], both: List[Dict],
+) -> None:
+    """
+    Move companies from spiro_only + bc_only → both when their names match.
+    Mutates the lists in-place.
+    """
+    if not spiro_only or not bc_only:
+        return
+
+    matched_spiro_idxs = set()
+    matched_bc_idxs = set()
+
+    for si, sc in enumerate(spiro_only):
+        s_norm = _normalize_company_name(sc.get("name", ""))
+        if not s_norm:
+            continue
+        s_words = set(s_norm.split())
+
+        for bi, bc in enumerate(bc_only):
+            if bi in matched_bc_idxs:
+                continue
+            b_norm = _normalize_company_name(bc.get("bc_customer_name", ""))
+            if not b_norm:
+                continue
+            b_words = set(b_norm.split())
+
+            # Match if: exact normalized match, or first significant word matches
+            # and there's reasonable overlap
+            exact_match = s_norm == b_norm
+            first_word_match = (
+                s_norm.split()[0] == b_norm.split()[0]
+                and len(s_norm.split()[0]) >= 4
+            )
+            word_overlap = len(s_words & b_words) / max(len(s_words | b_words), 1)
+
+            if exact_match or (first_word_match and word_overlap >= 0.3):
+                # Link them
+                sc["bc_customer_no"] = bc.get("bc_customer_no")
+                sc["bc_customer_name"] = bc.get("bc_customer_name")
+                sc["reconciled_by_name"] = True
+                both.append(sc)
+                matched_spiro_idxs.add(si)
+                matched_bc_idxs.add(bi)
+                logger.info(
+                    "[SpiroBCCrossRef] Reconciled by name: Spiro '%s' ↔ BC '%s' (%s)",
+                    sc.get("name"), bc.get("bc_customer_name"), bc.get("bc_customer_no"),
+                )
+                break
+
+    # Remove matched entries from spiro_only and bc_only (reverse order to preserve indices)
+    for idx in sorted(matched_spiro_idxs, reverse=True):
+        spiro_only.pop(idx)
+    for idx in sorted(matched_bc_idxs, reverse=True):
+        bc_only.pop(idx)
+
+
+
 
 async def build_cross_reference_dashboard(db) -> Dict[str, Any]:
     """
@@ -105,6 +180,11 @@ async def build_cross_reference_dashboard(db) -> Dict[str, Any]:
     for bno, bc in bc_customers.items():
         if not bc.get("spiro_id"):
             bc_only.append(bc)
+
+    # ── Name-based reconciliation pass ──
+    # Some companies appear in Spiro-only AND BC-only because no single doc
+    # has both matches. Link them by name similarity.
+    _reconcile_by_name(spiro_only, bc_only, both)
 
     # ── ISR coverage ──
     isr_stats: Dict[str, Dict[str, Any]] = {}

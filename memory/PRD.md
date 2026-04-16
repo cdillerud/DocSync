@@ -620,3 +620,20 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 ## Bug Fix: Total Amount Field Hit Rate at 0% (2026-04-15)
 - **Root cause**: `inside_sales_pilot_service.py` checked `doc.get("total_amount")` first, but the main pipeline stores amount as `amount_float` at the top level (line 3229 of `server.py`). The field `total_amount` was never set by the main pipeline for most docs.
 - **Fix**: Changed primary lookup to `doc.get("amount_float")` in both `inside_sales_pilot_service.py` and `so_rules_engine.py`. Extended fallback chain to also check `ef.get("amount")`, `ef.get("grand_total")`, `ef.get("invoice_total")`, `ef.get("net_amount")`.
+
+
+## Spiro ↔ BC Name Reconciliation (2026-04-15)
+- **Problem**: Companies like "Ortho Molecular Products" appeared in both "Spiro Only" and "BC Only" because no single document had both a Spiro match AND a BC match simultaneously. The cross-reference only linked companies when a single doc had both.
+- **Fix**: Added `_reconcile_by_name()` to `spiro_bc_cross_ref_service.py`. After building spiro_only and bc_only lists, performs a normalized name comparison (stripping suffixes like Inc/LLC/Ltd/NA, normalizing punctuation/case). Moves matched pairs from both "only" lists into the "both" list.
+- **Also fixed**: `bc_prod_validator.py` had same `doc.get("total_amount")` bug → fixed to `doc.get("amount_float")`. Added Gamer customer guard (clears Gamer-resolved customer_no, falls back to email sender domain).
+
+## SO Rules Engine — Flowchart Alignment (2026-04-15)
+- **Problem**: All 37 pilot sales docs evaluated as "Exception / Needs Review" with 32 Non-Compliant. The rules engine was treating early-stage docs (Draft/Open) the same as Released docs, pushing any missing field into a hard blocker.
+- **Root cause**: Per the user's canonical Sales Order flowchart, Draft/Open docs are at the BEGINNING of the workflow — missing cost, confirmation, picks are expected. Those are action items for later stages, not blockers.
+- **Fixes applied**:
+  1. **SO-001 (Customer PO)**: Inbound customer PO documents (filename contains "PO", "Purchase Order", etc.) now have PO control marked as "inherently satisfied" — the document itself IS the PO.
+  2. **SO-005 (Cost)**: Only blocks at Released+ stage. At Draft/Open, cost absence is informational ("will need cost entry before release").
+  3. **SO-011 (Customer resolution)**: Only blocks at Released/Posted. At Draft/Open, it's an action item ("must resolve in BC before release").
+  4. **Stage determination**: Draft/Open docs stay as "Draft / Open" with guidance. Only hard blockers (e.g., Gamer-is-customer, reclassification needed) push to Exception.
+  5. **Compliance**: Draft/Open docs with PO + customer identified → "Conditionally Compliant" (can proceed to SO creation).
+- **Expected impact**: Most pilot docs should now show "Draft / Open" + "Conditionally Compliant" with clear next-action guidance, instead of being dumped into exceptions.

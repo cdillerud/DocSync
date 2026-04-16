@@ -150,7 +150,8 @@ async def evaluate_sales_order(doc_id: str) -> Dict[str, Any]:
     # Determine stage
     stage = _determine_stage(ctx, blocking_issues, rules_triggered)
 
-    # Determine compliance
+    # Determine compliance (pass controls_present via ctx for Draft/Open logic)
+    ctx["_controls_present"] = controls_present
     compliance = _determine_compliance(blocking_issues, controls_missing, ctx)
 
     # Determine confidence
@@ -423,29 +424,45 @@ def _check_status_governance(ctx, blocking, present, missing, rules):
 
 
 def _check_customer_po(ctx, blocking, present, missing, rules):
-    """SO-001: Customer PO control."""
+    """SO-001: Customer PO control.
+
+    Per the flowchart: "Customer PO attached in Documents fact box?"
+    "Attach customer PO — Order is non-compliant until attachment is present"
+
+    For inbound customer POs (the document IS a PO from the customer),
+    the PO control is inherently satisfied — the document itself is the evidence.
+    """
     if ctx["po_number"]:
         present.append(f"Customer PO: {ctx['po_number']}")
-    else:
-        missing.append("Customer PO")
-        # Only block if this appears to be a GPI-originated sales order
-        # Inbound vendor docs may not have a separate PO number — the doc itself IS the PO
-        is_inbound = (ctx.get("customer") or "").lower().startswith("gamer")
-        file_name = (ctx.get("file_name") or "").lower()
-        is_vendor_confirmation = any(ind in file_name for ind in [
-            "confirmation", "order ack", "ord_ack",
-            "_ack.", "_ack_", "acknowledg", "proforma",
-        ])
-        doc_type = ctx.get("doc_type", "")
-        is_vendor_type = doc_type in ("Vendor_Document", "Purchase_Order")
-        if is_inbound or is_vendor_confirmation or is_vendor_type:
-            rules.append("SO-001: Customer PO not extracted — but this appears to be an inbound vendor document (PO implicit)")
-        else:
-            blocking.append("SO-001: Customer PO missing — required control absent, Non-Compliant unless exception evidence exists")
-            rules.append("SO-001: Customer PO attachment missing → Required Controls Missing = Customer PO, Compliance = Non-Compliant")
+        rules.append("SO-001: Customer PO present")
+        return
 
-    if not ctx["has_po_attachment"]:
-        rules.append("SO-001: No evidence of PO attachment in Documents fact box")
+    # Check if the document itself IS a customer PO (inbound order)
+    file_name = (ctx.get("file_name") or "").lower()
+    doc_type = ctx.get("doc_type", "")
+    is_inbound_po = any(ind in file_name for ind in [
+        "purchase order", "purchase-order", "purchaseorder",
+        "po ", "po_", "po-", "po0", "pmpo",
+    ]) or doc_type in ("Sales_Order", "Order_Confirmation")
+
+    # Detect vendor confirmations (not customer POs)
+    is_vendor_doc = any(ind in file_name for ind in [
+        "confirmation", "order ack", "ord_ack",
+        "_ack.", "_ack_", "acknowledg", "proforma",
+    ]) or doc_type in ("Vendor_Document", "Purchase_Order")
+
+    if is_inbound_po and not is_vendor_doc:
+        present.append("Customer PO: document IS the customer PO")
+        rules.append("SO-001: Inbound customer PO document — PO control inherently satisfied")
+        return
+
+    missing.append("Customer PO")
+    if is_vendor_doc:
+        rules.append("SO-001: Vendor document — PO control not applicable")
+    else:
+        # Only block if this is clearly a non-PO sales document
+        blocking.append("SO-001: Customer PO missing — required control absent")
+        rules.append("SO-001: Customer PO not found — non-compliant until PO is attached")
 
 
 def _check_line_items(ctx, blocking, present, missing, rules, risks):
@@ -478,16 +495,17 @@ def _check_line_items(ctx, blocking, present, missing, rules, risks):
 def _check_cost_rules(ctx, blocking, present, missing, rules):
     """SO-005: Service item cost rule.
 
-    Only applies to GPI-created Sales Orders where cost should be present.
-    Does NOT apply to inbound vendor documents (POs, order confirmations)
-    where cost naturally lives on the BC Purchase Order, not the PDF.
+    Per the flowchart, cost is relevant only after the SO is created and
+    released in BC. For inbound customer POs (Draft/Open stage), cost
+    wouldn't be on the PDF — it lives on the BC Sales Order.
+
+    Only blocks at Released+ stage. At Draft/Open, it's informational only.
     """
     lines = ctx["inventory_lines"]
     if not lines:
         return
 
     # Detect if this is an inbound vendor document vs a GPI sales order
-    # Inbound vendor docs: order confirmations, vendor POs, invoices FROM vendors
     file_name = (ctx.get("file_name") or "").lower()
     is_vendor_doc = any(ind in file_name for ind in [
         "confirmation", "order ack", "ord_ack", "vendor", "supplier",
@@ -495,7 +513,6 @@ def _check_cost_rules(ctx, blocking, present, missing, rules):
     ])
     doc_type = ctx.get("doc_type", "")
     is_vendor_type = doc_type in ("Vendor_Document", "Purchase_Order")
-    # If the customer resolved as "GAMER" — this is a vendor sending TO us, not our SO
     is_inbound = (ctx.get("customer") or "").lower().startswith("gamer")
 
     if is_vendor_doc or is_inbound or is_vendor_type:
@@ -509,8 +526,10 @@ def _check_cost_rules(ctx, blocking, present, missing, rules):
     ]
 
     if lines_needing_cost and ctx["lines_with_cost"] == 0:
-        blocking.append("SO-005: Service/item lines (non drop ship) with missing cost — business rule violation")
-        rules.append("SO-005: Line is service item AND not drop ship AND cost missing → business rule violation")
+        # Only block at Released+ stage — at Draft/Open, cost hasn't been entered yet
+        if ctx["status"] in ("Released", "Posted", "Shipped / Ready to Invoice"):
+            blocking.append("SO-005: Service/item lines (non drop ship) with missing cost — business rule violation")
+        rules.append("SO-005: Line items have no cost — will need cost entry before release")
 
 
 def _check_price_rules(ctx, blocking, rules, risks):
@@ -567,7 +586,12 @@ def _check_pick_rules(ctx, blocking, rules):
 
 
 def _check_readiness(ctx, blocking, present, missing, rules):
-    """SO-011: Shipping and invoicing readiness."""
+    """SO-011: Shipping and invoicing readiness.
+
+    Per flowchart: only check shipping/invoicing gates at Released+ stage.
+    Customer resolution is needed before release, but at Draft/Open it's
+    an action item, not a blocker.
+    """
     if ctx["shipped"]:
         present.append("Shipment evidence detected")
         rules.append("SO-011: Shipped but final readiness controls not fully evidenced → stage = Shipped / Ready to Invoice, NOT Ready to Post Invoice")
@@ -576,8 +600,11 @@ def _check_readiness(ctx, blocking, present, missing, rules):
 
     if not ctx["has_customer_resolved"]:
         missing.append("Customer not resolved in BC")
+        # Only block at Released+ — at Draft/Open, it's a next-step action
         if ctx["status"] in ("Released", "Posted"):
             blocking.append("Customer not resolved in BC — cannot post")
+        elif ctx["status"] in ("Open", "Draft / Open"):
+            rules.append("SO-011: Customer must be resolved in BC before release (action needed)")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -585,27 +612,41 @@ def _check_readiness(ctx, blocking, present, missing, rules):
 # ─────────────────────────────────────────────────────────────
 
 def _determine_stage(ctx, blocking, rules) -> str:
-    """Determine the canonical workflow stage using SO rule precedence."""
+    """Determine the canonical workflow stage using the flowchart.
+
+    Flowchart stages (in order):
+      Start → Create SO → Enter Lines → PO Attached? → Review Completeness
+      → Send Approval → Status (Released/Pending Approval/Pending Prepayment)
+      → Released? → Send Confirmation → Warehouse? → Drop Ship? → Freight?
+      → Shipment → Ready-to-Invoice? → Post Invoice → End: Posted
+
+    Draft/Open docs are at the BEGINNING of the flow — they should stay
+    as Draft/Open with action guidance, not be pushed to Exception.
+    """
     status = ctx["status"]
 
     if status == "Posted":
         return "Posted"
 
-    # SO-003: Pending Approval = blocked
+    # SO-003: Pending Approval = blocked (specific stage per flowchart)
     if status == "Pending Approval":
         return "Pending Approval"
 
-    # SO-004: Pending Prepayment = blocked
+    # SO-004: Pending Prepayment = blocked (specific stage per flowchart)
     if status == "Pending Prepayment":
         return "Pending Prepayment"
 
-    # SO-002: If not Released, treat as Draft unless blocking
+    # SO-002: Not Released — at the beginning of the flowchart
+    # Per flowchart: Start → Create SO → Lines → PO? → Review → Approval
+    # These are early-stage docs. Blocking issues are action items, not exceptions.
     if status in ("Open", "Draft / Open", "Unknown"):
-        if blocking:
+        # Only go to Exception if there are HARD blockers (e.g., Gamer-is-customer)
+        hard_blockers = [b for b in blocking if "not a sales order" in b.lower() or "reclassif" in b.lower()]
+        if hard_blockers:
             return "Exception / Needs Review"
         return "Draft / Open"
 
-    # Released path — apply downstream rules in order
+    # Released path — apply downstream rules in order per flowchart
     if status == "Released":
         # Check blocking issues first
         if blocking:
@@ -639,9 +680,28 @@ def _determine_stage(ctx, blocking, rules) -> str:
 
 
 def _determine_compliance(blocking, missing, ctx) -> str:
-    """Determine compliance status."""
+    """Determine compliance status.
+
+    Per flowchart: compliance is about whether the order CAN proceed.
+    At Draft/Open, missing fields are expected — they'll be filled during
+    SO creation in BC. Only hard blockers make it Non-Compliant.
+    """
     if blocking:
         return "Non-Compliant"
+
+    # At Draft/Open, missing fields are normal — it's early stage
+    if ctx.get("status") in ("Open", "Draft / Open", "Unknown"):
+        if not missing:
+            return "Compliant"
+        # PO present + customer identified = conditionally compliant (can proceed)
+        has_po = any("Customer PO" in p for p in (ctx.get("_controls_present") or []))
+        has_customer = bool(ctx.get("customer"))
+        if has_po and has_customer:
+            return "Conditionally Compliant"
+        if has_po or has_customer:
+            return "Conditionally Compliant"
+        return "Insufficient Evidence"
+
     if missing:
         if len(missing) <= 2 and ctx.get("has_customer_resolved"):
             return "Conditionally Compliant"

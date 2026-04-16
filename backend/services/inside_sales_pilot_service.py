@@ -882,6 +882,10 @@ async def get_pilot_documents(
                 "ai_confidence": 1,
                 "workflow_status": 1,
                 "created_utc": 1,
+                "so_rules_evaluation": 1,
+                "bc_prod_validation": 1,
+                "spiro_match": 1,
+                "reclassified_from": 1,
             },
         )
         .sort("created_utc", -1)

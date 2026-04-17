@@ -1188,7 +1188,20 @@ async def get_insights_trends(days: int = Query(30, le=90)):
                 {"$and": [
                     {"$ne": [{"$ifNull": ["$vendor_canonical", None]}, None]},
                     {"$ne": ["$vendor_canonical", ""]},
+                    # Only count vendor resolution for AP-applicable doc types
+                    {"$in": [{"$ifNull": ["$doc_type", ""]}, [
+                        "AP_Invoice", "AP_INVOICE", "PurchaseInvoice", "PurchaseOrder",
+                        "Remittance", "REMITTANCE", "Credit_Memo", "CREDIT_MEMO",
+                        "Purchase_Invoice", "PURCHASE_INVOICE",
+                    ]]},
                 ]}, 1, 0
+            ]}},
+            "vendor_applicable": {"$sum": {"$cond": [
+                {"$in": [{"$ifNull": ["$doc_type", ""]}, [
+                    "AP_Invoice", "AP_INVOICE", "PurchaseInvoice", "PurchaseOrder",
+                    "Remittance", "REMITTANCE", "Credit_Memo", "CREDIT_MEMO",
+                    "Purchase_Invoice", "PURCHASE_INVOICE",
+                ]]}, 1, 0
             ]}},
         }},
         {"$sort": {"_id": 1}},
@@ -1205,7 +1218,7 @@ async def get_insights_trends(days: int = Query(30, le=90)):
             "validation_rate": round((d["validated"] / total * 100) if total > 0 else 0, 1),
             "exception_rate": round((d["exceptions"] / total * 100) if total > 0 else 0, 1),
             "ai_confidence": round((d["avg_confidence"] or 0) * 100, 1),
-            "vendor_resolve_rate": round((d["vendor_resolved"] / total * 100) if total > 0 else 0, 1),
+            "vendor_resolve_rate": round((d["vendor_resolved"] / d["vendor_applicable"] * 100) if d.get("vendor_applicable", 0) > 0 else 0, 1),
         })
 
     # Bakeoff accuracy snapshots (latest runs)

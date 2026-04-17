@@ -321,47 +321,58 @@ async def _check_order(
 
     cache = get_cache_service()
 
-    for ref in refs_to_try:
-        # Try cache service multi-search
-        if cache:
-            results = await cache.search_multi(ref, ["sales_order"])
-            if results:
-                r = results[0]
+    # Search priority: open sales_order first (preferred),
+    # then posted_sales_invoice / posted_sales_shipment (catches 6-digit
+    # order numbers for posted docs and shipment/BOL refs).
+    SALES_ENTITY_PRIORITY = [
+        ["sales_order"],
+        ["posted_sales_invoice", "posted_sales_shipment"],
+    ]
+
+    for entity_group in SALES_ENTITY_PRIORITY:
+        for ref in refs_to_try:
+            # Try cache service multi-search
+            if cache:
+                results = await cache.search_multi(ref, entity_group)
+                if results:
+                    r = results[0]
+                    return {
+                        "found": True,
+                        "bc_order_no": r.get("bc_document_no"),
+                        "bc_external_ref": r.get("bc_external_document_no"),
+                        "bc_customer_no": r.get("bc_customer_no"),
+                        "bc_customer_name": r.get("bc_customer_name"),
+                        "bc_status": r.get("bc_status"),
+                        "bc_amount": r.get("bc_amount"),
+                        "bc_entity_type": r.get("bc_entity_type"),
+                        "match_method": f"cache_multi_search:{r.get('bc_entity_type','sales_order')}",
+                        "matched_ref": ref,
+                    }
+
+            # Direct DB fallback
+            direct = await db.bc_reference_cache.find_one(
+                {
+                    "bc_entity_type": {"$in": entity_group},
+                    "$or": [
+                        {"bc_document_no": ref},
+                        {"bc_external_document_no": ref},
+                        {"bc_order_number": ref},
+                    ],
+                },
+                {"_id": 0},
+            )
+            if direct:
                 return {
                     "found": True,
-                    "bc_order_no": r.get("bc_document_no"),
-                    "bc_external_ref": r.get("bc_external_document_no"),
-                    "bc_customer_no": r.get("bc_customer_no"),
-                    "bc_customer_name": r.get("bc_customer_name"),
-                    "bc_status": r.get("bc_status"),
-                    "bc_amount": r.get("bc_amount"),
-                    "match_method": "cache_multi_search",
+                    "bc_order_no": direct.get("bc_document_no"),
+                    "bc_external_ref": direct.get("bc_external_document_no"),
+                    "bc_customer_no": direct.get("bc_customer_no"),
+                    "bc_status": direct.get("bc_status"),
+                    "bc_amount": direct.get("bc_amount"),
+                    "bc_entity_type": direct.get("bc_entity_type"),
+                    "match_method": f"direct_cache_search:{direct.get('bc_entity_type','sales_order')}",
                     "matched_ref": ref,
                 }
-
-        # Direct DB fallback
-        direct = await db.bc_reference_cache.find_one(
-            {
-                "bc_entity_type": "sales_order",
-                "$or": [
-                    {"bc_document_no": ref},
-                    {"bc_external_document_no": ref},
-                    {"bc_order_number": ref},
-                ],
-            },
-            {"_id": 0},
-        )
-        if direct:
-            return {
-                "found": True,
-                "bc_order_no": direct.get("bc_document_no"),
-                "bc_external_ref": direct.get("bc_external_document_no"),
-                "bc_customer_no": direct.get("bc_customer_no"),
-                "bc_status": direct.get("bc_status"),
-                "bc_amount": direct.get("bc_amount"),
-                "match_method": "direct_cache_search",
-                "matched_ref": ref,
-            }
 
     # Try live BC API as last resort (read-only)
     try:
@@ -382,13 +393,17 @@ async def _check_order(
     except Exception as e:
         logger.debug("[BCProdValidation] Live BC order search failed: %s", e)
 
-    # Last resort: customer-scoped search in cache
+    # Last resort: customer-scoped search in cache (across all sales entities)
     if bc_customer_no:
         for ref in refs_to_try:
             safe_ref = re.escape(ref)
             scoped = await db.bc_reference_cache.find_one(
                 {
-                    "bc_entity_type": "sales_order",
+                    "bc_entity_type": {"$in": [
+                        "sales_order",
+                        "posted_sales_invoice",
+                        "posted_sales_shipment",
+                    ]},
                     "$and": [
                         {"$or": [
                             {"bc_customer_no": bc_customer_no},
@@ -410,7 +425,8 @@ async def _check_order(
                     "bc_customer_no": scoped.get("bc_customer_no"),
                     "bc_status": scoped.get("bc_status"),
                     "bc_amount": scoped.get("bc_amount"),
-                    "match_method": "customer_scoped_search",
+                    "bc_entity_type": scoped.get("bc_entity_type"),
+                    "match_method": f"customer_scoped_search:{scoped.get('bc_entity_type','sales_order')}",
                     "matched_ref": ref,
                 }
 

@@ -234,6 +234,8 @@ export default function InventoryImportsPage() {
   const [selectedId, setSelectedId] = useState(null);
   const [selectedStaging, setSelectedStaging] = useState(null);
   const [learnSummary, setLearnSummary] = useState(null);
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillResult, setBackfillResult] = useState(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -284,6 +286,24 @@ export default function InventoryImportsPage() {
     finally { setUploading(false); e.target.value = ''; }
   };
 
+  const handleBackfill = async (dryRun) => {
+    if (!dryRun && !window.confirm(
+      "Scan all pilot-ingested XLS/CSV files in hub_documents and stage any that classify as inventory. " +
+      "Staging rows will require human approval before hitting the ledger. Continue?"
+    )) return;
+    setBackfilling(true); setBackfillResult(null);
+    try {
+      const res = await fetch(`${API}/api/inventory-xls/backfill-pilot-docs?dry_run=${dryRun}&limit=200`, { method: 'POST' });
+      const data = await res.json();
+      setBackfillResult(data);
+      if (!dryRun) await fetchAll();
+    } catch (err) {
+      setBackfillResult({ error: String(err) });
+    } finally {
+      setBackfilling(false);
+    }
+  };
+
   return (
     <div className="space-y-6" data-testid="inventory-imports-page">
       <div className="flex items-center justify-between">
@@ -300,6 +320,26 @@ export default function InventoryImportsPage() {
           <button data-testid="refresh-btn" onClick={fetchAll} className="p-2 rounded border border-border hover:bg-muted" title="Refresh">
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
+          <button
+            data-testid="backfill-dry-btn"
+            onClick={() => handleBackfill(true)}
+            disabled={backfilling}
+            className="px-3 py-2 rounded-md border border-amber-500/40 text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 text-sm disabled:opacity-50 flex items-center gap-2"
+            title="Dry run: classify all pilot XLS but don't stage"
+          >
+            <Sparkles className="h-4 w-4" />
+            {backfilling ? 'Scanning…' : 'Scan Pilot XLS'}
+          </button>
+          <button
+            data-testid="backfill-btn"
+            onClick={() => handleBackfill(false)}
+            disabled={backfilling}
+            className="px-3 py-2 rounded-md border border-sky-500/40 text-sky-300 bg-sky-500/10 hover:bg-sky-500/20 text-sm disabled:opacity-50 flex items-center gap-2"
+            title="Classify + stage all pilot XLS files"
+          >
+            <Database className="h-4 w-4" />
+            Backfill Pilot XLS
+          </button>
           <label className="flex items-center gap-2 px-3 py-2 rounded-md border border-emerald-500/40 text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 cursor-pointer text-sm">
             <UploadCloud className="h-4 w-4" />
             {uploading ? 'Uploading…' : 'Upload XLS'}
@@ -307,6 +347,56 @@ export default function InventoryImportsPage() {
           </label>
         </div>
       </div>
+
+      {backfillResult && (
+        <div className="bg-card border border-border rounded-lg p-4 space-y-2" data-testid="backfill-result">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold">Backfill Result</h3>
+            <button onClick={() => setBackfillResult(null)} className="text-xs text-muted-foreground hover:text-foreground">dismiss</button>
+          </div>
+          {backfillResult.error ? (
+            <div className="text-sm text-red-400">{backfillResult.error}</div>
+          ) : (
+            <>
+              <div className="grid grid-cols-6 gap-3 text-center">
+                <div>
+                  <div className="text-xl font-bold">{backfillResult.scanned}</div>
+                  <div className="text-[10px] uppercase text-muted-foreground">Scanned</div>
+                </div>
+                <div>
+                  <div className="text-xl font-bold text-emerald-400">{backfillResult.classified_inventory}</div>
+                  <div className="text-[10px] uppercase text-muted-foreground">Inventory</div>
+                </div>
+                <div>
+                  <div className="text-xl font-bold text-sky-400">{backfillResult.staged}</div>
+                  <div className="text-[10px] uppercase text-muted-foreground">Staged</div>
+                </div>
+                <div>
+                  <div className="text-xl font-bold text-amber-400">{backfillResult.already_staged}</div>
+                  <div className="text-[10px] uppercase text-muted-foreground">Dup / Prior</div>
+                </div>
+                <div>
+                  <div className="text-xl font-bold text-muted-foreground">{backfillResult.skipped_not_inventory}</div>
+                  <div className="text-[10px] uppercase text-muted-foreground">Not Inventory</div>
+                </div>
+                <div>
+                  <div className="text-xl font-bold text-red-400">{backfillResult.errors}</div>
+                  <div className="text-[10px] uppercase text-muted-foreground">Errors</div>
+                </div>
+              </div>
+              {Object.keys(backfillResult.by_classification || {}).length > 0 && (
+                <div className="flex flex-wrap gap-2 pt-2 border-t border-border/50">
+                  {Object.entries(backfillResult.by_classification).map(([k, v]) => (
+                    <span key={k} className="text-[11px] px-2 py-0.5 rounded bg-muted font-mono">
+                      {k}: <span className="font-bold">{v}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* Learning summary strip */}
       {learnSummary && learnSummary.total_learned_mappings > 0 && (

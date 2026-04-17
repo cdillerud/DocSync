@@ -255,3 +255,166 @@ async def api_reject_staging(
 async def api_learning_summary():
     db = get_db()
     return await get_learning_summary(db)
+
+
+# ── Bulk backfill of existing pilot XLS docs ──────────
+
+@router.post("/backfill-pilot-docs")
+async def backfill_pilot_docs(
+    limit: int = Query(200, ge=1, le=1000),
+    dry_run: bool = Query(False, description="If true, report classifications without staging"),
+    force_llm: bool = Query(False),
+):
+    """
+    Scan hub_documents for pilot-ingested .xlsx/.xls/.csv files that were
+    classified as SALES_INVOICE / Report by the main pipeline, run them
+    through the inventory XLS classifier, and stage any that look like
+    inventory docs.
+
+    Read-only if dry_run=true. Otherwise creates staging rows but NEVER
+    writes to the ledger (staging approval is still required).
+    """
+    import base64 as _b64
+    db = get_db()
+    q = {
+        "inside_sales_pilot": True,
+        "file_name": {"$regex": r"\.(xlsx|xls|csv)$", "$options": "i"},
+    }
+    docs = await db.hub_documents.find(
+        q,
+        {"_id": 0, "id": 1, "file_name": 1, "email_sender": 1,
+         "file_content_b64": 1, "inventory_xls_backfilled": 1},
+    ).limit(limit).to_list(limit)
+
+    results = {
+        "scanned": len(docs),
+        "classified_inventory": 0,
+        "already_staged": 0,
+        "staged": 0,
+        "skipped_not_inventory": 0,
+        "errors": 0,
+        "skipped_no_bytes": 0,
+        "by_classification": {},
+        "items": [],
+    }
+
+    for doc in docs:
+        fname = doc.get("file_name") or ""
+        b64 = doc.get("file_content_b64")
+        entry = {"doc_id": doc["id"][:12], "file": fname[:60]}
+
+        if doc.get("inventory_xls_backfilled") and not dry_run:
+            # Already processed in a prior backfill run
+            results["already_staged"] += 1
+            entry["status"] = "already_processed"
+            results["items"].append(entry)
+            continue
+
+        if not b64:
+            results["skipped_no_bytes"] += 1
+            entry["status"] = "no_bytes"
+            results["items"].append(entry)
+            continue
+
+        try:
+            raw = _b64.b64decode(b64)
+            ext = fname.lower().rsplit(".", 1)[-1]
+            if ext == "csv":
+                headers, rows = _ingestor.parse_csv(raw, fname)
+            else:
+                headers, rows = _ingestor.parse_excel(raw, fname)
+            if not headers:
+                entry["status"] = "no_headers"
+                results["errors"] += 1
+                results["items"].append(entry)
+                continue
+
+            sender = doc.get("email_sender")
+            cls = classify_xls(fname, headers=headers, sender_email=sender)
+            entry["classification"] = cls.classification
+            entry["confidence"] = cls.confidence
+            results["by_classification"][cls.classification] = \
+                results["by_classification"].get(cls.classification, 0) + 1
+
+            if cls.classification == "not_inventory":
+                results["skipped_not_inventory"] += 1
+                entry["status"] = "not_inventory"
+                results["items"].append(entry)
+                continue
+
+            results["classified_inventory"] += 1
+
+            if dry_run:
+                entry["status"] = "would_stage"
+                results["items"].append(entry)
+                continue
+
+            # Build + stage
+            sender_domain = None
+            if sender and "@" in sender:
+                sender_domain = sender.split("@", 1)[1].lower()
+
+            cm = await build_column_map(
+                db, headers=headers, sample_rows=rows[:3],
+                classification=cls.classification, sender_domain=sender_domain,
+                filename=fname, force_llm=force_llm,
+            )
+            eff_date = extract_effective_date_from_filename(fname)
+            norm = normalize_rows(
+                rows=rows, column_map=cm, classification=cls.classification,
+                filename_effective_date=eff_date,
+            )
+            import hashlib as _h
+            file_hash = _h.sha256(raw).hexdigest()
+            suggested = await suggest_customer_workspace(db, sender, fname)
+
+            stage_res = await stage_import(
+                db,
+                filename=fname,
+                file_hash=file_hash,
+                sender_email=sender,
+                classification={
+                    "classification": cls.classification,
+                    "confidence": cls.confidence,
+                    "movement_intent": cls.movement_intent,
+                    "ownership_hint": cls.ownership_hint,
+                    "signals": cls.signals,
+                    "suggested_customer_hint": cls.suggested_customer_hint,
+                },
+                column_map=cm.to_dict(),
+                normalized_rows=norm["rows"],
+                row_errors=norm["row_errors"],
+                headers=headers,
+                suggested_customer_id=(suggested or {}).get("id"),
+                filename_effective_date=eff_date,
+                source_doc_id=doc["id"],
+            )
+
+            if stage_res.get("already_staged"):
+                results["already_staged"] += 1
+                entry["status"] = "already_staged"
+                entry["staging_id"] = stage_res.get("staging_id", "")[:12]
+            else:
+                results["staged"] += 1
+                entry["status"] = "staged"
+                entry["staging_id"] = (stage_res.get("staging") or {}).get("id", "")[:12]
+                entry["rows"] = (stage_res.get("staging") or {}).get("row_count", 0)
+
+            # Mark source doc
+            await db.hub_documents.update_one(
+                {"id": doc["id"]},
+                {"$set": {
+                    "inventory_xls_backfilled": True,
+                    "inventory_xls_classification": cls.classification,
+                    "inventory_xls_staging_id": entry.get("staging_id"),
+                }},
+            )
+        except Exception as e:
+            logger.warning("[XLSBackfill] %s failed: %s", fname[:40], e)
+            results["errors"] += 1
+            entry["status"] = "error"
+            entry["error"] = str(e)[:200]
+
+        results["items"].append(entry)
+
+    return results

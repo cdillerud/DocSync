@@ -807,6 +807,23 @@ async def resolve_customer(doc: dict) -> CustomerResolution:
                 customer_name = domain.replace("-", " ").replace("_", " ").title()
                 source = source or "email_sender"
 
+    # ── Step 10.5: Customer alias lookup (learned domain → customer_no) ──
+    if not customer_no:
+        sender = doc.get("email_sender") or ""
+        if sender and "@" in sender:
+            try:
+                from services.customer_alias_service import lookup_by_sender
+                alias = await lookup_by_sender(sender)
+                if alias and alias.get("customer_no"):
+                    customer_no = alias["customer_no"]
+                    if not customer_name or customer_name == alias.get("customer_name", ""):
+                        customer_name = alias.get("customer_name") or customer_name
+                    match_method = match_method or "customer_alias"
+                    confidence = confidence or alias.get("confidence", 0.7)
+                    source = source or "customer_alias"
+            except Exception:
+                pass
+
     # ── Step 11: Batch parent inheritance ──
     if (not customer_no or not customer_name) and doc.get("batch_parent_id"):
         try:

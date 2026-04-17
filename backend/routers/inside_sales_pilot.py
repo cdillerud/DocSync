@@ -355,6 +355,39 @@ async def list_readiness_review_results(
     }
 
 
+
+# ── Customer Alias Management ───────────────────────────
+
+@router.post("/build-customer-aliases")
+async def build_customer_aliases():
+    """
+    Scan pilot docs with resolved customers and build a learned
+    email domain → BC customer number mapping.
+    """
+    from services.customer_alias_service import build_aliases_from_pilot_docs
+    return await build_aliases_from_pilot_docs()
+
+
+@router.get("/customer-aliases")
+async def list_customer_aliases(limit: int = Query(200, ge=1, le=500)):
+    """List all learned customer aliases."""
+    from services.customer_alias_service import get_all_aliases
+    aliases = await get_all_aliases(limit=limit)
+    return {"total": len(aliases), "aliases": aliases}
+
+
+@router.post("/customer-aliases/manual")
+async def add_manual_customer_alias(
+    domain: str = Query(..., description="Email domain (e.g., comar.com)"),
+    customer_no: str = Query(..., description="BC customer number (e.g., COMAR1)"),
+    customer_name: str = Query("", description="Display name"),
+):
+    """Add or override a customer alias manually."""
+    from services.customer_alias_service import add_manual_alias
+    return await add_manual_alias(domain, customer_no, customer_name)
+
+
+
 # ── Sales Corpus Validation (existing 1000+ docs) ───────────
 
 @router.post("/validate-sales-corpus")

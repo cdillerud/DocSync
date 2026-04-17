@@ -603,21 +603,46 @@ async def _extract_sales_fields(
     # ── Ship-to ──
     ship_to = ef.get("ship_to") or ef.get("ship_to_address") or nf.get("ship_to")
 
-    # ── Amount: main pipeline stores as "amount_float" (top-level), NOT "total_amount" ──
+    # ── Amount: comprehensive resolution with line item fallback ──
     amount = (
         doc.get("amount_float")  # Main pipeline's top-level amount field
         or doc.get("total_amount")  # Fallback if set by SO-specific paths
-        or nf.get("amount_float") or nf.get("amount")
+        or doc.get("amount_raw")
+        or nf.get("amount_float") or nf.get("amount") or nf.get("amount_raw")
         or ef.get("total_amount") or ef.get("amount") or ef.get("grand_total")
-        or ef.get("invoice_total") or ef.get("net_amount")
-        or ef.get("amount_raw")
+        or ef.get("invoice_total") or ef.get("net_amount") or ef.get("net_total")
+        or ef.get("order_total") or ef.get("subtotal") or ef.get("total")
+        or ef.get("extended_amount") or ef.get("amount_raw") or ef.get("amount_due")
+        or ef.get("balance_due") or ef.get("total_due") or ef.get("po_total")
     )
     # Try to parse if it's a string
     if isinstance(amount, str):
         try:
-            amount = float(amount.replace(",", "").replace("$", "").strip())
+            cleaned = amount.replace(",", "").replace("$", "").replace("USD", "").replace("CAD", "").strip()
+            amount = float(cleaned) if cleaned else None
         except (ValueError, AttributeError):
             amount = None
+
+    # Fallback: sum line item totals if no top-level amount found
+    if not amount and line_items:
+        line_total = 0.0
+        for li in line_items:
+            lt = li.get("total") or li.get("line_total") or li.get("extended_amount") or li.get("amount")
+            if lt:
+                try:
+                    val = float(str(lt).replace(",", "").replace("$", "").strip()) if isinstance(lt, str) else float(lt)
+                    line_total += val
+                except (ValueError, TypeError):
+                    pass
+            elif li.get("quantity") and li.get("unit_price"):
+                try:
+                    qty = float(str(li["quantity"]).replace(",", "").strip())
+                    price = float(str(li["unit_price"]).replace(",", "").replace("$", "").strip())
+                    line_total += qty * price
+                except (ValueError, TypeError):
+                    pass
+        if line_total > 0:
+            amount = round(line_total, 2)
 
     # ── Lines: use main pipeline's extracted line items ──
     extracted_lines = []

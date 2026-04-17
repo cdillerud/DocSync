@@ -304,6 +304,19 @@ async def _check_order(
     if not refs_to_try:
         return {"found": False, "reason": "No PO or order number extracted"}
 
+    # Also generate cleaned variants (strip prefixes, leading zeros, etc.)
+    expanded_refs = []
+    for ref in refs_to_try:
+        expanded_refs.append(ref)
+        clean = re.sub(r'^(PO|SO|WO|PO#|SO#|#)\s*[-:]?\s*', '', str(ref), flags=re.IGNORECASE).strip()
+        if clean != ref:
+            expanded_refs.append(clean)
+        # Strip leading zeros
+        digits_only = re.sub(r'^0+', '', clean)
+        if digits_only and digits_only != clean:
+            expanded_refs.append(digits_only)
+    refs_to_try = list(dict.fromkeys(expanded_refs))  # Dedupe preserving order
+
     from services.bc_reference_cache_service import get_cache_service
 
     cache = get_cache_service()
@@ -368,6 +381,38 @@ async def _check_order(
                 }
     except Exception as e:
         logger.debug("[BCProdValidation] Live BC order search failed: %s", e)
+
+    # Last resort: customer-scoped search in cache
+    if bc_customer_no:
+        for ref in refs_to_try:
+            safe_ref = re.escape(ref)
+            scoped = await db.bc_reference_cache.find_one(
+                {
+                    "bc_entity_type": "sales_order",
+                    "$and": [
+                        {"$or": [
+                            {"bc_customer_no": bc_customer_no},
+                            {"bc_customer_no": {"$regex": f"^{re.escape(bc_customer_no[:6])}", "$options": "i"}},
+                        ]},
+                        {"$or": [
+                            {"bc_document_no": {"$regex": safe_ref, "$options": "i"}},
+                            {"bc_external_document_no": {"$regex": safe_ref, "$options": "i"}},
+                        ]},
+                    ],
+                },
+                {"_id": 0},
+            )
+            if scoped:
+                return {
+                    "found": True,
+                    "bc_order_no": scoped.get("bc_document_no"),
+                    "bc_external_ref": scoped.get("bc_external_document_no"),
+                    "bc_customer_no": scoped.get("bc_customer_no"),
+                    "bc_status": scoped.get("bc_status"),
+                    "bc_amount": scoped.get("bc_amount"),
+                    "match_method": "customer_scoped_search",
+                    "matched_ref": ref,
+                }
 
     return {
         "found": False,

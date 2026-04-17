@@ -1,5 +1,34 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-17] BC Order Match Rate Restored (P0 Fix)
+
+### Diagnosed
+- **Root cause**: Reported 0/222 Order Match was stale data. Earlier `validate-all` runs skipped docs with existing `bc_prod_validation` and didn't use `force=true`, so pre-fix results persisted.
+- **Confirmed**: `_check_order` query logic was functionally correct — diagnostic endpoint showed 42.1% live hit rate on the very first probe.
+
+### Added
+- `GET /api/inside-sales-pilot/diagnose-order-match` — read-only diagnostic endpoint reporting:
+  - `cache_health` — total sales_order records + external-ref coverage
+  - `extraction_health` — PO / order number coverage across pilot docs
+  - `sample_matches` — per-doc trace of refs_tried, direct cache hits, `_check_order` result
+  - `raw_cache_samples` — shape of `bc_external_document_no` values
+  - `summary` — hit rate broken down by match method
+
+### Changed
+- `_check_order` (in `services/bc_prod_validator.py`) now cascades across 3 BC entity types:
+  1. `sales_order` (open, preferred — unchanged behavior for already-matching docs)
+  2. `posted_sales_invoice` (catches 6-digit posted order numbers like `109301`, `111092`)
+  3. `posted_sales_shipment` (catches shipment / BOL / warehouse refs)
+- Customer-scoped fallback extended to the same 3 entity types.
+- `match_method` now includes entity-type suffix (e.g., `cache_multi_search:posted_sales_invoice`) for observability.
+
+### Verified (prod VM)
+- Post-fix: **58.8%** Order Match hit rate on 50-doc sample (20/34 docs with refs matched)
+- 225 pilot docs re-validated with `force=true`, 0 errors, avg overall score = **34**
+- Docs files: `/app/DIAGNOSE_ORDER_MATCH.md`, `/app/DEPLOY_ORDER_MATCH_FIX.md`
+
+
+
 ## [2026-03-25] Learned Dunnage Patterns Feature
 
 ### Added

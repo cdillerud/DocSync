@@ -259,8 +259,8 @@ async def generate_ap_suggestions(
 ):
     """Generate AP learning suggestions from reviewer feedback."""
     db = get_db()
-    from services.ap_invoice_feedback_learning_service import generate_ap_learning_suggestions
-    return await generate_ap_learning_suggestions(db, vendor_no=vendor_no, limit=limit)
+    from services.unified_learning_service import generate_suggestions, AP_CONFIG
+    return await generate_suggestions(db, AP_CONFIG, limit=limit)
 
 
 @router.get("/suggestions")
@@ -292,8 +292,8 @@ async def approve_ap_suggestion_endpoint(
     """Approve an AP learning suggestion."""
     user = _verify_token(authorization)
     db = get_db()
-    from services.ap_invoice_learning_suggestion_apply_service import approve_ap_suggestion
-    result = await approve_ap_suggestion(db, suggestion_id, user)
+    from services.unified_learning_service import approve_suggestion, AP_CONFIG
+    result = await approve_suggestion(db, AP_CONFIG, suggestion_id, user)
     if result.get("error"):
         raise HTTPException(status_code=422, detail=result["error"])
     return result
@@ -337,10 +337,10 @@ async def ap_learning_impact_review(
 ):
     """AP learning impact review — pre/post apply outcomes."""
     db = get_db()
-    from services.ap_invoice_learning_impact_review_service import run_ap_learning_impact_review
-    return await run_ap_learning_impact_review(
-        db, date_from=date_from, date_to=date_to,
-        vendor_no=vendor_no, suggestion_type=suggestion_type, applied_by=applied_by,
+    from services.unified_learning_service import run_impact_review, AP_CONFIG
+    return await run_impact_review(
+        db, AP_CONFIG, date_from=date_from, date_to=date_to,
+        entity_no=vendor_no, suggestion_type=suggestion_type, applied_by=applied_by,
     )
 
 
@@ -351,8 +351,8 @@ async def ap_learning_impact_details(
 ):
     """Per-suggestion impact detail records for AP."""
     db = get_db()
-    from services.ap_invoice_learning_impact_review_service import get_ap_impact_details
-    return await get_ap_impact_details(db, limit=limit, skip=skip, vendor_no=vendor_no, suggestion_type=suggestion_type)
+    from services.unified_learning_service import get_impact_details, AP_CONFIG
+    return await get_impact_details(db, AP_CONFIG, limit=limit, skip=skip, entity_no=vendor_no, suggestion_type=suggestion_type)
 
 
 @router.get("/profile-drift")

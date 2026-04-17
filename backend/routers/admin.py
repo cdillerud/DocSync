@@ -718,13 +718,13 @@ async def gen_learning_suggestions(
 ):
     """Generate candidate profile-learning suggestions from reviewer feedback."""
     from deps import get_db
-    from services.sales_order_feedback_learning_service import generate_learning_suggestions
+    from services.unified_learning_service import generate_suggestions, SALES_CONFIG
     db = get_db()
     if sync:
-        return await generate_learning_suggestions(db, customer_no=customer_no, limit=limit)
+        return await generate_suggestions(db, SALES_CONFIG, limit=limit)
     async def _run():
         try:
-            await generate_learning_suggestions(db, customer_no=customer_no, limit=limit)
+            await generate_suggestions(db, SALES_CONFIG, limit=limit)
         except Exception as exc:
             logger.error("[FeedbackLearning] Background generation failed: %s", exc)
     background_tasks.add_task(_run)
@@ -742,12 +742,11 @@ async def list_learning_suggestions(
 ):
     """Fetch learning suggestions with filters."""
     from deps import get_db
-    from services.sales_order_feedback_learning_service import get_suggestions
+    from services.unified_learning_service import get_suggestions, SALES_CONFIG
     db = get_db()
     return await get_suggestions(
-        db, customer_no=customer_no, suggestion_type=suggestion_type,
-        status=status, min_confidence=min_confidence,
-        date_from=date_from, date_to=date_to, limit=limit, skip=skip,
+        db, SALES_CONFIG, entity_no=customer_no, suggestion_type=suggestion_type,
+        status=status, limit=limit, skip=skip,
     )
 
 
@@ -755,9 +754,9 @@ async def list_learning_suggestions(
 async def get_learning_suggestion(suggestion_id: str):
     """Fetch a single suggestion by ID."""
     from deps import get_db
-    from services.sales_order_feedback_learning_service import get_suggestion_by_id
+    from services.unified_learning_service import get_suggestion_by_id, SALES_CONFIG
     db = get_db()
-    result = await get_suggestion_by_id(db, suggestion_id)
+    result = await get_suggestion_by_id(db, SALES_CONFIG, suggestion_id)
     if not result:
         raise HTTPException(status_code=404, detail="Suggestion not found")
     return result
@@ -783,9 +782,9 @@ async def approve_learning_suggestion(suggestion_id: str):
 async def reject_learning_suggestion(suggestion_id: str):
     """Reject a pending or approved suggestion."""
     from deps import get_db
-    from services.sales_order_learning_suggestion_apply_service import reject_suggestion
+    from services.unified_learning_service import reject_suggestion, SALES_CONFIG
     db = get_db()
-    result = await reject_suggestion(db, suggestion_id, approver="admin")
+    result = await reject_suggestion(db, SALES_CONFIG, suggestion_id, approver="admin")
     if result.get("error"):
         raise HTTPException(status_code=422, detail=result["error"])
     return result
@@ -795,9 +794,9 @@ async def reject_learning_suggestion(suggestion_id: str):
 async def apply_learning_suggestion(suggestion_id: str):
     """Apply an approved suggestion to the customer profile."""
     from deps import get_db
-    from services.sales_order_learning_suggestion_apply_service import apply_suggestion
+    from services.unified_learning_service import apply_suggestion, SALES_CONFIG
     db = get_db()
-    result = await apply_suggestion(db, suggestion_id, applier="admin")
+    result = await apply_suggestion(db, SALES_CONFIG, suggestion_id, applier="admin")
     if result.get("error"):
         raise HTTPException(status_code=422, detail=result["error"])
     return result
@@ -815,11 +814,11 @@ async def learning_impact_review(
 ):
     """Measure whether applied suggestions improved future advisory quality."""
     from deps import get_db
-    from services.sales_order_learning_impact_review_service import run_learning_impact_review
+    from services.unified_learning_service import run_impact_review, SALES_CONFIG
     db = get_db()
-    return await run_learning_impact_review(
-        db, date_from=date_from, date_to=date_to,
-        customer_no=customer_no, suggestion_type=suggestion_type,
+    return await run_impact_review(
+        db, SALES_CONFIG, date_from=date_from, date_to=date_to,
+        entity_no=customer_no, suggestion_type=suggestion_type,
         applied_by=applied_by,
     )
 
@@ -831,10 +830,10 @@ async def learning_impact_details(
 ):
     """Per-suggestion apply audit detail records."""
     from deps import get_db
-    from services.sales_order_learning_impact_review_service import get_impact_details
+    from services.unified_learning_service import get_impact_details, SALES_CONFIG
     db = get_db()
-    return await get_impact_details(db, limit=limit, skip=skip,
-                                    customer_no=customer_no, suggestion_type=suggestion_type)
+    return await get_impact_details(db, SALES_CONFIG, limit=limit, skip=skip,
+                                    entity_no=customer_no, suggestion_type=suggestion_type)
 
 
 # =============================================================================
@@ -930,3 +929,16 @@ async def maturity_reusability():
     from services.sales_order_maturity_checkpoint_service import get_reusability_review
     db = get_db()
     return await get_reusability_review(db)
+
+
+# =============================================================================
+# Unified Learning Summary (Cross-Pipeline View)
+# =============================================================================
+
+@router.get("/unified-learning/summary")
+async def unified_learning_summary():
+    """Cross-pipeline learning summary — powers the AI Learning Intelligence dashboard."""
+    from deps import get_db
+    from services.unified_learning_service import get_unified_learning_summary
+    db = get_db()
+    return await get_unified_learning_summary(db)

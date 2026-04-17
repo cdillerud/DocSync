@@ -1,5 +1,35 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-17] Round 3 — Learning-Backed Automation + Drift Alarm
+
+### Added — Auto-approve gate
+- `services/inventory_xls_staging_service.py` — `_should_auto_approve(staging_doc)` checks: assigned_customer ≠ null + rows present + column_map.source=="learned" + confidence ≥ 0.95 + learned `approval_count ≥ 3`. When all true, `stage_import` immediately calls `approve_staging` with `approved_by="auto:learned-mapping"`.
+- `services/inventory_xls_parser.py` — learned confidence formula updated to `min(0.99, 0.80 + 0.05 * approval_count)`. Thus 1→0.85, 2→0.90, 3→0.95 (auto threshold), 4→0.99.
+- Response shape now includes `auto_applied: bool` on `/ingest`; staging record carries `auto_approved: true` flag.
+
+### Added — Ingest-time XLS side-channel in pilot enrichment
+- `server.py :: _maybe_stage_inventory_xls(doc_id)` is called from `_run_pilot_enrichment` after BC validation + Spiro + SO rules. For every pilot-ingested `.xlsx/.xls/.csv`, runs the classifier → if inventory, auto-stages via `stage_import` (which may auto-approve per the gate above). Marks source doc with `inventory_xls_backfilled=true` to prevent re-runs.
+
+### Added — Bulk backfill endpoint
+- `POST /api/inventory-xls/backfill-pilot-docs?dry_run=true|false&limit=N` — scans all pilot-ingested XLS/CSV docs in `hub_documents` and either reports (dry_run) or stages them. Idempotent via `inventory_xls_backfilled` marker. Returns per-doc trace + classification breakdown.
+
+### Added — Cache Drift Alarm (frontend)
+- `InsideSalesPilotPage.js :: MatchTierDonut` now renders an amber alarm banner when matched ≥ 10 AND (`exact/matched < 0.80` OR `fuzzy/matched > 0.10`). Turns the donut from a passive metric into an active safety signal for extraction or BC-cache drift.
+
+### Added — Inventory Imports sidebar nav + backfill UI
+- `components/Layout.js` — new "Inventory Imports" sidebar entry (FileSpreadsheet icon).
+- `pages/InventoryImportsPage.js` — "Scan Pilot XLS" (dry run) + "Backfill Pilot XLS" buttons with a rich result card showing scanned / inventory / staged / already_staged / skipped / errors + by-classification breakdown.
+
+### Fixed — Customer auto-suggest prefix match
+- `suggest_customer_workspace` — bidirectional prefix match. Previous regex failed when the sender domain was LONGER than the customer code (e.g. `gamerpackaging` sender, `gamer` code). Now tests both `code.startsWith(hint)` AND `hint.startsWith(code)` with 3-char minimum code length to avoid false positives.
+
+### Verified
+- `testing_agent_v3_fork` iteration 208: **37/37 tests passed (17 new + 20 regression), 0 issues.**
+- Live E2E: 3 human approvals of same `(domain, header_hash)` → 4th file from same domain **auto-applied in one shot** with `created_by: auto:learned-mapping`.
+- Docs: `/app/BACKFILL_PILOT_XLS.md`, `/app/DEPLOY_INVENTORY_XLS.md`.
+
+
+
 ## [2026-04-17] Inventory XLS Inference Pipeline — Phases A+B+C+D
 
 ### Added — Phase A (Classifier)

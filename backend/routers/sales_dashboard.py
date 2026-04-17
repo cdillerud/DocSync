@@ -40,7 +40,6 @@ async def _assess_readiness(doc: dict) -> dict:
     """Lightweight readiness assessment without running full preflight.
     Returns {status, readiness, warnings, customer_no, customer_name, ...}.
     """
-    db = get_db()
     ef = doc.get("extracted_fields") or {}
     nf = doc.get("normalized_fields") or {}
 
@@ -67,122 +66,11 @@ async def _assess_readiness(doc: dict) -> dict:
     warnings = []
     blocking = []
 
-    # Customer resolution — check all available data sources
-    customer_no = (nf.get("bc_customer_no") or nf.get("customer_number")
-                   or ef.get("customer_number")
-                   or doc.get("matched_customer_no") or doc.get("customer_no")
-                   or "")
-
-    # Bridge: BC prod validation customer match
-    if not customer_no:
-        bc_val = doc.get("bc_prod_validation") or {}
-        bc_cm = bc_val.get("customer_match") or {}
-        if bc_cm.get("found") and bc_cm.get("bc_customer_no"):
-            customer_no = bc_cm["bc_customer_no"]
-
-    # Bridge: Spiro match external_id (this IS the BC customer number)
-    if not customer_no:
-        spiro = doc.get("spiro_match") or {}
-        spiro_cm = spiro.get("company_match") or {}
-        if spiro_cm.get("external_id"):
-            customer_no = spiro_cm["external_id"]
-
-    customer_name = (nf.get("customer_name") or ef.get("customer_name")
-                     or ef.get("customer") or ef.get("company_name")
-                     or doc.get("customer_extracted") or doc.get("vendor_name") or "")
-
-    # Bridge: pilot extraction customer name
-    if not customer_name:
-        pilot_ext = doc.get("sales_pilot_extraction") or {}
-        customer_name = pilot_ext.get("customer_name") or ""
-
-    # Bridge: Spiro company name
-    if not customer_name:
-        spiro = doc.get("spiro_match") or {}
-        spiro_cm = spiro.get("company_match") or {}
-        if spiro_cm.get("name"):
-            customer_name = spiro_cm["name"]
-
-    # Bridge: vendor_canonical (for sales docs, this is often the customer)
-    if not customer_name:
-        vc = doc.get("vendor_canonical") or ""
-        if vc and "gamer" not in vc.lower():
-            customer_name = vc
-
-    # Bridge: inherit from batch parent (split docs like _doc1, _doc2)
-    if (not customer_no or not customer_name) and doc.get("batch_parent_id"):
-        try:
-            parent = await db.hub_documents.find_one(
-                {"id": doc["batch_parent_id"]},
-                {"_id": 0, "vendor_canonical": 1, "matched_customer_no": 1,
-                 "sales_pilot_extraction": 1, "bc_prod_validation": 1,
-                 "spiro_match": 1, "extracted_fields": 1}
-            )
-            if parent:
-                p_ext = parent.get("sales_pilot_extraction") or {}
-                p_ef = parent.get("extracted_fields") or {}
-                p_bc = (parent.get("bc_prod_validation") or {}).get("customer_match") or {}
-                p_spiro = (parent.get("spiro_match") or {}).get("company_match") or {}
-                customer_name = (
-                    p_ext.get("customer_name") or p_ef.get("customer") or p_ef.get("customer_name")
-                    or parent.get("vendor_canonical") or ""
-                )
-                customer_no = (
-                    parent.get("matched_customer_no")
-                    or (p_bc.get("bc_customer_no") if p_bc.get("found") else "")
-                    or p_spiro.get("external_id") or ""
-                )
-                if customer_name and "gamer" in customer_name.lower():
-                    customer_name = ""
-                if customer_no and customer_no.upper() in ("GAMER", "GAMERPA", "GAMER1"):
-                    customer_no = ""
-        except Exception:
-            pass
-
-    # Skip Gamer as customer (Gamer is the seller)
-    if customer_no and customer_no.upper() in ("GAMER", "GAMERPA", "GAMER1"):
-        customer_no = ""
-    if customer_name and "gamer" in customer_name.lower():
-        customer_name = ""
-
-    # If customer_no resolved but no customer_name, look up the name from BC cache
-    if customer_no and not customer_name:
-        try:
-            import re as _re
-            bc_cached = await db.bc_reference_cache.find_one(
-                {
-                    "$or": [
-                        {"number": customer_no, "entity_type": {"$in": ["customer", "Customer"]}},
-                        {"bc_customer_no": customer_no, "bc_entity_type": "customer"},
-                    ],
-                },
-                {"_id": 0, "displayName": 1, "bc_customer_name": 1}
-            )
-            if bc_cached:
-                customer_name = bc_cached.get("displayName") or bc_cached.get("bc_customer_name", "")
-        except Exception:
-            pass
-
-    # Consistency gate: verify name matches customer_no
-    if customer_no and customer_name:
-        try:
-            bc_cached = await db.bc_reference_cache.find_one(
-                {
-                    "$or": [
-                        {"number": customer_no, "entity_type": {"$in": ["customer", "Customer"]}},
-                        {"bc_customer_no": customer_no, "bc_entity_type": "customer"},
-                    ],
-                },
-                {"_id": 0, "displayName": 1, "bc_customer_name": 1}
-            )
-            if bc_cached:
-                bc_name = (bc_cached.get("displayName") or bc_cached.get("bc_customer_name") or "").lower()
-                ext_first = customer_name.lower().split()[0] if customer_name else ""
-                bc_first = bc_name.split()[0] if bc_name else ""
-                if ext_first and bc_first and ext_first[:3] != bc_first[:3]:
-                    customer_name = bc_cached.get("displayName") or bc_cached.get("bc_customer_name") or customer_name
-        except Exception:
-            pass
+    # ── Customer resolution: use the unified service ──
+    from services.entity_resolution_service import resolve_customer
+    cr = await resolve_customer(doc)
+    customer_no = cr.customer_no
+    customer_name = cr.customer_name
 
     if not customer_no:
         blocking.append("Customer not resolved")

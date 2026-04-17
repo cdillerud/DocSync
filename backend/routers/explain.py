@@ -169,34 +169,16 @@ async def get_sales_order_advisory(
         except Exception:
             pass
 
-    # 3. Customer profile summary — use full resolution chain
-    customer_no = (
-        doc.get("matched_customer_no") or doc.get("customer_no") or ""
-    )
+    # 3. Customer profile summary — use unified resolution service
+    from services.entity_resolution_service import resolve_customer
+    cr = await resolve_customer(doc)
+    customer_no = cr.customer_no
 
-    # Bridge: BC prod validation
-    if not customer_no:
-        bc_val = doc.get("bc_prod_validation") or {}
-        bc_cm = bc_val.get("customer_match") or {}
-        if bc_cm.get("found") and bc_cm.get("bc_customer_no"):
-            customer_no = bc_cm["bc_customer_no"]
-
-    # Bridge: Spiro external_id
-    if not customer_no:
-        spiro = doc.get("spiro_match") or {}
-        spiro_cm = spiro.get("company_match") or {}
-        if spiro_cm.get("external_id"):
-            customer_no = spiro_cm["external_id"]
-
-    # Bridge: pilot readiness review already resolved it
+    # Also try pilot readiness review context
     if not customer_no and review:
         pc = review.get("pilot_context") or {}
         if pc.get("profile_customer_no"):
             customer_no = pc["profile_customer_no"]
-
-    # Skip Gamer
-    if customer_no and customer_no.upper() in ("GAMER", "GAMERPA", "GAMER1"):
-        customer_no = ""
 
     profile_summary = None
     if customer_no:

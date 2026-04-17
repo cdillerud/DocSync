@@ -628,3 +628,295 @@ async def correct_resolution(
         logger.warning("Learning loop hook failed: %s", e)
 
     return updated
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# UNIFIED CUSTOMER RESOLUTION — Single source of truth (replaces 9 copies)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# This is the canonical customer resolution chain for the entire platform.
+# AP, Sales, Warehouse, Dashboard, Preflight, Advisory — all call this.
+# DO NOT duplicate this logic elsewhere. If you need customer data, call:
+#
+#   from services.entity_resolution_service import resolve_customer
+#   result = await resolve_customer(doc)
+#
+# Returns: CustomerResolution dataclass with all fields.
+# ═══════════════════════════════════════════════════════════════════════════
+
+from dataclasses import dataclass as _dc
+
+
+@_dc
+class CustomerResolution:
+    """Result of customer resolution. Single return type for all consumers."""
+    customer_name: str = ""
+    customer_no: str = ""
+    match_method: str = "none"
+    confidence: float = 0.0
+    source: str = ""           # Which step resolved it
+    spiro_relationship: str = ""  # vendor/customer/prospect
+    spiro_company: str = ""
+    spiro_isr: str = ""
+    profile_found: bool = False
+
+    def to_dict(self) -> dict:
+        return {
+            "customer_name": self.customer_name,
+            "customer_no": self.customer_no,
+            "match_method": self.match_method,
+            "confidence": self.confidence,
+            "source": self.source,
+            "spiro_relationship": self.spiro_relationship,
+            "resolved": bool(self.customer_no or self.customer_name),
+        }
+
+
+_GAMER_NOS = {"GAMER", "GAMERPA", "GAMER1"}
+_GAMER_DOMAINS = {"gamerpackaging", "gamer", "gmail", "outlook", "hotmail", "yahoo"}
+
+
+def _is_gamer(name: str) -> bool:
+    return bool(name) and "gamer" in name.lower()
+
+
+async def resolve_customer(doc: dict) -> CustomerResolution:
+    """
+    Canonical customer resolution for any document.
+
+    Resolution chain (ordered by priority):
+      1. Existing BC match (validation_results.bc_record_info)
+      2. Extracted/normalized customer_no fields
+      3. BC prod validation customer_match
+      4. Spiro CRM external_id
+      5. Customer candidates list
+      6. Extracted/normalized customer_name fields
+      7. Pilot extraction customer_name
+      8. Spiro company name
+      9. vendor_canonical (non-Gamer)
+      10. Email sender domain
+      11. Batch parent inheritance
+      12. BC reference cache lookup by name → customer_no
+      13. BC reference cache lookup by customer_no → name
+      14. Consistency gate (name matches customer_no record)
+    """
+    db = get_db()
+    ef = doc.get("extracted_fields") or {}
+    nf = doc.get("normalized_fields") or {}
+    vr = doc.get("validation_results") or {}
+    bc_val = doc.get("bc_prod_validation") or {}
+    bc_cm = bc_val.get("customer_match") or {}
+    spiro = doc.get("spiro_match") or {}
+    spiro_cm = spiro.get("company_match") or {}
+    pilot_ext = doc.get("sales_pilot_extraction") or {}
+
+    customer_no = ""
+    customer_name = ""
+    match_method = "none"
+    confidence = 0.0
+    source = ""
+
+    # ── Step 1: Existing BC match from validation ──
+    bc_info = vr.get("bc_record_info") or {}
+    if bc_info.get("number"):
+        cno = bc_info["number"]
+        if cno.upper() not in _GAMER_NOS:
+            customer_no = cno
+            customer_name = bc_info.get("displayName", "")
+            match_method = vr.get("match_method", "validation")
+            confidence = float(vr.get("match_score", 0.9))
+            source = "bc_validation"
+
+    # ── Step 2: Extracted/normalized customer_no ──
+    if not customer_no:
+        cno = (
+            ef.get("customer_no") or ef.get("customer_number")
+            or nf.get("bc_customer_no") or nf.get("customer_no") or nf.get("customer_number")
+            or doc.get("matched_customer_no") or doc.get("customer_no")
+            or ""
+        )
+        if cno and cno.upper() not in _GAMER_NOS:
+            customer_no = cno
+            match_method = "extracted_field"
+            confidence = 0.95
+            source = "extracted_fields"
+
+    # ── Step 3: BC prod validation customer_match ──
+    if not customer_no and bc_cm.get("found") and bc_cm.get("bc_customer_no"):
+        cno = bc_cm["bc_customer_no"]
+        if cno.upper() not in _GAMER_NOS:
+            customer_no = cno
+            customer_name = bc_cm.get("bc_customer_name", "")
+            match_method = bc_cm.get("match_method", "bc_prod_validation")
+            confidence = 0.85
+            source = "bc_prod_validation"
+
+    # ── Step 4: Spiro external_id ──
+    if not customer_no and spiro_cm.get("external_id"):
+        customer_no = spiro_cm["external_id"]
+        customer_name = customer_name or spiro_cm.get("name", "")
+        match_method = "spiro_external_id"
+        confidence = 0.80
+        source = "spiro"
+
+    # ── Step 5: Customer candidates ──
+    if not customer_no:
+        for cand in (doc.get("customer_candidates") or []):
+            if cand.get("number"):
+                customer_no = cand["number"]
+                customer_name = customer_name or cand.get("displayName", "")
+                match_method = "customer_candidate"
+                confidence = float(cand.get("score", 0.8))
+                source = "customer_candidates"
+                break
+
+    # ── Step 6: Customer name from extracted/normalized fields ──
+    if not customer_name:
+        customer_name = (
+            nf.get("customer_name") or nf.get("customer")
+            or ef.get("customer_name") or ef.get("customer") or ef.get("company_name")
+            or doc.get("customer_extracted") or doc.get("vendor_name")
+            or ""
+        )
+
+    # ── Step 7: Pilot extraction customer_name ──
+    if not customer_name:
+        pn = pilot_ext.get("customer_name") or ""
+        if pn and not _is_gamer(pn):
+            customer_name = pn
+            source = source or "pilot_extraction"
+
+    # ── Step 8: Spiro company name ──
+    if not customer_name and spiro_cm.get("name"):
+        customer_name = spiro_cm["name"]
+        source = source or "spiro"
+
+    # ── Step 9: vendor_canonical (non-Gamer) ──
+    if not customer_name:
+        vc = doc.get("vendor_canonical") or ""
+        if vc and not _is_gamer(vc):
+            customer_name = vc
+            source = source or "vendor_canonical"
+
+    # ── Step 10: Email sender domain ──
+    if not customer_name:
+        sender = doc.get("email_sender") or ""
+        if sender and "@" in sender:
+            domain = sender.split("@")[1].split(".")[0]
+            if domain.lower() not in _GAMER_DOMAINS:
+                customer_name = domain.replace("-", " ").replace("_", " ").title()
+                source = source or "email_sender"
+
+    # ── Step 11: Batch parent inheritance ──
+    if (not customer_no or not customer_name) and doc.get("batch_parent_id"):
+        try:
+            parent = await db.hub_documents.find_one(
+                {"id": doc["batch_parent_id"]},
+                {"_id": 0, "vendor_canonical": 1, "matched_customer_no": 1,
+                 "sales_pilot_extraction": 1, "bc_prod_validation": 1,
+                 "spiro_match": 1, "extracted_fields": 1}
+            )
+            if parent:
+                if not customer_name:
+                    p_ext = parent.get("sales_pilot_extraction") or {}
+                    p_ef = parent.get("extracted_fields") or {}
+                    customer_name = (
+                        p_ext.get("customer_name") or p_ef.get("customer")
+                        or p_ef.get("customer_name") or parent.get("vendor_canonical") or ""
+                    )
+                    if _is_gamer(customer_name):
+                        customer_name = ""
+                if not customer_no:
+                    p_bc = (parent.get("bc_prod_validation") or {}).get("customer_match") or {}
+                    p_spiro = (parent.get("spiro_match") or {}).get("company_match") or {}
+                    customer_no = (
+                        parent.get("matched_customer_no")
+                        or (p_bc.get("bc_customer_no") if p_bc.get("found") else "")
+                        or p_spiro.get("external_id") or ""
+                    )
+                    if customer_no and customer_no.upper() in _GAMER_NOS:
+                        customer_no = ""
+                if customer_no or customer_name:
+                    match_method = match_method or "batch_parent"
+                    confidence = confidence or 0.75
+                    source = source or "batch_parent"
+        except Exception:
+            pass
+
+    # ── Gamer gate (final cleanup) ──
+    if customer_no and customer_no.upper() in _GAMER_NOS:
+        customer_no = ""
+    if _is_gamer(customer_name):
+        customer_name = ""
+
+    # ── Step 12: BC reference cache name → customer_no ──
+    if not customer_no and customer_name:
+        try:
+            safe = re.escape(customer_name[:30])
+            cached = await db.bc_reference_cache.find_one(
+                {"$or": [
+                    {"displayName": {"$regex": safe, "$options": "i"},
+                     "entity_type": {"$in": ["customer", "Customer"]}},
+                    {"bc_customer_name": {"$regex": safe, "$options": "i"},
+                     "bc_entity_type": "customer"},
+                ]},
+                {"_id": 0, "number": 1, "bc_customer_no": 1, "displayName": 1, "bc_customer_name": 1}
+            )
+            if cached:
+                customer_no = cached.get("number") or cached.get("bc_customer_no", "")
+                customer_name = customer_name or cached.get("displayName") or cached.get("bc_customer_name", "")
+                match_method = match_method or "cache_lookup"
+                confidence = confidence or 0.7
+                source = source or "bc_cache"
+        except Exception:
+            pass
+
+    # ── Step 13: BC reference cache customer_no → name ──
+    if customer_no and not customer_name:
+        try:
+            cached = await db.bc_reference_cache.find_one(
+                {"$or": [
+                    {"number": customer_no, "entity_type": {"$in": ["customer", "Customer"]}},
+                    {"bc_customer_no": customer_no, "bc_entity_type": "customer"},
+                ]},
+                {"_id": 0, "displayName": 1, "bc_customer_name": 1}
+            )
+            if cached:
+                customer_name = cached.get("displayName") or cached.get("bc_customer_name", "")
+        except Exception:
+            pass
+
+    # ── Step 14: Consistency gate ──
+    if customer_no and customer_name:
+        try:
+            cached = await db.bc_reference_cache.find_one(
+                {"$or": [
+                    {"number": customer_no, "entity_type": {"$in": ["customer", "Customer"]}},
+                    {"bc_customer_no": customer_no, "bc_entity_type": "customer"},
+                ]},
+                {"_id": 0, "displayName": 1, "bc_customer_name": 1}
+            )
+            if cached:
+                bc_name = (cached.get("displayName") or cached.get("bc_customer_name") or "").lower()
+                ext_first = customer_name.lower().split()[0] if customer_name else ""
+                bc_first = bc_name.split()[0] if bc_name else ""
+                if ext_first and bc_first and ext_first[:3] != bc_first[:3]:
+                    customer_name = cached.get("displayName") or cached.get("bc_customer_name") or customer_name
+        except Exception:
+            pass
+
+    # ── Spiro context ──
+    spiro_rel = (spiro_cm.get("relationship_type") or "").lower()
+    spiro_company = spiro_cm.get("name", "")
+    spiro_isr = spiro_cm.get("assigned_isr", "")
+
+    return CustomerResolution(
+        customer_name=customer_name,
+        customer_no=customer_no,
+        match_method=match_method,
+        confidence=confidence,
+        source=source,
+        spiro_relationship=spiro_rel,
+        spiro_company=spiro_company,
+        spiro_isr=spiro_isr,
+    )

@@ -1,0 +1,95 @@
+{
+  "summary": "Iteration 207: Inventory XLS Pipeline Backend Testing Complete. All 20 tests passed. Verified full pipeline: classify → parse → stage → update → approve → ledger persistence → learning loop. Key features tested: (1) POST /api/inventory-xls/ingest correctly classifies Open Orders XLS with confidence≥0.9 and column_map.source='heuristic', (2) Dedup detection returns already_staged=true on second upload, (3) Not-inventory files (RFQ.xlsx) return staged=false with classification='not_inventory', (4) Staging list/detail endpoints work with status filters, (5) Update staging assigns customer correctly, (6) Approve without customer returns 422, (7) Approve creates movements in inv_movements with source_type='spreadsheet_import' and reference_type='xls_import', (8) Effective date extracted from filename preserved in movements, (9) Forecast XLS routes to inv_incoming_supply (not inv_movements), (10) Learning loop works - first file uses 'heuristic', second file from same domain uses 'learned', (11) Reject staging sets status=rejected, (12) Learning summary returns aggregations.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_inventory_xls_pipeline.py",
+    "/app/test_reports/pytest/inventory_xls_pipeline_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "inventory_xls_classifier.py: Clean rule-based classification with filename + header signal matching. Confidence bonus when both match.",
+    "inventory_xls_parser.py: Proper cascade (learned→heuristic→LLM) with header_hash for learned mapping lookup. extract_effective_date_from_filename handles YYYY-MM-DD and MM.DD.YY formats.",
+    "inventory_xls_staging_service.py: Correct dedup by file_hash+customer, _persist_learning upserts by (sender_domain, header_hash), approve_staging correctly routes forecast to inv_incoming_supply.",
+    "inventory_xls router: All endpoints properly wired - ingest, staging CRUD, approve/reject, learning-summary."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_inventory_xls_pipeline.py"
+  ],
+  "success_rate": {
+    "backend": "100% (20/20 tests passed)"
+  },
+  "test_credentials": "N/A - backend-only testing, no auth required",
+  "seed_data_creation": "Created test customer XLSTEST* for pipeline tests. Created multiple staging records for testing various flows.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 207 verified Inventory XLS Pipeline (Phases A+B+C+D). All endpoints working: POST /api/inventory-xls/ingest (multipart), GET/POST staging endpoints, approve/reject, learning-summary. Learning loop verified: first file uses heuristic, second file from same domain uses learned mapping. Forecast files route to inv_incoming_supply. Effective dates extracted from filenames (YYYY-MM-DD and MM.DD.YY formats) are preserved in movements. Test customer created with code starting XLSTEST. 6 learned mappings exist in inv_xls_learned_mappings collection.",
+  "tested_features": {
+    "ingest_endpoint": [
+      "POST /api/inventory-xls/ingest with Open Orders XLS - PASS (staged=true, classification=inventory_open_orders, confidence=0.95)",
+      "Dedup detection on same file - PASS (already_staged=true)",
+      "Not-inventory file (RFQ.xlsx) - PASS (staged=false, classification=not_inventory)"
+    ],
+    "staging_endpoints": [
+      "GET /api/inventory-xls/staging - PASS (returns total + staging list)",
+      "GET /api/inventory-xls/staging?status=pending_review|applied|rejected - PASS (filters work)",
+      "GET /api/inventory-xls/staging/{id} - PASS (returns full record with rows, column_map, classification)",
+      "GET /api/inventory-xls/staging/{fake_id} - PASS (returns 404)"
+    ],
+    "update_approve_reject": [
+      "POST /api/inventory-xls/staging/{id}/update with assigned_customer_id - PASS (updated=true)",
+      "Update on already-applied staging - PASS (updated=false)",
+      "POST /api/inventory-xls/staging/{id}/approve without customer - PASS (returns 422)",
+      "POST /api/inventory-xls/staging/{id}/approve with customer - PASS (status=applied, applied_count=1)",
+      "POST /api/inventory-xls/staging/{id}/reject - PASS (status=rejected)"
+    ],
+    "ledger_persistence": [
+      "Movements created with source_type=spreadsheet_import - PASS",
+      "Movements created with reference_type=xls_import - PASS",
+      "Movements have reference_id=staging_id - PASS",
+      "Effective date preserved in movements - PASS (2026-05-20T00:00:00+00:00)"
+    ],
+    "forecast_routing": [
+      "Forecast XLS routes to inv_incoming_supply - PASS (applied_to=inv_incoming_supply, count=3)"
+    ],
+    "learning_loop": [
+      "First file uses heuristic mapping - PASS",
+      "Second file from same domain uses learned mapping - PASS",
+      "Learning summary returns aggregations - PASS (total_learned_mappings=6)"
+    ],
+    "classifier_behavior": [
+      "Open Orders filename + headers → classification=inventory_open_orders - PASS",
+      "Confidence ≥ 0.9 - PASS (0.95)",
+      "movement_intent=order_commitment - PASS",
+      "suggested_customer_hint=gamerpackaging from @gamerpackaging.com - PASS"
+    ],
+    "effective_date_extraction": [
+      "Filename 'Open Orders 2026-03-18.xlsx' → 2026-03-18T00:00:00+00:00 - PASS",
+      "Filename 'Gamer Dunnage 04.13.26.xlsx' → 2026-04-13T00:00:00+00:00 - PASS"
+    ]
+  },
+  "data_verification": {
+    "staging_records": {
+      "total": 15,
+      "pending_review": "multiple",
+      "applied": "multiple",
+      "rejected": "multiple"
+    },
+    "learned_mappings": {
+      "total": 6,
+      "classifications": 2,
+      "top_senders": 5
+    },
+    "test_customer": {
+      "code_prefix": "XLSTEST",
+      "id": "511965c5-2a7c-4198-b007-80b8583cd96a"
+    }
+  }
+}

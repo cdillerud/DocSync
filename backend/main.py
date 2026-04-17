@@ -96,6 +96,7 @@ from routers.dev_tools import router as dev_tools_router
 from routers.ap_advisory import router as ap_advisory_router
 from routers.governance import router as governance_router
 from routers.inside_sales_pilot import router as inside_sales_pilot_router
+from routers.inventory_xls import router as inventory_xls_router
 
 # ==================== APP ====================
 app = FastAPI(title="GPI Document Hub API")
@@ -173,6 +174,7 @@ app.include_router(dev_tools_router, prefix="/api")
 app.include_router(ap_advisory_router, prefix="/api")
 app.include_router(governance_router, prefix="/api")
 app.include_router(inside_sales_pilot_router, prefix="/api")
+app.include_router(inventory_xls_router, prefix="/api")
 
 # ==================== SALES MODULE ====================
 app.include_router(sales_router)
@@ -201,6 +203,14 @@ async def startup():
         await inv_ensure_indexes(get_db())
     except Exception as e:
         logger.warning("Inventory ledger index creation failed: %s", e)
+
+    # Inventory XLS staging + learning indexes
+    try:
+        from services.inventory_xls_staging_service import ensure_indexes as inv_xls_ensure_indexes
+        from deps import get_db
+        await inv_xls_ensure_indexes(get_db())
+    except Exception as e:
+        logger.warning("Inventory XLS staging index creation failed: %s", e)
 
     # Vendor matching: backfill name_normalized on cached BC vendors
     try:

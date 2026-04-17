@@ -229,6 +229,88 @@ async def api_update_staging(staging_id: str, body: dict = Body(default={})):
     return await update_staging(db, staging_id, body or {})
 
 
+@router.post("/staging/{staging_id}/re-normalize")
+async def api_renormalize_staging(staging_id: str):
+    """Re-run row normalization on a staging record using its current column_map.
+
+    Use this after editing the column_map via /update — it recomputes the
+    `rows` array from the originally-ingested raw data WITHOUT needing the
+    user to re-upload the file. Uses the source hub_document's file bytes.
+    """
+    import base64 as _b64
+    import hashlib as _h
+    from services.inventory_xls_staging_service import STAGING_COLL
+
+    db = get_db()
+    staging = await db[STAGING_COLL].find_one({"id": staging_id}, {"_id": 0})
+    if not staging:
+        raise HTTPException(status_code=404, detail="Staging not found")
+    if staging.get("status") != "pending_review":
+        raise HTTPException(status_code=422, detail=f"Status is {staging.get('status')} — re-normalize not allowed")
+
+    source_doc_id = staging.get("source_doc_id")
+    # Try to recover bytes — first via source hub_document, else fail clearly
+    raw = None
+    fname = staging.get("filename", "")
+    if source_doc_id:
+        src = await db.hub_documents.find_one({"id": source_doc_id}, {"_id": 0, "file_content_b64": 1})
+        if src and src.get("file_content_b64"):
+            raw = _b64.b64decode(src["file_content_b64"])
+    if not raw:
+        # Try to match by file_hash alone
+        h_doc = await db.hub_documents.find_one(
+            {"file_hash_sha256": staging.get("file_hash")},
+            {"_id": 0, "file_content_b64": 1},
+        )
+        if h_doc and h_doc.get("file_content_b64"):
+            raw = _b64.b64decode(h_doc["file_content_b64"])
+    if not raw:
+        raise HTTPException(status_code=410, detail="Original file bytes not available — re-upload instead")
+
+    ext = fname.lower().rsplit(".", 1)[-1]
+    if ext == "csv":
+        headers, rows = _ingestor.parse_csv(raw, fname)
+    else:
+        headers, rows = _ingestor.parse_excel(raw, fname)
+
+    cm_dict = staging.get("column_map", {})
+
+    # Rebuild a ColumnMap object from stored dict
+    from services.inventory_xls_parser import ColumnMap, normalize_rows
+    cm = ColumnMap(
+        mapping=cm_dict.get("mapping", {}),
+        confidence=cm_dict.get("confidence", 0.0),
+        source=cm_dict.get("source", "manual"),
+        missing_required=cm_dict.get("missing_required", []),
+        unmapped_headers=cm_dict.get("unmapped_headers", []),
+    )
+    norm = normalize_rows(
+        rows=rows, column_map=cm,
+        classification=(staging.get("classification") or {}).get("classification", ""),
+        filename_effective_date=staging.get("filename_effective_date"),
+    )
+    await db[STAGING_COLL].update_one(
+        {"id": staging_id},
+        {"$set": {
+            "rows": norm["rows"],
+            "row_errors": norm["row_errors"],
+            "row_count": len(norm["rows"]),
+            "renormalized_at": _iso_now(),
+        }},
+    )
+    return {
+        "staging_id": staging_id,
+        "parsed": len(norm["rows"]),
+        "errors": len(norm["row_errors"]),
+        "stats": norm["stats"],
+    }
+
+
+def _iso_now() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
+
+
 @router.post("/staging/{staging_id}/approve")
 async def api_approve_staging(staging_id: str, approved_by: str = Query("user")):
     db = get_db()

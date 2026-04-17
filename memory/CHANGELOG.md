@@ -1,5 +1,35 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-17] Round 4 — Description Fallback + Manual Mapping Editor
+
+### Bug fix: "0 rows" on Ryl Co Inventory files
+- **Root cause**: Spreadsheets like `Ryl Co Inventory vs Ryl Co Needs 4.17.26.xlsx` have a `Description` column but no dedicated SKU/Item column. Mapper tagged Description→item_description, then every row failed with "missing item".
+- **Fix** (`inventory_xls_parser.py`):
+  - If `item` is unmapped but `item_description` IS mapped, `normalize_rows` falls back to using description as the item identifier (legitimate for inventory summaries).
+  - Heuristic mapper no longer reports `missing_required: item` when description is mapped.
+  - Item string capped at 120 chars to keep ledger clean.
+
+### Bug fix: `\binventory\b` missing underscored filenames
+- Changed to `(^|[\s_\-.])inventory($|[\s_\-.])` so `Ryl_Co_Inventory.xlsx` matches.
+
+### Added: Manual column-map editor in UI
+- `pages/InventoryImportsPage.js` — side-drawer now has an **Edit** button next to the column map. Opens dropdowns for every canonical field with options from the staged headers.
+- **Save Mapping** calls `POST /api/inventory-xls/staging/{id}/update` with the new mapping, THEN automatically calls `POST /api/inventory-xls/staging/{id}/re-normalize` to re-run row normalization against the new map — no re-upload needed.
+
+### Added: `POST /api/inventory-xls/staging/{id}/re-normalize`
+- Recovers original file bytes from `hub_documents` (via `source_doc_id` or file_hash match), re-parses, and re-runs `normalize_rows` with the current column_map. Returns parsed/error counts.
+
+### Fixed: Approval UX for 0-row staging
+- UI blocks Approve when `row_count == 0` with explanatory message pointing user to fix the column map.
+- Backend approval errors now surface the first error's actual text instead of "undefined".
+
+### Verified
+- Live: `Ryl_Co_Inventory_test.xlsx` with only Description + Available columns → staged with 3/3 rows, item populated from description.
+- Manual editor UI: dropdowns rendered, Save Mapping triggers re-normalize automatically.
+- Classification fix: filename with underscores now matches correctly.
+
+
+
 ## [2026-04-17] Round 3 — Learning-Backed Automation + Drift Alarm
 
 ### Added — Auto-approve gate

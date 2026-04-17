@@ -66,7 +66,7 @@ _FILENAME_RULES = [
     (re.compile(r"(?i)\bon\s*hand\b", re.I), "inventory_snapshot", "opening_balance", None, 0.82),
     (re.compile(r"(?i)\bon.the.portal\b|from.*portal", re.I), "inventory_snapshot", "opening_balance", None, 0.78),
     # "Ryl Co Inventory ..." / "CP Inventory ..." — filename starts or contains "<name> inventory"
-    (re.compile(r"(?i)\binventory\b", re.I), "inventory_snapshot", "opening_balance", None, 0.75),
+    (re.compile(r"(?i)(^|[\s_\-.])inventory($|[\s_\-.])", re.I), "inventory_snapshot", "opening_balance", None, 0.75),
 
     (re.compile(r"(?i)^(asn|receipt|whse.*receipt|shipment.?notification)", re.I),
         "inventory_receipt", "receipt", None, 0.85),

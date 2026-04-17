@@ -148,7 +148,12 @@ def _heuristic_mapping(headers: List[str]) -> ColumnMap:
                 if rx.match(norm):
                     mapping.setdefault(canonical, orig)
                     break
+    # Fallback: if we have description but no item, that's OK — description will
+    # be used as item at normalization time.
     missing = [f for f in REQUIRED_FIELDS if f not in mapping]
+    if "item" in missing and "item_description" in mapping:
+        # Don't list as blocking, but record via a softer flag in raw.
+        missing.remove("item")
     unmapped = [orig for norm, orig in norm_to_orig.items() if orig not in mapping.values()]
     # Confidence = fraction of required hit + some bonus for optional coverage
     required_hit = 1.0 - (len(missing) / max(1, len(REQUIRED_FIELDS)))
@@ -389,6 +394,10 @@ def normalize_rows(
     errors: List[Dict[str, Any]] = []
     cm = column_map.mapping
 
+    # Fallback: if `item` is not mapped but `item_description` IS, use
+    # description as the item identifier (legit for inventory summaries).
+    item_fallback_to_description = "item" not in cm and "item_description" in cm
+
     for idx, raw in enumerate(rows, start=1):
         # Lookup each canonical value via the mapped source header
         def _get(field: str) -> Any:
@@ -398,6 +407,9 @@ def normalize_rows(
             return raw.get(src, raw.get(str(src).strip(), None))
 
         item = _get("item")
+        desc_val = _get("item_description")
+        if (item is None or str(item).strip() == "") and item_fallback_to_description and desc_val:
+            item = desc_val
         qty = _parse_number(_get("qty"))
 
         if item is None or str(item).strip() == "":
@@ -413,8 +425,8 @@ def normalize_rows(
         effective_date = _parse_date(_get("effective_date")) or filename_effective_date
 
         out.append({
-            "item": str(item).strip(),
-            "item_description": str(_get("item_description") or "").strip(),
+            "item": str(item).strip()[:120],  # cap to keep ledger clean
+            "item_description": str(desc_val or "").strip(),
             "qty": qty,
             "warehouse": str(_get("warehouse") or default_warehouse).strip() or default_warehouse,
             "uom": str(_get("uom") or default_uom).strip() or default_uom,

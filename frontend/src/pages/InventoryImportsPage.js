@@ -47,15 +47,54 @@ function StagingListRow({ item, onOpen }) {
   );
 }
 
-function StagingDetail({ staging, customers, onClose, onApproved, onRejected }) {
+function StagingDetail({ staging, customers, onClose, onApproved, onRejected, onUpdated }) {
   const [assignedCustomerId, setAssignedCustomerId] = useState(staging.assigned_customer_id || '');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [editMap, setEditMap] = useState(false);
+  const [mapDraft, setMapDraft] = useState(staging.column_map?.mapping || {});
 
   const cm = staging.column_map || {};
   const cls = staging.classification || {};
   const rows = staging.rows || [];
   const errs = staging.row_errors || [];
+
+  const CANONICAL_FIELDS = [
+    { key: 'item', label: 'Item / SKU', required: true },
+    { key: 'item_description', label: 'Description', required: false },
+    { key: 'qty', label: 'Quantity', required: true },
+    { key: 'warehouse', label: 'Warehouse', required: false },
+    { key: 'uom', label: 'UoM', required: false },
+    { key: 'reference', label: 'Reference (PO/SO)', required: false },
+    { key: 'effective_date', label: 'Effective Date', required: false },
+    { key: 'ownership_type', label: 'Ownership', required: false },
+    { key: 'notes', label: 'Notes', required: false },
+  ];
+
+  const saveMap = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const cleaned = Object.fromEntries(Object.entries(mapDraft).filter(([, v]) => v && String(v).trim()));
+      const res = await fetch(`${API}/api/inventory-xls/staging/${staging.id}/update`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ column_map: { ...cm, mapping: cleaned, source: 'manual' } }),
+      });
+      const d = await res.json();
+      if (!d.updated) throw new Error(d.reason || 'update failed');
+
+      // Now re-normalize rows against the saved mapping (no re-upload needed)
+      const renorm = await fetch(`${API}/api/inventory-xls/staging/${staging.id}/re-normalize`, { method: 'POST' });
+      const rd = await renorm.json();
+      if (renorm.status >= 400) {
+        setMsg({ type: 'err', text: `Saved map, but re-normalize failed: ${rd.detail || JSON.stringify(rd)}` });
+      } else {
+        setMsg({ type: 'ok', text: `Mapping saved. Re-normalized: ${rd.parsed} row(s), ${rd.errors} errors.` });
+      }
+      setEditMap(false);
+      onUpdated && onUpdated();
+    } catch (e) { setMsg({ type: 'err', text: String(e) }); }
+    finally { setBusy(false); }
+  };
 
   const save = async () => {
     setBusy(true); setMsg(null);
@@ -73,17 +112,22 @@ function StagingDetail({ staging, customers, onClose, onApproved, onRejected }) 
 
   const approve = async () => {
     if (!assignedCustomerId) { setMsg({ type: 'err', text: 'Assign a customer first.' }); return; }
+    if (rows.length === 0) {
+      setMsg({ type: 'err', text: `Cannot approve — staging has 0 normalized rows (${errs.length} rows failed parsing). Fix the column map and re-ingest first.` });
+      return;
+    }
     setBusy(true); setMsg(null);
     try {
-      // Save assignment first if dirty
       if (assignedCustomerId !== staging.assigned_customer_id) await save();
       const res = await fetch(`${API}/api/inventory-xls/staging/${staging.id}/approve?approved_by=user`, { method: 'POST' });
       const d = await res.json();
-      if (d.status === 'applied') {
-        setMsg({ type: 'ok', text: `Applied ${d.applied_count} movement(s). ${d.error_count} errors.` });
+      if (res.status >= 400) {
+        setMsg({ type: 'err', text: `HTTP ${res.status}: ${d.detail || JSON.stringify(d)}` });
+      } else if (d.status === 'applied') {
+        setMsg({ type: 'ok', text: `Applied ${d.applied_count} movement(s). ${d.error_count || 0} errors.` });
         onApproved && onApproved(d);
       } else {
-        setMsg({ type: 'err', text: `Approval status: ${d.status}. ${(d.errors || []).length} errors.` });
+        setMsg({ type: 'err', text: `Status: ${d.status || 'unknown'}. Applied: ${d.applied_count ?? 0}, errors: ${d.error_count ?? 0}. First error: ${(d.errors || [])[0]?.error || '—'}` });
       }
     } catch (e) { setMsg({ type: 'err', text: String(e) }); }
     finally { setBusy(false); }
@@ -138,18 +182,59 @@ function StagingDetail({ staging, customers, onClose, onApproved, onRejected }) 
               <div className="flex items-center gap-2">
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted uppercase tracking-wide">{cm.source}</span>
                 <ConfidencePill value={cm.confidence} />
+                {staging.status === 'pending_review' && (
+                  <button
+                    data-testid="edit-map-btn"
+                    onClick={() => setEditMap(e => !e)}
+                    className="text-[10px] px-1.5 py-0.5 rounded border border-border hover:bg-muted text-muted-foreground"
+                  >
+                    {editMap ? 'Cancel' : 'Edit'}
+                  </button>
+                )}
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-1.5 text-xs">
-              {Object.entries(cm.mapping || {}).map(([canonical, src]) => (
-                <div key={canonical} className="flex items-center gap-2">
-                  <span className="font-mono text-emerald-300">{canonical}</span>
-                  <span className="text-muted-foreground">←</span>
-                  <span className="truncate">{src}</span>
+            {!editMap ? (
+              <div className="grid grid-cols-2 gap-1.5 text-xs">
+                {Object.entries(cm.mapping || {}).map(([canonical, src]) => (
+                  <div key={canonical} className="flex items-center gap-2">
+                    <span className="font-mono text-emerald-300">{canonical}</span>
+                    <span className="text-muted-foreground">←</span>
+                    <span className="truncate">{src}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-1.5" data-testid="map-editor">
+                {CANONICAL_FIELDS.map(f => (
+                  <div key={f.key} className="flex items-center gap-2 text-xs">
+                    <span className={`font-mono w-32 shrink-0 ${f.required ? 'text-emerald-300' : 'text-muted-foreground'}`}>
+                      {f.key}{f.required ? '*' : ''}
+                    </span>
+                    <select
+                      data-testid={`map-sel-${f.key}`}
+                      value={mapDraft[f.key] || ''}
+                      onChange={(e) => setMapDraft(d => ({ ...d, [f.key]: e.target.value }))}
+                      className="flex-1 bg-background border border-border rounded px-2 py-1 text-xs"
+                    >
+                      <option value="">— skip —</option>
+                      {(staging.headers || []).map(h => (
+                        <option key={h} value={h}>{h}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+                <div className="flex justify-end pt-2">
+                  <button data-testid="save-map-btn" onClick={saveMap} disabled={busy}
+                    className="px-3 py-1 bg-primary/20 border border-primary text-primary rounded text-xs hover:bg-primary/30 disabled:opacity-50">
+                    Save Mapping
+                  </button>
                 </div>
-              ))}
-            </div>
-            {cm.missing_required?.length > 0 && (
+                <div className="text-[10px] text-muted-foreground pt-1">
+                  * = required. You'll need to re-ingest the file after saving (the rows were normalized with the old map).
+                </div>
+              </div>
+            )}
+            {cm.missing_required?.length > 0 && !editMap && (
               <div className="text-xs text-red-400 mt-2 flex items-center gap-1">
                 <AlertTriangle className="h-3 w-3" /> Missing required: {cm.missing_required.join(', ')}
               </div>
@@ -466,6 +551,11 @@ export default function InventoryImportsPage() {
           onClose={closeDetail}
           onApproved={() => { closeDetail(); fetchAll(); }}
           onRejected={() => { closeDetail(); fetchAll(); }}
+          onUpdated={async () => {
+            const res = await fetch(`${API}/api/inventory-xls/staging/${selectedId}`);
+            setSelectedStaging(await res.json());
+            fetchAll();
+          }}
         />
       )}
     </div>

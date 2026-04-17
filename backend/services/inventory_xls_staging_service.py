@@ -38,6 +38,18 @@ LEARNING_COLL = "inv_xls_learned_mappings"
 
 STAGING_STATUSES = {"pending_review", "applied", "rejected", "superseded"}
 
+# Auto-approve threshold — a staging record created from a learned mapping
+# will auto-approve if ALL of the following are true:
+#   1. column_map source == "learned"
+#   2. approval_count for the learned mapping >= AUTO_APPROVE_MIN_APPROVALS
+#   3. learned confidence >= AUTO_APPROVE_MIN_CONFIDENCE
+#   4. an assigned customer has been resolved via sender-domain auto-suggest
+#   5. normalized rows exist and no missing_required fields
+# This keeps the pilot's human-in-the-loop safety for new/unknown senders
+# while letting repeat senders flow straight through.
+AUTO_APPROVE_MIN_APPROVALS = 3
+AUTO_APPROVE_MIN_CONFIDENCE = 0.95
+
 
 # ─────────────────────────────────────────────────────────────
 # Customer auto-suggestion from sender
@@ -63,15 +75,24 @@ async def suggest_customer_workspace(
             hints.append(token)
 
     for hint in hints:
+        # Try prefix match in BOTH directions: code startsWith hint, OR hint startsWith code
+        # e.g. sender domain "gamerpackaging" should match customer code "gamer"
         cust = await db[CUSTOMERS_COLL].find_one(
             {"$or": [
                 {"code": {"$regex": f"^{hint}", "$options": "i"}},
+                {"code": {"$regex": f"^{hint[:5]}", "$options": "i"}},
                 {"name": {"$regex": hint, "$options": "i"}},
             ]},
             {"_id": 0},
         )
         if cust:
             return cust
+        # Also try: where hint startsWith customer code (domain is longer than code)
+        all_customers = await db[CUSTOMERS_COLL].find({}, {"_id": 0, "id": 1, "code": 1, "name": 1}).to_list(500)
+        for c in all_customers:
+            code = (c.get("code") or "").lower()
+            if code and len(code) >= 3 and hint.startswith(code):
+                return c
     return None
 
 
@@ -140,7 +161,62 @@ async def stage_import(
         staging_doc["id"][:8], staging_doc["row_count"],
         classification.get("classification"), suggested_customer_id,
     )
-    return {"already_staged": False, "staging": staging_doc}
+
+    # Auto-approve gate — only when we have a learned mapping with history,
+    # an auto-suggested customer, and healthy rows.
+    auto_applied = False
+    if await _should_auto_approve(db, staging_doc):
+        try:
+            approve_result = await approve_staging(
+                db, staging_doc["id"], approved_by="auto:learned-mapping",
+            )
+            auto_applied = approve_result.get("status") == "applied"
+            staging_doc["status"] = approve_result.get("status", staging_doc["status"])
+            staging_doc["auto_approved"] = auto_applied
+            logger.info(
+                "[XLSStaging] auto-approved id=%s applied=%d intent=%s",
+                staging_doc["id"][:8], approve_result.get("applied_count", 0),
+                classification.get("movement_intent"),
+            )
+        except Exception as e:
+            logger.warning("[XLSStaging] auto-approve failed for %s: %s", staging_doc["id"][:8], e)
+
+    return {
+        "already_staged": False,
+        "staging": staging_doc,
+        "auto_applied": auto_applied,
+    }
+
+
+async def _should_auto_approve(db, staging_doc: Dict[str, Any]) -> bool:
+    """Return True iff this staging is eligible for auto-approval."""
+    # We accept either suggested_customer_id OR assigned_customer_id — since
+    # stage_import sets both to the same value on creation.
+    customer_id = staging_doc.get("assigned_customer_id") or staging_doc.get("suggested_customer_id")
+    if not customer_id:
+        return False
+    staging_doc["assigned_customer_id"] = customer_id
+    if not staging_doc.get("rows"):
+        return False
+    cm = staging_doc.get("column_map") or {}
+    if (cm.get("missing_required") or []):
+        return False
+    if cm.get("source") != "learned":
+        return False
+    if (cm.get("confidence") or 0) < AUTO_APPROVE_MIN_CONFIDENCE:
+        return False
+    # Lookup the learning record to confirm approval_count
+    sender_domain = staging_doc.get("sender_domain") or "unknown"
+    header_hash = staging_doc.get("header_hash")
+    learned = await db[LEARNING_COLL].find_one(
+        {"sender_domain": sender_domain, "header_hash": header_hash},
+        {"_id": 0, "approval_count": 1},
+    )
+    if not learned:
+        return False
+    if learned.get("approval_count", 0) < AUTO_APPROVE_MIN_APPROVALS:
+        return False
+    return True
 
 
 # ─────────────────────────────────────────────────────────────

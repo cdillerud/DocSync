@@ -126,7 +126,7 @@ async def _lookup_learned_mapping(
     cm = learned.get("column_map") or {}
     return ColumnMap(
         mapping=cm,
-        confidence=min(0.99, 0.80 + 0.03 * learned.get("approval_count", 1)),
+        confidence=min(0.99, 0.80 + 0.05 * learned.get("approval_count", 1)),
         source="learned",
         missing_required=[f for f in REQUIRED_FIELDS if f not in cm],
         unmapped_headers=[],

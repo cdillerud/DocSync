@@ -1,0 +1,84 @@
+{
+  "summary": "Iteration 208: Inventory XLS Pipeline Round 3 Backend Testing Complete. All 37 tests passed (17 new Round 3 tests + 20 regression tests from iter 207). Verified: (1) Auto-approve gate fires after 3 approvals with auto_applied=true, status=applied, approved_by='auto:learned-mapping', (2) Confidence formula 0.80 + 0.05*approval_count verified via learned mapping lookup, (3) POST /api/inventory-xls/backfill-pilot-docs works with dry_run=true (scan only) and dry_run=false (scan+stage), idempotent behavior confirmed, (4) Customer prefix match: sender 'user@gamerpackaging.com' correctly suggests customer code='gamer' via hint.startsWith(code) logic, (5) All iter 207 endpoints still work (ingest, staging CRUD, approve/reject, learning-summary), (6) Auto-approved flag correctly set on staging records.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_inventory_xls_round3.py",
+    "/app/backend/tests/test_inventory_xls_pipeline.py",
+    "/app/test_reports/pytest/inventory_xls_round3_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "inventory_xls_staging_service.py: _should_auto_approve correctly checks all 5 conditions (learned source, confidence >= 0.95, approval_count >= 3, assigned_customer_id, no missing_required). Auto-approve gate fires inside stage_import after initial insert.",
+    "inventory_xls_parser.py: _lookup_learned_mapping uses formula min(0.99, 0.80 + 0.05 * approval_count) for confidence calculation. After 3 approvals: 0.95 (threshold met).",
+    "inventory_xls router: POST /backfill-pilot-docs at line 262 correctly scans hub_documents for pilot XLS/CSV files, classifies them, and stages if dry_run=false. Marks source docs with inventory_xls_backfilled=true for idempotency.",
+    "server.py: _run_pilot_enrichment (line 2825) calls _maybe_stage_inventory_xls (line 2857) for pilot-ingested XLS/CSV files. Non-XLS files are no-op.",
+    "inventory_xls_staging_service.py: suggest_customer_workspace uses prefix matching in both directions - code.startsWith(hint) AND hint.startsWith(code) - so 'gamerpackaging' domain matches 'gamer' customer code."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_inventory_xls_round3.py"
+  ],
+  "success_rate": {
+    "backend": "100% (37/37 tests passed: 17 Round 3 + 20 iter 207 regression)"
+  },
+  "test_credentials": "N/A - backend-only testing, no auth required",
+  "seed_data_creation": "Created/verified 'gamer' customer for prefix matching tests. Multiple staging records created for auto-approve gate testing.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 208 verified Round 3 Inventory XLS Pipeline enhancements. Auto-approve gate fires when: (1) column_map.source='learned', (2) confidence >= 0.95, (3) approval_count >= 3, (4) assigned_customer_id populated, (5) no missing_required fields. Confidence formula: 0.80 + 0.05 * approval_count (capped at 0.99). Backfill endpoint scans hub_documents for pilot XLS files. Customer prefix matching works bidirectionally. All iter 207 endpoints remain functional.",
+  "tested_features": {
+    "auto_approve_gate": [
+      "Auto-approve fires after 3 approvals - PASS (auto_applied=true, status=applied)",
+      "Auto-approve does NOT fire with approval_count < 3 - PASS (status=pending_review)",
+      "Auto-approved records have approved_by='auto:learned-mapping' - PASS"
+    ],
+    "confidence_formula": [
+      "Learned mapping confidence = 0.80 + 0.05 * approval_count - PASS",
+      "After 3 approvals, confidence >= 0.95 - PASS"
+    ],
+    "backfill_pilot_docs": [
+      "POST /api/inventory-xls/backfill-pilot-docs?dry_run=true - PASS (staged=0)",
+      "POST /api/inventory-xls/backfill-pilot-docs?dry_run=false - PASS (stages inventory XLS)",
+      "Backfill idempotent (second run returns already_staged) - PASS"
+    ],
+    "customer_prefix_match": [
+      "sender 'user@gamerpackaging.com' matches customer code='gamer' - PASS"
+    ],
+    "pilot_enrichment_side_channel": [
+      "_maybe_stage_inventory_xls function exists in server.py - VERIFIED (line 2857)",
+      "_run_pilot_enrichment calls _maybe_stage_inventory_xls - VERIFIED (line 2848)"
+    ],
+    "regression_iter207": [
+      "POST /api/inventory-xls/ingest - PASS",
+      "GET /api/inventory-xls/staging - PASS",
+      "GET /api/inventory-xls/staging/{id} - PASS",
+      "POST /api/inventory-xls/staging/{id}/update - PASS",
+      "POST /api/inventory-xls/staging/{id}/approve - PASS",
+      "POST /api/inventory-xls/staging/{id}/reject - PASS",
+      "GET /api/inventory-xls/learning-summary - PASS"
+    ],
+    "match_tier_distribution": [
+      "GET /api/inside-sales-pilot/match-tier-distribution returns buckets - PASS"
+    ]
+  },
+  "code_verification": {
+    "_should_auto_approve_conditions": [
+      "assigned_customer_id or suggested_customer_id populated",
+      "rows exist",
+      "no missing_required fields",
+      "column_map.source == 'learned'",
+      "confidence >= 0.95 (AUTO_APPROVE_MIN_CONFIDENCE)",
+      "approval_count >= 3 (AUTO_APPROVE_MIN_APPROVALS)"
+    ],
+    "confidence_formula_verification": "min(0.99, 0.80 + 0.05 * approval_count) in inventory_xls_parser.py line 129",
+    "backfill_endpoint_location": "inventory_xls.py line 262",
+    "pilot_side_channel_location": "server.py lines 2842-2850"
+  }
+}

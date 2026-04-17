@@ -11,7 +11,7 @@ import {
 import { ScrollArea } from '../components/ui/scroll-area';
 import { Badge } from '../components/ui/badge';
 import {
-  LayoutDashboard, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, ShoppingCart, ClipboardList, Brain, FolderTree, ArrowLeftRight, Sparkles, Tag, Wrench, Bug, FlaskConical, TrendingUp, ClipboardCheck, Activity, Shield, Map
+  LayoutDashboard, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, ShoppingCart, ClipboardList, Brain, FolderTree, ArrowLeftRight, Sparkles, Tag, Wrench, Bug, FlaskConical, TrendingUp, ClipboardCheck, Activity, Shield, Map, FileSpreadsheet
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { APP_VERSION, CHANGELOG } from '../lib/version';
@@ -24,6 +24,7 @@ const navItems = [
   { to: '/monitor', icon: Activity, label: 'Monitor' },
   { to: '/governance', icon: Shield, label: 'Governance' },
   { to: '/sales-inventory', icon: ShoppingCart, label: 'Sales' },
+  { to: '/inventory/imports', icon: FileSpreadsheet, label: 'Inventory Imports' },
   { to: '/posting-intelligence', icon: Brain, label: 'Posting AI' },
   { to: '/invoice-trace', icon: ArrowLeftRight, label: 'Trace' },
   { to: '/ai-learning', icon: TrendingUp, label: 'AI Learning' },

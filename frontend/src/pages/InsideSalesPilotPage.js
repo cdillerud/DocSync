@@ -69,6 +69,19 @@ function MatchTierDonut({ tiers }) {
     return seg;
   });
 
+  // Cache Drift Alarm — fires when exact is low vs matched total OR fuzzy is high vs matched total
+  const matched = (buckets.exact || 0) + (buckets.scoped || 0) + (buckets.fuzzy || 0) + (buckets.live || 0);
+  const exactShareOfMatched = matched > 0 ? (buckets.exact || 0) / matched : 1;
+  const fuzzyShareOfMatched = matched > 0 ? (buckets.fuzzy || 0) / matched : 0;
+  const EXACT_FLOOR = 0.80;   // if <80% of matches are exact → drift
+  const FUZZY_CEILING = 0.10; // if >10% of matches need fuzzy → drift
+  const drift =
+    matched >= 10 && exactShareOfMatched < EXACT_FLOOR
+      ? { level: 'warn', reason: `Only ${(exactShareOfMatched * 100).toFixed(0)}% of matches are exact-tier (threshold ${EXACT_FLOOR * 100}%). Extraction quality or BC cache may be drifting.` }
+      : matched >= 10 && fuzzyShareOfMatched > FUZZY_CEILING
+      ? { level: 'warn', reason: `Fuzzy tier carrying ${(fuzzyShareOfMatched * 100).toFixed(0)}% of matches (threshold ${FUZZY_CEILING * 100}%). Exact-tier cache hit rate is eroding.` }
+      : null;
+
   if (total === 0) {
     return (
       <div className="flex items-center justify-center h-40 text-sm text-muted-foreground" data-testid="match-tier-donut-empty">
@@ -78,43 +91,54 @@ function MatchTierDonut({ tiers }) {
   }
 
   return (
-    <div className="flex items-center gap-5" data-testid="match-tier-donut">
-      <svg width="160" height="160" viewBox="0 0 160 160" className="shrink-0">
-        <g transform="rotate(-90 80 80)">
-          {/* Background ring */}
-          <circle cx="80" cy="80" r={RADIUS} fill="transparent" stroke="hsl(var(--muted))" strokeWidth="20" />
-          {/* Segments */}
-          {segments.filter(s => s.len > 0).map(s => (
-            <circle
-              key={s.key}
-              cx="80"
-              cy="80"
-              r={RADIUS}
-              fill="transparent"
-              stroke={s.color}
-              strokeWidth="20"
-              strokeDasharray={`${s.len} ${CIRCUM - s.len}`}
-              strokeDashoffset={-s.offset}
-            />
-          ))}
-        </g>
-        {/* Center label */}
-        <text x="80" y="74" textAnchor="middle" className="fill-foreground font-bold" fontSize="24">
-          {tiers?.match_rate_pct ?? 0}%
-        </text>
-        <text x="80" y="96" textAnchor="middle" className="fill-muted-foreground" fontSize="10">
-          {tiers?.matched_docs ?? 0} / {tiers?.total_docs ?? 0}
-        </text>
-      </svg>
-      <div className="flex-1 space-y-1.5">
-        {segments.map(s => (
-          <div key={s.key} className="flex items-center gap-2 text-xs">
-            <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: s.color }} />
-            <span className="flex-1 text-muted-foreground">{s.label}</span>
-            <span className="font-mono font-medium">{s.value}</span>
-            <span className="text-muted-foreground/60 text-[10px] w-10 text-right">{(s.frac * 100).toFixed(0)}%</span>
+    <div className="space-y-3" data-testid="match-tier-donut">
+      {drift && (
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 flex items-start gap-2 text-xs" data-testid="cache-drift-alarm">
+          <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+          <div>
+            <div className="font-semibold text-amber-300">Cache Drift Alarm</div>
+            <div className="text-amber-200/90">{drift.reason}</div>
           </div>
-        ))}
+        </div>
+      )}
+      <div className="flex items-center gap-5">
+        <svg width="160" height="160" viewBox="0 0 160 160" className="shrink-0">
+          <g transform="rotate(-90 80 80)">
+            {/* Background ring */}
+            <circle cx="80" cy="80" r={RADIUS} fill="transparent" stroke="hsl(var(--muted))" strokeWidth="20" />
+            {/* Segments */}
+            {segments.filter(s => s.len > 0).map(s => (
+              <circle
+                key={s.key}
+                cx="80"
+                cy="80"
+                r={RADIUS}
+                fill="transparent"
+                stroke={s.color}
+                strokeWidth="20"
+                strokeDasharray={`${s.len} ${CIRCUM - s.len}`}
+                strokeDashoffset={-s.offset}
+              />
+            ))}
+          </g>
+          {/* Center label */}
+          <text x="80" y="74" textAnchor="middle" className="fill-foreground font-bold" fontSize="24">
+            {tiers?.match_rate_pct ?? 0}%
+          </text>
+          <text x="80" y="96" textAnchor="middle" className="fill-muted-foreground" fontSize="10">
+            {tiers?.matched_docs ?? 0} / {tiers?.total_docs ?? 0}
+          </text>
+        </svg>
+        <div className="flex-1 space-y-1.5">
+          {segments.map(s => (
+            <div key={s.key} className="flex items-center gap-2 text-xs">
+              <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: s.color }} />
+              <span className="flex-1 text-muted-foreground">{s.label}</span>
+              <span className="font-mono font-medium">{s.value}</span>
+              <span className="text-muted-foreground/60 text-[10px] w-10 text-right">{(s.frac * 100).toFixed(0)}%</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

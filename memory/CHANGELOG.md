@@ -1,5 +1,49 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-17] P1 Phase 2 + Batch Enhancements
+
+### Added — Order Match fuzzy tier
+- `_check_order` in `services/bc_prod_validator.py` gains a final **fuzzy_normalized_search** tier (runs when `bc_customer_no` is null and ref is ≥6 chars). Searches `normalized_document_no`, `normalized_external_ref`, and regex on raw `bc_external_document_no` across `sales_order + posted_sales_invoice + posted_sales_shipment`.
+- Diagnostic endpoint reports new `hit_via_fuzzy_normalized` bucket.
+
+### Added — UI BC Match column on Inside Sales Pilot dashboard
+- New column in Recent Pilot Documents table with color-coded `bc_entity_type` badge:
+  - 🟢 Open SO · 🟡 Posted Inv · 🔵 Shipment · ⚪ no match
+- Tier suffix: `~` for fuzzy, `c` for customer-scoped (tooltips on hover).
+- Gives reviewers instant visibility into whether a doc matched an open order vs an already-posted invoice — a key pilot-safety signal.
+
+### Added — Low-volume vendor gate
+- `document_readiness_service.evaluate_and_persist` now counts prior non-duplicate docs for the vendor. Fewer than 5 → readiness downgrades `ready_auto_*` → `needs_review` with `warning_reason: low_volume_vendor`.
+- Prevents first-time / rare vendors from auto-filing before training data exists.
+
+### Added — BOL / Tracking / Carrier extraction on pilot docs
+- `_extract_sales_fields` now captures `bol_number`, `tracking_number`, and `carrier` from the main pipeline onto `sales_pilot_extraction`.
+- Pilot remains ingest-only — fields are persisted/displayable, NOT written to BC.
+
+### Changed — P1 Phase 2: callers migrated to unified facade
+- 8 call sites now import from `services.unified_validation_service` instead of directly:
+  - `server.py` — intake readiness, gap-closer, PO retry (3 sites)
+  - `server.py :: _run_pilot_enrichment` (done in Phase 1)
+  - `routers/readiness.py` — `/evaluate/{doc_id}` + PO retry endpoint
+  - `routers/inside_sales_pilot.py` — `/validate/{doc_id}` + re-extract loop
+  - `services/inside_sales_pilot_service.py` — polling loop
+  - `services/gap_closer_service.py` — re-evaluation loop
+- Delegators (`run_bc_prod_validation`, `run_readiness`) are one-liners — zero behavior change.
+
+### Verified
+- `testing_agent_v3_fork` iteration 206: **22/22 backend tests passed, 0 issues**.
+- Facade imports work, policy registry returns 4 policies with archive fallback.
+- All pilot endpoints respond correctly; diagnostic reports new `hit_via_fuzzy_normalized` bucket.
+- Low-volume gate (threshold=5) and BOL/tracking code paths verified via introspection.
+- Fuzzy normalized tier verified present in `_check_order` with 6-char minimum.
+
+### Deferred with user input required
+- **Teams Adaptive Card webhook** — needs Azure AD app + Teams webhook URL + user sign-off on whether "Approve" should bypass the ingest-only pilot constraint.
+- **P1 Phase 3 (full server.py policy extraction)** — 1000+ lines of behavioral migration. Needs dedicated session with full regression testing.
+- **Evergreen multi-PO container allocation** — needs sample spreadsheet + schema clarification.
+
+
+
 ## [2026-04-17] P1 Refactor Started — Unified Validation + Policy Modules
 
 ### Added

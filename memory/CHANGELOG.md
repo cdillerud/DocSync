@@ -1,5 +1,61 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-17] Inventory XLS Inference Pipeline — Phases A+B+C+D
+
+### Added — Phase A (Classifier)
+- `services/inventory_xls_classifier.py` — `classify_xls(filename, headers, sender_email) → XlsClassification`. Rule-based detector for 6 inventory doc types with filename + header signals, confidence scoring, and filename+header agreement bonus.
+
+### Added — Phase B (Column Mapper + Row Normalizer)
+- `services/inventory_xls_parser.py`:
+  - `build_column_map` — cascade: learned → heuristic → LLM (Claude Haiku via Emergent LLM Key).
+  - `normalize_rows` — applies column_map, parses dates/numbers, skips zero-qty/missing-item rows.
+  - `compute_header_hash` — stable sha256[:16] over sorted-normalized headers (shared across services).
+  - `extract_effective_date_from_filename` — detects "As Of" dates in filenames.
+
+### Added — Phase C (Staging + Approval)
+- `services/inventory_xls_staging_service.py` — stage_import / update_staging / approve_staging / reject_staging / suggest_customer_workspace.
+- `routers/inventory_xls.py` — 8 REST endpoints under `/api/inventory-xls/`:
+  - `POST /ingest` (multipart file upload)
+  - `POST /ingest-pilot-doc/{doc_id}` (retroactive for hub_documents)
+  - `GET /staging[?status=&customer_id=&limit=&skip=]`
+  - `GET /staging/{id}`
+  - `POST /staging/{id}/update`
+  - `POST /staging/{id}/approve?approved_by=`
+  - `POST /staging/{id}/reject?rejected_by=&reason=`
+  - `GET /learning-summary`
+- New collections: `inv_import_staging`, `inv_xls_learned_mappings` (indexes ensured at startup).
+- Forecast rows route to `inv_incoming_supply` (planned); everything else to `inv_movements`.
+- `effective_date` additive field on movements (never overrides `created_at`).
+
+### Added — Phase D (Learning Loop)
+- On approval, persists `{sender_domain, header_hash, column_map, classification, approval_count}`.
+- Future ingests with matching `(sender_domain, header_hash)` auto-resolve via `source: "learned"` with conf = 0.80 + 0.03·approvals.
+- `get_learning_summary` returns aggregates for AI Learning dashboard.
+
+### Added — Phase E (UI)
+- `frontend/src/pages/InventoryImportsPage.js` — full review/approval dashboard at `/inventory/imports`:
+  - Status filter chips (pending_review / applied / rejected / all)
+  - Upload button (.xlsx / .xls / .csv)
+  - Learning summary strip (top senders by approval count)
+  - Staging list with classification + map source pills
+  - Side-drawer: classification signals, column map preview, first 80 rows, customer selector, Approve / Reject actions
+
+### Verified
+- `testing_agent_v3_fork` iteration 207: **20/20 backend tests passed, 0 issues.**
+- Live smoke test on preview env:
+  - Ingest: 3-row OpenOrders XLS → classified at 0.95 conf, mapped at 0.82 heuristic
+  - Approval: 3 movements in `inv_movements` with `effective_date` preserved
+  - Learning: second file from same domain → `source: "learned"` at 0.83 confidence
+  - UI: Renders correctly with learning strip, staging list, and detail drawer
+- Deploy instructions + backfill script in `/app/DEPLOY_INVENTORY_XLS.md`.
+
+### Deferred
+- Auto-stage from pilot mailbox ingestion (currently requires explicit `POST /ingest-pilot-doc/{id}` per doc, or the bulk backfill loop).
+- Teams Adaptive Card webhook (user input still pending).
+- P1 Phase 3 (policy extraction from server.py).
+
+
+
 ## [2026-04-17] Match-Tier Distribution Donut Chart
 
 ### Added

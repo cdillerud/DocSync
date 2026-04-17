@@ -17,7 +17,8 @@ Flow:
 
 import hashlib
 import logging
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, File, Form, HTTPException, Query, UploadFile
 
@@ -337,6 +338,51 @@ async def api_reject_staging(
 async def api_learning_summary():
     db = get_db()
     return await get_learning_summary(db)
+
+
+@router.post("/staging/re-suggest-customers")
+async def api_resuggest_customers(only_unassigned: bool = Query(True)):
+    """Re-run customer auto-suggest on existing staging records using the
+    current filename-aware logic. Useful after creating new customer workspaces
+    or upgrading the classifier rules.
+    """
+    from services.inventory_xls_staging_service import STAGING_COLL
+
+    db = get_db()
+    q: Dict[str, Any] = {"status": "pending_review"}
+    if only_unassigned:
+        q["$or"] = [
+            {"assigned_customer_id": None},
+            {"assigned_customer_id": {"$exists": False}},
+        ]
+    staging_rows = await db[STAGING_COLL].find(q, {"_id": 0}).to_list(500)
+
+    updated = 0
+    changed: List[Dict[str, str]] = []
+    for s in staging_rows:
+        cust = await suggest_customer_workspace(
+            db, s.get("sender_email"), s.get("filename", ""),
+        )
+        if not cust:
+            continue
+        new_cust_id = cust["id"]
+        if s.get("assigned_customer_id") == new_cust_id:
+            continue
+        await db[STAGING_COLL].update_one(
+            {"id": s["id"]},
+            {"$set": {
+                "suggested_customer_id": new_cust_id,
+                "assigned_customer_id": new_cust_id,
+                "resuggested_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+        updated += 1
+        changed.append({
+            "staging_id": s["id"][:12],
+            "filename": s.get("filename", "")[:60],
+            "new_customer": f'{cust.get("name")} ({cust.get("code")})',
+        })
+    return {"updated": updated, "total_pending": len(staging_rows), "changed": changed}
 
 
 # ── Bulk backfill of existing pilot XLS docs ──────────

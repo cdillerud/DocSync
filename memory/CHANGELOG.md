@@ -1,5 +1,33 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-17] Round 5 — Filename-Aware Customer Suggestion
+
+### Problem
+Brokers (like Gamer Packaging) email inventory reports for their downstream customers. Files like `Gamer Inventory Summary - Water Barons.xlsx` were being auto-suggested as the **sender** (Gamer) instead of the **actual inventory owner** (Water Barons) named in the filename.
+
+### Fixed — 3-tier suggestion cascade in `suggest_customer_workspace`
+1. **Filename suffix pattern**: `... - <Customer>.xlsx` → extracts `<Customer>` → matches against registered workspaces (name or code, bidirectional prefix match).
+2. **Filename prefix pattern**: `<Customer>. <Vendor> ...xlsx` or `<Customer> <Vendor> ...` where `<Vendor>` ∈ known broker tokens (gamer, pretium, mrp, ompi, ball, lagersmith). Extracts tokens BEFORE the vendor marker.
+3. **Sender domain** (priority 3, previous default): used only when filename parsing yields no match.
+
+### Added helpers
+- `_resolve_customer_text(text, customers)` — normalized bidirectional match (strips punctuation, case-insensitive, ≥3 char minimum, prefers exact/prefix over substring).
+
+### Added endpoint & UI
+- `POST /api/inventory-xls/staging/re-suggest-customers?only_unassigned=false` — re-runs the new logic on existing `pending_review` staging rows. Returns `{updated, total_pending, changed: [{staging_id, filename, new_customer}]}`.
+- New UI button **"Re-suggest Customers"** (violet, `Sparkles` icon) in `/inventory/imports` header. One click re-resolves all pending stagings to their correct customer via filename parsing.
+
+### Verified
+- Live E2E on 6 test patterns:
+  - `Gamer Inventory Summary - Water Barons.xlsx` → **Water Barons** ✅
+  - `Ryl Co Inventory vs Ryl Co Needs.xlsx` → **Ryl Co** ✅
+  - `Ryl Co. Gamer Can Forecast.xlsx` (broker pattern) → **Ryl Co** (not Gamer) ✅
+  - `Coloplast On Hold Orders.xlsx` → **Coloplast** ✅
+  - `Gamer Can Forecast.xlsx` (no downstream) → **Gamer** (fallback to sender) ✅
+  - `open_orders_report_17-APR-26.xlsx` → Pretium (via sender when no filename hint) ✅
+
+
+
 ## [2026-04-17] Round 4 — Description Fallback + Manual Mapping Editor
 
 ### Bug fix: "0 rows" on Ryl Co Inventory files

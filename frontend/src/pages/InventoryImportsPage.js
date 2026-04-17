@@ -389,6 +389,34 @@ export default function InventoryImportsPage() {
     }
   };
 
+  const handleResuggest = async () => {
+    if (!window.confirm("Re-run customer auto-suggest on all pending staging records using the latest filename-aware logic?")) return;
+    setBackfilling(true); setBackfillResult(null);
+    try {
+      const res = await fetch(`${API}/api/inventory-xls/staging/re-suggest-customers?only_unassigned=false`, { method: 'POST' });
+      const data = await res.json();
+      setBackfillResult({
+        scanned: data.total_pending,
+        classified_inventory: data.total_pending,
+        staged: data.updated,
+        already_staged: 0,
+        skipped_not_inventory: data.total_pending - data.updated,
+        errors: 0,
+        by_classification: Object.fromEntries(
+          (data.changed || []).reduce((acc, c) => {
+            acc.set(c.new_customer, (acc.get(c.new_customer) || 0) + 1);
+            return acc;
+          }, new Map())
+        ),
+      });
+      await fetchAll();
+    } catch (err) {
+      setBackfillResult({ error: String(err) });
+    } finally {
+      setBackfilling(false);
+    }
+  };
+
   return (
     <div className="space-y-6" data-testid="inventory-imports-page">
       <div className="flex items-center justify-between">
@@ -404,6 +432,16 @@ export default function InventoryImportsPage() {
         <div className="flex items-center gap-2">
           <button data-testid="refresh-btn" onClick={fetchAll} className="p-2 rounded border border-border hover:bg-muted" title="Refresh">
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+          <button
+            data-testid="resuggest-btn"
+            onClick={handleResuggest}
+            disabled={backfilling}
+            className="px-3 py-2 rounded-md border border-violet-500/40 text-violet-300 bg-violet-500/10 hover:bg-violet-500/20 text-sm disabled:opacity-50 flex items-center gap-2"
+            title="Re-run customer auto-suggest on all pending staging using filename-aware logic"
+          >
+            <Sparkles className="h-4 w-4" />
+            Re-suggest Customers
           </button>
           <button
             data-testid="backfill-dry-btn"

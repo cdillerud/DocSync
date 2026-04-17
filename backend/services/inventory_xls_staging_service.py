@@ -60,39 +60,93 @@ async def suggest_customer_workspace(
     sender_email: Optional[str],
     filename: str = "",
 ) -> Optional[Dict[str, Any]]:
-    """Auto-suggest an inv_customers workspace based on sender domain or filename.
+    """Auto-suggest an inv_customers workspace.
 
-    Returns the matching customer record or None.
+    Priority (most specific wins):
+      1. FILENAME CUSTOMER NAME — e.g. "Gamer Inventory Summary - Water Barons.xlsx"
+         → match "Water Barons" against registered customer names/codes.
+      2. FILENAME PREFIX — e.g. "Ryl Co. Gamer Can Forecast.xlsx"
+         → first word(s) before a known broker/vendor name.
+      3. SENDER DOMAIN — e.g. `pretiumpkg.com` → PRETIUM workspace.
+
+    Priority 1 + 2 override Priority 3 because brokers (e.g. Gamer) often
+    email third-party inventory reports, where the actual customer is
+    named in the filename, not the sender domain.
     """
+    import re as _re
+
+    all_customers = await db[CUSTOMERS_COLL].find(
+        {}, {"_id": 0, "id": 1, "code": 1, "name": 1},
+    ).to_list(500)
+    if not all_customers:
+        return None
+
+    fname = (filename or "").strip()
+    fname_base = _re.sub(r"\.(xlsx|xls|csv)$", "", fname, flags=_re.IGNORECASE)
+
+    # ── Priority 1: "... - <Customer>" suffix pattern
+    # Pick the last " - " separated segment and try to resolve it.
+    suffix_match = _re.search(r"\s-\s+([^-]+?)(?:\s*\.\s*[A-Za-z]+)?$", fname_base)
+    if suffix_match:
+        candidate = suffix_match.group(1).strip()
+        cust = _resolve_customer_text(candidate, all_customers)
+        if cust:
+            return cust
+
+    # ── Priority 2: prefix token pattern "<Customer>. <vendor> ..." or "<Customer> <vendor> ..."
+    # Take the first 1–3 words and try to resolve them.
+    tokens = _re.split(r"[\s.]+", fname_base.strip())
+    # Known vendor/broker tokens that, when detected, mean the prefix BEFORE them is the customer
+    VENDOR_MARKERS = {"gamer", "pretium", "mrp", "ompi", "ball", "lagersmith"}
+    for i in range(min(4, len(tokens))):
+        word = tokens[i].lower()
+        if word in VENDOR_MARKERS and i > 0:
+            prefix = " ".join(tokens[:i]).strip()
+            if prefix:
+                cust = _resolve_customer_text(prefix, all_customers)
+                if cust:
+                    return cust
+            break
+    # Also try the raw first 1-2 tokens
+    for take in (2, 1):
+        if len(tokens) >= take:
+            prefix = " ".join(tokens[:take]).strip()
+            if len(prefix) >= 3:
+                cust = _resolve_customer_text(prefix, all_customers)
+                if cust:
+                    return cust
+
+    # ── Priority 3: sender domain
     hints: List[str] = []
     if sender_email and "@" in sender_email:
         domain = sender_email.split("@", 1)[1].split(".")[0].lower()
         if domain not in ("gmail", "outlook", "hotmail", "yahoo"):
             hints.append(domain)
-    fname_lower = (filename or "").lower()
-    for token in ("gamer", "giovanni", "owen", "suja", "puer", "comar"):
-        if token in fname_lower and token not in hints:
-            hints.append(token)
 
     for hint in hints:
-        # Try prefix match in BOTH directions: code startsWith hint, OR hint startsWith code
-        # e.g. sender domain "gamerpackaging" should match customer code "gamer"
-        cust = await db[CUSTOMERS_COLL].find_one(
-            {"$or": [
-                {"code": {"$regex": f"^{hint}", "$options": "i"}},
-                {"code": {"$regex": f"^{hint[:5]}", "$options": "i"}},
-                {"name": {"$regex": hint, "$options": "i"}},
-            ]},
-            {"_id": 0},
-        )
+        cust = _resolve_customer_text(hint, all_customers)
         if cust:
             return cust
-        # Also try: where hint startsWith customer code (domain is longer than code)
-        all_customers = await db[CUSTOMERS_COLL].find({}, {"_id": 0, "id": 1, "code": 1, "name": 1}).to_list(500)
-        for c in all_customers:
-            code = (c.get("code") or "").lower()
-            if code and len(code) >= 3 and hint.startswith(code):
-                return c
+    return None
+
+
+def _resolve_customer_text(text: str, customers: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Given a free-text candidate (e.g. 'Water Barons' or 'gamerpackaging'),
+    return the matching customer record via bidirectional prefix / token match."""
+    import re as _re
+    norm = _re.sub(r"[^a-z0-9]", "", text.lower()).strip()
+    if len(norm) < 3:
+        return None
+    for c in customers:
+        code = _re.sub(r"[^a-z0-9]", "", (c.get("code") or "").lower())
+        name = _re.sub(r"[^a-z0-9]", "", (c.get("name") or "").lower())
+        if not code and not name:
+            continue
+        # Exact or prefix match in either direction
+        if code and (code == norm or code.startswith(norm) or norm.startswith(code) and len(code) >= 3):
+            return c
+        if name and (name == norm or name.startswith(norm) or norm in name and len(norm) >= 4):
+            return c
     return None
 
 

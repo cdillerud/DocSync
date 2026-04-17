@@ -2827,17 +2827,17 @@ async def _run_pilot_enrichment(pid: str):
     try:
         logger.info("[Pilot Enrichment] Starting auto-enrichment for %s", pid[:8])
 
-        from services.bc_prod_validator import validate_document_against_bc
-        await validate_document_against_bc(pid)
+        # Unified validation runs bc_prod + readiness + pilot_readiness in order
+        from services.unified_validation_service import validate_document
+        await validate_document(pid, policy_hint="pilot_sales")
 
+        # Spiro CRM match + SO Rules Engine are not part of validation —
+        # they are sales-specific enrichments, called here directly.
         from services.spiro_service import match_document_to_spiro
         await match_document_to_spiro(pid)
 
         from services.so_rules_engine import evaluate_sales_order
         await evaluate_sales_order(pid)
-
-        from services.pilot_readiness_review_service import review_pilot_document
-        await review_pilot_document(pid)
 
         logger.info("[Pilot Enrichment] Completed auto-enrichment for %s", pid[:8])
     except Exception as e:

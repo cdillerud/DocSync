@@ -1,5 +1,39 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-17] P1 Refactor Started — Unified Validation + Policy Modules
+
+### Added
+- **`services/unified_validation_service.py`** — single canonical entry point for document validation. Exposes:
+  - `validate_document(doc_id, policy_hint=None)` → orchestrates bc_prod + readiness + pilot_readiness per `POLICY_STAGES` table
+  - Thin delegators `run_bc_prod_validation`, `run_readiness`, `run_pilot_readiness`
+  - `POLICY_STAGES` map declaring which validation stages apply per doc_type
+  - `_infer_policy_hint(doc)` auto-detects the right pipeline based on `inside_sales_pilot` + `doc_type`
+- **`policies/` package** — pluggable policy modules (architectural review §2.3):
+  - `policies/base.py` — `PolicyModule` ABC + `PolicyResult` dataclass
+  - `policies/registry.py` — `register_policy`, `get_policy`, `list_policies`; fallback to archive policy
+  - `policies/archive.py` — 30-line policy for unknowns / no-op doc types
+  - `policies/warehouse.py` — BOL / shipment policy (thin wrapper, readiness-driven)
+  - `policies/ap_invoice.py` — AP routing by readiness state
+  - `policies/sales_order.py` — Pilot pilot_review enforcement + non-pilot readiness routing
+  - All 4 policies auto-register on package import
+
+### Changed
+- **`server.py :: _run_pilot_enrichment`** now calls `validate_document(pid, policy_hint="pilot_sales")` instead of importing bc_prod_validator + pilot_readiness_review_service directly (first canary migration; behavior unchanged — same stages run in same order).
+
+### Verified
+- Lint clean across all new files.
+- Registry correctly maps 14 doc_type strings → 4 policy modules.
+- `get_policy("garbage")` falls back to archive (no silent drops).
+- Policy `evaluate()` smoke test: pilot sales → `stage=pilot_review` with `hold_for_pilot_review` action (ingest-only constraint preserved).
+- Backend starts cleanly with no new errors.
+
+### Next migration steps (scheduled)
+- Migrate remaining `validate_document_against_bc` / `evaluate_and_persist` direct callers (~30 sites across server.py, routers/readiness.py, routers/inside_sales_pilot.py) to the unified facade.
+- Once call sites are consolidated, extract shared primitives (`field_completeness`, `entity_exists`, `po_match`, `amount_range`, `duplicate_risk`, `extraction_quality`) from the 5 readiness services into `unified_validation_service`.
+- Extract doc_type branches from `server.py` (lines 2065-2438, 3333-3634) into policy modules fleshing out real logic (currently thin wrappers).
+
+
+
 ## [2026-04-17] BC Order Match Rate Restored (P0 Fix)
 
 ### Diagnosed

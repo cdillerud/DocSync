@@ -290,6 +290,208 @@ async def list_validation_results(
     return {"total": total, "documents": docs}
 
 
+# ── Diagnostics: BC Order Match ──────────────────────────
+
+@router.get("/diagnose-order-match")
+async def diagnose_order_match(
+    sample_size: int = Query(20, ge=1, le=200),
+    doc_id: Optional[str] = Query(None, description="If set, diagnose only this doc"),
+):
+    """
+    Diagnostic endpoint to root-cause why BC Order Match is returning 0%.
+    Runs _check_order on sample pilot documents with full tracing, and
+    reports on bc_reference_cache health for sales_orders.
+    NEVER writes to BC.
+    """
+    import re as _re
+    from services.bc_prod_validator import _check_order
+
+    db = get_db()
+    report = {
+        "cache_health": {},
+        "extraction_health": {},
+        "sample_matches": [],
+        "raw_cache_samples": [],
+        "summary": {},
+    }
+
+    # 1. Cache health for sales_order
+    total_so = await db.bc_reference_cache.count_documents({"bc_entity_type": "sales_order"})
+    so_with_extref = await db.bc_reference_cache.count_documents({
+        "bc_entity_type": "sales_order",
+        "bc_external_document_no": {"$exists": True, "$nin": ["", None]},
+    })
+    so_with_docno = await db.bc_reference_cache.count_documents({
+        "bc_entity_type": "sales_order",
+        "bc_document_no": {"$exists": True, "$nin": ["", None]},
+    })
+    report["cache_health"] = {
+        "total_sales_order_records": total_so,
+        "records_with_bc_document_no": so_with_docno,
+        "records_with_bc_external_document_no": so_with_extref,
+        "external_ref_coverage_pct": round(so_with_extref / total_so * 100, 1) if total_so else 0,
+    }
+
+    # Sample 5 raw cache records so we can eyeball the shape
+    sample_cache = await db.bc_reference_cache.find(
+        {"bc_entity_type": "sales_order"},
+        {
+            "_id": 0,
+            "bc_document_no": 1,
+            "bc_external_document_no": 1,
+            "bc_order_number": 1,
+            "bc_customer_no": 1,
+            "bc_customer_name": 1,
+            "bc_status": 1,
+            "normalized_document_no": 1,
+            "normalized_external_ref": 1,
+        },
+    ).limit(5).to_list(5)
+    report["raw_cache_samples"] = sample_cache
+
+    # 2. Extraction health: how many pilot docs have a PO / order number?
+    pilot_filter = {"inside_sales_pilot": True}
+    total_docs = await db.hub_documents.count_documents(pilot_filter)
+    with_po = await db.hub_documents.count_documents({
+        **pilot_filter,
+        "$or": [
+            {"sales_pilot_extraction.po_number": {"$exists": True, "$nin": ["", None]}},
+            {"extracted_fields.po_number": {"$exists": True, "$nin": ["", None]}},
+            {"normalized_fields.customer_po": {"$exists": True, "$nin": ["", None]}},
+        ],
+    })
+    with_order = await db.hub_documents.count_documents({
+        **pilot_filter,
+        "$or": [
+            {"sales_pilot_extraction.order_number": {"$exists": True, "$nin": ["", None]}},
+            {"extracted_fields.order_number": {"$exists": True, "$nin": ["", None]}},
+            {"normalized_fields.order_number": {"$exists": True, "$nin": ["", None]}},
+        ],
+    })
+    report["extraction_health"] = {
+        "total_pilot_docs": total_docs,
+        "docs_with_po_number": with_po,
+        "docs_with_order_number": with_order,
+        "po_coverage_pct": round(with_po / total_docs * 100, 1) if total_docs else 0,
+    }
+
+    # 3. Run live _check_order tracing on a sample
+    sample_query = {"id": doc_id} if doc_id else pilot_filter
+    sample_docs = await db.hub_documents.find(
+        sample_query,
+        {
+            "_id": 0,
+            "id": 1,
+            "file_name": 1,
+            "sales_pilot_extraction": 1,
+            "extracted_fields": 1,
+            "normalized_fields": 1,
+            "matched_customer_no": 1,
+            "bc_prod_validation": 1,
+        },
+    ).limit(sample_size).to_list(sample_size)
+
+    hit_via_cache = 0
+    hit_via_direct = 0
+    hit_via_scoped = 0
+    hit_via_live = 0
+    misses = 0
+    no_ref = 0
+
+    for d in sample_docs:
+        sp = d.get("sales_pilot_extraction") or {}
+        ef = d.get("extracted_fields") or {}
+        nf = d.get("normalized_fields") or {}
+        po = sp.get("po_number") or ef.get("po_number") or nf.get("customer_po")
+        on = sp.get("order_number") or ef.get("order_number") or nf.get("order_number")
+        bc_cust = d.get("matched_customer_no")
+
+        entry = {
+            "doc_id": d.get("id", "")[:12],
+            "file_name": d.get("file_name", "")[:60],
+            "po_number": po,
+            "order_number": on,
+            "bc_customer_no": bc_cust,
+        }
+
+        if not po and not on:
+            entry["result"] = "SKIP_NO_REF"
+            no_ref += 1
+            report["sample_matches"].append(entry)
+            continue
+
+        # Build refs_to_try exactly like _check_order does
+        refs_raw = [r for r in [po, on] if r]
+        expanded = []
+        for ref in refs_raw:
+            expanded.append(ref)
+            clean = _re.sub(r'^(PO|SO|WO|PO#|SO#|#)\s*[-:]?\s*', '', str(ref), flags=_re.IGNORECASE).strip()
+            if clean != ref:
+                expanded.append(clean)
+            digits = _re.sub(r'^0+', '', clean)
+            if digits and digits != clean:
+                expanded.append(digits)
+        expanded = list(dict.fromkeys(expanded))
+        entry["refs_tried"] = expanded
+
+        # For each ref, check if it exists in the cache
+        ref_hits = []
+        for ref in expanded:
+            hit = await db.bc_reference_cache.find_one(
+                {
+                    "bc_entity_type": "sales_order",
+                    "$or": [
+                        {"bc_document_no": ref},
+                        {"bc_external_document_no": ref},
+                        {"bc_order_number": ref},
+                    ],
+                },
+                {"_id": 0, "bc_document_no": 1, "bc_external_document_no": 1, "bc_customer_no": 1},
+            )
+            if hit:
+                ref_hits.append({"ref": ref, "matched_on": hit})
+        entry["direct_ref_hits"] = ref_hits
+
+        # Now actually invoke _check_order
+        res = await _check_order(db, po, on, bc_cust)
+        entry["result"] = {
+            "found": res.get("found"),
+            "match_method": res.get("match_method"),
+            "matched_ref": res.get("matched_ref"),
+            "reason": res.get("reason"),
+        }
+        if res.get("found"):
+            m = res.get("match_method", "")
+            if "cache_multi" in m:
+                hit_via_cache += 1
+            elif "direct_cache" in m:
+                hit_via_direct += 1
+            elif "customer_scoped" in m:
+                hit_via_scoped += 1
+            elif "live_bc" in m:
+                hit_via_live += 1
+        else:
+            misses += 1
+
+        report["sample_matches"].append(entry)
+
+    report["summary"] = {
+        "sample_size": len(sample_docs),
+        "no_ref_extracted": no_ref,
+        "hit_via_cache_multi": hit_via_cache,
+        "hit_via_direct_cache": hit_via_direct,
+        "hit_via_customer_scoped": hit_via_scoped,
+        "hit_via_live_bc_api": hit_via_live,
+        "misses": misses,
+        "hit_rate_pct": round(
+            (hit_via_cache + hit_via_direct + hit_via_scoped + hit_via_live) /
+            max(1, len(sample_docs) - no_ref) * 100, 1
+        ) if (len(sample_docs) - no_ref) > 0 else 0,
+    }
+
+    return report
+
+
 # ── SO Readiness Review (Profile Comparison) ─────────────
 
 @router.post("/readiness-review/{doc_id}")

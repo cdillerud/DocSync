@@ -290,6 +290,73 @@ async def list_validation_results(
     return {"total": total, "documents": docs}
 
 
+# ── Match Tier Distribution (donut chart source) ──────────
+
+@router.get("/match-tier-distribution")
+async def match_tier_distribution():
+    """
+    Aggregate BC Order Match results across all pilot documents into
+    tier buckets for the dashboard donut chart.
+    """
+    db = get_db()
+    pipeline = [
+        {"$match": {"inside_sales_pilot": True}},
+        {"$project": {
+            "_id": 0,
+            "match_method": "$bc_prod_validation.order_lookup.match_method",
+            "found": "$bc_prod_validation.order_lookup.found",
+            "validated": {"$ifNull": ["$bc_prod_validation.order_lookup", None]},
+            "entity_type": "$bc_prod_validation.order_lookup.bc_entity_type",
+        }},
+    ]
+    rows = await db.hub_documents.aggregate(pipeline).to_list(None)
+
+    buckets = {
+        "exact": 0,
+        "scoped": 0,
+        "fuzzy": 0,
+        "live": 0,
+        "no_match": 0,
+        "no_ref": 0,
+    }
+    by_entity = {"sales_order": 0, "posted_sales_invoice": 0, "posted_sales_shipment": 0, "unknown": 0}
+
+    for r in rows:
+        if r.get("validated") is None:
+            buckets["no_ref"] += 1
+            continue
+        if not r.get("found"):
+            buckets["no_match"] += 1
+            continue
+        mm = r.get("match_method") or ""
+        if mm.startswith(("cache_multi_search", "direct_cache_search")):
+            buckets["exact"] += 1
+        elif mm.startswith("customer_scoped_search"):
+            buckets["scoped"] += 1
+        elif mm.startswith("fuzzy_normalized_search"):
+            buckets["fuzzy"] += 1
+        elif mm.startswith("live_bc_api"):
+            buckets["live"] += 1
+        else:
+            buckets["exact"] += 1
+
+        et = r.get("entity_type") or "unknown"
+        if et in by_entity:
+            by_entity[et] += 1
+        else:
+            by_entity["unknown"] += 1
+
+    total = sum(buckets.values())
+    matched = total - buckets["no_match"] - buckets["no_ref"]
+    return {
+        "total_docs": total,
+        "matched_docs": matched,
+        "match_rate_pct": round(matched / total * 100, 1) if total else 0.0,
+        "buckets": buckets,
+        "by_entity_type": by_entity,
+    }
+
+
 # ── Diagnostics: BC Order Match ──────────────────────────
 
 @router.get("/diagnose-order-match")

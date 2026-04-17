@@ -1,5 +1,17 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-17] Match-Tier Distribution Donut Chart
+
+### Added
+- **`GET /api/inside-sales-pilot/match-tier-distribution`** — aggregation endpoint returning match-tier buckets (`exact`, `scoped`, `fuzzy`, `live`, `no_match`, `no_ref`) + `by_entity_type` breakdown + overall `match_rate_pct`.
+- **`MatchTierDonut` component** (pure-SVG, no chart library) — rendered at top of Inside Sales Pilot dashboard showing donut + color-coded legend. Serves as canary metric: a drop in the exact slice while fuzzy rises is an early warning of extraction / BC cache drift BEFORE the overall match rate changes.
+- Lint clean. Backend smoke-tested (empty preview env returns zero-state correctly).
+
+### Added — Inventory XLS Proposal
+- **`/app/INVENTORY_XLS_PROPOSAL.md`** — 4-phase architecture for routing inventory-related `.xlsx`/`.xls` emails into the `inv_movements` ledger with pilot-style human-in-the-loop safety (Phase A classifier → B column mapping with LLM fallback → C staging + approval → D learning loop). Awaiting user scope decision (A only, A+B, or all four).
+
+
+
 ## [2026-04-17] P1 Phase 2 + Batch Enhancements
 
 ### Added — Order Match fuzzy tier

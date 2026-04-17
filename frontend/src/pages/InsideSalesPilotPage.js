@@ -39,6 +39,87 @@ function ScoreBadge({ score }) {
   return <span className={`text-xs font-bold px-2 py-0.5 rounded ${color}`}>{score}%</span>;
 }
 
+/**
+ * Pure-SVG donut chart for the BC match-tier distribution.
+ * Avoids adding a charting dependency.
+ */
+function MatchTierDonut({ tiers }) {
+  const TIER_CONFIG = [
+    { key: 'exact',    label: 'Exact',     color: '#22c55e' },  // emerald
+    { key: 'scoped',   label: 'Cust-scoped', color: '#0ea5e9' }, // sky
+    { key: 'fuzzy',    label: 'Fuzzy',     color: '#eab308' },  // amber
+    { key: 'live',     label: 'Live BC',   color: '#a855f7' },  // violet
+    { key: 'no_match', label: 'No match',  color: '#ef4444' },  // red
+    { key: 'no_ref',   label: 'No ref',    color: '#475569' },  // slate
+  ];
+
+  const buckets = tiers?.buckets || {};
+  const total = Object.values(buckets).reduce((a, b) => a + (b || 0), 0);
+
+  // Compute cumulative arc offsets
+  const RADIUS = 60;
+  const CIRCUM = 2 * Math.PI * RADIUS;
+  let cursor = 0;
+  const segments = TIER_CONFIG.map(t => {
+    const v = buckets[t.key] || 0;
+    const frac = total > 0 ? v / total : 0;
+    const len = frac * CIRCUM;
+    const seg = { ...t, value: v, frac, len, offset: cursor };
+    cursor += len;
+    return seg;
+  });
+
+  if (total === 0) {
+    return (
+      <div className="flex items-center justify-center h-40 text-sm text-muted-foreground" data-testid="match-tier-donut-empty">
+        No validated pilot documents yet.
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-5" data-testid="match-tier-donut">
+      <svg width="160" height="160" viewBox="0 0 160 160" className="shrink-0">
+        <g transform="rotate(-90 80 80)">
+          {/* Background ring */}
+          <circle cx="80" cy="80" r={RADIUS} fill="transparent" stroke="hsl(var(--muted))" strokeWidth="20" />
+          {/* Segments */}
+          {segments.filter(s => s.len > 0).map(s => (
+            <circle
+              key={s.key}
+              cx="80"
+              cy="80"
+              r={RADIUS}
+              fill="transparent"
+              stroke={s.color}
+              strokeWidth="20"
+              strokeDasharray={`${s.len} ${CIRCUM - s.len}`}
+              strokeDashoffset={-s.offset}
+            />
+          ))}
+        </g>
+        {/* Center label */}
+        <text x="80" y="74" textAnchor="middle" className="fill-foreground font-bold" fontSize="24">
+          {tiers?.match_rate_pct ?? 0}%
+        </text>
+        <text x="80" y="96" textAnchor="middle" className="fill-muted-foreground" fontSize="10">
+          {tiers?.matched_docs ?? 0} / {tiers?.total_docs ?? 0}
+        </text>
+      </svg>
+      <div className="flex-1 space-y-1.5">
+        {segments.map(s => (
+          <div key={s.key} className="flex items-center gap-2 text-xs">
+            <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: s.color }} />
+            <span className="flex-1 text-muted-foreground">{s.label}</span>
+            <span className="font-mono font-medium">{s.value}</span>
+            <span className="text-muted-foreground/60 text-[10px] w-10 text-right">{(s.frac * 100).toFixed(0)}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function InsideSalesPilotPage() {
   const [status, setStatus] = useState(null);
   const [corpusSummary, setCorpusSummary] = useState(null);
@@ -47,18 +128,21 @@ export default function InsideSalesPilotPage() {
   const [polling, setPolling] = useState(false);
   const [validatingCorpus, setValidatingCorpus] = useState(false);
   const [corpusResult, setCorpusResult] = useState(null);
+  const [tierDist, setTierDist] = useState(null);
 
   const fetchData = useCallback(async () => {
     try {
-      const [statusRes, corpusRes, docsRes] = await Promise.all([
+      const [statusRes, corpusRes, docsRes, tierRes] = await Promise.all([
         fetch(`${API}/api/inside-sales-pilot/status`),
         fetch(`${API}/api/inside-sales-pilot/corpus-validation-summary`),
         fetch(`${API}/api/inside-sales-pilot/documents?limit=10`),
+        fetch(`${API}/api/inside-sales-pilot/match-tier-distribution`),
       ]);
       setStatus(await statusRes.json());
       setCorpusSummary(await corpusRes.json());
       const docsData = await docsRes.json();
       setRecentDocs(docsData.documents || []);
+      setTierDist(await tierRes.json());
     } catch (e) {
       console.error('Failed to load pilot data:', e);
     } finally {
@@ -190,6 +274,24 @@ export default function InsideSalesPilotPage() {
             <p className="text-sm text-muted-foreground">Run validation to see results.</p>
           )}
         </div>
+      </div>
+
+      {/* Match Tier Distribution (donut) — canary for extraction / BC sync quality */}
+      <div className="bg-card border border-border rounded-lg p-4 space-y-3" data-testid="match-tier-card">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-emerald-400" />
+              BC Order Match — Tier Distribution
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Where documents matched: exact (best) → fuzzy (weaker) → no match. A drop in
+              the exact slice while fuzzy rises is an early warning of extraction drift or
+              BC cache drift.
+            </p>
+          </div>
+        </div>
+        <MatchTierDonut tiers={tierDist} />
       </div>
 
       {/* By Mailbox */}

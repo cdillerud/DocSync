@@ -843,7 +843,7 @@ async def fix_all_validation_gaps(db, limit: int = 500) -> Dict:
 
     Returns detailed summary of what was fixed.
     """
-    from services.document_readiness_service import evaluate_and_persist
+    from services.unified_validation_service import run_readiness as evaluate_and_persist
 
     results = {
         "po_learning": {"vendors_learned": 0, "vendors_checked": 0, "details": []},

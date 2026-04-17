@@ -1,0 +1,96 @@
+{
+  "summary": "Iteration 206: Inside Sales Pilot Refactor Backend Verification Complete. All 22 backend tests passed. Verified: (1) Unified validation service facade imports work (validate_document, run_bc_prod_validation, run_readiness, run_pilot_readiness, POLICY_STAGES), (2) Policies registry returns 4 policies (archive, warehouse, ap_invoice, sales_order) with correct fallback behavior, (3) All pilot endpoints respond correctly (status, validate/{doc_id}, diagnose-order-match, validate-all), (4) Readiness evaluate returns 404 for non-existent docs, (5) Low-volume vendor gate code exists with threshold=5, (6) BOL/tracking field extraction code exists, (7) Fuzzy normalized search tier exists in _check_order with 6-char minimum.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_inside_sales_pilot_refactor.py",
+    "/app/test_reports/pytest/inside_sales_pilot_refactor_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "unified_validation_service.py: Clean facade pattern with POLICY_STAGES dict mapping doc types to validation stages",
+    "policies/registry.py: Correctly auto-registers 4 policies on import with archive as fallback",
+    "bc_prod_validator.py: _check_order has proper search tier priority (cache_multi → direct_cache → live_bc → customer_scoped → fuzzy_normalized)",
+    "document_readiness_service.py: LOW_VOLUME_THRESHOLD=5 gate correctly downgrades ready_auto_* to needs_review for new vendors",
+    "inside_sales_pilot_service.py: _extract_sales_fields correctly extracts bol_number, tracking_number, carrier from extracted_fields/normalized_fields",
+    "routers/inside_sales_pilot.py: validate/{doc_id} correctly uses unified facade run_bc_prod_validation",
+    "routers/readiness.py: evaluate/{doc_id} correctly uses unified facade run_readiness and returns 404 for missing docs"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_inside_sales_pilot_refactor.py"
+  ],
+  "success_rate": {
+    "backend": "100% (22/22 tests passed)"
+  },
+  "test_credentials": "N/A - backend-only testing, no auth required for tested endpoints",
+  "seed_data_creation": "No seed data created - preview environment has existing bc_reference_cache with 1365 sales_order records",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 206 verified Inside Sales Pilot refactor. Preview env has 0 pilot documents but 1365 sales_order records in bc_reference_cache. All unified validation service facade imports work. Policies registry has 4 policies with archive fallback. Endpoints tested: GET /api/inside-sales-pilot/status (enabled=false, 7 mailboxes), POST /api/inside-sales-pilot/validate/{doc_id} (returns error dict for non-existent), GET /api/inside-sales-pilot/diagnose-order-match (has hit_via_fuzzy_normalized in summary), POST /api/inside-sales-pilot/validate-all (returns scores array), POST /api/readiness/evaluate/{doc_id} (returns 404 for non-existent). Code introspection verified: low-volume vendor gate (threshold=5), BOL/tracking extraction, fuzzy_normalized search tier (6-char min).",
+  "tested_features": {
+    "unified_validation_service_facade": [
+      "validate_document import - PASS",
+      "run_bc_prod_validation import - PASS",
+      "run_readiness import - PASS",
+      "run_pilot_readiness import - PASS",
+      "POLICY_STAGES dict import - PASS",
+      "POLICY_STAGES has pilot_sales, sales_order, ap_invoice, purchase_order, warehouse, generic - PASS"
+    ],
+    "policies_registry": [
+      "list_policies returns 4 policies - PASS",
+      "get_policy('sales_order') returns sales_order policy - PASS",
+      "get_policy('invoice') returns ap_invoice policy - PASS",
+      "get_policy('bol') returns warehouse policy - PASS",
+      "get_policy('garbage') falls back to archive - PASS"
+    ],
+    "inside_sales_pilot_endpoints": [
+      "GET /api/inside-sales-pilot/status returns 200 with enabled, mailboxes, total_documents - PASS",
+      "POST /api/inside-sales-pilot/validate/{doc_id} returns error dict for non-existent doc - PASS",
+      "GET /api/inside-sales-pilot/diagnose-order-match returns cache_health, extraction_health, sample_matches, raw_cache_samples, summary - PASS",
+      "diagnose-order-match summary has hit_via_fuzzy_normalized bucket - PASS",
+      "POST /api/inside-sales-pilot/validate-all returns total, validated, scores array - PASS"
+    ],
+    "readiness_endpoints": [
+      "POST /api/readiness/evaluate/{doc_id} returns 404 for non-existent doc - PASS",
+      "GET /api/readiness/metrics returns total_documents, by_status, by_action - PASS"
+    ],
+    "code_introspection": [
+      "LOW-VOLUME VENDOR GATE exists in evaluate_and_persist - PASS",
+      "LOW_VOLUME_THRESHOLD = 5 - PASS",
+      "_extract_sales_fields extracts bol_number, tracking_number, carrier - PASS",
+      "fuzzy_normalized search tier exists in _check_order - PASS",
+      "fuzzy tier has 6-char minimum length check - PASS"
+    ],
+    "unified_facade_integration": [
+      "validate endpoint uses unified_validation_service - PASS",
+      "readiness evaluate uses unified_validation_service - PASS"
+    ]
+  },
+  "data_verification": {
+    "pilot_status": {
+      "enabled": false,
+      "total_documents": 0,
+      "mailboxes_count": 7
+    },
+    "bc_reference_cache": {
+      "total_sales_order_records": 1365,
+      "records_with_bc_document_no": 1365,
+      "records_with_bc_external_document_no": 1348,
+      "external_ref_coverage_pct": 98.8
+    },
+    "readiness_metrics": {
+      "total_documents": 25,
+      "by_status": {
+        "blocked": 18,
+        "ready_auto_link": 7
+      }
+    }
+  }
+}

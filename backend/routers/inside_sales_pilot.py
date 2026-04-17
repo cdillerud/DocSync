@@ -187,7 +187,7 @@ async def re_extract_all_pilot_docs():
     ).to_list(500)
 
     from services.inside_sales_pilot_service import _extract_sales_fields
-    from services.bc_prod_validator import validate_document_against_bc
+    from services.unified_validation_service import run_bc_prod_validation
 
     results = {"total": len(docs), "re_extracted": 0, "re_validated": 0,
                "status_fixed": 0, "errors": []}
@@ -201,7 +201,7 @@ async def re_extract_all_pilot_docs():
             if ext:
                 results["re_extracted"] += 1
             # Re-validate against BC
-            await validate_document_against_bc(doc["id"])
+            await run_bc_prod_validation(doc["id"])
             results["re_validated"] += 1
             # Fix workflow status — pilot docs should never be "exported" or "completed"
             ws = doc.get("workflow_status", "")
@@ -231,8 +231,8 @@ async def validate_single_document(doc_id: str):
     Run BC Production cross-validation on a single pilot document.
     Read-only — never writes to BC.
     """
-    from services.bc_prod_validator import validate_document_against_bc
-    result = await validate_document_against_bc(doc_id)
+    from services.unified_validation_service import run_bc_prod_validation
+    result = await run_bc_prod_validation(doc_id)
     return result
 
 
@@ -394,6 +394,7 @@ async def diagnose_order_match(
     hit_via_cache = 0
     hit_via_direct = 0
     hit_via_scoped = 0
+    hit_via_fuzzy = 0
     hit_via_live = 0
     misses = 0
     no_ref = 0
@@ -468,6 +469,8 @@ async def diagnose_order_match(
                 hit_via_direct += 1
             elif "customer_scoped" in m:
                 hit_via_scoped += 1
+            elif "fuzzy_normalized" in m:
+                hit_via_fuzzy += 1
             elif "live_bc" in m:
                 hit_via_live += 1
         else:
@@ -481,10 +484,11 @@ async def diagnose_order_match(
         "hit_via_cache_multi": hit_via_cache,
         "hit_via_direct_cache": hit_via_direct,
         "hit_via_customer_scoped": hit_via_scoped,
+        "hit_via_fuzzy_normalized": hit_via_fuzzy,
         "hit_via_live_bc_api": hit_via_live,
         "misses": misses,
         "hit_rate_pct": round(
-            (hit_via_cache + hit_via_direct + hit_via_scoped + hit_via_live) /
+            (hit_via_cache + hit_via_direct + hit_via_scoped + hit_via_fuzzy + hit_via_live) /
             max(1, len(sample_docs) - no_ref) * 100, 1
         ) if (len(sample_docs) - no_ref) > 0 else 0,
     }

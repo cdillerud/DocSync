@@ -436,8 +436,8 @@ async def poll_inside_sales_pilot_mailbox(mailbox_address: str) -> Dict[str, Any
 
                             # --- Run BC Production cross-validation ---
                             try:
-                                from services.bc_prod_validator import validate_document_against_bc
-                                await validate_document_against_bc(doc_id)
+                                from services.unified_validation_service import run_bc_prod_validation
+                                await run_bc_prod_validation(doc_id)
                             except Exception as val_err:
                                 logger.warning(
                                     "[InsideSalesPilot:%s] BC validation failed for %s: %s",
@@ -679,6 +679,14 @@ async def _extract_sales_fields(
         "total_amount": amount,
         "line_count": len(extracted_lines) or None,
         "extracted_lines": extracted_lines if extracted_lines else None,
+
+        # Shipping references — extracted here, NOT written to BC while in pilot
+        "bol_number": ef.get("bol_number") or ef.get("bol_no") or nf.get("bol_number"),
+        "tracking_number": (
+            ef.get("tracking_number") or ef.get("tracking_no")
+            or nf.get("tracking_number") or nf.get("tracking_no")
+        ),
+        "carrier": ef.get("carrier") or nf.get("carrier"),
 
         # Main pipeline intelligence (leveraged, not duplicated)
         "document_type": doc_type,

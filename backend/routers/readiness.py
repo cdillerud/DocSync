@@ -48,9 +48,9 @@ async def get_readiness_queue(
 @router.post("/evaluate/{doc_id}")
 async def evaluate_document_readiness(doc_id: str):
     """Evaluate and persist readiness for a single document."""
-    from services.document_readiness_service import evaluate_and_persist
+    from services.unified_validation_service import run_readiness
     try:
-        result = await evaluate_and_persist(doc_id)
+        result = await run_readiness(doc_id)
         return {"success": True, "doc_id": doc_id, "readiness": result}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -1290,7 +1290,7 @@ async def retry_po_pending_docs():
     """
     from deps import get_db
     from datetime import datetime, timezone
-    from services.document_readiness_service import evaluate_and_persist
+    from services.unified_validation_service import run_readiness
     import logging
 
     logger = logging.getLogger("po_retry")
@@ -1321,7 +1321,7 @@ async def retry_po_pending_docs():
 
         try:
             # Full re-evaluation
-            readiness = await evaluate_and_persist(doc)
+            readiness = await run_readiness(doc)
             po_resolved = (readiness.get("signals") or {}).get("po_resolved", False)
             is_ready = readiness.get("status", "").startswith("ready")
 

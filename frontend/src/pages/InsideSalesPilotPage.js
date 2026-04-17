@@ -227,12 +227,26 @@ export default function InsideSalesPilotPage() {
                   <th className="pb-2 pr-3">PO</th>
                   <th className="pb-2 pr-3">Customer</th>
                   <th className="pb-2 pr-3">Quality</th>
+                  <th className="pb-2 pr-3">BC Match</th>
                   <th className="pb-2">Mailbox</th>
                 </tr>
               </thead>
               <tbody>
                 {recentDocs.map((doc) => {
                   const ext = doc.sales_pilot_extraction || {};
+                  const bcv = doc.bc_prod_validation || {};
+                  const ol = bcv.order_lookup || {};
+                  const matchEntity = ol.bc_entity_type || null;
+                  const matchMethod = ol.match_method || '';
+                  const entityConfig = {
+                    sales_order: { label: 'Open SO', cls: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' },
+                    posted_sales_invoice: { label: 'Posted Inv', cls: 'bg-amber-500/20 text-amber-300 border-amber-500/40' },
+                    posted_sales_shipment: { label: 'Shipment', cls: 'bg-sky-500/20 text-sky-300 border-sky-500/40' },
+                  }[matchEntity] || null;
+                  const tier = matchMethod.startsWith('fuzzy_normalized') ? 'fuzzy'
+                             : matchMethod.startsWith('customer_scoped') ? 'scoped'
+                             : matchMethod.startsWith('live_bc') ? 'live'
+                             : matchMethod ? 'exact' : null;
                   return (
                     <tr key={doc.id} className="border-b border-border/50 hover:bg-muted/30">
                       <td className="py-2 pr-3 max-w-[200px] truncate font-mono text-xs">{doc.file_name}</td>
@@ -241,6 +255,23 @@ export default function InsideSalesPilotPage() {
                       <td className="py-2 pr-3 font-mono text-xs">{ext.po_number || '—'}</td>
                       <td className="py-2 pr-3 text-xs max-w-[140px] truncate">{ext.customer_name || '—'}</td>
                       <td className="py-2 pr-3">{ext.extraction_quality_pct != null ? <ScoreBadge score={ext.extraction_quality_pct} /> : '—'}</td>
+                      <td className="py-2 pr-3" data-testid={`bc-match-${doc.id}`}>
+                        {entityConfig ? (
+                          <div className="flex items-center gap-1">
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${entityConfig.cls}`} title={`Matched via ${matchMethod}`}>
+                              {entityConfig.label}
+                            </span>
+                            {tier === 'fuzzy' && (
+                              <span className="text-[9px] text-muted-foreground uppercase tracking-wider" title="Matched via fuzzy/normalized search (lower confidence)">~</span>
+                            )}
+                            {tier === 'scoped' && (
+                              <span className="text-[9px] text-muted-foreground uppercase tracking-wider" title="Matched via customer-scoped search">c</span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </td>
                       <td className="py-2 text-xs truncate max-w-[180px]">{doc.pilot_mailbox}</td>
                     </tr>
                   );

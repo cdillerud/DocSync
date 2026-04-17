@@ -430,6 +430,51 @@ async def _check_order(
                     "matched_ref": ref,
                 }
 
+    # Fuzzy tier: substring / normalized match on bc_external_document_no
+    # when bc_customer_no is NOT available. Only refs with 6+ chars to
+    # keep false positives in check. This is the tier that catches free-form
+    # customer PO strings like "BPO216-GINGER ALE" when the extraction
+    # captures them partially or with minor formatting differences.
+    if not bc_customer_no:
+        from services.bc_reference_cache_service import normalize_document_no
+        for ref in refs_to_try:
+            if len(ref) < 6:
+                continue
+            normalized_ref = normalize_document_no(ref)
+            if len(normalized_ref) < 6:
+                continue
+            safe_ref = re.escape(ref)
+            # Priority: normalized field first (robust to prefix/hyphen/space),
+            # then raw regex on bc_external_document_no.
+            fuzzy = await db.bc_reference_cache.find_one(
+                {
+                    "bc_entity_type": {"$in": [
+                        "sales_order",
+                        "posted_sales_invoice",
+                        "posted_sales_shipment",
+                    ]},
+                    "$or": [
+                        {"normalized_document_no": {"$regex": re.escape(normalized_ref), "$options": "i"}},
+                        {"normalized_external_ref": {"$regex": re.escape(normalized_ref), "$options": "i"}},
+                        {"bc_external_document_no": {"$regex": safe_ref, "$options": "i"}},
+                    ],
+                },
+                {"_id": 0},
+            )
+            if fuzzy:
+                return {
+                    "found": True,
+                    "bc_order_no": fuzzy.get("bc_document_no"),
+                    "bc_external_ref": fuzzy.get("bc_external_document_no"),
+                    "bc_customer_no": fuzzy.get("bc_customer_no"),
+                    "bc_customer_name": fuzzy.get("bc_customer_name"),
+                    "bc_status": fuzzy.get("bc_status"),
+                    "bc_amount": fuzzy.get("bc_amount"),
+                    "bc_entity_type": fuzzy.get("bc_entity_type"),
+                    "match_method": f"fuzzy_normalized_search:{fuzzy.get('bc_entity_type','sales_order')}",
+                    "matched_ref": ref,
+                }
+
     return {
         "found": False,
         "searched_refs": refs_to_try,

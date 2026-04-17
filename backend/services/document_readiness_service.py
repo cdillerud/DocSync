@@ -627,6 +627,30 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
         ]
         logger.info("[Readiness:Bypass] doc=%s vendor=%s — bypassed to manual review", doc_id[:8], vendor_no)
 
+    # === LOW-VOLUME VENDOR GATE: fewer than 5 historical docs → manual review ===
+    # Prevents first-time / rare vendors from auto-filing with little training data.
+    if vendor_no and readiness["status"] in (STATUS_READY_AUTO_DRAFT, STATUS_READY_AUTO_LINK):
+        try:
+            LOW_VOLUME_THRESHOLD = 5
+            vendor_doc_count = await db.hub_documents.count_documents({
+                "bc_vendor_number": vendor_no,
+                "is_duplicate": {"$ne": True},
+            })
+            if vendor_doc_count < LOW_VOLUME_THRESHOLD:
+                readiness["status"] = STATUS_NEEDS_REVIEW
+                readiness["recommended_action"] = ACTION_REVIEW
+                readiness["warning_reasons"] = readiness.get("warning_reasons", []) + ["low_volume_vendor"]
+                readiness["explanations"] = readiness.get("explanations", []) + [
+                    f"LOW-VOLUME VENDOR: only {vendor_doc_count} prior doc(s) for this vendor "
+                    f"(threshold: {LOW_VOLUME_THRESHOLD}) — routed to manual review to build training data"
+                ]
+                logger.info(
+                    "[Readiness:LowVolume] doc=%s vendor=%s prior_docs=%d → manual review",
+                    doc_id[:8], vendor_no, vendor_doc_count,
+                )
+        except Exception as lv_err:
+            logger.debug("[Readiness:LowVolume] Skipped for %s: %s", doc_id[:8], lv_err)
+
     # === POSTING TEMPLATE TRUST: Upgrade to auto-draft if vendor has proven template ===
     if readiness["status"] in (STATUS_NEEDS_REVIEW, STATUS_AMBIGUOUS) and vendor_no:
         try:

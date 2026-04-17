@@ -3562,8 +3562,8 @@ async def _internal_intake_document(
     # =================================================================
     readiness_result = None
     try:
-        from services.document_readiness_service import evaluate_and_persist
-        readiness_result = await evaluate_and_persist(doc_id)
+        from services.unified_validation_service import run_readiness
+        readiness_result = await run_readiness(doc_id)
         logger.info("[Readiness] Document %s: status=%s confidence=%.2f action=%s",
                      doc_id, readiness_result.get("status"), readiness_result.get("confidence", 0),
                      readiness_result.get("recommended_action"))
@@ -8198,7 +8198,7 @@ async def startup():
 
             # 4. Auto-close validation gaps (vendor_match + po_validation)
             try:
-                from services.document_readiness_service import evaluate_and_persist
+                from services.unified_validation_service import run_readiness
                 # Find docs with open validation gaps that might now be resolvable
                 gap_docs = await db.hub_documents.find(
                     {
@@ -8220,7 +8220,7 @@ async def startup():
                     if not doc_id:
                         continue
                     try:
-                        readiness = await evaluate_and_persist(doc_id)
+                        readiness = await run_readiness(doc_id)
                         is_ready = readiness.get("status", "").startswith("ready")
                         blocking = readiness.get("blocking_reasons", [])
                         if is_ready or not blocking:
@@ -8428,7 +8428,7 @@ async def startup():
                     logger.info("[PO Retry] Auto-parked %d new PO-gap docs", new_parked.modified_count)
 
                 # 2. Retry all pending docs
-                from services.document_readiness_service import evaluate_and_persist
+                from services.unified_validation_service import run_readiness
 
                 pending = await db.hub_documents.find(
                     {
@@ -8450,7 +8450,7 @@ async def startup():
                     max_r = doc.get("po_pending_max_retries", PO_MAX_RETRIES)
 
                     try:
-                        readiness = await evaluate_and_persist(doc_id)
+                        readiness = await run_readiness(doc_id)
                         po_ok = (readiness.get("signals") or {}).get("po_resolved", False)
                         is_ready = readiness.get("status", "").startswith("ready")
 

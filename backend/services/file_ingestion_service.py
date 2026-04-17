@@ -169,32 +169,54 @@ class FileIngestionService:
             raise ValueError(f"Failed to parse CSV file: {str(e)}")
     
     def parse_excel(self, content: bytes, file_name: str, sheet_name: str = None) -> Tuple[List[str], List[Dict[str, Any]]]:
-        """Parse Excel file content into headers and rows."""
+        """Parse Excel file content into headers and rows.
+
+        Auto-detects the header row by scanning the first ~10 rows for the one
+        with the most non-null cells and the most string-typed cells. This
+        handles spreadsheets with title banners / blank rows before the header.
+        """
         try:
             import pandas as pd
             from io import BytesIO
-            
-            # Read Excel file
+
             excel_file = BytesIO(content)
-            
-            if sheet_name:
-                df = pd.read_excel(excel_file, sheet_name=sheet_name)
-            else:
-                # Read first sheet
-                df = pd.read_excel(excel_file)
-            
-            # Handle empty DataFrame
+
+            # 1. Peek at the sheet WITHOUT assuming header row
+            raw = pd.read_excel(excel_file, sheet_name=sheet_name, header=None, nrows=12) \
+                if sheet_name else pd.read_excel(excel_file, header=None, nrows=12)
+            if raw.empty:
+                return [], []
+
+            # 2. Score each row: prefer rows with many non-null string cells
+            best_row = 0
+            best_score = -1.0
+            for i in range(min(10, len(raw))):
+                r = raw.iloc[i]
+                non_null = r.notna().sum()
+                str_like = sum(1 for v in r.values if isinstance(v, str) and v.strip())
+                score = non_null + str_like * 0.5
+                if score > best_score and non_null >= 2:
+                    best_score = score
+                    best_row = i
+
+            # 3. Re-read using detected header row
+            excel_file.seek(0)
+            df = pd.read_excel(excel_file, sheet_name=sheet_name, header=best_row) \
+                if sheet_name else pd.read_excel(excel_file, header=best_row)
+
             if df.empty:
                 return [], []
-            
-            # Clean column names
+
             df.columns = [str(col).strip() for col in df.columns]
+            # Drop columns that look like "Unnamed: N" (pandas placeholder)
+            df = df.loc[:, ~df.columns.str.match(r"^Unnamed:?\s*\d*$")]
+            # Drop rows that are entirely blank
+            df = df.dropna(how="all")
             headers = list(df.columns)
-            
-            # Convert to list of dicts, handling NaN values
+
             df = df.fillna('')
             rows = df.to_dict('records')
-            
+
             return headers, rows
         except Exception as e:
             logger.error("Error parsing Excel: %s", str(e))

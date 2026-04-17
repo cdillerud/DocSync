@@ -52,12 +52,22 @@ class XlsClassification:
 # Each rule: (pattern on filename, classification, movement_intent,
 #             ownership_hint, confidence)
 _FILENAME_RULES = [
-    # Highest-specificity patterns first
-    (re.compile(r"(?i)open\s*order", re.I), "inventory_open_orders", "order_commitment", None, 0.90),
+    # Highest-specificity patterns first.
+    # Order-commitment patterns (both "open orders" AND "on hold orders" AND bare "PO" files)
+    (re.compile(r"(?i)open\s*orders?", re.I), "inventory_open_orders", "order_commitment", None, 0.90),
+    (re.compile(r"(?i)on\s*hold\s*orders?", re.I), "inventory_open_orders", "order_commitment", None, 0.85),
+    (re.compile(r"(?i)consignment.*invoic", re.I), "inventory_outbound", "outbound_shipment", None, 0.80),
     (re.compile(r"(?i)dunnage", re.I), "inventory_dunnage", "receipt", "gamer_reserved", 0.88),
-    (re.compile(r"(?i)forecast|HRML", re.I), "inventory_forecast", "incoming_supply", None, 0.82),
-    (re.compile(r"(?i)inventory.*(count|snapshot|balance|stock|on.?hand)", re.I),
-        "inventory_snapshot", "opening_balance", None, 0.92),
+    (re.compile(r"(?i)forecast|\bHRML\b", re.I), "inventory_forecast", "incoming_supply", None, 0.82),
+
+    # Snapshot-style filenames — match MANY common phrasings, not just literal "inventory count"
+    (re.compile(r"(?i)inventory.*(count|snapshot|balance|stock|on.?hand|vs|needs|summary)", re.I),
+        "inventory_snapshot", "opening_balance", None, 0.88),
+    (re.compile(r"(?i)\bon\s*hand\b", re.I), "inventory_snapshot", "opening_balance", None, 0.82),
+    (re.compile(r"(?i)\bon.the.portal\b|from.*portal", re.I), "inventory_snapshot", "opening_balance", None, 0.78),
+    # "Ryl Co Inventory ..." / "CP Inventory ..." — filename starts or contains "<name> inventory"
+    (re.compile(r"(?i)\binventory\b", re.I), "inventory_snapshot", "opening_balance", None, 0.75),
+
     (re.compile(r"(?i)^(asn|receipt|whse.*receipt|shipment.?notification)", re.I),
         "inventory_receipt", "receipt", None, 0.85),
     (re.compile(r"(?i)^(bol|bill.?of.?lading|outbound)", re.I),

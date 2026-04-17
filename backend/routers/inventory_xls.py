@@ -340,6 +340,15 @@ async def backfill_pilot_docs(
                 results["skipped_not_inventory"] += 1
                 entry["status"] = "not_inventory"
                 results["items"].append(entry)
+                # Mark the doc so it's not re-scanned on next backfill
+                if not dry_run:
+                    await db.hub_documents.update_one(
+                        {"id": doc["id"]},
+                        {"$set": {
+                            "inventory_xls_backfilled": True,
+                            "inventory_xls_classification": "not_inventory",
+                        }},
+                    )
                 continue
 
             results["classified_inventory"] += 1

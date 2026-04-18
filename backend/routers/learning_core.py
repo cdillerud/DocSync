@@ -141,3 +141,29 @@ async def fingerprints_similar(
         exclude_scope_value=scope_value,
     )
     return {"query_scope": scope_value, "token_count": len(query_tokens), "matches": matches}
+
+
+# ─────────────────────────────────────────────────────────────
+# U3 — Shared Pattern Health + Unified Hygiene (v2.5.2)
+# ─────────────────────────────────────────────────────────────
+
+@router.get("/pattern-health/unified")
+async def pattern_health_unified(
+    domain: Optional[str] = Query(None, description="sales_intake | ap_posting | None for all"),
+    limit: int = Query(25, le=200),
+):
+    """Cross-domain trust/drift/retire aggregate. Omit `domain` for
+    a combined view across AP + intake (+ future domains)."""
+    from services.learning_core import get_health
+    return await get_health(domain=domain, limit=limit)
+
+
+@router.post("/hygiene/run")
+async def hygiene_run(
+    domain: str = Query("all", description="sales_intake | ap_posting | all"),
+):
+    """Run hygiene across one or all domains. Replaces the per-domain
+    triggers (`/api/intake/learning/hygiene` still works but now
+    delegates here)."""
+    from services.learning_core import run_hygiene
+    return await run_hygiene(domain=domain, actor="user")

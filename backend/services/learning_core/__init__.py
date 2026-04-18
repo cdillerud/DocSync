@@ -31,6 +31,12 @@ from services.learning_core.fingerprint_service import (
     FINGERPRINTS_COLL,
     SCOPE_TYPES,
 )
+from services.learning_core.pattern_health_service import (
+    get_health,
+    run_hygiene,
+    HEALTH_ADAPTERS,
+    HYGIENE_ADAPTERS,
+)
 
 __all__ = [
     # Events (U1)
@@ -48,4 +54,9 @@ __all__ = [
     "find_similar",
     "FINGERPRINTS_COLL",
     "SCOPE_TYPES",
+    # Pattern health (U3)
+    "get_health",
+    "run_hygiene",
+    "HEALTH_ADAPTERS",
+    "HYGIENE_ADAPTERS",
 ]

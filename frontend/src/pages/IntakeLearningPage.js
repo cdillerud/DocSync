@@ -30,18 +30,21 @@ export default function IntakeLearningPage() {
   const [health, setHealth] = useState(null);
   const [driftAlerts, setDriftAlerts] = useState([]);
   const [driftSummary, setDriftSummary] = useState(null);
+  const [unified, setUnified] = useState(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [sumRes, flaggedRes, healthRes, driftRes, driftSumRes] = await Promise.all([
+      const [sumRes, flaggedRes, healthRes, driftRes, driftSumRes, unifiedRes] = await Promise.all([
         fetch(`${API}/api/intake/learning/summary`),
         fetch(`${API}/api/intake/flagged?limit=25`),
         fetch(`${API}/api/intake/learning/pattern-health?limit=25`),
         fetch(`${API}/api/learning/drift/alerts?status=open&limit=25`),
         fetch(`${API}/api/learning/drift/summary`),
+        fetch(`${API}/api/learning/pattern-health/unified?limit=15`),
+        fetch(`${API}/api/learning/pattern-health/unified?limit=15`),
       ]);
       if (sumRes.ok) setSummary(await sumRes.json());
       if (flaggedRes.ok) {
@@ -54,6 +57,7 @@ export default function IntakeLearningPage() {
         setDriftAlerts(data.alerts || []);
       }
       if (driftSumRes.ok) setDriftSummary(await driftSumRes.json());
+      if (unifiedRes.ok) setUnified(await unifiedRes.json());
     } finally {
       setLoading(false);
     }

@@ -227,6 +227,8 @@ async def run_intake_learning(
         insights["suggested_lines"] = []
         insights["bounds_check"] = {"in_bounds": True, "violations": [], "skipped": True}
         insights["item_validation"] = {"lines_total": len(line_items), "skipped": True}
+        # Still try cold-start peer matching — we have line items even without a customer_no
+        await _attach_cold_start_peer_suggestions(db, insights, line_items, exclude=None)
         await db.hub_documents.update_one(
             {"id": doc_id}, {"$set": {"intake_insights": insights}},
         )
@@ -263,6 +265,10 @@ async def run_intake_learning(
         if pattern_count == 0:
             insights["cold_start_reason"] = (
                 "customer resolved but no BC posted history available yet"
+            )
+            # Try peer-based cold-start suggestions from similar known customers
+            await _attach_cold_start_peer_suggestions(
+                db, insights, line_items, exclude=customer_no,
             )
 
         # ── Suggested lines ──
@@ -326,6 +332,30 @@ async def run_intake_learning(
         insights.get("has_actionable_findings"),
     )
     return insights
+
+
+async def _attach_cold_start_peer_suggestions(
+    db,
+    insights: Dict[str, Any],
+    line_items: List[Dict[str, Any]],
+    *,
+    exclude: Optional[str] = None,
+) -> None:
+    """Side-effect: populate `insights.peer_matches` with the top
+    similar known customers + their inherited suggestions, so cold-start
+    docs have something actionable to review instead of an empty panel."""
+    if not line_items:
+        return
+    try:
+        from services.cold_start_matcher_service import find_similar_customers
+        matches = await find_similar_customers(
+            line_items, top_k=3, exclude_customer_no=exclude, db=db,
+        )
+        if matches:
+            insights["peer_matches"] = matches
+            insights["stages_ran"].append("cold_start_peer_match")
+    except Exception as e:
+        insights["errors"].append(f"cold_start_peer_match: {type(e).__name__}: {e}")
 
 
 async def _validate_items_against_catalog(
@@ -449,6 +479,7 @@ async def run_intake_learning_for_xls_staging(
         insights["suggested_lines"] = []
         insights["bounds_check"] = {"in_bounds": True, "violations": [], "skipped": True}
         insights["item_validation"] = {"lines_total": len(line_items), "skipped": True}
+        await _attach_cold_start_peer_suggestions(db, insights, line_items, exclude=None)
         await db[STAGING_COLL].update_one(
             {"id": staging_id}, {"$set": {"intake_insights": insights}},
         )
@@ -480,6 +511,9 @@ async def run_intake_learning_for_xls_staging(
         if pattern_count == 0:
             insights["cold_start_reason"] = (
                 "BC customer resolved but no posted orders available yet"
+            )
+            await _attach_cold_start_peer_suggestions(
+                db, insights, line_items, exclude=bc_customer_no,
             )
 
         if pattern_count > 0 and line_items:

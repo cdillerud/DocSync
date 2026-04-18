@@ -211,6 +211,13 @@ async def _apply_suggestion_delta(
             "last_feedback_at": pattern["last_feedback_at"],
         }},
     )
+    # Invalidate the customer's fingerprint so cold-start matches see
+    # the updated pattern on next lookup.
+    try:
+        from services.cold_start_matcher_service import invalidate_fingerprint
+        await invalidate_fingerprint(customer_no, db=db)
+    except Exception:
+        pass
     return {
         "action": "applied",
         "item_no": item_no,

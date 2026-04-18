@@ -1,6 +1,20 @@
-export const APP_VERSION = "2.3.0";
+export const APP_VERSION = "2.4.0";
 
 export const CHANGELOG = [
+  {
+    version: "2.4.0",
+    date: "2026-04-18",
+    title: "Cold-Start Peer Matching — Bootstrap New Customers Instantly",
+    changes: [
+      { type: "feature", text: "TF-IDF customer fingerprints — every customer with learned patterns gets a token vector (item_no + description), cached in intake_customer_fingerprints with 24h TTL" },
+      { type: "feature", text: "Cold-start lookup — when a new/empty customer has an inbound PO, we cosine-match their line items against all known fingerprints and surface top-3 similar customers with matched-token receipts" },
+      { type: "feature", text: "Inherited suggestions — the top peer's most-frequent non-retired lines appear as reviewable suggestions labelled with source customer + similarity %" },
+      { type: "feature", text: "Promote-to-own — reviewer clicks the up-arrow and that inherited line becomes the target customer's first real learned pattern (audit event: inherited_suggestion_promoted)" },
+      { type: "feature", text: "Fingerprint auto-invalidation — every feedback event (accept/reject/retire/promote) invalidates the affected fingerprint so cold-start matches stay fresh" },
+      { type: "feature", text: "3 new /api/intake/* endpoints: promote-inherited, rebuild-fingerprints, similar-customers (diagnostic)" },
+      { type: "improvement", text: "Pure Python TF-IDF with numpy/Counter — no sklearn dep, no API calls, no embedding cost; deterministic + transparent (reviewers see which tokens matched)" },
+    ],
+  },
   {
     version: "2.3.0",
     date: "2026-04-18",

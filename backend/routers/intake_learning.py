@@ -205,3 +205,76 @@ async def recent_events(
         limit=limit, event_type=event_type, customer_no=customer_no,
     )
     return {"total": len(events), "events": events}
+
+
+# ─────────────────────────────────────────────────────────────
+# Phase E — Cold-Start Peer Matching (v2.4.0)
+# ─────────────────────────────────────────────────────────────
+
+class PromoteInheritedBody(BaseModel):
+    target_customer_no: str
+    source_customer_no: str
+    item_no: str
+    trigger_item: Optional[str] = None
+    doc_id: Optional[str] = None
+
+
+@router.post("/insights/promote-inherited")
+async def promote_inherited(body: PromoteInheritedBody):
+    """Promote an inherited (peer-matched) suggestion into the target
+    customer's own learned pattern. Reviewer-driven — never automatic."""
+    from services.cold_start_matcher_service import promote_inherited_suggestion
+    result = await promote_inherited_suggestion(
+        target_customer_no=body.target_customer_no,
+        source_customer_no=body.source_customer_no,
+        item_no=body.item_no,
+        trigger_item=body.trigger_item,
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@router.post("/learning/rebuild-fingerprints")
+async def rebuild_fingerprints():
+    """Force a rebuild of every customer fingerprint. Useful after a
+    big BC re-sync or a batch feedback load."""
+    from services.cold_start_matcher_service import rebuild_all_fingerprints
+    return await rebuild_all_fingerprints()
+
+
+@router.get("/learning/similar-customers")
+async def similar_customers_preview(
+    customer_no: Optional[str] = None,
+    doc_id: Optional[str] = None,
+    top_k: int = Query(3, le=10),
+):
+    """Preview peer matches for an existing doc or a specific customer's
+    own fingerprint. Handy for diagnostics and UI development."""
+    from services.cold_start_matcher_service import (
+        find_similar_customers, get_or_build_fingerprint,
+    )
+    db = get_db()
+    line_items: list = []
+    if doc_id:
+        d = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+        if d:
+            ef = d.get("extracted_fields") or {}
+            nf = d.get("normalized_fields") or {}
+            extr = d.get("sales_pilot_extraction") or {}
+            line_items = (
+                extr.get("line_items")
+                or nf.get("line_items")
+                or ef.get("line_items")
+                or []
+            )
+    elif customer_no:
+        # Use the customer's own fingerprint as the query — useful for "who
+        # are we most like?" exploration.
+        fp = await get_or_build_fingerprint(customer_no)
+        # synthesize pseudo-line-items from the fingerprint tokens
+        line_items = [{"description": tok} for tok in (fp.get("tf") or {}).keys()]
+    matches = await find_similar_customers(
+        line_items, top_k=top_k, exclude_customer_no=customer_no, db=db,
+    )
+    return {"matches": matches, "query_item_count": len(line_items)}

@@ -13,7 +13,7 @@
  * training data for the underlying pattern.
  */
 import { useState } from 'react';
-import { AlertTriangle, Check, Sparkles, Info, TrendingUp, Package, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { AlertTriangle, Check, Sparkles, Info, TrendingUp, Package, ThumbsUp, ThumbsDown, Users, ArrowUpRight } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -149,6 +149,83 @@ export default function IntakeLearningPanel({ insights, compact = false, docId, 
           <div className="text-muted-foreground mt-1">
             {insights.cold_start_reason || 'Not enough historical data to generate predictions.'}
           </div>
+        </div>
+      )}
+
+      {/* Peer matches (v2.4.0 — cold-start bootstrap from similar customers) */}
+      {insights.peer_matches && insights.peer_matches.length > 0 && !compact && (
+        <div data-testid="intake-learning-peer-matches" className="rounded-md border border-purple-500/30 bg-purple-500/5 p-3 space-y-2">
+          <div className="flex items-center gap-2 text-xs font-medium text-purple-700">
+            <Users className="h-3.5 w-3.5" /> Peer-matched suggestions ({insights.peer_matches.length} similar customer{insights.peer_matches.length === 1 ? '' : 's'})
+          </div>
+          <div className="text-[10px] text-muted-foreground">
+            Cold-start bootstrap — inherited from the most similar known customer. Review carefully before accepting; accepted items become this customer's own learned pattern.
+          </div>
+          {insights.peer_matches.map((m, idx) => (
+            <div key={`peer-${idx}`} className="rounded border border-border bg-card/50 p-2 space-y-1">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-mono">
+                  {m.customer_no} <span className="text-muted-foreground">· {Math.round((m.similarity || 0) * 100)}% similar · {m.pattern_count} pattern{m.pattern_count === 1 ? '' : 's'}</span>
+                </div>
+              </div>
+              {m.matched_tokens && m.matched_tokens.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {m.matched_tokens.slice(0, 8).map((t, i) => (
+                    <span key={i} className="text-[10px] font-mono bg-purple-500/10 text-purple-700 px-1 rounded">{t}</span>
+                  ))}
+                </div>
+              )}
+              {m.inherited_suggestions && m.inherited_suggestions.length > 0 && (
+                <div className="space-y-1 pt-1">
+                  {m.inherited_suggestions.slice(0, 5).map((s, i) => {
+                    const key = `peer-${m.customer_no}-${s.item_no}-${i}`;
+                    const state = feedbackState[key];
+                    return (
+                      <div key={i} className="flex items-center justify-between gap-2 text-xs bg-background/50 rounded px-2 py-1">
+                        <div className="min-w-0 truncate">
+                          <span className="font-mono">{s.item_no || '—'}</span>
+                          {s.description ? ` · ${s.description}` : ''} · qty <b>{s.quantity}</b>
+                          <span className="text-muted-foreground ml-1">({s.occurrences}×)</span>
+                        </div>
+                        <div className="shrink-0">
+                          {state === 'accepted' && <span className="text-emerald-600 text-[10px]">promoted ✓</span>}
+                          {state === 'loading' && <span className="text-[10px] text-muted-foreground">…</span>}
+                          {!state && insights.customer_no && (
+                            <button
+                              onClick={async () => {
+                                setFeedbackState((st) => ({ ...st, [key]: 'loading' }));
+                                try {
+                                  await fetch(`${API}/api/intake/insights/promote-inherited`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                      target_customer_no: insights.customer_no,
+                                      source_customer_no: m.customer_no,
+                                      item_no: s.item_no,
+                                      trigger_item: s.trigger_item,
+                                      doc_id: docId,
+                                    }),
+                                  });
+                                  setFeedbackState((st) => ({ ...st, [key]: 'accepted' }));
+                                } catch {
+                                  setFeedbackState((st) => ({ ...st, [key]: 'error' }));
+                                }
+                              }}
+                              className="p-1 rounded hover:bg-purple-500/20 text-muted-foreground hover:text-purple-700"
+                              title={`Promote this inherited line into ${insights.customer_no}'s own pattern`}
+                              data-testid={`peer-promote-${idx}-${i}`}
+                            >
+                              <ArrowUpRight className="h-3 w-3" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
 

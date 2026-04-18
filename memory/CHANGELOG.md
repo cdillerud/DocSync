@@ -1,5 +1,37 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-18e] v2.3.0 — Phase D: Learning Feedback Loop
+
+### Goal
+User: *"I want the AI to keep tuning and getting better — that is the best ROI."*
+
+Turn every reviewer click into training data so pattern confidence adapts in real time.
+
+### Added
+- **`services/intake_learning_feedback_service.py`** — new service with:
+  - `record_feedback_event()` — 6 event types (suggestion_accepted / suggestion_rejected / bounds_violation_confirmed / bounds_violation_overridden / unmatched_item_confirmed_new / unmatched_item_mapped)
+  - Pattern mutations: accepts bump `occurrences` + `frequency`, rejects decay them, acceptance <40% over ≥5 samples → `retired=true`, ≥90% → `trusted=true`
+  - Bounds overrides widen `qty_history.std_dev` by 10% per override
+  - Unmatched items seed `intake_item_candidates` / `intake_item_aliases` collections
+  - `get_pattern_health()` — dashboard aggregation (trusted / drifting / retired / unscored counts, per-customer drill-down, recent events feed)
+  - `run_pattern_hygiene()` — nightly safety-net pass
+- **4 new endpoints**:
+  - `POST /api/intake/insights/feedback`
+  - `GET /api/intake/learning/pattern-health`
+  - `POST /api/intake/learning/hygiene`
+  - `GET /api/intake/learning/events`
+- **Nightly hygiene scheduler** in `server.py` (24h interval, 10-min startup delay)
+- **`IntakeLearningPanel`** — inline ThumbsUp / ThumbsDown / Check buttons on every suggestion, bounds violation, and unmatched item. One-click state transitions to "kept ✓" / "dropped" / "new ✓".
+- **`IntakeLearningPage`** — new Pattern Health panel: 4 trust-state counters, per-customer table, 72h reviewer-feedback activity feed. "Pattern hygiene" button for on-demand cleanup.
+- **Version** bumped to **v2.3.0** in `/app/frontend/src/lib/version.js`.
+
+### Verified live
+- Giovanni C-10250 has 16 learned patterns. Accepting OIPALLET moved occurrences 15 → 16, frequency → 100%. 5 rejects of OITIERSHEET correctly retired it (retired count 0 → 1 on `/pattern-health`).
+- 19/19 pytest unit tests pass (8 new + 11 existing)
+- Testing agent iter 212: 100% backend (19/19 unit + 14/14 API) + 100% frontend (Pattern Health panel, feedback buttons, hygiene flow all verified). Zero issues.
+
+
+
 ## [2026-04-18d] v2.2.1 — Phase B (De-pilotization) + Phase C (Doc Detail Panel)
 
 ### Phase B — De-pilotized UI framing

@@ -35,7 +35,7 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - `/app/frontend/src/pages/IntakeLearningPage.js` — Intake-learning dashboard (2026-04-18)
 - `/app/frontend/src/components/IntakeLearningPanel.jsx` — Drop-in insights panel (2026-04-18)
 
-### 2026-04-18 — Intake Learning v2.2.1 (Hub-Wide Giovanni Pattern + De-pilotization)
+### 2026-04-18 — Intake Learning v2.3.0 (Hub-Wide Giovanni + Feedback Loop)
 - **v2.2.0**: Generalized the Giovanni/Nikki blanket-PO BC learning (C-10250) to every ingested doc + XLS spreadsheet
 - **v2.2.0**: New `sales_intake_learning_service` orchestrator runs at intake, readiness, and XLS staging
 - **v2.2.0**: 7 new `/api/intake/*` endpoints: summary, backfill, refresh-active, run, insights, flagged
@@ -44,7 +44,8 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - **v2.2.0**: Daily refresh scheduler + BC write-back auto-refresh hook (instant feedback loop)
 - **v2.2.1**: IntakeLearningPanel now on every Document Detail page (not just XLS drawer)
 - **v2.2.1**: De-pilotized UI labels — "Inside Sales Pilot" → "Sales Intake", "Pilot Docs" → "Intake Docs"
-- Read-only — never writes to BC. 11/11 tests pass. Testing agent iter 210/211 100% green.
+- **v2.3.0**: **Learning Feedback Loop** — inline thumbs-up/thumbs-down buttons on every suggestion + bounds violation + unmatched item. Pattern confidence auto-adapts (trusted/drifting/retired). Nightly Pattern Hygiene scheduler. New Pattern Health dashboard panel. 4 new endpoints (feedback, pattern-health, hygiene, events).
+- Read-only — never writes to BC. 19/19 tests pass. Testing agent iter 210/211/212 all 100% green.
 
 
 - `/app/frontend/src/pages/MonitoringDashboard.js` — Vendor mapping UI

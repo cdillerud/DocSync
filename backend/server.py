@@ -7785,6 +7785,27 @@ async def startup():
     asyncio.create_task(_intake_learning_refresh_scheduler())
     logger.info("Intake Learning Refresh scheduler started (interval: 24h)")
 
+    # ── Intake Pattern Hygiene scheduler (nightly) ──
+    # Retire patterns with consistently poor acceptance rates, promote
+    # trusted ones. Works on accumulated feedback from the dashboard.
+    async def _intake_pattern_hygiene_scheduler():
+        await asyncio.sleep(600)  # Let refresh scheduler run first
+        while True:
+            try:
+                from services.intake_learning_feedback_service import run_pattern_hygiene
+                result = await run_pattern_hygiene()
+                logger.info(
+                    "[IntakeHygiene.scheduler] done — scanned=%d retired=%d promoted=%d",
+                    result.get("patterns_scanned", 0),
+                    result.get("retired", 0),
+                    result.get("promoted", 0),
+                )
+            except Exception as e:
+                logger.warning("[IntakeHygiene.scheduler] failed: %s", e)
+            await asyncio.sleep(24 * 3600)
+    asyncio.create_task(_intake_pattern_hygiene_scheduler())
+    logger.info("Intake Pattern Hygiene scheduler started (interval: 24h)")
+
     # Start BC Shipment Sync scheduler (every 1h)
     async def _shipment_sync_scheduler():
         """Background worker: sync BC shipment lines into inventory every 1 hour."""

@@ -8,7 +8,7 @@
  *   • Actionable findings + backfill button
  */
 import { useCallback, useEffect, useState } from 'react';
-import { RefreshCw, Sparkles, AlertTriangle, Info, Database, TrendingUp } from 'lucide-react';
+import { RefreshCw, Sparkles, AlertTriangle, Info, Database, TrendingUp, ShieldCheck, Archive, Activity } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -27,21 +27,24 @@ function Metric({ label, value, hint, tone = 'text-foreground' }) {
 export default function IntakeLearningPage() {
   const [summary, setSummary] = useState(null);
   const [flagged, setFlagged] = useState([]);
+  const [health, setHealth] = useState(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [sumRes, flaggedRes] = await Promise.all([
+      const [sumRes, flaggedRes, healthRes] = await Promise.all([
         fetch(`${API}/api/intake/learning/summary`),
         fetch(`${API}/api/intake/flagged?limit=25`),
+        fetch(`${API}/api/intake/learning/pattern-health?limit=25`),
       ]);
       if (sumRes.ok) setSummary(await sumRes.json());
       if (flaggedRes.ok) {
         const data = await flaggedRes.json();
         setFlagged(data.documents || []);
       }
+      if (healthRes.ok) setHealth(await healthRes.json());
     } finally {
       setLoading(false);
     }
@@ -65,6 +68,20 @@ export default function IntakeLearningPage() {
       await load();
     } catch (e) {
       alert(`Backfill failed: ${e.message}`);
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const runHygiene = async () => {
+    setRunning(true);
+    try {
+      const res = await fetch(`${API}/api/intake/learning/hygiene`, { method: 'POST' });
+      const data = await res.json();
+      alert(`Pattern hygiene — scanned ${data.patterns_scanned}, retired ${data.retired}, promoted ${data.promoted}.`);
+      await load();
+    } catch (e) {
+      alert(`Hygiene failed: ${e.message}`);
     } finally {
       setRunning(false);
     }
@@ -124,6 +141,15 @@ export default function IntakeLearningPage() {
             data-testid="intake-learning-force-backfill"
           >
             Force re-run all
+          </button>
+          <button
+            disabled={running}
+            onClick={runHygiene}
+            className="px-3 py-1.5 text-sm rounded-md border border-border hover:bg-muted disabled:opacity-50"
+            title="Retire low-confidence patterns, promote trusted ones"
+            data-testid="intake-learning-hygiene"
+          >
+            <Activity className="h-4 w-4 inline mr-1" /> Pattern hygiene
           </button>
         </div>
       </div>
@@ -191,6 +217,77 @@ export default function IntakeLearningPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+      </div>
+
+      {/* Pattern Health (Phase D — feedback loop) */}
+      <div className="rounded-lg border border-border bg-card" data-testid="pattern-health-panel">
+        <div className="flex items-center justify-between p-3 border-b border-border">
+          <div className="text-sm font-semibold flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-emerald-500" /> Pattern Health
+          </div>
+          {health?.generated_at && (
+            <div className="text-[10px] text-muted-foreground">
+              {new Date(health.generated_at).toLocaleString()}
+            </div>
+          )}
+        </div>
+        <div className="p-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <Metric label="Trusted" value={health?.summary?.trusted ?? 0} tone="text-emerald-600" hint="Acceptance ≥ 90%" />
+          <Metric label="Drifting" value={health?.summary?.drifting ?? 0} tone="text-amber-600" hint="Needs feedback" />
+          <Metric label="Retired" value={health?.summary?.retired ?? 0} tone="text-red-600" hint="Acceptance < 40%" />
+          <Metric label="Unscored" value={health?.summary?.unscored ?? 0} hint="No feedback yet" />
+        </div>
+        {health?.per_customer?.length > 0 && (
+          <div className="overflow-x-auto border-t border-border">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground border-b border-border">
+                  <th className="p-2">Customer</th>
+                  <th className="p-2 text-right">Patterns</th>
+                  <th className="p-2 text-right">Trusted</th>
+                  <th className="p-2 text-right">Drifting</th>
+                  <th className="p-2 text-right">Retired</th>
+                  <th className="p-2">Last feedback</th>
+                </tr>
+              </thead>
+              <tbody>
+                {health.per_customer.slice(0, 15).map((c) => (
+                  <tr key={c.customer_no} className="border-b border-border/50 hover:bg-muted/30" data-testid={`pattern-health-row-${c.customer_no}`}>
+                    <td className="p-2 font-mono">{c.customer_no}</td>
+                    <td className="p-2 text-right">{c.patterns_total}</td>
+                    <td className="p-2 text-right text-emerald-600">{c.trusted || '—'}</td>
+                    <td className="p-2 text-right text-amber-600">{c.drifting || '—'}</td>
+                    <td className="p-2 text-right text-red-600">{c.retired || '—'}</td>
+                    <td className="p-2 text-xs text-muted-foreground">
+                      {c.last_feedback_at ? new Date(c.last_feedback_at).toLocaleDateString() : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {health?.recent_events?.length > 0 && (
+          <div className="border-t border-border p-3">
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2 flex items-center gap-1">
+              <Archive className="h-3 w-3" /> Recent reviewer feedback
+            </div>
+            <div className="space-y-1 text-xs max-h-48 overflow-y-auto">
+              {health.recent_events.slice(0, 10).map((e) => (
+                <div key={e.id} className="flex items-center justify-between gap-2 py-0.5">
+                  <div className="truncate">
+                    <span className="font-mono text-[10px] uppercase text-muted-foreground">{e.event_type}</span>
+                    {e.customer_no && <span className="ml-2">{e.customer_no}</span>}
+                    {e.item_no && <span className="ml-2 font-mono">{e.item_no}</span>}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground shrink-0">
+                    {new Date(e.created_at).toLocaleString()}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>

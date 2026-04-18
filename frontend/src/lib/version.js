@@ -1,6 +1,20 @@
-export const APP_VERSION = "2.2.1";
+export const APP_VERSION = "2.3.0";
 
 export const CHANGELOG = [
+  {
+    version: "2.3.0",
+    date: "2026-04-18",
+    title: "Learning Feedback Loop — Every Click Is Training Data",
+    changes: [
+      { type: "feature", text: "Inline thumbs-up/thumbs-down on every suggested line, bounds violation, and unmatched item in the IntakeLearningPanel — captured as structured events in a new `intake_learning_events` collection" },
+      { type: "feature", text: "Pattern confidence auto-adapts: accepts bump occurrences/frequency, rejects decay them, accept rate <40% over ≥5 samples → pattern retired, ≥90% → pattern marked trusted" },
+      { type: "feature", text: "Bounds-violation overrides widen the pattern's ±2σ envelope by 10% per override; confirms keep the sample as an outlier" },
+      { type: "feature", text: "New Pattern Health panel on /intake/learning — Trusted / Drifting / Retired / Unscored counters, per-customer drill-down, recent reviewer-feedback feed" },
+      { type: "feature", text: "Nightly Pattern Hygiene scheduler retires stale patterns automatically; manual 'Pattern hygiene' button on dashboard" },
+      { type: "feature", text: "Unmatched items can be confirmed-new (queued for BC admin) or mapped-to-existing (alias saved for auto-match next time)" },
+      { type: "feature", text: "4 new /api/intake/* endpoints: insights/feedback, learning/pattern-health, learning/hygiene, learning/events" },
+    ],
+  },
   {
     version: "2.2.1",
     date: "2026-04-18",

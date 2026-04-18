@@ -819,7 +819,7 @@ export default function DocumentDetailPage() {
           <ReadinessPanel readiness={doc.readiness} docStatus={doc.status} />
 
           {/* BC + Spiro Intake Intelligence (Giovanni-style learning) */}
-          <IntakeLearningPanel insights={doc.intake_insights} />
+          <IntakeLearningPanel insights={doc.intake_insights} docId={doc.id} />
 
           {/* Extracted Data Card — consolidates extracted_fields, normalized_fields, and top-level fields */}
           <ExtractedDataCard doc={doc} />

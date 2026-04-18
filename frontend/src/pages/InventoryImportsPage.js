@@ -163,7 +163,7 @@ function StagingDetail({ staging, customers, onClose, onApproved, onRejected, on
 
         <div className="p-4 space-y-4">
           {/* BC + Spiro Intake Intelligence */}
-          <IntakeLearningPanel insights={staging.intake_insights} />
+          <IntakeLearningPanel insights={staging.intake_insights} stagingId={staging.id} />
 
           {/* Classification */}
           <div className="bg-muted/30 rounded-lg p-3">

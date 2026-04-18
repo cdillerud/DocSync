@@ -8,8 +8,14 @@
  *   2. Cold start       → shows "no BC learning yet" with reason
  *   3. Learned          → customer chip + suggestions + bounds +
  *                         item-catalog match summary + actionable flag
+ *
+ * v2.3.0: inline reviewer feedback buttons — every click becomes
+ * training data for the underlying pattern.
  */
-import { AlertTriangle, Check, Sparkles, Info, TrendingUp, Package } from 'lucide-react';
+import { useState } from 'react';
+import { AlertTriangle, Check, Sparkles, Info, TrendingUp, Package, ThumbsUp, ThumbsDown } from 'lucide-react';
+
+const API = process.env.REACT_APP_BACKEND_URL;
 
 function Pill({ children, tone = 'neutral' }) {
   const map = {
@@ -26,7 +32,34 @@ function Pill({ children, tone = 'neutral' }) {
   );
 }
 
-export default function IntakeLearningPanel({ insights, compact = false }) {
+export default function IntakeLearningPanel({ insights, compact = false, docId, stagingId }) {
+  const [feedbackState, setFeedbackState] = useState({}); // key → 'accepted'|'rejected'|'loading'
+
+  const sendFeedback = async (key, eventType, payload) => {
+    setFeedbackState((s) => ({ ...s, [key]: 'loading' }));
+    try {
+      await fetch(`${API}/api/intake/insights/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event_type: eventType,
+          doc_id: docId || null,
+          staging_id: stagingId || null,
+          customer_no: insights?.customer_no || null,
+          ...payload,
+        }),
+      });
+      setFeedbackState((s) => ({
+        ...s,
+        [key]: eventType.includes('accepted') || eventType.includes('confirmed') || eventType === 'unmatched_item_confirmed_new'
+          ? 'accepted'
+          : 'rejected',
+      }));
+    } catch {
+      setFeedbackState((s) => ({ ...s, [key]: 'error' }));
+    }
+  };
+
   if (!insights) {
     return (
       <div
@@ -128,13 +161,44 @@ export default function IntakeLearningPanel({ insights, compact = false }) {
                 <AlertTriangle className="h-3.5 w-3.5" /> Quantity Bounds ({violations.length})
               </div>
               <div className="space-y-1 text-xs">
-                {violations.slice(0, 6).map((v, i) => (
-                  <div key={i} className="rounded border border-amber-500/30 bg-amber-500/5 px-2 py-1">
-                    <span className="font-mono">{v.item_no}</span> — ordered{' '}
-                    <b>{v.po_quantity}</b>, expected {v.expected_min}–{v.expected_max}{' '}
-                    (mean {v.mean}, ±2σ · {v.severity})
-                  </div>
-                ))}
+                {violations.slice(0, 6).map((v, i) => {
+                  const key = `bounds-${v.item_no}-${i}`;
+                  const state = feedbackState[key];
+                  return (
+                    <div key={i} className="rounded border border-amber-500/30 bg-amber-500/5 px-2 py-1 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="font-mono">{v.item_no}</span> — ordered{' '}
+                        <b>{v.po_quantity}</b>, expected {v.expected_min}–{v.expected_max}{' '}
+                        (mean {v.mean}, ±2σ · {v.severity})
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {state === 'accepted' && <span className="text-emerald-600 text-[10px]">confirmed</span>}
+                        {state === 'rejected' && <span className="text-sky-600 text-[10px]">overridden</span>}
+                        {!state && (
+                          <>
+                            <button
+                              onClick={() => sendFeedback(key, 'bounds_violation_confirmed', { item_no: v.item_no })}
+                              className="p-1 rounded hover:bg-amber-500/20 text-muted-foreground hover:text-amber-700"
+                              title="Confirm this was abnormal — tightens pattern"
+                              data-testid={`bounds-confirm-${i}`}
+                            >
+                              <ThumbsUp className="h-3 w-3" />
+                            </button>
+                            <button
+                              onClick={() => sendFeedback(key, 'bounds_violation_overridden', { item_no: v.item_no })}
+                              className="p-1 rounded hover:bg-sky-500/20 text-muted-foreground hover:text-sky-700"
+                              title="Qty is fine — widens the pattern's accepted range"
+                              data-testid={`bounds-override-${i}`}
+                            >
+                              <ThumbsDown className="h-3 w-3" />
+                            </button>
+                          </>
+                        )}
+                        {state === 'loading' && <span className="text-[10px] text-muted-foreground">…</span>}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -146,18 +210,45 @@ export default function IntakeLearningPanel({ insights, compact = false }) {
                 <Sparkles className="h-3.5 w-3.5 text-amber-500" /> Suggested Recurring Lines ({suggestions.length})
               </div>
               <div className="space-y-1 text-xs">
-                {suggestions.slice(0, 8).map((s, i) => (
-                  <div key={i} className="rounded border border-border bg-muted/30 px-2 py-1 flex items-center justify-between">
-                    <div>
-                      <span className="font-mono">{s.item_no || '—'}</span>
-                      {s.description ? ` · ${s.description}` : ''} · qty{' '}
-                      <b>{s.quantity}</b>
+                {suggestions.slice(0, 8).map((s, i) => {
+                  const key = `sug-${s.item_no}-${i}`;
+                  const state = feedbackState[key];
+                  return (
+                    <div key={i} className="rounded border border-border bg-muted/30 px-2 py-1 flex items-center justify-between gap-2">
+                      <div className="min-w-0 truncate">
+                        <span className="font-mono">{s.item_no || '—'}</span>
+                        {s.description ? ` · ${s.description}` : ''} · qty{' '}
+                        <b>{s.quantity}</b>
+                        <span className="text-muted-foreground ml-1">({s.occurrences}×, {Math.round((s.frequency || 0) * 100)}%)</span>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {state === 'accepted' && <span className="text-emerald-600 text-[10px]">kept ✓</span>}
+                        {state === 'rejected' && <span className="text-red-600 text-[10px]">dropped</span>}
+                        {!state && (
+                          <>
+                            <button
+                              onClick={() => sendFeedback(key, 'suggestion_accepted', { item_no: s.item_no, trigger_item: s.trigger_item })}
+                              className="p-1 rounded hover:bg-emerald-500/20 text-muted-foreground hover:text-emerald-700"
+                              title="Keep this suggestion — boosts pattern"
+                              data-testid={`sug-accept-${i}`}
+                            >
+                              <ThumbsUp className="h-3 w-3" />
+                            </button>
+                            <button
+                              onClick={() => sendFeedback(key, 'suggestion_rejected', { item_no: s.item_no, trigger_item: s.trigger_item })}
+                              className="p-1 rounded hover:bg-red-500/20 text-muted-foreground hover:text-red-700"
+                              title="Drop — decays pattern"
+                              data-testid={`sug-reject-${i}`}
+                            >
+                              <ThumbsDown className="h-3 w-3" />
+                            </button>
+                          </>
+                        )}
+                        {state === 'loading' && <span className="text-[10px] text-muted-foreground">…</span>}
+                      </div>
                     </div>
-                    <div className="text-muted-foreground">
-                      seen {s.occurrences}× ({Math.round((s.frequency || 0) * 100)}%)
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -169,15 +260,35 @@ export default function IntakeLearningPanel({ insights, compact = false }) {
                 <Package className="h-3.5 w-3.5" /> BC Item Catalog ({iv.lines_matched}/{iv.lines_total} matched · {iv.match_rate}%)
               </div>
               {iv.lines_unmatched > 0 && iv.unmatched_items && (
-                <div className="text-xs text-muted-foreground space-y-0.5">
-                  {iv.unmatched_items.slice(0, 5).map((u, i) => (
-                    <div key={i}>
-                      <span className="font-mono">{u.item_no || '(no item_no)'}</span>
-                      {u.description ? ` — ${u.description}` : ''}
-                    </div>
-                  ))}
+                <div className="text-xs space-y-1">
+                  {iv.unmatched_items.slice(0, 5).map((u, i) => {
+                    const key = `item-${u.item_no}-${i}`;
+                    const state = feedbackState[key];
+                    return (
+                      <div key={i} className="rounded border border-border/50 px-2 py-1 flex items-center justify-between gap-2">
+                        <div className="min-w-0 truncate">
+                          <span className="font-mono">{u.item_no || '(no item_no)'}</span>
+                          {u.description ? ` — ${u.description}` : ''}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {state === 'accepted' && <span className="text-emerald-600 text-[10px]">new ✓</span>}
+                          {!state && (
+                            <button
+                              onClick={() => sendFeedback(key, 'unmatched_item_confirmed_new', { item_no: u.item_no, extra: { description: u.description } })}
+                              className="p-1 rounded hover:bg-emerald-500/20 text-muted-foreground hover:text-emerald-700"
+                              title="Confirm this is a new item — queues for BC admin"
+                              data-testid={`item-confirm-${i}`}
+                            >
+                              <Check className="h-3 w-3" />
+                            </button>
+                          )}
+                          {state === 'loading' && <span className="text-[10px] text-muted-foreground">…</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
                   {iv.lines_unmatched > 5 && (
-                    <div>…and {iv.lines_unmatched - 5} more</div>
+                    <div className="text-muted-foreground">…and {iv.lines_unmatched - 5} more</div>
                   )}
                 </div>
               )}

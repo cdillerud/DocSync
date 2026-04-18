@@ -7,7 +7,8 @@ Reads only — never writes to BC.
 """
 
 from fastapi import APIRouter, HTTPException, Query
-from typing import Optional
+from pydantic import BaseModel, Field
+from typing import Any, Dict, Optional
 
 from services.sales_intake_learning_service import (
     run_intake_learning,
@@ -15,6 +16,13 @@ from services.sales_intake_learning_service import (
     backfill_intake_learning,
     refresh_active_customers,
     get_intake_learning_summary,
+)
+from services.intake_learning_feedback_service import (
+    record_feedback_event,
+    get_pattern_health,
+    run_pattern_hygiene,
+    list_recent_events,
+    EVENT_TYPES,
 )
 from deps import get_db
 
@@ -133,3 +141,67 @@ async def list_flagged_documents(
         },
     ).sort("created_utc", -1).limit(limit).to_list(limit)
     return {"total": len(docs), "documents": docs}
+
+
+
+# ─────────────────────────────────────────────────────────────
+# Phase D — Feedback Loop
+# ─────────────────────────────────────────────────────────────
+
+class FeedbackEvent(BaseModel):
+    event_type: str = Field(..., description=f"One of {sorted(EVENT_TYPES)}")
+    doc_id: Optional[str] = None
+    staging_id: Optional[str] = None
+    customer_no: Optional[str] = None
+    item_no: Optional[str] = None
+    trigger_item: Optional[str] = None
+    extra: Optional[Dict[str, Any]] = None
+    actor: Optional[str] = "user"
+
+
+@router.post("/insights/feedback")
+async def post_feedback(body: FeedbackEvent):
+    """Capture a reviewer feedback event and apply it to the learned pattern.
+
+    Event types:
+      • `suggestion_accepted` / `suggestion_rejected` — adjust pattern occurrence / frequency
+      • `bounds_violation_confirmed` / `bounds_violation_overridden` — nudge qty envelope
+      • `unmatched_item_confirmed_new` / `unmatched_item_mapped` — seed item alias candidates
+    """
+    if body.event_type not in EVENT_TYPES:
+        raise HTTPException(status_code=400, detail=f"event_type must be one of {sorted(EVENT_TYPES)}")
+    return await record_feedback_event(
+        event_type=body.event_type,
+        doc_id=body.doc_id,
+        staging_id=body.staging_id,
+        customer_no=body.customer_no,
+        item_no=body.item_no,
+        trigger_item=body.trigger_item,
+        extra=body.extra,
+        actor=body.actor or "user",
+    )
+
+
+@router.get("/learning/pattern-health")
+async def pattern_health(limit: int = Query(50, le=500)):
+    """Dashboard aggregation of pattern trust / retire / drift counts."""
+    return await get_pattern_health(limit=limit)
+
+
+@router.post("/learning/hygiene")
+async def trigger_hygiene():
+    """Manually kick the nightly pattern-hygiene pass."""
+    return await run_pattern_hygiene()
+
+
+@router.get("/learning/events")
+async def recent_events(
+    limit: int = Query(100, le=500),
+    event_type: Optional[str] = None,
+    customer_no: Optional[str] = None,
+):
+    """Most recent feedback events (audit feed)."""
+    events = await list_recent_events(
+        limit=limit, event_type=event_type, customer_no=customer_no,
+    )
+    return {"total": len(events), "events": events}

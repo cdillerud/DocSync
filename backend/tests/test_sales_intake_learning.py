@@ -318,5 +318,37 @@ async def test_refresh_active_customers_single_customer():
     assert res["refreshed_customers"][0]["patterns_learned"] == 2
 
 
+@pytest.mark.asyncio
+async def test_refresh_customer_after_bc_write_happy_path():
+    """Post-BC-write hook re-learns patterns for the given customer."""
+    from services import sales_intake_learning_service as sils
+    from unittest.mock import patch
+    with patch("services.order_line_patterns.learn_from_bc_posted_orders",
+               new=AsyncMock(return_value={"patterns_learned": 3})):
+        res = await sils.refresh_customer_after_bc_write("C-10250", db=object())
+    assert res["customer_no"] == "C-10250"
+    assert res["patterns_learned"] == 3
+    assert res["triggered_by"] == "bc_write"
+
+
+@pytest.mark.asyncio
+async def test_refresh_customer_after_bc_write_empty_customer_skipped():
+    from services import sales_intake_learning_service as sils
+    res = await sils.refresh_customer_after_bc_write("", db=object())
+    assert res.get("skipped") is True
+
+
+@pytest.mark.asyncio
+async def test_refresh_customer_after_bc_write_swallows_errors():
+    """Errors must never propagate — hook is fire-and-forget."""
+    from services import sales_intake_learning_service as sils
+    from unittest.mock import patch
+    with patch("services.order_line_patterns.learn_from_bc_posted_orders",
+               new=AsyncMock(side_effect=RuntimeError("BC unavailable"))):
+        res = await sils.refresh_customer_after_bc_write("C-10250", db=object())
+    assert "error" in res
+    assert res["customer_no"] == "C-10250"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

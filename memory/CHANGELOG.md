@@ -1,5 +1,22 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-18c] BC Write-Back Auto-Refresh Hook
+
+### Problem
+Daily scheduler (added in 2026-04-18b) was time-based — a user posting a sales order to BC would wait up to 24h before the hub learned the fresh pattern. Tight feedback loop requested.
+
+### Added
+- **`refresh_customer_after_bc_write(customer_no)`** — fire-and-forget service that re-learns patterns for a single customer the instant their BC sales order is posted successfully. Errors are swallowed so the main BC-write path is never blocked.
+- **Hook in `gpi_integration.create_sales_order_from_document`** — on `result["success"]=True`, spawns an `asyncio.create_task` to refresh that customer's patterns in the background.
+- **AP invoices intentionally excluded** — they already run `posting_pattern_analyzer.learn_from_posting` at the same callsite, which is the AP-side equivalent (vendor-based, not customer-based). The Giovanni pattern is a sales-side concept.
+
+### Verified
+- 11/11 unit tests pass (3 new tests covering happy path, empty customer skip, error swallowing)
+- Live `/api/intake/learning/refresh-active` manual endpoint still works
+- Backend restarts clean; hook is a no-op when BC write fails so no regression risk
+
+
+
 ## [2026-04-18b] Daily Intake Learning Refresh Scheduler
 
 ### Problem

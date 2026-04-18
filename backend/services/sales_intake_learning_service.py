@@ -603,6 +603,43 @@ async def backfill_intake_learning(
     }
 
 
+async def refresh_customer_after_bc_write(
+    customer_no: str,
+    db=None,
+) -> Dict[str, Any]:
+    """Post-BC-write hook — re-learn patterns for a single customer.
+
+    Called the instant a sales order or AP invoice is successfully
+    posted to BC, so the very next ingested doc for that customer
+    picks up the fresh pattern. Read-only against BC, runs in-process.
+
+    Safe to fire-and-forget via asyncio.create_task — never raises.
+    """
+    if not customer_no:
+        return {"skipped": True, "reason": "no customer_no"}
+    try:
+        from services.order_line_patterns import learn_from_bc_posted_orders
+        db = db if db is not None else get_db()
+        seed = await learn_from_bc_posted_orders(
+            db, customer_no, order_limit=10, threshold=0.75,
+        )
+        logger.info(
+            "[IntakeLearning.bc-write-hook] customer=%s patterns=%d",
+            customer_no, seed.get("patterns_learned", 0),
+        )
+        return {
+            "customer_no": customer_no,
+            "patterns_learned": seed.get("patterns_learned", 0),
+            "triggered_by": "bc_write",
+        }
+    except Exception as e:
+        logger.warning(
+            "[IntakeLearning.bc-write-hook] customer=%s failed: %s",
+            customer_no, e,
+        )
+        return {"customer_no": customer_no, "error": str(e)}
+
+
 async def refresh_active_customers(
     lookback_hours: int = 24,
     max_customers: int = 100,
@@ -840,6 +877,7 @@ __all__ = [
     "run_intake_learning_for_xls_staging",
     "backfill_intake_learning",
     "refresh_active_customers",
+    "refresh_customer_after_bc_write",
     "get_intake_learning_summary",
     "LEARNING_DOC_TYPES",
 ]

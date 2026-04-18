@@ -1303,6 +1303,17 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
     except Exception as evt_err:
         logger.warning("Failed to emit BC sales order event: %s", evt_err)
 
+    # ── Intake Learning auto-refresh on successful BC write ──
+    # Fire-and-forget so the very next ingested doc for this customer
+    # picks up fresh patterns without waiting for the daily scheduler.
+    if result.get("success") and customer_no:
+        try:
+            import asyncio as _asyncio
+            from services.sales_intake_learning_service import refresh_customer_after_bc_write
+            _asyncio.create_task(refresh_customer_after_bc_write(customer_no))
+        except Exception as rfr_err:
+            logger.debug("Intake learning post-write refresh skipped: %s", rfr_err)
+
     # ── Auto-approve dropship SOs ──
     ds_auto_approved = False
     if so_type == "dropship" and result.get("success") and result.get("status") != "already_exists":

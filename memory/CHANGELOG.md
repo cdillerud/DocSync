@@ -1,5 +1,35 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-18f] v2.4.0 — Phase E: Cold-Start Peer Matching
+
+### Goal
+Continue the "AI keeps tuning" thread from v2.3.0. Brand-new customers start with zero BC history, so the learning is cold — no suggested lines, no bounds, no guidance for the reviewer. Fix that by automatically finding the most similar known customer and offering their patterns as "inherited suggestions" that can be promoted to the new customer's own pattern with one click.
+
+### Added
+- **`services/cold_start_matcher_service.py`** — pure-python TF-IDF fingerprint matcher:
+  - `build_fingerprint()` / `get_or_build_fingerprint()` / `invalidate_fingerprint()` / `rebuild_all_fingerprints()` — TTL-cached in `intake_customer_fingerprints` (24h)
+  - `find_similar_customers()` — cosine-similarity against all known fingerprints, returns top-K with matched-token receipts
+  - `promote_inherited_suggestion()` — reviewer-driven; seeds a real pattern on the target customer and records an `inherited_suggestion_promoted` audit event
+  - Tokenizer keeps SKU-style tokens (`C-9874-10001833`) intact, drops stopwords/pure-numbers/short-tokens
+- **Wired into `sales_intake_learning_service`** at 3 cold-start branches (unresolved customer, resolved-no-history, XLS staging). Result surfaces as `intake_insights.peer_matches`.
+- **Fingerprint auto-invalidation** on every pattern feedback (accept/reject/promote) so cold-start matches stay fresh.
+- **3 new endpoints**: `POST /api/intake/insights/promote-inherited`, `POST /api/intake/learning/rebuild-fingerprints`, `GET /api/intake/learning/similar-customers`.
+- **Frontend**: `IntakeLearningPanel` renders a new purple "Peer-matched suggestions" block right after the cold-start notice, with matched-token pills + one-click ArrowUpRight promote buttons.
+- **28/28 pytest unit tests passing** (9 new + 8 feedback + 11 intake).
+- **Testing agent iter 213: 100% backend (39/39) + 100% frontend. Giovanni state stayed pristine.**
+
+### Design notes
+Chose pure-python TF-IDF over LLM embeddings deliberately:
+- Dataset is tiny (≤200 customers × ~100 tokens)
+- Domain vocabulary is sparse and highly discriminative (SKU prefixes like `C-9874` are natural TF-IDF gold)
+- Deterministic → reviewers can literally see which tokens matched
+- Zero API cost, zero network dep, zero sklearn bloat
+
+### Version
+- Bumped `APP_VERSION` to **2.4.0** in `/app/frontend/src/lib/version.js`.
+
+
+
 ## [2026-04-18e] v2.3.0 — Phase D: Learning Feedback Loop
 
 ### Goal

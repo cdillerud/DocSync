@@ -35,12 +35,13 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - `/app/frontend/src/pages/IntakeLearningPage.js` — Intake-learning dashboard (2026-04-18)
 - `/app/frontend/src/components/IntakeLearningPanel.jsx` — Drop-in insights panel (2026-04-18)
 
-### 2026-04-18 — Intake Learning v2.4.0 (Hub-Wide Giovanni + Feedback Loop + Cold-Start Peers)
-- **v2.2.0**: Generalized the Giovanni/Nikki blanket-PO BC learning (C-10250) to every ingested doc + XLS spreadsheet
+### 2026-04-18 — Intake Learning v2.4.1 (+ Learning Core U1)
+- **v2.2.0**: Generalized Giovanni/Nikki blanket-PO BC learning (C-10250) to every ingested doc + XLS spreadsheet
 - **v2.2.1**: IntakeLearningPanel on every Document Detail page; de-pilotized UI labels
-- **v2.3.0**: Learning feedback loop — inline thumbs-up/thumbs-down buttons, pattern confidence auto-adapts, nightly hygiene scheduler, Pattern Health dashboard
-- **v2.4.0**: Cold-start peer matching — pure-python TF-IDF fingerprints + inherited suggestions + promote-to-own-pattern button. New customers get sensible day-one suggestions from their most similar known peer.
-- Read-only wrt BC. 28/28 pytest + testing agent iter 210/211/212/213 all 100% green. Giovanni data kept pristine.
+- **v2.3.0**: Learning feedback loop — thumbs-up/down buttons, pattern trust/retire, hygiene scheduler, Pattern Health dashboard
+- **v2.4.0**: Cold-start peer matching — pure-python TF-IDF fingerprints + inherited suggestions + promote-to-own-pattern
+- **v2.4.1**: Learning Core U1 — unified event log (`learning_events_v2`) replaces 3 parallel collections over a 30-day dual-write window. New `/api/learning/events` + `/api/learning/events/summary` endpoints enable cross-domain drift analytics (Nikki's intake rejects + Meghan's AP corrections in one feed). No UI changes.
+- Read-only wrt BC. 33/33 pytest + testing agent iter 210/211/212/213 all 100% green. Giovanni data kept pristine.
 
 
 - `/app/frontend/src/pages/MonitoringDashboard.js` — Vendor mapping UI

@@ -1,5 +1,42 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-18g] v2.4.1 — Phase U1: Unified Event Log (Shared Plumbing)
+
+### Context
+Audit of the codebase surfaced 3 parallel event collections (`intake_learning_events`, `posting_learning_events`, `learning_events`) and 4 separate schedulers across AP + intake sides — the "AI Learning" and "Intake Learning" tabs are mirror images of each other but the underlying plumbing never consolidated. Started shared-plumbing refactor with the highest-ROI piece first: a canonical cross-domain event log.
+
+### Added
+- **`services/learning_core/`** package — new home for shared plumbing
+- **`learning_core.events_service`** with `record_event()`, `list_events()`, `get_domain_summary()`; writes to `learning_events_v2` with indexes auto-created on (domain, created_at), (scope_type, scope_value, created_at), (event_type, created_at)
+- **Schema**: `{id, domain, event_type, actor, scope_type, scope_value, target, applied, extra, source, created_at}` — scope_type polymorphic across `vendor`/`customer`/`xls_staging`/`global`
+- **`routers/learning_core.py`** — 2 new endpoints:
+  - `GET /api/learning/events` (filter by domain/type/scope/time)
+  - `GET /api/learning/events/summary` (dashboard aggregates)
+- **Dual-write** wired into 3 callsites:
+  - `intake_learning_feedback_service.record_feedback_event` (Phase D feedback)
+  - `cold_start_matcher_service.promote_inherited_suggestion` (Phase E promotions)
+  - `draft_feedback_service._record_feedback_events` (AP draft BC feedback)
+- Legacy collections still receive writes during the 30-day migration window — zero risk.
+
+### Not in U1 (planned for v2.5.0+)
+- U2 — Shared TF-IDF fingerprint service (merge vendor + customer similarity)
+- U3 — Shared pattern-health service + unified hygiene scheduler
+- U4 — Unified feedback ingest endpoint (`POST /api/learning/feedback`)
+- U5 — Shared `<PatternHealthPanel>` React component
+- U6 — Retire duplicate sales_order_learning_* service family
+
+### Verified
+- 33/33 pytest unit tests pass (5 new + 28 existing)
+- New test `test_intake_feedback_dual_writes_to_learning_core` proves dual-write lands in both collections
+- Live `GET /api/learning/events/summary` returns clean shape with zero events (nothing triggered yet in this environment)
+- Lint: all checks passed
+- Backend restarts clean; no regressions
+
+### Version
+- Bumped `APP_VERSION` to **2.4.1** in `/app/frontend/src/lib/version.js`
+
+
+
 ## [2026-04-18f] v2.4.0 — Phase E: Cold-Start Peer Matching
 
 ### Goal

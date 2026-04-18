@@ -1,0 +1,31 @@
+"""
+GPI Document Hub — Learning Core
+─────────────────────────────────
+
+Shared plumbing for learning systems across the hub. Today this
+package exposes:
+
+  • events_service     — canonical unified event log (replaces
+                         intake_learning_events / posting_learning_events
+                         / learning_events over a 30-day dual-write window)
+
+Future phases (U2+) will add fingerprint_service, pattern_health_service,
+and a shared feedback ingest endpoint. See
+/app/memory/CHANGELOG.md — v2.4.1 for the multi-phase rollout plan.
+"""
+
+from services.learning_core.events_service import (
+    record_event,
+    list_events,
+    get_domain_summary,
+    DOMAINS,
+    EVENTS_COLL,
+)
+
+__all__ = [
+    "record_event",
+    "list_events",
+    "get_domain_summary",
+    "DOMAINS",
+    "EVENTS_COLL",
+]

@@ -93,6 +93,33 @@ async def record_feedback_event(
     except Exception as e:
         logger.warning("[LearnFeedback] insert event failed: %s", e)
 
+    # Dual-write to the unified learning_events_v2 (U1, v2.4.1). Never
+    # blocks the primary ingest. Legacy collection still receives the
+    # event during the 30-day migration window.
+    try:
+        from services.learning_core import record_event
+        scope_type = "customer" if customer_no else "global"
+        if staging_id and not customer_no:
+            scope_type = "xls_staging"
+        await record_event(
+            domain="inventory_xls" if staging_id else "sales_intake",
+            event_type=event_type,
+            scope_type=scope_type,
+            scope_value=customer_no or staging_id,
+            target={
+                "doc_id": doc_id,
+                "staging_id": staging_id,
+                "item_no": item_no,
+                "trigger_item": trigger_item,
+            },
+            extra=extra or {},
+            actor=actor,
+            source="intake_learning_feedback_service",
+            db=db,
+        )
+    except Exception as e:
+        logger.debug("[LearnFeedback] dual-write to learning_core failed: %s", e)
+
     applied: Dict[str, Any] = {"event_id": event["id"], "applied": None}
     try:
         if event_type == "suggestion_accepted" and customer_no and item_no:

@@ -1,6 +1,18 @@
-export const APP_VERSION = "2.4.0";
+export const APP_VERSION = "2.4.1";
 
 export const CHANGELOG = [
+  {
+    version: "2.4.1",
+    date: "2026-04-18",
+    title: "Learning Core U1 — Unified Event Log (shared plumbing)",
+    changes: [
+      { type: "improvement", text: "New `learning_core` module — canonical cross-domain event log (`learning_events_v2` collection) replacing 3 separate event streams (intake_learning_events, posting_learning_events, learning_events) over a 30-day dual-write window" },
+      { type: "improvement", text: "Schema: {domain, event_type, scope_type, scope_value, target, applied, extra, actor, source, created_at}. Enables cross-domain drift analytics (e.g., 'customer C-10250 had 3 Intake rejects this week AND 2 AP posting corrections')" },
+      { type: "feature", text: "2 new endpoints: GET /api/learning/events (filter by domain/type/scope/time) and GET /api/learning/events/summary (dashboard aggregates)" },
+      { type: "improvement", text: "Intake feedback + Cold-start promotions + AP draft-feedback all now dual-write to both their legacy collection AND the unified log — zero-risk migration path" },
+      { type: "improvement", text: "Indexes auto-created on (domain, created_at), (scope_type, scope_value, created_at), (event_type, created_at)" },
+    ],
+  },
   {
     version: "2.4.0",
     date: "2026-04-18",

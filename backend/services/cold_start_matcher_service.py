@@ -396,6 +396,23 @@ async def promote_inherited_suggestion(
     except Exception as e:
         logger.debug("[ColdStart.promote] audit event failed: %s", e)
 
+    # Dual-write to unified learning_events_v2 (U1, v2.4.1)
+    try:
+        from services.learning_core import record_event
+        await record_event(
+            domain="sales_intake",
+            event_type="inherited_suggestion_promoted",
+            scope_type="customer",
+            scope_value=target_customer_no,
+            target={"item_no": item_no, "trigger_item": trigger_item},
+            extra={"inherited_from": source_customer_no},
+            actor="user",
+            source="cold_start_matcher_service",
+            db=db,
+        )
+    except Exception as e:
+        logger.debug("[ColdStart.promote] unified audit failed: %s", e)
+
     # Invalidate both fingerprints so next cold-start lookup reflects the change
     await invalidate_fingerprint(target_customer_no, db=db)
 

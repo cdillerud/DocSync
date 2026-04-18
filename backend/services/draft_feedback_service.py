@@ -305,6 +305,27 @@ async def _record_feedback_events(db, doc_id: str, vendor_no: str, diff: Dict, n
         "summary": diff["summary"],
     })
 
+    # Dual-write to unified learning_events_v2 (U1, v2.4.1)
+    try:
+        from services.learning_core import record_event
+        await record_event(
+            domain="ap_posting",
+            event_type="draft_bc_feedback",
+            scope_type="vendor",
+            scope_value=vendor_no,
+            target={"doc_id": doc_id},
+            applied={
+                "change_count": diff.get("change_count"),
+                "summary": diff.get("summary"),
+            },
+            extra={"corrections_preview": diff.get("corrections", [])[:5]},
+            actor="bc_write_hook",
+            source="draft_feedback_service",
+            db=db,
+        )
+    except Exception as e:
+        logger.debug("[DraftFeedback] unified event dual-write failed: %s", e)
+
     # Create individual classification corrections for learning dashboard visibility
     for c in diff["corrections"]:
         await db.classification_corrections.insert_one({

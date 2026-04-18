@@ -1,5 +1,46 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-18h] v2.5.0 + v2.5.1 — Drift Alerts + Shared Fingerprint Service
+
+### v2.5.0 — Proactive Drift Alerts
+Scans the unified `learning_events_v2` log (built in U1) every 24h for anomalies and surfaces them as structured alerts with severity + evidence.
+
+**5 drift rules:**
+1. **TRUSTED_PATTERN_DRIFT** (critical) — a trusted line getting rejected ≥2× in 7d
+2. **CUSTOMER_REJECT_SPIKE** (warn) — ≥5 rejections in 14d
+3. **BOUNDS_DRIFT** (warn) — ≥3 bounds overrides in 7d
+4. **AP_TEMPLATE_DRIFT** (warn) — vendor had ≥3 draft BC corrections in 7d
+5. **CATALOG_EXPLOSION** (info) — ≥5 new items confirmed in 30d
+
+**Added:**
+- `services/drift_alert_service.py` — idempotent scanner + ack/resolve lifecycle
+- 5 new endpoints under `/api/learning/drift/*`: scan, alerts, summary, acknowledge, resolve
+- Nightly `Drift Alert scheduler` (24h, 15-min startup delay)
+- New **Drift Alerts panel** on `/intake/learning` with severity-colored rows, inline Ack/Resolve buttons, "Scan drift" manual trigger
+- All thresholds env-configurable (`DRIFT_*_MIN_*`, `DRIFT_*_WINDOW_DAYS`)
+
+### v2.5.1 — U2: Shared Fingerprint Service
+Moved the TF-IDF cosine math into `learning_core.fingerprint_service` so it powers **both** customer (sales intake) and vendor (AP) similarity — one codebase, polymorphic `scope_type` discriminator.
+
+**Added:**
+- `services/learning_core/fingerprint_service.py` — domain-agnostic build/cache/invalidate/find_similar
+- Unified `scope_fingerprints` collection (unique index on `scope_type, scope_value`)
+- Pluggable `SCOPE_EXTRACTORS` — `customer` reads `order_line_patterns`, `vendor` reads `posting_pattern_analysis`
+- 2 new endpoints: `POST /api/learning/fingerprints/rebuild?scope_type=...`, `GET /api/learning/fingerprints/similar?scope_type=...&scope_value=...`
+- Legacy `cold_start_matcher_service` now **delegates** to the shared service — dual-writes to legacy `intake_customer_fingerprints` for 30-day migration window
+
+**Impact:** AP team gets free vendor-peer discovery ("which other vendor is Acme most similar to?") with zero new code — same surface as the customer one we already shipped.
+
+### Verified
+- 42/42 pytest unit tests passing (9 new + 33 existing)
+- Testing agent iter 214: **56/56 backend + 100% frontend, zero issues, zero regressions**
+- Scrubbed all test-customer residue (`C-TEST-*`) from `learning_events_v2`, `intake_learning_events`, `learning_drift_alerts`. Giovanni state confirmed pristine: 16 patterns, 0 feedback fields, 0 events.
+
+### Version
+- `APP_VERSION` bumped to **2.5.1** in `/app/frontend/src/lib/version.js`
+
+
+
 ## [2026-04-18g] v2.4.1 — Phase U1: Unified Event Log (Shared Plumbing)
 
 ### Context

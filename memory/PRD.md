@@ -35,13 +35,15 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - `/app/frontend/src/pages/IntakeLearningPage.js` — Intake-learning dashboard (2026-04-18)
 - `/app/frontend/src/components/IntakeLearningPanel.jsx` — Drop-in insights panel (2026-04-18)
 
-### 2026-04-18 — Intake Learning v2.4.1 (+ Learning Core U1)
+### 2026-04-18 — Intake Learning v2.5.1 (Giovanni + Feedback + Cold-Start + Unified Core)
 - **v2.2.0**: Generalized Giovanni/Nikki blanket-PO BC learning (C-10250) to every ingested doc + XLS spreadsheet
 - **v2.2.1**: IntakeLearningPanel on every Document Detail page; de-pilotized UI labels
 - **v2.3.0**: Learning feedback loop — thumbs-up/down buttons, pattern trust/retire, hygiene scheduler, Pattern Health dashboard
-- **v2.4.0**: Cold-start peer matching — pure-python TF-IDF fingerprints + inherited suggestions + promote-to-own-pattern
-- **v2.4.1**: Learning Core U1 — unified event log (`learning_events_v2`) replaces 3 parallel collections over a 30-day dual-write window. New `/api/learning/events` + `/api/learning/events/summary` endpoints enable cross-domain drift analytics (Nikki's intake rejects + Meghan's AP corrections in one feed). No UI changes.
-- Read-only wrt BC. 33/33 pytest + testing agent iter 210/211/212/213 all 100% green. Giovanni data kept pristine.
+- **v2.4.0**: Cold-start peer matching — pure-python TF-IDF fingerprints + inherited suggestions + promote-to-own
+- **v2.4.1**: Learning Core U1 — unified `learning_events_v2` collection + dual-write from intake, cold-start, and AP draft feedback
+- **v2.5.0**: Proactive Drift Alerts — 5 drift rules scan unified log nightly (trusted-pattern drift, reject spike, bounds drift, AP template drift, catalog explosion), inline Ack/Resolve UI
+- **v2.5.1**: Learning Core U2 — shared TF-IDF fingerprint service for both customer (intake) and vendor (AP); unified `scope_fingerprints` collection
+- Read-only wrt BC. 42/42 pytest + testing agent iter 210/211/212/213/214 all 100% green. Giovanni data kept pristine.
 
 
 - `/app/frontend/src/pages/MonitoringDashboard.js` — Vendor mapping UI

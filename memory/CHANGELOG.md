@@ -1,5 +1,59 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-18] Intake Learning — Hub-wide Giovanni Pattern (Phase A)
+
+### Problem
+The Giovanni/Nikki blanket-PO learning (customer C-10250) — product-level
+dunnage patterns, customer-level recurring lines (Energy Surcharge),
+±2σ quantity bounds — only fired inside Sales-Order preflight. Every
+other PO, sales order, AP invoice, freight invoice, and inventory XLS
+ingested by the hub silently bypassed it. User asked to generalize it
+so every ingest gets the same BC + Spiro learning treatment.
+
+### Added
+- **`services/sales_intake_learning_service.py`** — Orchestrator that runs
+  the Giovanni pipeline (seed → suggest → bounds check → item catalog)
+  on any hub doc or XLS staging record. Stores `intake_insights` on the
+  document, never writes to BC.
+- **`routers/intake_learning.py`** — New router with 6 endpoints:
+  `GET /api/intake/learning/summary`,
+  `POST /api/intake/learning/backfill`,
+  `POST /api/intake/learning/run/{doc_id}`,
+  `POST /api/intake/learning/run-xls/{staging_id}`,
+  `GET /api/intake/insights/{doc_id}`,
+  `GET /api/intake/insights-xls/{staging_id}`,
+  `GET /api/intake/flagged`.
+- **`unified_validation_service`** — Added `intake_learning` stage; runs for
+  pilot_sales, sales_order, ap_invoice, purchase_order policies.
+- **`document_readiness_service.evaluate_and_persist`** — Post-readiness hook
+  fires learning for every in-scope doc_type, so every doc the hub
+  processes picks up BC history automatically.
+- **`inventory_xls_staging_service.stage_import`** — Runs learning inline on
+  every new staging record (before auto-approve gate).
+- **Frontend**: `IntakeLearningPage` at `/intake/learning` (hub-wide KPIs,
+  top customers by learning coverage, flagged-for-review list, backfill
+  buttons). `IntakeLearningPanel` drop-in component wired into the
+  InventoryImportsPage staging drawer. Nav link added.
+- **Cold-start transparency**: When a customer is extracted but no BC
+  history exists, `intake_insights.cold_start=true` + a clear
+  `cold_start_reason` is stored and rendered with a blue info tile so
+  reviewers see "no BC learning yet" instead of silence.
+
+### Verified
+- 24/24 backend tests pass (6 unit + 18 API via testing subagent)
+- Live backfill processed 6 hub docs + 50 XLS staging records; 39
+  actionable findings correctly flagged
+- Zero regressions on existing endpoints (pilot, inventory-xls, inventory
+  health, sales-order preflight)
+
+### Next
+- Phase B — remove the "pilot" framing from UI/API labels and migrate to
+  canonical `/intake/*` terminology across the hub
+- Phase C — surface `intake_insights` on the individual Document Detail
+  page (not just XLS staging drawer)
+
+
+
 ## [2026-04-17] Round 5 — Filename-Aware Customer Suggestion
 
 ### Problem

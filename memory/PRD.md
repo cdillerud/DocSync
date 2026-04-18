@@ -26,8 +26,24 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - `/app/backend/routers/documents.py` — Queue endpoints, TERMINAL_STATUSES, is_duplicate filter
 - `/app/backend/routers/aliases.py` — Vendor matching & alias suggestions
 - `/app/backend/routers/workflow_fix.py` — Batch-fix stuck "captured" docs
+- `/app/backend/routers/intake_learning.py` — Hub-wide BC+Spiro learning endpoints (2026-04-18)
+- `/app/backend/services/sales_intake_learning_service.py` — Giovanni-pattern orchestrator (2026-04-18)
+- `/app/backend/services/order_line_patterns.py` — Core pattern learning engine (Giovanni C-10250)
+- `/app/backend/services/unified_validation_service.py` — Validation facade + intake_learning stage
 - `/app/backend/server.py` — Main server, background schedulers (PO retry, Captured retry), intake pipeline
 - `/app/frontend/src/pages/UnifiedQueuePage.js` — Inbox with metrics panel, retry-stuck button, tabs
+- `/app/frontend/src/pages/IntakeLearningPage.js` — Intake-learning dashboard (2026-04-18)
+- `/app/frontend/src/components/IntakeLearningPanel.jsx` — Drop-in insights panel (2026-04-18)
+
+### 2026-04-18 — Intake Learning (Hub-Wide Giovanni Pattern, Phase A)
+- Generalized the Giovanni/Nikki blanket-PO BC learning (C-10250) to every ingested doc + XLS spreadsheet
+- New `sales_intake_learning_service` orchestrator runs at intake, readiness, and XLS staging
+- 6 new `/api/intake/*` endpoints: summary, backfill, run, insights, flagged
+- New `/intake/learning` dashboard page + drop-in `IntakeLearningPanel` component
+- Cold-start transparency: "no BC learning yet" is explicitly surfaced (never hidden)
+- Read-only — never writes to BC. 24/24 tests pass.
+
+
 - `/app/frontend/src/pages/MonitoringDashboard.js` — Vendor mapping UI
 
 ## Critical Data Rule

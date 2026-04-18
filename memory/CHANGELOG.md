@@ -1,5 +1,30 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-18d] v2.2.1 — Phase B (De-pilotization) + Phase C (Doc Detail Panel)
+
+### Phase B — De-pilotized UI framing
+The Inside Sales Pilot is now part of the overall hub, not a feature flag. Renamed the user-facing labels:
+- Tab `Inside Sales Pilot` → `Sales Intake` (`SalesInventoryHubPage.js:19`)
+- Page header `Inside Sales Pilot` → `Sales Intake` (`InsideSalesPilotPage.js:222`)
+- Stat cards `Pilot Docs` → `Intake Docs` (InsideSalesPilotPage + SpiroBCCrossRefDashboard)
+- Disabled banner `Pilot is disabled` → `Sales intake polling is disabled`
+- Corpus comparison column `Inside Sales Pilot` → `Sales Intake`
+
+Backend endpoints + DB fields intentionally preserved (`/api/inside-sales-pilot/*`, `inside_sales_pilot: true`, `sales_pilot_extraction`, `pilot_mailbox`) to avoid regression. Only the human-facing labels were neutralized.
+
+### Phase C — IntakeLearningPanel on every Document Detail page
+- `DocumentDetailPage.js` now renders `IntakeLearningPanel` directly below `ReadinessPanel` (around line 820), so every doc shows its BC/Spiro insights the moment it's opened. No more drawer-digging.
+- Component is the same one used in the XLS staging drawer — single source of truth.
+
+### Version
+- Bumped `APP_VERSION` to **2.2.1** in `/app/frontend/src/lib/version.js`.
+
+### Verified
+- 11/11 pytest unit tests pass
+- Testing agent: 100% backend + 100% frontend, zero issues, zero action items (iteration_211.json)
+
+
+
 ## [2026-04-18c] BC Write-Back Auto-Refresh Hook
 
 ### Problem

@@ -26,6 +26,7 @@ const navItems = [
   { to: '/sales-inventory', icon: ShoppingCart, label: 'Sales' },
   { to: '/inventory/imports', icon: FileSpreadsheet, label: 'Inventory Imports' },
   { to: '/inventory/health', icon: Activity, label: 'Inventory Health' },
+  { to: '/intake/learning', icon: Sparkles, label: 'Intake Learning' },
   { to: '/posting-intelligence', icon: Brain, label: 'Posting AI' },
   { to: '/invoice-trace', icon: ArrowLeftRight, label: 'Trace' },
   { to: '/ai-learning', icon: TrendingUp, label: 'AI Learning' },
@@ -99,6 +100,7 @@ export default function Layout() {
     if (path === '/documents') return 'Inbox';
     if (path === '/sales-inventory') return 'Sales';
     if (path === '/insights') return 'Insights';
+    if (path === '/intake/learning') return 'Intake Learning';
     if (path === '/posting-intelligence') return 'Posting Intelligence';
     if (path === '/invoice-trace') return 'Invoice Trace';
     if (path === '/ai-learning') return 'AI Learning Intelligence';

@@ -1022,6 +1022,22 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
         readiness["recommended_action"], len(readiness["blocking_reasons"]),
         len(readiness["warning_reasons"]),
     )
+
+    # --- Intake Learning hook (Giovanni-pattern, hub-wide) ---
+    # Runs the BC + Spiro learning orchestrator on any doc that passes
+    # through readiness. Read-only, never writes to BC. Any error is
+    # swallowed so readiness persistence is never blocked by learning.
+    try:
+        from services.sales_intake_learning_service import (
+            run_intake_learning, LEARNING_DOC_TYPES,
+        )
+        doc_type_norm = (doc.get("doc_type") or "").strip().lower().replace(" ", "_")
+        scope = {t.lower().replace(" ", "_") for t in LEARNING_DOC_TYPES}
+        if doc_type_norm in scope:
+            await run_intake_learning(doc_id)
+    except Exception as learn_err:
+        logger.debug("[Readiness:IntakeLearning] skipped for %s: %s", doc_id[:8], learn_err)
+
     return readiness
 
 

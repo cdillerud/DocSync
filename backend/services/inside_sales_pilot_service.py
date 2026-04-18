@@ -455,6 +455,16 @@ async def poll_inside_sales_pilot_mailbox(mailbox_address: str) -> Dict[str, Any
                                     run_id, doc_id, spiro_err,
                                 )
 
+                            # --- Run intake learning (Giovanni pattern, hub-wide) ---
+                            try:
+                                from services.sales_intake_learning_service import run_intake_learning
+                                await run_intake_learning(doc_id)
+                            except Exception as learn_err:
+                                logger.warning(
+                                    "[InsideSalesPilot:%s] intake learning failed for %s: %s",
+                                    run_id, doc_id, learn_err,
+                                )
+
                             # --- Track classified type ---
                             doc_rec = await db.hub_documents.find_one(
                                 {"id": doc_id}, {"_id": 0, "doc_type": 1}

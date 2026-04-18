@@ -97,6 +97,7 @@ from routers.ap_advisory import router as ap_advisory_router
 from routers.governance import router as governance_router
 from routers.inside_sales_pilot import router as inside_sales_pilot_router
 from routers.inventory_xls import router as inventory_xls_router
+from routers.intake_learning import router as intake_learning_router
 
 # ==================== APP ====================
 app = FastAPI(title="GPI Document Hub API")
@@ -175,6 +176,7 @@ app.include_router(ap_advisory_router, prefix="/api")
 app.include_router(governance_router, prefix="/api")
 app.include_router(inside_sales_pilot_router, prefix="/api")
 app.include_router(inventory_xls_router, prefix="/api")
+app.include_router(intake_learning_router, prefix="/api")
 
 # ==================== SALES MODULE ====================
 app.include_router(sales_router)

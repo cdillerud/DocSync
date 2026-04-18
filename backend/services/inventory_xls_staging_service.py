@@ -216,6 +216,22 @@ async def stage_import(
         classification.get("classification"), suggested_customer_id,
     )
 
+    # Run intake learning (Giovanni pattern) — reads BC, never writes.
+    # Safe to run before auto-approve: it only reads bc history and
+    # stores `intake_insights` on the staging doc for reviewer visibility.
+    try:
+        from services.sales_intake_learning_service import (
+            run_intake_learning_for_xls_staging,
+        )
+        insights = await run_intake_learning_for_xls_staging(staging_doc["id"], db=db)
+        if insights and not insights.get("error"):
+            staging_doc["intake_insights"] = insights
+    except Exception as learn_err:
+        logger.warning(
+            "[XLSStaging] intake learning skipped for %s: %s",
+            staging_doc["id"][:8], learn_err,
+        )
+
     # Auto-approve gate — only when we have a learned mapping with history,
     # an auto-suggested customer, and healthy rows.
     auto_applied = False

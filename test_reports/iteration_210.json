@@ -1,0 +1,78 @@
+{
+  "summary": "Iteration 210: Intake Learning (hub-wide Giovanni-style BC + Spiro learning) - All tests passed. Backend: 24/24 tests passed (6 unit + 18 API). Frontend: IntakeLearningPage and IntakeLearningPanel both render correctly with proper KPIs, cold-start detection, and actionable findings display.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_sales_intake_learning.py",
+    "/app/backend/tests/test_intake_learning_api.py",
+    "/app/test_reports/pytest/intake_learning_api_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "sales_intake_learning_service.py: Well-structured orchestrator with clear separation of concerns. LEARNING_DOC_TYPES set properly includes sales_invoice for Giovanni pattern.",
+    "intake_learning.py router: Clean REST API design with proper 404 handling for missing docs/staging records.",
+    "IntakeLearningPage.js: Good use of data-testid attributes for testing. KPIs display correctly with proper formatting.",
+    "IntakeLearningPanel.jsx: Handles all three states (empty, skipped, learned) with transparent cold-start messaging as requested.",
+    "InventoryImportsPage.js: IntakeLearningPanel properly integrated at top of staging detail drawer."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_intake_learning_api.py"
+  ],
+  "success_rate": {
+    "backend": "100% (24/24 tests passed: 6 unit + 18 API)",
+    "frontend": "100% (IntakeLearningPage + IntakeLearningPanel both working)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "None - used existing staging records for testing",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 210 verified the hub-wide Giovanni-style BC + Spiro intake learning feature. All new /api/intake/* endpoints work correctly. IntakeLearningPage at /intake/learning shows KPIs (6 eligible docs, 6 with insights, 6 cold-start, 50/54 XLS staging). IntakeLearningPanel renders in InventoryImportsPage staging drawer with proper cold-start messaging. Regression tests confirm existing endpoints (/api/inside-sales-pilot/documents, /api/inventory-xls/staging, /api/inventory-ledger/health-summary) still work.",
+  "tested_features": {
+    "intake_learning_endpoints": [
+      "GET /api/intake/learning/summary - PASS (returns hub, xls_staging, top_customers with correct shape)",
+      "POST /api/intake/learning/backfill?only_missing=true - PASS (processes new docs only)",
+      "POST /api/intake/learning/backfill?only_missing=false - PASS (force re-runs all docs)",
+      "GET /api/intake/flagged - PASS (returns documents with has_actionable_findings=true)",
+      "GET /api/intake/flagged?customer_no=X - PASS (filters by customer)",
+      "GET /api/intake/insights-xls/{staging_id} - PASS (returns persisted intake_insights)",
+      "GET /api/intake/insights-xls/{invalid_id} - PASS (returns 404)",
+      "GET /api/intake/insights/{invalid_id} - PASS (returns 404)",
+      "POST /api/intake/learning/run-xls/{staging_id} - PASS (manually runs learning)",
+      "POST /api/intake/learning/run-xls/{invalid_id} - PASS (returns 404)",
+      "POST /api/intake/learning/run/{invalid_id} - PASS (returns 404)"
+    ],
+    "cold_start_detection": [
+      "XLS staging with customer but no BC history shows cold_start=true - PASS",
+      "cold_start_reason is populated with transparent message - PASS"
+    ],
+    "scope_gating": [
+      "doc_type 'Other' is skipped with skip_reason - PASS (unit test)",
+      "SALES_INVOICE doc_type is IN scope - PASS (unit test)"
+    ],
+    "frontend_ui": [
+      "IntakeLearningPage loads at /intake/learning - PASS",
+      "KPIs display correctly (Eligible Docs, With Insights, Cold Start, Actionable, Bounds Violations, XLS Staging) - PASS",
+      "Refresh, Backfill, Force re-run buttons visible - PASS",
+      "Top Customers table renders (empty state when no learned customers) - PASS",
+      "Flagged for Review section renders - PASS",
+      "IntakeLearningPanel renders in InventoryImportsPage staging drawer - PASS",
+      "Cold-start notice displays with reason - PASS"
+    ],
+    "regression_tests": [
+      "GET /api/inside-sales-pilot/documents - PASS",
+      "GET /api/inventory-xls/staging - PASS",
+      "GET /api/inventory-ledger/health-summary - PASS",
+      "GET /api/inventory-ledger/customers - PASS",
+      "GET /api/inventory-xls/learning-summary - PASS",
+      "GET /api/health - PASS"
+    ]
+  },
+  "notes": "All features working as expected. Cold-start customers transparently show 'no BC learning yet' message with reason. The 'pilot' framing has been removed from UI - now shows 'Intake Learning' as hub-wide feature. BC writes are OFF (read-only learning)."
+}

@@ -53,12 +53,12 @@ POLICY_STAGES: Dict[str, list] = {
     # Inside Sales Pilot documents (Purchase Order, SO Confirmation)
     # Pilot flow runs bc_prod + pilot_readiness only; the generic
     # `readiness` stage is handled by the main intake pipeline.
-    "pilot_sales": ["bc_prod", "pilot_readiness"],
+    "pilot_sales": ["bc_prod", "pilot_readiness", "intake_learning"],
     # Generic Sales Order (non-pilot)
-    "sales_order": ["bc_prod", "readiness"],
-    # AP side
-    "ap_invoice": ["readiness"],
-    "purchase_order": ["readiness"],
+    "sales_order": ["bc_prod", "readiness", "intake_learning"],
+    # AP side — intake learning picks up historical qty/price signals too
+    "ap_invoice": ["readiness", "intake_learning"],
+    "purchase_order": ["readiness", "intake_learning"],
     # Warehouse / shipping
     "warehouse": ["readiness"],
     # Fallback: just readiness
@@ -104,6 +104,17 @@ async def run_pilot_readiness(doc_id: str) -> Dict[str, Any]:
     return await review_pilot_document(doc_id)
 
 
+async def run_intake_learning(doc_id: str) -> Dict[str, Any]:
+    """Run BC intake-learning orchestrator (Giovanni-style pattern learning).
+
+    Generalises the C-10250 blanket-PO workflow so every ingested doc
+    picks up learned customer patterns, qty bounds, and suggested
+    recurring lines. Stores result under `intake_insights` on the doc.
+    """
+    from services.sales_intake_learning_service import run_intake_learning as _run
+    return await _run(doc_id)
+
+
 # ─────────────────────────────────────────────────────────────
 # Canonical entry point
 # ─────────────────────────────────────────────────────────────
@@ -143,6 +154,7 @@ async def validate_document(
         "bc_prod": None,
         "readiness": None,
         "pilot_readiness": None,
+        "intake_learning": None,
         "errors": [],
         "ran_stages": [],
     }
@@ -151,6 +163,7 @@ async def validate_document(
         "bc_prod": ("bc_prod", run_bc_prod_validation),
         "readiness": ("readiness", run_readiness),
         "pilot_readiness": ("pilot_readiness", run_pilot_readiness),
+        "intake_learning": ("intake_learning", run_intake_learning),
     }
 
     for stage in stages:
@@ -179,5 +192,6 @@ __all__ = [
     "run_bc_prod_validation",
     "run_readiness",
     "run_pilot_readiness",
+    "run_intake_learning",
     "POLICY_STAGES",
 ]

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { UploadCloud, CheckCircle2, XCircle, FileSpreadsheet, Database, Sparkles, AlertTriangle, RefreshCw } from 'lucide-react';
+import IntakeLearningPanel from '@/components/IntakeLearningPanel';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -161,6 +162,9 @@ function StagingDetail({ staging, customers, onClose, onApproved, onRejected, on
         </div>
 
         <div className="p-4 space-y-4">
+          {/* BC + Spiro Intake Intelligence */}
+          <IntakeLearningPanel insights={staging.intake_insights} />
+
           {/* Classification */}
           <div className="bg-muted/30 rounded-lg p-3">
             <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Classification</div>

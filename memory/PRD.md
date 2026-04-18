@@ -38,10 +38,11 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 ### 2026-04-18 — Intake Learning (Hub-Wide Giovanni Pattern, Phase A)
 - Generalized the Giovanni/Nikki blanket-PO BC learning (C-10250) to every ingested doc + XLS spreadsheet
 - New `sales_intake_learning_service` orchestrator runs at intake, readiness, and XLS staging
-- 6 new `/api/intake/*` endpoints: summary, backfill, run, insights, flagged
+- 7 new `/api/intake/*` endpoints: summary, backfill, refresh-active, run, insights, flagged
 - New `/intake/learning` dashboard page + drop-in `IntakeLearningPanel` component
 - Cold-start transparency: "no BC learning yet" is explicitly surfaced (never hidden)
-- Read-only — never writes to BC. 24/24 tests pass.
+- **Daily refresh scheduler**: auto-relearns for customers with new BC posted-order activity (configurable via `INTAKE_LEARNING_INTERVAL_SECONDS` / `INTAKE_LEARNING_LOOKBACK_HOURS`)
+- Read-only — never writes to BC. 8/8 unit tests pass.
 
 
 - `/app/frontend/src/pages/MonitoringDashboard.js` — Vendor mapping UI

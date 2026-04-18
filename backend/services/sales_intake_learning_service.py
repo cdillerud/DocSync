@@ -603,6 +603,157 @@ async def backfill_intake_learning(
     }
 
 
+async def refresh_active_customers(
+    lookback_hours: int = 24,
+    max_customers: int = 100,
+    refresh_docs: bool = True,
+    db=None,
+) -> Dict[str, Any]:
+    """Refresh learned patterns for customers with new BC posted-order activity.
+
+    For every customer whose BC posted orders changed inside the last
+    `lookback_hours`, we:
+      1. Re-run `learn_from_bc_posted_orders` to pick up new patterns
+      2. Optionally (if `refresh_docs=True`) re-run `run_intake_learning`
+         on any open hub docs + pending XLS staging tied to that customer,
+         so their `intake_insights` pick up the fresh patterns immediately.
+
+    Intended for a daily scheduler so Giovanni-style learning stays current
+    without manual backfills. Read-only w.r.t. BC.
+    """
+    from datetime import timedelta
+    from services.order_line_patterns import learn_from_bc_posted_orders
+    from services.inventory_xls_staging_service import STAGING_COLL
+
+    db = db if db is not None else get_db()
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
+
+    # ── Discover "active" customers from bc_reference_cache ──
+    # bc_reference_cache tracks posted sales orders / invoices. We look
+    # for entries whose modifiedDateTime (or created_at) crossed the
+    # cutoff. Falls back to customerNumber aggregation if timestamps are
+    # missing.
+    active_customers: List[str] = []
+    try:
+        pipeline = [
+            {"$match": {
+                "bc_entity_type": {"$in": ["sales_order", "sales_invoice", "posted_sales_invoice"]},
+                "$or": [
+                    {"modifiedDateTime": {"$gte": cutoff.isoformat()}},
+                    {"lastModifiedDateTime": {"$gte": cutoff.isoformat()}},
+                    {"created_at": {"$gte": cutoff}},
+                    {"updated_at": {"$gte": cutoff}},
+                ],
+            }},
+            {"$group": {"_id": "$bc_customer_no"}},
+            {"$match": {"_id": {"$ne": None}}},
+            {"$limit": max_customers},
+        ]
+        async for r in db.bc_reference_cache.aggregate(pipeline):
+            if r.get("_id"):
+                active_customers.append(r["_id"])
+    except Exception as e:
+        logger.warning("[IntakeLearning.refresh] discovery failed: %s", e)
+
+    # Fallback: if no timestamp-based results, pull customers from any
+    # doc whose intake_insights is older than the cutoff so we still
+    # make useful progress.
+    if not active_customers:
+        try:
+            pipeline = [
+                {"$match": {
+                    "intake_insights.customer_no": {"$ne": None},
+                    "intake_insights.ran_at": {"$lt": cutoff.isoformat()},
+                }},
+                {"$group": {"_id": "$intake_insights.customer_no"}},
+                {"$limit": max_customers},
+            ]
+            async for r in db.hub_documents.aggregate(pipeline):
+                if r.get("_id"):
+                    active_customers.append(r["_id"])
+        except Exception as e:
+            logger.warning("[IntakeLearning.refresh] fallback discovery failed: %s", e)
+
+    refreshed_customers: List[Dict[str, Any]] = []
+    docs_refreshed = 0
+    xls_refreshed = 0
+
+    for customer_no in active_customers:
+        learned_count = 0
+        try:
+            seed = await learn_from_bc_posted_orders(
+                db, customer_no, order_limit=10, threshold=0.75,
+            )
+            learned_count = seed.get("patterns_learned", 0)
+        except Exception as e:
+            logger.warning(
+                "[IntakeLearning.refresh] learn failed for %s: %s", customer_no, e,
+            )
+            continue
+
+        # Re-run intake learning on open docs + pending XLS for this customer
+        doc_count = 0
+        xls_count = 0
+        if refresh_docs:
+            try:
+                async for d in db.hub_documents.find(
+                    {"intake_insights.customer_no": customer_no,
+                     "status": {"$nin": ["Completed", "Archived", "Posted"]}},
+                    {"_id": 0, "id": 1},
+                ).limit(50):
+                    try:
+                        await run_intake_learning(d["id"], force=True, db=db)
+                        doc_count += 1
+                    except Exception as e:
+                        logger.debug("[refresh] doc %s fail: %s", d["id"][:8], e)
+                docs_refreshed += doc_count
+
+                # XLS staging — customer workspace may map to this BC customer
+                from services.inventory_ledger_service import CUSTOMERS_COLL
+                cust_hits = await db[CUSTOMERS_COLL].find(
+                    {"$or": [{"bc_customer_no": customer_no}, {"code": customer_no}]},
+                    {"_id": 0, "id": 1},
+                ).to_list(10)
+                workspace_ids = [c["id"] for c in cust_hits]
+                if workspace_ids:
+                    async for s in db[STAGING_COLL].find(
+                        {"assigned_customer_id": {"$in": workspace_ids},
+                         "status": "pending_review"},
+                        {"_id": 0, "id": 1},
+                    ).limit(50):
+                        try:
+                            await run_intake_learning_for_xls_staging(
+                                s["id"], force=True, db=db,
+                            )
+                            xls_count += 1
+                        except Exception as e:
+                            logger.debug("[refresh] xls %s fail: %s", s["id"][:8], e)
+                    xls_refreshed += xls_count
+            except Exception as e:
+                logger.warning("[IntakeLearning.refresh] doc loop fail for %s: %s", customer_no, e)
+
+        refreshed_customers.append({
+            "customer_no": customer_no,
+            "patterns_learned": learned_count,
+            "docs_refreshed": doc_count,
+            "xls_refreshed": xls_count,
+        })
+
+    result = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "lookback_hours": lookback_hours,
+        "active_customers": len(active_customers),
+        "refreshed_customers": refreshed_customers,
+        "docs_refreshed": docs_refreshed,
+        "xls_refreshed": xls_refreshed,
+    }
+    logger.info(
+        "[IntakeLearning.refresh] lookback=%dh customers=%d docs=%d xls=%d",
+        lookback_hours, len(active_customers), docs_refreshed, xls_refreshed,
+    )
+    return result
+
+
 async def get_intake_learning_summary(db=None) -> Dict[str, Any]:
     """Dashboard aggregation of intake-learning coverage across the hub."""
     db = db if db is not None else get_db()
@@ -688,6 +839,7 @@ __all__ = [
     "run_intake_learning",
     "run_intake_learning_for_xls_staging",
     "backfill_intake_learning",
+    "refresh_active_customers",
     "get_intake_learning_summary",
     "LEARNING_DOC_TYPES",
 ]

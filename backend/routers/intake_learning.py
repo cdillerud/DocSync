@@ -13,6 +13,7 @@ from services.sales_intake_learning_service import (
     run_intake_learning,
     run_intake_learning_for_xls_staging,
     backfill_intake_learning,
+    refresh_active_customers,
     get_intake_learning_summary,
 )
 from deps import get_db
@@ -85,6 +86,25 @@ async def backfill_learning(
     Pass `only_missing=false` to force re-run on every doc.
     """
     return await backfill_intake_learning(limit=limit, only_missing=only_missing)
+
+
+@router.post("/learning/refresh-active")
+async def refresh_active(
+    lookback_hours: int = Query(24, ge=1, le=720),
+    max_customers: int = Query(100, le=500),
+    refresh_docs: bool = Query(True),
+):
+    """Re-learn for customers whose BC posted orders changed recently.
+
+    Designed to run daily (via scheduler) OR on-demand when you post a
+    batch of orders to BC and want the hub to pick up the fresh patterns
+    right away. Read-only against BC.
+    """
+    return await refresh_active_customers(
+        lookback_hours=lookback_hours,
+        max_customers=max_customers,
+        refresh_docs=refresh_docs,
+    )
 
 
 @router.get("/learning/summary")

@@ -7758,6 +7758,33 @@ async def startup():
     asyncio.create_task(_catalog_sync_scheduler())
     logger.info("BC Catalog Sync scheduler started (interval: 24h)")
 
+    # ── Intake Learning Refresh scheduler (daily) ──
+    # Keeps the Giovanni-style intake_insights current by re-learning
+    # for any customer whose BC posted orders changed in the last 24h
+    # and re-running intake learning on their open docs + pending XLS
+    # staging. Read-only — never writes to BC.
+    async def _intake_learning_refresh_scheduler():
+        import os as _os
+        lookback = int(_os.environ.get("INTAKE_LEARNING_LOOKBACK_HOURS", "24"))
+        interval = int(_os.environ.get("INTAKE_LEARNING_INTERVAL_SECONDS", str(24 * 3600)))
+        await asyncio.sleep(300)  # Wait 5 min after startup so BC cache + catalog sync settle first
+        while True:
+            try:
+                from services.sales_intake_learning_service import refresh_active_customers
+                logger.info("[IntakeLearning.scheduler] Starting daily refresh (lookback=%dh)", lookback)
+                result = await refresh_active_customers(lookback_hours=lookback)
+                logger.info(
+                    "[IntakeLearning.scheduler] done — customers=%d docs=%d xls=%d",
+                    result.get("active_customers", 0),
+                    result.get("docs_refreshed", 0),
+                    result.get("xls_refreshed", 0),
+                )
+            except Exception as e:
+                logger.warning("[IntakeLearning.scheduler] failed: %s", e)
+            await asyncio.sleep(interval)
+    asyncio.create_task(_intake_learning_refresh_scheduler())
+    logger.info("Intake Learning Refresh scheduler started (interval: 24h)")
+
     # Start BC Shipment Sync scheduler (every 1h)
     async def _shipment_sync_scheduler():
         """Background worker: sync BC shipment lines into inventory every 1 hour."""

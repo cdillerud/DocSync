@@ -1,5 +1,22 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-18b] Daily Intake Learning Refresh Scheduler
+
+### Problem
+Phase A shipped the orchestrator but required manual `backfill` calls to pick up new BC posted orders. Nikki would post a batch of Giovanni orders to BC, but the hub wouldn't re-learn until someone clicked "Force re-run all."
+
+### Added
+- **`refresh_active_customers()`** — discovers customers with BC posted-order activity in the last N hours (via `bc_reference_cache` timestamps), re-runs `learn_from_bc_posted_orders`, then re-runs `run_intake_learning` on their open hub docs + pending XLS staging. Read-only.
+- **Daily scheduler** in `server.py` — fires once every 24h (5-min startup delay). Configurable via `INTAKE_LEARNING_INTERVAL_SECONDS` and `INTAKE_LEARNING_LOOKBACK_HOURS`.
+- **`POST /api/intake/learning/refresh-active`** — manual trigger with `lookback_hours` + `max_customers` + `refresh_docs` query params.
+
+### Verified
+- 8/8 unit tests pass (2 new tests for the refresh function)
+- Live curl: `POST /api/intake/learning/refresh-active?lookback_hours=720` returned empty result cleanly (no BC activity in sandbox)
+- Backend log confirms scheduler registered: `Intake Learning Refresh scheduler started (interval: 24h)`
+
+
+
 ## [2026-04-18] Intake Learning — Hub-wide Giovanni Pattern (Phase A)
 
 ### Problem

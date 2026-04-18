@@ -239,5 +239,84 @@ async def test_summary_shape_keys():
         assert k in res["hub"]
 
 
+@pytest.mark.asyncio
+async def test_refresh_active_customers_no_activity():
+    """With no BC activity in lookback window, returns an empty result cleanly."""
+    from services import sales_intake_learning_service as sils
+
+    class EmptyAgg:
+        def __init__(self): pass
+        def __aiter__(self):
+            return self
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+    class FakeColl:
+        def aggregate(self, pipeline):
+            return EmptyAgg()
+
+    class FakeDb:
+        bc_reference_cache = FakeColl()
+        hub_documents = FakeColl()
+        def __getitem__(self, name):
+            return FakeColl()
+
+    res = await sils.refresh_active_customers(
+        lookback_hours=24, max_customers=10, refresh_docs=False, db=FakeDb(),
+    )
+    assert res["active_customers"] == 0
+    assert res["docs_refreshed"] == 0
+    assert res["xls_refreshed"] == 0
+    assert res["refreshed_customers"] == []
+    assert "generated_at" in res
+    assert res["lookback_hours"] == 24
+
+
+@pytest.mark.asyncio
+async def test_refresh_active_customers_single_customer():
+    """With one active customer, we learn + get a refreshed_customers row."""
+    from services import sales_intake_learning_service as sils
+    from unittest.mock import patch
+
+    class OneRowAgg:
+        def __init__(self, rows):
+            self.rows = list(rows)
+        def __aiter__(self):
+            return self
+        async def __anext__(self):
+            if not self.rows:
+                raise StopAsyncIteration
+            return self.rows.pop(0)
+
+    class FakeColl:
+        def __init__(self, rows=None):
+            self.rows = rows or []
+        def aggregate(self, pipeline):
+            # Only the first aggregate call (bc_reference_cache) returns a customer;
+            # subsequent ones (fallback) return empty.
+            if self.rows:
+                out = OneRowAgg([{"_id": "C-10250"}])
+                self.rows = []
+                return out
+            return OneRowAgg([])
+
+    class FakeDb:
+        bc_reference_cache = FakeColl(rows=[{"_id": "C-10250"}])
+        hub_documents = FakeColl()
+        def __getitem__(self, name):
+            return FakeColl()
+
+    with patch("services.order_line_patterns.learn_from_bc_posted_orders",
+               new=AsyncMock(return_value={"patterns_learned": 2})):
+        res = await sils.refresh_active_customers(
+            lookback_hours=24, max_customers=5, refresh_docs=False, db=FakeDb(),
+        )
+
+    assert res["active_customers"] == 1
+    assert len(res["refreshed_customers"]) == 1
+    assert res["refreshed_customers"][0]["customer_no"] == "C-10250"
+    assert res["refreshed_customers"][0]["patterns_learned"] == 2
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

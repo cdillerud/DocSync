@@ -8,7 +8,7 @@
  *   • Actionable findings + backfill button
  */
 import { useCallback, useEffect, useState } from 'react';
-import { RefreshCw, Sparkles, AlertTriangle, Info, Database, TrendingUp, ShieldCheck, Archive, Activity } from 'lucide-react';
+import { RefreshCw, Sparkles, AlertTriangle, Info, Database, TrendingUp, ShieldCheck, Archive, Activity, Bell, CheckCircle2 } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -28,16 +28,20 @@ export default function IntakeLearningPage() {
   const [summary, setSummary] = useState(null);
   const [flagged, setFlagged] = useState([]);
   const [health, setHealth] = useState(null);
+  const [driftAlerts, setDriftAlerts] = useState([]);
+  const [driftSummary, setDriftSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [sumRes, flaggedRes, healthRes] = await Promise.all([
+      const [sumRes, flaggedRes, healthRes, driftRes, driftSumRes] = await Promise.all([
         fetch(`${API}/api/intake/learning/summary`),
         fetch(`${API}/api/intake/flagged?limit=25`),
         fetch(`${API}/api/intake/learning/pattern-health?limit=25`),
+        fetch(`${API}/api/learning/drift/alerts?status=open&limit=25`),
+        fetch(`${API}/api/learning/drift/summary`),
       ]);
       if (sumRes.ok) setSummary(await sumRes.json());
       if (flaggedRes.ok) {
@@ -45,6 +49,11 @@ export default function IntakeLearningPage() {
         setFlagged(data.documents || []);
       }
       if (healthRes.ok) setHealth(await healthRes.json());
+      if (driftRes.ok) {
+        const data = await driftRes.json();
+        setDriftAlerts(data.alerts || []);
+      }
+      if (driftSumRes.ok) setDriftSummary(await driftSumRes.json());
     } finally {
       setLoading(false);
     }
@@ -84,6 +93,38 @@ export default function IntakeLearningPage() {
       alert(`Hygiene failed: ${e.message}`);
     } finally {
       setRunning(false);
+    }
+  };
+
+  const runDriftScan = async () => {
+    setRunning(true);
+    try {
+      const res = await fetch(`${API}/api/learning/drift/scan`, { method: 'POST' });
+      const data = await res.json();
+      alert(`Drift scan — ${data.rules_fired} alerts fired. ${data.open_alerts_total} total open.`);
+      await load();
+    } catch (e) {
+      alert(`Drift scan failed: ${e.message}`);
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const acknowledgeDrift = async (alertId) => {
+    try {
+      await fetch(`${API}/api/learning/drift/alerts/${alertId}/acknowledge`, { method: 'POST' });
+      setDriftAlerts((prev) => prev.filter((a) => a.id !== alertId));
+    } catch (e) {
+      alert(`Failed to acknowledge: ${e.message}`);
+    }
+  };
+
+  const resolveDrift = async (alertId) => {
+    try {
+      await fetch(`${API}/api/learning/drift/alerts/${alertId}/resolve`, { method: 'POST' });
+      setDriftAlerts((prev) => prev.filter((a) => a.id !== alertId));
+    } catch (e) {
+      alert(`Failed to resolve: ${e.message}`);
     }
   };
 
@@ -151,6 +192,15 @@ export default function IntakeLearningPage() {
           >
             <Activity className="h-4 w-4 inline mr-1" /> Pattern hygiene
           </button>
+          <button
+            disabled={running}
+            onClick={runDriftScan}
+            className="px-3 py-1.5 text-sm rounded-md border border-border hover:bg-muted disabled:opacity-50"
+            title="Scan unified learning log for drift anomalies"
+            data-testid="intake-learning-drift-scan"
+          >
+            <Bell className="h-4 w-4 inline mr-1" /> Scan drift
+          </button>
         </div>
       </div>
 
@@ -217,6 +267,87 @@ export default function IntakeLearningPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+      </div>
+
+      {/* Drift Alerts (v2.5.0) */}
+      <div className="rounded-lg border border-border bg-card" data-testid="drift-alerts-panel">
+        <div className="flex items-center justify-between p-3 border-b border-border">
+          <div className="text-sm font-semibold flex items-center gap-2">
+            <Bell className="h-4 w-4 text-amber-500" /> Drift Alerts
+            {driftAlerts.length > 0 && (
+              <span className="text-xs bg-amber-500/20 text-amber-700 px-2 py-0.5 rounded-full">{driftAlerts.length} open</span>
+            )}
+          </div>
+          {driftSummary && (
+            <div className="flex gap-2 text-[11px]">
+              {driftSummary.open_by_severity?.critical > 0 && (
+                <span className="text-red-600 font-medium">{driftSummary.open_by_severity.critical} critical</span>
+              )}
+              {driftSummary.open_by_severity?.warn > 0 && (
+                <span className="text-amber-600">{driftSummary.open_by_severity.warn} warn</span>
+              )}
+              {driftSummary.open_by_severity?.info > 0 && (
+                <span className="text-sky-600">{driftSummary.open_by_severity.info} info</span>
+              )}
+            </div>
+          )}
+        </div>
+        {driftAlerts.length === 0 ? (
+          <div className="p-6 text-sm text-muted-foreground flex items-center justify-center gap-2" data-testid="drift-alerts-empty">
+            <CheckCircle2 className="h-4 w-4 text-emerald-500" /> No open drift alerts — patterns are behaving normally.
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {driftAlerts.map((a) => {
+              const sevClass =
+                a.severity === 'critical' ? 'border-l-red-500 bg-red-500/5' :
+                a.severity === 'warn' ? 'border-l-amber-500 bg-amber-500/5' :
+                'border-l-sky-500 bg-sky-500/5';
+              const sevPill =
+                a.severity === 'critical' ? 'bg-red-500/15 text-red-700' :
+                a.severity === 'warn' ? 'bg-amber-500/15 text-amber-700' :
+                'bg-sky-500/15 text-sky-700';
+              return (
+                <div key={a.id} className={`p-3 border-l-4 ${sevClass}`} data-testid={`drift-alert-${a.alert_type}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${sevPill}`}>{a.severity}</span>
+                        <span className="text-[10px] font-mono text-muted-foreground">{a.domain}</span>
+                        <span className="text-sm font-medium">{a.title}</span>
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">{a.description}</div>
+                      {a.evidence?.items && a.evidence.items.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {a.evidence.items.slice(0, 6).map((it, i) => (
+                            <span key={i} className="text-[10px] font-mono bg-muted px-1 rounded">{it}</span>
+                          ))}
+                          {a.evidence.items.length > 6 && (
+                            <span className="text-[10px] text-muted-foreground">+{a.evidence.items.length - 6} more</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-1 shrink-0">
+                      <button
+                        onClick={() => acknowledgeDrift(a.id)}
+                        className="text-[10px] px-2 py-0.5 rounded border border-border hover:bg-muted"
+                        title="Acknowledge — keep visible in history"
+                        data-testid={`drift-ack-${a.id.slice(0,8)}`}
+                      >Ack</button>
+                      <button
+                        onClick={() => resolveDrift(a.id)}
+                        className="text-[10px] px-2 py-0.5 rounded border border-emerald-500/30 text-emerald-700 hover:bg-emerald-500/10"
+                        title="Mark resolved — hide from open list"
+                        data-testid={`drift-resolve-${a.id.slice(0,8)}`}
+                      >Resolve</button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

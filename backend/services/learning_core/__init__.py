@@ -21,11 +21,31 @@ from services.learning_core.events_service import (
     DOMAINS,
     EVENTS_COLL,
 )
+from services.learning_core.fingerprint_service import (
+    tokenize,
+    build_fingerprint,
+    get_or_build,
+    invalidate,
+    rebuild_all,
+    find_similar,
+    FINGERPRINTS_COLL,
+    SCOPE_TYPES,
+)
 
 __all__ = [
+    # Events (U1)
     "record_event",
     "list_events",
     "get_domain_summary",
     "DOMAINS",
     "EVENTS_COLL",
+    # Fingerprint (U2)
+    "tokenize",
+    "build_fingerprint",
+    "get_or_build",
+    "invalidate",
+    "rebuild_all",
+    "find_similar",
+    "FINGERPRINTS_COLL",
+    "SCOPE_TYPES",
 ]

@@ -105,34 +105,38 @@ def _pattern_to_tokens(pattern: Dict[str, Any]) -> List[str]:
 # ─────────────────────────────────────────────────────────────
 
 async def build_fingerprint(customer_no: str, db=None) -> Dict[str, Any]:
-    """Compute and cache a TF vector for a customer's full pattern set.
+    """Compute and cache a TF vector for a customer.
 
-    Returns the fingerprint document. If the customer has no patterns,
-    returns an empty fingerprint (but still caches it so we don't
-    re-compute on every cold-start).
+    v2.5.1: delegates to `learning_core.fingerprint_service` for the canonical
+    build. Dual-writes to the legacy `intake_customer_fingerprints` for 30 days
+    so existing diagnostic tooling keeps working.
     """
     db = db if db is not None else get_db()
-    tokens: List[str] = []
-    pattern_count = 0
-    async for p in db[PATTERNS_COLL].find({"customer_no": customer_no}, {"_id": 0}):
-        tokens.extend(_pattern_to_tokens(p))
-        pattern_count += 1
-
-    tf = Counter(tokens)
-    fp = {
-        "id": str(uuid.uuid4()),
-        "customer_no": customer_no,
-        "token_count": len(tokens),
-        "unique_tokens": len(tf),
-        "tf": dict(tf),
-        "pattern_count": pattern_count,
-        "computed_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await db[FINGERPRINTS_COLL].update_one(
-        {"customer_no": customer_no},
-        {"$set": {k: v for k, v in fp.items() if k != "id"}},
-        upsert=True,
+    from services.learning_core.fingerprint_service import (
+        build_fingerprint as shared_build,
     )
+    fp = await shared_build("customer", customer_no, db=db)
+    # Dual-write to legacy collection
+    try:
+        legacy = {
+            "id": str(uuid.uuid4()),
+            "customer_no": customer_no,
+            "token_count": fp.get("token_count", 0),
+            "unique_tokens": fp.get("unique_tokens", 0),
+            "tf": fp.get("tf", {}),
+            "pattern_count": fp.get("source_count", 0),
+            "computed_at": fp.get("computed_at"),
+        }
+        await db[FINGERPRINTS_COLL].update_one(
+            {"customer_no": customer_no},
+            {"$set": {k: v for k, v in legacy.items() if k != "id"}},
+            upsert=True,
+        )
+    except Exception as e:
+        logger.debug("[ColdStart] legacy fingerprint dual-write failed: %s", e)
+    # Legacy alias for backwards-compat with pre-2.5.1 callers
+    if "pattern_count" not in fp:
+        fp["pattern_count"] = fp.get("source_count", 0)
     return fp
 
 
@@ -223,52 +227,46 @@ async def find_similar_customers(
 ) -> List[Dict[str, Any]]:
     """Return the top-K most similar *known* customers for a cold-start PO.
 
-    Each result includes: customer_no, similarity, matched_tokens,
-    pattern_count, suggested_lines (the top 5 frequent lines from that
-    customer's patterns, tagged inherited=True).
+    v2.5.1: delegates to the shared `learning_core.fingerprint_service`
+    for the TF-IDF math, then enriches each match with inherited
+    suggestions (which is sales-intake-specific).
     """
     db = db if db is not None else get_db()
+    from services.learning_core.fingerprint_service import find_similar as _shared_find
     query_tokens = _line_items_to_tokens(line_items)
     if len(query_tokens) < MIN_TOKENS_IN_QUERY:
         return []
 
-    query_tf = Counter(query_tokens)
+    # Ensure customer fingerprints exist in the unified collection
+    # (auto-rebuilds if the caller never seeded U2).
+    any_fp = await db["scope_fingerprints"].find_one(
+        {"scope_type": "customer", "token_count": {"$gt": 0}},
+        {"_id": 0, "scope_value": 1},
+    )
+    if not any_fp:
+        from services.learning_core.fingerprint_service import rebuild_all
+        await rebuild_all("customer", db=db)
 
-    # Pull all known fingerprints (excluding the target if known)
-    q: Dict[str, Any] = {"token_count": {"$gt": 0}}
-    if exclude_customer_no:
-        q["customer_no"] = {"$ne": exclude_customer_no}
-    fingerprints = await db[FINGERPRINTS_COLL].find(q, {"_id": 0}).to_list(500)
-    if not fingerprints:
-        return []
-
-    # Include the query as a "document" for IDF so query-specific tokens
-    # get proper weighting
-    idf = _compute_idf(fingerprints + [{"tf": dict(query_tf)}])
-
-    scored: List[Tuple[float, Dict[str, Any]]] = []
-    for fp in fingerprints:
-        fp_tf = Counter(fp.get("tf") or {})
-        sim = _cosine(query_tf, fp_tf, idf)
-        if sim >= MIN_SIMILARITY:
-            scored.append((sim, fp))
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-    scored = scored[:top_k]
+    shared_matches = await _shared_find(
+        query_tokens,
+        scope_type="customer",
+        top_k=top_k,
+        min_similarity=MIN_SIMILARITY,
+        exclude_scope_value=exclude_customer_no,
+        db=db,
+    )
 
     results: List[Dict[str, Any]] = []
-    for sim, fp in scored:
-        cust = fp["customer_no"]
-        # Grab the top frequent associated_lines from this customer as
-        # inherited suggestions
+    for m in shared_matches:
+        cust = m["scope_value"]
         inherited = await _pull_top_inherited_lines(db, cust, limit=5)
-        # Token intersection for transparency
-        matched = sorted(set(query_tf.keys()) & set((fp.get("tf") or {}).keys()))[:10]
+        # Count patterns for context
+        patt_count = await db.order_line_patterns.count_documents({"customer_no": cust})
         results.append({
             "customer_no": cust,
-            "similarity": round(sim, 3),
-            "pattern_count": fp.get("pattern_count", 0),
-            "matched_tokens": matched,
+            "similarity": m["similarity"],
+            "pattern_count": patt_count,
+            "matched_tokens": m["matched_tokens"],
             "inherited_suggestions": inherited,
         })
     return results

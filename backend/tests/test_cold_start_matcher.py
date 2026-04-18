@@ -85,8 +85,13 @@ class FakeDb:
         self.order_line_patterns = FakeColl()
         self.intake_customer_fingerprints = FakeColl()
         self.intake_learning_events = FakeColl()
+        self._extra_colls = {}
     def __getitem__(self, name):
-        return getattr(self, name, FakeColl())
+        if hasattr(self, name) and name != "_extra_colls":
+            return getattr(self, name)
+        if name not in self._extra_colls:
+            self._extra_colls[name] = FakeColl()
+        return self._extra_colls[name]
 
 
 # ─────────────────────────────────────────────────────────────

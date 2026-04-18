@@ -1,6 +1,29 @@
-export const APP_VERSION = "2.4.1";
+export const APP_VERSION = "2.5.1";
 
 export const CHANGELOG = [
+  {
+    version: "2.5.1",
+    date: "2026-04-18",
+    title: "Learning Core U2 — Shared Fingerprint Service",
+    changes: [
+      { type: "improvement", text: "Unified TF-IDF fingerprint service in `learning_core` — one codebase, polymorphic `scope_type` ('customer' | 'vendor'), single `scope_fingerprints` collection with (scope_type, scope_value) unique index" },
+      { type: "feature", text: "Vendor fingerprinting lights up — AP-side posting profiles now get the same peer-match treatment customers got in v2.4.0. Enables vendor-alias discovery + 'which vendor is most similar to this new one' queries." },
+      { type: "feature", text: "2 new endpoints: POST /api/learning/fingerprints/rebuild?scope_type=customer|vendor · GET /api/learning/fingerprints/similar?scope_type=&scope_value=&top_k=" },
+      { type: "improvement", text: "Legacy cold_start_matcher_service delegates to the shared module (dual-writes to legacy collection for 30 days). Zero behavior change for existing callers." },
+    ],
+  },
+  {
+    version: "2.5.0",
+    date: "2026-04-18",
+    title: "Proactive Drift Alerts",
+    changes: [
+      { type: "feature", text: "Scans the unified learning_events_v2 log for 5 drift patterns: customer reject spike, qty-bounds drift, catalog explosion, AP posting-template drift, and TRUSTED-pattern drift (critical)" },
+      { type: "feature", text: "New Drift Alerts panel on /intake/learning — inline Ack/Resolve buttons per alert, severity-colored rows with evidence (affected items, counts), open-alerts counter" },
+      { type: "feature", text: "Nightly drift scanner runs automatically (24h, 15-min startup delay) — also manual 'Scan drift' button" },
+      { type: "feature", text: "5 new endpoints under /api/learning/drift/*: scan, alerts (list), summary, acknowledge, resolve" },
+      { type: "improvement", text: "Alerts are idempotent — re-running scan updates last_seen_at instead of duplicating. All thresholds env-configurable (DRIFT_*_MIN_*, DRIFT_*_WINDOW_DAYS)." },
+    ],
+  },
   {
     version: "2.4.1",
     date: "2026-04-18",

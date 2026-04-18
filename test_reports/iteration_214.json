@@ -1,0 +1,126 @@
+{
+  "summary": "Iteration 214: v2.5.0 Drift Alerts + v2.5.1 Shared Fingerprint Service - All tests passed. Backend: 56/56 tests (42 unit + 14 API). Frontend: Version 2.5.1 confirmed, Drift Alerts panel verified with Scan drift button, empty state, and Pattern Health panel. DATA HYGIENE: Giovanni (C-10250) intact with 16 patterns, 0 retired. Test events created for C-TEST-REGR-001 (throwaway test customer).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "IntakeLearningPage",
+        "issues": ["Minor React hydration warning about <tr> inside <span> in Pattern Health table - cosmetic only, does not affect functionality"]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_drift_and_fingerprint.py",
+    "/app/backend/tests/test_learning_core_events.py",
+    "/app/backend/tests/test_cold_start_matcher.py",
+    "/app/backend/tests/test_intake_learning_feedback.py",
+    "/app/backend/tests/test_sales_intake_learning.py",
+    "/app/backend/tests/test_drift_fingerprint_api.py",
+    "/app/test_reports/pytest/drift_fingerprint_v251_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Drift Alert Service correctly implements 5 scan rules with idempotent upsert logic",
+    "Fingerprint Service correctly delegates from cold_start_matcher_service with dual-write to legacy collection",
+    "All 8 new endpoints working: drift/scan, drift/alerts, drift/summary, drift/ack, drift/resolve, fingerprints/rebuild, fingerprints/similar",
+    "Frontend Drift Alerts panel renders correctly above Pattern Health with proper data-testid attributes",
+    "Scan drift button triggers scan and shows alert with results"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_drift_fingerprint_api.py"
+  ],
+  "success_rate": {
+    "backend": "100% (56/56 tests - 42 unit + 14 API)",
+    "frontend": "100% (Version 2.5.1 confirmed, all UI elements verified)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "Created test events for C-TEST-REGR-001 via feedback endpoint (throwaway test customer)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "v2.5.0 Drift Alerts and v2.5.1 Shared Fingerprint Service fully tested. Giovanni (C-10250) has 16 patterns, 0 trusted/drifting/retired - baseline state intact. New test file test_drift_fingerprint_api.py covers all 8 new endpoints. Frontend Drift Alerts panel renders above Pattern Health with: Bell icon, severity counters, empty state 'No open drift alerts', Ack/Resolve buttons per alert. DATA HYGIENE: Test events exist for C-TEST-REGR-001 (throwaway) - no pollution to real customers.",
+  "tested_features": {
+    "pytest_unit_tests": [
+      "test_drift_scan_fires_reject_spike - PASS",
+      "test_drift_alerts_are_idempotent - PASS",
+      "test_drift_alerts_no_spurious_fires_when_below_threshold - PASS",
+      "test_acknowledge_alert_moves_to_acknowledged - PASS",
+      "test_build_fingerprint_customer_from_patterns - PASS",
+      "test_build_fingerprint_vendor_from_posting_profile - PASS",
+      "test_find_similar_shared_math - PASS",
+      "test_fingerprint_invalidate_ages_timestamp - PASS",
+      "test_fingerprint_rejects_unknown_scope_type - PASS",
+      "test_record_event_happy_path - PASS",
+      "test_record_event_coerces_unknown_domain_to_generic - PASS",
+      "test_list_events_filters_by_domain - PASS",
+      "test_get_domain_summary_shape - PASS",
+      "test_intake_feedback_dual_writes_to_learning_core - PASS",
+      "test_tokenize_preserves_sku_style - PASS",
+      "test_tokenize_drops_pure_numbers_and_short_tokens - PASS",
+      "test_build_fingerprint_counts_tokens - PASS",
+      "test_find_similar_returns_best_peer - PASS",
+      "test_find_similar_excludes_target - PASS",
+      "test_find_similar_no_fingerprints_returns_empty - PASS",
+      "test_find_similar_short_query_returns_empty - PASS",
+      "test_promote_creates_new_pattern_for_cold_customer - PASS",
+      "test_promote_returns_already_present_on_duplicate - PASS",
+      "test_unknown_event_type_returns_error - PASS",
+      "test_accept_bumps_occurrences_and_trust_at_90 - PASS",
+      "test_reject_retires_after_threshold - PASS",
+      "test_bounds_override_widens_std_dev - PASS",
+      "test_unmatched_item_confirmed_new_creates_candidate - PASS",
+      "test_unmatched_item_mapped_saves_alias - PASS",
+      "test_get_pattern_health_shape - PASS",
+      "test_run_pattern_hygiene_retires_and_promotes - PASS",
+      "test_intake_learning_giovanni_happy_path - PASS",
+      "test_intake_learning_cold_start_with_customer_name_only - PASS",
+      "test_intake_learning_skipped_for_non_scope_doc - PASS",
+      "test_sales_invoice_is_in_scope - PASS",
+      "test_xls_staging_intake_learning_cold_start - PASS",
+      "test_summary_shape_keys - PASS",
+      "test_refresh_active_customers_no_activity - PASS",
+      "test_refresh_active_customers_single_customer - PASS",
+      "test_refresh_customer_after_bc_write_happy_path - PASS",
+      "test_refresh_customer_after_bc_write_empty_customer_skipped - PASS",
+      "test_refresh_customer_after_bc_write_swallows_errors - PASS"
+    ],
+    "api_integration_tests": [
+      "POST /api/learning/drift/scan - PASS (returns {ran_at, rules_fired, open_alerts_total, actor})",
+      "POST /api/learning/drift/scan idempotency - PASS (no duplicate alerts)",
+      "GET /api/learning/drift/alerts?status=open - PASS (returns {total, alerts})",
+      "GET /api/learning/drift/alerts status filter - PASS (open/acknowledged/resolved/all)",
+      "GET /api/learning/drift/summary - PASS (returns {by_status, open_by_severity, open_by_type})",
+      "POST /api/learning/drift/alerts/{id}/acknowledge - PASS (404 for nonexistent)",
+      "POST /api/learning/drift/alerts/{id}/resolve - PASS (404 for nonexistent)",
+      "POST /api/learning/fingerprints/rebuild?scope_type=customer - PASS (rebuilt>=1)",
+      "POST /api/learning/fingerprints/rebuild?scope_type=vendor - PASS (rebuilt>=0)",
+      "GET /api/learning/fingerprints/similar?scope_type=customer&scope_value=C-10250 - PASS",
+      "GET /api/learning/fingerprints/similar missing scope_value - PASS (400)",
+      "POST /api/intake/insights/promote-inherited regression - PASS (404 for nonexistent source)",
+      "POST /api/intake/insights/feedback regression - PASS (records to both collections)"
+    ],
+    "frontend_ui_tests": [
+      "Version v2.5.1 in header - PASS",
+      "Intake Learning page loads - PASS",
+      "Drift Alerts panel (data-testid='drift-alerts-panel') - PASS",
+      "Drift Alerts empty state (data-testid='drift-alerts-empty') - PASS",
+      "Scan drift button (data-testid='intake-learning-drift-scan') - PASS",
+      "Pattern Health panel (data-testid='pattern-health-panel') - PASS",
+      "Scan drift button click triggers scan - PASS",
+      "Giovanni (C-10250) shown in Pattern Health with 16 patterns - PASS"
+    ]
+  },
+  "data_hygiene_verification": {
+    "giovanni_patterns": 16,
+    "giovanni_trusted": 0,
+    "giovanni_drifting": 0,
+    "giovanni_retired": 0,
+    "test_alerts_in_system": 0,
+    "test_events_created": "3 events for C-TEST-REGR-001 (throwaway test customer)",
+    "status": "CLEAN - Giovanni state intact, test data isolated to throwaway customers"
+  }
+}

@@ -14,6 +14,7 @@ import OperationsQueuePage from "@/pages/OperationsQueuePage";
 import DocumentsHubPage from "@/pages/DocumentsHubPage";
 import SalesInventoryHubPage from "@/pages/SalesInventoryHubPage";
 import InventoryImportsPage from "@/pages/InventoryImportsPage";
+import InventoryHealthPage from "@/pages/InventoryHealthPage";
 import SalespersonDashboardPage from "@/pages/SalespersonDashboardPage";
 import IntelligenceHubPage from "@/pages/IntelligenceHubPage";
 import IntegrationsHubPage from "@/pages/IntegrationsHubPage";
@@ -46,6 +47,7 @@ function AppRoutes() {
         <Route path="review/:id" element={<SalesOrderReviewPage />} />
         <Route path="sales-inventory" element={<SalesInventoryHubPage />} />
         <Route path="inventory/imports" element={<InventoryImportsPage />} />
+        <Route path="inventory/health" element={<InventoryHealthPage />} />
         <Route path="insights" element={<InsightsPage />} />
         <Route path="config" element={<SettingsHubPage />} />
         {/* Keep old pages accessible but not in nav */}

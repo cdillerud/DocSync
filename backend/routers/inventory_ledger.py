@@ -12,7 +12,7 @@ import io
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Any, Dict, Optional
 from deps import get_db
 from services.inventory_ledger_service import (
     list_customers, get_customer, create_customer, update_customer,
@@ -225,6 +225,166 @@ async def api_get_summary(customer_id: str):
         raise HTTPException(status_code=404, detail="Customer workspace not found")
     s = await customer_summary(db, customer_id)
     return {"customer_id": customer_id, "customer_name": c["name"], **s}
+
+
+# ═══════════════════════════════════════════════════════════════
+# HEALTH — cross-customer aggregation for dashboard
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/health-summary")
+async def api_health_summary(
+    stale_days: int = Query(30, ge=1, le=365,
+        description="A customer is 'stale' if no movement in N days"),
+    low_stock_threshold: float = Query(5.0,
+        description="Items with available qty <= this count as 'low'"),
+    top_n: int = Query(20, ge=1, le=100),
+):
+    """
+    Cross-customer inventory health overview.
+
+    Returns:
+      - per-customer roll-ups (on_hand, incoming, committed, shortage_count)
+      - global totals
+      - top items at risk across all customers
+      - stale customers (no movement in >N days)
+      - recent XLS import activity (last 7 days, last 30 days)
+    """
+    from datetime import datetime, timedelta, timezone
+    from services.inventory_ledger_service import INCOMING_COLL, MOVEMENTS_COLL
+
+    db = get_db()
+    now = datetime.now(timezone.utc)
+    stale_cutoff = (now - timedelta(days=stale_days)).isoformat()
+
+    # All customers
+    customers = await db.inv_customers.find({"active": True}, {"_id": 0}).to_list(500)
+
+    # Per-customer summary in parallel-ish (sequentially but small N)
+    per_customer = []
+    totals = {
+        "customer_count": 0,
+        "total_items": 0,
+        "total_on_hand": 0.0,
+        "total_incoming": 0.0,
+        "total_committed": 0.0,
+        "total_shortage_buckets": 0,
+        "total_low_buckets": 0,
+        "stale_customer_count": 0,
+    }
+    item_risk_map: Dict[str, Dict[str, Any]] = {}
+
+    for c in customers:
+        cid = c["id"]
+        # Get latest movement timestamp for staleness
+        latest = await db[MOVEMENTS_COLL].find_one(
+            {"customer_id": cid},
+            {"_id": 0, "created_at": 1, "effective_date": 1},
+            sort=[("created_at", -1)],
+        )
+        last_mv = (latest or {}).get("effective_date") or (latest or {}).get("created_at")
+
+        balances = await derive_balances(db, cid)
+        if not balances and not last_mv:
+            continue
+
+        on_hand = sum(b["on_hand"] for b in balances)
+        incoming = sum(b["incoming"] for b in balances)
+        committed = sum(b["committed"] for b in balances)
+        shortage = sum(1 for b in balances if b["is_short"])
+        low = sum(1 for b in balances if b["is_low"] and not b["is_short"])
+        total_items = len(set(b["item"] for b in balances))
+
+        is_stale = bool(last_mv and last_mv < stale_cutoff)
+
+        per_customer.append({
+            "customer_id": cid,
+            "customer_code": c.get("code"),
+            "customer_name": c.get("name"),
+            "total_items": total_items,
+            "total_buckets": len(balances),
+            "total_on_hand": round(on_hand, 2),
+            "total_incoming": round(incoming, 2),
+            "total_committed": round(committed, 2),
+            "shortage_buckets": shortage,
+            "low_buckets": low,
+            "last_movement": last_mv,
+            "is_stale": is_stale,
+        })
+
+        totals["customer_count"] += 1
+        totals["total_items"] += total_items
+        totals["total_on_hand"] += on_hand
+        totals["total_incoming"] += incoming
+        totals["total_committed"] += committed
+        totals["total_shortage_buckets"] += shortage
+        totals["total_low_buckets"] += low
+        if is_stale:
+            totals["stale_customer_count"] += 1
+
+        # Per-item risk (items with available < 0 OR committed - on_hand > 0)
+        for b in balances:
+            if b["is_short"] or (b["committed"] > b["on_hand"] + b["incoming"]):
+                key = f"{c.get('code','?')}:{b['item']}:{b['warehouse']}"
+                item_risk_map[key] = {
+                    "customer_id": cid,
+                    "customer_name": c.get("name"),
+                    "item": b["item"],
+                    "warehouse": b["warehouse"],
+                    "on_hand": b["on_hand"],
+                    "incoming": b["incoming"],
+                    "committed": b["committed"],
+                    "available": b["available"],
+                    "gap": round(b["committed"] - b["on_hand"] - b["incoming"], 2),
+                }
+
+    # Sort: shortages first by largest gap, then by name
+    per_customer.sort(
+        key=lambda x: (-(x["shortage_buckets"] + x["low_buckets"]), -x["total_committed"], x["customer_name"] or ""),
+    )
+    items_at_risk = sorted(
+        item_risk_map.values(),
+        key=lambda x: (-x["gap"], x["customer_name"] or "", x["item"]),
+    )[:top_n]
+
+    # XLS import activity (last 7 / last 30 days)
+    seven = (now - timedelta(days=7)).isoformat()
+    thirty = (now - timedelta(days=30)).isoformat()
+    staging_7 = await db.inv_import_staging.count_documents({"created_at": {"$gte": seven}})
+    staging_30 = await db.inv_import_staging.count_documents({"created_at": {"$gte": thirty}})
+    applied_7 = await db.inv_import_staging.count_documents({
+        "status": "applied", "approved_at": {"$gte": seven},
+    })
+    applied_30 = await db.inv_import_staging.count_documents({
+        "status": "applied", "approved_at": {"$gte": thirty},
+    })
+    auto_applied_30 = await db.inv_import_staging.count_documents({
+        "status": "applied",
+        "auto_approved": True,
+        "approved_at": {"$gte": thirty},
+    })
+
+    # Cast totals
+    for k in ("total_on_hand", "total_incoming", "total_committed"):
+        totals[k] = round(totals[k], 2)
+
+    return {
+        "generated_at": now.isoformat(),
+        "thresholds": {
+            "stale_days": stale_days,
+            "low_stock_threshold": low_stock_threshold,
+        },
+        "totals": totals,
+        "per_customer": per_customer,
+        "items_at_risk": items_at_risk,
+        "xls_activity": {
+            "staged_last_7d": staging_7,
+            "staged_last_30d": staging_30,
+            "applied_last_7d": applied_7,
+            "applied_last_30d": applied_30,
+            "auto_applied_last_30d": auto_applied_30,
+            "auto_apply_ratio_30d": round(auto_applied_30 / applied_30, 3) if applied_30 else 0.0,
+        },
+    }
 
 
 # ═══════════════════════════════════════════════════════════════

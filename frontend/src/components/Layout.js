@@ -25,6 +25,7 @@ const navItems = [
   { to: '/governance', icon: Shield, label: 'Governance' },
   { to: '/sales-inventory', icon: ShoppingCart, label: 'Sales' },
   { to: '/inventory/imports', icon: FileSpreadsheet, label: 'Inventory Imports' },
+  { to: '/inventory/health', icon: Activity, label: 'Inventory Health' },
   { to: '/posting-intelligence', icon: Brain, label: 'Posting AI' },
   { to: '/invoice-trace', icon: ArrowLeftRight, label: 'Trace' },
   { to: '/ai-learning', icon: TrendingUp, label: 'AI Learning' },

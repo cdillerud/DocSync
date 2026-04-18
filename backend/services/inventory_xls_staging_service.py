@@ -285,18 +285,44 @@ async def update_staging(
     """Update column_map, assigned_customer_id, or row-level overrides.
 
     Only permitted while status == pending_review.
+
+    If a manual column_map is saved (source="manual"), it is immediately
+    promoted to the learning loop as `inv_xls_learned_mappings` so the
+    correction becomes permanent for future files from the same
+    (sender_domain, header_hash).
     """
     allowed = {"column_map", "assigned_customer_id", "rows", "classification"}
     safe = {k: v for k, v in (updates or {}).items() if k in allowed}
     if not safe:
         return {"updated": False, "reason": "no allowed fields to update"}
-    doc = await db[STAGING_COLL].find_one({"id": staging_id}, {"_id": 0, "status": 1})
+    doc = await db[STAGING_COLL].find_one({"id": staging_id}, {"_id": 0})
     if not doc:
         return {"updated": False, "reason": "not found"}
     if doc.get("status") != "pending_review":
         return {"updated": False, "reason": f"status is {doc.get('status')}"}
     safe["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db[STAGING_COLL].update_one({"id": staging_id}, {"$set": safe})
+
+    # Promote manual column_map corrections into the learning loop.
+    # This is the bridge from "one-off manual fix" → "permanent learned mapping".
+    # Future ingests from the same (sender_domain, header_hash) pick up this
+    # mapping at confidence = 0.85 (1 approval) and walk the auto-approve
+    # cascade from there.
+    cm = safe.get("column_map") or {}
+    if cm.get("source") == "manual" and cm.get("mapping"):
+        try:
+            synthetic_staging = {
+                **doc,
+                "column_map": cm,
+            }
+            await _persist_learning(db, synthetic_staging, approved_by="manual:user-fix")
+            logger.info(
+                "[XLSStaging] manual column_map promoted to learning loop for domain=%s",
+                doc.get("sender_domain"),
+            )
+        except Exception as e:
+            logger.warning("[XLSStaging] failed to promote manual mapping: %s", e)
+
     return {"updated": True, "staging_id": staging_id}
 
 

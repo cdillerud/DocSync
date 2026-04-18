@@ -16,7 +16,7 @@ const TABS = [
   { key: 'triage', label: 'Triage' },
   { key: 'sales', label: 'Sales Orders' },
   { key: 'rep-performance', label: 'Rep Performance' },
-  { key: 'inside-sales-pilot', label: 'Inside Sales Pilot' },
+  { key: 'inside-sales-pilot', label: 'Sales Intake' },
   { key: 'spiro-bc', label: 'Spiro ↔ BC' },
   { key: 'inventory', label: 'Inventory Ledger' },
 ];

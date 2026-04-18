@@ -219,9 +219,9 @@ export default function InsideSalesPilotPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold tracking-tight">Inside Sales Pilot</h2>
+          <h2 className="text-lg font-bold tracking-tight">Sales Intake</h2>
           <p className="text-sm text-muted-foreground">
-            Controlled ingest-only monitoring for {(s.mailboxes || []).join(', ')}
+            Monitored mailboxes: {(s.mailboxes || []).join(', ')}
           </p>
         </div>
         <div className="flex gap-2">
@@ -249,13 +249,13 @@ export default function InsideSalesPilotPage() {
       {!s.enabled && (
         <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg px-4 py-3 flex items-center gap-2 text-yellow-400 text-sm" data-testid="pilot-disabled-banner">
           <AlertTriangle className="h-4 w-4" />
-          Pilot is disabled. Set INSIDE_SALES_PILOT_ENABLED=true in .env to activate.
+          Sales intake polling is disabled. Set INSIDE_SALES_PILOT_ENABLED=true in .env to activate.
         </div>
       )}
 
       {/* Top Stats */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <StatCard label="Pilot Docs" value={s.total_documents || 0} sub={`${Object.keys(s.by_mailbox || {}).length} mailboxes`} icon={FileText} />
+        <StatCard label="Intake Docs" value={s.total_documents || 0} sub={`${Object.keys(s.by_mailbox || {}).length} mailboxes`} icon={FileText} />
         <StatCard label="Extraction Quality" value={`${ext.avg_quality_pct || 0}%`} sub={ext.coverage || '0/0'} icon={TrendingUp} color="text-green-400" />
         <StatCard label="BC Match Score" value={`${bc.avg_score_pct || 0}%`} sub={bc.validated || '0/0'} icon={CheckCircle} color="text-blue-400" />
         <StatCard label="Signal:Noise" value={last24.signal_to_noise || '0:0'} sub={`${last24.poll_runs || 0} runs (24h)`} icon={Filter} color="text-purple-400" />
@@ -417,7 +417,7 @@ export default function InsideSalesPilotPage() {
               Sales Corpus Validation
             </h3>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Compare Inside Sales Pilot against the existing {corpus.validated_count || 0} validated + {corpus.unvalidated_remaining || 0} remaining sales docs
+              Compare the Sales Intake pipeline against the existing {corpus.validated_count || 0} validated + {corpus.unvalidated_remaining || 0} remaining sales docs
             </p>
           </div>
           <button
@@ -456,7 +456,7 @@ export default function InsideSalesPilotPage() {
               </div>
             </div>
             <div className="space-y-2">
-              <div className="text-xs font-medium text-muted-foreground uppercase">Inside Sales Pilot</div>
+              <div className="text-xs font-medium text-muted-foreground uppercase">Sales Intake</div>
               <div className="text-2xl font-bold">{pilot.avg_score || 0}%<span className="text-sm font-normal text-muted-foreground ml-1">avg</span></div>
               <div className="space-y-1 text-xs">
                 <div className="flex justify-between"><span className="text-muted-foreground">Validated</span><span>{pilot.validated_count || 0} docs</span></div>

@@ -146,7 +146,7 @@ export default function SpiroBCCrossRefDashboard() {
 
       {/* Top Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-        <StatCard label="Pilot Docs" value={s.total_pilot_docs || 0} icon={Building2} />
+        <StatCard label="Intake Docs" value={s.total_pilot_docs || 0} icon={Building2} />
         <StatCard label="In Both Systems" value={s.in_both || 0} sub="Fully linked" icon={CheckCircle} color="text-emerald-400" />
         <StatCard label="Spiro Only" value={s.spiro_only || 0} sub="Not in BC" icon={Unlink} color="text-blue-400" />
         <StatCard label="BC Only" value={s.bc_only || 0} sub="Not in Spiro" icon={AlertTriangle} color="text-orange-400" />

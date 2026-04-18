@@ -27,6 +27,7 @@ import MatchingDebugPanel from '../components/MatchingDebugPanel';
 import CreateBCSalesOrderPanel from '../components/CreateBCSalesOrderPanel';
 import CreateBCPurchaseInvoicePanel from '../components/CreateBCPurchaseInvoicePanel';
 import DocumentIntelligencePanel from '../components/DocumentIntelligencePanel';
+import IntakeLearningPanel from '../components/IntakeLearningPanel';
 import ARReleaseGatePanel from '../components/ARReleaseGatePanel';
 import DecisionExplainabilityPanel from '../components/DecisionExplainabilityPanel';
 import ReviewerAssistPanel from '../components/ReviewerAssistPanel';
@@ -816,6 +817,9 @@ export default function DocumentDetailPage() {
 
           {/* Readiness Panel */}
           <ReadinessPanel readiness={doc.readiness} docStatus={doc.status} />
+
+          {/* BC + Spiro Intake Intelligence (Giovanni-style learning) */}
+          <IntakeLearningPanel insights={doc.intake_insights} />
 
           {/* Extracted Data Card — consolidates extracted_fields, normalized_fields, and top-level fields */}
           <ExtractedDataCard doc={doc} />

@@ -1,0 +1,70 @@
+{
+  "summary": "Iteration 211: Phase B (de-pilotize UI) + Phase C (IntakeLearningPanel on Document Detail) + Version bump to v2.2.1 - All tests passed. Backend: 11/11 pytest unit tests passed. Frontend: All UI label changes verified (Sales Intake tab, Intake Docs stat cards, disabled banner text). Version v2.2.1 confirmed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_sales_intake_learning.py"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "SalesInventoryHubPage.js line 19: Tab label correctly changed from 'Inside Sales Pilot' to 'Sales Intake'",
+    "InsideSalesPilotPage.js: Page header 'Sales Intake', stat card 'Intake Docs', disabled banner 'Sales intake polling is disabled' - all correctly neutralized",
+    "SpiroBCCrossRefDashboard.js: 'Intake Docs' stat card label correctly updated",
+    "version.js: APP_VERSION = '2.2.1' with proper changelog entry for de-pilotization + doc-level IntakeLearningPanel",
+    "DocumentDetailPage.js: IntakeLearningPanel imported at line 30, rendered at line 822 after ReadinessPanel",
+    "gpi_integration.py: BC write-back hook at lines 1312-1313 spawns asyncio.create_task(refresh_customer_after_bc_write(customer_no))"
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (11/11 pytest unit tests passed)",
+    "frontend": "100% (All UI label changes verified)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "None - no documents in system to test Document Detail page directly",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 211 verified Phase B (de-pilotize UI framing) and Phase C (IntakeLearningPanel on Document Detail pages). All 11 pytest unit tests for sales_intake_learning_service passed. UI verified: 'Inside Sales Pilot' tab renamed to 'Sales Intake', 'Pilot Docs' stat cards renamed to 'Intake Docs' on both Sales Intake and Spiro BC tabs, disabled banner text updated to 'Sales intake polling is disabled'. Version v2.2.1 confirmed in header. IntakeLearningPanel component properly imported and rendered in DocumentDetailPage.js. BC write-back hook confirmed in gpi_integration.py. No documents in system to test Document Detail page directly, but code review confirms correct implementation.",
+  "tested_features": {
+    "pytest_unit_tests": [
+      "test_intake_learning_giovanni_happy_path - PASS",
+      "test_intake_learning_cold_start_with_customer_name_only - PASS",
+      "test_intake_learning_skipped_for_non_scope_doc - PASS",
+      "test_sales_invoice_is_in_scope - PASS",
+      "test_xls_staging_intake_learning_cold_start - PASS",
+      "test_summary_shape_keys - PASS",
+      "test_refresh_active_customers_no_activity - PASS",
+      "test_refresh_active_customers_single_customer - PASS",
+      "test_refresh_customer_after_bc_write_happy_path - PASS",
+      "test_refresh_customer_after_bc_write_empty_customer_skipped - PASS",
+      "test_refresh_customer_after_bc_write_swallows_errors - PASS"
+    ],
+    "api_endpoints": [
+      "POST /api/intake/learning/refresh-active?lookback_hours=24 - PASS (returns {active_customers, refreshed_customers, docs_refreshed, xls_refreshed})",
+      "GET /api/inside-sales-pilot/status - PASS (returns enabled=false, mailboxes, etc.)",
+      "GET /api/health - PASS",
+      "GET /api/gpi-integration/status - PASS"
+    ],
+    "ui_label_changes": [
+      "Tab label: 'Inside Sales Pilot' → 'Sales Intake' - PASS",
+      "Page header: 'Sales Intake' (not 'Inside Sales Pilot') - PASS",
+      "Stat card: 'Intake Docs' (not 'Pilot Docs') on Sales Intake tab - PASS",
+      "Stat card: 'Intake Docs' (not 'Pilot Docs') on Spiro BC tab - PASS",
+      "Disabled banner: 'Sales intake polling is disabled' (not 'Pilot is disabled') - PASS",
+      "Version: v2.2.1 displayed in header - PASS"
+    ],
+    "code_review": [
+      "IntakeLearningPanel imported in DocumentDetailPage.js at line 30 - VERIFIED",
+      "IntakeLearningPanel rendered at line 822 with insights={doc.intake_insights} - VERIFIED",
+      "BC write-back hook in gpi_integration.py at lines 1312-1313 - VERIFIED",
+      "APP_VERSION = '2.2.1' in version.js - VERIFIED"
+    ]
+  },
+  "notes": "All Phase B (de-pilotize UI) and Phase C (IntakeLearningPanel on Document Detail) changes verified. The pilot is now part of the overall hub with neutralized labels. Backend endpoints remain unchanged (/api/inside-sales-pilot/*) for compatibility. No documents in system to test Document Detail page rendering directly, but code review confirms IntakeLearningPanel is correctly integrated."
+}

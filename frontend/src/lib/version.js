@@ -1,6 +1,30 @@
-export const APP_VERSION = "2.1.0";
+export const APP_VERSION = "2.2.1";
 
 export const CHANGELOG = [
+  {
+    version: "2.2.1",
+    date: "2026-04-18",
+    title: "De-pilotization & Doc-Level Intelligence Panel",
+    changes: [
+      { type: "improvement", text: "De-pilotized UI framing — 'Inside Sales Pilot' tab renamed to 'Sales Intake', 'Pilot Docs' → 'Intake Docs', banner + stat labels neutralized. The pilot is now part of the overall hub." },
+      { type: "feature", text: "IntakeLearningPanel now appears on every Document Detail page — Nikki sees '±2σ qty flag', 'Energy Surcharge suggested', 'item not in BC catalog' the moment she opens any Giovanni PO, no drawer-digging required." },
+    ],
+  },
+  {
+    version: "2.2.0",
+    date: "2026-04-18",
+    title: "Intake Learning — Hub-Wide Giovanni Pattern",
+    changes: [
+      { type: "feature", text: "Intake Learning orchestrator — every ingested PO, sales order, invoice, and inventory XLS now gets Giovanni-style BC + Spiro cross-reference (customer match, Spiro ISR, learned pattern count, recurring-line suggestions, ±2σ qty bounds, BC item-catalog match)" },
+      { type: "feature", text: "New /intake/learning dashboard — hub-wide KPIs, top customers by learning coverage, flagged-for-review list, backfill controls" },
+      { type: "feature", text: "IntakeLearningPanel surfaced on every Document Detail page + XLS staging drawer — cold-start transparency: 'no BC learning yet' is always explicit" },
+      { type: "feature", text: "Daily auto-refresh scheduler — re-learns customers with new BC posted-order activity (24h window, configurable)" },
+      { type: "feature", text: "BC write-back hook — moment a sales order is posted to BC, that customer's patterns are re-learned in-process so the next ingest picks them up instantly" },
+      { type: "feature", text: "7 new /api/intake/* endpoints: summary, backfill, refresh-active, run, run-xls, insights, insights-xls, flagged" },
+      { type: "improvement", text: "SALES_INVOICE (GPI ZD00010, blanket sales orders) now correctly included in learning scope" },
+      { type: "improvement", text: "Never writes to BC — pure learning + visibility layer, safety guards preserved" },
+    ],
+  },
   {
     version: "2.1.0",
     date: "2026-04-14",

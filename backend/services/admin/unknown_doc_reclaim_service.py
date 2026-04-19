@@ -415,7 +415,288 @@ async def recent_runs(limit: int = 20, db=None) -> List[Dict[str, Any]]:
     ).sort("ran_at", -1).limit(limit).to_list(limit)
 
 
+# ─────────────────────────────────────────────────────────────
+# Retroactive post-process sweep (v2.5.7)
+# ─────────────────────────────────────────────────────────────
+# Problem this solves:
+#   v2.5.5 shipped first, then v2.5.6 added smart + skip_noise flags.
+#   Between those two versions an operator ran the plain sweep on prod,
+#   sending 372 docs to NeedsReview — including email-sprite noise and
+#   batch-split children that could have inherited parent metadata.
+#
+# This function finds already-reclaimed docs that NeedsReview review
+# (or are queue_visible) and retroactively applies the two modes.
+# It's safe to run multiple times (idempotency via
+# `post_process_applied_at` + `noise_filtered` + `parent_inheritance_applied`
+# sentinels).
+
+
+def _build_post_process_filter() -> Dict[str, Any]:
+    """Already-reclaimed docs that may still be enriched."""
+    return {
+        "$and": [
+            # Previously reclaimed by any of our earlier runs.
+            {"reclaim_to_needs_review_at": {"$exists": True, "$nin": [None, "", False]}},
+            # Hasn't already been through post-processing.
+            {"post_process_applied_at": {"$in": [None, "", False]}},
+            # Still visible in the queue (or actively in review) —
+            # don't touch docs an operator already resolved.
+            {"$or": [
+                {"status": "NeedsReview"},
+                {"workflow_status": "needs_review"},
+                {"queue_visible": True},
+            ]},
+            # Never revert docs that have gained BC evidence since the
+            # reclaim (defensive — shouldn't happen but cheap to check).
+            *[{f: {"$in": [None, ""]}} for f in BC_EVIDENCE_FIELDS],
+        ],
+    }
+
+
+async def post_process(
+    *,
+    execute: bool = False,
+    limit: Optional[int] = None,
+    actor: str = "admin",
+    smart: bool = False,
+    skip_noise: bool = False,
+    db=None,
+) -> Dict[str, Any]:
+    """Retroactively apply `smart` and/or `skip_noise` modes to docs that
+    were already reclaimed by an earlier plain run. Dry-run by default.
+
+    Rules (evaluated per doc, in order):
+      1. skip_noise=True + filename matches noise pattern
+         → flip to `noise_filtered=true`, `queue_visible=false`,
+           `status='Completed'` (revert out of NeedsReview).
+      2. smart=True + has batch_parent_id + parent is classified + no prior
+         inheritance
+         → copy parent's doc_type + vendor onto child, set
+           `parent_inheritance_applied=true`. Stays in NeedsReview but
+           reviewer now sees proper context.
+      3. Otherwise → no-op (just stamp `post_process_applied_at` so
+         future runs skip it).
+    """
+    db = db if db is not None else get_db()
+
+    q = _build_post_process_filter()
+    total = await db.hub_documents.count_documents(q)
+
+    projection = {
+        "_id": 0, "id": 1, "doc_type": 1, "document_type": 1,
+        "suggested_job_type": 1, "status": 1, "workflow_status": 1,
+        "file_name": 1, "vendor_canonical": 1, "vendor_id": 1,
+        "customer_canonical": 1, "batch_parent_id": 1,
+        "parent_inheritance_applied": 1, "noise_filtered": 1,
+    }
+    cursor = db.hub_documents.find(q, projection)
+    if limit:
+        cursor = cursor.limit(int(limit))
+
+    batch: List[Dict[str, Any]] = []
+    async for doc in cursor:
+        batch.append(doc)
+
+    # For dry-run, compute classification without mutating
+    parents_map: Dict[str, Dict[str, Any]] = {}
+    if smart:
+        parent_ids = [d["batch_parent_id"] for d in batch if d.get("batch_parent_id")]
+        parents_map = await _load_parents_map(db, parent_ids)
+
+    would_noise: List[str] = []
+    would_inherit: List[str] = []
+    would_stamp: List[str] = []
+
+    for doc in batch:
+        doc_id = doc.get("id")
+        if not doc_id:
+            continue
+        if skip_noise and _is_noise(doc.get("file_name", "")):
+            would_noise.append(doc_id)
+            continue
+        if (
+            smart
+            and doc.get("batch_parent_id")
+            and not doc.get("parent_inheritance_applied")
+            and _parent_is_classified(parents_map.get(doc["batch_parent_id"], {}))
+        ):
+            would_inherit.append(doc_id)
+            continue
+        would_stamp.append(doc_id)
+
+    if not execute:
+        return {
+            "execute": False,
+            "total_candidates": total,
+            "sample_size": len(batch),
+            "would_filter_noise": len(would_noise),
+            "would_inherit": len(would_inherit),
+            "would_stamp_only": len(would_stamp),
+            "modes": {"smart": smart, "skip_noise": skip_noise},
+            "hint": "Dry-run. Pass execute=true to apply.",
+            "sample": {
+                "noise_ids": would_noise[:20],
+                "inherit_ids": would_inherit[:20],
+                "stamp_ids": would_stamp[:20],
+            },
+        }
+
+    # Execute
+    now = datetime.now(timezone.utc).isoformat()
+    filtered_noise: List[str] = []
+    inherited: List[str] = []
+    stamped: List[str] = []
+    errors: List[Dict[str, Any]] = []
+
+    for doc in batch:
+        doc_id = doc.get("id")
+        if not doc_id:
+            continue
+        try:
+            # Rule 1: noise filter — revert out of NeedsReview
+            if skip_noise and _is_noise(doc.get("file_name", "")):
+                update = {
+                    "$set": {
+                        "noise_filtered": True,
+                        "noise_filtered_at": now,
+                        "noise_filtered_reason": (
+                            "v2.5.7 post-process: filename matches noise "
+                            "pattern; reverting out of NeedsReview queue"
+                        ),
+                        "queue_visible": False,
+                        "status": "Completed",
+                        "workflow_status": "completed",
+                        "square9_stage": "completed",
+                        "post_process_applied_at": now,
+                        "post_process_actor": actor,
+                        "updated_utc": now,
+                    },
+                    "$push": {
+                        "workflow_history": {
+                            "timestamp": now,
+                            "from_status": doc.get("status"),
+                            "to_status": "Completed",
+                            "event": "post_process_noise_filtered",
+                            "actor": actor,
+                            "reason": (
+                                f"v2.5.7 retro post-process: filename "
+                                f"'{doc.get('file_name')}' matches noise pattern"
+                            ),
+                        },
+                    },
+                }
+                r = await db.hub_documents.update_one({"id": doc_id}, update)
+                if r.modified_count:
+                    filtered_noise.append(doc_id)
+                continue
+
+            # Rule 2: smart inheritance
+            parent = parents_map.get(doc.get("batch_parent_id") or "")
+            if (
+                smart
+                and doc.get("batch_parent_id")
+                and not doc.get("parent_inheritance_applied")
+                and _parent_is_classified(parent)
+            ):
+                parent_type = (
+                    parent.get("doc_type")
+                    or parent.get("document_type")
+                    or parent.get("suggested_job_type")
+                )
+                set_fields: Dict[str, Any] = {
+                    "doc_type_from_reclaim_ai": doc.get("doc_type"),
+                    "doc_type": parent_type,
+                    "document_type": parent_type,
+                    "suggested_job_type": parent_type,
+                    "parent_inheritance_applied": True,
+                    "parent_inheritance_at": now,
+                    "parent_inheritance_source": "reclaim_post_process",
+                    "post_process_applied_at": now,
+                    "post_process_actor": actor,
+                    "updated_utc": now,
+                }
+                if parent.get("vendor_canonical") and not doc.get("vendor_canonical"):
+                    set_fields["vendor_canonical"] = parent["vendor_canonical"]
+                    set_fields["vendor_inherited_from_parent"] = True
+                if parent.get("vendor_id") and not doc.get("vendor_id"):
+                    set_fields["vendor_id"] = parent["vendor_id"]
+                if parent.get("customer_canonical") and not doc.get("customer_canonical"):
+                    set_fields["customer_canonical"] = parent["customer_canonical"]
+
+                r = await db.hub_documents.update_one(
+                    {"id": doc_id},
+                    {
+                        "$set": set_fields,
+                        "$push": {
+                            "workflow_history": {
+                                "timestamp": now,
+                                "from_status": doc.get("status"),
+                                "to_status": doc.get("status"),
+                                "event": "post_process_parent_inheritance",
+                                "actor": actor,
+                                "reason": (
+                                    f"v2.5.7 retro post-process: inherited "
+                                    f"parent doc_type='{parent_type}'"
+                                ),
+                            },
+                        },
+                    },
+                )
+                if r.modified_count:
+                    inherited.append(doc_id)
+                continue
+
+            # Rule 3: stamp only — marks as processed, prevents future picks
+            r = await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    "post_process_applied_at": now,
+                    "post_process_actor": actor,
+                }},
+            )
+            if r.modified_count:
+                stamped.append(doc_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[PostProcess] doc %s failed: %s", doc_id, e)
+            errors.append({"doc_id": doc_id, "error": str(e)})
+
+    result = {
+        "generated_at": now,
+        "execute": True,
+        "actor": actor,
+        "modes": {"smart": smart, "skip_noise": skip_noise},
+        "limit_applied": limit,
+        "total_candidates": total,
+        "processed": len(filtered_noise) + len(inherited) + len(stamped),
+        "filtered_noise_count": len(filtered_noise),
+        "inherited_count": len(inherited),
+        "stamped_only_count": len(stamped),
+        "filtered_noise_ids": filtered_noise[:50],
+        "inherited_ids": inherited[:50],
+        "errors_count": len(errors),
+        "errors": errors[:20],
+    }
+    try:
+        await db.unknown_doc_reclaim_post_process_runs.insert_one({**result, "ran_at": now})
+    except Exception as e:  # noqa: BLE001
+        logger.debug("[PostProcess] audit insert failed: %s", e)
+
+    logger.info(
+        "[PostProcess] actor=%s noise=%d inherited=%d stamped=%d errors=%d",
+        actor, len(filtered_noise), len(inherited), len(stamped), len(errors),
+    )
+    return result
+
+
+async def recent_post_process_runs(limit: int = 20, db=None) -> List[Dict[str, Any]]:
+    db = db if db is not None else get_db()
+    return await db.unknown_doc_reclaim_post_process_runs.find(
+        {}, {"_id": 0},
+    ).sort("ran_at", -1).limit(limit).to_list(limit)
+
+
 __all__ = [
     "preview", "run", "recent_runs",
+    "post_process", "recent_post_process_runs",
     "UNKNOWN_DOC_TYPES", "NOISE_FILENAME_PATTERNS",
 ]

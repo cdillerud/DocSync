@@ -1,0 +1,45 @@
+{
+  "summary": "v2.5.7 retroactive post-process sweep — full backend verification PASSED. 30/30 unit tests (test_unknown_doc_reclaim.py + test_unknown_doc_reclaim_smart.py + test_unknown_doc_reclaim_post_process.py — including prod-shape 20-doc mixed scenario returning the expected 6/8/6 split) + 13/13 live HTTP integration tests against the preview env (new). All 11 features/scenarios from the review request verified green. Total 43/43.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_unknown_doc_reclaim_post_process.py",
+    "/app/backend/tests/test_unknown_doc_reclaim_post_process_http.py",
+    "/app/test_reports/pytest/iter229_full.xml",
+    "/app/test_reports/pytest/iter229_http.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "_build_post_process_filter() correctly scopes candidates to already-reclaimed docs (reclaim_to_needs_review_at set via $exists/$nin) AND not already post-processed AND still queue-visible AND no BC evidence. Safety guarantees from the review-request map 1:1 to this filter.",
+    "Rule ordering in post_process(): noise → inheritance → stamp-only. `if skip_noise and _is_noise()` short-circuits BEFORE the smart branch, so noise always wins over inheritance (matches 'email sprites never belong in inbox'). Verified live with test_noise_wins_over_smart.",
+    "Idempotency sentinel `post_process_applied_at` is written by ALL THREE paths (noise, inheritance, stamp-only). Filter excludes {$in: [None,'',False]}, so second sweep correctly sees our doc processed=0. Verified live.",
+    "Stamp-only path prevents re-picks for benign plain docs (no noise, no classifiable parent). Without this, every sweep would re-process the same docs forever. Good defensive design.",
+    "Smart inheritance preserves child's original (garbage) doc_type under `doc_type_from_reclaim_ai` for forensics. parent_inheritance_source=='reclaim_post_process' cleanly distinguishes retro-inherited from reclaim-time-inherited (which is 'reclaim_smart_mode'). Reviewers can trace which pipeline stage enriched the doc.",
+    "Noise path in post_process sets status='Completed' + workflow_status='completed' + square9_stage='completed' + queue_visible=false — a full revert out of NeedsReview. Distinct from the reclaim-time noise path (which kept the doc at its pre-reclaim status). Semantically correct: retro-filtering means the doc should NEVER have been in the queue.",
+    "Audit row insert into unknown_doc_reclaim_post_process_runs is wrapped in try/except so an audit failure doesn't abort the mutation. Per-doc errors are collected and reported back in `errors[]` (capped at 20). Non-blocking design.",
+    "BC evidence check uses `{$in: [None, '']}` per field — matches the existing _build_filter() convention. Docs that gained BC writes since the original reclaim are defensively excluded.",
+    "parent_inheritance_applied guard in the `would_inherit` computation AND in the execute loop prevents double-inheritance. Children previously inherited (via v2.5.6 smart reclaim) correctly fall through to stamp-only. Verified with test_smart_skips_children_already_inherited.",
+    "Router endpoints properly use FastAPI Query() with ge/le bounds. Dry-run is the default (execute=false) — safe-by-default design consistent with /run. The legacy v2.5.5 /run endpoint, the v2.5.6 smart+skip_noise flags, and the v2.5.7 post-process endpoint all share the same filter+noise+parent primitives via shared helpers (_is_noise, _load_parents_map, _parent_is_classified) — DRY, maintainable.",
+    "Minor (non-blocking): router's `limit: int = Query(None, ...)` should ideally be Optional[int] for strict typing — FastAPI coerces this correctly, carry-over from v2.5.5."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_unknown_doc_reclaim_post_process_http.py (NEW — 13 live HTTP tests: dry-run shape + non-mutation, execute+skip_noise revert, execute+smart inheritance, noise-wins-combined, idempotency, organic NeedsReview safety, BC-evidence safety, resolved-doc safety, /runs endpoint, 4 regression endpoint checks)"
+  ],
+  "success_rate": {
+    "backend": "100% (43/43 — 30 unit + 13 HTTP)",
+    "frontend": "not tested (per request — backend-only)"
+  },
+  "test_credentials": "admin/admin (read from /app/memory/test_credentials.md — not needed; /api/admin/unknown-doc-reclaim/* endpoints are unauthenticated in preview env)",
+  "seed_data_creation": "Per-test function-scoped fixtures seeded ephemeral TEST_iter229_pp_* docs (parent + child variants: noise/inherit/stamp/combo/idem/organic/bc/resolved) across 8 scenarios. All cleaned up at fixture teardown + module-scope safety-net delete_many({_iter229:'TEST_iter229_pp'}). Post-run verification: 0 leftover TEST_iter229_* docs in hub_documents and 0 iter229_* audit rows in unknown_doc_reclaim_post_process_runs. Real customer data untouched.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "v2.5.7 post-process sweep fully verified on live preview env. Service exports post_process + recent_post_process_runs. Audit collection: unknown_doc_reclaim_post_process_runs. All three sentinels (post_process_applied_at, noise_filtered, parent_inheritance_applied) confirmed idempotent. The prod situation (372 v2.5.5-plain-reclaimed docs) can now be safely post-processed: expect the 50 batch children to go through smart inheritance and ~25-50 email sprites to be reverted out of NeedsReview. mongomock-motor==0.0.36 + pymongo live seeding both working. The 4 pre-existing failures in test_validation_auto_clear_readiness_fixes.py were NOT re-run this iteration (unrelated, carry-over from iter228).",
+  "rca of the issue": "N/A — no bugs found. All 11 review-request scenarios green. Note on dry-run non-mutation test: initial thought was to check our seeded docs specifically (rather than the single pre-existing real candidate in preview DB). Refactored accordingly — the dry-run test now asserts total_candidates>=3 (our 3 seeds + any real candidates) AND asserts no mutation on EACH of our 3 seeded IDs. Clean isolation, works alongside live data."
+}

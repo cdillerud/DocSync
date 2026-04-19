@@ -992,3 +992,35 @@ async def unknown_doc_reclaim_runs(limit: int = Query(20, ge=1, le=100)):
     from services.admin.unknown_doc_reclaim_service import recent_runs
     runs = await recent_runs(limit=limit)
     return {"total": len(runs), "runs": runs}
+
+
+@router.post("/unknown-doc-reclaim/post-process")
+async def unknown_doc_reclaim_post_process(
+    execute: bool = Query(False, description="Required True to actually mutate"),
+    limit: int = Query(None, ge=1, le=10000, description="Optional cap"),
+    actor: str = Query("admin", description="Audit actor label"),
+    smart: bool = Query(False, description=(
+        "Retroactively inherit parent metadata onto batch-split children "
+        "that were reclaimed without the smart flag"
+    )),
+    skip_noise: bool = Query(False, description=(
+        "Retroactively revert filename-noise docs out of NeedsReview "
+        "into noise_filtered=true"
+    )),
+):
+    """Retroactively apply smart + skip_noise modes to docs that were
+    already reclaimed by an earlier plain v2.5.5 run. Dry-run by default.
+    Idempotent via `post_process_applied_at` sentinel."""
+    from services.admin.unknown_doc_reclaim_service import post_process
+    return await post_process(
+        execute=execute, limit=limit, actor=actor,
+        smart=smart, skip_noise=skip_noise,
+    )
+
+
+@router.get("/unknown-doc-reclaim/post-process/runs")
+async def unknown_doc_reclaim_post_process_runs(limit: int = Query(20, ge=1, le=100)):
+    """Recent retro post-process run history."""
+    from services.admin.unknown_doc_reclaim_service import recent_post_process_runs
+    runs = await recent_post_process_runs(limit=limit)
+    return {"total": len(runs), "runs": runs}

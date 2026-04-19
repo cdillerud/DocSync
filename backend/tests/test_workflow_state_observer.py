@@ -153,5 +153,99 @@ async def test_recent_list_filters_and_limits():
     assert ts == sorted(ts, reverse=True)
 
 
+# ─────────────────────────────────────────────────────────────
+# Phase B Readiness Report
+# ─────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_readiness_report_not_ready_on_empty_data():
+    from services.workflow_state_observer import build_phase_b_readiness_report
+    db = FakeDb()
+    r = await build_phase_b_readiness_report(db, days=7, min_coverage=5)
+    assert r["ready_to_extract"] is False
+    assert r["total_calls"] == 0
+    assert r["counts"] == {"must_preserve": 0, "should_cover": 0, "edge_case": 0}
+    assert r["matrix"] == []
+    assert "NOT READY" in r["verdict"]
+    assert "no observer data" in r["verdict"]
+    # Markdown always generated, even when empty
+    assert "# Phase B Readiness Report" in r["markdown"]
+    assert "Total calls observed:** 0" in r["markdown"]
+
+
+@pytest.mark.asyncio
+async def test_readiness_report_categorizes_and_verdicts_ready():
+    from services.workflow_state_observer import build_phase_b_readiness_report, COLL
+    db = FakeDb()
+    now = datetime.now(timezone.utc).isoformat()
+    # 3 paths: 10× (must_preserve@5), 3× (should_cover), 1× (edge_case)
+    seed_plan = [
+        ("document_handlers.py", "process_document", "SALES_ORDER", 10),
+        ("server.py",            "process_document", "SHIPMENT",     3),
+        ("server.py",            "reprocess",        "RECEIPT",      1),
+    ]
+    for cfile, cfunc, dtype, count in seed_plan:
+        for _ in range(count):
+            db[COLL].docs.append({
+                "caller_file": cfile, "caller_func": cfunc, "doc_type": dtype,
+                "created_at": now,
+            })
+
+    r = await build_phase_b_readiness_report(db, days=7, min_coverage=5)
+    assert r["ready_to_extract"] is True
+    assert r["total_calls"] == 14
+    assert r["counts"]["must_preserve"] == 1
+    assert r["counts"]["should_cover"] == 1
+    assert r["counts"]["edge_case"] == 1
+    # Matrix sorted desc by calls
+    calls_order = [row["calls"] for row in r["matrix"]]
+    assert calls_order == sorted(calls_order, reverse=True)
+    # Categories assigned correctly
+    by_cat = {row["category"]: row for row in r["matrix"]}
+    assert by_cat["must_preserve"]["doc_type"] == "SALES_ORDER"
+    assert by_cat["should_cover"]["doc_type"] == "SHIPMENT"
+    assert by_cat["edge_case"]["doc_type"] == "RECEIPT"
+    assert "READY" in r["verdict"]
+    assert "1 must-preserve" in r["verdict"]
+    # Markdown has all 3 category sections
+    md = r["markdown"]
+    assert "Must-preserve paths" in md
+    assert "Should-cover paths" in md
+    assert "Edge cases" in md
+    assert "| `document_handlers.py::process_document` | `SALES_ORDER` | 10 |" in md
+
+
+@pytest.mark.asyncio
+async def test_readiness_report_not_ready_when_below_threshold():
+    """Even with data present, if nothing hits min_coverage, we're not ready."""
+    from services.workflow_state_observer import build_phase_b_readiness_report, COLL
+    db = FakeDb()
+    now = datetime.now(timezone.utc).isoformat()
+    # Only 2 calls total — below min_coverage=5
+    for _ in range(2):
+        db[COLL].docs.append({
+            "caller_file": "x.py", "caller_func": "y", "doc_type": "SHIPMENT",
+            "created_at": now,
+        })
+
+    r = await build_phase_b_readiness_report(db, days=7, min_coverage=5)
+    assert r["total_calls"] == 2
+    assert r["ready_to_extract"] is False
+    assert r["counts"]["must_preserve"] == 0
+    assert r["counts"]["should_cover"] == 1
+    assert "NOT READY" in r["verdict"]
+    assert "min_coverage=5" in r["verdict"]
+
+
+@pytest.mark.asyncio
+async def test_readiness_report_clamps_min_coverage():
+    from services.workflow_state_observer import build_phase_b_readiness_report
+    db = FakeDb()
+    r_lo = await build_phase_b_readiness_report(db, min_coverage=0)
+    assert r_lo["min_coverage"] == 2  # clamped up
+    r_hi = await build_phase_b_readiness_report(db, min_coverage=999)
+    assert r_hi["min_coverage"] == 100  # clamped down
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -158,9 +158,138 @@ async def list_recent_observations(
     return await db[COLL].find(q, {"_id": 0}).sort("created_at", -1).to_list(limit)
 
 
+# ─────────────────────────────────────────────────────────────
+# Phase B Readiness Report (v2.5.2)
+# ─────────────────────────────────────────────────────────────
+
+async def build_phase_b_readiness_report(
+    db, *, days: int = 7, min_coverage: int = 5,
+) -> Dict[str, Any]:
+    """Turn observer data into a Phase-B extraction readiness matrix.
+
+    For each (caller_file::caller_func, doc_type) pair seen in the
+    window, emit a row with the call count + a readiness category:
+      • 'must_preserve'   — ≥ min_coverage calls (high traffic; Phase B
+                            MUST have a green test for this exact path)
+      • 'should_cover'    — 2..min_coverage-1 calls (meaningful traffic)
+      • 'edge_case'       — 1 call (rare; nice-to-have coverage)
+
+    Also returns a human-readable markdown report ready to paste into
+    a PR description or the CHANGELOG before the extraction lands.
+    """
+    min_coverage = max(2, min(int(min_coverage), 100))
+    summary = await get_observer_summary(db, days=days)
+    cxd = summary.get("by_caller_x_doc_type", {})
+
+    rows: List[Dict[str, Any]] = []
+    for caller, dt_counts in cxd.items():
+        for doc_type, count in dt_counts.items():
+            if count >= min_coverage:
+                category = "must_preserve"
+            elif count >= 2:
+                category = "should_cover"
+            else:
+                category = "edge_case"
+            rows.append({
+                "caller": caller,
+                "doc_type": doc_type,
+                "calls": count,
+                "category": category,
+            })
+    rows.sort(key=lambda r: (-r["calls"], r["caller"], r["doc_type"]))
+
+    must_preserve = [r for r in rows if r["category"] == "must_preserve"]
+    should_cover = [r for r in rows if r["category"] == "should_cover"]
+    edge_cases = [r for r in rows if r["category"] == "edge_case"]
+
+    # Ready to extract only when we have AT LEAST ONE must-preserve path
+    # AND no caller path was silent in the window (i.e., coverage > 0 for
+    # every caller we know about — best-effort heuristic)
+    ready_to_extract = len(must_preserve) > 0
+    if summary.get("total_calls", 0) == 0:
+        verdict = "NOT READY — no observer data captured yet. Let the shim run in production for a full business week before re-running."
+    elif not ready_to_extract:
+        verdict = (
+            "NOT READY — observer has data but no caller × doc_type pair "
+            f"hit the min_coverage={min_coverage} threshold. Either lower "
+            "the threshold or wait for more traffic."
+        )
+    else:
+        verdict = (
+            f"READY — {len(must_preserve)} must-preserve paths identified. "
+            "Phase B extraction should ship with a pytest covering each of "
+            "those pairs to prevent behavior drift."
+        )
+
+    # Build markdown block (escape pipes in doc_type/caller just in case)
+    def _esc(s: str) -> str:
+        return (s or "").replace("|", "\\|")
+
+    md_lines = [
+        "# Phase B Readiness Report",
+        "",
+        f"**Window:** last {summary.get('window_days')} days"
+        f" (since `{summary.get('since', '')[:19]}Z`)",
+        f"**Total calls observed:** {summary.get('total_calls', 0)}",
+        f"**Min coverage threshold:** {min_coverage}",
+        "",
+        f"## Verdict",
+        "",
+        verdict,
+        "",
+    ]
+    if must_preserve:
+        md_lines += [
+            "## Must-preserve paths (REQUIRED test coverage in new home)",
+            "",
+            "| Caller | Doc Type | Calls |",
+            "|---|---|---|",
+        ]
+        for r in must_preserve:
+            md_lines.append(f"| `{_esc(r['caller'])}` | `{_esc(r['doc_type'])}` | {r['calls']} |")
+        md_lines.append("")
+    if should_cover:
+        md_lines += [
+            "## Should-cover paths (meaningful traffic)",
+            "",
+            "| Caller | Doc Type | Calls |",
+            "|---|---|---|",
+        ]
+        for r in should_cover:
+            md_lines.append(f"| `{_esc(r['caller'])}` | `{_esc(r['doc_type'])}` | {r['calls']} |")
+        md_lines.append("")
+    if edge_cases:
+        md_lines += [
+            "## Edge cases (single observed call)",
+            "",
+            "| Caller | Doc Type | Calls |",
+            "|---|---|---|",
+        ]
+        for r in edge_cases:
+            md_lines.append(f"| `{_esc(r['caller'])}` | `{_esc(r['doc_type'])}` | {r['calls']} |")
+        md_lines.append("")
+
+    return {
+        "window_days": summary.get("window_days"),
+        "since": summary.get("since"),
+        "total_calls": summary.get("total_calls", 0),
+        "min_coverage": min_coverage,
+        "ready_to_extract": ready_to_extract,
+        "verdict": verdict,
+        "counts": {
+            "must_preserve": len(must_preserve),
+            "should_cover": len(should_cover),
+            "edge_case": len(edge_cases),
+        },
+        "matrix": rows,
+        "markdown": "\n".join(md_lines),
+    }
+
+
 __all__ = [
     "record_workflow_call",
     "get_observer_summary",
     "list_recent_observations",
+    "build_phase_b_readiness_report",
     "COLL",
 ]

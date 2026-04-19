@@ -14,6 +14,7 @@ from deps import get_db
 from services.workflow_state_observer import (
     get_observer_summary,
     list_recent_observations,
+    build_phase_b_readiness_report,
 )
 
 router = APIRouter(prefix="/admin/workflow-observer", tags=["Admin"])
@@ -35,3 +36,22 @@ async def observer_recent(
         get_db(), limit=limit, caller_func=caller_func,
     )
     return {"total": len(rows), "observations": rows}
+
+
+@router.get("/phase-b-readiness")
+async def phase_b_readiness(
+    days: int = Query(7, ge=1, le=90),
+    min_coverage: int = Query(5, ge=2, le=100),
+    format: str = Query("json", pattern="^(json|markdown)$"),
+):
+    """Phase-B extraction readiness matrix — ranks every observed
+    caller × doc_type pair, categorizes as must_preserve / should_cover /
+    edge_case, and emits a verdict. Set `format=markdown` to get a
+    paste-ready PR-description block in `text/markdown`."""
+    report = await build_phase_b_readiness_report(
+        get_db(), days=days, min_coverage=min_coverage,
+    )
+    if format == "markdown":
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(report["markdown"], media_type="text/markdown")
+    return report

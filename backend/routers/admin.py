@@ -942,3 +942,40 @@ async def unified_learning_summary():
     from services.unified_learning_service import get_unified_learning_summary
     db = get_db()
     return await get_unified_learning_summary(db)
+
+
+
+# ─────────────── Unknown-Doc Reclaim (v2.5.5) ───────────────
+
+@router.get("/unknown-doc-reclaim/preview")
+async def unknown_doc_reclaim_preview(limit: int = Query(50, ge=1, le=500)):
+    """Dry-run the reclaim sweep: returns how many documents are currently
+    sitting at Completed/Exported with `doc_type` unclassified (None/Unknown/
+    Other/...) and would be kicked back to NeedsReview. Protected cases
+    (any BC record evidence, already-reclaimed docs) are excluded from the
+    count."""
+    from services.admin.unknown_doc_reclaim_service import preview
+    return await preview(limit=limit)
+
+
+@router.post("/unknown-doc-reclaim/run")
+async def unknown_doc_reclaim_run(
+    execute: bool = Query(False, description="Required True to actually mutate"),
+    limit: int = Query(None, ge=1, le=10000,
+                       description="Optional cap — reclaim at most N docs this run"),
+    actor: str = Query("admin", description="Audit actor label"),
+):
+    """Execute the reclaim. Defaults to `execute=false` (dry-run). When
+    `execute=true`, each matching document is moved to NeedsReview with a
+    `reclaim_to_needs_review_at` timestamp + a workflow_history entry.
+    Per-run audit row written to `unknown_doc_reclaim_runs`."""
+    from services.admin.unknown_doc_reclaim_service import run as do_run
+    return await do_run(execute=execute, limit=limit, actor=actor)
+
+
+@router.get("/unknown-doc-reclaim/runs")
+async def unknown_doc_reclaim_runs(limit: int = Query(20, ge=1, le=100)):
+    """Recent reclaim run history — audit trail for the sweep."""
+    from services.admin.unknown_doc_reclaim_service import recent_runs
+    runs = await recent_runs(limit=limit)
+    return {"total": len(runs), "runs": runs}

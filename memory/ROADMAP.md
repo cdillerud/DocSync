@@ -21,7 +21,7 @@
 - ~~Vendor Resolution Observability + Negative Feedback Loop~~ (2026-03-16, iter_116) — per-doc resolution objects, rejection memory, guardrails, analytics, 71 tests
 
 ### P1 — Next Up
-- **U5 — Parameterized `<PatternHealthPanel domain="...">` React component** — reusable panel mounted on both `/ai-learning` and `/intake/learning` (replaces inline Pattern Health markup in IntakeLearningPage.js)
+- **U6 — Retire duplicate SO services** — consolidate 5 redundant `sales_order_learning_*` services into `learning_core/` paradigm
 - **Rep Overrides Management UI** — Admin screen to easily map customers to reps without DB scripts
 - **Teams Adaptive Card Integration** — Webhook handler for "Approve" → BC Sales Order
 - **Admin UI for Item Mapping Rules** — CRUD interface for managing item mapping rules
@@ -29,8 +29,9 @@
 - **Batch AR Release Evaluation** — Auto-evaluate all sales docs through AR gate in pipeline
 
 ### P1 — Recently Completed
-- ~~U4 — Shared Feedback Ingest + AP Telemetry Tick~~ (2026-04-19, iter_217) — Single polymorphic POST /api/learning/feedback; AP reviewer feedback now emits to learning_events_v2 so sparklines light up organically
-- ~~U3 — Shared Pattern Health & Hygiene Consolidation~~ (2026-04-19, iter_215/216) — Cross-domain AP + intake health + unified hygiene + 7-day activity sparklines
+- ~~U5 — Reusable PatternHealthPanel + Learning Ops command center + reviewer leaderboard~~ (2026-04-19, iter_218)
+- ~~U4 — Shared Feedback Ingest + AP Telemetry Tick~~ (2026-04-19, iter_217)
+- ~~U3 — Shared Pattern Health & Hygiene Consolidation~~ (2026-04-19, iter_215/216)
 - ~~U2 — Shared Fingerprint Service~~ (2026-04-18, iter_214) — TF-IDF moved into learning_core; AP gets vendor-peer discovery for free
 - ~~U1 — Unified Event Log + Drift Alerts~~ (2026-04-18, iter_214) — `learning_events_v2` + 5 drift rules with nightly scanner
 

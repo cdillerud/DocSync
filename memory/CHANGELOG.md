@@ -1,5 +1,31 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-19] v2.5.2 — U5: Reusable PatternHealthPanel + Learning Ops Command Center
+
+Completed the U1–U6 unification backbone: extracted the inline Pattern Health markup into a single reusable `<PatternHealthPanel domain="..." />` component, mounted it across three surfaces (Intake Learning, AI Learning, Learning Ops), and shipped a new `/learning/ops` command-center page with a **reviewer activity leaderboard** that aggregates `learning_events_v2` by actor.
+
+**Added:**
+- `frontend/src/components/PatternHealthPanel.jsx` — single reusable component for cross-domain OR per-domain pattern health, fetches `/api/learning/pattern-health/unified`, renders summary metrics + per-scope table + trend sparkline + recent events, with `refreshKey` prop for parent-triggered reloads
+- `frontend/src/pages/LearningOpsPage.js` — read-only command center at `/learning/ops`: top-line KPIs (total events, open drift, active reviewers, feedback events) + cross-domain health + reviewer leaderboard (7/14/30d window selector, medal emojis for top 3, per-domain badges, top_event_type column) + drift alerts panel + recent events feed
+- `backend/services/learning_core/events_service.get_reviewer_leaderboard(days, limit)` — aggregates by actor, excludes bot actor `test`, clamps window to [1, 90]
+- `GET /api/learning/reviewers/leaderboard?days=&limit=` endpoint on `routers/learning_core.py`
+- Sidebar nav link "Learning Ops" (Gauge icon) → `/learning/ops`; new route in `App.js`; page title entry in `Layout.js`
+- 2 new pytest for leaderboard; 16 new API regression tests in `test_u5_ops_leaderboard_api.py` (authored by testing agent)
+
+**Refactored:**
+- `IntakeLearningPage.js` — ~150 lines of inline Pattern Health markup deleted; replaced with `<PatternHealthPanel domain="sales_intake" />` + `<PatternHealthPanel />` (cross-domain)
+- `LearningDashboard.js` (AI Learning) — `<PatternHealthPanel domain="ap_posting" />` mounted under Automation Rate widget (first time AP surface shows trust/drift/retire metrics)
+
+**Verified:**
+- 49/49 pytest passing across 6 learning-core test files
+- Testing agent iter 218: 16/16 API regression + full UI smoke PASS on all 3 pages; leaderboard ranking correct (sally.rep 7 > marcus.ap 4 > jenna.admin 2); window selector + sidebar nav work; every testid present
+- Seed data (13 scoped events) created + cleaned up; Giovanni C-10250 untouched
+- Clarified: the React hydration warnings seen in prior iterations come from the Emergent visual-editor's `<span data-ve-dynamic>` wrappers — **preview-env-only artifact**, not an app bug
+
+**Non-blocking code-review observations (not fixed):**
+- `days` clamp is enforced at function-level AND router-level (`Query(ge=1, le=90)`) — router returns 422 for days>90 before the function clamp runs; harmless but slightly inconsistent
+- `LearningOpsPage` fires two drift endpoints (alerts + summary) that overlap slightly; future cleanup candidate
+
 ## [2026-04-19] v2.5.2 — U4: Shared Feedback Ingest + AP Telemetry Tick
 
 Consolidated reviewer-feedback ingestion behind a single polymorphic endpoint `POST /api/learning/feedback` discriminated by `scope_type` (`customer` | `vendor`). Also closed the telemetry gap so AP reviewer thumbs-up/down now emits to `learning_events_v2` — meaning the 7-day sparklines on `/intake/learning` light up organically as both Inside Sales AND AP reviewers work their queues.

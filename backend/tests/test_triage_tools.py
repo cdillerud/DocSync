@@ -261,3 +261,41 @@ async def test_gammin_12x_prod_scenario(db):
     assert len(runs) == 1
     assert runs[0]["docs_marked_duplicate"] == 11
     assert runs[0]["actor"] == "meghan"
+
+
+
+# ──────────────────────────────────────────────────────────────
+# v2.5.12 — cap / limit regression
+# ──────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_duplicate_scan_max_groups_returned_cap(db):
+    """Response cap should shorten `.groups` without affecting
+    `.groups_total` / `.duplicate_docs_total`."""
+    # Seed 5 dup groups (2 docs each)
+    for gi in range(5):
+        keeper = _unk(f"g{gi}-a", f"file_{gi}.pdf", vendor="V")
+        dup = _unk(f"g{gi}-b", f"file_{gi}.pdf", vendor="V")
+        await db.hub_documents.insert_many([keeper, dup])
+    r = await duplicate_scan(db=db, max_groups_returned=2)
+    assert r["groups_total"] == 5
+    assert r["wasted_docs_estimate"] == 5  # 5 groups × (2-1)
+    assert len(r["groups"]) == 2  # response cap
+
+
+@pytest.mark.asyncio
+async def test_duplicate_resolve_clears_full_backlog_single_call(db):
+    """With the new max_groups_returned=10000 in duplicate_resolve,
+    one call must resolve ALL groups (previously capped at 100)."""
+    # 150 dup groups, 2 docs each
+    for gi in range(150):
+        await db.hub_documents.insert_many([
+            _unk(f"g{gi}-a", f"file_{gi}.pdf", vendor="V"),
+            _unk(f"g{gi}-b", f"file_{gi}.pdf", vendor="V"),
+        ])
+    r = await duplicate_resolve(db=db, execute=True, keep="oldest")
+    assert r["groups_resolved"] == 150
+    assert r["docs_marked_duplicate"] == 150
+    # Follow-up scan should find nothing left
+    after = await duplicate_scan(db=db)
+    assert after["groups_total"] == 0

@@ -169,8 +169,9 @@ def _ingestion_day_from_doc(d: Dict[str, Any]) -> str:
 async def duplicate_scan(
     *,
     same_day: bool = True,
-    limit: int = 2000,
+    limit: int = 20000,
     min_count: int = 2,
+    max_groups_returned: int = 1000,
     db=None,
 ) -> Dict[str, Any]:
     """Return groups of docs with the same (filename, vendor[, ingestion day])
@@ -181,6 +182,11 @@ async def duplicate_scan(
                   Catches repeated email-poll duplicates without flagging
                   legit recurring filings (e.g. a monthly statement that
                   comes in with the same name each month).
+        limit: Max hub_documents scanned in one pass. Bumped to 20000 so
+                  historical backlogs don't require for-loop runs.
+        max_groups_returned: Cap on the returned `groups` array (for
+                  response payload size). `groups_total` always reflects
+                  the true count regardless of this cap.
     """
     db = db if db is not None else get_db()
     projection = {
@@ -233,7 +239,7 @@ async def duplicate_scan(
         "groups_total": len(dup_groups),
         "duplicate_docs_total": total_dup_docs,
         "wasted_docs_estimate": sum(g["count"] - 1 for g in dup_groups),
-        "groups": dup_groups[:100],
+        "groups": dup_groups[:max_groups_returned],
     }
 
 
@@ -246,14 +252,19 @@ async def duplicate_resolve(
     keep: KeepStrategy = "oldest",
     same_day: bool = True,
     actor: str = "admin",
-    limit: int = 2000,
+    limit: int = 20000,
     db=None,
 ) -> Dict[str, Any]:
     """For every dup group, keep one doc (oldest or newest) and flag the
     rest with `duplicate_of=<keeper_id>`, `queue_visible=false`,
-    `status='Completed'`. Dry-run by default."""
+    `status='Completed'`. Dry-run by default. Runs scan with
+    `max_groups_returned=10000` so a single call clears the full backlog
+    (previously required a for-loop due to a 100-group response cap)."""
     db = db if db is not None else get_db()
-    scan = await duplicate_scan(same_day=same_day, limit=limit, db=db)
+    scan = await duplicate_scan(
+        same_day=same_day, limit=limit,
+        max_groups_returned=10000, db=db,
+    )
 
     # Decide winners / losers per group
     now = datetime.now(timezone.utc).isoformat()

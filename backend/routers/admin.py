@@ -1100,9 +1100,13 @@ async def filename_heuristics_unmatched_sample(
 async def duplicate_docs_scan(
     same_day: bool = Query(True,
                            description="Also require same YYYY-MM-DD ingestion day"),
-    limit: int = Query(2000, ge=1, le=20000),
+    limit: int = Query(20000, ge=1, le=100000),
     min_count: int = Query(2, ge=2, le=100,
                            description="Only flag groups with at least this many dupes"),
+    max_groups_returned: int = Query(
+        1000, ge=1, le=10000,
+        description="Cap on the returned groups array (response size). "
+                    "`groups_total` always reflects the true count."),
 ):
     """Find groups of docs with identical (file_name + vendor_canonical
     [+ ingestion day]). Catches email-poller dedup misses — e.g. the
@@ -1110,6 +1114,7 @@ async def duplicate_docs_scan(
     from services.admin.triage_tools_service import duplicate_scan
     return await duplicate_scan(
         same_day=same_day, limit=limit, min_count=min_count,
+        max_groups_returned=max_groups_returned,
     )
 
 
@@ -1118,11 +1123,12 @@ async def duplicate_docs_resolve(
     execute: bool = Query(False, description="Required True to mutate"),
     keep: str = Query("oldest", description="'oldest' | 'newest'"),
     same_day: bool = Query(True),
-    limit: int = Query(2000, ge=1, le=20000),
+    limit: int = Query(20000, ge=1, le=100000),
     actor: str = Query("admin"),
 ):
     """Mark all-but-one doc per duplicate group as `duplicate_of=<keeper>`,
-    status=Completed, queue_visible=false. Dry-run by default."""
+    status=Completed, queue_visible=false. Dry-run by default. One call
+    now clears the full backlog (previously required a for-loop)."""
     from services.admin.triage_tools_service import duplicate_resolve
     if keep not in ("oldest", "newest"):
         keep = "oldest"

@@ -231,16 +231,14 @@ async def auto_propose(
         # Pull the full distribution once — we use it for both the
         # majority decision AND the deferred diagnostic.
         dist = await vendor_doc_type_distribution(db, vendor_c, vendor_n)
-        majority = None
-        if dist["total"] >= min_vendor_samples and dist["top"]:
-            top = dist["top"][0]
-            if top["pct"] >= min_majority_pct:
-                majority = {
-                    "doc_type": top["doc_type"], "votes": top["votes"],
-                    "total": dist["total"], "pct": top["pct"],
-                }
+        decision = _decide(
+            dist,
+            unmatched_count=g["count"],
+            min_vendor_samples=min_vendor_samples,
+            min_majority_pct=min_majority_pct,
+        )
 
-        if not majority:
+        if decision is None:
             # Explain exactly why we couldn't decide.
             if not (vendor_c or vendor_n):
                 reason = "no vendor on the unmatched docs (vendor_canonical + vendor_name both empty)"
@@ -249,16 +247,25 @@ async def auto_propose(
                     "vendor has 0 non-Unknown, non-heuristic-classified docs "
                     "in hub_documents — can't infer doc_type from history"
                 )
-            elif dist["total"] < min_vendor_samples:
+            elif dist["total"] < 2:
                 reason = (
-                    f"only {dist['total']} classified docs for this vendor "
-                    f"(need ≥{min_vendor_samples} to vote)"
+                    f"only {dist['total']} classified doc for this vendor "
+                    f"(need ≥2 at 100% or ≥{min_vendor_samples} to vote)"
                 )
             else:
                 top = dist["top"][0]
+                second = dist["top"][1] if len(dist["top"]) > 1 else None
+                margin_note = (
+                    f" (margin {round(top['pct'] / second['pct'], 1)}× over 2nd "
+                    f"at {second['pct']}%)"
+                    if second and second["pct"] > 0 else ""
+                )
                 reason = (
-                    f"top doc_type is {top['doc_type']} at {top['pct']}% — "
-                    f"below {min_majority_pct}% majority threshold"
+                    f"top doc_type is {top['doc_type']} at {top['pct']}%{margin_note} — "
+                    f"no tier qualified "
+                    f"(A: ≥{min_majority_pct}% + ≥{min_vendor_samples} samples | "
+                    f"B: 100%% + ≥2 samples | "
+                    f"C: ≥60%% + ≥2× margin + ≥20 samples)"
                 )
             deferred.append({
                 "vendor_canonical": vendor_c,
@@ -273,12 +280,10 @@ async def auto_propose(
             })
             continue
 
+        majority, tier, confidence = decision
         rule_id = _rule_id_from(vendor_c or vendor_n, g["shape"])
         vendor_regex = _vendor_regex_from(vendor_c, vendor_n)
         filename_regex = shape_to_regex(g["shape"])
-        # Confidence is a scaled majority: 70% majority → 0.70,
-        # 100% majority → 0.95. Capped to preserve human review signal.
-        confidence = min(0.95, round(majority["pct"] / 100.0, 2))
 
         proposals.append({
             "rule_id": rule_id,
@@ -289,18 +294,23 @@ async def auto_propose(
             "filename_regex": filename_regex,
             "doc_type": majority["doc_type"],
             "confidence": confidence,
+            "tier": tier,
             "unmatched_count": g["count"],
             "vendor_history": majority,
             "examples": g["examples"],
             "example_ids": g["example_ids"],
             "note": (
-                f"Auto-derived from {majority['votes']}/{majority['total']} "
+                f"[Tier {tier}] Auto-derived from {majority['votes']}/{majority['total']} "
                 f"({majority['pct']}%) of this vendor's classified history."
             ),
         })
 
     proposals.sort(key=lambda p: -p["unmatched_count"])
     deferred.sort(key=lambda p: -p["unmatched_count"])
+
+    by_tier: Dict[str, int] = {"A": 0, "B": 0, "C": 0}
+    for p in proposals:
+        by_tier[p["tier"]] = by_tier.get(p["tier"], 0) + 1
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -311,10 +321,75 @@ async def auto_propose(
         "groups_total": len(raw_groups),
         "proposals_count": len(proposals),
         "deferred_count": len(deferred),
+        "proposals_by_tier": by_tier,
         "projected_coverage": sum(p["unmatched_count"] for p in proposals),
         "proposals": proposals[:200],
         "deferred": deferred[:100],
     }
+
+
+# ─────────────────────────────────────────────────────────────
+# Tiered decision
+# ─────────────────────────────────────────────────────────────
+
+# Tier C thresholds — catches "strong but not overwhelming" majorities
+# when there's a lot of unmatched volume AND a wide margin over 2nd.
+_TIER_C_MIN_PCT = 60.0
+_TIER_C_MIN_SAMPLES = 20
+_TIER_C_MIN_MARGIN = 2.0  # top_pct / second_pct
+
+
+def _decide(
+    dist: Dict[str, Any],
+    *,
+    unmatched_count: int,  # noqa: ARG001 — reserved for future per-group tuning
+    min_vendor_samples: int,
+    min_majority_pct: float,
+) -> Optional[tuple]:
+    """Return `(majority_dict, tier, confidence)` or None.
+
+    Three tiers, first match wins:
+        Tier A — High-volume, high-agreement (the original contract).
+                 ≥ min_majority_pct AND ≥ min_vendor_samples.
+                 confidence = top_pct/100, capped 0.95.
+        Tier B — Small sample, perfect agreement.
+                 100% majority AND total ≥ 2.
+                 confidence = 0.75 (strong signal but worth a human pass).
+        Tier C — Wide margin, strong (not perfect) majority, large sample.
+                 top_pct ≥ 60 AND margin ≥ 2× over 2nd AND total ≥ 20.
+                 confidence = 0.70. Deliberately below tier-A confidence
+                 so reviewers notice these before auto-close logic trusts them.
+    """
+    if not dist.get("top"):
+        return None
+    top = dist["top"][0]
+    total = dist["total"]
+    top_pct = top["pct"]
+    second_pct = dist["top"][1]["pct"] if len(dist["top"]) > 1 else 0.0
+
+    majority = {
+        "doc_type": top["doc_type"],
+        "votes": top["votes"],
+        "total": total,
+        "pct": top_pct,
+    }
+
+    # Tier A: original contract
+    if top_pct >= min_majority_pct and total >= min_vendor_samples:
+        return majority, "A", min(0.95, round(top_pct / 100.0, 2))
+
+    # Tier B: few samples but unanimous
+    if top_pct >= 100.0 and total >= 2:
+        return majority, "B", 0.75
+
+    # Tier C: wide margin with decent sample
+    if (top_pct >= _TIER_C_MIN_PCT
+            and total >= _TIER_C_MIN_SAMPLES
+            and second_pct > 0
+            and (top_pct / second_pct) >= _TIER_C_MIN_MARGIN):
+        return majority, "C", 0.70
+
+    return None
 
 
 def _rule_id_from(vendor: str, shape: str) -> str:

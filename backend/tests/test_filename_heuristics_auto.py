@@ -342,7 +342,7 @@ async def test_deferred_reason_below_majority(db):
                                      min_vendor_samples=5)
     assert report["deferred_count"] == 1
     d = report["deferred"][0]
-    assert "below" in d["reason"].lower() or "majority" in d["reason"].lower()
+    assert "tier qualified" in d["reason"].lower() or "below" in d["reason"].lower()
     assert d["vendor_history_total"] == 20
 
 
@@ -357,3 +357,131 @@ async def test_deferred_reason_no_vendor(db):
 
     hit = await fhs.classify_filename_async("disabled_target.pdf")
     assert hit is None
+
+
+# ──────────────────────────────────────────────────────────────
+# Tiered decision — Tier A / B / C
+# ──────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_tier_a_high_volume_high_agreement(db):
+    """Classic Tier A: ≥70% + ≥5 samples. Confidence tracks majority pct."""
+    await _insert_classified(db, "VA", "AP_Invoice", 18)
+    await _insert_classified(db, "VA", "BOL", 2)  # 90% majority
+    await _insert_unmatched(db, "VA", ["a_1.pdf", "a_2.pdf", "a_3.pdf"])
+    report = await auto.auto_propose(db=db, min_group_size=3)
+    assert report["proposals_count"] == 1
+    p = report["proposals"][0]
+    assert p["tier"] == "A"
+    assert p["confidence"] == 0.90
+    assert p["doc_type"] == "AP_Invoice"
+
+
+@pytest.mark.asyncio
+async def test_tier_b_small_sample_perfect_agreement(db):
+    """H&P case: 2 classified docs, both same type → tier B, conf 0.75."""
+    await _insert_classified(db, "HnP", "AP_INVOICE", 2)
+    # Same filename shape for all 3 so they group together
+    await _insert_unmatched(db, "HnP", ["W9_1.pdf", "W9_2.pdf", "W9_3.pdf"])
+    report = await auto.auto_propose(db=db, min_group_size=3)
+    assert report["proposals_count"] == 1
+    p = report["proposals"][0]
+    assert p["tier"] == "B"
+    assert p["confidence"] == 0.75
+    assert p["doc_type"] == "AP_INVOICE"
+
+
+@pytest.mark.asyncio
+async def test_tier_b_requires_at_least_2_samples(db):
+    """1 classified doc is too thin a signal, even at 100%."""
+    await _insert_classified(db, "OneDoc", "AP_INVOICE", 1)
+    await _insert_unmatched(db, "OneDoc", ["a_1.pdf", "a_2.pdf", "a_3.pdf"])
+    report = await auto.auto_propose(db=db, min_group_size=3)
+    assert report["proposals_count"] == 0
+    assert report["deferred_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_tier_c_ball_metal_case(db):
+    """Ball Metal real prod signal: 89/139 Shipping (64%), 2nd at 11.5%.
+    Margin = 5.6×, samples = 139 → Tier C fires at confidence 0.70."""
+    await _insert_classified(db, "BallMetal", "Shipping_Document", 89)
+    await _insert_classified(db, "BallMetal", "QUALITY_DOC", 16)
+    await _insert_classified(db, "BallMetal", "AP_INVOICE", 14)
+    await _insert_classified(db, "BallMetal", "PURCHASE_ORDER", 14)
+    await _insert_classified(db, "BallMetal", "SALES_INVOICE", 6)
+    await _insert_unmatched(db, "BallMetal", [
+        f"P00-{i}.pdf" for i in range(10)
+    ])
+    report = await auto.auto_propose(db=db, min_group_size=3)
+    assert report["proposals_count"] == 1
+    p = report["proposals"][0]
+    assert p["tier"] == "C"
+    assert p["confidence"] == 0.70
+    assert p["doc_type"] == "Shipping_Document"
+
+
+@pytest.mark.asyncio
+async def test_tier_c_rejects_narrow_margin(db):
+    """SC Warehouses real signal: 48% / 34% — only 1.4× margin, under the
+    2× Tier C gate. Must stay deferred."""
+    await _insert_classified(db, "SCW", "Shipping_Document", 28)
+    await _insert_classified(db, "SCW", "SALES_INVOICE", 20)
+    await _insert_classified(db, "SCW", "Other", 10)
+    await _insert_unmatched(db, "SCW", ["s_1.pdf", "s_2.pdf", "s_3.pdf"])
+    report = await auto.auto_propose(db=db, min_group_size=3)
+    assert report["proposals_count"] == 0
+    assert report["deferred_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_tier_c_rejects_small_sample(db):
+    """Even with a strong pct + margin, <20 samples stays deferred."""
+    await _insert_classified(db, "Tiny", "AP_Invoice", 7)
+    await _insert_classified(db, "Tiny", "BOL", 1)  # 87.5% + 7× margin
+    await _insert_unmatched(db, "Tiny", ["t_1.pdf", "t_2.pdf", "t_3.pdf"])
+    # Tier A still fires here (87.5% ≥ 70% + 8 ≥ 5) — that's fine.
+    # But if we artificially bump min_vendor_samples to 50, all tiers fail.
+    report = await auto.auto_propose(
+        db=db, min_group_size=3, min_vendor_samples=50,
+    )
+    # 8 samples < 50 for A, not 100% for B, 8 < 20 for C → deferred
+    assert report["proposals_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_mrp_solutions_split_stays_deferred(db):
+    """MRP Solutions real prod signal: 3/3/2 split across 3 doc_types.
+    No tier should fire — ambiguous by design."""
+    await _insert_classified(db, "MRP", "AP_INVOICE", 3)
+    await _insert_classified(db, "MRP", "SALES_INVOICE", 3)
+    await _insert_classified(db, "MRP", "Report", 2)
+    await _insert_unmatched(db, "MRP", ["m_1.pdf", "m_2.pdf", "m_3.pdf"])
+    report = await auto.auto_propose(db=db, min_group_size=3)
+    assert report["proposals_count"] == 0
+    assert report["deferred_count"] == 1
+    assert "tier qualified" in report["deferred"][0]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_proposals_by_tier_counter_present(db):
+    """Response should summarize how many proposals came from each tier."""
+    # Tier A
+    await _insert_classified(db, "VA", "AP_Invoice", 18)
+    await _insert_classified(db, "VA", "BOL", 2)
+    await _insert_unmatched(db, "VA", ["a_1.pdf", "a_2.pdf", "a_3.pdf"])
+    # Tier B
+    await _insert_classified(db, "VB", "AP_INVOICE", 2)
+    await _insert_unmatched(db, "VB", ["b_1.pdf", "b_2.pdf", "b_3.pdf"])
+    # Tier C
+    await _insert_classified(db, "VC", "Shipping_Document", 89)
+    await _insert_classified(db, "VC", "QUALITY_DOC", 16)
+    await _insert_classified(db, "VC", "AP_INVOICE", 14)
+    await _insert_classified(db, "VC", "PURCHASE_ORDER", 14)
+    await _insert_classified(db, "VC", "SALES_INVOICE", 6)
+    await _insert_unmatched(db, "VC", ["c_1.pdf", "c_2.pdf", "c_3.pdf"])
+
+    report = await auto.auto_propose(db=db, min_group_size=3)
+    assert report["proposals_count"] == 3
+    assert report["proposals_by_tier"] == {"A": 1, "B": 1, "C": 1}
+

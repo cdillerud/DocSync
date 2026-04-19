@@ -1,5 +1,36 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-19] v2.5.2 — Weekly Learning Digest + U6 SO-Learning Telemetry
+
+Closed the Learning-Core unification loop with a **preview-only weekly digest** surface and **U6 telemetry instrumentation** on the sales_order_learning suggestion workflow so every reviewer action — intake, AP, AND sales-order — now feeds the same Learning Ops leaderboard, sparklines, and digest.
+
+**Added (Weekly Digest):**
+- `services/learning_core/digest_service.py` — `build_weekly_digest()` assembles a one-week snapshot (top-3 reviewers, event totals by domain + event_type, new drift alerts in window, pattern-health snapshot, 7-day trend) and upserts into `learning_digests` collection keyed by ISO `week_key` (e.g. `2026-W16`) for idempotence
+- 4 new endpoints: `POST /api/learning/digest/rebuild[?week_of=YYYY-MM-DD]`, `GET /api/learning/digest/latest`, `GET /api/learning/digest/{week_key}`, `GET /api/learning/digest?limit=N`
+- `Weekly Digest scheduler` (24h interval, 20-min startup delay) — rebuilds the current-week digest continuously so `/api/learning/digest/latest` always reflects live state
+- `frontend/src/components/WeeklyDigestCard.jsx` — headline + 4 KPI cards (Events/Top Reviewer/New Drift/Generated) + top-reviewer pills with 🥇🥈🥉 + JSON download + Rebuild; week selector dropdown for history browsing
+- Mounted at the top of `/learning/ops`
+- 6 new pytest in `tests/test_weekly_digest.py` (empty-week headline, aggregation narrative, idempotent upsert, invalid-date error, latest-returns-newest, list-clamps-limit) + 7 new API regression tests (authored by testing agent)
+
+**Added (U6 — SO-Learning Telemetry):**
+- `sales_order_learning_suggestion_apply_service.py` — `_transition()` (approve/reject) and `apply_suggestion()` now emit unified `learning_events_v2` rows with `domain=sales_intake`, `event_type=so_suggestion_{approved|rejected|applied}`, `scope_value=customer_no`, `source=sales_order_learning_suggestion_apply_service`. Invalid transitions still return `{error}` without emitting telemetry
+- This means Inside Sales reviewer activity on sales-order learning suggestions now contributes to the Ops leaderboard + weekly digest — sparklines light up from **three** feedback surfaces instead of two
+- 3 new pytest in `tests/test_u6_so_telemetry.py` (approve emits, reject emits, invalid-transition no-emit)
+
+**Scope decision:**
+- Original handoff claimed "5 redundant `sales_order_learning_*` services to collapse." Inspection showed only 3 files, and they are NOT redundant with `learning_core/` (they mine BC sales order history for customer posting profiles — distinct concern). U6 pivoted to light-touch **telemetry instrumentation** instead of shim consolidation — higher value, zero regression risk, and the Ops page immediately benefits. Deeper refactor deferred to post-v2.5.2.
+
+**Design call on the digest:**
+- Preview-only, **no email integration** (Resend / MS Graph deliberately NOT wired). JSON download button on the card gives stakeholders a copy-pasteable artifact today; email delivery can layer on later without changing the build pipeline.
+
+**Verified:**
+- 58/58 pytest passing across 8 learning-core test files
+- Testing agent iter 219: 9/9 unit tests + 7/7 API regression + full UI smoke PASS on `/learning/ops`, `/intake/learning`, `/ai-learning` — zero regressions
+- Scheduler logged on startup; idempotent upsert by week_key confirmed; Giovanni C-10250 untouched; no seed data leaked
+
+**Non-blocking observation:**
+- `GET /api/learning/digest` returns `{total, digests:[...]}` envelope while sibling endpoints return bare arrays or `{items:[...]}`. Inconsistency flagged for future naming harmonization pass.
+
 ## [2026-04-19] v2.5.2 — U5: Reusable PatternHealthPanel + Learning Ops Command Center
 
 Completed the U1–U6 unification backbone: extracted the inline Pattern Health markup into a single reusable `<PatternHealthPanel domain="..." />` component, mounted it across three surfaces (Intake Learning, AI Learning, Learning Ops), and shipped a new `/learning/ops` command-center page with a **reviewer activity leaderboard** that aggregates `learning_events_v2` by actor.

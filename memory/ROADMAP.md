@@ -21,7 +21,6 @@
 - ~~Vendor Resolution Observability + Negative Feedback Loop~~ (2026-03-16, iter_116) — per-doc resolution objects, rejection memory, guardrails, analytics, 71 tests
 
 ### P1 — Next Up
-- **U6 — Retire duplicate SO services** — consolidate 5 redundant `sales_order_learning_*` services into `learning_core/` paradigm
 - **Rep Overrides Management UI** — Admin screen to easily map customers to reps without DB scripts
 - **Teams Adaptive Card Integration** — Webhook handler for "Approve" → BC Sales Order
 - **Admin UI for Item Mapping Rules** — CRUD interface for managing item mapping rules
@@ -29,6 +28,7 @@
 - **Batch AR Release Evaluation** — Auto-evaluate all sales docs through AR gate in pipeline
 
 ### P1 — Recently Completed
+- ~~Weekly Learning Digest (preview-only) + U6 SO-Learning Telemetry~~ (2026-04-19, iter_219)
 - ~~U5 — Reusable PatternHealthPanel + Learning Ops command center + reviewer leaderboard~~ (2026-04-19, iter_218)
 - ~~U4 — Shared Feedback Ingest + AP Telemetry Tick~~ (2026-04-19, iter_217)
 - ~~U3 — Shared Pattern Health & Hygiene Consolidation~~ (2026-04-19, iter_215/216)

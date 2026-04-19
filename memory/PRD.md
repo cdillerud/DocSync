@@ -416,6 +416,16 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - Admin endpoints: `GET /strong-profile-review`, `GET /strong-profile-review/details` — full filter support
 - Analysis only — never changes workflow, weights, or prompts
 
+## Bug Fix: Auto-Split Unknown Children Silently Exported (2026-04-19 — P0)
+- **Root cause**: `auto_clear_service.evaluate_auto_clear()` had `confidence_threshold=0.0` with no `require_minimum_extraction` for `Unknown` / `Other` / `DEFAULT` doc_types. Auto-split child PDFs (e.g., `..._p11.pdf`) that the AI re-classified as `Unknown` with 0.00 confidence and zero extracted fields trivially satisfied the one confidence check (0.0 ≥ 0.0) → "All 1 checks passed" → exported/completed, bypassing manual review.
+- **Fixes**:
+  1. `services/auto_clear_service.py` — early guard rejects `Unknown`/`Unknown_Document`/`Unknown_Sales`/`Other`/empty/`DEFAULT` doc_types when `confidence < 0.70` OR meaningful fields < 2. Returns `NEEDS_REVIEW` with `unclassified_guard_triggered=True`.
+  2. `services/batch_po_splitter.py` — new `_inherit_parent_and_reevaluate` helper: when a split child returns Unknown/low-confidence, inherits parent's `doc_type` + `vendor_canonical` + `vendor_id` + `customer_canonical` onto the child, preserves original AI values under `*_from_split_ai` for audit, and forces `status=NeedsReview`.
+  3. `routers/auto_clear.py` — repaired missing import block (`evaluate_auto_clear`, `get_auto_clear_config`, `update_threshold`, etc.) that had been causing 500 on `/api/auto-clear/evaluate/{id}`, `/config`, `/config/threshold`. Discovered by testing agent iter_224.
+- **KPI Fix (same iteration)**: `routers/dashboard.py` — `posted_to_bc_7d` query was too strict (required literal `status == "Posted"` AND `posted_to_bc_at` timestamp). Now matches any of `bc_purchase_invoice_no`/`bc_record_no`/`bc_document_no`/`bc_record_id` present WITH any of `posted_to_bc_at`/`bc_posted_at`/`posted_at`/`updated_utc` within 7 days. `ready_for_post` query's self-contradictory filter (`status=="ReadyForPost"` AND `status $nin ["Posted","Completed","Archived"]`) simplified.
+- **CI Gate**: `.github/workflows/phase-b-gate.yml` drafted — enforces Phase B observer + unknown-guard tests and blocks new external callers of `_update_standard_workflow_status` ahead of Phase B extraction.
+- **Tests**: `tests/test_auto_clear_unknown_guard.py` (8/8 pass), `tests/test_iter224_unknown_guard_http.py` (10/10 HTTP regression, added by testing agent), full suite 50/50 green (iteration_224.json).
+
 ## Upcoming Tasks
 - P1: Teams Adaptive Card integration (webhook → BC Sales Order)
 

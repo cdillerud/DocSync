@@ -730,8 +730,10 @@ async def intake_document(
             or update_data.get("vendor_raw")
         )
         if vendor_name:
-            from server import _update_vendor_profile_incremental
-            await _update_vendor_profile_incremental(db, doc_id, vendor_name, update_data, final_status)
+            # Orchestration Extraction (v2.5.2) — imports direct from service
+            # module; no more `from server import ...` late-resolution.
+            from services.vendor_profile_helpers import update_vendor_profile_incremental
+            await update_vendor_profile_incremental(db, doc_id, vendor_name, update_data, final_status)
     except Exception as e:
         logger.error("[VendorProfile] Error updating profile for doc %s: %s", doc_id, str(e))
 
@@ -1070,7 +1072,12 @@ async def _reprocess_document_inner_dh(doc_id: str, doc: dict, reclassify: bool,
     # === NON-AP DOCUMENTS: Standard workflow ===
     elif doc_type_value:
         try:
-            from server import _update_standard_workflow_status, compute_ap_normalized_fields
+            # Orchestration Extraction (v2.5.2) — compute_ap_normalized_fields
+            # is directly imported from document_intel_helpers (the server.py
+            # version is already a thin wrapper). _update_standard_workflow_status
+            # remains in server.py for this iteration (next extraction pass).
+            from server import _update_standard_workflow_status
+            from services.document_intel_helpers import compute_ap_normalized_fields
             norm_fields = compute_ap_normalized_fields(extracted_fields)
             await _update_standard_workflow_status(doc_id, doc_type_value, confidence, norm_fields)
             refreshed = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "status": 1, "workflow_status": 1})

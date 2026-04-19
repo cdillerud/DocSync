@@ -1,0 +1,36 @@
+{
+  "summary": "Iter 221 — Orchestration Extraction (Phase A, option A) verification. Backend-only refactor extracting _update_vendor_profile_incremental out of server.py into services/vendor_profile_helpers.py, with server keeping a thin compat wrapper. Plus splitting the late import in document_handlers.py L1075 so compute_ap_normalized_fields now comes from services.document_intel_helpers (authoritative) while _update_standard_workflow_status continues to come from server (by design, per user's scope choice A). ALL verification checks pass: (1) new module exposes public update_vendor_profile_incremental; (2) document_handlers.py L735 uses the new services path; (3) document_handlers.py L1079-1080 is correctly split into 2 imports; (4) server.py L2580-2589 is now a 10-line compat wrapper delegating to services; (5) 5/5 new unit tests pass; (6) full 63-test learning-core suite passes (58 learning + 5 new vendor profile); (7) E2E vendor profile update works against real MongoDB via server compat wrapper; (8) backend imports cleanly with zero ImportError/circular import; (9) supervisor status RUNNING, backend.err.log shows no new tracebacks (only pre-existing BC Azure-AD tenant token errors, unrelated to refactor).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_vendor_profile_helpers.py",
+    "/app/backend/tests/test_learning_core_events.py",
+    "/app/backend/tests/test_learning_loop_engine.py",
+    "/app/backend/tests/test_learning_review_queue.py",
+    "/app/test_reports/pytest/iter221_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "vendor_profile_helpers.py (132 lines) is clean, well-documented, self-contained, no cross-module deps. Good extraction.",
+    "server.py wrapper (L2580-2589) is minimal and correct — late-imports the impl inside the function body so server.py does not take a hard dep on services.vendor_profile_helpers at import time. Acceptable for the 30-day dual-path window mentioned in the docstring.",
+    "document_handlers.py L1079-1080 split is correct: _update_standard_workflow_status from server (still authoritative there, per option-A scope), compute_ap_normalized_fields from services.document_intel_helpers (authoritative). Server's existing compat wrapper for compute_ap_normalized_fields still works.",
+    "Remaining `from server import ...` lines in document_handlers.py for _update_standard_workflow_status (and the 4 late importers of _internal_intake_document in other services) are documented as expected to remain this iteration per user's scope choice A — not flagged as bugs.",
+    "No new files exceed 700 lines. Refactor reduces server.py surface without expanding any hotspot.",
+    "Pytest coverage for the new module is thorough — covers noop, create, increment, stable-vendor threshold, and compat wrapper delegation (5 tests, all green in 0.4s)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "N/A (backend-only refactor)"},
+  "test_credentials": "admin/admin (not exercised — no API auth flows in scope this iter)",
+  "seed_data_creation": "None. Test used TEST_VP_EXTRACTION_ITER221 vendor for E2E MongoDB roundtrip, cleaned up after. Did not touch C-DEMO-OVRD-1 / 2026-W15 / Giovanni C-10250.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 221 Orchestration Extraction Phase A (option A) is verified green. Three functions remain in server.py by design: _update_standard_workflow_status (427 lines, still late-imported from document_handlers.py), _internal_intake_document (771 lines, 4 late importers), and the _update_vendor_profile_incremental compat wrapper (will be retired after 30-day dual-path window). Full pytest command for regression: `REACT_APP_BACKEND_URL=$(grep REACT_APP_BACKEND_URL /app/frontend/.env | cut -d= -f2) pytest tests/test_vendor_profile_helpers.py tests/test_learning_core_events.py tests/test_learning_loop_engine.py tests/test_learning_review_queue.py --tb=short` → 63 passed. Pre-existing unrelated noise in backend.err.log: BC Azure-AD tenant 'doc-workflow-test' token failures (high frequency, unrelated to this refactor, ignore).",
+  "rca of the issue": "N/A — this was a refactor verification pass, not a bug fix. All acceptance criteria in the review request are met."
+}

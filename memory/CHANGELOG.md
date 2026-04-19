@@ -1,5 +1,25 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-19] v2.5.2 — U4: Shared Feedback Ingest + AP Telemetry Tick
+
+Consolidated reviewer-feedback ingestion behind a single polymorphic endpoint `POST /api/learning/feedback` discriminated by `scope_type` (`customer` | `vendor`). Also closed the telemetry gap so AP reviewer thumbs-up/down now emits to `learning_events_v2` — meaning the 7-day sparklines on `/intake/learning` light up organically as both Inside Sales AND AP reviewers work their queues.
+
+**Added:**
+- `services/learning_core/feedback_service.py` — `record_unified_feedback()` dispatcher
+- `POST /api/learning/feedback` on `routers/learning_core.py` with `UnifiedFeedbackBody` polymorphic Pydantic model (customer shape: `event_type + scope_value=customer_no + doc_id/item_no/trigger_item`; vendor shape: `document_id + reviewer_assessment + final_human_decision + disagreed_fields + notes`)
+- AP telemetry tick: `record_unified_feedback` writes a `learning_events_v2` row (domain=`ap_posting`, event_type=`ap_review_{assessment}`) on every successful vendor feedback — skipped cleanly on error paths (e.g. Document not found)
+- 7 new pytest in `tests/test_unified_feedback.py`: unknown scope, missing required fields (customer + vendor × 2), customer dual-write, vendor telemetry write, vendor-error no-telemetry
+
+**Design notes:**
+- Validation errors return 200 + `{error: "...", scope_type, known_event_types?}` — intentional so callers never need to parse HTTP status for input issues
+- Legacy endpoints (`/api/intake/insights/feedback`, `/api/ap-advisory/feedback/{doc_id}`) remain live during the 30-day dual-write window
+
+**Verified:**
+- 47/47 pytest passing across 6 learning-core test files (7 new U4 + 40 existing)
+- Testing agent iter 217: 7/7 backend curl spec cases + 7/7 pytest + frontend smoke PASS; zero regressions
+- No real customer (C-10250) or vendor records touched
+
+
 ## [2026-04-19] v2.5.2 — U3: Shared Pattern Health & Hygiene + 7-Day Activity Sparklines
 
 Consolidated AP (`posting_pattern_analysis`, confidence-tier-based) and Intake (`order_line_patterns`, accept-rate-based) pattern trust/drift/retire state into a single normalized `HealthReport` shape behind pluggable adapters — dashboards, schedulers, and alerts can now treat every domain identically. Follow-up enhancement layers per-domain 7-day activity sparklines so managers can eyeball whether patterns are trending healthier or noisier week-over-week.

@@ -1,5 +1,25 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-19] v2.5.2 — U3: Shared Pattern Health & Hygiene
+
+Consolidated AP (`posting_pattern_analysis`, confidence-tier-based) and Intake (`order_line_patterns`, accept-rate-based) pattern trust/drift/retire state into a single normalized `HealthReport` shape behind pluggable adapters — dashboards, schedulers, and alerts can now treat every domain identically.
+
+**Added:**
+- `services/learning_core/pattern_health_service.py` — normalized HealthReport aggregator with `HEALTH_ADAPTERS` + `HYGIENE_ADAPTERS` registries (sales_intake + ap_posting)
+- 2 new endpoints on `/api/learning/*`:
+  - `GET /api/learning/pattern-health/unified?domain=&limit=` — cross-domain OR per-domain report
+  - `POST /api/learning/hygiene/run?domain=all|sales_intake|ap_posting` — cross-domain hygiene trigger (delegates to each adapter, writes audit row to `pattern_hygiene_runs`)
+- AP-side hygiene: auto-retires `posting_pattern_analysis` docs when confidence tier drops to `none`
+- New **Cross-domain (AP + Intake)** roll-up section inside the Pattern Health panel on `/intake/learning` — renders unified Trusted/Drifting/Retired/Unscored metrics plus per-domain breakdown pills
+
+**Verified:**
+- 48/48 pytest unit tests passing (6 new U3 + 42 existing)
+- Testing agent iter 215: 11/11 frontend UI + 2/2 backend endpoints PASS, zero regressions on `/ai-learning` and `/` (Inbox)
+- Giovanni C-10250 state confirmed pristine: 16 patterns, 0 feedback mutations
+
+**Version:** `APP_VERSION` remains **2.5.1** in header (bump deferred until U4+U5 ship the full unification)
+
+
 ## [2026-04-18h] v2.5.0 + v2.5.1 — Drift Alerts + Shared Fingerprint Service
 
 ### v2.5.0 — Proactive Drift Alerts

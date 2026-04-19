@@ -426,6 +426,12 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - **CI Gate**: `.github/workflows/phase-b-gate.yml` drafted — enforces Phase B observer + unknown-guard tests and blocks new external callers of `_update_standard_workflow_status` ahead of Phase B extraction.
 - **Tests**: `tests/test_auto_clear_unknown_guard.py` (8/8 pass), `tests/test_iter224_unknown_guard_http.py` (10/10 HTTP regression, added by testing agent), full suite 50/50 green (iteration_224.json).
 
+## Pattern Health Implicit-Trust + Confidence Calibration Tightening (2026-04-19 — v2.5.3)
+- **Observed on prod dashboard**: `Pattern Health — AP` showed `Trusted=3 / Drifting=216` despite 97.5% auto-rate + zero recent negative feedback for the majority of those 216 vendors. Also: `Confidence Calibration` 85–95% band at 91% accuracy vs 70–85% at 98% and 95–100% at 99% — the AI was over-confident specifically in the 85–95% window.
+- **Fix A — Implicit Trust (`services/learning_core/pattern_health_service.py`)**: `_ap_health()` now uses implicit-success signals. New `_fetch_ap_negative_events_by_vendor()` aggregates `learning_events_v2` (domain=ap_posting, types in `{draft_bc_feedback, draft_rejected, pattern_rejected, suggestion_rejected, correction_applied, drift_flagged}`) once per call. Classification order: retired → explicit_high_tier → drift_signal → implicit_success (`samples >= AP_IMPLICIT_TRUST_MIN_SAMPLES=10` AND zero negative events in last 30 days) → medium_tier_still_maturing → unscored. Every `per_scope` row now carries `trust_reason` + `negative_events_30d` for transparency.
+- **Fix B — Calibration Curve (`services/per_document_learning_service.py`)**: `compute_effective_confidence()` curve tightened. Old curve: scale=1.0 at completeness>=0.50 (no penalty). New piecewise curve: full pass at >=0.75, mild penalty (scale~0.88) at 0.50, moderate (scale~0.67) at 0.25, heavy (scale~0.35) at 0.00. A 90%-confident doc with only 2 of 4 core fields now calibrates to ~79% and shifts from the 85–95% band into the 70–85% band where manual review catches it. Monotonicity preserved (test_curve_is_monotonic).
+- **Tests**: `tests/test_pattern_health_implicit_trust.py` (8/8) + `tests/test_confidence_calibration_curve.py` (10/10) + `tests/test_pattern_health_core.py` updated to assert new semantics. Full 32/32 unit tests + 6/6 HTTP endpoints green (iteration_225.json).
+
 ## Upcoming Tasks
 - P1: Teams Adaptive Card integration (webhook → BC Sales Order)
 

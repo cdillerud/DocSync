@@ -8,7 +8,8 @@ during the 30-day dual-write window.
 """
 
 from fastapi import APIRouter, Query
-from typing import Optional
+from pydantic import BaseModel, Field
+from typing import Any, Dict, List, Optional
 
 from services.learning_core import list_events, get_domain_summary, DOMAINS
 from services.drift_alert_service import (
@@ -167,3 +168,69 @@ async def hygiene_run(
     delegates here)."""
     from services.learning_core import run_hygiene
     return await run_hygiene(domain=domain, actor="user")
+
+
+# ─────────────────────────────────────────────────────────────
+# U4 — Shared Feedback Ingest (v2.5.2)
+# ─────────────────────────────────────────────────────────────
+
+class UnifiedFeedbackBody(BaseModel):
+    """Polymorphic body — `scope_type` discriminates customer vs vendor.
+
+    For `scope_type="customer"` (intake reviewer feedback): `event_type`
+    and `scope_value` (customer_no) are the primary fields.
+
+    For `scope_type="vendor"` (AP advisory reviewer feedback):
+    `document_id` (or `doc_id`) and `reviewer_assessment` are required.
+    """
+    scope_type: str = Field(..., description="customer | vendor")
+    scope_value: Optional[str] = Field(
+        None, description="customer_no (for customer) or vendor_no (for vendor)"
+    )
+
+    # customer (intake) shape
+    event_type: Optional[str] = None
+    doc_id: Optional[str] = None
+    staging_id: Optional[str] = None
+    item_no: Optional[str] = None
+    trigger_item: Optional[str] = None
+
+    # vendor (AP) shape
+    document_id: Optional[str] = None
+    reviewer_assessment: Optional[str] = None
+    final_human_decision: Optional[str] = None
+    disagreed_fields: Optional[List[str]] = None
+    notes: Optional[str] = None
+
+    # shared
+    actor: Optional[str] = "user"
+    extra: Optional[Dict[str, Any]] = None
+
+
+@router.post("/feedback")
+async def unified_feedback(body: UnifiedFeedbackBody):
+    """Single cross-domain feedback ingest. Routes by `scope_type` to
+    the correct underlying service while keeping legacy endpoints alive
+    during the 30-day dual-write window.
+
+    Never raises for input errors — returns `{error: "..."}` with a
+    200 so the caller can surface the message without a 5xx. HTTP
+    error statuses are reserved for infra-level failures.
+    """
+    from services.learning_core import record_unified_feedback
+    return await record_unified_feedback(
+        scope_type=body.scope_type,
+        scope_value=body.scope_value,
+        event_type=body.event_type,
+        doc_id=body.doc_id,
+        staging_id=body.staging_id,
+        item_no=body.item_no,
+        trigger_item=body.trigger_item,
+        document_id=body.document_id,
+        reviewer_assessment=body.reviewer_assessment,
+        final_human_decision=body.final_human_decision,
+        disagreed_fields=body.disagreed_fields,
+        notes=body.notes,
+        actor=body.actor or "user",
+        extra=body.extra,
+    )

@@ -1,0 +1,58 @@
+{
+  "summary": "U4 Shared Feedback Ingest (v2.5.2) verified end-to-end. Unified POST /api/learning/feedback routes by scope_type and returns 200+{error} for all validation cases as spec'd. Customer happy-path dual-writes to intake_learning_events + learning_events_v2 (domain=sales_intake). Vendor nonexistent-doc path returns {error:'Document not found', scope_type:'vendor'} with NO telemetry write. Legacy POST /api/intake/insights/feedback still works (30-day dual-write window intact). GET /api/learning/pattern-health/unified still returns trend_7d (len=7, ascending) per domain. Frontend /intake/learning loads with all sparkline + unified-panel testids present. Pytest tests/test_unified_feedback.py: 7/7 passed. Test data (U4-SMOKE-CUST + U4-SMOKE-LEGACY) cleaned up from both collections.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/intake/learning", "issues": ["Pre-existing (NOT U4-related) React hydration warning: <span> cannot be child of <tbody> / <tr> cannot be child of <span> around pattern-health-row mapping in IntakeLearningPage.js L471-473. Wrap with React.Fragment instead of <span>. Cosmetic only."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_unified_feedback.py",
+    "/app/test_reports/pytest/u4_unified_feedback.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "routers/learning_core.py UnifiedFeedbackBody polymorphic shape is clean — single Pydantic model with scope_type discriminator, Optional fields for both customer+vendor shapes. Spec compliance: returns 200 + {error} for all validation failures (confirmed for unknown scope_type, missing event_type, missing document_id, missing reviewer_assessment, Document not found).",
+    "Customer dual-write works: 1 row in intake_learning_events + 1 row in learning_events_v2 (domain=sales_intake, scope_value=U4-SMOKE-CUST, source=intake_learning_feedback_service). Event IDs differ between collections, which is expected (legacy had its own id 45e30dca; v2 got d5b365c2).",
+    "Vendor error path correctly short-circuits: 'Document not found' returns without writing a learning_events_v2 telemetry row (verified via /api/learning/events?scope_value=nonexistent-doc-id -> total:0).",
+    "Legacy endpoint /api/intake/insights/feedback still returns ok:true with same response shape — 30-day dual-write window preserved.",
+    "Pre-existing UI warning: IntakeLearningPage.js wraps <tr> children in <span> inside <tbody> (via a dynamic wrapper). Causes a React hydration warning on every /intake/learning load. Not blocking but should be fixed with Fragment — not U4 scope."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (7/7 pytest + 7/7 curl spec cases)",
+    "frontend": "100% (smoke load: intake-learning-page, pattern-health-unified, sparkline-sales_intake, sparkline-ap_posting all present; no error boundary)"
+  },
+  "test_credentials": "admin / admin (used for frontend smoke)",
+  "seed_data_creation": "Customer smoke wrote 1 intake_learning_events + 1 learning_events_v2 row under scope_value=U4-SMOKE-CUST (actor=u4-test). Legacy regression wrote 1 intake_learning_events + 1 learning_events_v2 under scope_value=U4-SMOKE-LEGACY (actor=u4-legacy). BOTH CLEANED UP via motor delete_many at end — verified total:0 events on both scope_values post-cleanup. No real customer/vendor data (Giovanni C-10250, etc.) was mutated.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "U4 unified feedback endpoint is live at POST /api/learning/feedback with polymorphic body (scope_type + shape-specific fields). Legacy endpoints /api/intake/insights/feedback and /api/ap/invoice/feedback still alive (30-day dual-write window). record_unified_feedback in services/learning_core/feedback_service.py dispatches to intake_learning_feedback_service (customer) or ap_invoice_feedback_service (vendor) and tacks on a learning_events_v2 telemetry row on vendor success. Validation errors surface as 200+{error,scope_type,known_event_types?} — intentional per spec. Pytest suite tests/test_unified_feedback.py uses a FakeDb with both __getitem__ and __getattr__ to support motor-style access.",
+  "tested_features": {
+    "backend_curl": [
+      "POST /api/learning/feedback scope_type=bogus -> 200 {error:'unknown scope_type bogus', known:[customer,vendor]} PASS",
+      "POST /api/learning/feedback scope_type=customer (no event_type) -> 200 {error:'event_type is required...', known_event_types:[...6 values]} PASS",
+      "POST /api/learning/feedback scope_type=vendor (no document_id) -> 200 {error:'document_id is required...'} PASS",
+      "POST /api/learning/feedback scope_type=vendor doc_id only (no reviewer_assessment) -> 200 {error:'reviewer_assessment is required...'} PASS",
+      "POST /api/learning/feedback scope_type=customer + event_type=suggestion_accepted + scope_value=U4-SMOKE-CUST + item_no=U4-ITEM -> 200 {ok:true, scope_type:customer}; 1 row intake_learning_events + 1 row learning_events_v2(domain=sales_intake, scope_value=U4-SMOKE-CUST) PASS",
+      "POST /api/learning/feedback scope_type=vendor + document_id=nonexistent-doc-id + reviewer_assessment=correct -> 200 {error:'Document not found', scope_type:vendor}; NO learning_events_v2 write PASS",
+      "GET /api/learning/events?scope_value=U4-SMOKE-CUST -> total:1 event (domain=sales_intake, source=intake_learning_feedback_service) before cleanup PASS",
+      "Regression: POST /api/intake/insights/feedback (legacy) -> ok:true, event written PASS",
+      "Regression: GET /api/learning/pattern-health/unified -> both domains (sales_intake, ap_posting) have trend_7d length=7 with ascending dates PASS"
+    ],
+    "pytest": [
+      "tests/test_unified_feedback.py: 7/7 passed in 0.11s (unknown_scope, customer_missing_event_type, vendor_missing_doc_id, vendor_missing_assessment, customer_dual_write, vendor_dual_write_telemetry, vendor_error_no_telemetry)"
+    ],
+    "frontend_smoke": [
+      "Login admin/admin -> PASS",
+      "/intake/learning loads with intake-learning-page, pattern-health-unified, sparkline-sales_intake, sparkline-ap_posting testids -> PASS",
+      "No error boundary / error messages on page -> PASS"
+    ]
+  },
+  "rca of the issue": "N/A — no issues found. U4 unified feedback ingest is working per spec."
+}

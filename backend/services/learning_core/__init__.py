@@ -38,6 +38,10 @@ from services.learning_core.pattern_health_service import (
     HEALTH_ADAPTERS,
     HYGIENE_ADAPTERS,
 )
+from services.learning_core.feedback_service import (
+    record_unified_feedback,
+    SCOPE_TYPES as FEEDBACK_SCOPE_TYPES,
+)
 
 __all__ = [
     # Events (U1)
@@ -61,4 +65,7 @@ __all__ = [
     "run_hygiene",
     "HEALTH_ADAPTERS",
     "HYGIENE_ADAPTERS",
+    # Shared feedback ingest (U4)
+    "record_unified_feedback",
+    "FEEDBACK_SCOPE_TYPES",
 ]

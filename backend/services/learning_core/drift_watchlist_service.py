@@ -277,6 +277,7 @@ async def _send_graph_channel_message(card: Dict[str, Any]) -> Dict[str, Any]:
     if not token:
         return {"error": "graph token unavailable"}
     attachment_id = "drift-watchlist-1"
+    import json as _json
     payload = {
         "body": {
             "contentType": "html",
@@ -285,7 +286,11 @@ async def _send_graph_channel_message(card: Dict[str, Any]) -> Dict[str, Any]:
         "attachments": [{
             "id": attachment_id,
             "contentType": "application/vnd.microsoft.card.adaptive",
-            "content": str(card["attachments"][0]["content"]).replace("'", '"'),
+            # Must be a JSON string per Graph API spec. `str(dict)` would
+            # produce Python-repr output (single quotes, True/False/None)
+            # which Graph 400s — and vendor names with apostrophes would
+            # silently corrupt the payload. Use json.dumps.
+            "content": _json.dumps(card["attachments"][0]["content"]),
         }],
     }
     url = (

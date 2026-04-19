@@ -432,6 +432,21 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - **Fix B — Calibration Curve (`services/per_document_learning_service.py`)**: `compute_effective_confidence()` curve tightened. Old curve: scale=1.0 at completeness>=0.50 (no penalty). New piecewise curve: full pass at >=0.75, mild penalty (scale~0.88) at 0.50, moderate (scale~0.67) at 0.25, heavy (scale~0.35) at 0.00. A 90%-confident doc with only 2 of 4 core fields now calibrates to ~79% and shifts from the 85–95% band into the 70–85% band where manual review catches it. Monotonicity preserved (test_curve_is_monotonic).
 - **Tests**: `tests/test_pattern_health_implicit_trust.py` (8/8) + `tests/test_confidence_calibration_curve.py` (10/10) + `tests/test_pattern_health_core.py` updated to assert new semantics. Full 32/32 unit tests + 6/6 HTTP endpoints green (iteration_225.json).
 
+## Drift Watchlist Weekly Notification (2026-04-19 — v2.5.4)
+- **Purpose**: Turn the passive Pattern Health dashboard into an actionable weekly alert. Aggregates vendors with corrective events in the last 30 days (`learning_events_v2` negative event types) OR open rows in `learning_drift_alerts`, ranks by score (`2 × open_alerts + negative_events_30d`), and dispatches.
+- **Service** (`services/learning_core/drift_watchlist_service.py`): `build_watchlist` (one aggregation + one find + one enrichment query — no N+1), `format_teams_card` (Adaptive Card with 15-vendor cap + "+N more" footer), `format_email_html` (HTML table with clickable vendor deep-links via `APP_PUBLIC_URL`), `send_watchlist` (per-channel dispatcher with failure isolation — one failing channel never kills siblings).
+- **Channels** (via `DRIFT_WATCHLIST_CHANNELS` comma-separated env — any combination):
+  - `teams_webhook` → `TEAMS_DRIFT_WEBHOOK_URL`
+  - `graph_channel` → MS Graph `/teams/{id}/channels/{id}/messages` using existing `GRAPH_CLIENT_ID`/`GRAPH_CLIENT_SECRET` (requires `ChannelMessage.Send`)
+  - `email` → MS Graph `/users/{from}/sendMail`
+- **Scheduler** (`server.py`): fires weekly, gated by `DRIFT_WATCHLIST_ENABLED=true`, `DRIFT_WATCHLIST_CRON_DOW` (0=Mon), `DRIFT_WATCHLIST_CRON_HOUR` (default 7). Hourly-poll design that sends at most once per target day.
+- **Router endpoints** (`routers/learning_core.py`):
+  - `GET /api/learning/drift-watchlist/preview` — dry-run, returns `{watchlist, teams_card, email_html}` without sending
+  - `POST /api/learning/drift-watchlist/send-now?channels=` — manual dispatch with optional channel override
+  - `GET /api/learning/drift-watchlist/runs` — audit history of past dispatches (persisted in `drift_watchlist_runs`)
+- **Safety**: empty-watchlist short-circuit (no noise), per-run audit even on skip, `{_id: 0}` projection everywhere.
+- **Tests**: `tests/test_drift_watchlist.py` (16/16). Full iteration_226 report: 16 unit + 6 HTTP + 26 regression tests green.
+
 ## Upcoming Tasks
 - P1: Teams Adaptive Card integration (webhook → BC Sales Order)
 

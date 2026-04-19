@@ -1,5 +1,33 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-19] v2.5.2 — Orchestration Extraction Phase A
+
+First scoped extraction pass on `server.py` (8,900 lines → progress toward `/backend/policies/`). User picked **Option A** (smallest, lowest-risk scope) — extract the 2 small functions that `document_handlers.py` imports from `server.py`. Larger extractions (`_update_standard_workflow_status` 427 lines, `_internal_intake_document` 771 lines) deferred to their own focused iterations.
+
+**Added:**
+- `services/vendor_profile_helpers.py` (132 lines) — new authoritative home for `update_vendor_profile_incremental()` (dropped leading underscore — now public API). Self-contained: only needs `re`, `datetime`, and the passed-in `db`. No server-side module state dependencies.
+- 5 new pytest in `tests/test_vendor_profile_helpers.py` — noop-on-empty-name, create-profile, increment-existing, stable-vendor-flag-at-10+, server-compat-wrapper-delegates.
+
+**Refactored:**
+- `server.py` L2580: the 91-line `_update_vendor_profile_incremental` body is now a 10-line compat wrapper that late-imports from `services.vendor_profile_helpers`. Preserved so server-internal callers continue to work during the 30-day dual-path window.
+- `services/document_handlers.py` L733: `from server import _update_vendor_profile_incremental` → `from services.vendor_profile_helpers import update_vendor_profile_incremental`
+- `services/document_handlers.py` L1075: split the `from server import _update_standard_workflow_status, compute_ap_normalized_fields` into two — `compute_ap_normalized_fields` now imported directly from its authoritative home `services.document_intel_helpers` (server's version was already a thin wrapper). `_update_standard_workflow_status` remains from server (deferred to next extraction pass per scope choice).
+
+**Net impact:**
+- `document_handlers.py` late-imports from server.py: **3 → 1** (only `_update_standard_workflow_status` remains)
+- `server.py` active function bodies shrunk by ~85 lines
+- Zero behavior change (compat wrapper preserves all legacy paths)
+
+**Verified:**
+- Testing agent iter_221: 63/63 pytest across 9 test files PASS (5 new + 58 existing). Full E2E MongoDB roundtrip via the compat wrapper verified. Backend starts cleanly — no ImportError / circular import. Zero regressions.
+- Giovanni C-10250 + all persisted fixtures (C-DEMO-OVRD-1, digest 2026-W15) untouched.
+
+**Remaining late-imports from `server` in services/** (intentionally out-of-scope this iteration):
+- `document_handlers.py` L1079 → `_update_standard_workflow_status` (427 lines)
+- `email_polling_service.py` L420, L763 → `_internal_intake_document` (771 lines)
+- `inside_sales_pilot_service.py` L387 → same
+- `batch_po_splitter.py` L162 → same
+
 ## [2026-04-19] v2.5.2 — WoW Delta Banner + ~~Rep Overrides Admin UI~~ (rolled back — dup)
 
 **Week-over-Week Delta Banner** shipped as planned. **Rep Overrides admin UI rolled back** — a tab for it already existed inside `/config` (Settings → Rep Overrides) via `components/RepOverridesPanel.js`. Main agent failed to grep the codebase before building. Duplicate deleted; sidebar link + route removed.

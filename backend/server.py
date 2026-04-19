@@ -2013,7 +2013,22 @@ async def _update_standard_workflow_status(
     from services.square9_workflow import (
         initialize_retry_state, increment_retry, determine_square9_stage, reset_retry_counter
     )
-    
+
+    # Phase B.0 — observability tick so the Phase B extraction can see
+    # which callers + doc_types actually exercise this function in
+    # production. Fire-and-forget; never blocks the primary workflow.
+    try:
+        from services.workflow_state_observer import record_workflow_call
+        await record_workflow_call(
+            db,
+            doc_id=doc_id,
+            doc_type=doc_type,
+            confidence=confidence,
+            has_normalized_fields=bool(normalized_fields),
+        )
+    except Exception:
+        pass
+
     doc = await db.hub_documents.find_one({"id": doc_id})
     if not doc:
         return

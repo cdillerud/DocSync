@@ -500,6 +500,17 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
   - `GET  /api/admin/filename-heuristics/runs`
 - **Tests**: `tests/test_filename_heuristics.py` (34: 15 real-prod-filename matches + 8 false-positive checks + 11 behavioral). Iteration_230: 78/78 (64 unit + 14 HTTP), zero bugs. 15 real prod filenames from the user's iteration_227/229 sample all classified correctly.
 
+## Triage Tools: Unmatched-Sample + Duplicate Scan/Resolve (2026-04-19 — v2.5.9)
+- **Context**: v2.5.8 heuristics matched 56 of 417 candidates on prod (13%), leaving 361 unmatched. Also surfaced 12x duplicate ingestion of `GAMMIN_AR_20260316.xls` in a single day — proof of email-poller dedup miss.
+- **Service** (`services/admin/triage_tools_service.py`): `filename_shape` (single-pass tokenizer using `#+` for digits + `A+` for letters — fixed an initial bug where `\\d+` replacement got letter-consumed by a second pass), `unmatched_sample`, `duplicate_scan`, `duplicate_resolve`, `recent_duplicate_runs`.
+- **Endpoints** (`routers/admin.py`):
+  - `GET /api/admin/filename-heuristics/unmatched-sample?limit=&top_n=&min_group_size=` — groups unmatched filenames by (vendor, shape). Includes defensive rescan — docs that `classify_filename` WOULD match are excluded from rule_candidates.
+  - `GET /api/admin/duplicate-docs/scan?same_day=&limit=&min_count=` — groups docs by (file_name + vendor_canonical [+ YYYY-MM-DD]) where count ≥ 2. Skips `duplicate_resolved_at`-set docs (idempotent).
+  - `POST /api/admin/duplicate-docs/resolve?execute=&keep=oldest|newest&same_day=&actor=` — keeps one per group (oldest or newest), marks rest `duplicate_of=<keeper>`, `status=Completed`, `queue_visible=false`, appends `duplicate_resolved` workflow_history event, persists audit row.
+  - `GET /api/admin/duplicate-docs/runs`
+- **Safety**: dry-run defaults, idempotent via `duplicate_resolved_at`, keeper never mutated, router guards invalid `keep` values.
+- **Tests**: `tests/test_triage_tools.py` (18 tests incl. GAMMIN-12x scenario). Iteration_231: 101/101 (82 regression + 19 HTTP), zero bugs. filename_shape collisions verified symmetric (e.g., ROT12345_p1.pdf ≡ FED99887_p12.pdf).
+
 ## Upcoming Tasks
 - P1: Teams Adaptive Card integration (webhook → BC Sales Order)
 

@@ -7,10 +7,10 @@ candidates actionable.
 
 1. `unmatched_sample` — for every unclassified doc that DIDN'T match any
    existing filename rule, collapse the filename into a "shape signature"
-   (digits → `\\d+`, letters → `A+`, punctuation preserved) and group by
+   (digits → `#+`, letters → `A+`, punctuation preserved) and group by
    (vendor, shape, extension). This surfaces new rule candidates like:
-       vendor=ROTONDO  shape=A+\\d+.pdf    count=40  → probably AP_Invoice
-       vendor=FEDEX    shape=\\d+_A+.pdf   count=12  → probably BOL/Tracking
+       vendor=ROTONDO  shape=A+#+_A+#+.A+    count=40  → probably AP_Invoice
+       vendor=FEDEX    shape=#+_A+.A+        count=12  → probably BOL/Tracking
 
 2. `duplicate_scan` — finds groups of docs with the same
    (file_name + vendor_canonical + ingestion_day) where count > 1. This

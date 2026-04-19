@@ -1,0 +1,28 @@
+{
+  "summary": "Iter 220 testing complete. WoW Delta Banner + Rep Overrides admin UI verified end-to-end against live backend. All backend (11/11 pytest) and all targeted UI flows pass.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Global (pre-existing, not new this iter)", "issues": ["React hydration warnings from external ve-dynamic wrappers injecting <span> inside <select>/<table>/<tbody>. Dev-tooling artefact only, no functional impact; was present on prior iters too."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter220_rep_overrides_wow.py",
+    "/app/test_reports/pytest/iter220_rep_overrides_wow.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "WeekOverWeekDeltaBanner.jsx: pct calc divides by prior value but prints Math.abs(pct). For diff<0, sign='' so output is '-2 (25%)' — readable, but concatenation lacks a space between the raw value and the delta icon cell (e.g. 'Events6-2'). Minor readability nit; consider wrapping value in its own span with trailing margin.",
+    "RepOverridesPage.js: select has native `required`, which competes with the JS-level 'Rep email is required' message. In practice HTML5 blocks the submit before JS runs on real browsers — the JS error path is hard to hit from UI (had to remove required in test). Consider dropping the native required so the JS error message is always reachable for consistency with the customer-no/name error."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter220_rep_overrides_wow.py"],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "100% (all targeted flows passed)"},
+  "test_credentials": "admin / admin (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Created + cleaned up C-ITER-220-TEST override via API (DELETE 200). Demo seed C-DEMO-OVRD-1 was NOT clicked/deleted — still alive as required. No drift/digest mutations.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test file test_iter220_rep_overrides_wow.py is reusable regression for rep-overrides CRUD + digest/limit=2 + U3/U4/U5 smoke. Seed C-DEMO-OVRD-1 is the canonical fixture row for the Rep Overrides UI. On iter 220 banner state was 'delta' (2 digests present): events=6 diff=-2, reviewers=0 diff=0, drift=0 diff=-2 (emerald because inverted good). Baseline fallback code-path was verified by code review only (cannot be exercised while both digests exist).",
+  "rca of the issue": "N/A — no bugs found."
+}

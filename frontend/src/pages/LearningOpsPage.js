@@ -15,6 +15,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { RefreshCw, Activity, Bell, Trophy, Users, CheckCircle2, AlertTriangle } from 'lucide-react';
 import PatternHealthPanel from '../components/PatternHealthPanel';
 import WeeklyDigestCard from '../components/WeeklyDigestCard';
+import WeekOverWeekDeltaBanner from '../components/WeekOverWeekDeltaBanner';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -137,6 +138,9 @@ export default function LearningOpsPage() {
           testId="ops-kpi-feedback-events"
         />
       </div>
+
+      {/* Week-over-week delta banner — "Did we move the needle?" */}
+      <WeekOverWeekDeltaBanner />
 
       {/* Weekly Digest — "This Week" snapshot (U5+) */}
       <WeeklyDigestCard onRebuilt={load} />

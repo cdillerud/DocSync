@@ -1,0 +1,38 @@
+{
+  "summary": "v2.5.8 Filename Heuristics Classifier — backend-only regression. All 64 unit tests (test_filename_heuristics.py + three prior reclaim suites) pass, plus 14 new live-HTTP end-to-end tests against the public preview URL. Seeded TEST_iter230_* docs verified real mutation pipeline: type fields + before_heuristic + rule/confidence/note/applied_at/applied/actor + workflow_history event all stamped, status preserved at NeedsReview (never auto-clear). BC-evidence and known-doc-type safety, idempotency, min_confidence gating, and audit runs endpoint all verified. 4 prior regression endpoints still 200.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_filename_heuristics.py",
+    "/app/backend/tests/test_filename_heuristics_http_iter230.py",
+    "/app/test_reports/pytest/iter230_full.xml",
+    "/app/test_reports/pytest/iter230_http.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Minor: review request mentions 34+11+11+9=65 tests but actual count is 34+10+11+9=64 (test_unknown_doc_reclaim_post_process.py has 10 tests, not 11). Not a defect — just a counting discrepancy in the request.",
+    "Observation: FILENAME_RULES use top-down first-match-wins. Ordering is currently safe (generic_invoice_prefix at 0.70 sits AFTER cargomo_invoice_prefix at 0.85, so CARGOMO wins). If new vendor-specific rules are added later, ensure vendor-scoped rules are placed before generic ones to preserve higher confidence. Consider adding an ordering-sanity unit test.",
+    "Safety: the apply() writer sets both filename_heuristic_applied_at (timestamp) AND filename_heuristic_applied (bool). The idempotency filter only checks the timestamp sentinel — consistent, but consider consolidating to a single sentinel to avoid drift.",
+    "The workflow_history entry uses from_status == to_status (intentional 'enrichment-only' event). Reviewers reading workflow timelines should be aware this is not a transition. Consider an explicit event_kind='enrichment' field for clarity when querying history."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_filename_heuristics_http_iter230.py (NEW — 14 live-HTTP tests)"
+  ],
+  "success_rate": {
+    "backend": "100% (78/78)",
+    "frontend": "N/A (backend-only)"
+  },
+  "test_credentials": "admin / admin (endpoints are unauthenticated in preview env)",
+  "seed_data_creation": "Seeded 7 ephemeral TEST_iter230_* docs in hub_documents via pymongo (TUMALOC, GROUPWA, CARGOMO, Lone Star, unmatched, BC-evidence, known-doctype). Plus one TEST_iter230_minconf_* doc created/cleaned per test. All cleaned up in module fixture teardown + filename_heuristic_runs actor filter.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "The new test_filename_heuristics_http_iter230.py is reusable for regression. It uses pymongo (sync) for seeding/verification to sidestep motor event-loop issues. The admin/filename-heuristics endpoints are unauthenticated in preview. Prior endpoint path correction: GET history is at /api/admin/unknown-doc-reclaim/post-process/runs (not /post-process — that path only accepts POST).",
+  "rca of the issue": "N/A — no defects found. Implementation matches all requirements in the review request."
+}

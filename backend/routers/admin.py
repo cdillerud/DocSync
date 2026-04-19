@@ -1024,3 +1024,52 @@ async def unknown_doc_reclaim_post_process_runs(limit: int = Query(20, ge=1, le=
     from services.admin.unknown_doc_reclaim_service import recent_post_process_runs
     runs = await recent_post_process_runs(limit=limit)
     return {"total": len(runs), "runs": runs}
+
+
+# ─────────────── Filename Heuristics (v2.5.8) ───────────────
+
+@router.get("/filename-heuristics/rules")
+async def filename_heuristics_rules():
+    """Expose the current rule set so operators can see what patterns will match."""
+    from services.admin.filename_heuristics_service import list_rules
+    rules = list_rules()
+    return {"total": len(rules), "rules": rules}
+
+
+@router.get("/filename-heuristics/preview")
+async def filename_heuristics_preview(
+    limit: int = Query(2000, ge=1, le=10000),
+):
+    """Dry-run the heuristic classifier across candidate docs. Returns
+    match counts by rule + by target doc_type + a 30-doc sample showing
+    exactly which rule matched each filename."""
+    from services.admin.filename_heuristics_service import preview
+    return await preview(limit=limit)
+
+
+@router.post("/filename-heuristics/apply")
+async def filename_heuristics_apply(
+    execute: bool = Query(False, description="Required True to mutate"),
+    limit: int = Query(None, ge=1, le=10000),
+    actor: str = Query("admin"),
+    min_confidence: float = Query(0.70, ge=0.0, le=1.0),
+    keep_in_review: bool = Query(True, description=(
+        "If True (default) the doc stays at its current status (usually "
+        "NeedsReview) but gets enriched with doc_type + vendor. Never "
+        "auto-clears — always requires human signoff."
+    )),
+):
+    """Apply filename-heuristic classifications. Dry-run by default."""
+    from services.admin.filename_heuristics_service import apply
+    return await apply(
+        execute=execute, limit=limit, actor=actor,
+        min_confidence=min_confidence, keep_in_review=keep_in_review,
+    )
+
+
+@router.get("/filename-heuristics/runs")
+async def filename_heuristics_runs(limit: int = Query(20, ge=1, le=100)):
+    """Audit trail for heuristic runs."""
+    from services.admin.filename_heuristics_service import recent_runs
+    runs = await recent_runs(limit=limit)
+    return {"total": len(runs), "runs": runs}

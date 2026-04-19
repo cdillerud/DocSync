@@ -447,6 +447,18 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - **Safety**: empty-watchlist short-circuit (no noise), per-run audit even on skip, `{_id: 0}` projection everywhere.
 - **Tests**: `tests/test_drift_watchlist.py` (16/16). Full iteration_226 report: 16 unit + 6 HTTP + 26 regression tests green.
 
+## Unknown-Doc Reclaim Sweep (2026-04-19 — v2.5.5)
+- **Purpose**: Counterpart to the v2.5.3 `unclassified_guard`. Sweeps docs that were auto-cleared to Completed/Exported BEFORE the guard existed and kicks them back to NeedsReview so humans can resolve them.
+- **Service** (`services/admin/unknown_doc_reclaim_service.py`): `preview` + `run` + `recent_runs`. Filter requires ALL three type fields (`doc_type`, `document_type`, `suggested_job_type`) to be in the unknown set (`$and` — fixed an initial `$or` bug where missing-field defaulted to None/Unknown and caused false positives on real AP_Invoice docs).
+- **Safety**: hard guard against any BC-write evidence (`bc_purchase_invoice_no`, `bc_record_no`, `bc_document_no`, `bc_record_id`). Idempotent via `reclaim_to_needs_review_at` timestamp. Dry-run default.
+- **Audit**: preserves `auto_cleared=True` / `auto_cleared_at` history, appends workflow_history event, persists per-run summary to `unknown_doc_reclaim_runs`.
+- **Endpoints** (`routers/admin.py`):
+  - `GET /api/admin/unknown-doc-reclaim/preview?limit=` — counts + sample + breakdown (how many from batch-split, by doc_type)
+  - `POST /api/admin/unknown-doc-reclaim/run?execute=false&limit=&actor=` — dry-run by default; `execute=true` required to mutate; optional `limit` for staged rollout
+  - `GET /api/admin/unknown-doc-reclaim/runs?limit=` — audit history
+- **Tests**: `tests/test_unknown_doc_reclaim.py` (9/9 via mongomock-motor). Full iteration_227: 48/48 green. Live preview DB verified end-to-end (1 real candidate found and reclaimed).
+- **Deps**: added `mongomock-motor==0.0.36` to test stack.
+
 ## Upcoming Tasks
 - P1: Teams Adaptive Card integration (webhook → BC Sales Order)
 

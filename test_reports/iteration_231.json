@@ -1,0 +1,39 @@
+{
+  "summary": "v2.5.9 Triage Tools (unmatched-sample + duplicate-doc scan/resolve) — backend-only regression. All 82 unit tests in the required regression set pass (test_triage_tools.py 18 + test_filename_heuristics.py 34 + test_unknown_doc_reclaim.py 9 + test_unknown_doc_reclaim_smart.py 11 + test_unknown_doc_reclaim_post_process.py 10). Plus 19 new live-HTTP end-to-end tests against the public preview URL (all pass). filename_shape collapses correctly (ROT12345.pdf → A+#+.A+, 0303382.pdf → #+.A+, Invoice-123.pdf → A+-#+.A+) and is symmetric. unmatched-sample respects min_group_size, excludes docs an existing rule would match (TUMALOC 0303382.pdf lands in still_matched_after_rescan, not rule_candidates), and performs ZERO mutations. duplicate-docs/scan groups by (file_name + vendor_canonical + YYYY-MM-DD), cross-day collapse works with same_day=false, already-resolved docs are skipped. duplicate-docs/resolve dry-run mutates nothing; execute=true with keep=oldest|newest stamps duplicate_of, status=Completed, workflow_status=completed, queue_visible=false, duplicate_resolved_strategy, and appends a 'duplicate_resolved' workflow_history entry. Idempotent (second run marks 0). GAMMIN 12x prod scenario verified end-to-end: 1 keeper untouched, exactly 11 marked. keep=invalid sanitizes to 'oldest' via router guard. /runs returns per-run audit rows. 4 prior regression endpoints still 200. All TEST_iter231_* seed docs + runs fully cleaned up post-run (verified 0 leftovers in hub_documents and duplicate_resolve_runs).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_triage_tools.py",
+    "/app/backend/tests/test_triage_tools_http_iter231.py",
+    "/app/test_reports/pytest/iter231_regression.xml",
+    "/app/test_reports/pytest/iter231_http.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Service module /app/backend/services/admin/triage_tools_service.py is 366 lines — well under the 700-line guideline. Good separation of concerns (shape, unmatched_sample, duplicate_scan, duplicate_resolve, recent_duplicate_runs).",
+    "Router guard at /api/admin/duplicate-docs/resolve silently coerces invalid keep values to 'oldest'. This is defensive but swallows caller bugs; consider logging a warning (or returning 400) when keep ∉ {'oldest','newest'} so operators notice typos.",
+    "duplicate_scan's 'same-day' key is YYYY-MM-DD sliced from the created_utc string. If a doc's created_utc is ever stored as a native datetime (non-ISO string), the slice [:10] could silently mis-group. Not an issue for current ingestion pipeline (all ISO strings) but worth an explicit assertion or normalization step.",
+    "Docstring at triage_tools_service.py:12 still references the old shape notation `\\d+` / `A+` in examples, but the implementation uses `#+` / `A+`. Comment drift — update doc examples for consistency.",
+    "The unmatched-sample endpoint has `limit` (docs scanned) capped at 10000 and duplicate-docs at 20000. For a 361-doc backlog this is fine, but at scale (>20k unknown docs) operators will silently get partial results. Consider surfacing a 'truncated: true' flag in the response when total_scanned == limit."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_triage_tools_http_iter231.py (NEW — 19 live-HTTP tests)"
+  ],
+  "success_rate": {
+    "backend": "100% (82/82 regression + 19/19 live HTTP = 101/101)",
+    "frontend": "N/A (backend-only)"
+  },
+  "test_credentials": "admin / admin (endpoints are unauthenticated in preview env)",
+  "seed_data_creation": "Seeded ephemeral TEST_iter231_* docs via pymongo for HTTP tests (ROTONDO-shape set, MYSTERY set, TUMALOC would-match set, min-group-size set, same-day/cross-day/already-resolved scan sets, dry-run/keep-oldest/keep-newest/idempotent/invalid-keep/GAMMIN-12x resolve sets). Module-scoped teardown deletes all docs matching ^TEST_iter231_ and all duplicate_resolve_runs with actor='TEST_iter231_actor'. Verified 0 leftovers in both collections post-run.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_triage_tools_http_iter231.py is reusable for regression. It uses pymongo (sync) for seeding/verification and requests for HTTP calls — sidesteps motor event-loop issues. Admin endpoints are unauthenticated in preview env. The live hub_documents collection has prod-like data; all seeded docs use TEST_iter231_ prefix + uuid4 suffix to avoid collisions. Note: duplicate_scan's group.count only reflects visible (non-resolved) docs — if adding tests that rely on total ingested count, inspect raw DB directly. Shape signature uses `#+` / `A+` tokens (NOT `\\d+`) — fixed mid-iter230 due to self-consumption bug.",
+  "rca of the issue": "N/A — no defects found. Implementation matches all requirements in the v2.5.9 review request."
+}

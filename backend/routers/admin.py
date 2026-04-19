@@ -1073,3 +1073,68 @@ async def filename_heuristics_runs(limit: int = Query(20, ge=1, le=100)):
     from services.admin.filename_heuristics_service import recent_runs
     runs = await recent_runs(limit=limit)
     return {"total": len(runs), "runs": runs}
+
+
+# ─────────── Triage Tools: Unmatched Sample + Duplicate Scan (v2.5.9) ───────────
+
+@router.get("/filename-heuristics/unmatched-sample")
+async def filename_heuristics_unmatched_sample(
+    limit: int = Query(2000, ge=1, le=10000,
+                       description="Max docs scanned"),
+    top_n: int = Query(40, ge=1, le=200,
+                       description="Top N groups returned"),
+    min_group_size: int = Query(2, ge=1, le=50,
+                                description="Skip groups smaller than this"),
+):
+    """Groups currently-unmatched filenames by (vendor, shape-signature)
+    to surface next-wave rule candidates. Shape collapses digit runs to
+    `#+` and letter runs to `A+` so e.g. `ROT12345_p1.pdf` and
+    `ROT99_p3.pdf` share the same shape `A+#+_A+#+.A+`."""
+    from services.admin.triage_tools_service import unmatched_sample
+    return await unmatched_sample(
+        limit=limit, top_n=top_n, min_group_size=min_group_size,
+    )
+
+
+@router.get("/duplicate-docs/scan")
+async def duplicate_docs_scan(
+    same_day: bool = Query(True,
+                           description="Also require same YYYY-MM-DD ingestion day"),
+    limit: int = Query(2000, ge=1, le=20000),
+    min_count: int = Query(2, ge=2, le=100,
+                           description="Only flag groups with at least this many dupes"),
+):
+    """Find groups of docs with identical (file_name + vendor_canonical
+    [+ ingestion day]). Catches email-poller dedup misses — e.g. the
+    GAMMIN_AR_20260316.xls that arrived 12 times in one day."""
+    from services.admin.triage_tools_service import duplicate_scan
+    return await duplicate_scan(
+        same_day=same_day, limit=limit, min_count=min_count,
+    )
+
+
+@router.post("/duplicate-docs/resolve")
+async def duplicate_docs_resolve(
+    execute: bool = Query(False, description="Required True to mutate"),
+    keep: str = Query("oldest", description="'oldest' | 'newest'"),
+    same_day: bool = Query(True),
+    limit: int = Query(2000, ge=1, le=20000),
+    actor: str = Query("admin"),
+):
+    """Mark all-but-one doc per duplicate group as `duplicate_of=<keeper>`,
+    status=Completed, queue_visible=false. Dry-run by default."""
+    from services.admin.triage_tools_service import duplicate_resolve
+    if keep not in ("oldest", "newest"):
+        keep = "oldest"
+    return await duplicate_resolve(
+        execute=execute, keep=keep, same_day=same_day,
+        limit=limit, actor=actor,
+    )
+
+
+@router.get("/duplicate-docs/runs")
+async def duplicate_docs_runs(limit: int = Query(20, ge=1, le=100)):
+    """Audit trail for duplicate-resolve runs."""
+    from services.admin.triage_tools_service import recent_duplicate_runs
+    runs = await recent_duplicate_runs(limit=limit)
+    return {"total": len(runs), "runs": runs}

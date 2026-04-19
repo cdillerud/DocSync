@@ -483,6 +483,23 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
   - `GET  /api/admin/unknown-doc-reclaim/post-process/runs`
 - **Tests**: `tests/test_unknown_doc_reclaim_post_process.py` (11 tests). iteration_229: 43/43 (30 unit + 13 HTTP), zero bugs.
 
+## Filename Heuristics Classifier (2026-04-19 — v2.5.8)
+- **Purpose**: Pattern-based fallback classifier targeting the ~335 "stamp-only" docs left in NeedsReview after the v2.5.7 post-process sweep — docs the standalone page-level AI couldn't type but whose filename + vendor clearly signals the type.
+- **Service** (`services/admin/filename_heuristics_service.py`): 12 rules derived from real prod samples (TUMALOC freight, CARGOMO invoices, Valley Distributing receiving reports, Brown monthly statements, Progressive Logistics rebills, Crown/Apex outbound, GROUPWA W-prefix, GAMMIN AR, Lone Star numeric, SMC Scan-WA, etc.). Every rule carries an `evidence note` so reviewers see *why* the AI reclassified each doc.
+- **Safety**: 
+  - Filter requires ALL three type fields in UNKNOWN_DOC_TYPES (never touches known-typed docs)
+  - Never touches docs with BC evidence
+  - Idempotent via `filename_heuristic_applied_at` sentinel
+  - `keep_in_review=True` default — status stays at current (NeedsReview) pending human signoff; heuristic NEVER auto-clears
+  - `doc_type_before_heuristic` audit field preserves the original (garbage) doc_type
+  - `min_confidence=0.70` default gate (each rule has its own confidence, tunable per call)
+- **Endpoints** (`routers/admin.py`):
+  - `GET  /api/admin/filename-heuristics/rules`
+  - `GET  /api/admin/filename-heuristics/preview`
+  - `POST /api/admin/filename-heuristics/apply?execute=&smart=&min_confidence=&limit=&actor=`
+  - `GET  /api/admin/filename-heuristics/runs`
+- **Tests**: `tests/test_filename_heuristics.py` (34: 15 real-prod-filename matches + 8 false-positive checks + 11 behavioral). Iteration_230: 78/78 (64 unit + 14 HTTP), zero bugs. 15 real prod filenames from the user's iteration_227/229 sample all classified correctly.
+
 ## Upcoming Tasks
 - P1: Teams Adaptive Card integration (webhook → BC Sales Order)
 

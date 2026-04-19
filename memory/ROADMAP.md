@@ -21,13 +21,14 @@
 - ~~Vendor Resolution Observability + Negative Feedback Loop~~ (2026-03-16, iter_116) — per-doc resolution objects, rejection memory, guardrails, analytics, 71 tests
 
 ### P1 — Next Up
-- **Rep Overrides Management UI** — Admin screen to easily map customers to reps without DB scripts
 - **Teams Adaptive Card Integration** — Webhook handler for "Approve" → BC Sales Order
 - **Admin UI for Item Mapping Rules** — CRUD interface for managing item mapping rules
 - **Continue Orchestration Extraction** — document_handlers.py, sharepoint helpers, email polling still import from server.py
 - **Batch AR Release Evaluation** — Auto-evaluate all sales docs through AR gate in pipeline
+- **Wire email delivery for the weekly digest** — MS Graph (existing creds) or Resend. Build pipeline done; just needs a `send_digest()` hook.
 
 ### P1 — Recently Completed
+- ~~WoW Delta Banner + Rep Overrides Admin UI~~ (2026-04-19, iter_220)
 - ~~Weekly Learning Digest (preview-only) + U6 SO-Learning Telemetry~~ (2026-04-19, iter_219)
 - ~~U5 — Reusable PatternHealthPanel + Learning Ops command center + reviewer leaderboard~~ (2026-04-19, iter_218)
 - ~~U4 — Shared Feedback Ingest + AP Telemetry Tick~~ (2026-04-19, iter_217)

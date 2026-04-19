@@ -111,7 +111,7 @@ export default function WeekOverWeekDeltaBanner() {
               title={`${label}: ${value} this week vs ${delta.pri} prior`}
             >
               <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</span>
-              <span className="text-sm font-bold tabular-nums">{value}</span>
+              <span className="text-sm font-bold tabular-nums mr-1">{value}</span>
               <span className={`flex items-center gap-0.5 text-xs font-semibold ${delta.tone}`}>
                 <Icon className="h-3.5 w-3.5" />
                 {delta.diff === 0

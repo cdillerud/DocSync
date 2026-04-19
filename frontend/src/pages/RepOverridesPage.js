@@ -208,7 +208,6 @@ export default function RepOverridesPage() {
                 onChange={(e) => pickRep(e.target.value)}
                 className="w-full mt-1 px-2 py-1.5 text-sm border border-border rounded bg-background"
                 data-testid="rep-overrides-form-rep-select"
-                required
               >
                 <option value="">-- Select rep --</option>
                 {reps.map((r) => (

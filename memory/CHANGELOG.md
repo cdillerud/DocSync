@@ -1,5 +1,25 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-19] v2.5.2 — WoW Delta Banner + Rep Overrides Admin UI
+
+Two follow-on surfaces on top of the digest + Learning Core work.
+
+**Added (Week-over-Week Delta Banner):**
+- `frontend/src/components/WeekOverWeekDeltaBanner.jsx` — slim banner at the top of `/learning/ops` ("Did we move the needle?") that pulls the latest 2 digests via `GET /api/learning/digest?limit=2` and computes client-side deltas for: events total, active reviewers, new drift alerts. Drift delta is inverted (DOWN is green). Gracefully falls back to a "Baseline week" message when only one digest exists. Zero new backend work.
+
+**Added (Rep Overrides Admin UI):**
+- `frontend/src/pages/RepOverridesPage.js` — full CRUD admin screen over the existing `customer_rep_overrides` collection at route `/admin/rep-overrides`. Replaces the "run a DB script" workflow.
+- Table: customer (#/name), rep (name/email/salesperson_code), reason, updated date, expires date, delete button. Client-side search/filter across all columns. Expired overrides visually muted.
+- Inline form: customer_no + customer_name + rep dropdown (populated from `GET /api/sales-dashboard/reps` → BC cache + existing overrides + documents), reason, notes, optional expiry date. JS-level validation for "rep required" + "customer required". Upserts via `POST /api/sales-dashboard/rep-overrides`.
+- Delete/deactivate via `DELETE /api/sales-dashboard/rep-overrides/{customer_no}` with confirm.
+- New sidebar nav "Rep Overrides" with UserCheck icon; new route in App.js; page title entry in Layout.js.
+- **No backend changes** — all 4 endpoints pre-existed (`list_rep_overrides`, `create_rep_override`, `delete_rep_override`, `list_reps`); this iteration just exposes them via UI.
+
+**Verified:**
+- Testing agent iter_220: 11/11 pytest (new `test_iter220_rep_overrides_wow.py`) + full UI flow coverage PASS. Zero regressions across /learning/ops, /intake/learning, /ai-learning, and every U3/U4/U5/digest backend endpoint.
+- Seed data: `C-DEMO-OVRD-1` (Acme Demo Co. → Demo Rep) persisted as a canonical fixture for future runs; prior-week digest `2026-W15` persisted so the WoW banner always has data to compare against.
+- Minor code-review fixes applied: dropped native `required` on rep `<select>` so JS validation path is reachable; added `mr-1` spacing between metric value and delta arrow in the banner.
+
 ## [2026-04-19] v2.5.2 — Weekly Learning Digest + U6 SO-Learning Telemetry
 
 Closed the Learning-Core unification loop with a **preview-only weekly digest** surface and **U6 telemetry instrumentation** on the sales_order_learning suggestion workflow so every reviewer action — intake, AP, AND sales-order — now feeds the same Learning Ops leaderboard, sparklines, and digest.

@@ -8,6 +8,9 @@
 - Run `POST /api/sales-dashboard/demo/run-batch` to seed batch demo docs and dunnage patterns
 - Use batch-child docs with C-9874 items (e.g., `batch-child-*`) to test dunnage suggestions
 - Giovanni customer: C-10250
+- Rep Overrides demo fixture: `C-DEMO-OVRD-1` / "Acme Demo Co." → Demo Rep (`demo.rep@example.com`, salesperson_code `DEMO01`). Persisted in `customer_rep_overrides` so `/admin/rep-overrides` always has one visible row. Do NOT delete permanently.
+- Prior-week digest fixture: `2026-W15` row in `learning_digests`. Persisted so the `/learning/ops` Week-over-Week banner always has data to compare against. Do NOT delete.
+
 
 ## Intake Learning (new — hub-wide Giovanni pattern)
 - `POST /api/intake/learning/backfill` — run learning across all eligible docs + staging

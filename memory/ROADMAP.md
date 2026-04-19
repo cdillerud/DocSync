@@ -28,7 +28,7 @@
 - **Wire email delivery for the weekly digest** — MS Graph (existing creds) or Resend. Build pipeline done; just needs a `send_digest()` hook.
 
 ### P1 — Recently Completed
-- ~~WoW Delta Banner + Rep Overrides Admin UI~~ (2026-04-19, iter_220)
+- ~~WoW Delta Banner~~ (2026-04-19, iter_220) — Rep Overrides admin UI ROLLED BACK (duplicate of existing Settings tab)
 - ~~Weekly Learning Digest (preview-only) + U6 SO-Learning Telemetry~~ (2026-04-19, iter_219)
 - ~~U5 — Reusable PatternHealthPanel + Learning Ops command center + reviewer leaderboard~~ (2026-04-19, iter_218)
 - ~~U4 — Shared Feedback Ingest + AP Telemetry Tick~~ (2026-04-19, iter_217)

@@ -1,24 +1,27 @@
 # GPI Document Hub - Changelog
 
-## [2026-04-19] v2.5.2 — WoW Delta Banner + Rep Overrides Admin UI
+## [2026-04-19] v2.5.2 — WoW Delta Banner + ~~Rep Overrides Admin UI~~ (rolled back — dup)
 
-Two follow-on surfaces on top of the digest + Learning Core work.
+**Week-over-Week Delta Banner** shipped as planned. **Rep Overrides admin UI rolled back** — a tab for it already existed inside `/config` (Settings → Rep Overrides) via `components/RepOverridesPanel.js`. Main agent failed to grep the codebase before building. Duplicate deleted; sidebar link + route removed.
 
 **Added (Week-over-Week Delta Banner):**
 - `frontend/src/components/WeekOverWeekDeltaBanner.jsx` — slim banner at the top of `/learning/ops` ("Did we move the needle?") that pulls the latest 2 digests via `GET /api/learning/digest?limit=2` and computes client-side deltas for: events total, active reviewers, new drift alerts. Drift delta is inverted (DOWN is green). Gracefully falls back to a "Baseline week" message when only one digest exists. Zero new backend work.
 
-**Added (Rep Overrides Admin UI):**
-- `frontend/src/pages/RepOverridesPage.js` — full CRUD admin screen over the existing `customer_rep_overrides` collection at route `/admin/rep-overrides`. Replaces the "run a DB script" workflow.
-- Table: customer (#/name), rep (name/email/salesperson_code), reason, updated date, expires date, delete button. Client-side search/filter across all columns. Expired overrides visually muted.
-- Inline form: customer_no + customer_name + rep dropdown (populated from `GET /api/sales-dashboard/reps` → BC cache + existing overrides + documents), reason, notes, optional expiry date. JS-level validation for "rep required" + "customer required". Upserts via `POST /api/sales-dashboard/rep-overrides`.
-- Delete/deactivate via `DELETE /api/sales-dashboard/rep-overrides/{customer_no}` with confirm.
-- New sidebar nav "Rep Overrides" with UserCheck icon; new route in App.js; page title entry in Layout.js.
-- **No backend changes** — all 4 endpoints pre-existed (`list_rep_overrides`, `create_rep_override`, `delete_rep_override`, `list_reps`); this iteration just exposes them via UI.
+**Rolled back:**
+- `frontend/src/pages/RepOverridesPage.js` — **deleted**
+- Route `/admin/rep-overrides` — removed from `App.js`
+- Sidebar nav link "Rep Overrides" + `UserCheck` icon — removed from `Layout.js`
+- Page title entry — removed
+
+**Retained:**
+- `C-DEMO-OVRD-1` / Acme Demo Co. → Demo Rep fixture stays — it's now useful for the existing Settings → Rep Overrides tab (already confirmed rendering the row)
+- `2026-W15` prior-week digest fixture — still needed for the WoW banner
 
 **Verified:**
-- Testing agent iter_220: 11/11 pytest (new `test_iter220_rep_overrides_wow.py`) + full UI flow coverage PASS. Zero regressions across /learning/ops, /intake/learning, /ai-learning, and every U3/U4/U5/digest backend endpoint.
-- Seed data: `C-DEMO-OVRD-1` (Acme Demo Co. → Demo Rep) persisted as a canonical fixture for future runs; prior-week digest `2026-W15` persisted so the WoW banner always has data to compare against.
-- Minor code-review fixes applied: dropped native `required` on rep `<select>` so JS validation path is reachable; added `mr-1` spacing between metric value and delta arrow in the banner.
+- Testing agent iter_220 had validated both features before rollback — WoW banner tests all still apply; Rep Overrides tests are now stale but harmless (endpoint-level coverage still valid)
+- Confirmed post-rollback: `/config` (Settings) → "Rep Overrides" tab renders `RepOverridesPanel` with the `C-DEMO-OVRD-1` seed row visible; sidebar no longer shows the dup link
+
+**Lesson:** Before building a new page, grep for existing component/panel/tab implementations (`grep -rln "<feature-name>"`). Should have been standard practice here.
 
 ## [2026-04-19] v2.5.2 — Weekly Learning Digest + U6 SO-Learning Telemetry
 

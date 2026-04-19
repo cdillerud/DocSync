@@ -470,6 +470,19 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - **Endpoints** (`routers/admin.py`) now accept `smart` + `skip_noise` query params on both `/preview` and `/run`.
 - **Tests**: `tests/test_unknown_doc_reclaim_smart.py` (11) + `tests/test_unknown_doc_reclaim.py` (9) = 20/20 unit. Full iteration_228: 38/38 (20 unit + 18 HTTP). Verified NOISE_FILENAME_PATTERNS do NOT match real doc filenames (W117505.pdf, MARCH 2026 ACTIVITY.pdf, 0303382.pdf etc).
 
+## Retroactive Post-Process Sweep (2026-04-19 — v2.5.7)
+- **Purpose**: Fix the prod situation where operator ran v2.5.5 plain reclaim on 372 docs BEFORE v2.5.6 (smart + skip_noise) shipped. Those docs went to NeedsReview without parent-inheritance enrichment and with email-sprite noise still in the queue. This sweep retroactively applies the two modes.
+- **Service** (`services/admin/unknown_doc_reclaim_service.py`): `_build_post_process_filter` + `post_process` + `recent_post_process_runs`. Filter scopes to docs with `reclaim_to_needs_review_at` set AND `post_process_applied_at` unset AND still queue-visible AND no BC evidence.
+- **Three paths per doc** (evaluated in order):
+  1. `skip_noise` + filename matches noise → revert OUT of NeedsReview (`status=Completed`, `queue_visible=false`, `noise_filtered=true`)
+  2. `smart` + batch_parent_id + classified parent + no prior inheritance → inherit parent's `doc_type` + `vendor_canonical` + `vendor_id` + `customer_canonical`; stays in NeedsReview but enriched
+  3. Otherwise → stamp-only (`post_process_applied_at` set; prevents re-picks)
+- **Audit**: `unknown_doc_reclaim_post_process_runs` collection + `workflow_history` events (`post_process_noise_filtered`, `post_process_parent_inheritance`).
+- **Endpoints** (`routers/admin.py`):
+  - `POST /api/admin/unknown-doc-reclaim/post-process?execute=&smart=&skip_noise=&limit=&actor=`
+  - `GET  /api/admin/unknown-doc-reclaim/post-process/runs`
+- **Tests**: `tests/test_unknown_doc_reclaim_post_process.py` (11 tests). iteration_229: 43/43 (30 unit + 13 HTTP), zero bugs.
+
 ## Upcoming Tasks
 - P1: Teams Adaptive Card integration (webhook → BC Sales Order)
 

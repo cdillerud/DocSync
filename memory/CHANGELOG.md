@@ -1,5 +1,32 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-19] v2.5.2 — Phase B Readiness Report (stub ready)
+
+Companion stub to the Phase B.0 observer — turns raw observation data into a categorized test-coverage matrix with a READY / NOT READY verdict. When production observations accumulate (~7 days), the readiness endpoint tells us EXACTLY which caller × doc_type paths Phase B must preserve with green tests in the new home.
+
+**Added:**
+- `services/workflow_state_observer.build_phase_b_readiness_report(days, min_coverage)` — emits `{ready_to_extract, verdict, counts, matrix, markdown}`. Categories: `must_preserve` (≥ `min_coverage` calls), `should_cover` (2..min-1), `edge_case` (1). Matrix sorted desc by calls. Built-in markdown renderer produces a PR-ready block with 3 section headers + pipe-escaped tables.
+- `GET /api/admin/workflow-observer/phase-b-readiness?days=&min_coverage=&format=json|markdown` — JSON by default, `format=markdown` returns `text/markdown` via `PlainTextResponse`. Query bounds: days ∈ [1, 90], min_coverage ∈ [2, 100], format ∈ {json, markdown}. All validated by FastAPI → 422 on violation.
+- 4 new pytest in `tests/test_workflow_state_observer.py` — not-ready-on-empty, categorizes-and-verdicts-ready, not-ready-below-threshold, clamps-min-coverage
+- Testing agent also authored `tests/test_phase_b_readiness_http.py` (15 HTTP integration tests) against the live preview URL
+
+**Verdicts:**
+- **NOT READY** — when `total_calls=0` OR no path hits the threshold. Verdict string tells the user which case + what to do.
+- **READY** — at least one `must_preserve` path. Verdict string names the count + prescribes the action ("Phase B extraction should ship with a pytest covering each of those pairs").
+
+**Verified:**
+- Testing agent iter_223: **96/96 total** (9 observer + 72 regression + 15 HTTP integration) PASS. Zero critical issues. JSON and markdown paths both verified with seeded+cleaned data. Parameter validation returns 422 on all bad inputs. Fixtures (C-10250, C-DEMO-OVRD-1, digest 2026-W15) untouched.
+- Code-review note: Report rightly separates threshold (min_coverage) from time window (days). Markdown escapes pipes in caller/doc_type. With `min_coverage=2` the `should_cover` range is degenerate (empty); noted as expected behavior, not a bug.
+
+**How to use after 7 days of production traffic:**
+```
+# Machine-readable (for CI / scripts)
+curl /api/admin/workflow-observer/phase-b-readiness?days=7 | jq
+
+# Human-readable (paste into the Phase B PR description)
+curl "/api/admin/workflow-observer/phase-b-readiness?days=7&format=markdown"
+```
+
 ## [2026-04-19] v2.5.2 — Phase B.0: Workflow State Observer
 
 De-risking pre-flight for the upcoming Phase B extraction (moving the 427-line `_update_standard_workflow_status` out of `server.py`). Captures caller attribution + doc_type for every invocation into a TTL-bounded collection so we have production data — which callers exercise which branches — before the real move.

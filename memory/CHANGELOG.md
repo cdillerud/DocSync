@@ -1,5 +1,61 @@
 # GPI Document Hub - Changelog
 
+
+## [2026-04-19] v2.5.10 — Email-Poller Dedup Fix + Auto-Proposed Filename Rules
+
+**Problem surfaced from prod triage-scan dump**
+- `GET /api/admin/triage/duplicate-scan` showed identical attachments (`GAMMIN_AR_20260316.xls`, `W9.pdf`, etc.) ingested 10–12× per day.
+- `GET /api/admin/filename-heuristics/unmatched-sample` revealed 187 Ball Metal + 13 MRP Solutions docs stuck in NeedsReview — no existing rule matches them.
+
+**Root cause of dup ingestion (3 compounding bugs):**
+1. Dynamic poller (`poll_mailbox_for_documents`) deduped by `attachment_name` but the static AP poller (`poll_mailbox_for_attachments`) wrote the same `mail_intake_log` rows with field `filename`. Cross-worker blindness → same file ingested twice.
+2. Dynamic poller used a **hardcoded 1-hour rolling lookback** and ran every 60 s → replayed the same messages up to 60× an hour.
+3. No unique index on `mail_intake_log(internet_message_id, attachment_hash)` — nothing enforced uniqueness at the DB layer.
+
+**Fixes (`services/email_polling_service.py`):**
+- `check_duplicate_mail_intake(...)` now matches across BOTH legacy schemas (`filename` + `attachment_name`) AND has a global hash-only fallback so the same content forwarded from a different email still dedups.
+- `record_mail_intake_log` writes BOTH `filename` and `attachment_name` for forward interop; swallows `DuplicateKeyError` from the unique index (concurrent-worker race → treated as "already processed").
+- New `ensure_mail_intake_indexes()` creates a UNIQUE partial index on `(internet_message_id, attachment_hash)` + lookup indexes. Called at startup in `server.py` before any poller task is spawned.
+- Dynamic poller now uses hash-first dedup (same path as static) + a **per-mailbox watermark** stored in `hub_settings` with key `mailbox_watermark:<address>`, so we no longer replay a 1-hour window every minute.
+
+**New feature — Auto-Proposed Filename Heuristic Rules (`services/admin/filename_heuristics_auto_service.py`):**
+Zero-manual-input rule generation. Mines each vendor's own already-classified docs in `hub_documents` (excluding its own heuristic decisions, to avoid feedback loops) and proposes a rule when one `doc_type` carries ≥70% of ≥5 samples.
+- `auto_propose(...)` → `{proposals, deferred, projected_coverage, ...}`
+- `apply_auto_proposed(execute, min_unmatched_count, min_confidence, actor)` → upserts into `filename_heuristic_custom_rules`, invalidates classifier cache.
+- `list_custom_rules(only_enabled)` + `set_custom_rule_enabled(rule_id, enabled)`.
+
+**Classifier consults custom rules (`services/admin/filename_heuristics_service.py`):**
+- New `classify_filename_async()` — safe in any async context; cached for 60 s.
+- Built-in rules always win over custom rules (custom is a fallback, not an override).
+- `apply()` and `preview()` upgraded to use `classify_filename_async`.
+
+**5 new admin endpoints:**
+- `GET  /api/admin/filename-heuristics/auto-propose`
+- `POST /api/admin/filename-heuristics/auto-apply?execute=&min_unmatched_count=&min_confidence=`
+- `GET  /api/admin/filename-heuristics/custom-rules?only_enabled=`
+- `POST /api/admin/filename-heuristics/custom-rules/{rule_id}/toggle?enabled=`
+
+**Verified:**
+- 8 new pytests in `tests/test_email_polling_dedup.py` — all green.
+- 13 new pytests in `tests/test_filename_heuristics_auto.py` — all green.
+- Testing agent iter_232: **107/107 PASS** across related suites. Full round-trip seeded, verified persisted + toggled + regression on `/filename-heuristics/*`, `/duplicate-docs/*`, `/email-polling/status`, `/documents`. Startup log confirms `mail_intake_log indexes ensured`.
+
+**Operator playbook (on prod — remember to `cd /opt/gpi-hub && git pull && docker compose build --no-cache && docker compose up -d` first):**
+```bash
+# 1. Dry-run to see what would be proposed
+curl http://localhost:8080/api/admin/filename-heuristics/auto-propose?min_group_size=3 | jq
+
+# 2. Commit the rules
+curl -XPOST 'http://localhost:8080/api/admin/filename-heuristics/auto-apply?execute=true&min_unmatched_count=5&min_confidence=0.75'
+
+# 3. Backfill the existing Unknowns now that rules exist
+curl -XPOST 'http://localhost:8080/api/admin/filename-heuristics/apply?execute=true&min_confidence=0.70'
+
+# 4. Clean up the dup docs from prior runs
+curl -XPOST 'http://localhost:8080/api/admin/duplicate-docs/resolve?execute=true&keep=oldest'
+```
+
+
 ## [2026-04-19] v2.5.2 — Phase B Readiness Report (stub ready)
 
 Companion stub to the Phase B.0 observer — turns raw observation data into a categorized test-coverage matrix with a READY / NOT READY verdict. When production observations accumulate (~7 days), the readiness endpoint tells us EXACTLY which caller × doc_type paths Phase B must preserve with green tests in the new home.

@@ -774,3 +774,14 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - **Root cause**: `_normalize_status()` in `so_rules_engine.py` returned raw status strings for unrecognized values (e.g., "captured", "extracted"). These fell through all stage checks to the final "Exception / Needs Review" return.
 - **Fix**: Added 10+ hub internal statuses to the mapping (captured, extracted, classified, ingested, processing, queued, new, pending → Draft/Open; exception, failed, error → Exception). Unrecognized statuses now default to "Draft / Open" instead of raw passthrough.
 - **Impact**: All 37 docs moved from "Exception / Needs Review" to "Draft / Open"
+
+
+## v2.5.10 — Email Dedup + Auto-Proposed Filename Rules (2026-04-19)
+- **Fixed**: Email-poller ingesting same attachment 10–12×/day (GAMMIN_AR, W9.pdf). Root cause: static + dynamic pollers used incompatible dedup schemas in shared `mail_intake_log`, dynamic poller had 1h hardcoded lookback replayed every 60 s, and no DB-layer uniqueness. Fix: unified hash-first dedup across both pollers, per-mailbox watermarks, UNIQUE partial index on `(internet_message_id, attachment_hash)`, and `ensure_mail_intake_indexes()` at startup.
+- **Added**: Auto-Proposed Filename Heuristic Rules — mines each vendor's own classified-doc history in `hub_documents` to derive new rules without manual input. Persisted in `filename_heuristic_custom_rules` collection and consulted by `classify_filename_async` (60 s cache). Built-in rules always win; custom rules serve as fallback. 5 new admin endpoints under `/api/admin/filename-heuristics/{auto-propose, auto-apply, custom-rules, custom-rules/{id}/toggle}`.
+- **Tests**: 8 dedup + 13 auto-propose pytests + testing-agent iter_232 HTTP suite — 107/107 PASS.
+- **Known follow-ups** (all P2 — see ROADMAP.md):
+  - Frontend tooltip on Document Detail showing `filename_heuristic_rule` + `filename_heuristic_note`.
+  - Surface the custom-rules list in an admin UI panel (currently API-only).
+  - Phase B/C orchestration extraction from `server.py`.
+

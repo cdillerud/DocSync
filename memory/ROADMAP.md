@@ -31,6 +31,16 @@
 - ~~Admin UI for Item Mapping Rules~~ — lives in `Settings → Item Mappings` tab + dedicated `ItemMappingsPage.js` + 4 endpoints in `gpi_integration.py`
 - ~~Rep Overrides Management UI~~ — lives in `Settings → Rep Overrides` tab backed by `components/RepOverridesPanel.js`
 
+### P1 — Completed this session (2026-04-19)
+- ~~Email-Poller Duplicate-Ingestion Fix~~ (v2.5.10) — Static + dynamic pollers now share hash-first dedup, per-mailbox watermarks, unique partial index on `mail_intake_log(internet_message_id, attachment_hash)`. 8 pytests.
+- ~~Auto-Proposed Filename Heuristic Rules~~ (v2.5.10) — Mines vendor-owned classified-doc history to auto-derive new rules without manual input. 5 new admin endpoints. 13 pytests + testing-agent HTTP round-trip. Covers the 187 Ball Metal / 13 MRP Unknowns the user surfaced from prod.
+
+### P2 — Follow-ups from v2.5.10
+- **Frontend tooltip on Document Detail page** — Show `filename_heuristic_rule` + `filename_heuristic_note` so reviewers understand WHY the AI classified a doc.
+- **Admin UI panel for custom rules** — Surface `GET /api/admin/filename-heuristics/custom-rules` + toggle endpoint in Settings (currently API-only).
+- **Weekly audit alert** — When `auto-apply` persists ≥5 new rules in a week, ping Teams via existing MS Graph drift-watchlist plumbing.
+
+
 ### P1 — Recently Completed
 - ~~Phase B Readiness Report stub~~ (2026-04-19, iter_223) — categorizes observer data into must_preserve/should_cover/edge_case with READY verdict + PR-ready markdown
 - ~~Phase B.0 Workflow State Observer~~ (2026-04-19, iter_222) — observability shim with caller attribution, TTL-bounded

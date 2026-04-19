@@ -1,0 +1,61 @@
+{
+  "summary": "Validated P0 data-integrity fix: Unknown/split-child auto-clear guardrail + posted_to_bc_7d KPI + parent-inheritance helper. 8/8 new unit tests pass, 4/4 test_auto_close_confidence_fix, 28/28 test_po_resolution_api, and a new 10-case HTTP regression suite all green. Found + fixed a critical missing-import bug in routers/auto_clear.py that was returning 500 on /api/auto-clear/evaluate/{doc_id} (and /config, /config/threshold) \u2014 the hard guardrail was correct in the service layer but unreachable via HTTP.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "/api/auto-clear/evaluate/{doc_id} (and /api/auto-clear/config, /api/auto-clear/config/threshold/{doc_type})",
+        "issue": "routers/auto_clear.py was missing imports for evaluate_auto_clear, get_auto_clear_config, update_threshold, get_auto_clear_summary, AutoClearDecision \u2014 every call to the module raised NameError \u2192 500 Internal Server Error. FIXED by adding the import block from services.auto_clear_service. After fix, all 3 endpoints return 200 and the unclassified_guard fires correctly end-to-end.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "/api/learning/pattern-health",
+        "issue": "Path specified in the review_request does not exist; actual paths are /api/learning/pattern-health/unified (learning_core router) and /api/intake/learning/pattern-health (intake_learning router). Both return 200. No code change needed, just a docs/path mismatch."
+      },
+      {
+        "endpoint": "/api/auto-clear/reprocess",
+        "issue": "Actual prefix is /api/auto-clear-reprocess (separate router); endpoints are /dry-run, /run, /force-clear-remaining, /clear-junk/dry-run, /clear-junk/run. Confirmed dry-run responds 200 (code path uses same evaluate_auto_clear \u2192 guard effective here too)."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_auto_clear_unknown_guard.py",
+    "/app/backend/tests/test_auto_close_confidence_fix.py",
+    "/app/backend/tests/test_po_resolution_api.py",
+    "/app/backend/tests/test_iter224_unknown_guard_http.py",
+    "/app/test_reports/pytest/iter224_guard.xml",
+    "/app/test_reports/pytest/iter224_http.xml"
+  ],
+  "action_items": [
+    "Main agent: review the routers/auto_clear.py import fix (committed by testing agent) \u2014 this was a latent bug in the checkout, not part of the P0 fix scope.",
+    "Consider updating PRD/context note: /api/auto-clear/reprocess is actually /api/auto-clear-reprocess/* and /api/learning/pattern-health is /api/learning/pattern-health/unified (or /api/intake/learning/pattern-health). Review request paths were slightly off.",
+    "4 failures in test_validation_auto_clear_readiness_fixes.py confirmed pre-existing (PO-resolution check added earlier in history) \u2014 not regressions of this iteration. Recommend main agent either update those fixtures to include resolved PO OR mark them as xfail with explanation."
+  ],
+  "critical_code_review_comments": [
+    "routers/auto_clear.py had NO imports for the service-layer helpers it called (evaluate_auto_clear, get_auto_clear_config, update_threshold, get_auto_clear_summary, AutoClearDecision, AUTO_CLEAR_CONFIG) \u2014 every endpoint in that router was broken. Added the imports. Root cause was likely a refactor/rename that dropped the import block.",
+    "auto_clear_service.py \u2192 evaluate_auto_clear guard block (lines 212-270) is tight and well-commented; handles None/empty/Unknown/Other/DEFAULT doc_types and percentage-string confidences. \u2713",
+    "batch_po_splitter.py \u2192 _inherit_parent_and_reevaluate correctly preserves AI-original values as doc_type_from_split_ai / classification_confidence_from_split_ai for audit, only inherits real parent values, and never overwrites existing child extractions. \u2713",
+    "routers/dashboard.py KPI logic (via /inbox-stats) verified: posted_to_bc_7d and ready_for_post both present as ints (0 and 1 respectively on current data). \u2713",
+    "Minor: the new guardrail uses meaningful_early < 2; consider documenting this threshold in a constant so future tuning is explicit."
+  ],
+  "updated_files": [
+    "/app/backend/routers/auto_clear.py (added missing imports block \u2014 criticial bug fix)",
+    "/app/backend/tests/test_iter224_unknown_guard_http.py (new regression suite, 10 cases)"
+  ],
+  "success_rate": {
+    "backend": "100% (50/50 target tests; 4 pre-existing unrelated failures confirmed not regressions)",
+    "frontend": "not tested (backend-only scope)"
+  },
+  "test_credentials": "admin / admin per /app/memory/test_credentials.md (not needed for these backend tests \u2014 endpoints are unauthenticated in preview env)",
+  "seed_data_creation": "Ephemeral TEST_unknown_* and TEST_ap_* docs created in hub_documents and deleted in fixture teardown. No customer data touched. No leftover rows.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iter 224 focus: auto-clear unknown guardrail + parent inheritance + posted_to_bc_7d KPI. All passing. Critical finding: routers/auto_clear.py had broken imports \u2014 fixed. New HTTP suite at /app/backend/tests/test_iter224_unknown_guard_http.py can be reused as regression. Pre-existing failures in test_validation_auto_clear_readiness_fixes.py (4) are NOT regressions \u2014 they rely on PO-resolution shortcut that was tightened earlier in history.",
+  "rca of the issue": "P0 bug: Auto-split children (e.g., Ball Metal *_p11.pdf) classified as doc_type=Unknown + conf=0.0 + 0 fields passed evaluate_auto_clear because the Unknown threshold config had confidence_threshold=0.0 with no require_minimum_extraction. Trivially 0.0 \u2265 0.0 \u2192 CLEARED \u2192 exported/completed, skipping human review. Fix: (1) services/auto_clear_service.py adds early guard rejecting Unknown/Other/empty doc_types when conf<0.70 OR meaningful_fields<2, returning NEEDS_REVIEW with unclassified_guard_triggered=True; (2) services/batch_po_splitter._inherit_parent_and_reevaluate inherits parent doc_type + vendor_canonical into split children that returned Unknown, forces status=NeedsReview, preserves AI original under *_from_split_ai; (3) routers/dashboard.py widens posted_to_bc_7d query across bc_purchase_invoice_no/bc_record_no/bc_document_no/bc_record_id and multiple timestamp fields (posted_to_bc_at/bc_posted_at/posted_at/updated_utc). Secondary bug discovered during testing: routers/auto_clear.py was missing the import block for the service helpers \u2014 fixed here, else the HTTP guardrail path returned 500."
+}

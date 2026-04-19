@@ -959,15 +959,39 @@ async def get_inbox_stats():
     # Bounds alerts (active)
     bounds_alerts = await db.hub_documents.count_documents({"bounds_alert": True})
 
-    # Posted to BC (7-day window)
+    # Posted to BC (7-day window) — a doc counts as "posted" if we captured
+    # evidence of a BC record (any of bc_purchase_invoice_no / bc_record_no /
+    # bc_document_no / bc_record_id) within the last 7 days. This matches
+    # the actual write paths (see PRD 2026-04-10 field-name migration) and
+    # no longer requires a literal status == "Posted" string match.
     posted_to_bc_7d = await db.hub_documents.count_documents({
-        "status": "Posted",
-        "posted_to_bc_at": {"$gte": seven_days_ago_utc},
+        "$and": [
+            {
+                "$or": [
+                    {"bc_purchase_invoice_no": {"$exists": True, "$nin": [None, ""]}},
+                    {"bc_record_no": {"$exists": True, "$nin": [None, ""]}},
+                    {"bc_document_no": {"$exists": True, "$nin": [None, ""]}},
+                    {"bc_record_id": {"$exists": True, "$nin": [None, ""]}},
+                    {"status": "Posted"},
+                ],
+            },
+            {
+                "$or": [
+                    {"posted_to_bc_at": {"$gte": seven_days_ago_utc}},
+                    {"bc_posted_at": {"$gte": seven_days_ago_utc}},
+                    {"posted_at": {"$gte": seven_days_ago_utc}},
+                    {"updated_utc": {"$gte": seven_days_ago_utc}},
+                ],
+            },
+        ],
     })
-    # Also count ReadyForPost (queued but not yet posted)
+    # Count docs currently queued for posting (ReadyForPost) — status/workflow
+    # flags may diverge during retries, so match on either.
     ready_for_post = await db.hub_documents.count_documents({
-        "$or": [{"status": "ReadyForPost"}, {"workflow_status": "ready_for_post"}],
-        "status": {"$nin": ["Posted", "Completed", "Archived"]},
+        "$or": [
+            {"status": "ReadyForPost"},
+            {"workflow_status": "ready_for_post"},
+        ],
     })
 
     # Avg AI confidence (sampled from last 200 docs for speed)

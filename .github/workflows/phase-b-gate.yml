@@ -1,0 +1,61 @@
+name: Phase B Readiness Gate
+
+# Blocks merges that touch the legacy `_update_standard_workflow_status` orchestration
+# path in server.py unless the Phase B Workflow State Observer reports READY via
+# /api/admin/workflow-observer/phase-b-readiness. This is the de-risk gate for the
+# Phase B extraction work tracked in ROADMAP.md.
+
+on:
+  pull_request:
+    paths:
+      - 'backend/server.py'
+      - 'backend/services/workflow_state_observer.py'
+      - 'backend/routers/workflow_observer.py'
+  workflow_dispatch:
+
+jobs:
+  phase-b-tests:
+    name: Phase B observer + readiness tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install backend deps
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run Phase B unit tests
+        working-directory: backend
+        env:
+          MONGO_URL: mongodb://localhost:27017
+          DB_NAME: gpi_hub_ci
+        run: |
+          pytest -q \
+            tests/test_workflow_state_observer.py \
+            tests/test_phase_b_readiness.py \
+            tests/test_auto_clear_unknown_guard.py
+
+      - name: Guardrail - no new direct calls to `_update_standard_workflow_status`
+        run: |
+          # Count external callers of the legacy orchestration function.
+          # Only server.py itself is allowed to reference it until Phase B extraction lands.
+          COUNT=$(grep -rn "_update_standard_workflow_status" backend \
+            --include='*.py' \
+            --exclude='server.py' \
+            --exclude-dir='tests' \
+            | grep -v 'workflow_state_observer' \
+            | wc -l)
+          echo "External callers found: $COUNT"
+          if [ "$COUNT" -gt 0 ]; then
+            echo "::error::New external caller of _update_standard_workflow_status detected. See ROADMAP 'Orchestration Extraction Phase B'."
+            exit 1
+          fi

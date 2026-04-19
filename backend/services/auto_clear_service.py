@@ -201,6 +201,73 @@ def evaluate_auto_clear(
         return AutoClearDecision.NEEDS_REVIEW, "Auto-clear disabled", {}
     
     doc_type = doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type") or "DEFAULT"
+
+    # =================================================================
+    # HARD GUARDRAIL: Never auto-clear unclassified / junk documents.
+    # Protects against split children (`auto_split`) that come back as
+    # `Unknown` with 0 confidence and no extracted fields — previously
+    # these trivially passed the single confidence check (0.0 ≥ 0.0) and
+    # got exported/completed, bypassing human review.
+    # =================================================================
+    UNKNOWN_TYPES = {
+        None, "", "DEFAULT",
+        "Unknown", "UNKNOWN", "unknown",
+        "Unknown_Document", "UNKNOWN_DOCUMENT",
+        "Unknown_Sales", "UNKNOWN_SALES",
+        "Other", "OTHER",
+    }
+    if doc_type in UNKNOWN_TYPES:
+        ai_class_early = doc.get("ai_classification") or {}
+        conf_early = (
+            ai_class_early.get("confidence")
+            or doc.get("classification_confidence")
+            or doc.get("ai_confidence")
+            or doc.get("confidence")
+            or 0.0
+        )
+        try:
+            if isinstance(conf_early, str):
+                conf_early = float(conf_early.replace("%", "")) / 100 if "%" in conf_early else float(conf_early)
+            conf_early = float(conf_early)
+        except (TypeError, ValueError):
+            conf_early = 0.0
+
+        extracted_early = doc.get("extracted_fields") or {}
+        normalized_early = doc.get("normalized_fields") or {}
+        meaningful_early = sum(
+            1
+            for k, v in {**extracted_early, **normalized_early}.items()
+            if v and str(v).strip() and not str(k).endswith("_detected_by")
+        )
+
+        # Require BOTH reasonable confidence (>=0.70) AND real extracted content
+        # before an Unknown/Other doc may proceed through the remaining checks.
+        if conf_early < 0.70 or meaningful_early < 2:
+            return (
+                AutoClearDecision.NEEDS_REVIEW,
+                (
+                    f"Unclassified document (doc_type={doc_type or 'None'}, "
+                    f"confidence={conf_early:.2f}, fields={meaningful_early}) — "
+                    "refusing to auto-clear without human review"
+                ),
+                {
+                    "doc_id": doc.get("id"),
+                    "doc_type": doc_type,
+                    "evaluated_at": utcnow(),
+                    "checks": [{
+                        "check": "unclassified_guard",
+                        "passed": False,
+                        "value": {
+                            "doc_type": doc_type,
+                            "confidence": conf_early,
+                            "meaningful_fields": meaningful_early,
+                        },
+                        "message": "Unknown / low-confidence / no-content docs require manual review",
+                    }],
+                    "all_checks_passed": False,
+                    "unclassified_guard_triggered": True,
+                },
+            )
     # Case-insensitive config lookup — DB stores 'AP_INVOICE', config keys use 'AP_Invoice'
     type_config = config["thresholds"].get(doc_type)
     if type_config is None:

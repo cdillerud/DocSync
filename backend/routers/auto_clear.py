@@ -4,6 +4,16 @@ from fastapi import APIRouter, HTTPException, Body, Query
 from deps import get_db
 from datetime import datetime, timezone
 
+from services.auto_clear_service import (
+    evaluate_auto_clear,
+    get_auto_clear_update,
+    get_auto_clear_summary,
+    get_auto_clear_config,
+    update_threshold,
+    AutoClearDecision,
+    AUTO_CLEAR_CONFIG,
+)
+
 router = APIRouter(prefix="/auto-clear", tags=["Auto-Clear"])
 
 

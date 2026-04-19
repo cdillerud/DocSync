@@ -165,6 +165,24 @@ async def split_and_ingest_batch(
     reader = PdfReader(io.BytesIO(file_content))
     total_pages = len(reader.pages)
 
+    # Load parent metadata so child pages can inherit doc_type / vendor when
+    # the AI re-classifies an isolated page as "Unknown". This prevents
+    # unclassified split children from being auto-cleared with zero evidence.
+    parent_doc = await db.hub_documents.find_one(
+        {"id": parent_doc_id},
+        {
+            "_id": 0,
+            "doc_type": 1,
+            "document_type": 1,
+            "suggested_job_type": 1,
+            "vendor_canonical": 1,
+            "vendor_id": 1,
+            "vendor_name": 1,
+            "customer_canonical": 1,
+            "customer_id": 1,
+        },
+    ) or {}
+
     # Determine split strategy
     if groups and len(groups) > 0:
         # Boundary-aware: split by logical document groups
@@ -242,6 +260,17 @@ async def split_and_ingest_batch(
                     }},
                 )
 
+                # Inherit parent metadata for children that came back Unknown /
+                # unclassified. Also re-run auto-clear so the post-inheritance
+                # state is persisted correctly (it will route to NeedsReview if
+                # guardrails still trip — never silently "Completed").
+                await _inherit_parent_and_reevaluate(
+                    db=db,
+                    child_doc_id=child_doc_id,
+                    parent_doc=parent_doc,
+                    unit_vendor_hint=unit.get("vendor_hint", ""),
+                )
+
             child_info = {
                 "group_num": unit_idx + 1,
                 "pages": sorted(pages),
@@ -314,3 +343,120 @@ async def split_and_ingest_batch(
         "children_errors": len(errors),
         "children": children,
     }
+
+
+
+# Doc-type values that indicate the AI could not classify the split child.
+_UNKNOWN_CHILD_TYPES = {
+    None, "", "DEFAULT",
+    "Unknown", "UNKNOWN", "unknown",
+    "Unknown_Document", "UNKNOWN_DOCUMENT",
+    "Unknown_Sales", "UNKNOWN_SALES",
+    "Other", "OTHER",
+}
+
+
+async def _inherit_parent_and_reevaluate(
+    db,
+    child_doc_id: str,
+    parent_doc: dict,
+    unit_vendor_hint: str = "",
+) -> None:
+    """When an auto-split child comes back as Unknown / unclassified, inherit
+    the parent's doc_type + vendor context and force the child to NeedsReview
+    instead of letting a 0-confidence Unknown silently auto-clear/export.
+
+    Keeps the original AI result visible under `*_from_split_ai` fields for
+    audit/learning.
+    """
+    try:
+        child = await db.hub_documents.find_one({"id": child_doc_id}, {"_id": 0})
+        if not child:
+            return
+
+        child_type = (
+            child.get("doc_type")
+            or child.get("document_type")
+            or child.get("suggested_job_type")
+            or ""
+        )
+        child_conf = (
+            (child.get("ai_classification") or {}).get("confidence")
+            or child.get("classification_confidence")
+            or child.get("ai_confidence")
+            or 0.0
+        )
+        try:
+            child_conf = float(child_conf)
+        except (TypeError, ValueError):
+            child_conf = 0.0
+
+        is_unclassified = child_type in _UNKNOWN_CHILD_TYPES or child_conf < 0.70
+        if not is_unclassified:
+            return
+
+        parent_type = (
+            parent_doc.get("doc_type")
+            or parent_doc.get("document_type")
+            or parent_doc.get("suggested_job_type")
+            or ""
+        )
+        parent_vendor = parent_doc.get("vendor_canonical") or parent_doc.get("vendor_name") or ""
+        parent_customer = parent_doc.get("customer_canonical") or ""
+
+        update_fields = {
+            "parent_inheritance_applied": True,
+            "parent_inheritance_at": datetime.now(timezone.utc).isoformat(),
+            # Audit: preserve what the AI decided on the isolated page
+            "doc_type_from_split_ai": child_type or None,
+            "classification_confidence_from_split_ai": child_conf,
+            # Force manual review — AI couldn't confirm this page standalone
+            "status": "NeedsReview",
+            "workflow_status": "needs_review",
+            "square9_stage": "needs_review",
+            "queue_visible": True,
+            "auto_cleared": False,
+            "auto_clear_decision": "needs_review",
+            "auto_clear_details": {
+                "checks": [{
+                    "check": "split_child_unclassified_guard",
+                    "passed": False,
+                    "message": (
+                        f"Split child AI doc_type='{child_type or 'None'}' "
+                        f"conf={child_conf:.2f} — inherited parent "
+                        f"doc_type='{parent_type or 'None'}', requiring human review"
+                    ),
+                }],
+                "unclassified_guard_triggered": True,
+                "parent_inheritance_applied": True,
+            },
+            "updated_utc": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # Only inherit parent values that actually exist so we never overwrite
+        # real child-level extractions with None.
+        if parent_type and parent_type not in _UNKNOWN_CHILD_TYPES:
+            update_fields["doc_type"] = parent_type
+            update_fields["document_type"] = parent_type
+            update_fields["suggested_job_type"] = parent_type
+        if parent_vendor and not child.get("vendor_canonical"):
+            update_fields["vendor_canonical"] = parent_vendor
+            update_fields["vendor_inherited_from_parent"] = True
+        if parent_doc.get("vendor_id") and not child.get("vendor_id"):
+            update_fields["vendor_id"] = parent_doc["vendor_id"]
+        if parent_customer and not child.get("customer_canonical"):
+            update_fields["customer_canonical"] = parent_customer
+        if unit_vendor_hint and not child.get("vendor_canonical"):
+            update_fields.setdefault("vendor_canonical", unit_vendor_hint)
+
+        await db.hub_documents.update_one({"id": child_doc_id}, {"$set": update_fields})
+        logger.info(
+            "[BatchSplit] Child %s unclassified (type=%s conf=%.2f) — inherited parent type=%s, vendor=%s, forced NeedsReview",
+            child_doc_id[:8], child_type or "None", child_conf,
+            parent_type or "None", parent_vendor or "None",
+        )
+    except Exception as e:  # noqa: BLE001 — never let inheritance kill splitting
+        logger.warning(
+            "[BatchSplit] Inheritance/re-evaluate failed for child %s: %s",
+            child_doc_id[:8] if child_doc_id else "?", str(e),
+        )

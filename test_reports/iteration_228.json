@@ -1,0 +1,44 @@
+{
+  "summary": "v2.5.6 Unknown-Doc Reclaim smart + skip_noise modes — full backend verification PASSED. 20/20 unit tests (test_unknown_doc_reclaim.py + test_unknown_doc_reclaim_smart.py) + 18/18 live HTTP integration tests (7 v2.5.5 carry-over + 11 new v2.5.6). All 9 review-request scenarios green. Combined total 38/38.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_unknown_doc_reclaim_smart_http.py",
+    "/app/test_reports/pytest/iter228_smart.xml",
+    "/app/test_reports/pytest/iter228_http.xml",
+    "/app/test_reports/pytest/iter228_full.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Noise precedence is correctly implemented in run(): `if skip_noise and _is_noise(...)` short-circuits BEFORE the smart-inheritance branch, so noise always wins over smart inheritance — matches the product requirement ('email sprites never belong in inbox').",
+    "NOISE_FILENAME_PATTERNS verified safe against the 5 real filenames flagged in the review request (W117505.pdf, Invoice-0493680.pdf, Gamer Ship 3626.pdf, MARCH 2026 ACTIVITY.pdf, 0303382.pdf) — none matched. Anchored with ^ in each pattern prevents mid-string false positives.",
+    "_is_noise() handles None/empty string safely (returns False) — no crashes on docs without file_name.",
+    "_build_reclaim_update returns (update, path_taken) tuple — cleanly separates the inherited vs plain counter increments in run(). Good refactor.",
+    "Smart inheritance correctly guards vendor_canonical + vendor_id + customer_canonical with `and not doc.get(...)` so existing child fields are never clobbered (verified by test_smart_mode_does_not_overwrite_existing_child_vendor).",
+    "Audit preservation: when smart-inherited, child's original (garbage) doc_type is kept under `doc_type_from_reclaim_ai` for future debugging — verified live.",
+    "Legacy `reclaimed_count` = plain + inherited (NOT including noise) — correct back-compat: noise docs never went to NeedsReview in v2.5.5 either since that field didn't exist. Downstream consumers of reclaimed_count see unchanged semantics.",
+    "Idempotency sentinel `reclaim_to_needs_review_at` is written by BOTH the reclaim-update AND the noise-update paths, so a second run correctly skips already-processed docs regardless of which path they took — verified live with test_idempotent_second_run_no_re_pick.",
+    "preview() mode counters correctly return None (not 0) when flags are OFF — this lets UI distinguish 'feature disabled' from 'zero candidates'. Verified.",
+    "Minor (non-blocking, pre-existing): router `limit: int = Query(None, ...)` on /run should ideally be `Optional[int]` for strict typing — works via FastAPI coercion."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_unknown_doc_reclaim_smart_http.py (NEW — 11 live HTTP tests: preview null-counters, preview flag ints + non-mutation, smart inheritance, smart no-parent plain path, skip_noise filters linkedin sprite, noise-wins-over-smart combined mode, idempotency snapshot-preservation, v2.5.5 default regression, default dry-run shape, dashboard + pattern-health regression)"
+  ],
+  "success_rate": {
+    "backend": "100% (38/38 — 20 unit + 18 HTTP)",
+    "frontend": "not tested (per request — backend-only)"
+  },
+  "test_credentials": "admin/admin (read from /app/memory/test_credentials.md — not needed; /api/admin/unknown-doc-reclaim/* endpoints are unauthenticated in preview env)",
+  "seed_data_creation": "Per-test function-scoped fixtures seeded ephemeral TEST_iter228_* docs (parent + children: inh/plain/noise/np/idem variants) across 8 scenarios. All cleaned up at fixture teardown + module-scope safety-net delete_many({id: /^TEST_iter228_/}). Post-run verification: 0 leftover TEST_iter228_* docs in hub_documents and 0 TEST_iter228_* actor rows in unknown_doc_reclaim_runs. Real customer data untouched.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "v2.5.6 smart + skip_noise reclaim modes fully verified on live preview env. Service module exports NOISE_FILENAME_PATTERNS + _is_noise for reuse. The /runs endpoint audit trail includes iter228 TEST_ rows (deleted during cleanup) + prior ci_test/ci_test_idem rows from iter227 — those prior v2.5.5 rows auto-picked up the new v2.5.6 counter fields as 0 (back-compat confirmed). mongomock-motor 0.0.36 + pymongo for live DB seeding both working. The 4 pre-existing failures in test_validation_auto_clear_readiness_fixes.py mentioned in the context were NOT re-run this iteration (unrelated). If production sweep is next, user-facing impact will be: 372 raw candidates → significant reduction after skip_noise filters email sprites/signatures, smart mode will inherit parent doc_type for the 31/50 batch children.",
+  "rca of the issue": "N/A — no bugs found. All 9 features/scenarios from the v2.5.6 review request verified green. One minor note: while authoring the HTTP test suite, initial implementation used module-scope seeding which caused test ordering contamination (smart-only run processed noise-filename docs before skip_noise tests could see them — by design, since smart alone doesn't filter noise). Refactored to function-scope per-test seeding for clean isolation; all 11 pass consistently now."
+}

@@ -948,14 +948,16 @@ async def unified_learning_summary():
 # ─────────────── Unknown-Doc Reclaim (v2.5.5) ───────────────
 
 @router.get("/unknown-doc-reclaim/preview")
-async def unknown_doc_reclaim_preview(limit: int = Query(50, ge=1, le=500)):
-    """Dry-run the reclaim sweep: returns how many documents are currently
-    sitting at Completed/Exported with `doc_type` unclassified (None/Unknown/
-    Other/...) and would be kicked back to NeedsReview. Protected cases
-    (any BC record evidence, already-reclaimed docs) are excluded from the
-    count."""
+async def unknown_doc_reclaim_preview(
+    limit: int = Query(50, ge=1, le=500),
+    smart: bool = Query(False, description="If true, surface how many candidates could inherit parent metadata"),
+    skip_noise: bool = Query(False, description="If true, surface how many candidates match the noise filter"),
+):
+    """Dry-run the reclaim sweep. With `smart=true` + `skip_noise=true` the
+    sample_breakdown includes `smart_inheritable` and `filtered_as_noise`
+    counts so you can see the impact before flipping `execute=true`."""
     from services.admin.unknown_doc_reclaim_service import preview
-    return await preview(limit=limit)
+    return await preview(limit=limit, smart=smart, skip_noise=skip_noise)
 
 
 @router.post("/unknown-doc-reclaim/run")
@@ -964,13 +966,24 @@ async def unknown_doc_reclaim_run(
     limit: int = Query(None, ge=1, le=10000,
                        description="Optional cap — reclaim at most N docs this run"),
     actor: str = Query("admin", description="Audit actor label"),
+    smart: bool = Query(False, description=(
+        "Batch-split children whose parent is classified inherit the "
+        "parent's doc_type + vendor before routing to NeedsReview"
+    )),
+    skip_noise: bool = Query(False, description=(
+        "Filename-noise candidates (email sprites, signatures, image.png, "
+        "tracking pixels) are marked noise_filtered and kept OUT of "
+        "NeedsReview"
+    )),
 ):
-    """Execute the reclaim. Defaults to `execute=false` (dry-run). When
-    `execute=true`, each matching document is moved to NeedsReview with a
-    `reclaim_to_needs_review_at` timestamp + a workflow_history entry.
-    Per-run audit row written to `unknown_doc_reclaim_runs`."""
+    """Execute the reclaim. Defaults to `execute=false` (dry-run). Mode
+    flags `smart` + `skip_noise` can be combined freely. Per-run audit
+    row written to `unknown_doc_reclaim_runs`."""
     from services.admin.unknown_doc_reclaim_service import run as do_run
-    return await do_run(execute=execute, limit=limit, actor=actor)
+    return await do_run(
+        execute=execute, limit=limit, actor=actor,
+        smart=smart, skip_noise=skip_noise,
+    )
 
 
 @router.get("/unknown-doc-reclaim/runs")

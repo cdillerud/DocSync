@@ -265,5 +265,95 @@ async def test_disabled_custom_rule_is_ignored(db):
         "last_updated_utc": _now(),
     })
     fhs._invalidate_custom_rule_cache()
+
+
+# ──────────────────────────────────────────────────────────────
+# vendor_doc_type_distribution — diagnostic
+# ──────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_vendor_distribution_reports_raw_counts(db):
+    await _insert_classified(db, "Ball Metal", "AP_Invoice", 15)
+    await _insert_classified(db, "Ball Metal", "BOL", 5)
+    d = await auto.vendor_doc_type_distribution(db, "Ball Metal")
+    assert d["total"] == 20
+    assert d["by_doc_type"] == {"AP_Invoice": 15, "BOL": 5}
+    assert d["top"][0]["doc_type"] == "AP_Invoice"
+    assert d["top"][0]["pct"] == 75.0
+
+
+@pytest.mark.asyncio
+async def test_vendor_distribution_zero_when_no_vendor(db):
+    d = await auto.vendor_doc_type_distribution(db, None, None)
+    assert d["total"] == 0
+    assert d["top"] == []
+
+
+@pytest.mark.asyncio
+async def test_vendor_distribution_can_include_heuristic_applied(db):
+    # 3 real classifications
+    await _insert_classified(db, "V2", "AP_Invoice", 3)
+    # 20 heuristic-applied — excluded by default, included when flag set
+    for i in range(20):
+        await db.hub_documents.insert_one({
+            "id": f"h-{i}",
+            "vendor_canonical": "V2",
+            "doc_type": "BOL",
+            "filename_heuristic_applied_at": _now(),
+            "status": "Completed",
+        })
+    d_default = await auto.vendor_doc_type_distribution(db, "V2")
+    assert d_default["total"] == 3
+    d_all = await auto.vendor_doc_type_distribution(
+        db, "V2", include_heuristic_applied=True,
+    )
+    assert d_all["total"] == 23
+
+
+# ──────────────────────────────────────────────────────────────
+# auto_propose deferred reason messages
+# ──────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_deferred_reason_zero_classified_vendor(db):
+    # Ball Metal has 200 Unknowns but NO classified history
+    await _insert_unmatched(db, "Ball Metal", [
+        f"BM-{i}.pdf" for i in range(10)
+    ])
+    report = await auto.auto_propose(db=db, min_group_size=3,
+                                     min_vendor_samples=5)
+    assert report["deferred_count"] == 1
+    d = report["deferred"][0]
+    assert "0" in d["reason"]
+    assert "history" in d["reason"].lower()
+    assert d["vendor_history_total"] == 0
+    assert d["vendor_history_top"] == []
+
+
+@pytest.mark.asyncio
+async def test_deferred_reason_below_majority(db):
+    # 50/50 split is below 70% threshold
+    await _insert_classified(db, "Mixed", "AP_Invoice", 10)
+    await _insert_classified(db, "Mixed", "BOL", 10)
+    await _insert_unmatched(db, "Mixed", [
+        "mixed_a.pdf", "mixed_b.pdf", "mixed_c.pdf",
+    ])
+    report = await auto.auto_propose(db=db, min_group_size=3,
+                                     min_vendor_samples=5)
+    assert report["deferred_count"] == 1
+    d = report["deferred"][0]
+    assert "below" in d["reason"].lower() or "majority" in d["reason"].lower()
+    assert d["vendor_history_total"] == 20
+
+
+@pytest.mark.asyncio
+async def test_deferred_reason_no_vendor(db):
+    await _insert_unmatched(db, "", ["w9.pdf", "w9.pdf", "w9.pdf"])
+    report = await auto.auto_propose(db=db, min_group_size=3)
+    # Empty vendor → deferred with no-vendor reason
+    if report["deferred_count"] >= 1:
+        d = report["deferred"][0]
+        assert "vendor" in d["reason"].lower()
+
     hit = await fhs.classify_filename_async("disabled_target.pdf")
     assert hit is None

@@ -1210,3 +1210,32 @@ async def filename_heuristics_custom_rule_toggle(
     result = await set_custom_rule_enabled(rule_id, enabled)
     _invalidate_custom_rule_cache()
     return result
+
+
+@router.get("/filename-heuristics/vendor-history")
+async def filename_heuristics_vendor_history(
+    vendor: str = Query(..., description="vendor_canonical (primary) or vendor_name fallback"),
+    include_heuristic_applied: bool = Query(
+        False,
+        description="If True, also count docs that were classified by a previous "
+                    "filename-heuristic run (normally excluded to avoid feedback loops).",
+    ),
+    limit: int = Query(2000, ge=100, le=20000),
+):
+    """Diagnostic: show a vendor's full classified doc_type distribution.
+
+    Use this when `/auto-propose` deferred a vendor with
+    `reason='vendor has 0 classified docs'` or a low majority — it
+    surfaces WHY so you can decide whether to lower thresholds,
+    classify a few docs manually first, or write a rule by hand.
+    """
+    from services.admin.filename_heuristics_auto_service import (
+        vendor_doc_type_distribution,
+    )
+    from deps import get_db
+    db = get_db()
+    return await vendor_doc_type_distribution(
+        db, vendor, vendor,
+        include_heuristic_applied=include_heuristic_applied,
+        limit=limit,
+    )

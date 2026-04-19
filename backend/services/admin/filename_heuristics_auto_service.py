@@ -72,6 +72,58 @@ def shape_to_regex(shape: str) -> str:
 # Vendor majority-type mining
 # ─────────────────────────────────────────────────────────────
 
+async def vendor_doc_type_distribution(
+    db,
+    vendor_canonical: Optional[str],
+    vendor_name: Optional[str] = None,
+    *,
+    include_heuristic_applied: bool = False,
+    limit: int = 2000,
+) -> Dict[str, Any]:
+    """Return the raw vendor history. Diagnostic-friendly:
+        {
+            total: int, by_doc_type: {<type>: <n>}, top: [ (type,n,pct), ... ],
+            query_used: dict, included_heuristic_applied: bool
+        }
+    """
+    if not vendor_canonical and not vendor_name:
+        return {"total": 0, "by_doc_type": {}, "top": [],
+                "query_used": None, "reason": "no vendor provided"}
+    or_clauses = []
+    if vendor_canonical:
+        or_clauses.append({"vendor_canonical": vendor_canonical})
+    if vendor_name:
+        or_clauses.append({"vendor_name": vendor_name})
+    q: Dict[str, Any] = {
+        "$or": or_clauses,
+        "doc_type": {"$nin": list(UNKNOWN_DOC_TYPES)},
+    }
+    if not include_heuristic_applied:
+        q["filename_heuristic_applied_at"] = {"$in": [None, "", False]}
+
+    counter: Counter = Counter()
+    cursor = db.hub_documents.find(q, {"_id": 0, "doc_type": 1}).limit(limit)
+    async for d in cursor:
+        dt = d.get("doc_type")
+        if dt:
+            counter[dt] += 1
+    total = sum(counter.values())
+    top = [
+        {"doc_type": t, "votes": n,
+         "pct": round((n / total) * 100.0, 1) if total else 0.0}
+        for t, n in counter.most_common(10)
+    ]
+    return {
+        "vendor_canonical": vendor_canonical,
+        "vendor_name": vendor_name,
+        "total": total,
+        "by_doc_type": dict(counter),
+        "top": top,
+        "query_used": q,
+        "included_heuristic_applied": include_heuristic_applied,
+    }
+
+
 async def vendor_majority_doc_type(
     db,
     vendor_canonical: Optional[str],
@@ -82,38 +134,20 @@ async def vendor_majority_doc_type(
 ) -> Optional[Dict[str, Any]]:
     """Return `{doc_type, votes, total, pct}` if one doc_type dominates
     this vendor's classified history, else None."""
-    if not vendor_canonical and not vendor_name:
+    dist = await vendor_doc_type_distribution(
+        db, vendor_canonical, vendor_name,
+    )
+    total = dist["total"]
+    if total < min_samples or not dist["top"]:
         return None
-    or_clauses = []
-    if vendor_canonical:
-        or_clauses.append({"vendor_canonical": vendor_canonical})
-    if vendor_name:
-        or_clauses.append({"vendor_name": vendor_name})
-    q = {
-        "$or": or_clauses,
-        "doc_type": {"$nin": list(UNKNOWN_DOC_TYPES)},
-        # Exclude our own heuristic decisions so the vote is based on
-        # real classifications (AI, reviewer, BC evidence).
-        "filename_heuristic_applied_at": {"$in": [None, "", False]},
-    }
-    cursor = db.hub_documents.find(q, {"_id": 0, "doc_type": 1}).limit(2000)
-    counter: Counter = Counter()
-    async for d in cursor:
-        dt = d.get("doc_type")
-        if dt:
-            counter[dt] += 1
-    total = sum(counter.values())
-    if total < min_samples:
-        return None
-    top_type, top_votes = counter.most_common(1)[0]
-    pct = round((top_votes / total) * 100.0, 1)
-    if pct < min_majority_pct:
+    top = dist["top"][0]
+    if top["pct"] < min_majority_pct:
         return None
     return {
-        "doc_type": top_type,
-        "votes": top_votes,
+        "doc_type": top["doc_type"],
+        "votes": top["votes"],
         "total": total,
-        "pct": pct,
+        "pct": top["pct"],
     }
 
 
@@ -194,19 +228,48 @@ async def auto_propose(
     for g in raw_groups:
         vendor_c = g["vendor_canonical"]
         vendor_n = g["vendor_name"]
-        majority = await vendor_majority_doc_type(
-            db, vendor_c, vendor_n,
-            min_samples=min_vendor_samples,
-            min_majority_pct=min_majority_pct,
-        )
+        # Pull the full distribution once — we use it for both the
+        # majority decision AND the deferred diagnostic.
+        dist = await vendor_doc_type_distribution(db, vendor_c, vendor_n)
+        majority = None
+        if dist["total"] >= min_vendor_samples and dist["top"]:
+            top = dist["top"][0]
+            if top["pct"] >= min_majority_pct:
+                majority = {
+                    "doc_type": top["doc_type"], "votes": top["votes"],
+                    "total": dist["total"], "pct": top["pct"],
+                }
+
         if not majority:
+            # Explain exactly why we couldn't decide.
+            if not (vendor_c or vendor_n):
+                reason = "no vendor on the unmatched docs (vendor_canonical + vendor_name both empty)"
+            elif dist["total"] == 0:
+                reason = (
+                    "vendor has 0 non-Unknown, non-heuristic-classified docs "
+                    "in hub_documents — can't infer doc_type from history"
+                )
+            elif dist["total"] < min_vendor_samples:
+                reason = (
+                    f"only {dist['total']} classified docs for this vendor "
+                    f"(need ≥{min_vendor_samples} to vote)"
+                )
+            else:
+                top = dist["top"][0]
+                reason = (
+                    f"top doc_type is {top['doc_type']} at {top['pct']}% — "
+                    f"below {min_majority_pct}% majority threshold"
+                )
             deferred.append({
                 "vendor_canonical": vendor_c,
                 "vendor_name": vendor_n,
                 "shape": g["shape"],
                 "unmatched_count": g["count"],
                 "examples": g["examples"],
-                "reason": "no decisive vendor majority",
+                "example_ids": g["example_ids"][:5],
+                "vendor_history_total": dist["total"],
+                "vendor_history_top": dist["top"][:5],
+                "reason": reason,
             })
             continue
 

@@ -1,8 +1,8 @@
 # GPI Document Hub - Changelog
 
-## [2026-04-19] v2.5.2 — U3: Shared Pattern Health & Hygiene
+## [2026-04-19] v2.5.2 — U3: Shared Pattern Health & Hygiene + 7-Day Activity Sparklines
 
-Consolidated AP (`posting_pattern_analysis`, confidence-tier-based) and Intake (`order_line_patterns`, accept-rate-based) pattern trust/drift/retire state into a single normalized `HealthReport` shape behind pluggable adapters — dashboards, schedulers, and alerts can now treat every domain identically.
+Consolidated AP (`posting_pattern_analysis`, confidence-tier-based) and Intake (`order_line_patterns`, accept-rate-based) pattern trust/drift/retire state into a single normalized `HealthReport` shape behind pluggable adapters — dashboards, schedulers, and alerts can now treat every domain identically. Follow-up enhancement layers per-domain 7-day activity sparklines so managers can eyeball whether patterns are trending healthier or noisier week-over-week.
 
 **Added:**
 - `services/learning_core/pattern_health_service.py` — normalized HealthReport aggregator with `HEALTH_ADAPTERS` + `HYGIENE_ADAPTERS` registries (sales_intake + ap_posting)
@@ -11,11 +11,14 @@ Consolidated AP (`posting_pattern_analysis`, confidence-tier-based) and Intake (
   - `POST /api/learning/hygiene/run?domain=all|sales_intake|ap_posting` — cross-domain hygiene trigger (delegates to each adapter, writes audit row to `pattern_hygiene_runs`)
 - AP-side hygiene: auto-retires `posting_pattern_analysis` docs when confidence tier drops to `none`
 - New **Cross-domain (AP + Intake)** roll-up section inside the Pattern Health panel on `/intake/learning` — renders unified Trusted/Drifting/Retired/Unscored metrics plus per-domain breakdown pills
+- **`events_service.get_trend(domain, days)`** — returns dense, zero-filled per-day event counts from `learning_events_v2`; attached as `trend_7d` to each domain's HealthReport
+- **Inline SVG Sparkline component** on `/intake/learning` — renders a 7-day polyline per domain (testids `sparkline-sales_intake`, `sparkline-ap_posting`) with native tooltip ("Last 7d — N events") and numeric total sibling
 
 **Verified:**
-- 48/48 pytest unit tests passing (6 new U3 + 42 existing)
-- Testing agent iter 215: 11/11 frontend UI + 2/2 backend endpoints PASS, zero regressions on `/ai-learning` and `/` (Inbox)
-- Giovanni C-10250 state confirmed pristine: 16 patterns, 0 feedback mutations
+- 40/40 pytest passing across 5 learning-core test files (3 new `get_trend` tests + 37 existing)
+- Testing agent iter 215 (U3 core): 11/11 frontend UI + 2/2 backend endpoints PASS, zero regressions
+- Testing agent iter 216 (sparkline enhancement): 8/8 frontend + trend_7d shape PASS, zero regressions
+- Giovanni C-10250 state confirmed pristine (16 patterns, 0 feedback mutations); sparkline seed data cleaned up post-validation
 
 **Version:** `APP_VERSION` remains **2.5.1** in header (bump deferred until U4+U5 ship the full unification)
 

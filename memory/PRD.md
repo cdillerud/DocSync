@@ -459,6 +459,17 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
 - **Tests**: `tests/test_unknown_doc_reclaim.py` (9/9 via mongomock-motor). Full iteration_227: 48/48 green. Live preview DB verified end-to-end (1 real candidate found and reclaimed).
 - **Deps**: added `mongomock-motor==0.0.36` to test stack.
 
+## Unknown-Doc Reclaim — Smart + Skip-Noise Modes (2026-04-19 — v2.5.6)
+- **Purpose**: Dramatically reduce the review-queue load before the user runs the full 372-doc sweep. Sampling showed 62% batch-split children (whose parents ARE classified) and 40%+ `OTHER` doc-type garbage, plus a cluster of email-sprite noise (`linkedin_*.png`, `cmn_*.png`, `image.png`).
+- **New flags** (opt-in, both default False for backward compat):
+  - `smart=true` — batch-split children whose parent is classified inherit parent's `doc_type` + `vendor_canonical` + `vendor_id` + `customer_canonical` before routing to NeedsReview. Original child `doc_type` preserved under `doc_type_from_reclaim_ai`. `parent_inheritance_applied=true` flag set. Reviewer sees enriched context instead of bare "Unknown".
+  - `skip_noise=true` — filenames matching 15 regex patterns (email sprites, signatures, tracking pixels, `image*.png`, `logo.svg`) get marked `noise_filtered=true`, `queue_visible=false`, and KEPT OUT of NeedsReview entirely. `reclaim_to_needs_review_at` is still stamped for idempotency.
+- **Precedence**: noise wins over smart (an email sprite with a classified parent is still noise).
+- **Shape changes**: response now has `reclaimed_plain_count` / `reclaimed_inherited_count` / `filtered_noise_count` / `total_mutated`. Legacy `reclaimed_count = plain + inherited` (noise separate) for back-compat.
+- **Preview extension**: `smart_inheritable` + `filtered_as_noise` counters in `sample_breakdown` (returns null when flag is off — distinguishes "feature disabled" from "zero").
+- **Endpoints** (`routers/admin.py`) now accept `smart` + `skip_noise` query params on both `/preview` and `/run`.
+- **Tests**: `tests/test_unknown_doc_reclaim_smart.py` (11) + `tests/test_unknown_doc_reclaim.py` (9) = 20/20 unit. Full iteration_228: 38/38 (20 unit + 18 HTTP). Verified NOISE_FILENAME_PATTERNS do NOT match real doc filenames (W117505.pdf, MARCH 2026 ACTIVITY.pdf, 0303382.pdf etc).
+
 ## Upcoming Tasks
 - P1: Teams Adaptive Card integration (webhook → BC Sales Order)
 

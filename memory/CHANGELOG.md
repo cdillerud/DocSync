@@ -1,5 +1,25 @@
 # GPI Document Hub - Changelog
 
+## [2026-04-19] v2.5.2 — Phase B.0: Workflow State Observer
+
+De-risking pre-flight for the upcoming Phase B extraction (moving the 427-line `_update_standard_workflow_status` out of `server.py`). Captures caller attribution + doc_type for every invocation into a TTL-bounded collection so we have production data — which callers exercise which branches — before the real move.
+
+**Added:**
+- `services/workflow_state_observer.py` — `record_workflow_call()` + `get_observer_summary()` + `list_recent_observations()`. Fire-and-forget: wrapped in try/except, never blocks the primary workflow. Auto-creates a 30-day TTL index on `created_at` plus `by_caller`/`by_doc_type` indexes. Uses `inspect.stack()` to attribute to the REAL caller by walking past (a) its own frame AND (b) the instrumented `_update_standard_workflow_status` frame.
+- `routers/workflow_observer.py` — 2 new endpoints under `/api/admin/workflow-observer/`: `GET /summary?days=` (ge=1, le=90) and `GET /recent?limit=&caller_func=` (ge=1, le=500). Both strip `_id`.
+- `main.py` — include_router wiring
+- `server.py` L2013-2028 — instrumented `_update_standard_workflow_status` with a fire-and-forget observe call at the top (before the find_one early-return so EVERY invocation is captured)
+- 5 new pytest in `tests/test_workflow_state_observer.py` — real-caller attribution, never-raises-on-db-error, summary groups by caller × doc_type, days clamp at service layer, recent filters + limits
+
+**Verified:**
+- Testing agent iter_222: 68/68 pytest (5 new + 63 regression) PASS. Live E2E: triggered `record_workflow_call` from a named function and confirmed `caller_func` came back as that function's name (not `_update_standard_workflow_status`). TTL index verified present with expireAfterSeconds=2592000. Zero regressions on `/api/learning/*`, `/api/sales-dashboard/*`, `/api/intake/*`, `/api/documents`, `/api/health`. Giovanni C-10250 + fixtures (C-DEMO-OVRD-1, digest 2026-W15) untouched.
+
+**Known minor spec inconsistency (non-blocking):** The router returns HTTP 422 for out-of-range `days` while the service layer also clamps defensively. Both layers work; only the public HTTP contract matters (422). Left as-is — consistent with the `/recent` endpoint's behavior.
+
+**Soft hardening opportunity (deferred)** noted by testing agent: `SKIP_FUNCS = {"_update_standard_workflow_status"}` is a magic string that must be updated in lockstep if the function is renamed. Fine for now (observer explicitly exists to support this one function). Consider parameterizing in Phase B.
+
+**When to read the data:** Let this shim run in production for ~7 days, then hit `GET /api/admin/workflow-observer/summary?days=7` to see which callers + doc_types actually exercise the function. Phase B extraction can then proceed with production-grounded test-coverage targets.
+
 ## [2026-04-19] v2.5.2 — Orchestration Extraction Phase A
 
 First scoped extraction pass on `server.py` (8,900 lines → progress toward `/backend/policies/`). User picked **Option A** (smallest, lowest-risk scope) — extract the 2 small functions that `document_handlers.py` imports from `server.py`. Larger extractions (`_update_standard_workflow_status` 427 lines, `_internal_intake_document` 771 lines) deferred to their own focused iterations.

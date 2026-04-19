@@ -21,17 +21,18 @@
 - ~~Vendor Resolution Observability + Negative Feedback Loop~~ (2026-03-16, iter_116) — per-doc resolution objects, rejection memory, guardrails, analytics, 71 tests
 
 ### P1 — Next Up
-- **Orchestration Extraction Phase B** — extract `_update_standard_workflow_status` (427 lines) out of `server.py` so `document_handlers.py` has zero `from server import ...`. Workflow-state-machine core; 4 internal callers need updating.
+- **Orchestration Extraction Phase B** — extract `_update_standard_workflow_status` (427 lines) out of `server.py`. Now de-risked by Phase B.0 observer shim (iter_222) — let it capture production call-site data for ~7 days, then extract with confidence.
 - **Orchestration Extraction Phase C** — extract `_internal_intake_document` (771 lines) out of `server.py`. Highest-value: decouples `email_polling_service.py` + `inside_sales_pilot_service.py` + `batch_po_splitter.py` from server. Highest risk too (core ingress pipeline).
 - **Teams Adaptive Card Integration** — Webhook handler for "Approve" → BC Sales Order
 - **Batch AR Release Evaluation** — Auto-evaluate all sales docs through AR gate in pipeline
-- **Wire email delivery for the weekly digest** — MS Graph (existing creds) or Resend. Build pipeline done; just needs a `send_digest()` hook.
+- **Wire email delivery for the weekly digest** — MS Graph (existing creds) or Resend
 
 ### ✅ P1 — Already Built (grep-verified, no work needed)
 - ~~Admin UI for Item Mapping Rules~~ — lives in `Settings → Item Mappings` tab + dedicated `ItemMappingsPage.js` + 4 endpoints in `gpi_integration.py`
 - ~~Rep Overrides Management UI~~ — lives in `Settings → Rep Overrides` tab backed by `components/RepOverridesPanel.js`
 
 ### P1 — Recently Completed
+- ~~Phase B.0 Workflow State Observer~~ (2026-04-19, iter_222) — observability shim with caller attribution, TTL-bounded, captures production data for Phase B extraction
 - ~~Orchestration Extraction Phase A~~ (2026-04-19, iter_221) — `update_vendor_profile_incremental` extracted to `services/vendor_profile_helpers.py`; `document_handlers.py` late-imports from server reduced 3 → 1
 - ~~WoW Delta Banner~~ (2026-04-19, iter_220) — Rep Overrides admin UI ROLLED BACK (duplicate of existing Settings tab)
 - ~~Weekly Learning Digest (preview-only) + U6 SO-Learning Telemetry~~ (2026-04-19, iter_219)

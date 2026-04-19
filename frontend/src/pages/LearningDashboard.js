@@ -11,6 +11,7 @@ import {
 import { toast } from 'sonner';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid } from 'recharts';
 import LearningSuggestionsPanel from '../components/LearningSuggestionsPanel';
+import PatternHealthPanel from '../components/PatternHealthPanel';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -1728,6 +1729,9 @@ export default function LearningDashboard() {
 
       {/* Automation Rate Widget */}
       <AutomationRateWidget />
+
+      {/* U5 — Shared Pattern Health (AP vendors) */}
+      <PatternHealthPanel domain="ap_posting" />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Template Confidence Breakdown */}

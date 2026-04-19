@@ -55,6 +55,18 @@ async def events_summary():
     return await get_domain_summary()
 
 
+@router.get("/reviewers/leaderboard")
+async def reviewers_leaderboard(
+    days: int = Query(7, ge=1, le=90),
+    limit: int = Query(10, ge=1, le=100),
+):
+    """Who's been giving the most feedback in the last `days` days?
+    Aggregates `learning_events_v2` by actor across all domains, returns
+    a ranked leaderboard with per-domain + top-event-type breakdown."""
+    from services.learning_core import get_reviewer_leaderboard
+    return await get_reviewer_leaderboard(days=days, limit=limit)
+
+
 # ─────────────────────────────────────────────────────────────
 # v2.5.0 — Drift Alerts
 # ─────────────────────────────────────────────────────────────

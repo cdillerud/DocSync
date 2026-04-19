@@ -190,6 +190,62 @@ async def test_get_trend_filters_by_domain():
     assert sum(b["count"] for b in trend_ap) == 1
 
 
+@pytest.mark.asyncio
+async def test_leaderboard_ranks_actors_by_event_count():
+    """Most active reviewer appears first; bots (actor='test') are skipped."""
+    from datetime import datetime, timezone
+    from services.learning_core import get_reviewer_leaderboard, EVENTS_COLL
+
+    db = FakeDb()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    seed = [
+        ("alice", "sales_intake", "suggestion_accepted"),
+        ("alice", "sales_intake", "suggestion_accepted"),
+        ("alice", "ap_posting",   "ap_review_correct"),
+        ("bob",   "ap_posting",   "ap_review_correct"),
+        ("test",  "sales_intake", "suggestion_rejected"),  # should be skipped
+    ]
+    for actor, dom, et in seed:
+        await db[EVENTS_COLL].insert_one({
+            "id": f"lb-{actor}-{dom}-{et}",
+            "actor": actor, "domain": dom, "event_type": et,
+            "scope_type": "global", "scope_value": None,
+            "target": {}, "extra": {}, "source": "test",
+            "created_at": now_iso,
+        })
+
+    lb = await get_reviewer_leaderboard(days=7, limit=10, db=db)
+    assert lb["total_events"] == 4  # 'test' actor skipped
+    assert lb["unique_actors"] == 2
+    assert len(lb["reviewers"]) == 2
+    assert lb["reviewers"][0]["actor"] == "alice"
+    assert lb["reviewers"][0]["events"] == 3
+    assert lb["reviewers"][0]["domains"] == {"sales_intake": 2, "ap_posting": 1}
+    assert lb["reviewers"][0]["top_event_type"] == "suggestion_accepted"
+    assert lb["reviewers"][1]["actor"] == "bob"
+    assert lb["reviewers"][1]["events"] == 1
+
+
+@pytest.mark.asyncio
+async def test_leaderboard_respects_window_and_limit():
+    from datetime import datetime, timezone
+    from services.learning_core import get_reviewer_leaderboard
+
+    db = FakeDb()
+    # Empty DB
+    lb = await get_reviewer_leaderboard(days=7, limit=5, db=db)
+    assert lb["window_days"] == 7
+    assert lb["reviewers"] == []
+    assert lb["total_events"] == 0
+    # Clamp days
+    lb = await get_reviewer_leaderboard(days=999, db=db)
+    assert lb["window_days"] == 90
+    lb = await get_reviewer_leaderboard(days=0, db=db)
+    assert lb["window_days"] == 1
+
+
+
+
 
 
 @pytest.mark.asyncio

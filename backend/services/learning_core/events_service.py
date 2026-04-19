@@ -218,11 +218,90 @@ async def get_trend(
     return out
 
 
+async def get_reviewer_leaderboard(
+    *,
+    days: int = 7,
+    limit: int = 10,
+    db=None,
+) -> Dict[str, Any]:
+    """Who's been giving the most feedback in the last `days` days?
+
+    Returns: {
+      "window_days": N,
+      "since": "YYYY-MM-DD",
+      "total_events": int,
+      "unique_actors": int,
+      "reviewers": [
+        {"actor": "...", "events": N, "domains": {...}, "top_event_type": "..."},
+        ...
+      ],
+    }
+    """
+    from datetime import timedelta
+
+    days = max(1, min(int(days), 90))
+    limit = max(1, min(int(limit), 100))
+    db = db if db is not None else get_db()
+
+    today_utc = datetime.now(timezone.utc).date()
+    start_date = today_utc - timedelta(days=days - 1)
+    since_iso = start_date.isoformat() + "T00:00:00+00:00"
+
+    # Skip auto-generated actors — focus on human reviewers + named systems
+    SKIP_ACTORS = {"", None, "test"}
+
+    # Collect events into memory (bounded by the time window — small per day)
+    per_actor: Dict[str, Dict[str, Any]] = {}
+    total = 0
+    try:
+        async for doc in db[EVENTS_COLL].find(
+            {"created_at": {"$gte": since_iso}},
+            {"_id": 0, "actor": 1, "domain": 1, "event_type": 1},
+        ):
+            actor = doc.get("actor") or ""
+            if actor in SKIP_ACTORS:
+                continue
+            total += 1
+            bucket = per_actor.setdefault(actor, {
+                "actor": actor,
+                "events": 0,
+                "domains": {},
+                "event_types": {},
+            })
+            bucket["events"] += 1
+            dom = doc.get("domain") or "unknown"
+            bucket["domains"][dom] = bucket["domains"].get(dom, 0) + 1
+            et = doc.get("event_type") or "unknown"
+            bucket["event_types"][et] = bucket["event_types"].get(et, 0) + 1
+    except Exception as e:
+        logger.warning("[LearningCore.events] leaderboard aggregate failed: %s", e)
+
+    reviewers = []
+    for b in per_actor.values():
+        top_et = max(b["event_types"].items(), key=lambda kv: kv[1])[0] if b["event_types"] else None
+        reviewers.append({
+            "actor": b["actor"],
+            "events": b["events"],
+            "domains": b["domains"],
+            "top_event_type": top_et,
+        })
+    reviewers.sort(key=lambda r: r["events"], reverse=True)
+
+    return {
+        "window_days": days,
+        "since": start_date.isoformat(),
+        "total_events": total,
+        "unique_actors": len(per_actor),
+        "reviewers": reviewers[:limit],
+    }
+
+
 __all__ = [
     "record_event",
     "list_events",
     "get_domain_summary",
     "get_trend",
+    "get_reviewer_leaderboard",
     "DOMAINS",
     "SCOPE_TYPES",
     "EVENTS_COLL",

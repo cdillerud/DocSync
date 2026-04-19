@@ -19,6 +19,7 @@ from services.learning_core.events_service import (
     list_events,
     get_domain_summary,
     get_trend,
+    get_reviewer_leaderboard,
     DOMAINS,
     EVENTS_COLL,
 )
@@ -49,6 +50,7 @@ __all__ = [
     "list_events",
     "get_domain_summary",
     "get_trend",
+    "get_reviewer_leaderboard",
     "DOMAINS",
     "EVENTS_COLL",
     # Fingerprint (U2)

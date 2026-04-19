@@ -11,7 +11,7 @@ import {
 import { ScrollArea } from '../components/ui/scroll-area';
 import { Badge } from '../components/ui/badge';
 import {
-  LayoutDashboard, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, ShoppingCart, ClipboardList, Brain, FolderTree, ArrowLeftRight, Sparkles, Tag, Wrench, Bug, FlaskConical, TrendingUp, ClipboardCheck, Activity, Shield, Map, FileSpreadsheet
+  LayoutDashboard, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, ShoppingCart, ClipboardList, Brain, FolderTree, ArrowLeftRight, Sparkles, Tag, Wrench, Bug, FlaskConical, TrendingUp, ClipboardCheck, Activity, Shield, Map, FileSpreadsheet, Gauge
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { APP_VERSION, CHANGELOG } from '../lib/version';
@@ -30,6 +30,7 @@ const navItems = [
   { to: '/posting-intelligence', icon: Brain, label: 'Posting AI' },
   { to: '/invoice-trace', icon: ArrowLeftRight, label: 'Trace' },
   { to: '/ai-learning', icon: TrendingUp, label: 'AI Learning' },
+  { to: '/learning/ops', icon: Gauge, label: 'Learning Ops' },
   { to: '/review-queue', icon: ClipboardCheck, label: 'Review Queue' },
   { to: '/insights', icon: TrendingUp, label: 'Insights' },
   { to: '/roadmap', icon: Map, label: 'Roadmap' },
@@ -104,6 +105,7 @@ export default function Layout() {
     if (path === '/posting-intelligence') return 'Posting Intelligence';
     if (path === '/invoice-trace') return 'Invoice Trace';
     if (path === '/ai-learning') return 'AI Learning Intelligence';
+    if (path === '/learning/ops') return 'Learning Ops';
     if (path === '/monitor') return 'System Monitor';
     if (path === '/governance') return 'Governance';
     if (path === '/roadmap') return 'Build Roadmap';

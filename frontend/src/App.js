@@ -26,6 +26,7 @@ import SalesOrderReviewPage from "@/pages/SalesOrderReviewPage";
 import PostingPatternsDashboard from "@/pages/PostingPatternsDashboard";
 import InvoiceTracePage from "@/pages/InvoiceTracePage";
 import LearningDashboard from "@/pages/LearningDashboard";
+import LearningOpsPage from "@/pages/LearningOpsPage";
 import ReviewQueuePage from "@/pages/ReviewQueuePage";
 import MonitoringDashboard from "@/pages/MonitoringDashboard";
 import GovernanceDashboard from "@/pages/GovernanceDashboard";
@@ -59,6 +60,7 @@ function AppRoutes() {
         <Route path="posting-intelligence" element={<PostingPatternsDashboard />} />
         <Route path="invoice-trace" element={<InvoiceTracePage />} />
         <Route path="ai-learning" element={<LearningDashboard />} />
+        <Route path="learning/ops" element={<LearningOpsPage />} />
         <Route path="monitor" element={<MonitoringDashboard />} />
         <Route path="governance" element={<GovernanceDashboard />} />
         <Route path="roadmap" element={<RoadmapGanttPage />} />

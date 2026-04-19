@@ -8,7 +8,8 @@
  *   • Actionable findings + backfill button
  */
 import { useCallback, useEffect, useState } from 'react';
-import { RefreshCw, Sparkles, AlertTriangle, Info, Database, TrendingUp, ShieldCheck, Archive, Activity, Bell, CheckCircle2 } from 'lucide-react';
+import { RefreshCw, Sparkles, AlertTriangle, Info, Database, TrendingUp, Activity, Bell, CheckCircle2 } from 'lucide-react';
+import PatternHealthPanel from '../components/PatternHealthPanel';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -24,76 +25,35 @@ function Metric({ label, value, hint, tone = 'text-foreground' }) {
   );
 }
 
-/**
- * Sparkline — tiny inline SVG for a 7-day activity trend.
- * Accepts an array of {date, count}. Renders a polyline normalized
- * to the component's width/height. Flat line when all counts are 0.
- */
-function Sparkline({ points = [], width = 64, height = 18, className = 'text-sky-500', testId }) {
-  if (!Array.isArray(points) || points.length === 0) return null;
-  const counts = points.map((p) => Number(p.count) || 0);
-  const max = Math.max(1, ...counts);
-  const stepX = points.length > 1 ? width / (points.length - 1) : 0;
-  const coords = counts.map((c, i) => {
-    const x = i * stepX;
-    const y = height - (c / max) * (height - 2) - 1;
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  });
-  const total = counts.reduce((a, b) => a + b, 0);
-  return (
-    <svg
-      width={width}
-      height={height}
-      viewBox={`0 0 ${width} ${height}`}
-      className={`inline-block align-middle ${className}`}
-      data-testid={testId}
-      aria-label={`7-day trend, ${total} events`}
-    >
-      <polyline
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.25"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        points={coords.join(' ')}
-      />
-    </svg>
-  );
-}
-
 export default function IntakeLearningPage() {
   const [summary, setSummary] = useState(null);
   const [flagged, setFlagged] = useState([]);
-  const [health, setHealth] = useState(null);
   const [driftAlerts, setDriftAlerts] = useState([]);
   const [driftSummary, setDriftSummary] = useState(null);
-  const [unified, setUnified] = useState(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [phRefreshKey, setPhRefreshKey] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [sumRes, flaggedRes, healthRes, driftRes, driftSumRes, unifiedRes] = await Promise.all([
+      const [sumRes, flaggedRes, driftRes, driftSumRes] = await Promise.all([
         fetch(`${API}/api/intake/learning/summary`),
         fetch(`${API}/api/intake/flagged?limit=25`),
-        fetch(`${API}/api/intake/learning/pattern-health?limit=25`),
         fetch(`${API}/api/learning/drift/alerts?status=open&limit=25`),
         fetch(`${API}/api/learning/drift/summary`),
-        fetch(`${API}/api/learning/pattern-health/unified?limit=15`),
       ]);
       if (sumRes.ok) setSummary(await sumRes.json());
       if (flaggedRes.ok) {
         const data = await flaggedRes.json();
         setFlagged(data.documents || []);
       }
-      if (healthRes.ok) setHealth(await healthRes.json());
       if (driftRes.ok) {
         const data = await driftRes.json();
         setDriftAlerts(data.alerts || []);
       }
       if (driftSumRes.ok) setDriftSummary(await driftSumRes.json());
-      if (unifiedRes.ok) setUnified(await unifiedRes.json());
+      setPhRefreshKey((k) => k + 1);  // trigger PatternHealthPanel re-fetch
     } finally {
       setLoading(false);
     }
@@ -392,121 +352,9 @@ export default function IntakeLearningPage() {
         )}
       </div>
 
-      {/* Pattern Health (Phase D — feedback loop) */}
-      <div className="rounded-lg border border-border bg-card" data-testid="pattern-health-panel">
-        <div className="flex items-center justify-between p-3 border-b border-border">
-          <div className="text-sm font-semibold flex items-center gap-2">
-            <ShieldCheck className="h-4 w-4 text-emerald-500" /> Pattern Health
-          </div>
-          {health?.generated_at && (
-            <div className="text-[10px] text-muted-foreground">
-              {new Date(health.generated_at).toLocaleString()}
-            </div>
-          )}
-        </div>
-        <div className="p-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <Metric label="Trusted" value={health?.summary?.trusted ?? 0} tone="text-emerald-600" hint="Acceptance ≥ 90%" />
-          <Metric label="Drifting" value={health?.summary?.drifting ?? 0} tone="text-amber-600" hint="Needs feedback" />
-          <Metric label="Retired" value={health?.summary?.retired ?? 0} tone="text-red-600" hint="Acceptance < 40%" />
-          <Metric label="Unscored" value={health?.summary?.unscored ?? 0} hint="No feedback yet" />
-        </div>
-
-        {/* U3 — cross-domain (AP + intake) unified roll-up */}
-        {unified?.combined_summary && (
-          <div className="border-t border-border p-3" data-testid="pattern-health-unified">
-            <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2 flex items-center gap-1">
-              <Sparkles className="h-3 w-3 text-sky-500" /> Cross-domain (AP + Intake)
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <Metric label="Unified Trusted" value={unified.combined_summary.trusted ?? 0} tone="text-emerald-600" />
-              <Metric label="Unified Drifting" value={unified.combined_summary.drifting ?? 0} tone="text-amber-600" />
-              <Metric label="Unified Retired" value={unified.combined_summary.retired ?? 0} tone="text-red-600" />
-              <Metric label="Unified Unscored" value={unified.combined_summary.unscored ?? 0} />
-            </div>
-            {Array.isArray(unified.domains) && unified.domains.length > 0 && (
-              <div className="flex flex-wrap gap-4 mt-2 text-[11px] text-muted-foreground">
-                {unified.domains.map((r) => {
-                  const total7 = Array.isArray(r.trend_7d)
-                    ? r.trend_7d.reduce((a, p) => a + (Number(p.count) || 0), 0)
-                    : 0;
-                  return (
-                    <span key={r.domain} className="flex items-center gap-2" data-testid={`unified-domain-${r.domain}`}>
-                      <span className="font-mono">{r.domain}</span>:{' '}
-                      <span className="text-emerald-600">{r.summary?.trusted ?? 0}✓</span>{' / '}
-                      <span className="text-amber-600">{r.summary?.drifting ?? 0}⚠</span>{' / '}
-                      <span className="text-red-600">{r.summary?.retired ?? 0}✗</span>
-                      {Array.isArray(r.trend_7d) && r.trend_7d.length > 0 && (
-                        <span
-                          className="flex items-center gap-1 pl-2 border-l border-border"
-                          title={`Last 7d — ${total7} events`}
-                        >
-                          <Sparkline
-                            points={r.trend_7d}
-                            className={total7 > 0 ? 'text-sky-500' : 'text-muted-foreground/60'}
-                            testId={`sparkline-${r.domain}`}
-                          />
-                          <span className="text-[10px] tabular-nums">{total7}</span>
-                        </span>
-                      )}
-                    </span>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-        {health?.per_customer?.length > 0 && (
-          <div className="overflow-x-auto border-t border-border">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground border-b border-border">
-                  <th className="p-2">Customer</th>
-                  <th className="p-2 text-right">Patterns</th>
-                  <th className="p-2 text-right">Trusted</th>
-                  <th className="p-2 text-right">Drifting</th>
-                  <th className="p-2 text-right">Retired</th>
-                  <th className="p-2">Last feedback</th>
-                </tr>
-              </thead>
-              <tbody>
-                {health.per_customer.slice(0, 15).map((c) => (
-                  <tr key={c.customer_no} className="border-b border-border/50 hover:bg-muted/30" data-testid={`pattern-health-row-${c.customer_no}`}>
-                    <td className="p-2 font-mono">{c.customer_no}</td>
-                    <td className="p-2 text-right">{c.patterns_total}</td>
-                    <td className="p-2 text-right text-emerald-600">{c.trusted || '—'}</td>
-                    <td className="p-2 text-right text-amber-600">{c.drifting || '—'}</td>
-                    <td className="p-2 text-right text-red-600">{c.retired || '—'}</td>
-                    <td className="p-2 text-xs text-muted-foreground">
-                      {c.last_feedback_at ? new Date(c.last_feedback_at).toLocaleDateString() : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        {health?.recent_events?.length > 0 && (
-          <div className="border-t border-border p-3">
-            <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2 flex items-center gap-1">
-              <Archive className="h-3 w-3" /> Recent reviewer feedback
-            </div>
-            <div className="space-y-1 text-xs max-h-48 overflow-y-auto">
-              {health.recent_events.slice(0, 10).map((e) => (
-                <div key={e.id} className="flex items-center justify-between gap-2 py-0.5">
-                  <div className="truncate">
-                    <span className="font-mono text-[10px] uppercase text-muted-foreground">{e.event_type}</span>
-                    {e.customer_no && <span className="ml-2">{e.customer_no}</span>}
-                    {e.item_no && <span className="ml-2 font-mono">{e.item_no}</span>}
-                  </div>
-                  <div className="text-[10px] text-muted-foreground shrink-0">
-                    {new Date(e.created_at).toLocaleString()}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
+      {/* Pattern Health — U5 reusable component (intake-focused + cross-domain roll-up) */}
+      <PatternHealthPanel domain="sales_intake" refreshKey={phRefreshKey} />
+      <PatternHealthPanel refreshKey={phRefreshKey} title="Cross-domain (AP + Intake)" />
 
       {/* Flagged docs */}
       <div className="rounded-lg border border-border bg-card">

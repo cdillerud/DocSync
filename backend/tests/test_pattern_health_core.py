@@ -98,8 +98,16 @@ async def test_ap_health_maps_confidence_tiers():
         {"vendor_no": "V-D", "posting_template": {"confidence": "none"}, "invoices_analyzed": 0},
     ])
     r = await ph.get_health("ap_posting", db=db)
+    # New (v2.5.3) semantics:
+    #   V-A  (high, 10 samples)  → trusted   (explicit high tier)
+    #   V-B  (medium, 3 samples) → drifting  (medium_tier_still_maturing,
+    #                                         samples < implicit-trust min)
+    #   V-C  (low, 1 sample)     → unscored  (insufficient_samples — was
+    #                                         incorrectly "drifting" pre-fix)
+    #   V-D  (none, 0 samples)   → retired   (tier=none)
     assert r["summary"]["trusted"] == 1
-    assert r["summary"]["drifting"] == 2  # medium + low (samples >=1)
+    assert r["summary"]["drifting"] == 1
+    assert r["summary"]["unscored"] == 1
     assert r["summary"]["retired"] == 1
     assert r["summary"]["total"] == 4
 

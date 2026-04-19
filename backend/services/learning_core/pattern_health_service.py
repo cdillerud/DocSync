@@ -113,29 +113,95 @@ AP_TRUSTED_TIERS = {"high"}
 AP_DRIFTING_TIERS = {"medium"}
 AP_RETIRED_TIERS = {"none"}
 
+# Implicit-trust thresholds: a vendor with a clean history earns trust even
+# without explicit thumbs-up feedback. "No corrective events + N posted
+# invoices" is treated as quiet success.
+AP_IMPLICIT_TRUST_MIN_SAMPLES = 10
+# Event types that *disqualify* a vendor from implicit trust. These indicate
+# real drift: BC human corrections, explicit rejects, or flagged mismatches.
+AP_NEGATIVE_EVENT_TYPES = {
+    "draft_bc_feedback",        # BC user edited our auto-draft
+    "draft_rejected",
+    "pattern_rejected",
+    "suggestion_rejected",
+    "correction_applied",
+    "drift_flagged",
+}
+# Window for considering a vendor "currently drifting" — anything older than
+# this is stale and doesn't disqualify implicit trust.
+AP_DRIFT_WINDOW_DAYS = 30
+
+
+async def _fetch_ap_negative_events_by_vendor(db) -> Dict[str, int]:
+    """Return {vendor_no: negative_event_count_last_N_days} aggregated from
+    the unified learning_events_v2 log. Used to distinguish real drift from
+    silent success."""
+    from datetime import timedelta
+    since = (
+        datetime.now(timezone.utc) - timedelta(days=AP_DRIFT_WINDOW_DAYS)
+    ).isoformat()
+    counts: Dict[str, int] = {}
+    try:
+        pipeline = [
+            {"$match": {
+                "domain": "ap_posting",
+                "event_type": {"$in": list(AP_NEGATIVE_EVENT_TYPES)},
+                "scope_type": "vendor",
+                "created_at": {"$gte": since},
+            }},
+            {"$group": {"_id": "$scope_value", "c": {"$sum": 1}}},
+        ]
+        async for row in db.learning_events_v2.aggregate(pipeline):
+            if row.get("_id"):
+                counts[row["_id"]] = int(row.get("c", 0))
+    except Exception as e:  # noqa: BLE001 — implicit trust is best-effort
+        logger.debug("[PatternHealth] negative event aggregation failed: %s", e)
+    return counts
+
 
 async def _ap_health(db, limit: int) -> Dict[str, Any]:
     rep = _empty_report("ap_posting")
     per_vendor: List[Dict[str, Any]] = []
+
+    # Pull per-vendor negative event counts once (single aggregation) so the
+    # main loop stays O(N_vendors) and not O(N_vendors * N_events).
+    negative_counts = await _fetch_ap_negative_events_by_vendor(db)
+
     async for p in db.posting_pattern_analysis.find({}, {"_id": 0}):
         template = p.get("posting_template") or {}
         tier = (template.get("confidence") or "low").lower()
         samples = int(p.get("invoices_analyzed", 0) or 0)
         scope_value = p.get("vendor_no") or "UNKNOWN"
+        neg_events = negative_counts.get(scope_value, 0)
+        has_drift_signal = neg_events > 0
 
-        # Normalize AP tier → our 4-state model:
-        #   high          → trusted
-        #   medium        → drifting (needs more samples / corrections)
-        #   low           → unscored (still learning)
-        #   none / retired→ retired
+        # Normalize AP tier → our 4-state model. Rules (in order):
+        #   1. Explicit retired / tier=none           → retired
+        #   2. Tier=high (any samples)                → trusted   (explicit)
+        #   3. Recent corrective events               → drifting  (real drift)
+        #   4. Samples >= IMPLICIT_MIN and no drift   → trusted   (implicit)
+        #      ("quiet success" — vendor posts cleanly, no BC corrections)
+        #   5. Tier=medium                            → drifting  (still
+        #                                               maturing, needs feedback)
+        #   6. Everything else                        → unscored
         if p.get("status") == "retired" or tier in AP_RETIRED_TIERS:
             state = "retired"
+            trust_reason = "retired"
         elif tier in AP_TRUSTED_TIERS and samples >= 3:
             state = "trusted"
-        elif tier in AP_DRIFTING_TIERS or (samples >= 1 and tier != "high"):
+            trust_reason = "explicit_high_tier"
+        elif has_drift_signal:
             state = "drifting"
+            trust_reason = f"{neg_events}_negative_event(s)_last_{AP_DRIFT_WINDOW_DAYS}d"
+        elif samples >= AP_IMPLICIT_TRUST_MIN_SAMPLES:
+            state = "trusted"
+            trust_reason = f"implicit_success_{samples}_samples_no_drift"
+        elif tier in AP_DRIFTING_TIERS:
+            state = "drifting"
+            trust_reason = "medium_tier_still_maturing"
         else:
             state = "unscored"
+            trust_reason = "insufficient_samples"
 
         rep["summary"][state] += 1
         per_vendor.append({
@@ -151,6 +217,8 @@ async def _ap_health(db, limit: int) -> Dict[str, Any]:
                 or p.get("last_analyzed_at"),
             "invoices_analyzed": samples,
             "confidence_tier": tier,
+            "negative_events_30d": neg_events,
+            "trust_reason": trust_reason,
         })
 
     rep["summary"]["total"] = sum(

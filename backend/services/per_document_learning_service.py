@@ -50,8 +50,18 @@ def compute_effective_confidence(doc: Dict) -> float:
     Problem: AI may report 85% confidence on classification, but extract 0/6 fields.
     This inflates the 85-95% confidence band with docs that always fail.
 
-    Fix: Penalize the confidence proportional to extraction gaps so these docs
-    land in a lower (more honest) band.
+    Calibration (2026-04-19 v2.5.3 tightening): observed 85-95% band accuracy
+    at 91% vs 70-85% at 98% and 95-100% at 99% on the prod dashboard. The AI
+    is over-confident specifically in the 85-95% window — most of the failures
+    are docs with 2/4 core fields (borderline extraction). The new curve
+    penalizes anything below 75% completeness so those docs shift one band
+    down into 70-85% where manual review naturally catches them.
+
+    Curve:
+      completeness >= 0.75  → no penalty          (scale = 1.00)
+      completeness  = 0.50  → mild penalty        (scale = 0.88)  [NEW]
+      completeness  = 0.25  → moderate penalty    (scale = 0.67)
+      completeness  = 0.00  → heavy penalty       (scale = 0.35)
 
     Returns the adjusted effective confidence (0.0–1.0).
     """
@@ -81,14 +91,21 @@ def compute_effective_confidence(doc: Dict) -> float:
     core_total = len(core_fields)
     completeness = core_present / core_total  # 0.0 to 1.0
 
-    # If extraction is >= 50% complete, no penalty
-    if completeness >= 0.5:
+    # Fully-extracted docs sail through untouched.
+    if completeness >= 0.75:
         return ai_conf
 
-    # Scale factor: ranges from 0.35 (0% extraction) to 1.0 (50% extraction)
-    # At 0% extraction: effective = ai_conf * 0.35 → 85% becomes ~30%
-    # At 25% extraction: effective = ai_conf * 0.675 → 85% becomes ~57%
-    scale = 0.35 + 0.65 * (completeness / 0.5)
+    # Piecewise linear scale — smooth, monotonically increasing, bounded.
+    # Anchors: (0.00, 0.35), (0.25, 0.67), (0.50, 0.88), (0.75, 1.00).
+    if completeness >= 0.50:
+        # Between 50% and 75% — mild penalty: scale 0.88 → 1.00.
+        scale = 0.88 + 0.48 * (completeness - 0.50)
+    elif completeness >= 0.25:
+        # Between 25% and 50% — moderate penalty: scale 0.67 → 0.88.
+        scale = 0.67 + 0.84 * (completeness - 0.25)
+    else:
+        # Below 25% — heavy penalty: scale 0.35 → 0.67.
+        scale = 0.35 + 1.28 * completeness
 
     # Small bonus if vendor was resolved despite poor extraction
     if vendor_resolved and not has_vendor:

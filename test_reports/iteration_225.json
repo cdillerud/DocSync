@@ -1,0 +1,40 @@
+{
+  "summary": "v2.5.3 follow-up for Pattern Health implicit-trust + Confidence Calibration extended penalty curve. All 32 targeted unit tests pass (8 implicit_trust + 10 calibration_curve + 6 pattern_health_core + 8 auto_clear_unknown_guard). All 6 HTTP endpoints in the review_request return 200 with the expected response shape. No regressions detected.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/learning/pattern-health/unified",
+        "issue": "In preview env the posting_pattern_analysis collection is empty, so ap_posting.per_scope comes back as []. Could not live-verify the new 'trust_reason' + 'negative_events_30d' fields on a real vendor row via HTTP. Verified via code inspection (pattern_health_service.py lines 207-222 unconditionally include both fields on every per_scope entry) AND via the 8 unit tests in test_pattern_health_implicit_trust.py which exercise all 5 classification branches with mocked DBs. No action required; this is an environment data-state, not a bug."
+      },
+      {
+        "endpoint": "/api/posting-patterns/intelligence/recalibrate-confidence",
+        "issue": "Response uses underscore keys for bands ('0_50','50_70','70_85','85_95','95_100') rather than the hyphenated form mentioned in the review_request ('0-50', etc.). All 5 bands are present in band_distribution + calibration sub-objects. Status=completed, documents_processed=30. Shape is consistent with prior iterations. Worth noting if any frontend code filters on hyphenated keys."
+      }
+    ]
+  },
+  "frontend_issues": { "ui_bugs": [], "integration_issues": [], "design_issues": [] },
+  "test_report_links": [
+    "/app/backend/tests/test_pattern_health_implicit_trust.py",
+    "/app/backend/tests/test_confidence_calibration_curve.py",
+    "/app/backend/tests/test_pattern_health_core.py",
+    "/app/backend/tests/test_auto_clear_unknown_guard.py",
+    "/app/test_reports/pytest/iter225_regression.xml"
+  ],
+  "action_items": [
+    "None critical. Optional: decide whether confidence-calibration band keys should be '0-50'/'50-70'/... (as described in PRD) or '0_50'/'50_70'/... (as returned today). Currently underscored — if any consumer expects hyphenated, align them. Otherwise ignore."
+  ],
+  "critical_code_review_comments": [
+    "pattern_health_service._ap_health (lines 162-234): implicit-trust rules are correctly ordered — retired > explicit_high_tier > drift_signal > implicit_success > medium_still_maturing > unscored. trust_reason + negative_events_30d are always populated on every per_scope row. Clean.",
+    "pattern_health_service._fetch_ap_negative_events_by_vendor pulls all per-vendor negative counts in a single aggregation BEFORE the main loop, avoiding N+1 queries. Good.",
+    "per_document_learning_service.compute_effective_confidence (lines 46-120): piecewise curve is monotonic (verified by test_curve_is_monotonic) and 50%-complete docs now get ~12% penalty, pushing them out of the 85-95% band into 70-85% as designed.",
+    "Thresholds AP_IMPLICIT_TRUST_MIN_SAMPLES and AP_DRIFT_WINDOW_DAYS are defined as module constants — easy to tune."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "100% (32/32 unit + 6/6 HTTP endpoints)", "frontend": "not tested (backend-only scope)" },
+  "test_credentials": "admin / admin (not needed — all endpoints tested are unauthenticated in preview)",
+  "seed_data_creation": "None. All tests run against live preview data; unit tests use mocked DB fixtures and self-clean.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iter 225 verified: (A) implicit-trust logic in pattern_health_service._ap_health + new _fetch_ap_negative_events_by_vendor helper, (B) extended extraction-completeness penalty curve in per_document_learning_service.compute_effective_confidence. 32/32 unit tests green, 6/6 HTTP endpoints green, no regressions in inbox-stats (posted_to_bc_7d, ready_for_post still ints) or /learning/hygiene/run (per_domain shape preserved). Preview env has empty posting_pattern_analysis so AP per_scope is [] over HTTP — unit tests cover the shape; do not treat as a defect. Recalibrate-confidence returns underscore band keys ('0_50' etc.) — flagged as minor in case frontend expects hyphenated form."
+}

@@ -1,0 +1,70 @@
+{
+  "summary": "Iteration 215: U3 (Shared Pattern Health & Hygiene Consolidation) frontend verified end-to-end. Cross-domain unified section renders in Pattern Health panel with all required testids. All button interactions (Refresh, Pattern Hygiene, Scan drift) functional. Regression for /ai-learning and / (Inbox) passed — no error boundaries. Backend smoke: GET /api/learning/pattern-health/unified and POST /api/learning/hygiene/run?domain=all return expected shapes. Giovanni (C-10250) data intact: 16 unscored patterns, 0 retired.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/readiness/exception-queue?limit=0 and /api/readiness/po-pending?limit=0", "issue": "Returns 422 when limit=0 passed from Inbox header. Pre-existing, unrelated to U3. Likely needs limit>=1 validation constraint loosened or UI should skip the call when limit is 0."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "IntakeLearningPage (Pattern Health table)", "issues": ["Pre-existing React hydration warnings: <tr> inside <span>, <span> inside <tbody>, <span> inside <select>/<option>. Cosmetic only. Carried over from previous iteration 214."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_215.json"
+  ],
+  "action_items": [
+    "(Optional/Minor) Fix 422 on /api/readiness/exception-queue and /api/readiness/po-pending when limit=0 is sent from Inbox. Either allow limit=0 server-side or skip the fetch in the UI when caller wants count-only.",
+    "(Optional/Cosmetic) Clean up React hydration warnings in Pattern Health table — <tr>/<span>/<tbody> nesting in IntakeLearningPage.js."
+  ],
+  "critical_code_review_comments": [
+    "IntakeLearningPage.js correctly calls GET /api/learning/pattern-health/unified and conditionally renders the Cross-domain unified section only when data is present.",
+    "data-testid coverage complete: intake-learning-page, pattern-health-panel, pattern-health-unified, unified-domain-sales_intake, unified-domain-ap_posting, metric-unified-trusted/drifting/retired/unscored, intake-learning-hygiene, intake-learning-drift-scan, intake-learning-reload, drift-alerts-panel all present.",
+    "Unified endpoint response shape is correct: {generated_at, combined_summary{trusted,drifting,retired,unscored,total}, domains[{domain, summary, per_scope, recent_events}]}.",
+    "Hygiene endpoint response shape is correct: {ran_at, actor, domain_requested, total_scanned, total_retired, total_promoted, per_domain{sales_intake, ap_posting}}.",
+    "Read-only verification preserved — no mutations to Giovanni (C-10250) or other real customer records."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (2/2 endpoints smoke-tested via curl — pattern-health/unified + hygiene/run)",
+    "frontend": "100% (11/11 targeted checks: page load, 4 core metrics, unified section, 2 domain pills, hygiene alert, drift scan, refresh, 2 regression pages)"
+  },
+  "test_credentials": "admin / admin",
+  "seed_data_creation": "None. Read-only verification only. No mutations performed.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "U3 frontend complete. Cross-domain unified Pattern Health section is live on /intake/learning and pulls from /api/learning/pattern-health/unified. Per-domain pills for sales_intake and ap_posting render under the unified metrics row. Pattern Hygiene button calls POST /api/learning/hygiene/run?domain=all and shows alert 'Pattern hygiene — scanned X, retired Y, promoted Z.'. Scan drift shows alert 'Drift scan — N alerts fired. M total open.'. Giovanni C-10250 remains at 16 patterns/0 trusted/0 drifting/0 retired. Known unrelated issues: (1) /api/readiness/* endpoints 422 on limit=0, (2) table hydration warnings — both pre-existing.",
+  "tested_features": {
+    "backend_smoke": [
+      "GET /api/learning/pattern-health/unified?limit=5 — 200 OK, correct shape, combined_summary + domains[sales_intake, ap_posting]",
+      "POST /api/learning/hygiene/run?domain=all — 200 OK, returns total_scanned/total_retired/total_promoted + per_domain breakdown"
+    ],
+    "frontend_ui": [
+      "Login admin/admin — PASS",
+      "/intake/learning loads data-testid='intake-learning-page' — PASS",
+      "Pattern Health panel with 4 metric cards (Trusted=0, Drifting=0, Retired=0, Unscored=16) — PASS",
+      "Cross-domain unified section (data-testid='pattern-health-unified') visible — PASS",
+      "Unified metrics (metric-unified-trusted/drifting/retired/unscored) render — PASS",
+      "Per-domain pills (data-testid='unified-domain-sales_intake' + 'unified-domain-ap_posting') visible with counts — PASS",
+      "Pattern Hygiene button click → alert 'Pattern hygiene — scanned 0, retired 0, promoted 0.' — PASS",
+      "Scan drift button click → alert 'Drift scan — 0 alerts fired. 0 total open.' — PASS",
+      "Refresh button reloads without breaking page or unified section — PASS",
+      "Regression /ai-learning loads without error boundary — PASS",
+      "Regression / (Inbox) loads without error boundary — PASS"
+    ]
+  },
+  "data_hygiene_verification": {
+    "giovanni_customer_id": "C-10250",
+    "giovanni_patterns_total": 16,
+    "giovanni_trusted": 0,
+    "giovanni_drifting": 0,
+    "giovanni_retired": 0,
+    "giovanni_unscored": 16,
+    "ap_posting_patterns_total": 0,
+    "mutations_performed": "none",
+    "status": "CLEAN — no real customer data touched."
+  }
+}

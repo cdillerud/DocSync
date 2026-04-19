@@ -44,7 +44,6 @@ export default function IntakeLearningPage() {
         fetch(`${API}/api/learning/drift/alerts?status=open&limit=25`),
         fetch(`${API}/api/learning/drift/summary`),
         fetch(`${API}/api/learning/pattern-health/unified?limit=15`),
-        fetch(`${API}/api/learning/pattern-health/unified?limit=15`),
       ]);
       if (sumRes.ok) setSummary(await sumRes.json());
       if (flaggedRes.ok) {
@@ -374,6 +373,33 @@ export default function IntakeLearningPage() {
           <Metric label="Retired" value={health?.summary?.retired ?? 0} tone="text-red-600" hint="Acceptance < 40%" />
           <Metric label="Unscored" value={health?.summary?.unscored ?? 0} hint="No feedback yet" />
         </div>
+
+        {/* U3 — cross-domain (AP + intake) unified roll-up */}
+        {unified?.combined_summary && (
+          <div className="border-t border-border p-3" data-testid="pattern-health-unified">
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2 flex items-center gap-1">
+              <Sparkles className="h-3 w-3 text-sky-500" /> Cross-domain (AP + Intake)
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <Metric label="Unified Trusted" value={unified.combined_summary.trusted ?? 0} tone="text-emerald-600" />
+              <Metric label="Unified Drifting" value={unified.combined_summary.drifting ?? 0} tone="text-amber-600" />
+              <Metric label="Unified Retired" value={unified.combined_summary.retired ?? 0} tone="text-red-600" />
+              <Metric label="Unified Unscored" value={unified.combined_summary.unscored ?? 0} />
+            </div>
+            {Array.isArray(unified.domains) && unified.domains.length > 0 && (
+              <div className="flex flex-wrap gap-3 mt-2 text-[11px] text-muted-foreground">
+                {unified.domains.map((r) => (
+                  <span key={r.domain} data-testid={`unified-domain-${r.domain}`}>
+                    <span className="font-mono">{r.domain}</span>:{' '}
+                    <span className="text-emerald-600">{r.summary?.trusted ?? 0}✓</span>{' / '}
+                    <span className="text-amber-600">{r.summary?.drifting ?? 0}⚠</span>{' / '}
+                    <span className="text-red-600">{r.summary?.retired ?? 0}✗</span>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         {health?.per_customer?.length > 0 && (
           <div className="overflow-x-auto border-t border-border">
             <table className="w-full text-sm">

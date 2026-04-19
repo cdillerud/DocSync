@@ -170,24 +170,66 @@ _COMPILED: List[Tuple[str, Optional[re.Pattern], re.Pattern, str, float, str]] =
 ]
 
 
-def classify_filename(
-    file_name: Optional[str],
-    vendor_canonical: Optional[str] = None,
-    vendor_name: Optional[str] = None,
-) -> Optional[Dict[str, Any]]:
-    """Return the first matching rule as a suggestion, or None.
+# ── Dynamic/custom rules (auto-proposed, persisted in Mongo) ─────
+# Loaded lazily + cached 60s so we don't hit the DB on every classify
+# call but still pick up newly-persisted rules without a restart.
+_CUSTOM_CACHE: Dict[str, Any] = {"at": 0.0, "rules": []}
+_CUSTOM_TTL_SECONDS = 60.0
 
-    Output:
-        {rule_id, doc_type, confidence, note, match_on_vendor, match_on_filename}
-    """
-    if not file_name:
-        return None
-    vendor_str = (vendor_canonical or vendor_name or "").strip()
-    for (rid, vr, fr, dt, conf, note) in _COMPILED:
+
+def _invalidate_custom_rule_cache() -> None:
+    """Force the next classify call to refresh from Mongo."""
+    _CUSTOM_CACHE["at"] = 0.0
+    _CUSTOM_CACHE["rules"] = []
+
+
+async def _load_custom_rules_from_db() -> List[Tuple[str, Optional[re.Pattern], re.Pattern, str, float, str]]:
+    """Pull enabled custom rules from `filename_heuristic_custom_rules`
+    and compile them. Bad rows (invalid regex) are logged and skipped."""
+    db = get_db()
+    rows = await db.filename_heuristic_custom_rules.find(
+        {"enabled": True}, {"_id": 0},
+    ).to_list(500)
+    compiled: List[Tuple[str, Optional[re.Pattern], re.Pattern, str, float, str]] = []
+    for r in rows:
+        try:
+            rid = r.get("rule_id") or f"custom_{len(compiled)}"
+            vr = re.compile(r["vendor_regex"]) if r.get("vendor_regex") else None
+            fr = re.compile(r["filename_regex"])
+            dt = r.get("doc_type") or "Unknown"
+            conf = float(r.get("confidence") or 0.70)
+            note = r.get("note") or "custom rule"
+            compiled.append((rid, vr, fr, dt, conf, note))
+        except Exception as e:  # noqa: BLE001 — one bad rule shouldn't break all classification
+            logger.warning(
+                "Custom filename rule %s skipped (bad regex): %s",
+                r.get("rule_id"), e,
+            )
+    return compiled
+
+
+async def _get_custom_rules() -> List[Tuple[str, Optional[re.Pattern], re.Pattern, str, float, str]]:
+    import time
+    now = time.time()
+    if now - _CUSTOM_CACHE["at"] < _CUSTOM_TTL_SECONDS and _CUSTOM_CACHE["rules"] is not None:
+        return _CUSTOM_CACHE["rules"]
+    try:
+        rules = await _load_custom_rules_from_db()
+    except Exception as e:  # noqa: BLE001 — DB outage shouldn't kill classification
+        logger.debug("custom rule load failed: %s", e)
+        return _CUSTOM_CACHE.get("rules") or []
+    _CUSTOM_CACHE["rules"] = rules
+    _CUSTOM_CACHE["at"] = now
+    return rules
+
+
+def _try_match(
+    compiled_rules, file_name: str, vendor_str: str, origin: str,
+) -> Optional[Dict[str, Any]]:
+    for (rid, vr, fr, dt, conf, note) in compiled_rules:
         if vr is not None and not vr.search(vendor_str):
             continue
-        m = fr.match(file_name.strip())
-        if not m:
+        if not fr.match(file_name):
             continue
         return {
             "rule_id": rid,
@@ -196,8 +238,69 @@ def classify_filename(
             "note": note,
             "match_on_vendor": bool(vr),
             "match_on_filename": True,
+            "origin": origin,
         }
     return None
+
+
+def classify_filename(
+    file_name: Optional[str],
+    vendor_canonical: Optional[str] = None,
+    vendor_name: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Return the first matching rule as a suggestion, or None.
+
+    Built-in rules are consulted first; custom (auto-proposed) rules
+    serve as a fallback. Custom rules are cached for 60 seconds.
+
+    Output:
+        {rule_id, doc_type, confidence, note, match_on_vendor,
+         match_on_filename, origin}
+    """
+    if not file_name:
+        return None
+    fn = file_name.strip()
+    vendor_str = (vendor_canonical or vendor_name or "").strip()
+    hit = _try_match(_COMPILED, fn, vendor_str, origin="builtin")
+    if hit:
+        return hit
+    # Custom rules: async cache load is only safe when we're in an event
+    # loop. Fall back silently if we aren't (e.g. sync pytest context).
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # We're inside async code — but we can't await here. Use the
+            # cached snapshot if warm, otherwise skip.
+            if _CUSTOM_CACHE["rules"]:
+                return _try_match(
+                    _CUSTOM_CACHE["rules"], fn, vendor_str, origin="custom",
+                )
+        else:
+            rules = loop.run_until_complete(_get_custom_rules())
+            return _try_match(rules, fn, vendor_str, origin="custom")
+    except RuntimeError:
+        # No loop at all. Skip custom rules this time.
+        return None
+    return None
+
+
+async def classify_filename_async(
+    file_name: Optional[str],
+    vendor_canonical: Optional[str] = None,
+    vendor_name: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Async variant — consults built-in AND custom rules safely from an
+    async context. Prefer this in request handlers + schedulers."""
+    if not file_name:
+        return None
+    fn = file_name.strip()
+    vendor_str = (vendor_canonical or vendor_name or "").strip()
+    hit = _try_match(_COMPILED, fn, vendor_str, origin="builtin")
+    if hit:
+        return hit
+    custom = await _get_custom_rules()
+    return _try_match(custom, fn, vendor_str, origin="custom")
 
 
 # ── Candidate filter ────────────────────────────────────────────
@@ -242,7 +345,7 @@ async def preview(*, limit: int = 1000, db=None) -> Dict[str, Any]:
     unmatched = 0
 
     for d in docs:
-        suggestion = classify_filename(
+        suggestion = await classify_filename_async(
             d.get("file_name"), d.get("vendor_canonical"), d.get("vendor_name"),
         )
         if not suggestion:
@@ -316,7 +419,7 @@ async def apply(
         if not doc_id:
             continue
         try:
-            suggestion = classify_filename(
+            suggestion = await classify_filename_async(
                 doc.get("file_name"),
                 doc.get("vendor_canonical"),
                 doc.get("vendor_name"),

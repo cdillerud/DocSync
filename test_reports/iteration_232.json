@@ -1,0 +1,36 @@
+{
+  "summary": "v2.5.10 backend review — email-poller dedup bug fix + 5 new auto-proposed filename-heuristic endpoints. All 5 new admin endpoints return 200 with correct response shape. Full round-trip verified: seeded hub_documents (6 classified PurchaseOrder + 4 unmatched same-shape docs for a test vendor), called /auto-apply?execute=true, verified a row persisted in filename_heuristic_custom_rules with enabled=true + origin=auto_proposed, then GET /custom-rules returned it, toggle=false flipped Mongo flag and only_enabled filter excluded it, toggle=true restored. Regression confirmed on pre-existing /filename-heuristics/rules,/preview,/apply,/unmatched-sample, /duplicate-docs/scan, /email-polling/status, and /documents. Startup log confirms 'mail_intake_log indexes ensured'. 107/107 pytests pass across related suites (dedup 8, auto 13, existing heuristics + triage + HTTP iters 230/231/232 = 86). New HTTP suite: 12/12 passing.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_filename_heuristics_auto_http_iter232.py",
+    "/app/test_reports/pytest/iter232_http.xml",
+    "/app/backend/tests/test_email_polling_dedup.py",
+    "/app/backend/tests/test_filename_heuristics_auto.py"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "auto_service.apply_auto_proposed internally re-calls auto_propose() without passing through the caller's min_group_size/min_vendor_samples/min_majority_pct overrides. A caller that uses custom thresholds via /auto-propose and then /auto-apply with the default thresholds will see a different eligible set than expected. Consider forwarding those knobs on /auto-apply too, or documenting that /auto-apply always uses propose defaults.",
+    "filename_heuristics_auto_service._collect_unmatched_groups pulls at most `limit` docs then filters by min_group_size in Python — OK for preview scale but won't scale past ~20k unmatched docs. Fine for now, flag for future $group aggregation if corpus grows.",
+    "routers/admin.py filename-heuristics section has no per-route rate limiting / admin role check (noted as intentional for this env). If these endpoints ever graduate to prod, they should require admin auth because auto-apply?execute=true writes to Mongo.",
+    "apply_auto_proposed swallows audit-insert errors silently (logger.debug). A failed audit write when execute=true should at least surface in the response (e.g. audit_logged=false) so operators don't lose the paper trail.",
+    "Empty vendor key fallback '<no vendor>' in _collect_unmatched_groups could funnel every vendor-less doc into one giant group; vendor_majority_doc_type correctly returns None in that case, but worth an explicit early-skip for clarity."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_filename_heuristics_auto_http_iter232.py (NEW)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "not tested (backend-only request)"},
+  "test_credentials": "none — admin endpoints unauthenticated in preview env",
+  "seed_data_creation": "Seeded 10 hub_documents tagged seed_tag=TEST_iter232_<uuid8> (6 classified PurchaseOrder + 4 unmatched) and auto-cleaned them + the resulting filename_heuristic_custom_rules row in module teardown. No residue left in Mongo.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "New HTTP regression lives at tests/test_filename_heuristics_auto_http_iter232.py. Round-trip test uses relaxed thresholds (min_group_size=2, min_vendor_samples=3, min_majority_pct=60) so a small seed triggers a proposal. If the auto-propose defaults are tightened beyond those numbers the round-trip call passes its own params explicitly, so it remains stable. Any future changes to _unmatched_filter (triage_tools_service) or UNKNOWN_DOC_TYPES must keep 'Unknown' in the set or the seed will stop being classified as unmatched.",
+  "rca of the issue": "N/A — this iteration is feature verification, no bug reported."
+}

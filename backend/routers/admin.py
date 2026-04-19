@@ -1138,3 +1138,75 @@ async def duplicate_docs_runs(limit: int = Query(20, ge=1, le=100)):
     from services.admin.triage_tools_service import recent_duplicate_runs
     runs = await recent_duplicate_runs(limit=limit)
     return {"total": len(runs), "runs": runs}
+
+
+# ─────────── Auto-Proposed Filename Heuristic Rules (v2.5.10) ───────────
+
+@router.get("/filename-heuristics/auto-propose")
+async def filename_heuristics_auto_propose(
+    limit: int = Query(3000, ge=100, le=20000,
+                       description="Max unmatched docs scanned"),
+    min_group_size: int = Query(3, ge=1, le=50,
+                                description="Skip (vendor, shape) groups smaller than this"),
+    min_vendor_samples: int = Query(5, ge=1, le=500,
+                                    description="Min classified docs for a vendor "
+                                                "to drive a majority vote"),
+    min_majority_pct: float = Query(70.0, ge=50.0, le=100.0,
+                                    description="Minimum %% the winning doc_type "
+                                                "needs to carry"),
+):
+    """Derive rule proposals by mining each vendor's own classified
+    history. Returns `proposals` (ready to execute) + `deferred` (need
+    a human)."""
+    from services.admin.filename_heuristics_auto_service import auto_propose
+    return await auto_propose(
+        limit=limit,
+        min_group_size=min_group_size,
+        min_vendor_samples=min_vendor_samples,
+        min_majority_pct=min_majority_pct,
+    )
+
+
+@router.post("/filename-heuristics/auto-apply")
+async def filename_heuristics_auto_apply(
+    execute: bool = Query(False, description="Required True to persist"),
+    actor: str = Query("admin"),
+    min_unmatched_count: int = Query(3, ge=1, le=500),
+    min_confidence: float = Query(0.70, ge=0.5, le=1.0),
+    limit: int = Query(3000, ge=100, le=20000),
+):
+    """Persist every high-confidence auto-proposed rule into
+    `filename_heuristic_custom_rules`. Dry-run by default."""
+    from services.admin.filename_heuristics_auto_service import apply_auto_proposed
+    return await apply_auto_proposed(
+        execute=execute, actor=actor,
+        min_unmatched_count=min_unmatched_count,
+        min_confidence=min_confidence, limit=limit,
+    )
+
+
+@router.get("/filename-heuristics/custom-rules")
+async def filename_heuristics_custom_rules(
+    only_enabled: bool = Query(False),
+):
+    """List all custom (auto-proposed) rules currently in Mongo."""
+    from services.admin.filename_heuristics_auto_service import list_custom_rules
+    rules = await list_custom_rules(only_enabled=only_enabled)
+    return {"total": len(rules), "rules": rules}
+
+
+@router.post("/filename-heuristics/custom-rules/{rule_id}/toggle")
+async def filename_heuristics_custom_rule_toggle(
+    rule_id: str,
+    enabled: bool = Query(...),
+):
+    """Enable or disable a single custom rule."""
+    from services.admin.filename_heuristics_auto_service import (
+        set_custom_rule_enabled,
+    )
+    from services.admin.filename_heuristics_service import (
+        _invalidate_custom_rule_cache,
+    )
+    result = await set_custom_rule_enabled(rule_id, enabled)
+    _invalidate_custom_rule_cache()
+    return result

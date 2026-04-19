@@ -287,3 +287,49 @@ async def digest_rebuild(
     per week_key. Normally fires on the weekly scheduler."""
     from services.learning_core import build_weekly_digest
     return await build_weekly_digest(week_of=week_of, actor="user")
+
+
+
+# ───────────────────────────── Drift Watchlist ─────────────────────────────
+
+@router.get("/drift-watchlist/preview")
+async def drift_watchlist_preview():
+    """Dry-run the weekly Drift Watchlist — returns the aggregated vendor
+    list + rendered Teams card + email HTML without sending anywhere. Use
+    this to verify channel payloads before enabling the scheduler."""
+    from services.learning_core.drift_watchlist_service import (
+        build_watchlist, format_teams_card, format_email_html,
+    )
+    wl = await build_watchlist()
+    return {
+        "watchlist": wl,
+        "teams_card": format_teams_card(wl),
+        "email_html": format_email_html(wl),
+    }
+
+
+@router.post("/drift-watchlist/send-now")
+async def drift_watchlist_send_now(
+    channels: Optional[str] = Query(
+        None,
+        description="Comma-separated override of channels "
+                    "(teams_webhook,graph_channel,email). Defaults to env "
+                    "DRIFT_WATCHLIST_CHANNELS.",
+    ),
+):
+    """Immediately build + dispatch the watchlist. Safe — still honours
+    'empty watchlist = skip' and logs the run in `drift_watchlist_runs`."""
+    from services.learning_core.drift_watchlist_service import send_watchlist
+    override = [c.strip() for c in channels.split(",")] if channels else None
+    return await send_watchlist(channels=override, actor="manual_trigger")
+
+
+@router.get("/drift-watchlist/runs")
+async def drift_watchlist_runs(limit: int = Query(20, ge=1, le=100)):
+    """Recent watchlist dispatch runs (for audit / debugging)."""
+    from deps import get_db
+    db = get_db()
+    runs = await db.drift_watchlist_runs.find(
+        {}, {"_id": 0},
+    ).sort("ran_at", -1).limit(limit).to_list(limit)
+    return {"total": len(runs), "runs": runs}

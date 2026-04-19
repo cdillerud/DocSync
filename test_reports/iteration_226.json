@@ -1,0 +1,50 @@
+{
+  "summary": "v2.5.4 Drift Watchlist (option D: 3 channels via DRIFT_WATCHLIST_CHANNELS). Full review_request matrix green: 16/16 unit tests in test_drift_watchlist.py, 6/6 new HTTP endpoint tests in test_drift_watchlist_http_iter226.py, and the 26/26 targeted regression suite (pattern_health_implicit_trust + confidence_calibration_curve + auto_clear_unknown_guard). The send-now?channels=sms_pigeon seeded-vendor path was additionally verified end-to-end against the live preview DB and returns per_channel.sms_pigeon.error = \"unknown channel 'sms_pigeon'\" as designed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/learning/drift-watchlist/send-now",
+        "issue": "Query param `channels` only splits on comma; whitespace trimming is handled, but if the caller passes an empty string (?channels=) the route computes `[''.strip()] = ['']` then `_resolve_channels` drops it to [] which then falls through to env DRIFT_WATCHLIST_CHANNELS. Behaviour is benign but slightly surprising — `?channels=` should probably be treated the same as no override rather than env fallback. Not blocking."
+      },
+      {
+        "endpoint": "services/learning_core/drift_watchlist_service._send_graph_channel_message",
+        "issue": "Serialises Adaptive Card content via str(dict).replace(\"'\", '\"') — this is fragile: any value containing a single quote (e.g. a vendor name like O'Brien) will produce invalid JSON and Graph will 400. Prefer json.dumps(card['attachments'][0]['content']). Low-priority because this codepath only runs when graph_channel is enabled, which it is not in preview."
+      }
+    ]
+  },
+  "frontend_issues": { "ui_bugs": [], "integration_issues": [], "design_issues": [] },
+  "test_report_links": [
+    "/app/backend/tests/test_drift_watchlist.py",
+    "/app/backend/tests/test_drift_watchlist_http_iter226.py",
+    "/app/test_reports/pytest/iter226_drift_watchlist.xml",
+    "/app/test_reports/pytest/iter226_regression.xml",
+    "/app/test_reports/pytest/iter226_http.xml"
+  ],
+  "action_items": [
+    "Optional: replace str(dict).replace(\"'\", '\"') in _send_graph_channel_message with json.dumps(...) before the Graph channel path is ever enabled — will silently mangle vendor names with apostrophes otherwise.",
+    "Optional: normalise ?channels= (empty string) on POST /drift-watchlist/send-now to explicitly mean 'no override' rather than falling back to env. Cosmetic."
+  ],
+  "critical_code_review_comments": [
+    "drift_watchlist_service.send_watchlist correctly isolates per-channel failures — test_send_one_failing_channel_does_not_kill_others proves the try/except keeps siblings alive. Good.",
+    "build_watchlist does exactly one aggregation + one find + one enrich query; O(1) round-trips regardless of vendor count. No N+1. Good.",
+    "Scoring formula score = 2 * open_drift_alerts + negative_events_30d is deterministic and tie-broken by vendor_no (test_sort_score_and_ties covers). Clean.",
+    "_persist_run is always called (even on skipped=empty_watchlist / no_channels_configured) which gives /runs full audit coverage. Good.",
+    "Teams card truncation at MAX_VENDORS_IN_CARD = 15 is honoured and the '+N more not shown' footer is rendered (test_teams_card_truncated_when_over_max). Good.",
+    "Environment gating is correct: DRIFT_WATCHLIST_ENABLED defaults false and the scheduler in server.py is therefore a no-op in preview — matches the agent_to_agent_context_note. Verified by grep, did not exercise scheduler loop.",
+    "ObjectId hygiene: /drift-watchlist/runs projects {_id:0} so no ObjectId leakage. Good."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_drift_watchlist_http_iter226.py (NEW — 6 HTTP regression tests)"
+  ],
+  "success_rate": {
+    "backend": "100% — 16/16 unit tests + 26/26 regression tests + 6/6 HTTP endpoint tests + 1/1 seeded-vendor live verification",
+    "frontend": "not tested (backend-only scope per review_request)"
+  },
+  "test_credentials": "admin / admin (not exercised — drift-watchlist endpoints are not auth-gated in preview)",
+  "seed_data_creation": "Temporarily inserted one learning_events_v2 doc {scope_value:'TEST_DW_VENDOR', event_type:'draft_rejected'} to exercise the non-empty send-now?channels=sms_pigeon path. Deleted immediately after the call. No residual test data. drift_watchlist_runs has a handful of new audit rows from send-now calls — harmless per review_request instructions.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iter 226 verified v2.5.4 Drift Watchlist end-to-end. 16 unit tests (build/format/dispatch/env parsing) + 6 HTTP tests (preview, send-now empty, send-now sms_pigeon override, runs persistence, inbox-stats regression, pattern-health unified regression) all green. Seeded a single draft_rejected event against scope_value=TEST_DW_VENDOR and confirmed the /send-now?channels=sms_pigeon response shape: vendor_count=1, per_channel.sms_pigeon = {error: \"unknown channel 'sms_pigeon'\"}. drift_watchlist_runs is populated from test runs (harmless). DRIFT_WATCHLIST_ENABLED=false and DRIFT_WATCHLIST_CHANNELS unset in preview, as expected — scheduler never fires. Two minor code-quality notes flagged (str() JSON serialisation in _send_graph_channel_message, and empty ?channels= normalisation) — neither blocks.",
+  "rca of the issue": "N/A — no bugs surfaced. Feature is behaving per spec."
+}

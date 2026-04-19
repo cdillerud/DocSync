@@ -7787,6 +7787,45 @@ async def startup():
     asyncio.create_task(_weekly_digest_scheduler())
     logger.info("Weekly Digest scheduler started (interval: 24h, rebuilds current-week digest)")
 
+    # ── Drift Watchlist scheduler (v2.5.4) ───────────────────────
+    # Dispatches the weekly vendor Drift Watchlist to the channels
+    # configured in DRIFT_WATCHLIST_CHANNELS (teams_webhook / graph_channel /
+    # email). Fires once every 24h; each tick checks whether "now" matches
+    # the configured day-of-week (0=Mon..6=Sun) and hour window. Defaults to
+    # Monday 07:00 local server time.
+    async def _drift_watchlist_scheduler():
+        await asyncio.sleep(1500)  # 25-min startup delay
+        target_dow = int(os.environ.get("DRIFT_WATCHLIST_CRON_DOW", "0"))  # 0 = Mon
+        target_hour = int(os.environ.get("DRIFT_WATCHLIST_CRON_HOUR", "7"))
+        enabled = os.environ.get("DRIFT_WATCHLIST_ENABLED", "false").lower() in ("1", "true", "yes")
+        if not enabled:
+            logger.info("Drift Watchlist scheduler disabled (set DRIFT_WATCHLIST_ENABLED=true to enable)")
+            return
+        last_sent_day: Optional[str] = None
+        while True:
+            try:
+                now = datetime.now()
+                day_key = now.strftime("%Y-%m-%d")
+                if (
+                    now.weekday() == target_dow
+                    and now.hour == target_hour
+                    and last_sent_day != day_key
+                ):
+                    from services.learning_core.drift_watchlist_service import send_watchlist
+                    result = await send_watchlist(actor="scheduler")
+                    last_sent_day = day_key
+                    logger.info(
+                        "[DriftWatchlist.scheduler] dispatched: vendors=%d channels=%s",
+                        result.get("vendor_count", 0),
+                        list(result.get("per_channel", {})),
+                    )
+            except Exception as e:
+                logger.warning("[DriftWatchlist.scheduler] tick failed: %s", e)
+            # Wake every hour so we don't drift past the target window
+            await asyncio.sleep(3600)
+    asyncio.create_task(_drift_watchlist_scheduler())
+    logger.info("Drift Watchlist scheduler started (check: hourly; fires once per target day/hour)")
+
     # Start BC Shipment Sync scheduler (every 1h)
     async def _shipment_sync_scheduler():
         """Background worker: sync BC shipment lines into inventory every 1 hour."""

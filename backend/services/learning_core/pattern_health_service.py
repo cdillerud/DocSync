@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from deps import get_db
-from services.learning_core.events_service import list_events
+from services.learning_core.events_service import list_events, get_trend
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +101,7 @@ async def _intake_health(db, limit: int) -> Dict[str, Any]:
     rep["recent_events"] = await list_events(
         domain="sales_intake", limit=10, db=db,
     )
+    rep["trend_7d"] = await get_trend(domain="sales_intake", days=7, db=db)
     return rep
 
 
@@ -161,6 +162,7 @@ async def _ap_health(db, limit: int) -> Dict[str, Any]:
     rep["recent_events"] = await list_events(
         domain="ap_posting", limit=10, db=db,
     )
+    rep["trend_7d"] = await get_trend(domain="ap_posting", days=7, db=db)
     return rep
 
 

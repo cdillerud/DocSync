@@ -133,6 +133,66 @@ async def test_get_domain_summary_shape():
 
 
 @pytest.mark.asyncio
+async def test_get_trend_returns_dense_series_with_zero_fill():
+    """7-day trend must always return exactly `days` buckets, zero-filled."""
+    from datetime import datetime, timezone, timedelta
+    from services.learning_core import get_trend, EVENTS_COLL
+
+    db = FakeDb()
+    now = datetime.now(timezone.utc)
+    # 2 events today, 1 event 3 days ago, 1 outside the 7-day window (10d ago)
+    for offset, count in [(0, 2), (3, 1), (10, 1)]:
+        ts = (now - timedelta(days=offset)).isoformat()
+        for _ in range(count):
+            await db[EVENTS_COLL].insert_one({
+                "id": f"t-{offset}-{_}", "domain": "sales_intake",
+                "event_type": "x", "scope_type": "global", "scope_value": None,
+                "target": {}, "extra": {}, "source": "test",
+                "created_at": ts,
+            })
+
+    trend = await get_trend(domain="sales_intake", days=7, db=db)
+    assert len(trend) == 7, f"expected 7 buckets, got {len(trend)}"
+    assert all("date" in b and "count" in b for b in trend)
+    # Dates are ascending
+    assert [b["date"] for b in trend] == sorted(b["date"] for b in trend)
+    # Today bucket has 2 events; 3-days-ago bucket has 1; 10-days-ago excluded
+    assert sum(b["count"] for b in trend) == 3
+    assert trend[-1]["count"] == 2  # last bucket = today
+
+
+@pytest.mark.asyncio
+async def test_get_trend_clamps_days_range():
+    """days is clamped to [1, 90]."""
+    from services.learning_core import get_trend
+    db = FakeDb()
+    assert len(await get_trend(days=0, db=db)) == 1
+    assert len(await get_trend(days=-5, db=db)) == 1
+    assert len(await get_trend(days=500, db=db)) == 90
+
+
+@pytest.mark.asyncio
+async def test_get_trend_filters_by_domain():
+    from datetime import datetime, timezone
+    from services.learning_core import get_trend, EVENTS_COLL
+
+    db = FakeDb()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for dom in ("sales_intake", "sales_intake", "ap_posting"):
+        await db[EVENTS_COLL].insert_one({
+            "id": f"t-{dom}", "domain": dom, "event_type": "x",
+            "scope_type": "global", "scope_value": None, "target": {},
+            "extra": {}, "source": "test", "created_at": now_iso,
+        })
+    trend_si = await get_trend(domain="sales_intake", days=7, db=db)
+    trend_ap = await get_trend(domain="ap_posting", days=7, db=db)
+    assert sum(b["count"] for b in trend_si) == 2
+    assert sum(b["count"] for b in trend_ap) == 1
+
+
+
+
+@pytest.mark.asyncio
 async def test_intake_feedback_dual_writes_to_learning_core(monkeypatch):
     """record_feedback_event should land in both the legacy intake_learning_events
     AND the unified learning_events_v2 collection."""

@@ -178,10 +178,51 @@ async def get_domain_summary(db=None) -> Dict[str, Any]:
     }
 
 
+async def get_trend(
+    *,
+    domain: Optional[str] = None,
+    days: int = 7,
+    db=None,
+) -> List[Dict[str, Any]]:
+    """Per-day event count for the last `days` days (ascending). Fills
+    missing days with 0 so the result length is always exactly `days`.
+
+    Returns: [{"date": "YYYY-MM-DD", "count": int}, ...]
+    """
+    from datetime import timedelta
+
+    days = max(1, min(int(days), 90))
+    db = db if db is not None else get_db()
+
+    today_utc = datetime.now(timezone.utc).date()
+    start_date = today_utc - timedelta(days=days - 1)
+    since_iso = start_date.isoformat() + "T00:00:00+00:00"
+
+    q: Dict[str, Any] = {"created_at": {"$gte": since_iso}}
+    if domain:
+        q["domain"] = domain
+
+    buckets: Dict[str, int] = {}
+    try:
+        async for doc in db[EVENTS_COLL].find(q, {"_id": 0, "created_at": 1}):
+            ca = doc.get("created_at") or ""
+            if len(ca) >= 10:
+                buckets[ca[:10]] = buckets.get(ca[:10], 0) + 1
+    except Exception as e:
+        logger.warning("[LearningCore.events] trend aggregate failed: %s", e)
+
+    out: List[Dict[str, Any]] = []
+    for i in range(days):
+        d = (start_date + timedelta(days=i)).isoformat()
+        out.append({"date": d, "count": int(buckets.get(d, 0))})
+    return out
+
+
 __all__ = [
     "record_event",
     "list_events",
     "get_domain_summary",
+    "get_trend",
     "DOMAINS",
     "SCOPE_TYPES",
     "EVENTS_COLL",

@@ -24,6 +24,43 @@ function Metric({ label, value, hint, tone = 'text-foreground' }) {
   );
 }
 
+/**
+ * Sparkline — tiny inline SVG for a 7-day activity trend.
+ * Accepts an array of {date, count}. Renders a polyline normalized
+ * to the component's width/height. Flat line when all counts are 0.
+ */
+function Sparkline({ points = [], width = 64, height = 18, className = 'text-sky-500', testId }) {
+  if (!Array.isArray(points) || points.length === 0) return null;
+  const counts = points.map((p) => Number(p.count) || 0);
+  const max = Math.max(1, ...counts);
+  const stepX = points.length > 1 ? width / (points.length - 1) : 0;
+  const coords = counts.map((c, i) => {
+    const x = i * stepX;
+    const y = height - (c / max) * (height - 2) - 1;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const total = counts.reduce((a, b) => a + b, 0);
+  return (
+    <svg
+      width={width}
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      className={`inline-block align-middle ${className}`}
+      data-testid={testId}
+      aria-label={`7-day trend, ${total} events`}
+    >
+      <polyline
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.25"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        points={coords.join(' ')}
+      />
+    </svg>
+  );
+}
+
 export default function IntakeLearningPage() {
   const [summary, setSummary] = useState(null);
   const [flagged, setFlagged] = useState([]);
@@ -387,15 +424,33 @@ export default function IntakeLearningPage() {
               <Metric label="Unified Unscored" value={unified.combined_summary.unscored ?? 0} />
             </div>
             {Array.isArray(unified.domains) && unified.domains.length > 0 && (
-              <div className="flex flex-wrap gap-3 mt-2 text-[11px] text-muted-foreground">
-                {unified.domains.map((r) => (
-                  <span key={r.domain} data-testid={`unified-domain-${r.domain}`}>
-                    <span className="font-mono">{r.domain}</span>:{' '}
-                    <span className="text-emerald-600">{r.summary?.trusted ?? 0}✓</span>{' / '}
-                    <span className="text-amber-600">{r.summary?.drifting ?? 0}⚠</span>{' / '}
-                    <span className="text-red-600">{r.summary?.retired ?? 0}✗</span>
-                  </span>
-                ))}
+              <div className="flex flex-wrap gap-4 mt-2 text-[11px] text-muted-foreground">
+                {unified.domains.map((r) => {
+                  const total7 = Array.isArray(r.trend_7d)
+                    ? r.trend_7d.reduce((a, p) => a + (Number(p.count) || 0), 0)
+                    : 0;
+                  return (
+                    <span key={r.domain} className="flex items-center gap-2" data-testid={`unified-domain-${r.domain}`}>
+                      <span className="font-mono">{r.domain}</span>:{' '}
+                      <span className="text-emerald-600">{r.summary?.trusted ?? 0}✓</span>{' / '}
+                      <span className="text-amber-600">{r.summary?.drifting ?? 0}⚠</span>{' / '}
+                      <span className="text-red-600">{r.summary?.retired ?? 0}✗</span>
+                      {Array.isArray(r.trend_7d) && r.trend_7d.length > 0 && (
+                        <span
+                          className="flex items-center gap-1 pl-2 border-l border-border"
+                          title={`Last 7d — ${total7} events`}
+                        >
+                          <Sparkline
+                            points={r.trend_7d}
+                            className={total7 > 0 ? 'text-sky-500' : 'text-muted-foreground/60'}
+                            testId={`sparkline-${r.domain}`}
+                          />
+                          <span className="text-[10px] tabular-nums">{total7}</span>
+                        </span>
+                      )}
+                    </span>
+                  );
+                })}
               </div>
             )}
           </div>

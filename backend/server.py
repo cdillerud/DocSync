@@ -7605,6 +7605,12 @@ async def startup():
     
     # Start dynamic mailbox polling worker (polls mailboxes configured via UI)
     import services.email_polling_service as email_polling_svc
+    # Ensure idempotency indexes on mail_intake_log before any worker runs.
+    try:
+        await email_polling_svc.ensure_mail_intake_indexes()
+        logger.info("mail_intake_log indexes ensured")
+    except Exception as _e:
+        logger.warning("ensure_mail_intake_indexes failed (non-fatal): %s", _e)
     global _dynamic_mailbox_polling_task
     _dynamic_mailbox_polling_task = asyncio.create_task(email_polling_svc.dynamic_mailbox_polling_worker())
     email_polling_svc._dynamic_mailbox_polling_task = _dynamic_mailbox_polling_task

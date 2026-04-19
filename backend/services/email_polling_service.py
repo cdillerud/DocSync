@@ -219,6 +219,44 @@ async def move_email_to_folder(email_id: str, mailbox_address: str, folder_name:
 # Mail Intake Logging & Dedup
 # =========================================================================
 
+async def ensure_mail_intake_indexes():
+    """Create idempotency indexes on mail_intake_log. Safe to call repeatedly.
+
+    The unique `(internet_message_id, attachment_hash)` index is the
+    ultimate backstop against concurrent-poller dup inserts — writes that
+    collide raise DuplicateKeyError which callers treat as "already seen".
+    The partial filter skips rows missing either field so legacy/skipped
+    entries don't fight the index.
+    """
+    db = get_db()
+    try:
+        await db.mail_intake_log.create_index(
+            [("internet_message_id", 1), ("attachment_hash", 1)],
+            unique=True,
+            partialFilterExpression={
+                "internet_message_id": {"$type": "string", "$gt": ""},
+                "attachment_hash": {"$type": "string", "$gt": ""},
+            },
+            name="uniq_msgid_hash",
+        )
+    except Exception as e:  # noqa: BLE001 — collection may predate fix
+        logger.warning("ensure_mail_intake_indexes: uniq_msgid_hash failed: %s", e)
+    # Lookup indexes used by check_duplicate_mail_intake fallback paths.
+    for keys, name in (
+        ([("internet_message_id", 1), ("filename", 1)], "msgid_filename"),
+        ([("internet_message_id", 1), ("attachment_name", 1)], "msgid_attname"),
+        ([("attachment_hash", 1), ("status", 1)], "hash_status"),
+    ):
+        try:
+            await db.mail_intake_log.create_index(keys, name=name)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("ensure_mail_intake_indexes: %s failed: %s", name, e)
+
+
+# Statuses that prove we actually ingested (vs. skipped inline / error).
+_PROCESSED_STATUSES = ("Processed", "Ingested", "SkippedDuplicate", "Skipped_Duplicate")
+
+
 async def record_mail_intake_log(
     message_id: str,
     internet_message_id: str,
@@ -229,7 +267,13 @@ async def record_mail_intake_log(
     sharepoint_doc_id: str = None,
     error: str = None,
 ):
-    """Record mail intake for idempotency and observability."""
+    """Record mail intake for idempotency and observability.
+
+    Writes BOTH `filename` and `attachment_name` so the other
+    (dynamic mailbox) poller can dedup against our rows and vice versa.
+    DuplicateKeyError from the unique index is swallowed — that just
+    means another worker already recorded this exact attachment.
+    """
     db = get_db()
     log_entry = {
         "id": str(uuid.uuid4()),
@@ -238,27 +282,62 @@ async def record_mail_intake_log(
         "attachment_id": attachment_id,
         "attachment_hash": attachment_hash,
         "filename": filename,
+        "attachment_name": filename,  # schema-unify with dynamic poller
         "status": status,
         "sharepoint_doc_id": sharepoint_doc_id,
         "error": error,
         "processed_at": datetime.now(timezone.utc).isoformat(),
     }
-    await db.mail_intake_log.insert_one(log_entry)
+    try:
+        await db.mail_intake_log.insert_one(log_entry)
+    except Exception as e:  # noqa: BLE001
+        # DuplicateKeyError → another worker already recorded this one.
+        if "DuplicateKey" in type(e).__name__ or "E11000" in str(e):
+            logger.info(
+                "record_mail_intake_log: dedup hit on uniq index for %s (%s)",
+                filename, (attachment_hash or "")[:12],
+            )
+        else:
+            raise
     return log_entry
 
 
 async def check_duplicate_mail_intake(
     internet_message_id: str, attachment_hash: str,
     message_id: str = None, attachment_id: str = None,
+    filename: str = None,
 ) -> bool:
-    """Check if this attachment was already processed (idempotency)."""
+    """Check if this attachment was already processed (idempotency).
+
+    Matches across BOTH legacy schemas (static poller wrote `filename`,
+    dynamic poller wrote `attachment_name`) so cross-worker ingestion
+    correctly dedups. Hash-based match is primary and sufficient on its
+    own even if filename differs.
+    """
     db = get_db()
-    query = {"$or": [
-        {"internet_message_id": internet_message_id, "attachment_hash": attachment_hash}
-    ]}
+    clauses = []
+    if internet_message_id and attachment_hash:
+        clauses.append({
+            "internet_message_id": internet_message_id,
+            "attachment_hash": attachment_hash,
+        })
     if message_id and attachment_id:
-        query["$or"].append({"message_id": message_id, "attachment_id": attachment_id})
-    existing = await db.mail_intake_log.find_one(query)
+        clauses.append({"message_id": message_id, "attachment_id": attachment_id})
+    if internet_message_id and filename:
+        # Catch legacy rows that lack hash (e.g. inline-skipped)
+        clauses.append({"internet_message_id": internet_message_id, "filename": filename})
+        clauses.append({"internet_message_id": internet_message_id, "attachment_name": filename})
+    # Global hash-only fallback: same content already ingested from a
+    # different message (e.g. same attachment forwarded twice).
+    if attachment_hash:
+        clauses.append({
+            "attachment_hash": attachment_hash,
+            "status": {"$in": list(_PROCESSED_STATUSES)},
+        })
+    if not clauses:
+        return False
+    query = clauses[0] if len(clauses) == 1 else {"$or": clauses}
+    existing = await db.mail_intake_log.find_one(query, {"_id": 0, "id": 1})
     return existing is not None
 
 
@@ -406,7 +485,9 @@ async def poll_mailbox_for_attachments():
                             stats["errors"].append(f"Failed to decode {filename}: {str(e)}")
                             continue
 
-                        if await check_duplicate_mail_intake(internet_msg_id, att_hash):
+                        if await check_duplicate_mail_intake(
+                            internet_msg_id, att_hash, filename=filename,
+                        ):
                             await record_mail_intake_log(
                                 message_id=msg_id, internet_message_id=internet_msg_id,
                                 attachment_id=att_id, attachment_hash=att_hash,
@@ -672,7 +753,20 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
             stats["errors"].append("Failed to get email token")
             return stats
 
-        lookback_time = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        # Per-mailbox watermark — keeps us from re-examining the same 1h
+        # window every 60 seconds (root cause of the 10×/day dup bug).
+        watermark_key = f"mailbox_watermark:{mailbox_address}"
+        wm_doc = await db.hub_settings.find_one({"type": watermark_key}, {"_id": 0})
+        if wm_doc and wm_doc.get("last_received_datetime"):
+            try:
+                wm_dt = datetime.fromisoformat(
+                    wm_doc["last_received_datetime"].replace("Z", "+00:00")
+                )
+                lookback_time = (wm_dt - timedelta(minutes=5)).isoformat()
+            except Exception:
+                lookback_time = wm_doc["last_received_datetime"]
+        else:
+            lookback_time = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             messages_resp = await client.get(
@@ -720,14 +814,6 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
                         stats["attachments_skipped_inline"] += 1
                         continue
 
-                    existing = await db.mail_intake_log.find_one({
-                        "internet_message_id": internet_msg_id,
-                        "attachment_name": filename,
-                    })
-                    if existing:
-                        stats["attachments_skipped_dup"] += 1
-                        continue
-
                     try:
                         att_content_resp = await client.get(
                             f"https://graph.microsoft.com/v1.0/users/{mailbox_address}/messages/{msg_id}/attachments/{att_id}",
@@ -741,21 +827,39 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
                         content_bytes = base64.b64decode(content_b64)
                         content_hash = hashlib.sha256(content_bytes).hexdigest()
 
+                        # ── Unified dedup ─────────────────────────────
+                        # Hash-first: catches the same file from the same
+                        # message AND the same content forwarded twice.
+                        # Also matches rows written by the static AP
+                        # poller (cross-worker protection).
+                        if await check_duplicate_mail_intake(
+                            internet_msg_id, content_hash, filename=filename,
+                        ):
+                            await record_mail_intake_log(
+                                message_id=msg_id,
+                                internet_message_id=internet_msg_id,
+                                attachment_id=att_id,
+                                attachment_hash=content_hash,
+                                filename=filename,
+                                status="SkippedDuplicate",
+                            )
+                            stats["attachments_skipped_dup"] += 1
+                            continue
+
                         hash_dup = await db.hub_documents.find_one(
                             {"sha256_hash": content_hash, "is_duplicate": {"$ne": True}},
                             {"_id": 0, "id": 1},
                         )
                         if hash_dup:
-                            await db.mail_intake_log.insert_one({
-                                "internet_message_id": internet_msg_id,
-                                "attachment_name": filename,
-                                "attachment_hash": content_hash,
-                                "document_id": hash_dup["id"],
-                                "mailbox_source": mailbox_address,
-                                "source_id": source_id,
-                                "status": "Skipped_Duplicate",
-                                "created_utc": datetime.now(timezone.utc).isoformat(),
-                            })
+                            await record_mail_intake_log(
+                                message_id=msg_id,
+                                internet_message_id=internet_msg_id,
+                                attachment_id=att_id,
+                                attachment_hash=content_hash,
+                                filename=filename,
+                                status="SkippedDuplicate",
+                                sharepoint_doc_id=hash_dup["id"],
+                            )
                             stats["attachments_skipped_dup"] += 1
                             continue
 
@@ -768,21 +872,39 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
                             mailbox_category=default_category,
                         )
 
-                        await db.mail_intake_log.insert_one({
-                            "internet_message_id": internet_msg_id,
-                            "attachment_name": filename,
-                            "attachment_hash": content_hash,
-                            "document_id": result.get("document_id"),
-                            "mailbox_source": mailbox_address,
-                            "source_id": source_id,
-                            "status": "Ingested",
-                            "created_utc": datetime.now(timezone.utc).isoformat(),
-                        })
+                        doc_id = (
+                            result.get("document_id")
+                            or result.get("document", {}).get("id")
+                        )
+                        await record_mail_intake_log(
+                            message_id=msg_id,
+                            internet_message_id=internet_msg_id,
+                            attachment_id=att_id,
+                            attachment_hash=content_hash,
+                            filename=filename,
+                            status="Processed",
+                            sharepoint_doc_id=doc_id,
+                        )
                         stats["attachments_ingested"] += 1
 
                     except Exception as e:
                         stats["attachments_failed"] += 1
                         stats["errors"].append(f"Failed to process {filename}: {str(e)}")
+
+            # Advance per-mailbox watermark so we don't replay the same
+            # 1-hour window every minute.
+            if messages:
+                newest_received = max(m.get("receivedDateTime", "") for m in messages)
+                if newest_received:
+                    await db.hub_settings.update_one(
+                        {"type": watermark_key},
+                        {"$set": {
+                            "last_received_datetime": newest_received,
+                            "mailbox_address": mailbox_address,
+                            "updated_utc": datetime.now(timezone.utc).isoformat(),
+                        }},
+                        upsert=True,
+                    )
 
     except Exception as e:
         stats["errors"].append(f"Poll error: {str(e)}")
